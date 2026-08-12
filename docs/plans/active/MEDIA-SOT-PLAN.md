@@ -1,6 +1,8 @@
 # MEDIA-SOT-PLAN — mediamtx as the video source of truth
 
-**Status:** approved architecture decision (2026-08-12), unbuilt. Owner: perception.
+**Status:** approved architecture decision (2026-08-12). M0 measured and returned **GO** —
+[CV-PULL-SPIKE.md](../../conclusions/CV-PULL-SPIKE.md) is the measurement record and its three
+corrections are folded into §5.3, §5.5 and §6 below. Waves M1, M2, M8 built. Owner: perception.
 **Decides:** `docs/plans/active/CV-SCALE-PLAN.md` §S5 ("DECISION REQUIRED") — the answer is **GO**, and this
 plan owns its execution. §S5 is superseded by this file (amendment text in §10).
 **Reads with:** [ARCHITECTURE.md](../../../ARCHITECTURE.md) · [CV-SCALE-PLAN.md](CV-SCALE-PLAN.md) (S1–S4,
@@ -186,16 +188,24 @@ public interface StreamPublisherPort {
 
 ### 5.3 mediamtx Control API (v3) — used by `MediamtxProxyPublisher`
 
-Enabled by `MTX_API: "yes"`; container port `9997`, host-mapped **`19997:9997`** (same collision-avoidance
-convention as `18888`/`18889`/`19996`). **Wave M0 must verify these paths and body keys against 1.19.3 with
-`curl` before M6 codes against them** — this is the one part of the contract taken from the API's documented
-shape rather than from this repo.
+Container port `9997`, host-mapped **`19997:9997`** (same collision-avoidance convention as
+`18888`/`18889`/`19996`). M0 verified every row below against 1.19.3 by `curl`; the transcript is
+`cv-service/spikes/pull/results/mediamtx_api_transcript.txt`.
+
+> **`MTX_API: "yes"` alone does not make this API callable — corrected from M0's measurement.**
+> mediamtx's baked-in `authInternalUsers` grants unauthenticated `api` access **only to a caller at
+> `127.0.0.1`/`::1`**. A docker-published port does not preserve that view, so `vision-app` calling from a
+> sibling container gets `401 authentication error` on all three operations. Publish/read/playback carry no
+> such restriction, which is why this never surfaced. **`MTX_AUTHINTERNALUSERS` as an env override was tried
+> and does not work** — M7 must mount a `mediamtx.yml` widening the `api` user's `ips`, or configure explicit
+> API credentials. This is blocking for M7, not cosmetic.
 
 | Operation | Call | Handling |
 |---|---|---|
-| create path | `POST {api-base}/v3/config/paths/add/{streamId}` · `{"source":"<camera rtsp uri>","sourceOnDemand":false,"rtspTransport":"automatic"}` | 400 "already exists" → fall through to `patch` (idempotent start) |
-| readiness | `GET {api-base}/v3/paths/get/{streamId}` → `{"ready":bool,...}` | polled up to `vision.publish.source-proxy.ready-timeout` before the start call returns |
-| delete path | `DELETE {api-base}/v3/config/paths/delete/{streamId}` | 404 → treat as success (idempotent stop) |
+| create path | `POST {api-base}/v3/config/paths/add/{streamId}` · `{"source":"<camera rtsp uri>","sourceOnDemand":false,"rtspTransport":"automatic"}` | **verified**: `{"status":"ok"}`; on a duplicate, HTTP 400 `path already exists` → fall through to patch (idempotent start) |
+| patch path | `PATCH {api-base}/v3/config/paths/patch/{streamId}`, same body | **verified** `{"status":"ok"}` on an existing path. Spelled out because M0 found §5.3 only implied it |
+| readiness | `GET {api-base}/v3/paths/get/{streamId}` → `{"ready":bool,...}` — **verified**; HTTP 404 `path not found` when absent | polled up to `vision.publish.source-proxy.ready-timeout` before the start call returns |
+| delete path | `DELETE {api-base}/v3/config/paths/delete/{streamId}` | **verified**: 404 for both a just-deleted and a never-existing path → treat as success (idempotent stop) |
 
 ### 5.4 REST / SSE — three additive fields, nothing removed
 
@@ -220,12 +230,12 @@ the next `PullControl` instead of the next `FrameRequest`.
 | `vision.cv.frame-transport` | `push` | switch B — `push` \| `pull` |
 | `vision.cv.pull.rtsp-base` | `rtsp://localhost:8554` | **the address the *worker* dials**, deliberately separate from `vision.publish.mediamtx.rtsp-base`: a remote GB4005 worker needs the host's LAN address, not `localhost` |
 | `vision.cv.pull.reconnect-backoff` | `500ms` … `10s` | mirrors `vision.publish.resilience.*` |
-| `CV_PULL_DECODER` | per M0 (`opencv` expected) | `opencv` \| `pyav` \| `ffmpeg` |
+| `CV_PULL_DECODER` | **`opencv`** — chosen by M0 | Fastest on both boxes (2.3/4.1 ms laptop, 1.9/4.3 ms GB4005) and no new dependency. `pyav` stays the fallback (aarch64 wheel verified by download); measured ~33 ms, so it is not the default |
 | `CV_PULL_RTSP_TRANSPORT` | `tcp` | |
 | `CV_PULL_TARGET_FPS` | `10.0` | floor when `PullControl.target_fps <= 0` |
 | `CV_PULL_MAX_WIDTH` | `640` | matches `MAX_DETECT_WIDTH` |
 | `CV_PULL_OPEN_TIMEOUT_MILLIS` / `CV_PULL_STALL_TIMEOUT_MILLIS` | `5000` / `5000` | |
-| `CV_PULL_CLOCK_MODE` | per M0 | `anchor` \| `arrival` (§6) |
+| `CV_PULL_CLOCK_MODE` | **`anchor`** — chosen by M0 | ±15 ms over 10 min, inside the 100 ms gate. `arrival` remains selectable; `ffmpeg_wallclock` was dropped (§6) |
 
 ---
 
@@ -241,10 +251,18 @@ absolute anchor when the camera sends them; `cv2.VideoCapture` does **not** expo
 > whenever measured skew exceeds a threshold. The worker reports its own error bar as
 > `capture_skew_millis` on every response.
 
-M0 measures three candidates over a 10-minute run and the winner becomes `CV_PULL_CLOCK_MODE`'s default:
-`anchor` (above), `arrival` (receipt wallclock — simplest, biased by the jitter buffer), and an ffmpeg
-subprocess with `-use_wallclock_as_timestamps 1`. **If anchored drift exceeds 100 ms over 10 minutes,
-PyAV is adopted** (aarch64 wheel verified by download, per the P1 convention) for real RTP/RTCP access.
+**M0 measured this and chose `anchor`** (±15 ms over 10 minutes, worst spike ~80 ms — inside the 100 ms
+gate, so PyAV's fallback trigger was not tripped). `arrival` (receipt wallclock, biased by the jitter
+buffer) remains selectable.
+
+> **The third candidate does not exist — corrected from M0.** `-use_wallclock_as_timestamps 1` is a
+> **no-op against RTSP sources** (verified by A/B `showinfo`), so `ffmpeg_wallclock` never meant what its
+> name implied. It is dropped; an ffmpeg-subprocess decoder gives `arrival`, not wallclock capture time.
+
+**The gate M0 could not exercise:** the spike's synthetic source has no independent camera oscillator, so
+±15 ms is a drift *floor*, not a real-camera ceiling. Re-run the 10-minute drift measurement against a real
+H1 camera before treating the 100 ms budget as settled; PyAV (aarch64 wheel already verified) is the
+pre-agreed answer if a real camera's clock drifts past it.
 
 **Alignment is best-effort and asymmetric — say so in the UI, do not hide it:**
 
@@ -355,7 +373,8 @@ gone; snapshot and training capture still return a real, **un-annotated** frame.
 
 ### M7 — Wiring, flags, deployment · *after M5 + M6*
 *Scope:* `vision-app/**` only (`VisionPublishProperties`, `VisionCvProperties`, `PublishWiring`, `CvWiring`,
-`application.yaml`, ArchUnit), `docker-compose.yml` (`MTX_API: "yes"`, `19997:9997`, and the worker's
+`application.yaml`, ArchUnit), `docker-compose.yml` (`MTX_API: "yes"` **plus a mounted `mediamtx.yml` or API
+credentials — §5.3's auth correction, without which every Control API call 401s**, `19997:9997`, and the worker's
 `VISION_CV_PULL_RTSP_BASE`), `.env.example`, `vision-app/MODULE.md`.
 Reject `A=proxy, B=push` at startup with a clear message.
 *Build:* `./mvnw -B -pl vision-app test`.
