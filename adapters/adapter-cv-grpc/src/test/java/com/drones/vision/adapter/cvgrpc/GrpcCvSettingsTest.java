@@ -2,6 +2,7 @@ package com.drones.vision.adapter.cvgrpc;
 
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
@@ -33,6 +34,9 @@ class GrpcCvSettingsTest {
         assertEquals(262_144, settings.uploadChunkBytes());
         assertEquals(640, settings.detectWidth());
         assertEquals(0.8f, settings.jpegQuality());
+        assertEquals(URI.create("rtsp://localhost:8554"), settings.pullRtspBase());
+        assertEquals(Duration.ofMillis(500), settings.pullReconnectInitialBackoff());
+        assertEquals(Duration.ofSeconds(10), settings.pullReconnectMaxBackoff());
     }
 
     @Test
@@ -77,11 +81,13 @@ class GrpcCvSettingsTest {
         assertThrows(IllegalArgumentException.class, () -> new GrpcCvSettings(Duration.ZERO,
                 defaults.keepAliveTime(), defaults.keepAliveTimeout(), defaults.keepAliveWithoutCalls(),
                 defaults.channelShutdownTimeout(), defaults.plaintext(), defaults.uploadTimeout(),
-                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat()));
+                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat(),
+                defaults.pullRtspBase(), defaults.pullReconnectInitialBackoff(), defaults.pullReconnectMaxBackoff()));
         assertThrows(IllegalArgumentException.class, () -> new GrpcCvSettings(defaults.responseTimeout(),
                 Duration.ofSeconds(-1), defaults.keepAliveTimeout(), defaults.keepAliveWithoutCalls(),
                 defaults.channelShutdownTimeout(), defaults.plaintext(), defaults.uploadTimeout(),
-                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat()));
+                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat(),
+                defaults.pullRtspBase(), defaults.pullReconnectInitialBackoff(), defaults.pullReconnectMaxBackoff()));
     }
 
     @Test
@@ -90,7 +96,8 @@ class GrpcCvSettingsTest {
         assertThrows(IllegalArgumentException.class, () -> new GrpcCvSettings(defaults.responseTimeout(),
                 defaults.keepAliveTime(), defaults.keepAliveTimeout(), defaults.keepAliveWithoutCalls(),
                 defaults.channelShutdownTimeout(), defaults.plaintext(), defaults.uploadTimeout(),
-                0, defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat()));
+                0, defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat(),
+                defaults.pullRtspBase(), defaults.pullReconnectInitialBackoff(), defaults.pullReconnectMaxBackoff()));
     }
 
     @Test
@@ -99,7 +106,53 @@ class GrpcCvSettingsTest {
         assertThrows(NullPointerException.class, () -> new GrpcCvSettings(null,
                 defaults.keepAliveTime(), defaults.keepAliveTimeout(), defaults.keepAliveWithoutCalls(),
                 defaults.channelShutdownTimeout(), defaults.plaintext(), defaults.uploadTimeout(),
-                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat()));
+                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat(),
+                defaults.pullRtspBase(), defaults.pullReconnectInitialBackoff(), defaults.pullReconnectMaxBackoff()));
+    }
+
+    @Test
+    void constructorRejectsNullPullRtspBase() {
+        GrpcCvSettings defaults = GrpcCvSettings.defaults();
+        assertThrows(NullPointerException.class, () -> new GrpcCvSettings(defaults.responseTimeout(),
+                defaults.keepAliveTime(), defaults.keepAliveTimeout(), defaults.keepAliveWithoutCalls(),
+                defaults.channelShutdownTimeout(), defaults.plaintext(), defaults.uploadTimeout(),
+                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat(),
+                null, defaults.pullReconnectInitialBackoff(), defaults.pullReconnectMaxBackoff()));
+    }
+
+    @Test
+    void constructorRejectsNonPositivePullReconnectInitialBackoff() {
+        GrpcCvSettings defaults = GrpcCvSettings.defaults();
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> new GrpcCvSettings(
+                defaults.responseTimeout(), defaults.keepAliveTime(), defaults.keepAliveTimeout(),
+                defaults.keepAliveWithoutCalls(), defaults.channelShutdownTimeout(), defaults.plaintext(),
+                defaults.uploadTimeout(), defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(),
+                defaults.wireFormat(), defaults.pullRtspBase(), Duration.ZERO, defaults.pullReconnectMaxBackoff()));
+        assertTrue(ex.getMessage().contains("pullReconnectInitialBackoff"),
+                "message should mention pullReconnectInitialBackoff: " + ex.getMessage());
+    }
+
+    @Test
+    void constructorRejectsPullReconnectMaxBackoffBelowInitial() {
+        GrpcCvSettings defaults = GrpcCvSettings.defaults();
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> new GrpcCvSettings(
+                defaults.responseTimeout(), defaults.keepAliveTime(), defaults.keepAliveTimeout(),
+                defaults.keepAliveWithoutCalls(), defaults.channelShutdownTimeout(), defaults.plaintext(),
+                defaults.uploadTimeout(), defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(),
+                defaults.wireFormat(), defaults.pullRtspBase(), Duration.ofSeconds(10), Duration.ofSeconds(1)));
+        assertTrue(ex.getMessage().contains("pullReconnectMaxBackoff"),
+                "message should mention pullReconnectMaxBackoff: " + ex.getMessage());
+    }
+
+    @Test
+    void withPullRtspBaseChangesOnlyThatField() {
+        GrpcCvSettings defaults = GrpcCvSettings.defaults();
+        GrpcCvSettings remote = defaults.withPullRtspBase(URI.create("rtsp://192.168.0.106:8554"));
+
+        assertEquals(URI.create("rtsp://192.168.0.106:8554"), remote.pullRtspBase());
+        assertEquals(defaults.detectWidth(), remote.detectWidth());
+        assertEquals(defaults.pullReconnectInitialBackoff(), remote.pullReconnectInitialBackoff());
+        assertEquals(defaults.pullReconnectMaxBackoff(), remote.pullReconnectMaxBackoff());
     }
 
     @Test

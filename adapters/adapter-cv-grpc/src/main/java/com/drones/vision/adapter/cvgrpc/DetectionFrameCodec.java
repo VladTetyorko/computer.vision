@@ -222,8 +222,13 @@ final class DetectionFrameCodec {
      * {@code 0} straight through when the domain does not know it — the wire's own spelling of
      * "derive it from the horizontal FOV and the frame aspect ratio", which is exactly what
      * cv-service's {@code pose_gmc} does with it.
+     *
+     * <p>Package-private (not {@code private}), docs/plans/active/MEDIA-SOT-PLAN.md wave M4:
+     * {@link PulledDetectionSession} reuses this exact mapping for {@code PullControl.camera_pose} —
+     * the wire shape is identical between {@code FrameRequest} and {@code PullControl}, so this is the
+     * one place either builds one.
      */
-    private static CameraPose toWireCameraPose(CameraAttitude attitude) {
+    static CameraPose toWireCameraPose(CameraAttitude attitude) {
         return CameraPose.newBuilder()
                 .setYawDegrees((float) attitude.yawDegrees())
                 .setPitchDegrees((float) attitude.pitchDegrees())
@@ -234,7 +239,14 @@ final class DetectionFrameCodec {
                 .build();
     }
 
-    private static com.drones.vision.proto.v1.TrackingConfig toWireTrackingConfig(TrackingConfig tracking) {
+    /**
+     * Package-private (not {@code private}), docs/plans/active/MEDIA-SOT-PLAN.md wave M4: {@link
+     * PulledDetectionSession} reuses this exact mapping for {@code PullControl.tracking} — {@code
+     * PullControl} carries the identical wire {@code TrackingConfig} message {@code FrameRequest}
+     * does (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.1: "reused verbatim, including TargetLock/lock_seq
+     * semantics"), so this is the one place either builds one.
+     */
+    static com.drones.vision.proto.v1.TrackingConfig toWireTrackingConfig(TrackingConfig tracking) {
         com.drones.vision.proto.v1.TrackingConfig.Builder builder = com.drones.vision.proto.v1.TrackingConfig.newBuilder()
                 .setMode(toWireTrackingMode(tracking.mode()))
                 .setEngineId(tracking.engineId())
