@@ -179,6 +179,82 @@ class StreamPipelineTest {
         return pipeline;
     }
 
+    /**
+     * Drives the pipeline with a scripted <b>latency</b> clock (the package-private seam), leaving
+     * the cadence clock at its default so the sampling behaviour under test elsewhere is untouched.
+     */
+    private StreamPipeline latencyPipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
+                                            LongSupplier latencyClock) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, null, null, null, null, null,
+                fixedFpsClock(30), StreamPipelineSettings.defaults(), latencyClock);
+    }
+
+    /** Returns each scripted reading in order, then repeats the last one. */
+    private static LongSupplier scriptedClock(long... readingsNanos) {
+        return new LongSupplier() {
+            private int index;
+
+            @Override
+            public long getAsLong() {
+                long value = readingsNanos[Math.min(index, readingsNanos.length - 1)];
+                index++;
+                return value;
+            }
+        };
+    }
+
+    @Test
+    void recordsTheRoundTripOfEveryCompletedDetection() {
+        long ms = 1_000_000L;
+        // Two readings per detection (submit, complete): 20 ms of round trip, completions 100 ms apart.
+        LongSupplier latencyClock = scriptedClock(
+                0L, 20 * ms,
+                100 * ms, 120 * ms,
+                200 * ms, 220 * ms);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0), frame(1), frame(2)));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        // inferenceFps=60 against the assumed 30fps warmup rate -> everyNth = 1, so all three sample.
+        StreamPipeline pipeline = latencyPipeline(publisher, config(60, 5), latencyClock);
+        pipeline.start();
+
+        PipelineLatency latency = pipeline.pipelineLatency();
+        assertEquals(3L, latency.samples(), "every completed detection is recorded");
+        assertEquals(20.0, latency.roundTripMillisP50());
+        assertEquals(100.0, latency.updateIntervalMillisP50());
+        // The whole point of the split: 20 ms of round trip, but a box is 120 ms old at worst
+        // because the next one is a full sample interval away.
+        assertEquals(120.0, latency.worstBoxAgeMillis(), 1e-9);
+    }
+
+    @Test
+    void reportsNoLatencyBeforeTheFirstDetection() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of());
+
+        PipelineLatency latency = latencyPipeline(publisher, config(60, 5), scriptedClock(0L)).pipelineLatency();
+
+        assertEquals(0L, latency.samples());
+        assertEquals(0.0, latency.worstBoxAgeMillis());
+    }
+
+    @Test
+    void recordsTheRoundTripOfAFailedDetectionToo() {
+        long ms = 1_000_000L;
+        LongSupplier latencyClock = scriptedClock(0L, 45 * ms);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0)));
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("cv-service down")));
+
+        StreamPipeline pipeline = latencyPipeline(publisher, config(60, 5), latencyClock);
+        pipeline.start();
+
+        // A stream in outage is precisely the one whose round trips matter; a failure must not be
+        // silently excluded from the window.
+        assertEquals(1L, pipeline.pipelineLatency().samples());
+        assertEquals(45.0, pipeline.pipelineLatency().roundTripMillisP50());
+    }
+
     private static final Flow.Publisher<VideoFrame> NO_OP_SOURCE = subscriber -> { };
 
     private static final Flow.Subscription NOOP_SUBSCRIPTION = new Flow.Subscription() {

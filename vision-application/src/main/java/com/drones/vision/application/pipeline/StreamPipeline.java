@@ -234,6 +234,22 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /** @see #trackBook */
     private final TrackingStatsWindow trackingStats;
 
+    /**
+     * Wall-clock cost of the detection round trip, as opposed to the compute cost cv-service
+     * self-reports (docs/conclusions/CV-RATE-BUDGET.md §3). Separate from {@link #trackingStats}
+     * because it must keep counting when tracking is OFF — see {@link PipelineLatencyWindow}.
+     */
+    private final PipelineLatencyWindow pipelineLatency;
+
+    /**
+     * The clock {@link #pipelineLatency} measures durations with — deliberately <b>not</b> {@link
+     * #nanoTimeSource}. That one is a <i>cadence</i> seam: the tests' fake advances one frame
+     * interval on every read, which encodes "the pipeline reads me once per frame" and silently
+     * skews the measured source rate if anything else reads it. Measuring a duration needs a clock
+     * that answers "what time is it" the same way twice, so latency gets its own.
+     */
+    private final LongSupplier latencyNanoSource;
+
     // Frame-cadence and detection-outage tuning (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
     // extraction) -- read from the StreamPipelineSettings supplied to the constructor, defaulting
     // to StreamPipelineSettings#defaults() when the caller doesn't supply one explicitly.
@@ -430,6 +446,23 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                    AssetId assetId, LiveUpdatePublisherPort liveUpdatePublisherPort,
                    Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
                    StreamPipelineSettings settings) {
+        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
+                nanoTimeSource, settings, System::nanoTime);
+    }
+
+    /**
+     * Package-private seam adding {@code latencyNanoSource} — see {@link #latencyNanoSource} for why
+     * it is separate from {@code nanoTimeSource}. Only the same-package latency test injects it.
+     */
+    StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
+                   Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
+                   StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
+                   EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
+                   AssetId assetId, LiveUpdatePublisherPort liveUpdatePublisherPort,
+                   Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
+                   StreamPipelineSettings settings, LongSupplier latencyNanoSource) {
+        this.latencyNanoSource = Objects.requireNonNull(latencyNanoSource, "latencyNanoSource must not be null");
         this.streamId = Objects.requireNonNull(streamId, "streamId must not be null");
         this.device = Objects.requireNonNull(device, "device must not be null");
         this.config = Objects.requireNonNull(config, "config must not be null");
@@ -457,6 +490,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 new DetectionExtrapolator(settings.extrapolationMaxMillis(), settings.extrapolationMatchGate());
         this.trackBook = new TrackBook(settings.trackRetention());
         this.trackingStats = new TrackingStatsWindow(settings.trackingStatsWindow());
+        this.pipelineLatency = new PipelineLatencyWindow(settings.trackingStatsWindow());
         this.backoffNanos = this.detectionBackoffInitialNanos;
         this.sampleEveryNthFrame = everyNth(assumedSourceFps);
     }
@@ -531,6 +565,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             // deliberately clears nothing -- tracking is a hot knob like confidence and fps.
             trackBook.clear();
             trackingStats.clear();
+            pipelineLatency.clear();
         }
     }
 
@@ -571,6 +606,18 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      */
     public TrackingStats trackingStats() {
         return trackingStats.snapshot(config.tracking().mode());
+    }
+
+    /**
+     * @return what this stream's detections actually cost in wall-clock time over the stats window
+     *         (docs/conclusions/CV-RATE-BUDGET.md §3): the submit&rarr;available round trip and the
+     *         interval between completions, which together bound how old the displayed box is.
+     *         Unlike {@link #trackingStats()} this keeps counting with tracking {@code OFF} — a
+     *         stream whose boxes lag is very often exactly that stream. {@link
+     *         PipelineLatency#empty} until the first result arrives. Never {@code null}.
+     */
+    public PipelineLatency pipelineLatency() {
+        return pipelineLatency.snapshot();
     }
 
     /**
@@ -832,7 +879,11 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     private void submitDetection(VideoFrame frame, boolean isProbe) {
+        long submittedAtNanos = latencyNanoSource.getAsLong();
         detectionPort.detect(frame, config).whenComplete((result, error) -> {
+            // Recorded before the closed/error branches below: a round trip that ended in a failure,
+            // or arrived after close, still happened and is still the number worth seeing.
+            pipelineLatency.record(submittedAtNanos, latencyNanoSource.getAsLong());
             if (isProbe) {
                 clearProbeInFlight();
             } else {

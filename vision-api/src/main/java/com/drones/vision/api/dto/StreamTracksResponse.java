@@ -14,7 +14,7 @@ import java.util.List;
  * /api/streams/{streamId}/detections} already uses, and the reason a polling client needs one code
  * path instead of two.
  *
- * <p>{@code @JsonInclude(NON_NULL)} covers exactly one field, {@code stats}: it is absent whenever
+ * <p>{@code @JsonInclude(NON_NULL)} covers {@code stats} and {@code latency}: {@code stats} is absent whenever
  * there is nothing honest to report (see {@code StreamController#tracks}), never a zeroed object —
  * the flow strip hides itself rather than showing a strip of zeros.
  *
@@ -25,10 +25,13 @@ import java.util.List;
  *                      "Following #N — release" chip gates on
  * @param tracks        the booked tracks, ordered by {@code trackId} ascending
  * @param stats         the duty-cycle counters, or absent when the window has nothing to report yet
+ * @param latency       what detections cost in wall-clock time, or absent before the first result.
+ *                      Independent of {@code stats}: present whatever the tracking mode is
+ *                      (docs/conclusions/CV-RATE-BUDGET.md &sect;3)
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
-                                    TrackStatsResponse stats) {
+                                    TrackStatsResponse stats, PipelineLatencyResponse latency) {
 
     public StreamTracksResponse {
         tracks = List.copyOf(tracks);
