@@ -114,6 +114,27 @@ message TrackingConfig {
   int32  memory_ttl_millis      = 10; // NEW -- dormant-gallery TTL for re-acquisition; <=0 = server default
 }
 
+// -------------------------------------------------------- MEDIA-SOT-PLAN wave M1
+
+// Declarative per-pull desired state, restated on EVERY PullControl message -- same doctrine as
+// TrackingConfig above, and for the same reason: a one-shot control message can be lost with no
+// error and no retry, so a restated desired state is self-healing. `source_url` and
+// `rtsp_transport` are read from the FIRST message of the call only; every other field is hot and
+// takes effect as soon as the worker sees it (docs/plans/active/MEDIA-SOT-PLAN.md §5.1).
+message PullControl {
+  string stream_id            = 1;   // vision StreamId; ALSO the mediamtx path name (D2)
+  string source_url           = 2;   // rtsp://{host}:8554/{stream_id} -- read from the FIRST message only
+  string rtsp_transport       = 3;   // "tcp" | "udp" | "" = server default; first message only
+  string model_id             = 4;   // hot
+  string model_version        = 5;   // hot
+  float  confidence_threshold = 6;   // hot
+  float  target_fps           = 7;   // hot; <=0 = server default. The Java rate controller's output
+  int32  detect_width         = 8;   // hot; <=0 = server default. Worker downscales locally
+  TrackingConfig tracking     = 9;   // hot; reused verbatim, including TargetLock/lock_seq semantics
+  CameraPose camera_pose      = 10;  // hot; arrives at telemetry rate, decoupled from frames
+  bool   stop                 = 11;  // true = drain and half-close cleanly
+}
+
 // ---------------------------------------------------------- CHANGED messages
 
 // A single frame sent to the CV service for inference, plus which model to
@@ -175,6 +196,16 @@ message DetectionResponse {
   bool   detector_roi      = 13;  // NEW -- the pass was a crop around a prediction, not a full frame
   int64  motion_millis     = 14;  // NEW -- ego-motion estimation cost for this frame
   string motion_engine_id  = 15;  // NEW -- compensator that served this frame ("" = none ran)
+
+  // Pull mode only (DetectPulled). All zero in push mode -- together these are the complete,
+  // honest accounting of a decode-and-infer loop that now runs on another machine, where the
+  // usual per-request round trip can no longer tell an operator what happened (MEDIA-SOT-PLAN §5.1, §7).
+  int64 decode_millis       = 16;  // NEW -- local decode cost for the frame this response describes
+  float source_fps          = 17;  // NEW -- measured rate of the pulled stream
+  float achieved_fps        = 18;  // NEW -- measured rate at which this loop actually infers
+  int64 dropped_frames      = 19;  // NEW -- cumulative frames the latest-wins decode loop discarded (D8)
+  int64 missed_deadlines    = 20;  // NEW -- cumulative sampler deadlines no frame arrived to serve
+  int64 capture_skew_millis = 21;  // NEW -- worker's estimate of (local receipt - capture); 0 = unknown
 }
 
 message TrainingJobSpec {
@@ -240,6 +271,10 @@ message UploadAck {
 // Frame -> detections streaming inference.
 service Inference {
   rpc DetectStream(stream FrameRequest) returns (stream DetectionResponse);
+  // NEW -- MEDIA-SOT-PLAN wave M1: worker dials mediamtx and decodes the pulled stream itself;
+  // the client sends PullControl (desired state, see above) and receives the same DetectionResponse
+  // push mode uses, with fields 16-21 populated. Additive: DetectStream is unchanged byte-for-byte.
+  rpc DetectPulled(stream PullControl) returns (stream DetectionResponse);
 }
 
 // Dataset training and model registry control plane.
