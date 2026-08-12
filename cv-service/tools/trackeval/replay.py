@@ -48,6 +48,7 @@ from typing import Optional
 from typing import Sequence as TypingSequence
 
 from cv_service.config import Settings
+from cv_service.tracking.engines.base import Box
 from cv_service.tracking.params import MODE_FOLLOW, LockRequest, TrackingRequest
 from cv_service.tracking.registry import TrackerRegistry, build_default_registry
 from cv_service.tracking.session import FrameOutcome, StreamTrackingSession
@@ -90,6 +91,19 @@ class DetectorNoiseConfig:
     position_jitter: float = 0.0
     false_positive_probability: float = 0.0
     confidence: float = 0.9
+    # Apparent size (the larger box dimension, as a fraction of the extent
+    # actually handed to the detector) at or above which recall is
+    # unaffected. Below it, an object is progressively more likely to be
+    # missed. 0.0 disables the model entirely, which is what every scenario
+    # written before ROI re-detection existed relies on.
+    #
+    # This is the ONE property of a real detector that a uniform dropout
+    # cannot express, and without it a crop-and-re-detect pass is
+    # unmeasurable: the whole reason such a pass works is that a distant
+    # object occupying a handful of pixels after downscaling to `imgsz`
+    # occupies a useful fraction of a crop.
+    reliable_size: float = 0.0
+    max_miss_probability: float = 0.9
 
 
 # A false positive's box: small, and placed uniformly within this leading
@@ -111,17 +125,61 @@ class SyntheticDetector:
         self._config = config
         self._rng = random.Random(config.seed)
 
-    def detect(self, ground_truth: TypingSequence[GroundTruthObject]) -> list[_SyntheticDetection]:
+    def detect(
+        self,
+        ground_truth: TypingSequence[GroundTruthObject],
+        roi: Optional[Box] = None,
+    ) -> list[_SyntheticDetection]:
+        """One detector pass, optionally over a crop.
+
+        `roi` models the production ROI pass: the detector is shown only that
+        region, so an object inside it is magnified by the crop factor and
+        becomes correspondingly easier to see. Objects outside the crop are
+        not reported at all -- a crop cannot detect what it does not contain,
+        and pretending otherwise would let a ROI pass look strictly better
+        than a full frame, which it is not.
+        """
         detections: list[_SyntheticDetection] = []
         for obj in ground_truth:
             if not obj.visible:
                 continue
+            if roi is not None and obj.box.iou(roi) <= 0.0:
+                continue
             if self._rng.random() < self._config.dropout_probability:
                 continue
+            # The draw is taken ONLY when the recall model is actually in
+            # play. Consuming one unconditionally would advance this
+            # detector's deterministic stream and silently re-roll the
+            # jitter of every scenario written before ROI re-detection
+            # existed -- which is not a hypothetical: it flipped
+            # `crossing`'s id-swap count the first time this was written.
+            miss_probability = self._miss_probability(obj, roi)
+            if miss_probability > 0.0 and self._rng.random() < miss_probability:
+                continue
             detections.append(self._jittered(obj))
-        if self._rng.random() < self._config.false_positive_probability:
+        if roi is None and self._rng.random() < self._config.false_positive_probability:
             detections.append(self._false_positive())
         return detections
+
+    def _miss_probability(self, obj: GroundTruthObject, roi: Optional[Box]) -> float:
+        """How likely this pass is to miss `obj`, from its APPARENT size.
+
+        Linear from zero at `reliable_size` to `max_miss_probability` at zero
+        size. Linear rather than anything cleverer on purpose: the point is
+        the monotonic relationship between apparent size and recall, and a
+        curve fitted to nothing would only look more authoritative than it is.
+        """
+        reliable = self._config.reliable_size
+        if reliable <= 0.0:
+            return 0.0
+        extent = max(roi.width, roi.height) if roi is not None else 1.0
+        if extent <= 0.0:
+            return 0.0
+        apparent = max(obj.box.width, obj.box.height) / extent
+        if apparent >= reliable:
+            return 0.0
+        shortfall = (reliable - apparent) / reliable
+        return min(self._config.max_miss_probability, shortfall * self._config.max_miss_probability)
 
     def _jittered(self, obj: GroundTruthObject) -> _SyntheticDetection:
         jitter = self._config.position_jitter
@@ -198,8 +256,13 @@ def run_replay(
     for frame in sequence.frames:
         now_millis = frame.index * (MILLIS_PER_SECOND / sequence.fps)
 
-        def detect(ground_truth=frame.ground_truth) -> "tuple[list[_SyntheticDetection], int]":
-            return detector.detect(ground_truth), 0
+        def detect(
+            roi: Optional[Box] = None, ground_truth=frame.ground_truth
+        ) -> "tuple[list[_SyntheticDetection], int]":
+            # Optional-argument, so this harness works against a session that
+            # asks for a crop and one that does not -- the production side of
+            # ROI re-detection lands separately.
+            return detector.detect(ground_truth, roi), 0
 
         def load_frame(image=frame.image):
             return image

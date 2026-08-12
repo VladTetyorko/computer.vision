@@ -741,6 +741,54 @@ def crowd_recall(seed: int = DEFAULT_SEED) -> Sequence:
     )
 
 
+# -- scenario: small_target -------------------------------------------------
+#
+# Detection recall rather than identity: the review's other half, and the one
+# every other scenario is silent about because they all use objects large
+# enough that a detector never struggles with them.
+#
+# A drone watching a road from altitude is looking at objects a few dozen
+# pixels across, and after the frame is downscaled to `imgsz` they are a
+# handful. That is why they go undetected -- not noise, not occlusion, but
+# apparent SIZE, which is exactly what `DetectorNoiseConfig.reliable_size`
+# models and what a crop-and-re-detect pass around a predicted box is for.
+# The object here is deliberately well under the reliable size, so a
+# full-frame pass misses it most of the time and the track survives only if
+# something asks a second, closer question.
+
+SMALL_TARGET_FRAME_COUNT = 80
+SMALL_TARGET_SIZE = 0.035
+SMALL_TARGET_LANE = 0.5
+SMALL_TARGET_TRAVEL_START = 0.10
+SMALL_TARGET_SPEED = 0.008
+# Below `SMALL_TARGET_SIZE`, so a full-frame pass is unreliable on it while a
+# crop a few times the object's own size is not.
+SMALL_TARGET_RELIABLE_SIZE = 0.10
+
+
+def small_target(seed: int = DEFAULT_SEED) -> Sequence:
+    """One object far below the detector's reliable size, crossing steadily
+    -- a distant vehicle seen from altitude, where recall and not identity is
+    what fails."""
+    rng = Random(seed)
+    color = _OBJECT_COLORS[0]
+    frames = []
+    for index in range(SMALL_TARGET_FRAME_COUNT):
+        x = SMALL_TARGET_TRAVEL_START + SMALL_TARGET_SPEED * index
+        jitter = rng.uniform(-POSITION_JITTER, POSITION_JITTER)
+        box = Box(x, SMALL_TARGET_LANE + jitter, SMALL_TARGET_SIZE, SMALL_TARGET_SIZE)
+        objects = (GroundTruthObject(gt_id=1, label=OBJECT_LABEL, box=box, visible=box.valid),)
+        frames.append(_render_frame(index, objects, {1: color}))
+    return Sequence(
+        name="small_target",
+        fps=DEFAULT_FPS,
+        width=FRAME_WIDTH,
+        height=FRAME_HEIGHT,
+        frames=tuple(frames),
+        primary_gt_id=1,
+    )
+
+
 SCENARIOS: dict[str, Callable[[int], Sequence]] = {
     "linear": linear,
     "occlusion": occlusion,
@@ -751,4 +799,5 @@ SCENARIOS: dict[str, Callable[[int], Sequence]] = {
     "clutter": clutter,
     "long_occlusion": long_occlusion,
     "crowd_recall": crowd_recall,
+    "small_target": small_target,
 }

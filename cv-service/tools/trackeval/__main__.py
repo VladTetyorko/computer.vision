@@ -24,7 +24,7 @@ from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW
 
 from tools.trackeval import metrics as metrics_module
 from tools.trackeval import replay as replay_module
-from tools.trackeval.sequences import DEFAULT_SEED, SCENARIOS
+from tools.trackeval.sequences import DEFAULT_SEED, SCENARIOS, SMALL_TARGET_RELIABLE_SIZE
 
 _MODE_ALIASES: dict[str, str] = {"ASSOCIATE": MODE_ASSOCIATE, "FOLLOW": MODE_FOLLOW}
 
@@ -49,10 +49,19 @@ _DROPOUT_PROBABILITY = 0.35
 # order of magnitude smaller than a box's own width.
 _CROSSING_NOISE_SEED = 0
 _CROSSING_POSITION_JITTER = 0.02
+_SMALL_TARGET_NOISE_SEED = 90210
+
 DEFAULT_NOISE_BY_SCENARIO: dict[str, replay_module.DetectorNoiseConfig] = {
     "dropout": replay_module.DetectorNoiseConfig(seed=_DROPOUT_NOISE_SEED, dropout_probability=_DROPOUT_PROBABILITY),
     "crossing": replay_module.DetectorNoiseConfig(
         seed=_CROSSING_NOISE_SEED, position_jitter=_CROSSING_POSITION_JITTER
+    ),
+    # The only scenario that opts into the apparent-size recall model: its
+    # object is far below `reliable_size`, so a full-frame pass misses it most
+    # of the time and a crop around a prediction does not.
+    "small_target": replay_module.DetectorNoiseConfig(
+        seed=_SMALL_TARGET_NOISE_SEED,
+        reliable_size=SMALL_TARGET_RELIABLE_SIZE,
     ),
 }
 
