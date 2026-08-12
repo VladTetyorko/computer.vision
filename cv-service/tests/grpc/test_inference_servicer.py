@@ -315,3 +315,209 @@ def test_registry_path_per_frame_failure_still_echoes():
 
     assert list(response.detections) == []
     assert response.inference_millis == 0
+
+
+# --- ROI re-detection (TRACKING-V2-PLAN wave C5c) -----------------------------
+#
+# `_run_detector`'s full-frame branch (`roi=None`) is exercised by every test
+# above, unchanged. These exercise `_run_roi_detector` directly -- the crop/
+# decode/map round-trip is the part most likely to be silently wrong, per the
+# wave's own instruction, so it is tested here in isolation from tracking/
+# session/gRPC-stream plumbing entirely. Needs `numpy` (pixel cropping);
+# skips rather than fails when the `cv` extra is absent, same contract this
+# file's registry-path tests already use for `cv_service.inference.registry`.
+
+
+class _RecordingGate:
+    """Counts `acquire()` calls -- same minimal double
+    `tests/grpc/test_detect_stream_tracking.py`'s own `RecordingGate` is,
+    kept local here so this file's "importable without `cv`" claim needs no
+    cross-file import."""
+
+    def __init__(self) -> None:
+        self.acquisitions = 0
+
+    def acquire(self):
+        gate = self
+
+        class _Scope:
+            def __enter__(self):
+                gate.acquisitions += 1
+                return None
+
+            def __exit__(self, *_exc):
+                return False
+
+        return _Scope()
+
+
+class _CropCapturingDetector:
+    """Records the crop it was actually asked to detect on, and reports one
+    detection back in the CROP's own normalized `[0, 1]` space."""
+
+    model_name = "fake-crop-model"
+
+    def __init__(self, detections, millis=5):
+        self._detections = detections
+        self._millis = millis
+        self.calls: list[dict] = []
+
+    def detect(self, **kwargs):
+        self.calls.append(kwargs)
+        return list(self._detections), self._millis
+
+
+def test_run_detector_roi_crops_and_maps_coordinates_back_to_full_frame():
+    # THE coordinate round-trip: a known ROI, a known box the fake detector
+    # reports INSIDE it (crop-relative), and the exact full-frame
+    # coordinates that must come back out.
+    np = pytest.importorskip("numpy")
+    from cv_service.inference.detector import ENCODING_BGR24, Detection
+    from cv_service.tracking.engines.base import Box
+
+    image = np.zeros((10, 20, 3), dtype=np.uint8)  # height=10, width=20
+    detector = _CropCapturingDetector([Detection("car", 0.9, x=0.1, y=0.2, width=0.3, height=0.4)])
+    servicer = InferenceServicer(detector=detector)
+    request = _make_request(width=20, height=10)
+    roi = Box(x=0.25, y=0.2, width=0.5, height=0.6)
+
+    detections, millis = servicer._run_detector(request, roi, lambda: image)
+
+    assert millis == 5
+    call = detector.calls[0]
+    # roi in PIXELS: x [5, 15) y [2, 8) -- a 10x6 crop of the 20x10 frame.
+    assert call["width"] == 10
+    assert call["height"] == 6
+    assert call["encoding"] == ENCODING_BGR24
+    assert len(call["data"]) == 10 * 6 * 3
+
+    (detection,) = detections
+    # full = roi.origin + crop_relative * roi.extent, applied per axis.
+    assert detection.x == pytest.approx(0.25 + 0.1 * 0.5)
+    assert detection.y == pytest.approx(0.2 + 0.2 * 0.6)
+    assert detection.width == pytest.approx(0.3 * 0.5)
+    assert detection.height == pytest.approx(0.4 * 0.6)
+    assert detection.label == "car"
+    assert detection.confidence == pytest.approx(0.9)
+
+
+def test_run_detector_roi_is_gated_by_the_inference_gate():
+    # P2: a ROI pass is still a detector pass, gated exactly like a
+    # full-frame one -- and through the SAME site (`_run_detector`).
+    np = pytest.importorskip("numpy")
+    from cv_service.tracking.engines.base import Box
+
+    image = np.zeros((10, 20, 3), dtype=np.uint8)
+    gate = _RecordingGate()
+    detector = _CropCapturingDetector([])
+    servicer = InferenceServicer(detector=detector, inference_gate=gate)
+    request = _make_request(width=20, height=10)
+
+    servicer._run_detector(request, Box(0.25, 0.2, 0.5, 0.6), lambda: image)
+
+    assert gate.acquisitions == 1
+
+
+def test_run_detector_roi_reuses_the_given_frame_loader_not_a_second_decode():
+    # "Reuse the servicer's existing memoized frame loader. Do not add a
+    # second decode." -- proven directly: the loader is called exactly
+    # once for one ROI pass.
+    np = pytest.importorskip("numpy")
+    from cv_service.tracking.engines.base import Box
+
+    image = np.zeros((10, 20, 3), dtype=np.uint8)
+    calls = []
+
+    def loader():
+        calls.append(1)
+        return image
+
+    servicer = InferenceServicer(detector=_CropCapturingDetector([]))
+    request = _make_request(width=20, height=10)
+
+    servicer._run_detector(request, Box(0.25, 0.2, 0.5, 0.6), loader)
+
+    assert len(calls) == 1
+
+
+def test_run_detector_roi_with_no_frame_loader_is_a_safe_no_op():
+    from cv_service.tracking.engines.base import Box
+
+    gate = _RecordingGate()
+    detector = _CropCapturingDetector([])
+    servicer = InferenceServicer(detector=detector, inference_gate=gate)
+    request = _make_request()
+
+    detections, millis = servicer._run_detector(request, Box(0.25, 0.2, 0.5, 0.6), None)
+
+    assert detections == []
+    assert millis == 0
+    assert detector.calls == []  # never even reached the detector
+    assert gate.acquisitions == 0  # -- so never the gate either
+
+
+def test_run_detector_roi_with_a_degenerate_crop_is_a_safe_no_op():
+    # A ROI that rounds down to nothing usable (`_ROI_MIN_PIXELS`) on a tiny
+    # frame -- costs this one pass's detections (P5), never raises, never
+    # touches the detector or the gate.
+    np = pytest.importorskip("numpy")
+    from cv_service.tracking.engines.base import Box
+
+    image = np.zeros((10, 20, 3), dtype=np.uint8)
+    gate = _RecordingGate()
+    detector = _CropCapturingDetector([])
+    servicer = InferenceServicer(detector=detector, inference_gate=gate)
+    request = _make_request(width=20, height=10)
+
+    # A sliver 0.5% of the frame wide -- rounds to < 2px at this resolution.
+    detections, millis = servicer._run_detector(request, Box(0.5, 0.5, 0.005, 0.005), lambda: image)
+
+    assert detections == []
+    assert millis == 0
+    assert detector.calls == []
+    assert gate.acquisitions == 0
+
+
+def test_run_detector_roi_none_is_byte_identical_to_the_pre_wave_full_frame_call():
+    # P1, restated for `_run_detector` itself: the `roi=None` branch must be
+    # untouched by this wave -- same detector call, same result, whether or
+    # not a `frame_loader`/`roi` argument is even passed.
+    detector = FakeDetector(detections=[], inference_millis=11)
+    servicer = InferenceServicer(detector=detector)
+    request = _make_request()
+
+    without_args = servicer._run_detector(request)
+    detector.calls.clear()
+    with_none_roi = servicer._run_detector(request, None, None)
+
+    assert without_args == with_none_roi == ([], 11)
+    assert len(detector.calls) == 1
+
+
+def test_registry_path_serves_a_roi_crop_through_detect_composite():
+    # The registry-routed branch (composite mode's own gate-per-member
+    # acquisition, `detect_composite`) gets the SAME crop treatment as the
+    # explicit-detector branch above -- `_detect_via_registry`'s
+    # width/height/encoding/data overrides are what make this work without
+    # a second code path.
+    pytest.importorskip("cv_service.inference.registry")
+    np = pytest.importorskip("numpy")
+    from cv_service.inference.detector import Detection
+    from cv_service.tracking.engines.base import Box
+
+    class OneModelRegistry:
+        def resolve(self, model_id):
+            return [("fake.pt", _CropCapturingDetector([Detection("car", 0.9, 0.0, 0.0, 1.0, 1.0)]))]
+
+    servicer = InferenceServicer(registry=OneModelRegistry())
+    request = _make_request(width=20, height=10)
+    roi = Box(0.25, 0.2, 0.5, 0.6)
+    image = np.zeros((10, 20, 3), dtype=np.uint8)
+
+    detections, _millis = servicer._run_detector(request, roi, lambda: image)
+
+    (detection,) = detections
+    assert detection.x == pytest.approx(0.25)
+    assert detection.y == pytest.approx(0.2)
+    assert detection.width == pytest.approx(0.5)
+    assert detection.height == pytest.approx(0.6)

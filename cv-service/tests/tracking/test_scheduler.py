@@ -45,6 +45,10 @@ def params(mode: str, **overrides) -> TrackingParams:
         memory_params=MemoryParams(),
         # TRACKING-V2-PLAN wave C5b -- inert here too, same reason.
         follow_top_k=1,
+        # TRACKING-V2-PLAN wave C5c -- inert here too, same reason.
+        roi_enabled=False,
+        roi_crop_factor=4.0,
+        roi_min_iou=0.2,
     )
     base.update(overrides)
     return TrackingParams(**base)

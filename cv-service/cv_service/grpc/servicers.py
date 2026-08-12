@@ -48,6 +48,7 @@ committed.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import shutil
@@ -64,7 +65,7 @@ import grpc
 from cv_service.config import DEFAULT_MAX_UPLOAD_BYTES, Settings
 from cv_service.inference.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
 from cv_service.tracking import params as tracking_params
-from cv_service.tracking.engines.base import CameraPose
+from cv_service.tracking.engines.base import Box, CameraPose
 from cv_service.tracking.registry import TrackerRegistry
 from cv_service.tracking.session import FrameOutcome, StreamTrackingSession
 from cv_service.tracking.sessions import SessionRegistry
@@ -242,11 +243,13 @@ def _tracked_response(
         detector_reason=cv_pb2.DetectorReason.Value(outcome.detector_reason),
         motion_millis=outcome.motion_millis,
         motion_engine_id=outcome.motion_engine_id,
+        detector_roi=outcome.detector_roi,
     )
 
 
 def _frame_loader(request: "cv_pb2.FrameRequest") -> Callable[[], Any]:
-    """A memoized decoder for this frame's pixels, for the FOLLOW path.
+    """A memoized decoder for this frame's pixels, for the FOLLOW path and
+    (TRACKING-V2-PLAN wave C5c) the ROI re-detection pass.
 
     Lazy for two reasons: `ASSOCIATE` never needs pixels at all, and
     `cv_service.inference.detector` imports `cv2`/`numpy` at module scope --
@@ -254,7 +257,9 @@ def _frame_loader(request: "cv_pb2.FrameRequest") -> Callable[[], Any]:
     `python -m cv_service.grpc.server`'s) ability to start without the `cv`
     extra. Memoized because a FOLLOW verify frame touches the frame twice
     (re-anchor plus the response), and decoding a JPEG twice for that would
-    be a real, avoidable per-frame cost.
+    be a real, avoidable per-frame cost -- wave C5c's `_run_roi_detector`
+    shares this SAME instance (built once per frame in `_handle_request`)
+    rather than decoding a third time for its own crop.
     """
     decoded: list[Any] = []
 
@@ -273,6 +278,56 @@ def _frame_loader(request: "cv_pb2.FrameRequest") -> Callable[[], Any]:
         return decoded[0]
 
     return load
+
+
+# A crop below this many pixels on either side cannot be a useful detector
+# input -- TRACKING-V2-PLAN wave C5c's own floor, independent of `Box.valid`
+# (which is a NORMALIZED-space check; this one is pixel-space, after
+# rounding, which is where a crop can round down to nothing even though the
+# normalized `Box` it came from looked fine).
+_ROI_MIN_PIXELS = 2
+
+
+def _crop_for_roi(image: Any, roi: Box) -> "Optional[tuple[Any, int, int]]":
+    """Normalized `roi` -> a pixel crop of `image` (shape `(H, W, 3)`),
+    rounding to the nearest pixel (TRACKING-V2-PLAN wave C5c).
+
+    Returns `(cropped_image, width, height)`, or `None` for a crop that
+    rounds down to fewer than `_ROI_MIN_PIXELS` on either side -- a
+    degenerate, unusable detector input, not a real one (P5). Coordinates
+    are clamped into `[0, width]`/`[0, height]` defensively: `roi` itself is
+    already frame-clamped by `session.py`'s `_roi_box`, but this function
+    makes no assumption about its caller.
+    """
+    height, width = image.shape[0], image.shape[1]
+    x0 = max(0, min(width, round(roi.x * width)))
+    y0 = max(0, min(height, round(roi.y * height)))
+    x1 = max(0, min(width, round((roi.x + roi.width) * width)))
+    y1 = max(0, min(height, round((roi.y + roi.height) * height)))
+    if x1 - x0 < _ROI_MIN_PIXELS or y1 - y0 < _ROI_MIN_PIXELS:
+        return None
+    return image[y0:y1, x0:x1], x1 - x0, y1 - y0
+
+
+def _map_roi_detection(detection: Any, roi: Box) -> Any:
+    """One detection, reported in the CROP's own normalized `[0, 1]` space,
+    mapped back to full-frame normalized coordinates (TRACKING-V2-PLAN wave
+    C5c) -- the coordinate round-trip this wave's crop-and-re-detect pass
+    lives or dies on.
+
+    `roi` is itself already in full-frame coordinates (`session.py`'s
+    `_roi_box`/`_roi_rescue`, `Box`'s own docstring), so a point at the
+    crop's own origin maps to `roi`'s origin, and the crop's own unit square
+    maps onto exactly `roi`'s own extent -- plain affine, no rotation:
+    ``full = roi.origin + crop_relative * roi.extent``.
+    """
+    return dataclasses.replace(
+        detection,
+        x=roi.x + detection.x * roi.width,
+        y=roi.y + detection.y * roi.height,
+        width=detection.width * roi.width,
+        height=detection.height * roi.height,
+    )
 
 
 def _build_default_registry() -> Optional["ModelRegistry"]:
@@ -442,6 +497,9 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
     ) -> None:
         self._inference_gate = inference_gate if inference_gate is not None else process_gate()
         self._warned_model_ids: set[str] = set()
+        # TRACKING-V2-PLAN wave C5c -- log-once set for `_warn_roi_degraded`,
+        # same shape as `_warned_model_ids` above.
+        self._warned_roi_degradations: set[str] = set()
         # `Settings` is needed for the `CV_TRACK_*` defaults `params.resolve`
         # falls back to; resolved fresh here when not supplied, exactly like
         # `YoloDetector` does (see cv_service/config.py's module docstring).
@@ -543,6 +601,11 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
     ) -> "cv_pb2.DetectionResponse":
         try:
             if session is not None and self._sync_tracking(session, request):
+                # Built ONCE and shared between `frame=` (the FOLLOW path's
+                # own memoized decode) and `detect=`'s own ROI branch
+                # (TRACKING-V2-PLAN wave C5c) -- `_frame_loader`'s docstring
+                # makes the "no second decode" promise explicit.
+                loader = _frame_loader(request)
                 outcome = session.process(
                     # A LOCAL monotonic clock, deliberately, not
                     # `request.timestamp_millis`: the duty cycle is about how
@@ -551,8 +614,8 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     # another machine's clock and can go backwards across a
                     # reconnect.
                     now_millis=time.monotonic() * 1000.0,
-                    detect=lambda: self._run_detector(request),
-                    frame=_frame_loader(request),
+                    detect=lambda roi=None: self._run_detector(request, roi, loader),
+                    frame=loader,
                     pose=_camera_pose_from_wire(request.camera_pose),
                 )
                 if outcome.boxes is None:
@@ -611,14 +674,32 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
             session.apply_config(_tracking_request_from_wire(wire), wire)
         return session.active
 
-    def _run_detector(self, request: "cv_pb2.FrameRequest") -> tuple[Optional[list], int]:
-        """One full detector pass. **The only place `InferenceGate` is taken.**
+    def _run_detector(
+        self,
+        request: "cv_pb2.FrameRequest",
+        roi: Optional[Box] = None,
+        frame_loader: Optional[Callable[[], Any]] = None,
+    ) -> tuple[Optional[list], int]:
+        """One detector pass, full-frame or over a crop. **The only place
+        `InferenceGate` is taken.**
 
         Both model paths live here so the tracking session can spend a
         detector pass through one callable without knowing which one this
         servicer was built with -- and so the gate acquisition stays in a
         single, greppable location (TRACKING-ORCHESTRATION §3.1).
+
+        `roi` (TRACKING-V2-PLAN wave C5c, review §4.6): a normalized crop
+        around a track's predicted box. `None` -- every caller before this
+        wave, and the overwhelming majority of calls after it -- takes the
+        SAME full-frame branch below, byte-for-byte unchanged (P1).
+        `cv_service.tracking.session.StreamTrackingSession` is the only
+        caller that ever passes one (`_roi_rescue`, at most once per frame),
+        and only alongside `frame_loader` -- the SAME memoized decoder
+        `_handle_request` already built for this frame, so a ROI pass never
+        pays for a second decode.
         """
+        if roi is not None:
+            return self._run_roi_detector(request, roi, frame_loader)
         if self._registry is not None:
             return self._detect_via_registry(request)
         self._warn_once_on_unknown_model(request.model_id)
@@ -630,6 +711,81 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                 data=request.data,
                 confidence_threshold=request.confidence_threshold or None,
             )
+
+    def _run_roi_detector(
+        self,
+        request: "cv_pb2.FrameRequest",
+        roi: Box,
+        frame_loader: Optional[Callable[[], Any]],
+    ) -> tuple[Optional[list], int]:
+        """Crop the ALREADY-decoded frame to `roi`, run the SAME detector
+        (single or registry-routed composite, whichever this servicer was
+        built with) on the crop, and map its detections back to full-frame
+        coordinates (TRACKING-V2-PLAN wave C5c).
+
+        Reuses `frame_loader` -- the servicer's own memoized decoder, built
+        once per frame in `_handle_request` -- rather than decoding a second
+        time; `session.py`'s module docstring makes the same "one decode"
+        promise for the FOLLOW path, and a ROI pass shares the exact same
+        frame. The crop is re-packaged as raw `IMAGE_ENCODING_BGR24` bytes
+        (no JPEG round-trip) so it feeds the SAME `detect(width=, height=,
+        encoding=, data=, ...)` shape every other call in this file uses --
+        `_detect_via_registry`'s optional overrides exist for exactly this.
+
+        Every degradation here -- a missing loader, a decode failure, or a
+        crop that rounds down to nothing usable -- costs this ONE pass's
+        detections and is logged at most once per servicer instance, never
+        raised (P5): the frame's own full-frame pass already ran regardless.
+        """
+        if frame_loader is None:
+            self._warn_roi_degraded("no frame loader available for this stream")
+            return [], 0
+        try:
+            image = frame_loader()
+        except Exception as exc:  # noqa: BLE001 - a bad frame costs this pass, not the stream
+            self._warn_roi_degraded(f"frame decode failed ({exc})")
+            return [], 0
+
+        cropped = _crop_for_roi(image, roi)
+        if cropped is None:
+            self._warn_roi_degraded("degenerate ROI after clamping to the frame")
+            return [], 0
+        crop_image, crop_width, crop_height = cropped
+
+        from cv_service.inference.detector import ENCODING_BGR24
+
+        import numpy as np
+
+        data = np.ascontiguousarray(crop_image).tobytes()
+
+        if self._registry is not None:
+            detections, millis = self._detect_via_registry(
+                request, width=crop_width, height=crop_height, encoding=ENCODING_BGR24, data=data
+            )
+        else:
+            self._warn_once_on_unknown_model(request.model_id)
+            with self._inference_gate.acquire():
+                detections, millis = self._detector.detect(
+                    width=crop_width,
+                    height=crop_height,
+                    encoding=ENCODING_BGR24,
+                    data=data,
+                    confidence_threshold=request.confidence_threshold or None,
+                )
+        if not detections:
+            return detections, millis
+        return [_map_roi_detection(detection, roi) for detection in detections], millis
+
+    def _warn_roi_degraded(self, reason: str) -> None:
+        """Log-once-per-servicer-instance for an ROI pass that could not run
+        at all (TRACKING-V2-PLAN wave C5c) -- same posture `_warn_once_on_
+        unknown_model` already takes for a per-frame condition that would
+        otherwise spam the log once per frame for the life of a stream.
+        """
+        if reason in self._warned_roi_degradations:
+            return
+        self._warned_roi_degradations.add(reason)
+        LOGGER.warning("cv-service ROI re-detection pass skipped: %s", reason)
 
     def _resolve_tracker_registry(self) -> Optional[TrackerRegistry]:
         """The shared `TrackerRegistry`, built on first actual use.
@@ -653,7 +809,13 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         return self._tracker_registry  # type: ignore[return-value]
 
     def _detect_via_registry(
-        self, request: "cv_pb2.FrameRequest"
+        self,
+        request: "cv_pb2.FrameRequest",
+        *,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        encoding: Optional[str] = None,
+        data: Optional[bytes] = None,
     ) -> tuple[Optional[list], int]:
         """Registry-routed counterpart of the explicit-`detector` branch above.
 
@@ -664,6 +826,14 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         Returns ``(None, 0)`` when nothing resolved at all (registry present
         but even its own default failed to load) so the caller echoes this
         one frame, same as any other per-frame failure.
+
+        `width`/`height`/`encoding`/`data` default to `request`'s own fields
+        -- every call site before TRACKING-V2-PLAN wave C5c, and still the
+        overwhelming majority after it. `_run_roi_detector` is the only
+        caller that ever overrides them, with a crop's own pixel dimensions
+        and raw bytes, while still routing through `request.model_id`/
+        `request.confidence_threshold` -- a ROI pass uses the SAME model and
+        threshold the full-frame pass would have.
         """
         from cv_service.inference.registry import detect_composite
 
@@ -673,10 +843,10 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         detections, inference_millis = detect_composite(
             resolved,
             gate=self._inference_gate,
-            width=request.width,
-            height=request.height,
-            encoding=cv_pb2.ImageEncoding.Name(request.encoding),
-            data=request.data,
+            width=width if width is not None else request.width,
+            height=height if height is not None else request.height,
+            encoding=encoding if encoding is not None else cv_pb2.ImageEncoding.Name(request.encoding),
+            data=data if data is not None else request.data,
             confidence_threshold=request.confidence_threshold or None,
         )
         return detections, inference_millis

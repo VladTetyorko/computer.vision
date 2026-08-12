@@ -21,10 +21,53 @@ from cv_service.config import (
     DEFAULT_SHUTDOWN_GRACE_SECONDS,
     Settings,
     _default_max_concurrent_inferences,
+    _parse_bool,
     _parse_device,
     _parse_imgsz,
+    _parse_positive_float,
     _resolve_max_concurrent_inferences,
 )
+
+# --- _parse_bool (TRACKING-V2-PLAN wave C5c) ----------------------------------
+
+
+def test_parse_bool_defaults_when_unset():
+    assert _parse_bool(None, True, "X") is True
+    assert _parse_bool("", False, "X") is False
+
+
+@pytest.mark.parametrize("raw", ["1", "true", "TRUE", "True", "yes", "on", "  on  "])
+def test_parse_bool_recognizes_true_spellings(raw):
+    assert _parse_bool(raw, False, "X") is True
+
+
+@pytest.mark.parametrize("raw", ["0", "false", "FALSE", "no", "off"])
+def test_parse_bool_recognizes_false_spellings(raw):
+    assert _parse_bool(raw, True, "X") is False
+
+
+@pytest.mark.parametrize("raw", ["maybe", "2", "yesplease", " "])
+def test_parse_bool_garbage_falls_back_to_default(raw):
+    assert _parse_bool(raw, True, "X") is True
+    assert _parse_bool(raw, False, "X") is False
+
+
+# --- _parse_positive_float (TRACKING-V2-PLAN wave C5c) ------------------------
+
+
+def test_parse_positive_float_defaults_when_unset():
+    assert _parse_positive_float(None, 4.0, "X") == 4.0
+    assert _parse_positive_float("", 4.0, "X") == 4.0
+
+
+def test_parse_positive_float_honors_override():
+    assert _parse_positive_float("6.5", 4.0, "X") == 6.5
+
+
+@pytest.mark.parametrize("garbage", ["not-a-number", "0", "-3.0", "  "])
+def test_parse_positive_float_garbage_falls_back_to_default(garbage):
+    assert _parse_positive_float(garbage, 4.0, "X") == 4.0
+
 
 # --- _parse_imgsz ------------------------------------------------------------
 

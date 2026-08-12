@@ -93,7 +93,7 @@ from typing import Any, Callable, Optional, Sequence
 
 from cv_service.tracking import lock as lock_module
 from cv_service.tracking import params as params_module
-from cv_service.tracking.assign import Candidate, CostAssociator, Target
+from cv_service.tracking.assign import Assignment, Candidate, CostAssociator, Target
 from cv_service.tracking.engines.base import (
     IDENTITY,
     SOURCE_TRACKER,
@@ -131,10 +131,15 @@ from cv_service.tracking.track import (
 
 LOGGER = logging.getLogger("cv_service.tracking.session")
 
-# `detect` returns whatever `InferenceServicer._detect_via_registry` returns:
-# `(detections, inference_millis)`, with `detections is None` meaning "no
-# model resolved at all -- echo this frame".
-DetectFn = Callable[[], "tuple[Optional[list], int]"]
+# `detect(roi=None)` returns whatever `InferenceServicer._run_detector`
+# returns: `(detections, inference_millis)`, with `detections is None`
+# meaning "no model resolved at all -- echo this frame". `roi`
+# (TRACKING-V2-PLAN wave C5c, review §4.6) asks for a SECOND, cropped pass
+# around a candidate's predicted box instead of the full frame -- optional,
+# so every pre-C5c caller (every harness/test `detect()` written before this
+# wave) keeps working unchanged. `session.py` is the only caller that ever
+# passes one, and only from `_roi_rescue`.
+DetectFn = Callable[[Optional[Box]], "tuple[Optional[list], int]"]
 FrameFn = Callable[[], Any]
 
 # `TrackingParams.motion_engine_id`'s one non-roster value (TRACKING-V2-PLAN
@@ -234,6 +239,16 @@ class FrameOutcome:
     # frame where nothing was constructible.
     motion_millis: int = 0
     motion_engine_id: str = ""
+    # TRACKING-V2-PLAN wave C5c -- `DetectionResponse.detector_roi` (wire
+    # field 13). `True` exactly when `_roi_rescue` actually invoked `detect`
+    # with a region THIS frame -- always in ADDITION to, never instead of,
+    # the frame's own full-frame/duty-cycle detector pass (`detector_ran`
+    # above): ASSOCIATE always runs full-frame every received frame, so a
+    # `True` here means TWO detector passes served this one response, not
+    # one. `False` on every frame the rescue never fired, including every
+    # frame `roi_enabled` is off on (the deployment default) and every
+    # frame it fired on but found nothing worth merging.
+    detector_roi: bool = False
 
 
 class StreamTrackingSession:
@@ -298,6 +313,13 @@ class StreamTrackingSession:
         # from within `_run_cost_associate` (`_resolve_memory` below).
         self._memory: Optional[ObjectMemory] = None
         self._memory_resolved = False
+        # ROI re-detection bookkeeping (TRACKING-V2-PLAN wave C5c) -- reset
+        # at the top of every `process()` call, read once at the bottom to
+        # build this frame's `FrameOutcome`. No build-once-lazily state to
+        # hold here (unlike the engines above): `_roi_rescue` needs nothing
+        # but `self._params` and the book, both already current every frame.
+        self._roi_ran = False
+        self._roi_millis = 0
         # The last wire `TrackingConfig` message applied, held opaquely and
         # compared by equality (a protobuf `==`, no allocation) so the
         # restated-every-frame config costs one comparison per frame and
@@ -399,6 +421,11 @@ class StreamTrackingSession:
         decision = self._scheduler.decide(now_millis, state)
         self._tracker_failed = False
         self._box_invalid = False
+        # TRACKING-V2-PLAN wave C5c -- reset every frame, set (at most) by
+        # `_roi_rescue` below, read once at the bottom to build this frame's
+        # `FrameOutcome`/`inference_millis`.
+        self._roi_ran = False
+        self._roi_millis = 0
 
         detections: Optional[list] = None
         inference_millis = 0
@@ -449,16 +476,21 @@ class StreamTrackingSession:
         if engine is None or self._params.mode == MODE_OFF:
             boxes = [_box_for(detection) for detection in (detections or [])]
         elif self._params.mode == MODE_ASSOCIATE:
-            boxes = self._run_associate(engine, detections or [], now, frame)
+            boxes = self._run_associate(engine, detections or [], now, frame, detect)
         elif decision.run_detector:
             boxes = self._follow_verify(engine, detections or [], frame, now)
         else:
             boxes = self._follow_predict(engine, frame, now)
         tracker_millis = int(round((perf_counter() - started) * 1000.0))
 
+        # TRACKING-V2-PLAN wave C5c: an ROI pass is a real, additional
+        # detector cost -- summed into the SAME `inference_millis` total the
+        # full-frame pass reports, the same "one number, whatever ran"
+        # convention `detect_composite` already uses for multi-model
+        # composite mode (`cv_service/inference/registry.py`).
         return FrameOutcome(
             boxes=boxes,
-            inference_millis=inference_millis,
+            inference_millis=inference_millis + self._roi_millis,
             detector_ran=decision.run_detector,
             detector_reason=decision.reason,
             tracker_millis=tracker_millis,
@@ -466,6 +498,7 @@ class StreamTrackingSession:
             locked_track_id=self._lock.bound_track_id,
             motion_millis=motion_millis,
             motion_engine_id=motion_engine_id,
+            detector_roi=self._roi_ran,
         )
 
     # -- reconnect (TRACKING-V2-PLAN wave C5b, review finding B5) -----------
@@ -527,11 +560,24 @@ class StreamTrackingSession:
     # -- mode A: associate --------------------------------------------------
 
     def _run_associate(
-        self, engine: Any, detections: Sequence[Any], now: float, frame: FrameFn
+        self,
+        engine: Any,
+        detections: Sequence[Any],
+        now: float,
+        frame: FrameFn,
+        detect: DetectFn,
     ) -> list[TrackedBox]:
         if self._engine_id == CostAssociator.engine_id:
-            return self._run_cost_associate(engine, detections, now, frame)
+            return self._run_cost_associate(engine, detections, now, frame, detect)
 
+        # TRACKING-V2-PLAN wave C5c: ROI re-detection is NOT wired into this
+        # branch. `cost`'s candidates ARE `TrackBook`'s own tracks, already
+        # known confirmed/unmatched before `TrackBook.apply()` runs -- the
+        # seam `_roi_rescue` needs. `bytetrack`'s association state lives
+        # inside a third-party engine (its own Kalman filters) with no such
+        # seam -- the SAME reasoning wave C2's module docstring already gives
+        # for why `bytetrack` never gets ego-motion compensation either. See
+        # MODULE.md for this scope decision stated in full.
         try:
             observations = engine.associate(detections, now)
         except Exception as exc:  # noqa: BLE001 - one bad frame, not a dead stream
@@ -547,7 +593,12 @@ class StreamTrackingSession:
         return [_box_for(detection, by_index.get(index)) for index, detection in enumerate(detections)]
 
     def _run_cost_associate(
-        self, engine: CostAssociator, detections: Sequence[Any], now: float, frame: FrameFn
+        self,
+        engine: CostAssociator,
+        detections: Sequence[Any],
+        now: float,
+        frame: FrameFn,
+        detect: DetectFn,
     ) -> list[TrackedBox]:
         """ASSOCIATE via `assign.CostAssociator`: the platform owns the match.
 
@@ -559,6 +610,14 @@ class StreamTrackingSession:
         this frame. That is what makes this the one associator for which
         TRACKING-V2-PLAN wave C2's `TrackBook.warp()` changes the
         association DECISION rather than only what a coasting box displays.
+
+        TRACKING-V2-PLAN wave C5c: it is ALSO the one associator for which
+        `_roi_rescue` (below) has a seam -- `tracks_list`/`candidates` are
+        already known confirmed/unmatched, by this SAME `assignment`, before
+        `TrackBook.apply()` runs, so a rescue observation can be folded into
+        the ONE `apply()` call this frame is only ever allowed to make
+        (`TrackBook.apply()`'s own docstring, and `session.py`'s module
+        docstring on the multi-target FOLLOW trap this mirrors).
         """
         extractor = self._resolve_appearance_extractor()
         boxes = [Box(d.x, d.y, d.width, d.height) for d in detections]
@@ -574,6 +633,14 @@ class StreamTrackingSession:
             )
             for index, detection in enumerate(detections)
         ]
+        # Captured once: `candidates[i]` and `tracks_list[i]` are the SAME
+        # track, by construction -- `_roi_rescue` needs the raw `Track` (for
+        # `.misses`/`.track_id`, its own priority rule) alongside the
+        # `Candidate` `engine.assign` already speaks, and reading
+        # `self._book.tracks` a second time would only be correct by
+        # coincidence (nothing mutates the book between here and there today,
+        # but nothing should have to promise that to stay correct).
+        tracks_list = self._book.tracks
         candidates = [
             Candidate(
                 key=track.key,
@@ -582,7 +649,7 @@ class StreamTrackingSession:
                 descriptor=track.descriptor,
                 confirmed=track.state != STATE_TENTATIVE,
             )
-            for track in self._book.tracks
+            for track in tracks_list
         ]
 
         # No appearance extractor active on this stream -> pure geometry,
@@ -616,6 +683,20 @@ class StreamTrackingSession:
                 )
             )
             observation_descriptors.append(target.descriptor)
+
+        # TRACKING-V2-PLAN wave C5c: at most one bounded, gated second look
+        # at the highest-priority CONFIRMED candidate the match above just
+        # left unmatched -- see `_roi_rescue`'s own docstring for the full
+        # policy. Folded into the SAME `observations`/`observation_
+        # descriptors` lists `TrackBook.apply()` books below, never a second
+        # `apply()` call.
+        rescue = self._roi_rescue(engine, tracks_list, candidates, assignment, now, frame, detect, extractor)
+        rescue_index: Optional[int] = None
+        if rescue is not None:
+            observation, descriptor, _rescued_detection = rescue
+            rescue_index = len(observations)
+            observations.append(observation)
+            observation_descriptors.append(descriptor)
 
         # TRACKING-V2-PLAN wave C4: an unmatched target has no live candidate
         # claiming it, but that is not the same question as "is this a
@@ -661,7 +742,7 @@ class StreamTrackingSession:
             for observation, track in zip(observations, tracks)
             if observation.det_index >= 0
         }
-        return [
+        boxes_out = [
             _box_for(
                 detection,
                 by_index.get(index),
@@ -674,6 +755,154 @@ class StreamTrackingSession:
             )
             for index, detection in enumerate(detections)
         ]
+        # TRACKING-V2-PLAN wave C5c: the rescued detection has no FULL-FRAME
+        # `det_index` (`Observation(det_index=-1)`, `_roi_rescue`'s own
+        # docstring) -- it never entered `by_index` and never will, so it is
+        # appended directly rather than folded into the comprehension above.
+        # `rescue_index` is exactly where it landed in `observations`, so
+        # `tracks[rescue_index]` is unambiguously ITS `Track`, regardless of
+        # how many recovery-loop observations came after it.
+        if rescue_index is not None:
+            boxes_out.append(_box_for(rescue[2], tracks[rescue_index]))
+        return boxes_out
+
+    def _roi_rescue(
+        self,
+        engine: CostAssociator,
+        tracks: Sequence[Track],
+        candidates: Sequence[Candidate],
+        assignment: Assignment,
+        now: float,
+        frame: FrameFn,
+        detect: DetectFn,
+        extractor: Any,
+    ) -> "Optional[tuple[Observation, Optional[Descriptor], Any]]":
+        """At most one bounded, gated second look per frame -- TRACKING-V2-
+        PLAN wave C5c, review §4.6's "detection recall" half: "the detector
+        cannot detect the subject" is a different failure from bad
+        association, dominant for a small/distant object that is a handful
+        of pixels once downscaled to `imgsz`. Only reachable from `_run_cost_
+        associate` -- see that method's own docstring for why `bytetrack`
+        ASSOCIATE does not get this.
+
+        **The gate that makes this a genuine no-op when disabled.** Checked
+        FIRST, before touching `assignment` or anything else: `roi_enabled`
+        is `False` by default (`config.py`'s `DEFAULT_TRACK_ROI_ENABLED`),
+        and every existing scenario/mode that never opts in pays exactly
+        zero of this method's cost.
+
+        **Priority, stated explicitly.** Eligible candidates are the
+        `assignment.unmatched_candidates` that are also CONFIRMED
+        (`Candidate.confirmed`, i.e. `Track.state != TENTATIVE` -- a
+        candidate that never earned an id is not "something the system
+        believes in", so it is not worth a second detector pass). Among
+        those, the one with the MOST consecutive misses -- closest to
+        ageing out past `max_age_frames` into LOST -- gets the pass: that is
+        the candidate a closer look benefits most, since recovering it now
+        avoids the far more expensive failure (a retired id, a fresh birth,
+        or a costly dormant-gallery round-trip) losing it altogether would
+        cost. Ties broken by the lowest `track_id`, for a deterministic,
+        greppable choice when two candidates are equally at risk.
+
+        **The bound.** At most ONE `detect(roi)` call per frame, full stop
+        -- the crop is built once, for the one chosen candidate, and this
+        method returns after that single call succeeds or fails. An
+        unbounded second pass per frame would double the very detector cost
+        TRACKING-V2-PLAN exists to reduce.
+
+        **The gate on the MATCH, not just the pass.** A degenerate crop (a
+        collapsed box, or nothing left on-frame after clamping -- `_roi_box`)
+        is a genuine no-op: no `detect()` call, no cost, logged nowhere
+        because nothing went wrong. Otherwise `detect(roi)` runs through the
+        SAME sole `InferenceGate` acquisition site a full-frame pass uses
+        (the servicer's `_run_detector` -- P2), and anything it returns is
+        judged by the SAME already-retuned `engine.assign(...)`, restricted
+        to this ONE candidate against the crop's own targets: a match must
+        clear the identical IoU/appearance/cost gates a full-frame match
+        would, never a hand-attach bypassing them.
+        """
+        if not self._params.roi_enabled:
+            return None
+        eligible = [
+            index for index in assignment.unmatched_candidates if candidates[index].confirmed
+        ]
+        if not eligible:
+            return None
+        chosen_index = max(eligible, key=lambda index: (tracks[index].misses, -tracks[index].track_id))
+        candidate = candidates[chosen_index]
+
+        roi = self._roi_box(candidate.box)
+        if roi is None:
+            return None
+
+        self._roi_ran = True
+        roi_detections, roi_millis = detect(roi)
+        self._roi_millis += roi_millis
+        if not roi_detections:
+            return None
+
+        roi_boxes = [Box(d.x, d.y, d.width, d.height) for d in roi_detections]
+        roi_descriptors = self._describe(extractor, frame, roi_boxes)
+        roi_targets = [
+            Target(
+                box=roi_boxes[index],
+                label=detection.label,
+                confidence=detection.confidence,
+                descriptor=roi_descriptors[index],
+                det_index=index,
+            )
+            for index, detection in enumerate(roi_detections)
+        ]
+        rescue_assignment = engine.assign([candidate], roi_targets)
+        if not rescue_assignment.matches:
+            return None
+        # A rescue is held to a STRICTER overlap than an ordinary match, and
+        # this is the one place the two deliberately differ. The crop exists
+        # because the object was predicted here, so a genuine rescue sits on
+        # the prediction; a neighbour that the deliberately-wide crop happens
+        # to contain does not. Reusing the primary gate -- which C3 left
+        # permissive on purpose, since a full-frame match has the whole scene
+        # competing to explain each box -- let a crowd's neighbour win the
+        # slot, and cost `clutter` six id swaps. Measured, not supposed.
+        rescued_box = roi_targets[rescue_assignment.matches[0][1]].box
+        if candidate.box.iou(rescued_box) < self._params.roi_min_iou:
+            return None
+        _, target_index = rescue_assignment.matches[0]
+        target = roi_targets[target_index]
+        observation = Observation(
+            key=candidate.key,
+            box=target.box,
+            label=target.label,
+            confidence=target.confidence,
+            # -1: no FULL-FRAME detection index behind this observation
+            # (`Observation.det_index`'s own docstring) -- `_run_cost_
+            # associate` appends this box to the response directly instead
+            # of through the `by_index`/`enumerate(detections)` mapping.
+            det_index=-1,
+        )
+        return observation, target.descriptor, roi_detections[target_index]
+
+    def _roi_box(self, box: Box) -> Optional[Box]:
+        """A square crop centered on `box`, `roi_crop_factor` times its own
+        larger dimension, clamped to the unit frame (TRACKING-V2-PLAN wave
+        C5c). `None` -- a genuine no-op, P5 -- when `box` has already
+        collapsed or the clamped crop has nothing of the frame left in it;
+        the detector never sees a degenerate region.
+        """
+        side = self._params.roi_crop_factor * max(box.width, box.height)
+        if side <= 0.0:
+            return None
+        cx, cy = box.center
+        half = side / 2.0
+        x0 = _clamp01(cx - half)
+        x1 = _clamp01(cx + half)
+        y0 = _clamp01(cy - half)
+        y1 = _clamp01(cy + half)
+        width = x1 - x0
+        height = y1 - y0
+        if width <= 0.0 or height <= 0.0:
+            return None
+        return Box(x0, y0, width, height)
 
     def _attempt_recovery(
         self, target: Target, now: float
@@ -1530,3 +1759,13 @@ def _box_for(
 
 def _from_track(track: Track) -> TrackedBox:
     return TrackedBox(label=track.label, confidence=track.confidence, box=track.box, track=track)
+
+
+def _clamp01(value: float) -> float:
+    """TRACKING-V2-PLAN wave C5c -- `_roi_box`'s own clamp-to-frame, pulled
+    out to a plain function rather than importing `cv_service.inference.
+    detector`'s equivalent (same name, same behaviour): that module is `cv2`
+    /`numpy`-gated (P3), and this one call site does not need the rest of
+    it.
+    """
+    return max(0.0, min(1.0, value))

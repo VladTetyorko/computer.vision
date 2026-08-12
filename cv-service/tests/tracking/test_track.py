@@ -62,6 +62,12 @@ def params(**overrides) -> TrackingParams:
         # reads `follow_top_k`; included only because `TrackingParams`
         # requires it.
         follow_top_k=1,
+        # TRACKING-V2-PLAN wave C5c -- also inert here: only `session.py`'s
+        # `_roi_rescue` reads either; included only because `TrackingParams`
+        # requires them.
+        roi_enabled=False,
+        roi_crop_factor=4.0,
+        roi_min_iou=0.2,
     )
     base.update(overrides)
     return TrackingParams(**base)

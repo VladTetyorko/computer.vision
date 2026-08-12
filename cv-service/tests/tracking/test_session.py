@@ -226,16 +226,56 @@ def session(registry, settings=None) -> StreamTrackingSession:
 
 
 def detect_returning(*detections, millis=7):
-    def detect():
-        return list(detections), millis
+    def detect(roi=None):
+        # `roi=None` default (TRACKING-V2-PLAN wave C5c): every caller
+        # before this wave, and every test in this file that never opts
+        # into `roi_enabled`, calls this with no argument at all -- adding
+        # the parameter here is what keeps this fake shaped like the real
+        # `DetectFn` contract without changing a single existing call site.
+        # A roi call (only ever made by a test that explicitly opted into
+        # `roi_enabled`) answers EMPTY rather than reusing `detections`: a
+        # crop around one candidate's predicted box would not, in a real
+        # detector, also contain an unrelated object somewhere else in the
+        # frame -- reusing the full-frame list here would let an
+        # UNINTENTIONAL roi call (e.g. during an roi test's own setup
+        # frames) silently contaminate a DIFFERENT track with the wrong
+        # box. A test that wants a specific roi answer uses
+        # `RecordingDetect` instead.
+        if roi is None:
+            return list(detections), millis
+        return [], millis
 
     return detect
 
 
-def run(subject, *, now_millis, detections=(), millis=7):
+def run(subject, *, now_millis, detections=(), millis=7, detect=None):
     return subject.process(
-        now_millis=now_millis, detect=detect_returning(*detections, millis=millis), frame=lambda: FRAME
+        now_millis=now_millis,
+        detect=detect if detect is not None else detect_returning(*detections, millis=millis),
+        frame=lambda: FRAME,
     )
+
+
+class RecordingDetect:
+    """A `DetectFn` double for TRACKING-V2-PLAN wave C5c: `full` answers a
+    `roi=None` (full-frame) call, `roi_response` answers every `roi=<Box>`
+    call, and every roi call's OWN `Box` argument is recorded -- so a test
+    can assert how many ROI passes happened this frame, and exactly which
+    region each one asked for, without a servicer or a real detector.
+    """
+
+    def __init__(self, full=(), roi_response=(), millis=7, roi_millis=5):
+        self.full = list(full)
+        self.roi_response = list(roi_response)
+        self.millis = millis
+        self.roi_millis = roi_millis
+        self.roi_calls: list[Box] = []
+
+    def __call__(self, roi=None):
+        if roi is None:
+            return list(self.full), self.millis
+        self.roi_calls.append(roi)
+        return list(self.roi_response), self.roi_millis
 
 
 # -- OFF --------------------------------------------------------------------
@@ -522,6 +562,214 @@ def test_appearance_off_never_asks_the_registry():
     run(subject, now_millis=0.0, detections=[det()])
 
     assert registry.appearance_calls == 0
+
+
+# -- ROI re-detection (TRACKING-V2-PLAN wave C5c, review §4.6) ---------------
+
+
+def roi_settings(**overrides) -> Settings:
+    overrides.setdefault("track_roi_enabled", True)
+    overrides.setdefault("track_roi_crop_factor", 4.0)
+    return dataclasses.replace(Settings(), **overrides)
+
+
+def test_roi_rescue_is_a_genuine_no_op_when_disabled():
+    # Disabling must never call `detect` with a roi, even when an eligible
+    # CONFIRMED-but-unmatched candidate exists -- a genuine no-op, not merely
+    # an unlikely trigger. (The default is now ON; this asserts the OFF path
+    # still costs exactly nothing, which is what an operator turning it off
+    # for a dense scene is buying.)
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=dataclasses.replace(Settings(), track_roi_enabled=False))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    detect = RecordingDetect(full=[])
+    outcome = subject.process(now_millis=66.0, detect=detect, frame=lambda: FRAME)
+
+    assert detect.roi_calls == []
+    assert outcome.detector_roi is False
+    assert outcome.boxes == []
+
+
+def test_roi_rescue_recovers_an_unmatched_confirmed_track_under_its_own_id():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=roi_settings())
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    first = run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1, w=0.1, h=0.1)])
+    track_id = first.boxes[0].track.track_id
+
+    # The full-frame pass sees nothing; the ROI pass, over a crop around the
+    # SAME predicted box, finds the object again.
+    detect = RecordingDetect(full=[], roi_response=[det("car", x=0.1, y=0.1, w=0.1, h=0.1)])
+    outcome = subject.process(now_millis=66.0, detect=detect, frame=lambda: FRAME)
+
+    assert len(detect.roi_calls) == 1
+    assert outcome.detector_roi is True
+    assert len(outcome.boxes) == 1
+    assert outcome.boxes[0].track.track_id == track_id
+    assert outcome.boxes[0].track.misses == 0  # a genuine re-anchor, not a coast
+    assert outcome.inference_millis == detect.millis + detect.roi_millis
+
+
+def test_roi_rescue_never_fires_for_a_tentative_candidate():
+    # `min_hits=2`: one hit is not enough to leave TENTATIVE, so a
+    # candidate that has never earned an id is not "something the system
+    # believes in" -- not eligible for a rescue pass.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=roi_settings())
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=2))
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    detect = RecordingDetect(full=[], roi_response=[det("car", x=0.1)])
+    subject.process(now_millis=66.0, detect=detect, frame=lambda: FRAME)
+
+    assert detect.roi_calls == []
+
+
+def test_roi_rescue_never_hand_attaches_a_detection_that_fails_the_cost_gates():
+    # A strict `min_iou` gate: the roi "find" is a completely different box
+    # (zero overlap with the candidate's predicted position), so the SAME
+    # gates a full-frame match would apply must reject it -- never a
+    # hand-attach.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=roi_settings(track_cost_gate_min_iou=0.5))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1, w=0.1, h=0.1)])
+
+    detect = RecordingDetect(full=[], roi_response=[det("car", x=0.8, y=0.8, w=0.1, h=0.1)])
+    outcome = subject.process(now_millis=66.0, detect=detect, frame=lambda: FRAME)
+
+    assert len(detect.roi_calls) == 1  # the pass DID run --
+    assert outcome.boxes == []  # -- it just found nothing worth merging
+    assert subject.tracks[0].misses == 1  # ages normally, exactly as before this wave
+
+
+def test_at_most_one_roi_pass_happens_per_frame_even_with_two_eligible_candidates():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=roi_settings())
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1), det("bus", x=0.6, y=0.6)])
+    # Both miss together on the next frame -- two eligible candidates.
+    run(subject, now_millis=66.0, detections=[])
+
+    detect = RecordingDetect(full=[])
+    subject.process(now_millis=132.0, detect=detect, frame=lambda: FRAME)
+
+    assert len(detect.roi_calls) == 1
+
+
+def test_roi_rescue_prioritizes_the_candidate_with_the_most_misses():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=roi_settings())
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1, w=0.1, h=0.1), det("bus", x=0.6, y=0.6, w=0.1, h=0.1)])
+    # `car` keeps matching (misses stays 0); `bus` starts missing a frame
+    # earlier than the shared frame below, so by the shared frame `bus` has
+    # STRICTLY more misses than `car` -- the priority rule this test pins.
+    run(subject, now_millis=66.0, detections=[det("car", x=0.1, y=0.1, w=0.1, h=0.1)])
+
+    detect = RecordingDetect(full=[])
+    subject.process(now_millis=132.0, detect=detect, frame=lambda: FRAME)
+
+    assert len(detect.roi_calls) == 1
+    roi = detect.roi_calls[0]
+    # `bus`'s predicted box is centered near x=0.65/y=0.65; `car`'s near
+    # x=0.15/y=0.15 -- asserting on the CENTER is robust to the exact crop
+    # math (`_roi_box`'s own concern, tested separately below).
+    center_x, center_y = roi.center
+    assert center_x > 0.4
+    assert center_y > 0.4
+
+
+def test_roi_box_is_a_square_crop_centered_on_the_candidates_predicted_box():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=roi_settings(track_roi_crop_factor=2.0))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    run(subject, now_millis=0.0, detections=[det("car", x=0.40, y=0.40, w=0.10, h=0.10)])
+
+    detect = RecordingDetect(full=[])
+    subject.process(now_millis=66.0, detect=detect, frame=lambda: FRAME)
+
+    (roi,) = detect.roi_calls
+    # box center is (0.45, 0.45); crop_factor=2.0 * larger dimension (0.10)
+    # = 0.20 side, so [0.35, 0.55] on both axes -- comfortably inside the
+    # unit frame, so no clamping to complicate the assertion.
+    assert roi.x == pytest.approx(0.35)
+    assert roi.y == pytest.approx(0.35)
+    assert roi.width == pytest.approx(0.20)
+    assert roi.height == pytest.approx(0.20)
+
+
+def test_a_non_positive_crop_factor_is_a_genuine_no_op():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=roi_settings(track_roi_crop_factor=0.0))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    detect = RecordingDetect(full=[])
+    subject.process(now_millis=66.0, detect=detect, frame=lambda: FRAME)
+
+    assert detect.roi_calls == []
+
+
+def test_bytetrack_associate_never_triggers_a_roi_pass():
+    # TRACKING-V2-PLAN wave C5c's own scope decision: `bytetrack` has no
+    # Candidate/Assignment seam (its association state lives inside a
+    # third-party engine), the SAME reasoning wave C2 already gives for why
+    # `bytetrack` never gets ego-motion compensation either.
+    registry = FakeRegistry(associator=FakeAssociator("bytetrack"))
+    subject = session(registry, settings=roi_settings())
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="bytetrack", min_hits=1))
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    detect = RecordingDetect(full=[])
+    subject.process(now_millis=66.0, detect=detect, frame=lambda: FRAME)
+
+    assert detect.roi_calls == []
+
+
+def test_follow_mode_never_triggers_a_roi_pass():
+    registry = FakeRegistry(follower=FakeFollower)
+    subject = session(registry, settings=roi_settings())
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW, engine_id="fake-follow", min_hits=1, lock=LockRequest(point_x=0.15, point_y=0.15)
+        )
+    )
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1, w=0.1, h=0.1)])
+
+    detect = RecordingDetect(full=[det("car", x=0.1, y=0.1, w=0.1, h=0.1)])
+    subject.process(now_millis=2000.0, detect=detect, frame=lambda: FRAME)
+
+    assert detect.roi_calls == []
+
+
+def test_a_roi_rescue_does_not_double_age_the_rest_of_the_book():
+    # `TrackBook.apply()`'s own trap (this file's module docstring, and the
+    # multi-target FOLLOW wave that first found it): a second `apply()` call
+    # in the same frame would double-count `age_frames`/`misses` for EVERY
+    # live track, not just the rescued one. `bystander` here is a live,
+    # ALWAYS-matched track that never touches the rescue at all -- its
+    # `age_frames` must advance by exactly one on the rescue frame.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=roi_settings())
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    run(
+        subject,
+        now_millis=0.0,
+        detections=[det("car", x=0.1, y=0.1, w=0.1, h=0.1), det("bystander", x=0.6, y=0.6, w=0.1, h=0.1)],
+    )
+    bystander_age_before = next(t for t in subject.tracks if t.label == "bystander").age_frames
+
+    detect = RecordingDetect(
+        full=[det("bystander", x=0.6, y=0.6, w=0.1, h=0.1)],
+        roi_response=[det("car", x=0.1, y=0.1, w=0.1, h=0.1)],
+    )
+    subject.process(now_millis=66.0, detect=detect, frame=lambda: FRAME)
+
+    bystander_age_after = next(t for t in subject.tracks if t.label == "bystander").age_frames
+    assert bystander_age_after == bystander_age_before + 1
 
 
 # -- object memory (TRACKING-V2-PLAN wave C4) --------------------------------

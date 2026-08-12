@@ -187,6 +187,16 @@ class TrackingParams:
     # single-target behaviour exactly -- see `config.py`'s `DEFAULT_TRACK_
     # FOLLOW_TOP_K` for why that, not a larger number, is what ships.
     follow_top_k: int
+    # TRACKING-V2-PLAN wave C5c addition (review §4.6, "detection recall").
+    # Same "deployment-only, no wire field" shape as `follow_top_k` directly
+    # above -- `session.py`'s `_roi_rescue` reads `roi_enabled` as the whole
+    # feature's on/off switch (checked FIRST, before anything else is even
+    # computed -- a genuine no-op when `False`) and `roi_crop_factor` as how
+    # large a crop it builds around a rescued candidate's predicted box. See
+    # `config.py`'s `DEFAULT_TRACK_ROI_ENABLED` for why this ships opt-in.
+    roi_enabled: bool
+    roi_crop_factor: float
+    roi_min_iou: float
 
     @property
     def active(self) -> bool:
@@ -350,4 +360,9 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
         # No wire field (TRACKING-V2-PLAN wave C5b) -- straight from
         # `Settings`, same shape as `track_max_age_millis` above.
         follow_top_k=settings.track_follow_top_k,
+        # No wire field (TRACKING-V2-PLAN wave C5c) -- straight from
+        # `Settings`, same shape as `follow_top_k` directly above.
+        roi_enabled=settings.track_roi_enabled,
+        roi_crop_factor=settings.track_roi_crop_factor,
+        roi_min_iou=settings.track_roi_min_iou,
     )

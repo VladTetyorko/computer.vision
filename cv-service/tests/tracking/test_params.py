@@ -464,3 +464,76 @@ def test_garbage_wave_c5b_env_vars_fall_back_and_never_raise(monkeypatch):
     assert settings.track_session_grace_millis == Settings().track_session_grace_millis
     assert settings.track_session_capacity == Settings().track_session_capacity
     assert settings.track_follow_top_k == Settings().track_follow_top_k
+
+
+# -- wave C5c additions: ROI re-detection --------------------------------------
+#
+# Both deployment-only, same "no wire field, straight from Settings" shape as
+# `follow_top_k` directly above -- `resolve()` copies them onto
+# `TrackingParams` unchanged, and `session.py`'s `_roi_rescue`/`_roi_box` are
+# what actually interpret them.
+
+
+def test_resolve_takes_roi_settings_straight_through():
+    settings = dataclasses.replace(SETTINGS, track_roi_enabled=True, track_roi_crop_factor=6.0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.roi_enabled is True
+    assert resolved.roi_crop_factor == 6.0
+
+
+def test_roi_is_enabled_by_default():
+    # Shipped OFF first, deliberately, because a gated extra detector pass is
+    # a real cost -- and because it regressed `clutter` by six id switches
+    # until the rescue got its own IoU gate. With that gate it is better or
+    # equal on every scenario and worse on none, which is the same evidence
+    # bar `cost` had to clear, so it is on.
+    assert Settings().track_roi_enabled is True
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), Settings())
+    assert resolved.roi_enabled is True
+
+
+def test_settings_read_the_wave_c5c_env_vars(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_ROI_ENABLED", "1")
+    monkeypatch.setenv("CV_TRACK_ROI_CROP_FACTOR", "5.5")
+
+    settings = Settings.from_env()
+
+    assert settings.track_roi_enabled is True
+    assert settings.track_roi_crop_factor == 5.5
+
+
+def test_roi_enabled_env_var_accepts_the_usual_boolean_spellings(monkeypatch):
+    for spelling, expected in (
+        ("true", True),
+        ("YES", True),
+        ("on", True),
+        ("false", False),
+        ("NO", False),
+        ("off", False),
+    ):
+        monkeypatch.setenv("CV_TRACK_ROI_ENABLED", spelling)
+        assert Settings.from_env().track_roi_enabled is expected
+
+
+def test_garbage_wave_c5c_env_vars_fall_back_and_never_raise(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_ROI_ENABLED", "sort-of")
+    monkeypatch.setenv("CV_TRACK_ROI_CROP_FACTOR", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert settings.track_roi_enabled == Settings().track_roi_enabled
+    assert settings.track_roi_crop_factor == Settings().track_roi_crop_factor
+
+
+def test_a_non_positive_roi_crop_factor_env_var_falls_back_to_default(monkeypatch):
+    # Unlike `CV_TRACK_MEMORY_TTL_MILLIS`, `<=0` here is NOT a legitimate
+    # "disable" sentinel -- that is `CV_TRACK_ROI_ENABLED`'s job -- so a
+    # non-positive crop factor is treated as a misconfiguration, same as
+    # every other `_parse_positive_*` knob in `config.py`.
+    monkeypatch.setenv("CV_TRACK_ROI_CROP_FACTOR", "0")
+
+    settings = Settings.from_env()
+
+    assert settings.track_roi_crop_factor == Settings().track_roi_crop_factor

@@ -18,6 +18,7 @@ from cv_service.config import Settings
 from cv_service.grpc import servicers as servicers_module
 from cv_service.grpc.servicers import InferenceServicer, _camera_pose_from_wire, cv_pb2
 from cv_service.inference.detector import Detection
+from cv_service.tracking.assign import AssignGates, AssignWeights, CostAssociator
 from cv_service.tracking.engines.base import Box, CameraPose, Observation, Transform, TrackerUpdate
 
 WIDTH, HEIGHT = 8, 6
@@ -489,6 +490,10 @@ def test_multi_target_follow_updates_never_acquire_the_inference_gate(clock):
 
 
 def test_associate_with_cost_motion_and_appearance_never_acquires_the_inference_gate(clock):
+    # ROI re-detection turned off for this test, deliberately. Its detector
+    # double is indexed by CALL COUNT, and a rescue is an extra call, so an
+    # enabled rescue desynchronises the script and the test stops measuring
+    # what it is named for. The rescue's own gating has its own tests.
     # TRACKING-V2-PLAN wave C3's own P2 proof: `cost` gives ASSOCIATE a live
     # motion compensator AND a live appearance extractor for the first time
     # -- neither the ego-motion estimate nor the per-object histogram
@@ -510,7 +515,7 @@ def test_associate_with_cost_motion_and_appearance_never_acquires_the_inference_
         min_hits=1,
     )
     session = servicers_module.StreamTrackingSession(
-        settings=Settings(), registry_provider=subject._resolve_tracker_registry
+        settings=dataclasses.replace(Settings(), track_roi_enabled=False), registry_provider=subject._resolve_tracker_registry
     )
 
     frame_count = 20
@@ -734,6 +739,10 @@ def _memory_config(**fields):
 
 
 def test_a_recovered_track_keeps_its_id_and_reports_the_recovery_honestly(clock):
+    # ROI re-detection turned off for this test, deliberately. Its detector
+    # double is indexed by CALL COUNT, and a rescue is an extra call, so an
+    # enabled rescue desynchronises the script and the test stops measuring
+    # what it is named for. The rescue's own gating has its own tests.
     # The wire-level counterpart to `long_occlusion`'s harness row
     # (`MODULE.md` "Wave C4"): a track that genuinely EXPIRES from
     # `TrackBook` -- not merely coasts -- and later reappears must come back
@@ -759,7 +768,7 @@ def test_a_recovered_track_keeps_its_id_and_reports_the_recovery_honestly(clock)
     )
     config = _memory_config()
     session = servicers_module.StreamTrackingSession(
-        settings=Settings(), registry_provider=subject._resolve_tracker_registry
+        settings=dataclasses.replace(Settings(), track_roi_enabled=False), registry_provider=subject._resolve_tracker_registry
     )
 
     responses = []
@@ -783,6 +792,10 @@ def test_a_recovered_track_keeps_its_id_and_reports_the_recovery_honestly(clock)
 
 
 def test_a_genuinely_different_object_in_the_gap_does_not_get_the_remembered_id(clock):
+    # ROI re-detection turned off for this test, deliberately. Its detector
+    # double is indexed by CALL COUNT, and a rescue is an extra call, so an
+    # enabled rescue desynchronises the script and the test stops measuring
+    # what it is named for. The rescue's own gating has its own tests.
     # The refusal case the plan calls out explicitly: a false recovery is
     # worse than a missed one, so a different LABEL arriving during the gap
     # must mint its own id, never borrow the dormant one.
@@ -802,7 +815,7 @@ def test_a_genuinely_different_object_in_the_gap_does_not_get_the_remembered_id(
     )
     config = _memory_config()
     session = servicers_module.StreamTrackingSession(
-        settings=Settings(), registry_provider=subject._resolve_tracker_registry
+        settings=dataclasses.replace(Settings(), track_roi_enabled=False), registry_provider=subject._resolve_tracker_registry
     )
 
     responses = []
@@ -930,3 +943,169 @@ def test_the_tracker_registry_is_built_lazily_and_only_once():
 
     subject._handle_request(frame_request(0))  # OFF: never asks for a registry
     assert built == []
+
+
+# --- ROI re-detection (TRACKING-V2-PLAN wave C5c, review §4.6) ---------------
+
+
+class PartialThenRoiDetector:
+    """A `YoloDetector`-shaped double whose answer depends on WHETHER it was
+    asked about the full frame (`width`/`height` == `WIDTH`/`HEIGHT`) or a
+    crop (anything smaller) -- letting a test drive `StreamTrackingSession.
+    _roi_rescue` deterministically through the REAL gRPC/session/servicer
+    wiring, not a stubbed-out associator.
+
+    Full-frame: both objects on the FIRST call (so both get born and
+    CONFIRMED at `min_hits=1`); `person` silently drops out of every
+    full-frame call after that, exactly the "the detector cannot detect the
+    subject" failure this wave exists to recover from.
+
+    A crop call answers with `person` alone, in **crop-relative** normalized
+    coordinates -- which is what a real detector handed a crop returns, and
+    what `_map_roi_detection` exists to undo. This double originally returned
+    the same FULL-FRAME numbers for both kinds of call, so the box it
+    reported mapped back to somewhere the object was not, and the test still
+    passed because the rescue's IoU gate was permissive enough to adopt it.
+    The crop is `roi_crop_factor` (4x) around the predicted box, so a
+    correctly-reported object sits at a quarter of the crop's extent, centred
+    -- hence 0.375/0.25.
+    """
+
+    model_name = "fake-roi"
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self._full_frame_passes = 0
+
+    def detect(self, *, width, height, **_kwargs):
+        self.calls.append({"width": width, "height": height})
+        if width == WIDTH and height == HEIGHT:
+            self._full_frame_passes += 1
+            if self._full_frame_passes == 1:
+                return [
+                    Detection("car", 0.9, 0.10, 0.10, 0.10, 0.10),
+                    Detection("person", 0.7, 0.70, 0.70, 0.06, 0.12),
+                ], 11
+            return [Detection("car", 0.9, 0.10, 0.10, 0.10, 0.10)], 11
+        return [Detection("person", 0.7, 0.375, 0.375, 0.25, 0.25)], 3
+
+
+def _cost_engine() -> CostAssociator:
+    return CostAssociator(weights=AssignWeights(), gates=AssignGates())
+
+
+def test_a_roi_pass_acquires_the_inference_gate_exactly_like_a_full_frame_pass(clock):
+    # P2 at the wire: a ROI pass is STILL a detector pass, gated exactly
+    # like a full-frame one, through the SAME sole acquisition site
+    # (`_run_detector`).
+    gate = RecordingGate()
+    detector = PartialThenRoiDetector()
+    settings = dataclasses.replace(Settings(), track_roi_enabled=True)
+    subject = InferenceServicer(
+        detector=detector,
+        inference_gate=gate,
+        settings=settings,
+        tracker_registry=StubTrackerRegistry(associator=_cost_engine),
+    )
+    config = tracking(cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE, engine_id="cost", min_hits=1)
+    session = servicers_module.StreamTrackingSession(
+        settings=settings, registry_provider=subject._resolve_tracker_registry
+    )
+
+    clock.seconds = 0.0
+    first = subject._handle_request(frame_request(0, config), session)
+    assert sorted(d.label for d in first.detections) == ["car", "person"]
+    assert gate.acquisitions == 1  # one full-frame pass, both objects found
+
+    clock.seconds = 0.066
+    second = subject._handle_request(frame_request(1, config), session)
+
+    # +1 full-frame (misses `person`) +1 roi (recovers `person`) == 3 total.
+    assert gate.acquisitions == 3
+    assert second.detector_roi is True
+    assert sorted(d.label for d in second.detections) == ["car", "person"]
+
+
+def test_a_roi_recovery_keeps_the_same_track_id_and_reports_it_on_the_wire(clock):
+    detector = PartialThenRoiDetector()
+    settings = dataclasses.replace(Settings(), track_roi_enabled=True)
+    subject = InferenceServicer(
+        detector=detector,
+        inference_gate=RecordingGate(),
+        settings=settings,
+        tracker_registry=StubTrackerRegistry(associator=_cost_engine),
+    )
+    config = tracking(cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE, engine_id="cost", min_hits=1)
+    session = servicers_module.StreamTrackingSession(
+        settings=settings, registry_provider=subject._resolve_tracker_registry
+    )
+
+    clock.seconds = 0.0
+    first = subject._handle_request(frame_request(0, config), session)
+    person_id_before = next(d.track_id for d in first.detections if d.label == "person")
+
+    clock.seconds = 0.066
+    second = subject._handle_request(frame_request(1, config), session)
+    person_id_after = next(d.track_id for d in second.detections if d.label == "person")
+
+    assert person_id_after == person_id_before
+
+
+def test_detector_roi_is_false_when_the_full_frame_pass_finds_everything(clock):
+    # The common case, restated on the wire: nothing to rescue this frame,
+    # so `detector_roi` reports it honestly.
+    class AlwaysBothDetector:
+        model_name = "fake-both"
+
+        def detect(self, **_kwargs):
+            return [
+                Detection("car", 0.9, 0.10, 0.10, 0.10, 0.10),
+                Detection("person", 0.7, 0.70, 0.70, 0.06, 0.12),
+            ], 11
+
+    settings = dataclasses.replace(Settings(), track_roi_enabled=True)
+    subject = InferenceServicer(
+        detector=AlwaysBothDetector(),
+        inference_gate=RecordingGate(),
+        settings=settings,
+        tracker_registry=StubTrackerRegistry(associator=_cost_engine),
+    )
+    config = tracking(cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE, engine_id="cost", min_hits=1)
+    session = servicers_module.StreamTrackingSession(
+        settings=settings, registry_provider=subject._resolve_tracker_registry
+    )
+
+    clock.seconds = 0.0
+    subject._handle_request(frame_request(0, config), session)
+    clock.seconds = 0.066
+    second = subject._handle_request(frame_request(1, config), session)
+
+    assert second.detector_roi is False
+
+
+def test_detector_roi_defaults_to_false_when_roi_is_disabled(clock):
+    # With ROI turned OFF, even an eligible unmatched confirmed candidate on
+    # every frame never makes the wire report a ROI pass, because none ever
+    # runs. (ROI is ON by default since C5c; this pins that turning it off is
+    # a real no-op rather than a quieter version of the same work.)
+    detector = PartialThenRoiDetector()
+    roi_off = dataclasses.replace(Settings(), track_roi_enabled=False)
+    subject = InferenceServicer(
+        detector=detector,
+        inference_gate=RecordingGate(),
+        settings=roi_off,
+        tracker_registry=StubTrackerRegistry(associator=_cost_engine),
+    )
+    config = tracking(cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE, engine_id="cost", min_hits=1)
+    session = servicers_module.StreamTrackingSession(
+        settings=dataclasses.replace(Settings(), track_roi_enabled=False), registry_provider=subject._resolve_tracker_registry
+    )
+
+    clock.seconds = 0.0
+    subject._handle_request(frame_request(0, config), session)
+    clock.seconds = 0.066
+    second = subject._handle_request(frame_request(1, config), session)
+
+    assert second.detector_roi is False
+    assert sorted(d.label for d in second.detections) == ["car"]  # person genuinely lost
+    assert all(call["width"] == WIDTH and call["height"] == HEIGHT for call in detector.calls)

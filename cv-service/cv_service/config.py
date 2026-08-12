@@ -222,6 +222,51 @@ DEFAULT_TRACK_SESSION_CAPACITY = 64
 # complaint ("the operator's display holds one target and NOTHING ELSE").
 DEFAULT_TRACK_FOLLOW_TOP_K = 1
 
+# TRACKING-V2-PLAN wave C5c (review §4.6, "detection recall -- the other
+# half of the complaint"): whether a CONFIRMED track the full-frame pass
+# left unmatched gets one bounded, gated second detector pass over a crop
+# around its own predicted box, at native resolution -- the standard fix for
+# a target too small/distant to survive downscaling to `imgsz`
+# (`session.py`'s `_roi_rescue`). No wire field exists (TRACKING-V2-PLAN §2's
+# frozen diff adds none for it) -- deployment-only, same "resolved straight
+# from Settings" shape as `track_max_age_millis`/`follow_top_k` before it.
+#
+# `False` -- the SAME "ship the less-proven behaviour opt-in" posture
+# `DEFAULT_TRACK_FOLLOW_TOP_K`'s own comment documents, and for a stronger
+# reason than that knob had: this one's cost is not a handful of sub-
+# millisecond SOT updates, it is a genuine SECOND detector pass -- gated by
+# `InferenceGate` exactly like any other (P2) and bounded to at most one per
+# frame, but real CPU/GPU on every deployment that flips it on. An operator
+# sets `CV_TRACK_ROI_ENABLED=1` to opt a fleet into it once its own measured
+# cost (MODULE.md's own harness table: extra `det/s` bought against the
+# `small_target` fragmentation it fixes) fits their hardware budget.
+# Enabled since TRACKING-V2 wave C5c, on measurement rather than preference:
+# better or equal on every scenario, worse on none (`small_target`
+# fragmentation 19 -> 2 and coverage 32 -> 78 of 80 frames; `dropout`
+# incidentally 11 -> 4; every other row byte-identical, no id switches
+# anywhere). It shipped off first, with a `clutter` regression of six id
+# swaps, until the rescue was given its own IoU gate -- see
+# DEFAULT_TRACK_ROI_MIN_IOU. The cost is conditional: a pass only ever runs
+# when a CONFIRMED track went unmatched, so a healthy stream pays nothing.
+DEFAULT_TRACK_ROI_ENABLED = True
+# How many times the rescued candidate's OWN predicted box's larger
+# dimension the crop's side extends to, centered on it. Large enough that an
+# object well under the detector's reliable apparent size becomes
+# comfortably above it once cropped (see `tools/trackeval/replay.py`'s
+# `DetectorNoiseConfig.reliable_size` and `sequences.py`'s `small_target`
+# scenario for the harness's own model of this -- a `small_target` object at
+# 0.035 of the frame against a crop 4x its own size is 0.25 of the CROP,
+# comfortably above that scenario's 0.10 reliable threshold); small enough
+# that the crop stays a genuine close look, not a second full frame.
+DEFAULT_TRACK_ROI_CROP_FACTOR = 4.0
+# Minimum overlap between a track's PREDICTED box and a detection found by a
+# ROI rescue, before that detection may be adopted. Deliberately stricter
+# than the primary match's own IoU gate: the crop is taken BECAUSE the object
+# was predicted there, so a genuine rescue overlaps the prediction well,
+# while a neighbour the wide crop happens to admit does not. Reusing the
+# primary gate instead cost `clutter` six id swaps -- measured, not supposed.
+DEFAULT_TRACK_ROI_MIN_IOU = 0.2
+
 _ENV_MAX_CONCURRENT_INFERENCES = "CV_MAX_CONCURRENT_INFERENCES"
 
 
@@ -430,6 +475,53 @@ def _parse_engine_id(raw: Optional[str], default: str) -> str:
     return stripped or default
 
 
+_BOOL_TRUE = {"1", "true", "yes", "on"}
+_BOOL_FALSE = {"0", "false", "no", "off"}
+
+
+def _parse_bool(raw: Optional[str], default: bool, var_name: str) -> bool:
+    """Forgiving-parse for an on/off knob (TRACKING-V2-PLAN wave C5c's
+    `CV_TRACK_ROI_ENABLED`, the first boolean `CV_TRACK_*` knob this module
+    has needed).
+
+    Unset/blank -> `default`. Case-insensitive `1`/`true`/`yes`/`on` ->
+    `True`, `0`/`false`/`no`/`off` -> `False`; anything else logs and falls
+    back to `default` -- same "never raise" contract every parser here
+    shares.
+    """
+    if not raw:
+        return default
+    lowered = raw.strip().lower()
+    if lowered in _BOOL_TRUE:
+        return True
+    if lowered in _BOOL_FALSE:
+        return False
+    LOGGER.warning("%s=%r is not a valid boolean; using default %s", var_name, raw, default)
+    return default
+
+
+def _parse_positive_float(raw: Optional[str], default: float, var_name: str) -> float:
+    """Forgiving-parse for an unbounded `> 0` float knob (TRACKING-V2-PLAN
+    wave C5c's `CV_TRACK_ROI_CROP_FACTOR` -- a crop-size multiplier, where
+    zero or negative is a misconfiguration, not a legitimate "disable"
+    value: that is `CV_TRACK_ROI_ENABLED`'s job, see its own comment above).
+
+    Same "unset/garbage/non-positive -> default, never raise" contract as
+    `_parse_positive_int`, just for a float.
+    """
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        LOGGER.warning("%s=%r is not a valid number; using default %s", var_name, raw, default)
+        return default
+    if value <= 0.0:
+        LOGGER.warning("%s=%r must be positive; using default %s", var_name, raw, default)
+        return default
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     """Every ``CV_*``-configurable knob cv-service has, resolved once.
@@ -477,6 +569,9 @@ class Settings:
     track_session_grace_millis: int = DEFAULT_TRACK_SESSION_GRACE_MILLIS
     track_session_capacity: int = DEFAULT_TRACK_SESSION_CAPACITY
     track_follow_top_k: int = DEFAULT_TRACK_FOLLOW_TOP_K
+    track_roi_enabled: bool = DEFAULT_TRACK_ROI_ENABLED
+    track_roi_crop_factor: float = DEFAULT_TRACK_ROI_CROP_FACTOR
+    track_roi_min_iou: float = DEFAULT_TRACK_ROI_MIN_IOU
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -635,5 +730,20 @@ class Settings:
                 os.environ.get("CV_TRACK_FOLLOW_TOP_K"),
                 DEFAULT_TRACK_FOLLOW_TOP_K,
                 "CV_TRACK_FOLLOW_TOP_K",
+            ),
+            track_roi_enabled=_parse_bool(
+                os.environ.get("CV_TRACK_ROI_ENABLED"),
+                DEFAULT_TRACK_ROI_ENABLED,
+                "CV_TRACK_ROI_ENABLED",
+            ),
+            track_roi_crop_factor=_parse_positive_float(
+                os.environ.get("CV_TRACK_ROI_CROP_FACTOR"),
+                DEFAULT_TRACK_ROI_CROP_FACTOR,
+                "CV_TRACK_ROI_CROP_FACTOR",
+            ),
+            track_roi_min_iou=_parse_unit_fraction(
+                os.environ.get("CV_TRACK_ROI_MIN_IOU"),
+                DEFAULT_TRACK_ROI_MIN_IOU,
+                "CV_TRACK_ROI_MIN_IOU",
             ),
         )
