@@ -344,6 +344,24 @@ vision:
     #     One value per instance, not per camera: a deployment mixing lenses needs this lifted onto
     #     the asset, which is the follow-up this default is deliberately conservative for.
     #     camera-hfov-degrees: 0.0
+    #     ADAPTIVE RATE (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2). A fixed inference rate is
+    #     both wasteful when nothing is moving and far too slow during a manoeuvre: at 30 deg/s of
+    #     yaw across a 60 deg lens the scene shifts half a frame width per second, which a 0.2-wide
+    #     box loses association with in well under a second (docs/conclusions/CV-RATE-BUDGET.md 2).
+    #     When enabled, the sampler raises its rate toward what the tracked target's own motion
+    #     demands -- displacement per second divided by the association budget w(1-t)/(1+t) -- and
+    #     leaves it exactly at inference-fps whenever nothing is tracked or nothing is moving.
+    #     It can only ever RAISE the rate above the operator's inference-fps, never lower it, and it
+    #     is bounded at runtime by the source's own frame rate and by measured detector capacity
+    #     (max-in-flight / round trip), so a cv-service that slows down lowers the rate feeding it.
+    #     Target motion works on any deployment; the ego-motion term needs camera-hfov-degrees above
+    #     and is simply absent without it, never estimated from a guess.
+    #     Set enabled: false to pin the rate to exactly inference-fps. On a metered link prefer
+    #     lowering max-fps -- a capped adaptive rate still spends its frames where they are needed.
+    #     adaptive-rate:
+    #       enabled: true
+    #       max-fps: 30.0
+    #       ewma-alpha: 0.2
     #   DetectionExtrapolator's smoothing tunables (how far past the latest completed result's capture
     #   time it extrapolates, and the max normalized box-center distance for a same-label match).
     #   extrapolation:

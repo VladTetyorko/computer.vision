@@ -101,9 +101,9 @@ final class DetectionRateWindow {
     /**
      * @return the counters over the current window. Never {@code null}, never throws.
      */
-    synchronized DetectionRate snapshot(double sourceFps, double targetFps) {
+    synchronized DetectionRate snapshot(double sourceFps, double targetFps, double demandFps) {
         if (samples.isEmpty()) {
-            return new DetectionRate(window, sourceFps, targetFps, 0.0, 0L, 0L, 0L, missedDeadlines);
+            return new DetectionRate(window, sourceFps, targetFps, demandFps, 0.0, 0L, 0L, 0L, missedDeadlines);
         }
         long submitted = 0L;
         long droppedInFlight = 0L;
@@ -115,7 +115,7 @@ final class DetectionRateWindow {
                 case DROPPED_OUTAGE -> droppedOutage++;
             }
         }
-        return new DetectionRate(window, sourceFps, targetFps, submittedFps(submitted),
+        return new DetectionRate(window, sourceFps, targetFps, demandFps, submittedFps(submitted),
                 submitted, droppedInFlight, droppedOutage, missedDeadlines);
     }
 

@@ -352,7 +352,9 @@ public class ApplicationServiceWiring {
                 Duration.ofSeconds(tracking.statsWindowSeconds()),
                 Duration.ofSeconds(tracking.trackRetentionSeconds()),
                 TrackingWiring.streamStartTrackingSeed(tracking),
-                pipeline.cameraHfovDegrees());
+                pipeline.cameraHfovDegrees(),
+                new AdaptiveRateSettings(pipeline.adaptiveRate().enabled(), pipeline.adaptiveRate().maxFps(),
+                        pipeline.adaptiveRate().ewmaAlpha()));
     }
 
     /**

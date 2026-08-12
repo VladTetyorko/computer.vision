@@ -25,7 +25,13 @@ import java.util.Objects;
  * @param sourceFps        measured frame arrival rate of the video source; the hard ceiling on any
  *                         achievable detection rate, and {@code 0} before the first measurement
  * @param targetFps        the rate the sampler is currently aiming for — the operator's {@code
- *                         inferenceFps}, raised to {@code followFps} in FOLLOW
+ *                         inferenceFps}, raised to {@code followFps} in FOLLOW, and raised further
+ *                         by the adaptive loop when the tracked target demands it
+ * @param demandFps        the rate the tracked target's motion asked for before any ceiling was
+ *                         applied (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;2); {@code 0} when
+ *                         nothing is tracked. {@code demandFps > targetFps} means the stream is
+ *                         capacity-limited, not configuration-limited — the one comparison that
+ *                         separates "raise the ceiling" from "shrink the round trip"
  * @param submittedFps     frames actually handed to the detection port per second, over the window
  * @param submitted        frames handed to the detection port in the window
  * @param droppedInFlight  samples discarded because {@code maxInFlightInferences} were outstanding —
@@ -34,8 +40,8 @@ import java.util.Objects;
  * @param missedDeadlines  sample deadlines no frame arrived in time to serve — the source is slower
  *                         than the requested rate, so no amount of detector capacity would help
  */
-public record DetectionRate(Duration window, double sourceFps, double targetFps, double submittedFps,
-                             long submitted, long droppedInFlight, long droppedOutage,
+public record DetectionRate(Duration window, double sourceFps, double targetFps, double demandFps,
+                             double submittedFps, long submitted, long droppedInFlight, long droppedOutage,
                              long missedDeadlines) {
 
     public DetectionRate {
@@ -48,7 +54,7 @@ public record DetectionRate(Duration window, double sourceFps, double targetFps,
      *         first sample, and immediately after a model re-arm.
      */
     public static DetectionRate empty(Duration window, double sourceFps, double targetFps) {
-        return new DetectionRate(window, sourceFps, targetFps, 0.0, 0L, 0L, 0L, 0L);
+        return new DetectionRate(window, sourceFps, targetFps, 0.0, 0.0, 0L, 0L, 0L, 0L);
     }
 
     /** @return sample opportunities that reached the sampler — every deadline a frame did serve. */

@@ -22,8 +22,11 @@ import com.drones.vision.application.pipeline.DetectionRate;
  * @param windowSeconds   how far back the counters reach
  * @param sourceFps       measured frame arrival rate of the video source — the hard ceiling on any
  *                        achievable detection rate
- * @param targetFps       the rate the sampler aimed for: {@code inferenceFps}, or {@code followFps}
- *                        in FOLLOW
+ * @param targetFps       the rate the sampler aimed for: {@code inferenceFps}, {@code followFps} in
+ *                        FOLLOW, or higher still when the adaptive loop raised it
+ * @param demandFps       what the tracked target's motion asked for before any ceiling applied;
+ *                        {@code 0} when nothing is tracked. {@code demandFps > targetFps} means the
+ *                        stream is capacity-limited rather than configuration-limited
  * @param submittedFps    frames actually handed to the detector per second
  * @param submitted       frames handed to the detector in the window
  * @param droppedInFlight samples discarded at the {@code maxInFlightInferences} bound
@@ -35,13 +38,14 @@ import com.drones.vision.application.pipeline.DetectionRate;
  *                        above zero means the configured rate is not the delivered one
  */
 public record DetectionRateResponse(long windowSeconds, double sourceFps, double targetFps,
-                                     double submittedFps, long submitted, long droppedInFlight,
-                                     long droppedOutage, long missedDeadlines, double dropRatio) {
+                                     double demandFps, double submittedFps, long submitted,
+                                     long droppedInFlight, long droppedOutage, long missedDeadlines,
+                                     double dropRatio) {
 
     /** Maps the application-layer read model onto this wire shape. */
     public static DetectionRateResponse from(DetectionRate rate) {
         return new DetectionRateResponse(rate.window().toSeconds(), rate.sourceFps(), rate.targetFps(),
-                rate.submittedFps(), rate.submitted(), rate.droppedInFlight(), rate.droppedOutage(),
-                rate.missedDeadlines(), rate.dropRatio());
+                rate.demandFps(), rate.submittedFps(), rate.submitted(), rate.droppedInFlight(),
+                rate.droppedOutage(), rate.missedDeadlines(), rate.dropRatio());
     }
 }

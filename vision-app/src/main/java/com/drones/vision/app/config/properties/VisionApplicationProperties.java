@@ -1,6 +1,7 @@
 package com.drones.vision.app.config.properties;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import com.drones.vision.application.pipeline.AdaptiveRateSettings;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
@@ -72,7 +73,7 @@ public record VisionApplicationProperties(
             pipeline = new Pipeline(Pipeline.DEFAULT_ASSUMED_SOURCE_FPS_INT,
                     Pipeline.DEFAULT_MEASURED_FPS_EWMA_ALPHA_DOUBLE, Pipeline.DEFAULT_WARMUP_FRAMES_INT,
                     Pipeline.DEFAULT_MIN_MEASURED_FPS_DOUBLE, Pipeline.DEFAULT_MAX_MEASURED_FPS_DOUBLE, null, null,
-                    Pipeline.DEFAULT_CAMERA_HFOV_DEGREES_DOUBLE);
+                    Pipeline.DEFAULT_CAMERA_HFOV_DEGREES_DOUBLE, null);
         }
         if (extrapolation == null) {
             extrapolation = new Extrapolation(Extrapolation.DEFAULT_MAX_MILLIS_LONG,
@@ -155,6 +156,11 @@ public record VisionApplicationProperties(
      *                              (docs/conclusions/CV-RATE-BUDGET.md &sect;2). Default
      *                              {@value #DEFAULT_CAMERA_HFOV_DEGREES} = unknown, which leaves
      *                              pose compensation off rather than guessing a scale
+     * @param adaptiveRate          whether and how far the sample rate may rise above the
+     *                              operator's {@code inferenceFps} when a tracked target is about
+     *                              to leave its association budget
+     *                              (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2); defaulted as a
+     *                              whole when absent
      */
     public record Pipeline(@DefaultValue(Pipeline.DEFAULT_ASSUMED_SOURCE_FPS) int assumedSourceFps,
                             @DefaultValue(Pipeline.DEFAULT_MEASURED_FPS_EWMA_ALPHA) double measuredFpsEwmaAlpha,
@@ -163,7 +169,8 @@ public record VisionApplicationProperties(
                             @DefaultValue(Pipeline.DEFAULT_MAX_MEASURED_FPS) double maxMeasuredFps,
                             Backoff detectionBackoff,
                             Backoff sourceReopenBackoff,
-                            @DefaultValue(Pipeline.DEFAULT_CAMERA_HFOV_DEGREES) double cameraHfovDegrees) {
+                            @DefaultValue(Pipeline.DEFAULT_CAMERA_HFOV_DEGREES) double cameraHfovDegrees,
+                            AdaptiveRate adaptiveRate) {
         static final String DEFAULT_ASSUMED_SOURCE_FPS = "30";
         static final String DEFAULT_CAMERA_HFOV_DEGREES = "0.0";
         static final double DEFAULT_CAMERA_HFOV_DEGREES_DOUBLE = 0.0;
@@ -186,6 +193,25 @@ public record VisionApplicationProperties(
                 sourceReopenBackoff = new Backoff(Backoff.DEFAULT_SOURCE_REOPEN_INITIAL_MS_INT,
                         Backoff.DEFAULT_SOURCE_REOPEN_MAX_MS_INT);
             }
+            if (adaptiveRate == null) {
+                adaptiveRate = new AdaptiveRate(AdaptiveRateSettings.DEFAULT_ENABLED,
+                        AdaptiveRateSettings.DEFAULT_MAX_FPS, AdaptiveRateSettings.DEFAULT_EWMA_ALPHA);
+            }
+        }
+
+        /**
+         * The adaptive-rate loop's three knobs, mapped straight onto {@code AdaptiveRateSettings}.
+         *
+         * @param enabled  whether the demand may raise the rate at all; it can only ever raise it
+         *                 above the configured {@code inferenceFps}, never lower it
+         * @param maxFps   the deployment's ceiling — a bandwidth budget, not a promise: the rate is
+         *                 also bounded at runtime by the source rate and by measured detector
+         *                 capacity
+         * @param ewmaAlpha smoothing on the computed demand, in {@code (0,1]}
+         */
+        public record AdaptiveRate(@DefaultValue("true") boolean enabled,
+                                    @DefaultValue("30.0") double maxFps,
+                                    @DefaultValue("0.2") double ewmaAlpha) {
         }
 
         /**

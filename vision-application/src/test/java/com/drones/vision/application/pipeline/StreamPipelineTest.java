@@ -1428,6 +1428,64 @@ class StreamPipelineTest {
 
     // --- docs/plans/done/TRACKING-PLAN.md §5.D/§5.E, wave T3: track book, stats window, follow sampling ---
 
+    // --- docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2: the adaptive rate, end to end -------------
+
+    private static StreamPipelineSettings settingsWithAdaptiveRate(AdaptiveRateSettings adaptiveRate) {
+        StreamPipelineSettings base = StreamPipelineSettings.defaults();
+        return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(),
+                base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
+                base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
+                base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
+                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(),
+                base.cameraHfovDegrees(), adaptiveRate);
+    }
+
+    /** A result whose single box is small and fast enough to demand far more than 10 fps. */
+    private DetectionResult escapingTargetResult(long sequence) {
+        Detection detection = new Detection("person", 0.9, new BoundingBox(0.4, 0.4, 0.05, 0.05),
+                new ModelRef("yolo", "latest"),
+                new TrackRef(1L, TrackState.CONFIRMED, DetectionSource.TRACKER, 2.0, 0.0, 10));
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5));
+    }
+
+    private int samplesOverTwoSecondsOfA60FpsSource(AdaptiveRateSettings adaptiveRate) {
+        List<VideoFrame> frames = new ArrayList<>();
+        for (long i = 0; i < 120; i++) {
+            frames.add(frame(i));
+        }
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any()))
+                .thenAnswer(invocation -> CompletableFuture.completedFuture(escapingTargetResult(0)));
+
+        new StreamPipeline(streamId, device, trackingConfig(10, TrackingConfig.defaults()), publisher,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
+                null, null, fixedFpsClock(60), settingsWithAdaptiveRate(adaptiveRate), System::nanoTime).start();
+
+        return mockingDetails(detectionPort).getInvocations().size();
+    }
+
+    @Test
+    void raisesTheSampleRateWhenATrackedTargetIsAboutToLeaveItsAssociationBudget() {
+        // The wiring test, not the arithmetic one -- DetectionRateControllerTest owns the formula.
+        // A 0.05-wide box crossing at 2 frame widths/s demands ~74fps against its association
+        // budget; the ceiling holds it at the configured 30. Two seconds of a 60fps source
+        // therefore yields far more than the 20 samples inferenceFps=10 alone would allow.
+        int samples = samplesOverTwoSecondsOfA60FpsSource(AdaptiveRateSettings.defaults());
+
+        assertTrue(samples > 40, "expected the rate to be raised well above 10fps, sampled " + samples);
+        assertTrue(samples <= 61, "and still capped at the configured 30fps ceiling, sampled " + samples);
+    }
+
+    @Test
+    void leavesTheSampleRateAtTheConfiguredOneWhenTheAdaptiveLoopIsDisabled() {
+        // Same target, same source: with the loop off the operator's 10fps is exactly what runs,
+        // which is what makes the previous test evidence of the loop rather than of the clock.
+        int samples = samplesOverTwoSecondsOfA60FpsSource(AdaptiveRateSettings.disabled());
+
+        assertEquals(20, samples, 1, "two seconds at exactly the configured 10fps");
+    }
+
     private static PipelineConfig trackingConfig(int inferenceFps, TrackingConfig tracking) {
         return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, 5, true, Set.of(),
                 EventRuleConfig.defaults(), true, true, tracking);

@@ -1019,13 +1019,14 @@ class StreamControllerTest {
         StreamId streamId = StreamId.random();
         when(streamService.tracks(streamId)).thenReturn(List.of());
         when(streamService.detectionRate(streamId)).thenReturn(Optional.of(
-                new DetectionRate(Duration.ofSeconds(30), 24.0, 10.0, 7.5, 15L, 5L, 0L, 3L)));
+                new DetectionRate(Duration.ofSeconds(30), 24.0, 10.0, 18.0, 7.5, 15L, 5L, 0L, 3L)));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.rate.windowSeconds").value(30))
                 .andExpect(jsonPath("$.rate.sourceFps").value(24.0))
                 .andExpect(jsonPath("$.rate.targetFps").value(10.0))
+                .andExpect(jsonPath("$.rate.demandFps").value(18.0))
                 .andExpect(jsonPath("$.rate.submittedFps").value(7.5))
                 .andExpect(jsonPath("$.rate.submitted").value(15))
                 .andExpect(jsonPath("$.rate.droppedInFlight").value(5))

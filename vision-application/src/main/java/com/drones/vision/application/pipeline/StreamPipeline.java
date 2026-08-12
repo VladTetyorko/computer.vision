@@ -262,6 +262,14 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final DetectionRateWindow detectionRate;
 
     /**
+     * Chooses the rate {@link #sampleIntervalNanos} schedules deadlines at
+     * (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2). Built here rather than injected for the same
+     * reason {@link #extrapolator} is: it is this pipeline's own per-stream bookkeeping, not a
+     * substitutable collaborator.
+     */
+    private final DetectionRateController rateController;
+
+    /**
      * The clock {@link #pipelineLatency} measures durations with — deliberately <b>not</b> {@link
      * #nanoTimeSource}. That one is a <i>cadence</i> seam: the tests' fake advances one frame
      * interval on every read, which encodes "the pipeline reads me once per frame" and silently
@@ -525,6 +533,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.trackingStats = new TrackingStatsWindow(settings.trackingStatsWindow());
         this.pipelineLatency = new PipelineLatencyWindow(settings.trackingStatsWindow());
         this.detectionRate = new DetectionRateWindow(settings.trackingStatsWindow());
+        this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
         this.backoffNanos = this.detectionBackoffInitialNanos;
     }
 
@@ -600,6 +609,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             trackingStats.clear();
             pipelineLatency.clear();
             detectionRate.clear();
+            rateController.clear();
         }
     }
 
@@ -662,7 +672,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         says how many were asked for and what became of them. Never {@code null}.
      */
     public DetectionRate detectionRate() {
-        return detectionRate.snapshot(sourceFps(), effectiveInferenceFps());
+        return detectionRate.snapshot(sourceFps(), targetFps(), rateController.demandFps());
     }
 
     /**
@@ -931,7 +941,17 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /** The gap between sample deadlines for the currently targeted rate; at least one nanosecond. */
     private long sampleIntervalNanos() {
-        return Math.max(1L, Math.round(NANOS_PER_SECOND / effectiveInferenceFps()));
+        return Math.max(1L, Math.round(NANOS_PER_SECOND / targetFps()));
+    }
+
+    /**
+     * The rate being sampled at right now: {@link #effectiveInferenceFps()} raised by {@link
+     * #rateController} when the tracked target is about to leave its association budget, and exactly
+     * {@link #effectiveInferenceFps()} whenever it is not (or the loop is off). Read on every frame,
+     * so it is deliberately a few comparisons over volatile fields rather than any kind of scan.
+     */
+    private double targetFps() {
+        return rateController.targetFps(effectiveInferenceFps(), sourceFps(), config.maxInFlightInferences());
     }
 
     /**
@@ -1045,13 +1065,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         // test double) that never learned about attitude sees exactly the calls it saw before this
         // feature existed. The additive contract holds at the call site, not just in the interface.
         CameraAttitude attitude = cameraAttitude();
+        rateController.observeAttitude(attitude, submittedAtNanos);
         CompletionStage<DetectionResult> pending = attitude == null
                 ? detectionPort.detect(frame, config)
                 : detectionPort.detect(frame, config, attitude);
         pending.whenComplete((result, error) -> {
             // Recorded before the closed/error branches below: a round trip that ended in a failure,
             // or arrived after close, still happened and is still the number worth seeing.
-            pipelineLatency.record(submittedAtNanos, latencyNanoSource.getAsLong());
+            long completedAtNanos = latencyNanoSource.getAsLong();
+            pipelineLatency.record(submittedAtNanos, completedAtNanos);
+            rateController.recordRoundTrip(completedAtNanos - submittedAtNanos);
             if (isProbe) {
                 clearProbeInFlight();
             } else {
@@ -1151,6 +1174,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         extrapolator.accept(filtered);
         trackBook.accept(filtered);
         trackingStats.accept(filtered);
+        rateController.observeDetections(filtered.detections(), config.tracking().redetectIouPercent());
         if (eventEngine != null) {
             eventEngine.accept(filtered);
         }
