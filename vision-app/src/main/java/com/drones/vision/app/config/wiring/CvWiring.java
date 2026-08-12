@@ -1,6 +1,7 @@
 package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.adapter.cvgrpc.GrpcCvSettings;
+import com.drones.vision.adapter.cvgrpc.WireFormat;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.app.config.properties.VisionCvProperties;
@@ -74,7 +75,7 @@ public class CvWiring {
         return new GrpcCvSettings(properties.responseTimeout(), properties.keepAliveTime(),
                 properties.keepAliveTimeout(), properties.keepAliveWithoutCalls(), properties.channelShutdownTimeout(),
                 properties.plaintext(), upload.timeout(), upload.chunkBytes(), properties.detectWidth(),
-                properties.jpegQuality());
+                properties.jpegQuality(), WireFormat.parse(properties.wireFormat()));
     }
 
     /**

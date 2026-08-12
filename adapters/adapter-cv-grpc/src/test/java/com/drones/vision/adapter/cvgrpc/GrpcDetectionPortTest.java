@@ -84,7 +84,18 @@ class GrpcDetectionPortTest {
     }
 
     private GrpcDetectionPort newPort(BindableService service, int detectWidth, float jpegQuality) throws Exception {
-        return newPort(service, GrpcCvSettings.defaults().withDetectWidth(detectWidth).withJpegQuality(jpegQuality));
+        return newPort(service, GrpcCvSettings.defaults().withDetectWidth(detectWidth).withJpegQuality(jpegQuality)
+                .withWireFormat(WireFormat.JPEG));
+    }
+
+    /**
+     * A port pinned to JPEG. An in-process channel reports {@code localhost} as its authority, so
+     * under the shipped {@link WireFormat#AUTO} default these tests would otherwise exercise the raw
+     * path — correct behaviour, but not what a test named "…ToJpeg…" is asserting. Pinning states
+     * which encoding is under test instead of depending on how gRPC names a test channel.
+     */
+    private GrpcDetectionPort newJpegPort(BindableService service) throws Exception {
+        return newPort(service, GrpcCvSettings.defaults().withWireFormat(WireFormat.JPEG));
     }
 
     private GrpcDetectionPort newPort(BindableService service, GrpcCvSettings settings) throws Exception {
@@ -445,7 +456,7 @@ class GrpcDetectionPortTest {
     @Test
     void detectDownscalesWideBgr24FrameToJpegAtMaxDetectWidth() throws Exception {
         CapturingServicer servicer = new CapturingServicer();
-        GrpcDetectionPort port = newPort(servicer);
+        GrpcDetectionPort port = newJpegPort(servicer);
         StreamId streamId = StreamId.random();
         int width = 1280;
         int height = 720;
@@ -465,6 +476,49 @@ class GrpcDetectionPortTest {
         BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(sent.getData().toByteArray()));
         assertEquals(GrpcCvSettings.MAX_DETECT_WIDTH, decoded.getWidth(), "captured JPEG must decode to the scaled width");
         assertEquals(expectedHeight, decoded.getHeight(), "captured JPEG must decode to the scaled height");
+    }
+
+    @Test
+    void detectSendsTheDownscaledFrameRawWhenTheWireFormatIsBgr24() throws Exception {
+        // docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R3: the same downscale, without the JPEG encode
+        // here or the matching decode inside cv-service -- together most of the ~25ms of
+        // non-inference round trip measured in docs/conclusions/CV-RATE-BUDGET.md 3.
+        CapturingServicer servicer = new CapturingServicer();
+        GrpcDetectionPort port = newPort(servicer, GrpcCvSettings.defaults().withWireFormat(WireFormat.BGR24));
+        StreamId streamId = StreamId.random();
+        int width = 1280;
+        int height = 720;
+        byte[] pixels = new byte[width * height * 3];
+        new Random(4).nextBytes(pixels);
+        VideoFrame frame = new VideoFrame(streamId, 0, Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                width, height, PixelFormat.BGR24, ByteBuffer.wrap(pixels));
+
+        port.detect(frame, PipelineConfig.defaults()).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        FrameRequest sent = servicer.received.get(0L);
+        int expectedHeight = Math.round((float) height * GrpcCvSettings.MAX_DETECT_WIDTH / width);
+        assertEquals(ImageEncoding.IMAGE_ENCODING_BGR24, sent.getEncoding());
+        assertEquals(GrpcCvSettings.MAX_DETECT_WIDTH, sent.getWidth());
+        assertEquals(expectedHeight, sent.getHeight());
+        assertEquals(GrpcCvSettings.MAX_DETECT_WIDTH * expectedHeight * 3, sent.getData().size(),
+                "raw BGR24 is exactly three bytes per pixel of the SCALED frame, with no row padding");
+    }
+
+    @Test
+    void autoSendsRawToALoopbackEndpointWithNoWireFormatConfigured() throws Exception {
+        // The shipped default, exercised end to end rather than asserted on the enum alone: an
+        // in-process channel's authority is `localhost`, which is exactly the case AUTO exists for.
+        CapturingServicer servicer = new CapturingServicer();
+        GrpcDetectionPort port = newPort(servicer, GrpcCvSettings.defaults());
+        StreamId streamId = StreamId.random();
+        byte[] pixels = new byte[1280 * 720 * 3];
+        VideoFrame frame = new VideoFrame(streamId, 0, Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                1280, 720, PixelFormat.BGR24, ByteBuffer.wrap(pixels));
+
+        port.detect(frame, PipelineConfig.defaults()).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        assertEquals(WireFormat.AUTO, GrpcCvSettings.defaults().wireFormat(), "AUTO really is the default");
+        assertEquals(ImageEncoding.IMAGE_ENCODING_BGR24, servicer.received.get(0L).getEncoding());
     }
 
     @Test

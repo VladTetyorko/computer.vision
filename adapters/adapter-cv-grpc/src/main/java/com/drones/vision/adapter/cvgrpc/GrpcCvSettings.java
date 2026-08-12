@@ -52,6 +52,9 @@ import java.util.Objects;
  *                                JPEG-encoded instead of sent raw; must be {@code >=} {@value
  *                                #MIN_DETECT_WIDTH}
  * @param jpegQuality            JPEG encoder quality for the downscale path; must be in {@code (0,1]}
+ * @param wireFormat             how a downscaled frame reaches cv-service; must not be {@code null},
+ *                                defaults to {@link WireFormat#AUTO} which picks raw {@code BGR24}
+ *                                for a loopback endpoint and JPEG for anything else
  */
 public record GrpcCvSettings(
         Duration responseTimeout,
@@ -63,7 +66,8 @@ public record GrpcCvSettings(
         Duration uploadTimeout,
         int uploadChunkBytes,
         int detectWidth,
-        float jpegQuality) {
+        float jpegQuality,
+        WireFormat wireFormat) {
 
     /** Default {@link #responseTimeout()} — see {@code GrpcDetectionPort}'s class javadoc, "hung service" case. */
     static final long RESPONSE_TIMEOUT_SECONDS = 2;
@@ -102,6 +106,9 @@ public record GrpcCvSettings(
     /** Default {@link #jpegQuality()} — balances size vs. detail. */
     static final float JPEG_QUALITY = 0.8f;
 
+    /** Default {@link #wireFormat()} — see {@link WireFormat#AUTO} for why the default is a rule. */
+    static final WireFormat WIRE_FORMAT = WireFormat.AUTO;
+
     public GrpcCvSettings {
         Objects.requireNonNull(responseTimeout, "responseTimeout must not be null");
         Objects.requireNonNull(keepAliveTime, "keepAliveTime must not be null");
@@ -119,6 +126,9 @@ public record GrpcCvSettings(
         if (detectWidth < MIN_DETECT_WIDTH) {
             throw new IllegalArgumentException(
                     "detectWidth must be >= " + MIN_DETECT_WIDTH + ", was " + detectWidth);
+        }
+        if (wireFormat == null) {
+            throw new IllegalArgumentException("wireFormat must not be null; use WireFormat.AUTO");
         }
         if (jpegQuality <= 0f || jpegQuality > 1f) {
             throw new IllegalArgumentException("jpegQuality must be in (0,1], was " + jpegQuality);
@@ -143,18 +153,28 @@ public record GrpcCvSettings(
                 Duration.ofSeconds(UPLOAD_TIMEOUT_SECONDS),
                 CHUNK_BYTES,
                 MAX_DETECT_WIDTH,
-                JPEG_QUALITY);
+                JPEG_QUALITY,
+                WIRE_FORMAT);
     }
 
     /** Copy of this settings object with just {@link #detectWidth()} replaced — a test/tuning convenience. */
     public GrpcCvSettings withDetectWidth(int newDetectWidth) {
         return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
-                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, newDetectWidth, jpegQuality);
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, newDetectWidth, jpegQuality,
+                wireFormat);
+    }
+
+    /** Copy of this settings object with just {@link #wireFormat()} replaced — a test/tuning convenience. */
+    public GrpcCvSettings withWireFormat(WireFormat newWireFormat) {
+        return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, jpegQuality,
+                newWireFormat);
     }
 
     /** Copy of this settings object with just {@link #jpegQuality()} replaced — a test/tuning convenience. */
     public GrpcCvSettings withJpegQuality(float newJpegQuality) {
         return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
-                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, newJpegQuality);
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, newJpegQuality,
+                wireFormat);
     }
 }

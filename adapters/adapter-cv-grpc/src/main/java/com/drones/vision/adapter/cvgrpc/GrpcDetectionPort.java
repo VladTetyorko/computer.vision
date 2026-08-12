@@ -84,7 +84,12 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
         this.channel = Objects.requireNonNull(channel, "channel must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.asyncStub = InferenceGrpc.newStub(channel);
-        this.codec = new DetectionFrameCodec(settings.detectWidth(), settings.jpegQuality());
+        // Resolved from the channel rather than from a host string so that BOTH constructors get the
+        // same answer, including the shared-channel one that never sees a host. An in-process
+        // channel (tests) has a non-loopback authority and so resolves to JPEG -- the behaviour
+        // every existing test was written against.
+        this.codec = new DetectionFrameCodec(settings.detectWidth(), settings.jpegQuality(),
+                settings.wireFormat().resolve(channel.authority()));
     }
 
     private static ManagedChannel buildChannel(String host, int port, GrpcCvSettings settings) {

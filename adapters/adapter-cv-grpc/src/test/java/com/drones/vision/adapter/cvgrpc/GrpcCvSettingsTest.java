@@ -77,11 +77,11 @@ class GrpcCvSettingsTest {
         assertThrows(IllegalArgumentException.class, () -> new GrpcCvSettings(Duration.ZERO,
                 defaults.keepAliveTime(), defaults.keepAliveTimeout(), defaults.keepAliveWithoutCalls(),
                 defaults.channelShutdownTimeout(), defaults.plaintext(), defaults.uploadTimeout(),
-                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality()));
+                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat()));
         assertThrows(IllegalArgumentException.class, () -> new GrpcCvSettings(defaults.responseTimeout(),
                 Duration.ofSeconds(-1), defaults.keepAliveTimeout(), defaults.keepAliveWithoutCalls(),
                 defaults.channelShutdownTimeout(), defaults.plaintext(), defaults.uploadTimeout(),
-                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality()));
+                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat()));
     }
 
     @Test
@@ -90,7 +90,7 @@ class GrpcCvSettingsTest {
         assertThrows(IllegalArgumentException.class, () -> new GrpcCvSettings(defaults.responseTimeout(),
                 defaults.keepAliveTime(), defaults.keepAliveTimeout(), defaults.keepAliveWithoutCalls(),
                 defaults.channelShutdownTimeout(), defaults.plaintext(), defaults.uploadTimeout(),
-                0, defaults.detectWidth(), defaults.jpegQuality()));
+                0, defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat()));
     }
 
     @Test
@@ -99,7 +99,7 @@ class GrpcCvSettingsTest {
         assertThrows(NullPointerException.class, () -> new GrpcCvSettings(null,
                 defaults.keepAliveTime(), defaults.keepAliveTimeout(), defaults.keepAliveWithoutCalls(),
                 defaults.channelShutdownTimeout(), defaults.plaintext(), defaults.uploadTimeout(),
-                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality()));
+                defaults.uploadChunkBytes(), defaults.detectWidth(), defaults.jpegQuality(), defaults.wireFormat()));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.drones.vision.app.config.properties;
 
+import com.drones.vision.adapter.cvgrpc.WireFormat;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -35,6 +36,10 @@ import java.time.Duration;
  * @param jpegQuality            JPEG encoder quality {@code GrpcDetectionPort} uses for that same
  *                               downscale path; must be in {@code (0, 1]}; default
  *                               {@value #DEFAULT_JPEG_QUALITY}
+ * @param wireFormat             {@code auto} | {@code jpeg} | {@code bgr24} — how a downscaled frame
+ *                               reaches cv-service; default {@value #DEFAULT_WIRE_FORMAT}, which
+ *                               sends raw {@code BGR24} to a loopback endpoint (no encode here, no
+ *                               decode there) and JPEG to anything further away
  * @param responseTimeout        per-pending-future response timeout on the detection bidi stream; default 2s
  * @param keepAliveTime          HTTP/2 keepalive PING interval; default 20s
  * @param keepAliveTimeout       keepalive PING ack deadline; default 5s
@@ -52,6 +57,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                   @DefaultValue(VisionCvProperties.DEFAULT_ENDPOINT) String endpoint,
                                   @DefaultValue(VisionCvProperties.DEFAULT_DETECT_WIDTH) int detectWidth,
                                   @DefaultValue(VisionCvProperties.DEFAULT_JPEG_QUALITY) float jpegQuality,
+                                  @DefaultValue(VisionCvProperties.DEFAULT_WIRE_FORMAT) String wireFormat,
                                   @DefaultValue("2s") Duration responseTimeout,
                                   @DefaultValue("20s") Duration keepAliveTime,
                                   @DefaultValue("5s") Duration keepAliveTimeout,
@@ -64,6 +70,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
     static final String DEFAULT_ENDPOINT = "localhost:50051";
     static final String DEFAULT_DETECT_WIDTH = "640";
     static final String DEFAULT_JPEG_QUALITY = "0.8";
+    static final String DEFAULT_WIRE_FORMAT = "auto";
     private static final int MIN_DETECT_WIDTH = 64;
 
     @ConstructorBinding
@@ -77,6 +84,11 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
         }
         if (jpegQuality <= 0f || jpegQuality > 1f) {
             throw new IllegalArgumentException("vision.cv.jpeg-quality must be in (0,1], was " + jpegQuality);
+        }
+        try {
+            WireFormat.parse(wireFormat);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("vision.cv.wire-format must be auto|jpeg|bgr24, was " + wireFormat, e);
         }
         if (upload == null) {
             upload = new Upload(Upload.DEFAULT_TIMEOUT_DURATION, Upload.DEFAULT_CHUNK_BYTES_INT);
@@ -93,8 +105,8 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
      * is unchanged.
      */
     public VisionCvProperties(boolean enabled, String endpoint, int detectWidth, float jpegQuality) {
-        this(enabled, endpoint, detectWidth, jpegQuality, Duration.ofSeconds(2), Duration.ofSeconds(20),
-                Duration.ofSeconds(5), true, Duration.ofSeconds(5), true, null, null);
+        this(enabled, endpoint, detectWidth, jpegQuality, DEFAULT_WIRE_FORMAT, Duration.ofSeconds(2),
+                Duration.ofSeconds(20), Duration.ofSeconds(5), true, Duration.ofSeconds(5), true, null, null);
     }
 
     /**

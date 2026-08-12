@@ -146,6 +146,20 @@ vision:
     # path; lower trades detail for a smaller payload. Only read when
     # vision.cv.enabled=true.
     # jpeg-quality: 0.8
+    # How a DOWNSCALED frame reaches cv-service: auto | jpeg | bgr24
+    # (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R3). The wire has always carried
+    # IMAGE_ENCODING_BGR24 and cv-service has always decoded it; only the Java side used to
+    # re-encode unconditionally, because the downscale path was written when every deployment was
+    # remote. Sending raw removes a JPEG encode here AND a decode there -- together most of the
+    # ~25ms of NON-INFERENCE round trip measured on loopback (docs/conclusions/CV-RATE-BUDGET.md 3,
+    # where 53.8ms of round trip contained only 29ms of inference).
+    # What it costs is payload: 640x360 of BGR24 is ~691 KB against ~40 KB of JPEG. Free over
+    # loopback, indefensible over a radio link -- so `auto` (the default) decides from the endpoint
+    # itself rather than guessing: raw to localhost/127.x/[::1], JPEG to anything else. Set bgr24
+    # explicitly for a wired LAN box (e.g. the GB4005 at 192.168.0.106, ~55 Mbps at 10fps), and
+    # jpeg to pin the old behaviour. JPEG frames from an MJPEG source are unaffected either way --
+    # they are forwarded byte-identical, never transcoded.
+    # wire-format: auto
     # GrpcCvSettings' remaining gRPC transport tunables (docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2, wave F4).
     # response-timeout: 2s
     # keepalive-time: 20s
