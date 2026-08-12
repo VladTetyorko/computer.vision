@@ -1,10 +1,19 @@
 # MEDIA-SOT-PLAN — mediamtx as the video source of truth
 
-**Status:** approved architecture decision (2026-08-12). M0 measured and returned **GO** —
+**Status:** **all waves M0–M9 shipped, 2026-08-12.** M0 measured and returned **GO** —
 [CV-PULL-SPIKE.md](../../conclusions/CV-PULL-SPIKE.md) is the measurement record and its three
-corrections are folded into §5.3, §5.5 and §6 below. Waves M1, M2, M8 built. Owner: perception.
-**Decides:** `docs/plans/active/CV-SCALE-PLAN.md` §S5 ("DECISION REQUIRED") — the answer is **GO**, and this
-plan owns its execution. §S5 is superseded by this file (amendment text in §10).
+corrections are folded into §5.3, §5.5 and §6 below. M9 re-measured every claim in §1 against a live
+compose stack (not the throwaway M0 rig) and all five held — see
+[MEDIA-SOT-RESULTS.md](../../conclusions/MEDIA-SOT-RESULTS.md), which also folds in the amendment to
+`CV-SCALE-PLAN.md` §S5 (§10 below, applied). Owner: perception. **Two items stay open, gated on the
+H1 camera purchase (TWO-TARGETS-PLAN.md), not on any remaining work in this plan:** real-camera
+glass-to-glass, and §6's clock-drift re-measurement against a real camera oscillator (M0's ±15 ms is
+a synthetic-source floor, not a ceiling). MEDIA-SOT-RESULTS.md §7 also found one live defect this
+plan did not anticipate — pull-mode's `DetectionRate.dropRatio()` is pinned at 1.0 by construction
+(`DetectionRateWindow.snapshotPull` never populates `submitted`) — reported, not fixed, out of scope
+for a docs-only wave.
+**Decided:** `docs/plans/active/CV-SCALE-PLAN.md` §S5 ("DECISION REQUIRED") — the answer is **GO**, and this
+plan owned its execution. §S5 is superseded by this file (amendment text in §10, applied to that file).
 **Reads with:** [ARCHITECTURE.md](../../../ARCHITECTURE.md) · [CV-SCALE-PLAN.md](CV-SCALE-PLAN.md) (S1–S4,
 which this composes with) · [CV-RATE-CONTROL-PLAN.md](CV-RATE-CONTROL-PLAN.md) and
 [CV-RATE-BUDGET.md](../../conclusions/CV-RATE-BUDGET.md) (whose §5 gap 9 — *"tracker runs across the

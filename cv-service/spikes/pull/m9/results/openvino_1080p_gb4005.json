@@ -1,0 +1,18 @@
+{
+  "model": "yolo26n_openvino_model",
+  "label": "1080p",
+  "resolution": "1920x1080",
+  "frames": 120,
+  "wall_seconds": 16.55,
+  "inference_ms": {
+    "p50": 136.0,
+    "p95": 143.0,
+    "max": 212.0,
+    "mean": 137.817,
+    "n": 120
+  },
+  "implied_fps_ceiling": 7.35,
+  "cpu_percent_avg_over_run": 193.4,
+  "rss_mb_final": 432.9,
+  "_note": "Same run as openvino_720p_gb4005.json's sibling; near-identical figures because inference always runs at fixed imgsz=416 regardless of input resolution -- the same pattern M0's own PyTorch figures showed (197.0 vs 199.0 ms)."
+}

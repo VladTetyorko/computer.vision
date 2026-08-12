@@ -115,7 +115,12 @@ The prerequisite for "change one stream, only it changes."
 - GB4005 stays in the story as one small Intel/OpenVINO worker in a heterogeneous pool; routing
   is load-based so a slow worker simply gets fewer streams.
 
-### S5 — Pull-based frames (the real scale ceiling, biggest change) — DECISION REQUIRED
+### S5 — Pull-based frames (the real scale ceiling, biggest change) — **DECIDED: GO**
+The decision was taken on 2026-08-12 and its execution is owned by
+[MEDIA-SOT-PLAN.md](MEDIA-SOT-PLAN.md), which widens it from "the worker pulls frames" to "mediamtx is
+the video source of truth for viewing *and* CV". The body below stands as the original statement of the
+problem; the frozen contract, the phasing and the waves live in that plan.
+
 Today the **backend** decodes H.264 for every active stream and pushes frames to workers. That
 decode cost is O(active streams) on the backend — the ceiling that caps how far S4 scales.
 The scalable answer flips it: **the CV worker pulls RTSP from mediamtx and decodes locally**;
@@ -168,7 +173,8 @@ fit, and more so as workers multiply.**
 - **Wave 3**: S4 pool router (vision-app wiring + a `PooledDetectionPort` in adapter-cv-grpc or
   vision-app) — after S2 so the demand gate already bounds worker load.
 - **Wave 4** (decision + measure): S5 pull-based frames — its own spike first (one worker
-  pulling one RTSP path end-to-end), then a go/no-go with real decode-cost numbers.
+  pulling one RTSP path end-to-end), then a go/no-go with real decode-cost numbers. Executed as
+  MEDIA-SOT-PLAN waves M0–M9; the spike this wave asked for is M0.
 - Every wave: read module MODULE.mds first, update after, scoped builds only, local-only. The
   frozen wire contracts (PATCH detection, GET /api/cv/models, endpoints property) are pinned
   above so UI and backend waves parallelize.

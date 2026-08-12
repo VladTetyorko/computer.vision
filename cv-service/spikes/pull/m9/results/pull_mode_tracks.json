@@ -1,0 +1,23 @@
+{
+  "streamId": "495e3a99-3036-4004-b92b-6a597d1e4ff9",
+  "latency": {
+    "windowSeconds": 30, "samples": 300,
+    "roundTripMillisP50": 34.387483, "roundTripMillisP95": 67.524773,
+    "roundTripMillisMax": 101.732939, "updateIntervalMillisP50": 100.118972,
+    "effectiveFps": 9.999753228497795, "worstBoxAgeMillis": 167.643745
+  },
+  "rate": {
+    "sourceFps": 30.054000854492188, "targetFps": 10.0, "submittedFps": 9.987000465393066,
+    "submitted": 0, "droppedInFlight": 1027, "droppedOutage": 0, "missedDeadlines": 0,
+    "dropRatio": 1.0, "transport": "pull", "decodeMillisP50": 33.0,
+    "BUG_NOTE": "dropRatio=1.0 is misleading -- DetectionRateWindow.snapshotPull() hardcodes submitted=0L (DetectionRateWindow.java ~line 209), so DetectionRate.dropRatio()=droppedInFlight/(submitted+droppedInFlight+droppedOutage) is pinned at 1.0 whenever any worker latest-wins discard has happened, which is normal/expected whenever sourceFps>targetFps. submittedFps (9.987, healthy, on-target) is populated correctly via a separate path. Not covered by DetectionRateWindowPullModeTest (which never asserts dropRatio or submitted)."
+  },
+  "mediamtx_path_profile": "Baseline (byte-identical to camera source, no re-encode)",
+  "mediamtx_readers_simultaneous": ["hlsSession (viewer)", "rtspSession (cv-service pull worker)"],
+  "vision_app_cpu_percent": "0.6-2.0% per active stream (no viewer), 0.6-0.7% (1 HLS viewer)",
+  "vision_app_rss_mb": "400-407",
+  "cv_service_cpu_percent": "106-119%",
+  "cv_service_rss_mb": "415-421",
+  "restart_survives_video": true,
+  "restart_evidence": "mediamtx path stayed ready=true source=rtspSource continuously across `docker compose restart vision-app` (0.76s restart) and for 17s after; HLS index.m3u8 kept returning HTTP 200; /api/streams went empty (registry/box gap) while video kept flowing"
+}

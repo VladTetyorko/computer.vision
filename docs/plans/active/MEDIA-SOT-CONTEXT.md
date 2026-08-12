@@ -20,13 +20,19 @@ Waves commit onto this branch with disjoint file scopes. One commit per wave.
 | M6 | `adapters/adapter-publish-hls` — proxy publisher + frame grab | M2 | **done** |
 | M7 | `vision-app` + `docker-compose.yml` — wiring, flags | M5, M6 | **done** |
 | M8 | `vision-web` — client overlay truth + WHEP box timing | M1 | **done** |
-| M9 | `docs/` — measure, amend CV-SCALE §S5 | M7, M8 | **ready** |
+| M9 | `docs/` — measure, amend CV-SCALE §S5 | M7, M8 | **done** |
 
 ## 2. Gate
 
 **M0 returned GO** (2026-08-12). `CV_PULL_DECODER=opencv`, `CV_PULL_CLOCK_MODE=anchor`, both
 chosen by number — see [CV-PULL-SPIKE.md](../../conclusions/CV-PULL-SPIKE.md). The gate is
 discharged; M3/M5/M6 may proceed against the amended contract.
+
+**M9 re-measured every §1 claim against the real, live stack and all five held** — see
+[MEDIA-SOT-RESULTS.md](../../conclusions/MEDIA-SOT-RESULTS.md). The programme is closed: nothing
+in this plan gates further work. Two items remain open, gated on hardware this repo does not own
+yet (the H1 camera, TWO-TARGETS-PLAN.md), not on anything left to build here: real-camera
+glass-to-glass, and §6's clock-drift re-measurement against a real camera oscillator.
 
 ## 3. Decisions taken during execution (not in the plan)
 
@@ -69,6 +75,30 @@ discharged; M3/M5/M6 may proceed against the amended contract.
 - **`MediamtxLiveFrameGrabber` is built but not wired** into `StreamService` — M7 plumbing.
 - **Boxes-mode logic lives in `shared/player/detection-overlay-logic.ts`**, not `fly-logic.ts` as
   §8 M8 assumed — the wall tile needed the identical burn-in-aware cycle.
+- **M9 found `docker-compose.yml` never set `VISION_PUBLISH_MEDIAMTX_API_BASE` for `vision-app`**,
+  unlike its `rtsp-base`/`hls-base`/`whep-base` siblings — flagged and deliberately deferred by
+  M7's own hardening pass, fixed in M9 (the one product-adjacent line M9's scope allowed): container
+  port `9997` at the compose-internal `mediamtx` hostname, not the loopback-bound `19997` host
+  mapping.
+- **M9 found a real defect in pull mode's rate readout, unrelated to anything M9 built:**
+  `DetectionRateWindow.snapshotPull()` hard-codes `submitted=0L`, so `DetectionRate.dropRatio()`
+  (`droppedInFlight / (submitted+droppedInFlight+droppedOutage)`) evaluates to a permanent `1.0`
+  whenever the worker's latest-wins loop has discarded anything — which is the normal, healthy case
+  whenever source fps exceeds target fps. D8's actual promise (drops counted, never silent) holds;
+  the defect is one level up, in a derived field `DetectionRateWindowPullModeTest` never asserts.
+  Reported in [MEDIA-SOT-RESULTS.md](../../conclusions/MEDIA-SOT-RESULTS.md) §6, not fixed — out of
+  a docs-only wave's scope.
+- **M9 also found the repo has no `.dockerignore` anywhere**, so `docker compose build cv-service`
+  transfers `cv-service/.venv` (1.7 GB) plus the untracked `spikes/geo/`/`demo/` residue §11.7
+  already named as debt — together explaining a 1.97 GB build-context transfer that helped exhaust
+  this session's own disk mid-measurement (MEDIA-SOT-RESULTS.md §1). Reported, not fixed — out of
+  scope for the same reason.
+- **The `vision_postgres-data` docker volume in this dev environment held Flyway checksums from an
+  older jar** than M9's build — a pre-existing, unrelated staleness, not something this wave
+  introduced. M9 sidestepped it (`VISION_PERSISTENCE_ENABLED=false`, `VISION_AUTH_ENABLED=false`
+  for the measurement session only, via an uncommitted `docker-compose.override.yml`) rather than
+  reset the volume, since resetting it is exactly the kind of destructive action a docs-only wave
+  should not take unilaterally.
 
 ## 4. Working rules for wave agents
 

@@ -367,6 +367,18 @@ services:
       # for a host-run vision-app talking to mediamtx over localhost.
       VISION_PUBLISH_MEDIAMTX_RTSP_BASE: rtsp://mediamtx:8554
       VISION_PUBLISH_MEDIAMTX_HLS_BASE: http://mediamtx:8888
+      # docs/plans/active/MEDIA-SOT-PLAN.md §5.3, wave M7 (gap closed in M9): MediamtxProxyPublisher's
+      # Control API base, read by vision-app ITSELF (server-side, like rtsp-base/hls-base above), so
+      # the compose-internal "mediamtx" hostname is correct here too -- unlike whep-base below, no
+      # browser ever touches this URL. Only matters once vision.publish.source-proxy.enabled=true is
+      # turned on (off by default, D1); left unset, application.yaml's own default
+      # (http://localhost:19997) would resolve inside THIS container to itself, not to the mediamtx
+      # service -- a real defect this compose file shipped with M7 (the sibling RTSP/HLS vars got the
+      # compose-internal treatment, this one didn't) and would only surface once source-proxy is
+      # flipped on. Container port 9997, not the 19997 host mapping above -- that mapping is also
+      # loopback-only (127.0.0.1:19997:9997, see the mediamtx service's own Control API port comment),
+      # so it wouldn't be reachable from this container even by address, only by container port.
+      VISION_PUBLISH_MEDIAMTX_API_BASE: http://mediamtx:9997
       # docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M7: the address the WORKER (cv-service) dials
       # for a pulled stream -- only read when vision.cv.frame-transport=pull (off by default, D1;
       # this var is inert against the default push transport). Defaults to the same

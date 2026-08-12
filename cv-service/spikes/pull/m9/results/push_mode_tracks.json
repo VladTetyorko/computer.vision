@@ -1,0 +1,21 @@
+{
+  "streamId": "6fb01e46-ec49-45d4-b89e-0eb2dfd07761",
+  "latency": {
+    "windowSeconds": 30, "samples": 300,
+    "roundTripMillisP50": 47.712418, "roundTripMillisP95": 87.735704,
+    "roundTripMillisMax": 104.54204, "updateIntervalMillisP50": 99.871991,
+    "effectiveFps": 9.975793848662425, "worstBoxAgeMillis": 187.60769499999998
+  },
+  "rate": {
+    "sourceFps": 38.87015438331271, "targetFps": 10.0, "submittedFps": 10.033030438809828,
+    "submitted": 300, "droppedInFlight": 0, "droppedOutage": 0, "missedDeadlines": 0,
+    "dropRatio": 0.0, "transport": "push", "decodeMillisP50": 0.0
+  },
+  "mediamtx_path_profile": "High (JVM re-encode, x264)",
+  "vision_app_cpu_percent": "51-58% per active stream (no viewer), 51-55% (1 HLS viewer)",
+  "vision_app_rss_mb": "483-510",
+  "cv_service_cpu_percent": "104-115%",
+  "cv_service_rss_mb": "357-369",
+  "restart_survives_video": false,
+  "restart_evidence": "mediamtx path disappeared ~0.76s after `docker compose restart vision-app`, never recovered in 17s watch window; /api/streams and mediamtx path list both empty ~3s after restart"
+}
