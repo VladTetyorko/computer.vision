@@ -45,6 +45,7 @@
     <modules>
         <module>vision-kernel</module>
         <module>vision-platform</module>
+        <module>contexts</module>
         <module>vision-domain</module>
         <module>vision-application</module>
         <module>vision-proto</module>
@@ -75,6 +76,46 @@
             <dependency>
                 <groupId>com.drones</groupId>
                 <artifactId>vision-application</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>vision-warehouse</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>vision-identity</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>vision-flight</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>vision-perception</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>vision-map</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>vision-events</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>vision-learning</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>vision-simulation</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

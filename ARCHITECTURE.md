@@ -62,25 +62,30 @@ vision/                                  (parent pom, dependency management)
 │                                        but java.base. Universal — every bounded context may use it.
 ├── vision-platform/                     Cross-cutting seams every context writes to: events, audit
 │                                        trail, visibility scope. Depends only on vision-kernel.
-├── vision-domain/                       Pure domain model, organized per bounded context. NO framework deps, no Spring.
-│                                        Depends on vision-kernel + vision-platform.
-│   ├── model/        Asset, Device, DeviceCategory, StreamDescriptor, VideoFrame,
-│   │                 Telemetry, Detection, DetectionQuery, LifecycleState,
-│   │                 AuditEntry, Ownership, AssetUsage, Event
-│   └── port/
-│       └── out/      (driven)   VideoSourcePort, DetectionPort, OverlayPort,
-│                     StreamPublisherPort, RecordingPort, EventPublisherPort,
-│                     DeviceRepositoryPort, TelemetrySourcePort, ModelRegistryPort,
-│                     AuditTrailPort
-│
-├── vision-application/                  Services (the driving surface), pipeline
-│   │                                    orchestration, backpressure/frame-skip policy.
-│   │                                    Depends ONLY on vision-domain.
-│   │        AssetService, DeviceService, StreamService, CategoryService,
-│   │        DiscoveryService — one interface + one `Default*` implementation each,
-│   │        plus their command/read-model records (AssetSpec, DeviceEdit, …)
-│   └── pipeline/     StreamPipeline: source → decode → sample → detect →
-│                     track → overlay → fan-out (publish/record/events)
+├── contexts/                             One Maven module per bounded context. Each holds BOTH its domain
+│   │                                     layer (`<ctx>.domain.model` / `.port`, NO framework deps) and its
+│   │                                     application layer (`<ctx>.application.*` services) — the package
+│   │                                     tree already had this shape, so extraction was a directory move,
+│   │                                     not a redesign (docs/plans/active/DOMAIN-SEPARATION-W1.md §16).
+│   │                                     The domain/application boundary inside each module stays
+│   │                                     ArchUnit-enforced exactly as when it was one big vision-domain.
+│   ├── vision-warehouse/                 Asset/Device/DeviceCategory/StreamDescriptor inventory, discovery,
+│   │                                     fleet summaries, usage records. The pure leaf: depends only on
+│   │                                     vision-kernel + vision-platform, nothing reads it back.
+│   ├── vision-identity/                  Users, auth, assignment, visibility-scope resolution. + warehouse
+│   ├── vision-flight/                    Flight sessions (AssetUsage), telemetry, geofencing, manual
+│   │                                     control. + warehouse
+│   ├── vision-perception/                StreamPipeline (VideoFrame → Detection → AnnotatedFrame),
+│   │                                     VideoSourcePort/DetectionPort/OverlayPort, device probing.
+│   │                                     + warehouse, flight
+│   ├── vision-map/                       Tactical map layers and marks. + identity, perception
+│   ├── vision-events/                    Replay capture, usage timeline — a downstream sink that reads
+│   │                                     every context below; nothing reads it back. + warehouse, flight,
+│   │                                     perception
+│   ├── vision-learning/                  CV training datasets, labeling, model promotion.
+│   │                                     + warehouse, perception, events
+│   └── vision-simulation/                Synthetic flight-plan/telemetry simulation orchestration.
+│                                         + warehouse, perception
 │
 ├── adapters/
 │   ├── adapter-rtsp/                    RTSP/RTP ingest (IP cams, some drones) — JavaCV/FFmpeg
@@ -119,7 +124,7 @@ vision/                                  (parent pom, dependency management)
 **The acting user is never a constructor dependency.** It varies per request, so it is resolved once at the API edge (`CurrentUser`, from the JWT once Spring Security lands) and passed down as a method parameter. Threading an `Ownership` through construction is what turned services into eight-argument classes.
 
 **Dependency rule (enforced with ArchUnit tests):**
-`vision-kernel` ← `vision-platform` ← `vision-domain` ← `vision-application` ← adapters ← `vision-app`. Nothing points outward. Adapters never depend on each other — shared needs go into a port or the domain. `vision-kernel` and `vision-platform` are universal: every bounded context may depend on them, they never depend back (docs/plans/active/DOMAIN-SEPARATION-W1.md).
+`vision-kernel` ← `vision-platform` ← `contexts/*` ← adapters ← `vision-app`. Nothing points outward. Within `contexts/*`, `vision-warehouse` is the pure leaf and the other seven form the measured, acyclic dependency graph in `docs/plans/active/DOMAIN-SEPARATION-W1.md` §16 (identity/flight → warehouse; perception → warehouse, flight; map → identity, perception; events → warehouse, flight, perception; learning → warehouse, perception, events; simulation → warehouse, perception). Adapters never depend on each other — shared needs go into a port or a context. `vision-kernel` and `vision-platform` are universal: every bounded context may depend on them, they never depend back.
 
 ---
 

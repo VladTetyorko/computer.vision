@@ -16,8 +16,14 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 |---|---|---|
 | vision-kernel | `vision-kernel/` | Shared kernel: ids + pure value objects, no third-party deps, depends on nothing |
 | vision-platform | `vision-platform/` | Cross-cutting seams every context writes to (events, audit trail, visibility scope); depends only on vision-kernel |
-| vision-domain | `vision-domain/` | Framework-free domain: models + ports (in/out), per bounded context |
-| vision-application | `vision-application/` | Use-case services, StreamPipeline, UsageTracker |
+| vision-warehouse | `contexts/vision-warehouse/` | Asset/device inventory, categories, discovery, fleet summaries, usage records. The pure leaf — no other context |
+| vision-identity | `contexts/vision-identity/` | Users, auth, assignment, visibility-scope resolution |
+| vision-flight | `contexts/vision-flight/` | Flight sessions (AssetUsage), telemetry, geofencing, manual control |
+| vision-perception | `contexts/vision-perception/` | StreamPipeline, detection, device probing |
+| vision-map | `contexts/vision-map/` | Tactical map layers and marks |
+| vision-events | `contexts/vision-events/` | Replay capture, usage timeline — a downstream sink, reads every context, nothing reads it back |
+| vision-learning | `contexts/vision-learning/` | CV training datasets, labeling, model promotion |
+| vision-simulation | `contexts/vision-simulation/` | Synthetic flight-plan/telemetry simulation orchestration |
 | vision-proto | `vision-proto/` | gRPC codegen from `proto/vision/v1/cv.proto` |
 | adapter-simulation | `adapters/adapter-simulation/` | Synthetic video + telemetry sources (`sim`) |
 | adapter-rtsp | `adapters/adapter-rtsp/` | RTSP/FFmpeg ingest |
@@ -36,7 +42,7 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 
 ## Cross-cutting facts
 
-- **Dependency rule (ArchUnit-enforced):** domain ← application ← adapters ← app; adapters never depend on each other; Spring only in vision-app/vision-api/adapters (never domain/application).
+- **Dependency rule (ArchUnit-enforced):** kernel ← platform ← contexts (warehouse is the pure leaf; identity/flight/perception/map/events/learning/simulation form the measured DAG over it, see `docs/plans/active/DOMAIN-SEPARATION-W1.md` §16) ← adapters ← app; adapters never depend on each other; Spring only in vision-app/vision-api/adapters (never a context module).
 - **Ids:** entity ids wrap `java.util.UUID` (`X.random()`, `X.of(String)` → IllegalArgumentException on bad input). `CategoryId` is a kebab-case slug. `DeviceType` enum no longer exists — categories are data.
 - **Asset model:** users interact with `Asset` (owned, categorized, 1..n devices, attributes map); `Device` is low-level plumbing; `AssetUsage` records sessions + telemetry.
 - **Validation idiom:** domain records validate in compact constructors with manual `if (…) throw new IllegalArgumentException(…)`; application layer uses `Objects.requireNonNull`.

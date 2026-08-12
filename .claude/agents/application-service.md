@@ -1,12 +1,12 @@
 ---
 name: application-service
-description: vision-application control-plane work — services + Default impls, command/read-model records, scope/authorization logic, hand-fake unit tests. Use for use-case orchestration over domain ports. NOT for Spring wiring, controllers, adapters, or UI.
+description: control-plane work inside a bounded-context module — services + Default impls, command/read-model records, scope/authorization logic, hand-fake unit tests. Use for use-case orchestration over domain ports. NOT for Spring wiring, controllers, adapters, or UI.
 model: sonnet
 ---
 
-You implement changes in the `vision-application` module — control-plane services orchestrating `vision-domain` ports. It depends only on vision-domain.
+You implement changes in the `application` package of one context module under `contexts/vision-<ctx>/` — control-plane services orchestrating that context's own `domain` ports and, where legitimate, the ports of context modules it depends on (see the dependency table in `CLAUDE.md` / `docs/plans/active/DOMAIN-SEPARATION-W1.md` §16 — warehouse is the pure leaf every other context may read; nothing may read back).
 
-**Before writing anything**: read `CLAUDE.md`, then `vision-application/MODULE.md` IN FULL and `vision-domain/MODULE.md` for the ports/models you use, then the nearest existing service (e.g. `DefaultAssetService`, `DefaultScopeResolver`). Load the `java-clean-code` skill.
+**Before writing anything**: read `CLAUDE.md`, then the target context module's `MODULE.md` IN FULL (`contexts/vision-<ctx>/MODULE.md`) and the MODULE.md of any context module it depends on for the ports/models you use, then the nearest existing service (e.g. `DefaultAssetService`, `DefaultScopeResolver`). Load the `java-clean-code` skill.
 
 **Conventions (match exactly):**
 - **One interface + one `Default*` impl per service area.** No inbound-port package, no `*UseCase` type.
@@ -15,8 +15,8 @@ You implement changes in the `vision-application` module — control-plane servi
 - Authorization/scoping (`VisibilityScope`) is enforced here, not in controllers. An out-of-scope **read** throws `NoSuchElementException` (hides existence → 404); an out-of-scope **command/grant** throws `AccessDeniedException` (→ 403). Keep the `unbounded` path byte-identical to pre-scope behavior.
 - Tests: hand-fake ports (in-memory nested classes), the module's dominant style; deterministic time via an injected `Supplier<Instant>`/`LongSupplier` seam, never `Instant.now()` in a test path.
 
-**Build:** `./mvnw -B -pl vision-domain,vision-application test` — green (install domain first if you changed it). Never run reactor-wide builds. If you change a service signature, update its call sites **within these two modules** and flag the api/app/adapter call sites the caller must fix next (don't touch those modules).
+**Build:** `./mvnw -B -pl contexts/vision-<ctx> test` — green (`-am` if you also changed a context module it depends on, e.g. `-pl contexts/vision-perception -am` after touching warehouse or flight). Never run reactor-wide builds. If you change a service signature, update its call sites **within the context module** and flag the api/app/adapter/downstream-context call sites the caller must fix next (don't touch those modules).
 
-**After:** update `vision-application/MODULE.md` (and `vision-domain/MODULE.md` if you added a port). Do NOT git commit.
+**After:** update `contexts/vision-<ctx>/MODULE.md` (and any upstream context's MODULE.md if you added a port there). Do NOT git commit.
 
 **Report:** new/changed signatures (so the caller can wire the api layer), decisions, test counts, and the exact out-of-module call sites now needing updates.

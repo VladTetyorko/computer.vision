@@ -16,7 +16,15 @@
     <dependencies>
         <dependency>
             <groupId>com.drones</groupId>
-            <artifactId>vision-domain</artifactId>
+            <artifactId>vision-kernel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-perception</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-learning</artifactId>
         </dependency>
         <dependency>
             <groupId>com.drones</groupId>

@@ -49,7 +49,7 @@ For partial updates, one DTO with nullable fields (`null` = unchanged) beats one
 ## 6. Keep the domain plain
 
 - Value types are `record`s with validation in the compact constructor.
-- No framework annotations in `vision-domain` / `vision-application`.
+- No framework annotations in a context module's `domain` / `application` packages (`contexts/vision-<ctx>/`).
 - Prefer `final` classes and package-private visibility until something outside actually needs the type.
 - Enums over booleans when a third state is plausible (`LifecycleState`, not `boolean active`) — but do not invent states nobody asked for.
 
