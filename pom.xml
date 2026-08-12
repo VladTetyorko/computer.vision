@@ -46,8 +46,6 @@
         <module>vision-kernel</module>
         <module>vision-platform</module>
         <module>contexts</module>
-        <module>vision-domain</module>
-        <module>vision-application</module>
         <module>vision-proto</module>
         <module>adapters</module>
         <module>vision-api</module>
@@ -66,16 +64,6 @@
             <dependency>
                 <groupId>com.drones</groupId>
                 <artifactId>vision-platform</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.drones</groupId>
-                <artifactId>vision-domain</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.drones</groupId>
-                <artifactId>vision-application</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

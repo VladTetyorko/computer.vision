@@ -220,7 +220,7 @@ class AssetWiringTest {
     @Autowired
     private CurrentUser currentUser;
 
-    /** Simulated-feed resume-on-boot (vision-application/MODULE.md's own design sketch) — always registered, resolves to a no-op with default (persistence-disabled) properties. */
+    /** Simulated-feed resume-on-boot (contexts/vision-simulation/MODULE.md's own design sketch) — always registered, resolves to a no-op with default (persistence-disabled) properties. */
     @Autowired
     private ApplicationRunner simulationResumeRunner;
 

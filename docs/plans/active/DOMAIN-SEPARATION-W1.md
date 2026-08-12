@@ -200,7 +200,17 @@ nothing else can be in flight while every import in the repo moves.
   - [x] W1.6d probe → perception — cycles 2→1, edges 16→15
   - [x] W1.6e stream lifecycle off AssetService + `AssetLiveStatePort` — **cycles 1→0**, edges 15→14
       Reactor-wide green at every one; domain 527 · application 816 · api 551 · app 224 · adapters unchanged.
-- [ ] **W1.7 Maven extraction** — see §16 (measured dependency matrix)
+- [x] **W1.7 Maven extraction** — see §16. `vision-domain` and `vision-application` are gone.
+  - [x] W1.7a `vision-kernel` + `vision-platform` — pure `git mv` + POMs, not one `.java` changed
+  - [x] W1.7b the eight contexts under `contexts/` — 353 renames, again no package or import changed;
+        every consumer POM narrowed to the contexts it actually imports
+  - [x] W1.7c a `MODULE.md` per new module, redistributed from the two dissolved docs, and every
+        citation of those two files elsewhere in the repo repointed at its new home
+  Reactor: 29 modules green. The 410 + 816 tests became warehouse 170 · identity 91 · flight 144 ·
+  perception 345 · map 223 · events 24 · learning 158 · simulation 71 = **1226**, the pre-split total.
+
+**W1 is complete.** What W2 inherits: eight independently-buildable context modules over a measured,
+ArchUnit-frozen DAG, with `theModuleGraphIsAcyclic` keeping it that way. Role flags moved to W3.
 
 ---
 

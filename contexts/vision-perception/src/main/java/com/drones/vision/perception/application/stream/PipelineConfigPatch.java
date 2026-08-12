@@ -20,7 +20,7 @@ import com.drones.vision.perception.domain.model.TrackingConfig;
  * PATCH-able (frozen contract &sect;3); a present {@code modelId} keeps the running config's
  * current version unchanged. {@code maxInFlightInferences}, {@code overlayTelemetry}, {@code
  * overlayBurnIn}, and {@code eventRule} are likewise not PATCH-able in v1 and have no field here at
- * all — see {@code StreamPipeline}'s javadoc and vision-application/MODULE.md for why.
+ * all — see {@code StreamPipeline}'s javadoc and contexts/vision-perception/MODULE.md for why.
  *
  * <p>{@code labelFilter}, when present, replaces the running set wholesale — there is no per-label
  * add/remove, only present-vs-absent for the set as a whole; an empty (but non-{@code null}) set is

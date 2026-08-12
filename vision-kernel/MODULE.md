@@ -50,7 +50,7 @@ same rule structural — it has no internal dependency to declare.
 
 - `StreamDescriptor.protocol` must already be lower-case; the compact ctor throws `IllegalArgumentException` if it isn't — callers cannot rely on normalization happening for them.
 - `CategoryId.slug` must match `[a-z0-9]+(-[a-z0-9]+)*` (lower-case-kebab), enforced here rather than left to callers, because slugs double as stable, human-readable reference-data keys.
-- `GeofenceZone.contains` (flight context, not this module) is a planar approximation over `GeoPosition` — see `vision-domain/MODULE.md`'s Gotchas for why that is safe at geofence scale but not near poles/antimeridian.
+- `GeofenceZone.contains` (flight context, not this module) is a planar approximation over `GeoPosition` — see `contexts/vision-flight/MODULE.md`'s Gotchas for why that is safe at geofence scale but not near poles/antimeridian.
 
 ## Status
 

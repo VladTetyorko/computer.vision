@@ -29,8 +29,8 @@ import com.drones.vision.map.application.MapAccessPolicy.Viewer;
  * <p>No interface: exactly one implementation is ever plausible (a thin, in-process wrapper over
  * one repository port — see java-clean-code SKILL.md §1), and it is {@code public} rather than
  * package-private only because cross-package construction/use requires it, the same "widened to
- * public" precedent {@code SupervisedPublisher}/{@code DetectionEventEngine} already set in this
- * module (see vision-application/MODULE.md's Package structure table).
+ * public" precedent {@code SupervisedPublisher}/{@code DetectionEventEngine} set in vision-perception
+ * (see contexts/vision-map/MODULE.md's own {@code LayerResolver} entry for why).
  *
  * <h2>Threading</h2>
  * {@link #copLayerId()} and {@link #defaultLayerFor} are {@code synchronized} on this instance:
