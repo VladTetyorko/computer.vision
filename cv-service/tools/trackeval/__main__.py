@@ -16,6 +16,7 @@ checkout rather than another one):
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 from typing import Optional
 from typing import Sequence as TypingSequence
@@ -66,13 +67,41 @@ DEFAULT_NOISE_BY_SCENARIO: dict[str, replay_module.DetectorNoiseConfig] = {
 }
 
 
-def _noise_for(scenario: str) -> replay_module.DetectorNoiseConfig:
-    return DEFAULT_NOISE_BY_SCENARIO.get(scenario, replay_module.DetectorNoiseConfig())
+def _noise_for(
+    scenario: str, *, confidence_floor: float = 0.0, detect_threshold: float = 0.0
+) -> replay_module.DetectorNoiseConfig:
+    """This scenario's noise, with the two confidence-split knobs folded on.
+
+    Both default to 0 (disabled), so a bare invocation reproduces `BASELINE.md`
+    exactly -- these exist to be A/B-ed explicitly, never to drift into the
+    default scoreboard.
+    """
+    base = DEFAULT_NOISE_BY_SCENARIO.get(scenario, replay_module.DetectorNoiseConfig())
+    if confidence_floor <= 0.0 and detect_threshold <= 0.0:
+        return base
+    return dataclasses.replace(
+        base, confidence_floor=confidence_floor, detect_threshold=detect_threshold
+    )
 
 
-def _run_one(scenario: str, mode: str, *, engine_id: str = "", seed: int) -> metrics_module.Metrics:
+def _run_one(
+    scenario: str,
+    mode: str,
+    *,
+    engine_id: str = "",
+    seed: int,
+    confidence_floor: float = 0.0,
+    detect_threshold: float = 0.0,
+) -> metrics_module.Metrics:
     sequence = SCENARIOS[scenario](seed)
-    result = replay_module.run_replay(sequence, mode=mode, engine_id=engine_id, detector_config=_noise_for(scenario))
+    result = replay_module.run_replay(
+        sequence,
+        mode=mode,
+        engine_id=engine_id,
+        detector_config=_noise_for(
+            scenario, confidence_floor=confidence_floor, detect_threshold=detect_threshold
+        ),
+    )
     return metrics_module.compute(result)
 
 
@@ -85,6 +114,27 @@ def _parse_args(argv: TypingSequence[str]) -> argparse.Namespace:
     # reproduces `BASELINE.md` exactly.
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--all", action="store_true", help="every scenario x every mode, as a matrix")
+    parser.add_argument(
+        "--confidence-floor",
+        type=float,
+        default=0.0,
+        help=(
+            "model falling detector confidence for small/occluded targets: confidence "
+            "interpolates from the scenario's own value down to this at zero apparent size. "
+            "0 = flat confidence (the BASELINE.md behaviour). Needs a scenario with "
+            "reliable_size set to have any effect."
+        ),
+    )
+    parser.add_argument(
+        "--detect-threshold",
+        type=float,
+        default=0.0,
+        help=(
+            "the threshold the DETECTOR runs at -- weaker boxes are never emitted. "
+            "A/B the confidence split with this: 0.4 is where the operator threshold used "
+            "to land, 0.15 is CV_DETECT_FLOOR. 0 = emit everything."
+        ),
+    )
     args = parser.parse_args(argv)
     if not args.all and args.scenario is None:
         parser.error("either --scenario NAME or --all is required")
@@ -95,12 +145,27 @@ def main(argv: Optional[TypingSequence[str]] = None) -> None:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     if args.all:
         rows = [
-            _run_one(scenario, mode, seed=args.seed)
+            _run_one(
+                scenario,
+                mode,
+                seed=args.seed,
+                confidence_floor=args.confidence_floor,
+                detect_threshold=args.detect_threshold,
+            )
             for scenario in sorted(SCENARIOS)
             for mode in (MODE_ASSOCIATE, MODE_FOLLOW)
         ]
     else:
-        rows = [_run_one(args.scenario, _MODE_ALIASES[args.mode], engine_id=args.engine, seed=args.seed)]
+        rows = [
+            _run_one(
+                args.scenario,
+                _MODE_ALIASES[args.mode],
+                engine_id=args.engine,
+                seed=args.seed,
+                confidence_floor=args.confidence_floor,
+                detect_threshold=args.detect_threshold,
+            )
+        ]
     print(metrics_module.render_table(rows))
 
 

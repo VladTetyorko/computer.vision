@@ -104,6 +104,27 @@ class DetectorNoiseConfig:
     # occupies a useful fraction of a crop.
     reliable_size: float = 0.0
     max_miss_probability: float = 0.9
+    # How weak a detection gets as its apparent size shrinks. Real detectors
+    # do not fail a target cleanly at some size -- they report it with falling
+    # confidence first, and only then stop reporting it. Modelling only the
+    # cliff (`reliable_size` above) makes the whole low-confidence regime
+    # invisible, which is precisely the regime the acquisition/continuation
+    # split exists for (docs/conclusions/CV-RATE-BUDGET.md §4).
+    #
+    # 0.0 disables the model: confidence stays flat at `confidence`, which is
+    # what every scenario written before this existed relies on. When > 0 and
+    # `reliable_size > 0`, confidence interpolates linearly from `confidence`
+    # at/above `reliable_size` down to `confidence_floor` at zero apparent size.
+    confidence_floor: float = 0.0
+    # The threshold the DETECTOR runs at -- boxes weaker than this are never
+    # emitted, exactly as `model.predict(conf=)` never creates them. 0.0 = emit
+    # everything, the pre-existing behaviour.
+    #
+    # This is the knob the confidence split moves: before it, the operator's
+    # own threshold landed here (0.4 by default); after it, the low
+    # `CV_DETECT_FLOOR` does, and the operator's threshold applies to the
+    # RESPONSE instead. A/B this to measure the change.
+    detect_threshold: float = 0.0
 
 
 # A false positive's box: small, and placed uniformly within this leading
@@ -156,7 +177,14 @@ class SyntheticDetector:
             miss_probability = self._miss_probability(obj, roi)
             if miss_probability > 0.0 and self._rng.random() < miss_probability:
                 continue
-            detections.append(self._jittered(obj))
+            detection = self._jittered(obj, self._confidence_for(obj, roi))
+            # Applied AFTER the box is built so the draw sequence is identical
+            # whether or not a threshold is configured -- otherwise A/B-ing the
+            # threshold would also re-roll every jitter, and the comparison
+            # would measure two different sequences.
+            if detection.confidence < self._config.detect_threshold:
+                continue
+            detections.append(detection)
         if roi is None and self._rng.random() < self._config.false_positive_probability:
             detections.append(self._false_positive())
         return detections
@@ -181,13 +209,38 @@ class SyntheticDetector:
         shortfall = (reliable - apparent) / reliable
         return min(self._config.max_miss_probability, shortfall * self._config.max_miss_probability)
 
-    def _jittered(self, obj: GroundTruthObject) -> _SyntheticDetection:
+    def _confidence_for(self, obj: GroundTruthObject, roi: Optional[Box]) -> float:
+        """This detection's confidence, from its APPARENT size.
+
+        Linear from `confidence` at/above `reliable_size` down to
+        `confidence_floor` at zero, mirroring `_miss_probability`'s shape
+        deliberately: the same physical fact (a small object is harder to see)
+        shows up first as a weaker score and then as a miss, and modelling the
+        two with different curves would invent a relationship neither has.
+
+        Consumes NO randomness, so enabling it cannot re-roll any scenario's
+        existing draw sequence.
+        """
+        floor = self._config.confidence_floor
+        reliable = self._config.reliable_size
+        if floor <= 0.0 or reliable <= 0.0:
+            return self._config.confidence
+        extent = max(roi.width, roi.height) if roi is not None else 1.0
+        if extent <= 0.0:
+            return self._config.confidence
+        apparent = max(obj.box.width, obj.box.height) / extent
+        if apparent >= reliable:
+            return self._config.confidence
+        span = self._config.confidence - floor
+        return floor + span * (apparent / reliable)
+
+    def _jittered(self, obj: GroundTruthObject, confidence: float) -> _SyntheticDetection:
         jitter = self._config.position_jitter
         dx = self._rng.uniform(-jitter, jitter)
         dy = self._rng.uniform(-jitter, jitter)
         return _SyntheticDetection(
             obj.label,
-            self._config.confidence,
+            confidence,
             obj.box.x + dx,
             obj.box.y + dy,
             obj.box.width,

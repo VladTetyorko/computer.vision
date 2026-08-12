@@ -23,6 +23,37 @@ PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --scenario occlusion --mod
 PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --all
 ```
 
+### Measuring the acquisition/continuation confidence split
+
+`--confidence-floor` and `--detect-threshold` (both default `0`, i.e. off, so a
+bare run still reproduces [`BASELINE.md`](BASELINE.md) exactly) exist to A/B the
+change in `docs/conclusions/CV-RATE-BUDGET.md` §4. Before them the harness gave
+**every** synthetic detection a flat `confidence = 0.9` and never applied a
+threshold, so the entire low-confidence regime — the one the split exists for —
+was invisible and the feature was unmeasurable here.
+
+```bash
+# old behaviour: the operator's 0.4 threshold applied AT the detector
+PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval \
+    --scenario small_target --mode ASSOCIATE --confidence-floor 0.10 --detect-threshold 0.40
+# new behaviour: CV_DETECT_FLOOR
+PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval \
+    --scenario small_target --mode ASSOCIATE --confidence-floor 0.10 --detect-threshold 0.15
+```
+
+`--confidence-floor` makes confidence fall linearly with apparent size (from the
+scenario's own `confidence` at/above `reliable_size` down to this at zero),
+mirroring `_miss_probability`'s existing curve on purpose: the same physical
+fact — a small object is harder to see — shows up first as a weaker score and
+only then as a miss. It consumes no randomness, so enabling it cannot re-roll
+any scenario's existing draw sequence, and the threshold is applied *after* the
+box is built for the same reason.
+
+**What it does and does not model.** This covers the half of the change that
+decides *which boxes reach the associator*. It does **not** model the response
+filter (`servicers._reportable`), which is what the operator finally sees —
+that half is covered by `tests/grpc/test_confidence_split.py` only.
+
 `--scenario` is one of `linear` / `occlusion` / `crossing` / `pan` / `dropout`
 (see "Scenarios" below); `--mode` is `ASSOCIATE` or `FOLLOW`. `--all` runs
 every scenario in both modes and prints the full matrix — this is what
