@@ -210,6 +210,19 @@ class DetectionRateControllerTest {
     }
 
     @Test
+    void settlesToExactlyZeroWhenTracksStopArrivingRatherThanDecayingForever() {
+        // Found by reading the live API rather than by a failing test: the EWMA decays toward zero
+        // geometrically and never arrives, so a stream that stopped tracking anything reported
+        // `demandFps: 9.29e-38`. Harmless arithmetic, indistinguishable from a bug to whoever reads it.
+        DetectionRateController controller = controller();
+        settle(controller, List.of(tracked(0.05, 2.0, 0.0)));
+
+        settle(controller, List.of(untracked()));
+
+        assertEquals(0.0, controller.demandFps(), "exactly zero, not a denormal");
+    }
+
+    @Test
     void clearForgetsTheDemandAndTheCapacityEstimate() {
         DetectionRateController controller = controller();
         settle(controller, List.of(tracked(0.05, 2.0, 0.0)));

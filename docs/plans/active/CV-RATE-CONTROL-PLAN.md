@@ -1,6 +1,8 @@
 # CV rate control — close the loop, then widen the pipe
 
-**Status:** active, 2026-08-12. Branch `feat/cv-rate-control`.
+**Status:** R1–R3 done and measured, R4 done. 2026-08-12. Branch `feat/cv-rate-control`.
+Results and their caveats live in `docs/conclusions/CV-RATE-BUDGET.md` §3 ("Re-measured"), which is
+the authority; this file is the design record.
 **Follows:** `docs/conclusions/CV-RATE-BUDGET.md` §6 items 1–2 (gap 1 + the ~25 ms overhead).
 **Premise:** all three open latency items are one mechanism — the pipeline has *no rate control
 loop at all*. It quantizes a fixed target to an integer frame stride, drops whatever does not
@@ -110,10 +112,22 @@ Sending the downscaled frame raw removes a Java encode **and** a Python decode f
   loopback, JPEG otherwise. A real decision rule, not a guess: 640x360 BGR24 is ~691 KB against
   ~40 KB of JPEG, which is free on loopback and wrong over a radio link.
 
-### R4 — measure and record
-Run the real path (`vision.cv.enabled=true`, real cv-service), read the counters, and update
-`CV-RATE-BUDGET.md` §3 and §6 with measurements. **Not** with a green suite — §5's standing lesson
-is *mechanism right, tests green, outcome wrong*.
+### R4 — measure and record ✔
+Ran the real path against a real cv-service and against a probe server. Headlines: **effectiveFps
+9.998/10** with all three drop counters at zero; a **24 fps source asked for 10 now gets 10.002**
+where the integer stride could only have given 12; **worst box age 208 ms → 144 ms**; BGR24 saves
+~3 ms of median round trip and costs tail latency; and `wire-format` was confirmed *on the wire*
+(691,200 bytes = 3 × 640 × 360), including that the shipped `auto` default resolves correctly with
+no key set.
+
+Two things the run is honest about rather than quiet about: the before/after round trips were taken
+on **different sources** and are not comparable, and **R2 never engaged** — a `testsrc` pattern
+contains nothing the detector detects, so no track existed to demand a higher rate. R2 is built and
+unit-covered; its live effect is unmeasured. §5's standing lesson is that green tests are not an
+outcome, and that applies to one's own work first.
+
+One defect the live run did find, which no test would have: the demand EWMA decayed toward zero
+geometrically and never arrived, so an idle stream reported `demandFps: 9.29e-38` on its API.
 
 ## 4. Non-goals
 

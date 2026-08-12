@@ -70,6 +70,14 @@ final class DetectionRateController {
      */
     private static final double MAX_YAW_DELTA_SECONDS = 2.0;
 
+    /**
+     * Below this the demand is snapped to exactly zero. Without it the EWMA decays toward zero
+     * geometrically and never arrives, so a stream that has simply stopped tracking anything reports
+     * a denormal like {@code 9.29e-38} on its API — arithmetically harmless, and indistinguishable
+     * from a bug to whoever reads it. One frame per thousand seconds is not a rate.
+     */
+    private static final double NEGLIGIBLE_DEMAND_FPS = 1e-3;
+
     private final boolean enabled;
     private final double maxFps;
     private final double ewmaAlpha;
@@ -221,7 +229,8 @@ final class DetectionRateController {
     private void blendDemand(double instantaneous) {
         double bounded = Double.isFinite(instantaneous) ? Math.max(0.0, instantaneous) : 0.0;
         double previous = demandFps;
-        demandFps = previous <= 0.0 ? bounded : ewmaAlpha * bounded + (1 - ewmaAlpha) * previous;
+        double blended = previous <= 0.0 ? bounded : ewmaAlpha * bounded + (1 - ewmaAlpha) * previous;
+        demandFps = blended < NEGLIGIBLE_DEMAND_FPS ? 0.0 : blended;
     }
 
     /** Signed difference {@code to - from} folded into {@code (-180, 180]}. */
