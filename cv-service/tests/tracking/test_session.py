@@ -675,14 +675,58 @@ def follow_session(
 
 
 def test_follow_without_a_lock_keeps_re_acquiring():
+    """Re-acquisition keeps happening -- but on a cadence, not every frame.
+
+    This test used to assert a pass on EVERY frame, which is what the code
+    did and what made trigger (c) a trap: a FOLLOW stream whose target is
+    simply gone spent more detector passes than ASSOCIATE would, for as long
+    as the stream lasted, silently ending the duty cycle FOLLOW exists for.
+    Rewritten deliberately -- the old assertion pinned the defect.
+    """
     subject = session(FakeRegistry(follower=FakeFollower()))
     subject.apply_config(TrackingRequest(mode=MODE_FOLLOW))
 
-    for frame in range(5):
+    reasons = []
+    for frame in range(20):
         outcome = run(subject, now_millis=frame * 66.0, detections=[det()])
+        assert outcome.locked_track_id == 0
+        if outcome.detector_ran:
+            reasons.append(outcome.detector_reason)
+
+    # It keeps trying -- an operator's target may be back at any moment...
+    assert reasons
+    assert set(reasons) == {REASON_NO_LOCK}
+    # ...but it does not spend a pass on all twenty frames.
+    assert len(reasons) < 20
+
+
+def test_follow_without_a_lock_does_not_run_the_detector_every_frame():
+    """The bound, stated as the cost it exists to prevent."""
+    subject = session(FakeRegistry(follower=FakeFollower()))
+    subject.apply_config(TrackingRequest(mode=MODE_FOLLOW))
+
+    frames = 30
+    passes = sum(
+        1
+        for frame in range(frames)
+        if run(subject, now_millis=frame * 66.0, detections=[det()]).detector_ran
+    )
+    # 30 frames at ~15 fps is ~2 s of stream. At the default 250 ms
+    # re-acquire cadence that is a handful of passes, not thirty.
+    assert passes <= frames // 3
+
+
+def test_re_acquisition_is_never_slower_than_the_verify_cadence():
+    """An operator asking for a very short cadence is asking the detector to
+    look often, and a target they have LOST is more urgent than one they
+    still hold -- so the rate limit must not overtake the cadence."""
+    subject = session(FakeRegistry(follower=FakeFollower()))
+    subject.apply_config(TrackingRequest(mode=MODE_FOLLOW, verify_every_millis=1))
+
+    for frame in range(5):
+        outcome = run(subject, now_millis=frame * 10.0, detections=[det()])
         assert outcome.detector_ran is True
         assert outcome.detector_reason == REASON_NO_LOCK
-        assert outcome.locked_track_id == 0
 
 
 def test_a_click_lock_binds_the_target_and_confirms_it_at_once():

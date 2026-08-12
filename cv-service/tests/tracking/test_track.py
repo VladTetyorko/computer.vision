@@ -35,6 +35,7 @@ def params(**overrides) -> TrackingParams:
         mode=MODE_ASSOCIATE,
         engine_id="e",
         verify_every_millis=2000,
+        reacquire_every_millis=250,
         redetect_iou_threshold=0.3,
         max_age_frames=3,
         min_hits=3,

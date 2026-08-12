@@ -134,6 +134,7 @@ class TrackingParams:
     mode: str
     engine_id: str
     verify_every_millis: int
+    reacquire_every_millis: int
     redetect_iou_threshold: float
     max_age_frames: int
     min_hits: int
@@ -183,6 +184,20 @@ class TrackingParams:
     def active(self) -> bool:
         """Whether any tracking work happens at all (mode is not OFF)."""
         return self.mode in _ACTIVE_MODES
+
+    @property
+    def effective_reacquire_millis(self) -> int:
+        """How often FOLLOW may spend a pass re-acquiring, never slower than
+        it would ordinarily verify.
+
+        A rate limit that could exceed `verify_every_millis` would be
+        backwards: an operator who asks for a very short cadence is asking
+        the detector to look often, and re-acquiring a target they have LOST
+        is more urgent than re-confirming one they still hold, not less. So
+        this bites only where it was meant to -- a long cadence, where trigger
+        (c) would otherwise run the detector on every single frame.
+        """
+        return min(self.reacquire_every_millis, self.verify_every_millis)
 
     @property
     def effective_max_age_millis(self) -> int:
@@ -264,6 +279,10 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
             if request.verify_every_millis > 0
             else settings.track_verify_millis
         ),
+        # No wire field: this bounds a runaway rather than expressing an
+        # operator preference, so it is deployment-only, like the memory and
+        # cost knobs.
+        reacquire_every_millis=settings.track_reacquire_millis,
         redetect_iou_threshold=(
             request.redetect_iou_threshold
             if request.redetect_iou_threshold > 0

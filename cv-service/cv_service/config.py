@@ -72,6 +72,13 @@ _DATASET_DIRNAME = "datasets"
 # `bytetrack` remains fully supported and one env var away.
 DEFAULT_TRACK_ASSOCIATE_ENGINE = "cost"
 DEFAULT_TRACK_FOLLOW_ENGINE = "lk"
+# How often FOLLOW may spend a detector pass trying to RE-ACQUIRE a target it
+# is no longer holding. Deliberately far shorter than the verify cadence: an
+# operator whose target reappears wants it back at once, so this bounds a
+# runaway rather than economising. Without it, scheduler trigger (c) fires on
+# EVERY frame for as long as nothing is re-acquired -- more detector passes
+# than ASSOCIATE would spend, and the end of the duty cycle FOLLOW exists for.
+DEFAULT_TRACK_REACQUIRE_MILLIS = 250
 DEFAULT_TRACK_VERIFY_MILLIS = 2000
 DEFAULT_TRACK_IOU = 0.3
 DEFAULT_TRACK_MAX_AGE_FRAMES = 30
@@ -399,6 +406,7 @@ class Settings:
     shutdown_grace_seconds: int = DEFAULT_SHUTDOWN_GRACE_SECONDS
     track_associate_engine: str = DEFAULT_TRACK_ASSOCIATE_ENGINE
     track_follow_engine: str = DEFAULT_TRACK_FOLLOW_ENGINE
+    track_reacquire_millis: int = DEFAULT_TRACK_REACQUIRE_MILLIS
     track_verify_millis: int = DEFAULT_TRACK_VERIFY_MILLIS
     track_iou: float = DEFAULT_TRACK_IOU
     track_max_age_frames: int = DEFAULT_TRACK_MAX_AGE_FRAMES
@@ -457,6 +465,11 @@ class Settings:
             ),
             track_follow_engine=_parse_engine_id(
                 os.environ.get("CV_TRACK_FOLLOW_ENGINE"), DEFAULT_TRACK_FOLLOW_ENGINE
+            ),
+            track_reacquire_millis=_parse_positive_int(
+                os.environ.get("CV_TRACK_REACQUIRE_MILLIS"),
+                DEFAULT_TRACK_REACQUIRE_MILLIS,
+                "CV_TRACK_REACQUIRE_MILLIS",
             ),
             track_verify_millis=_parse_positive_int(
                 os.environ.get("CV_TRACK_VERIFY_MS"),

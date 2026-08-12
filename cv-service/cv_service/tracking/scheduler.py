@@ -109,18 +109,34 @@ class DutyCycleScheduler:
             return Decision(True, REASON_ALWAYS)
 
         if not state.has_lock:
-            return Decision(True, REASON_NO_LOCK)  # (c)
+            # (c), rate-limited. Re-acquisition must be prompt -- the
+            # operator's target may be back on the very next frame -- but
+            # unbounded it is a trap: a target that is simply GONE leaves
+            # this branch firing every frame for the rest of the stream,
+            # spending more detector passes than ASSOCIATE would and
+            # silently ending the duty cycle FOLLOW exists for. Nearly
+            # unreachable before the wall-clock LOST rule, which is why it
+            # went unnoticed; reachable now.
+            if _elapsed(now_millis, state.last_detector_millis) >= self._params.effective_reacquire_millis:
+                return Decision(True, REASON_NO_LOCK)
+            return Decision(False)
         if state.tracker_failed:
             return Decision(True, REASON_TRACKER_FAILED)  # (b)
         if state.box_invalid:
             return Decision(True, REASON_BOX_INVALID)  # (d)
         if state.coasting_frames > self._params.max_age_frames:
             return Decision(True, REASON_COASTED_OUT)  # (e)
-        if state.last_detector_millis is None:
-            # No pass has ever run for this lock; treat the cadence as
-            # already elapsed rather than inventing a separate reason.
-            return Decision(True, REASON_CADENCE)  # (a)
-        if now_millis - state.last_detector_millis >= self._params.verify_every_millis:
+        if _elapsed(now_millis, state.last_detector_millis) >= self._params.verify_every_millis:
+            # `None` reads as "infinitely long ago": no pass has ever run for
+            # this lock, so the cadence is already elapsed and needs no
+            # reason of its own.
             return Decision(True, REASON_CADENCE)  # (a)
 
         return Decision(False)
+
+
+def _elapsed(now_millis: float, last_millis: Optional[float]) -> float:
+    """Milliseconds since `last_millis`, with "never" as infinitely long ago."""
+    if last_millis is None:
+        return float("inf")
+    return now_millis - last_millis
