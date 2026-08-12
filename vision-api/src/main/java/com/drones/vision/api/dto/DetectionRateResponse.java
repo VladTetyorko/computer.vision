@@ -36,16 +36,24 @@ import com.drones.vision.application.pipeline.DetectionRate;
  *                        starving source produces no events for a window to age out
  * @param dropRatio       the fraction of served deadlines thrown away, in {@code [0,1]}; anything
  *                        above zero means the configured rate is not the delivered one
+ * @param transport       which loop counted these figures: {@code "push"} (the JVM's own sampler) or
+ *                        {@code "pull"} (a worker's, self-reported) — docs/plans/active/MEDIA-SOT-PLAN.md
+ *                        &sect;5.4/&sect;7. Also the reader's cue for which definition {@code
+ *                        PipelineLatencyResponse#roundTripMillis*} is using, since {@code latency} and
+ *                        {@code rate} are always read together off the same stream
+ * @param decodeMillisP50 median local decode cost the worker reported, milliseconds; {@code 0} in
+ *                        push mode
  */
 public record DetectionRateResponse(long windowSeconds, double sourceFps, double targetFps,
                                      double demandFps, double submittedFps, long submitted,
                                      long droppedInFlight, long droppedOutage, long missedDeadlines,
-                                     double dropRatio) {
+                                     double dropRatio, String transport, double decodeMillisP50) {
 
     /** Maps the application-layer read model onto this wire shape. */
     public static DetectionRateResponse from(DetectionRate rate) {
         return new DetectionRateResponse(rate.window().toSeconds(), rate.sourceFps(), rate.targetFps(),
                 rate.demandFps(), rate.submittedFps(), rate.submitted(), rate.droppedInFlight(),
-                rate.droppedOutage(), rate.missedDeadlines(), rate.dropRatio());
+                rate.droppedOutage(), rate.missedDeadlines(), rate.dropRatio(), rate.transport(),
+                rate.decodeMillisP50());
     }
 }

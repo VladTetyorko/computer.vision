@@ -162,6 +162,45 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.whepUrl").doesNotExist());
     }
 
+    // ---- docs/plans/active/MEDIA-SOT-PLAN.md §5.4, wave M5: burnedIn ----
+
+    @Test
+    void startReportsBurnedInFromTheStreamService() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
+        when(streamService.burnedIn(streamId)).thenReturn(true);
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.burnedIn").value(true));
+    }
+
+    @Test
+    void startReportsBurnedInFalseForAProxiedOrPullStream() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
+        when(streamService.burnedIn(streamId)).thenReturn(false);
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
+                .andExpect(status().isCreated())
+                // a primitive boolean is always serialized, unlike viewUrl/whepUrl -- an absent
+                // burnedIn would read as "true" to the client (wave M8), which would misreport this.
+                .andExpect(jsonPath("$.burnedIn").value(false));
+    }
+
+    @Test
+    void listReportsEachStreamsOwnBurnedIn() throws Exception {
+        StreamId streamId = StreamId.random();
+        DeviceId listedDeviceId = DeviceId.random();
+        when(streamService.streams())
+                .thenReturn(List.of(new com.drones.vision.application.stream.ActiveStream(streamId, listedDeviceId,
+                        Instant.now(), false)));
+
+        mockMvc.perform(get("/api/streams"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].burnedIn").value(false));
+    }
+
     @Test
     void startUsesPipelineConfigDefaultsWhenBodyAbsent() throws Exception {
         StreamId streamId = StreamId.random();
@@ -1033,6 +1072,34 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.rate.droppedOutage").value(0))
                 .andExpect(jsonPath("$.rate.missedDeadlines").value(3))
                 .andExpect(jsonPath("$.rate.dropRatio").value(0.25));
+    }
+
+    @Test
+    void tracksReportsTransportAndDecodeMillisP50ForAPullModeStream() throws Exception {
+        // docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§7, wave M5: the two additive fields.
+        StreamId streamId = StreamId.random();
+        when(streamService.tracks(streamId)).thenReturn(List.of());
+        when(streamService.detectionRate(streamId)).thenReturn(Optional.of(
+                new DetectionRate(Duration.ofSeconds(30), 9.9, 10.0, 0.0, 9.5, 0L, 2L, 0L, 1L,
+                        DetectionRate.TRANSPORT_PULL, 4.0)));
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rate.transport").value("pull"))
+                .andExpect(jsonPath("$.rate.decodeMillisP50").value(4.0));
+    }
+
+    @Test
+    void tracksReportsTransportPushAndZeroDecodeMillisForAPlainPushStream() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.tracks(streamId)).thenReturn(List.of());
+        when(streamService.detectionRate(streamId)).thenReturn(Optional.of(
+                new DetectionRate(Duration.ofSeconds(30), 24.0, 10.0, 18.0, 7.5, 15L, 5L, 0L, 3L)));
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rate.transport").value("push"))
+                .andExpect(jsonPath("$.rate.decodeMillisP50").value(0.0));
     }
 
     @Test

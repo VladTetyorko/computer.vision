@@ -1,7 +1,10 @@
 package com.drones.vision.application.pipeline;
 
+import com.drones.vision.domain.model.PullTelemetry;
+
 import java.time.Duration;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.Objects;
 
@@ -21,9 +24,18 @@ import java.util.Objects;
  * per {@code onNext} and passed in, never read again here. See {@link StreamPipeline}'s
  * {@code latencyNanoSource} javadoc for why that distinction is load-bearing.
  *
+ * <h2>Pull mode (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7, wave M5)</h2>
+ * A window is either {@link Transport#PUSH} or {@link Transport#PULL} for its whole life, decided once
+ * at construction — a running stream is one or the other, never both. {@link #record}/{@link
+ * #recordMissedDeadlines} are the <b>push</b>-mode sampler's own counters and are never called by a
+ * pull-mode pipeline (there is no local sampler in pull mode — the worker runs its own, ported,
+ * deadline sampler); {@link #recordPull} is the pull-mode counterpart, folding the worker's
+ * self-reported figures straight in rather than re-deriving them from local sampler decisions. {@link
+ * #snapshot} reads whichever set applies.
+ *
  * <h2>Threading</h2>
- * Every method is {@code synchronized}: {@link #record} runs on the source's delivery thread while
- * {@link #snapshot} is read from an HTTP thread.
+ * Every method is {@code synchronized}: {@link #record}/{@link #recordPull} run on the source's
+ * delivery thread while {@link #snapshot} is read from an HTTP thread.
  */
 final class DetectionRateWindow {
 
@@ -32,7 +44,15 @@ final class DetectionRateWindow {
 
     private static final double NANOS_PER_SECOND = 1_000_000_000.0;
 
-    /** What the sampler did with one served deadline. */
+    /** Which loop counted these figures — decided once, at construction, never mixed. */
+    enum Transport {
+        /** The JVM's own sampler decides, and counts what it decided. */
+        PUSH,
+        /** The worker's (ported) sampler decides; this window mirrors its self-reported counters. */
+        PULL
+    }
+
+    /** What the sampler did with one served deadline (push mode only). */
     enum Outcome {
         /** Handed to the detection port. */
         SUBMITTED,
@@ -44,14 +64,29 @@ final class DetectionRateWindow {
 
     private final Duration window;
     private final long windowNanos;
+    private final Transport transport;
 
     private final Deque<Sample> samples = new ArrayDeque<>();
 
     private record Sample(long atNanos, Outcome outcome) {
     }
 
-    /** Deadlines no frame served, counted separately: they have no sample to hang on the deque. */
+    /** Deadlines no frame served, counted separately: they have no sample to hang on the deque. Push mode only. */
     private long missedDeadlines;
+
+    // Pull-mode state (Transport.PULL only): the worker restates these on every response, so the
+    // latest report is simply kept rather than derived from anything local (§7 -- there is no JVM
+    // sampler to count in pull mode).
+    private volatile double pullSourceFps = 0.0;
+    private volatile double pullAchievedFps = 0.0;
+    private volatile long pullDroppedFrames = 0L;
+    private volatile long pullMissedDeadlines = 0L;
+
+    /** Rolling {@code decode_millis} samples, windowed exactly like {@link #samples} (pull mode only). */
+    private final Deque<DecodeSample> decodeMillisSamples = new ArrayDeque<>();
+
+    private record DecodeSample(long atNanos, long decodeMillis) {
+    }
 
     /**
      * @param window how far back the counters reach; must be positive. {@link StreamPipeline} passes
@@ -59,15 +94,25 @@ final class DetectionRateWindow {
      *               per stream, deliberately not a third knob that could drift out of step.
      */
     DetectionRateWindow(Duration window) {
+        this(window, Transport.PUSH);
+    }
+
+    /**
+     * @param window    as the 1-argument constructor
+     * @param transport which loop's counters this window reports (docs/plans/active/MEDIA-SOT-PLAN.md wave M5);
+     *                  fixed for the window's whole life
+     */
+    DetectionRateWindow(Duration window, Transport transport) {
         Objects.requireNonNull(window, "window must not be null");
         if (window.isZero() || window.isNegative()) {
             throw new IllegalArgumentException("window must be positive, was " + window);
         }
         this.window = window;
         this.windowNanos = window.toNanos();
+        this.transport = Objects.requireNonNull(transport, "transport must not be null");
     }
 
-    /** Records one served deadline and evicts whatever has aged out. */
+    /** Records one served deadline and evicts whatever has aged out. Push mode only. */
     synchronized void record(Outcome outcome, long atNanos) {
         samples.addLast(new Sample(atNanos, Objects.requireNonNull(outcome, "outcome must not be null")));
         evict(atNanos);
@@ -77,11 +122,28 @@ final class DetectionRateWindow {
      * Records deadlines that came and went with no frame to serve them. Unlike {@link #record} this
      * is a running total rather than a windowed one: it is a starvation signal whose absolute count
      * over the stream's life is what matters, and a starving source produces no events to evict by.
+     * Push mode only.
      */
     synchronized void recordMissedDeadlines(long count) {
         if (count > 0L) {
             missedDeadlines += count;
         }
+    }
+
+    /**
+     * Folds one pull result's worker-reported diagnostics in (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7, D12):
+     * {@code source_fps}/{@code achieved_fps}/{@code missed_deadlines}/{@code dropped_frames} are kept
+     * as the worker's latest restatement (cumulative counters, not deltas — nothing to sum), while
+     * {@code decode_millis} joins a rolling window for {@link DetectionRate#decodeMillisP50()}.
+     */
+    synchronized void recordPull(PullTelemetry telemetry, long atNanos) {
+        Objects.requireNonNull(telemetry, "telemetry must not be null");
+        pullSourceFps = telemetry.sourceFps();
+        pullAchievedFps = telemetry.achievedFps();
+        pullDroppedFrames = telemetry.droppedFrames();
+        pullMissedDeadlines = telemetry.missedDeadlines();
+        decodeMillisSamples.addLast(new DecodeSample(atNanos, telemetry.decodeMillis()));
+        evictDecode(atNanos);
     }
 
     private void evict(long nowNanos) {
@@ -92,16 +154,41 @@ final class DetectionRateWindow {
         }
     }
 
+    private void evictDecode(long nowNanos) {
+        long staleBefore = nowNanos - windowNanos;
+        while (!decodeMillisSamples.isEmpty()
+                && (decodeMillisSamples.size() > MAX_SAMPLES
+                        || decodeMillisSamples.peekFirst().atNanos() <= staleBefore)) {
+            decodeMillisSamples.removeFirst();
+        }
+    }
+
     /** Empties the window; called by {@link StreamPipeline#updateConfig} on a model re-arm. */
     synchronized void clear() {
         samples.clear();
         missedDeadlines = 0L;
+        decodeMillisSamples.clear();
+        pullSourceFps = 0.0;
+        pullAchievedFps = 0.0;
+        pullDroppedFrames = 0L;
+        pullMissedDeadlines = 0L;
     }
 
     /**
-     * @return the counters over the current window. Never {@code null}, never throws.
+     * @return the counters over the current window. Never {@code null}, never throws. In {@link
+     *         Transport#PULL}, {@code sourceFps} is the worker's own self-report, not {@code
+     *         sourceFps} (the JVM-measured/assumed video-source rate passed in — meaningless for a
+     *         proxied stream that never flows through this JVM at all); {@code targetFps}/{@code
+     *         demandFps} still come from the caller, since the Java rate controller runs unchanged in
+     *         pull mode (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7) and its output still travels on the wire.
      */
     synchronized DetectionRate snapshot(double sourceFps, double targetFps, double demandFps) {
+        return transport == Transport.PULL
+                ? snapshotPull(targetFps, demandFps)
+                : snapshotPush(sourceFps, targetFps, demandFps);
+    }
+
+    private DetectionRate snapshotPush(double sourceFps, double targetFps, double demandFps) {
         if (samples.isEmpty()) {
             return new DetectionRate(window, sourceFps, targetFps, demandFps, 0.0, 0L, 0L, 0L, missedDeadlines);
         }
@@ -117,6 +204,26 @@ final class DetectionRateWindow {
         }
         return new DetectionRate(window, sourceFps, targetFps, demandFps, submittedFps(submitted),
                 submitted, droppedInFlight, droppedOutage, missedDeadlines);
+    }
+
+    private DetectionRate snapshotPull(double targetFps, double demandFps) {
+        return new DetectionRate(window, pullSourceFps, targetFps, demandFps, pullAchievedFps, 0L,
+                pullDroppedFrames, 0L, pullMissedDeadlines, DetectionRate.TRANSPORT_PULL, decodeMillisP50());
+    }
+
+    /** Median {@code decode_millis} over the window; {@code 0} when nothing has been reported yet. */
+    private double decodeMillisP50() {
+        if (decodeMillisSamples.isEmpty()) {
+            return 0.0;
+        }
+        long[] sorted = new long[decodeMillisSamples.size()];
+        int index = 0;
+        for (DecodeSample sample : decodeMillisSamples) {
+            sorted[index++] = sample.decodeMillis();
+        }
+        Arrays.sort(sorted);
+        int rank = (int) Math.ceil(0.5 * sorted.length) - 1;
+        return sorted[Math.clamp(rank, 0, sorted.length - 1)];
     }
 
     /**

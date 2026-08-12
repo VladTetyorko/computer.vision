@@ -17,7 +17,13 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param viewUrl  where a viewer can watch the stream over HLS, or absent if the active publisher has no viewing endpoint
  * @param whepUrl  where a viewer can watch the stream over WebRTC/WHEP (sub-second latency), or absent
  *                 if the active publisher has no WebRTC viewing endpoint
+ * @param burnedIn whether server-side overlay burn-in is actually active for this stream
+ *                 (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4) — {@code false} exactly when nothing burns
+ *                 detection boxes into the published video (a proxied source, or a pull-transport
+ *                 stream), {@code true} otherwise. A primitive, always serialized — never omitted like
+ *                 {@code viewUrl}/{@code whepUrl} — because an absent value reads as {@code true} to
+ *                 the client (docs/plans/done wave M8), which would misreport the {@code false} case
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record StartStreamResponse(String streamId, String viewUrl, String whepUrl) {
+public record StartStreamResponse(String streamId, String viewUrl, String whepUrl, boolean burnedIn) {
 }

@@ -9,6 +9,7 @@ import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.Event;
 import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.PipelineConfig;
+import com.drones.vision.domain.model.PullTelemetry;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.TrackedObject;
@@ -22,6 +23,8 @@ import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -235,6 +238,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final DetectionExtrapolator extrapolator;
 
     /**
+     * Pull-mode detection driver (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5/D6) — {@code null} means push
+     * mode: {@link #maybeDetect} samples frames and calls {@link #detectionPort} directly, unchanged.
+     * Non-null switches this pipeline to {@link PullResultSubscriber}, which subscribes to {@link
+     * PullDetectionBinding#results()} and forwards every arriving result to the same {@link
+     * #onDetectionResult} fan-out push mode uses — the seam is here and in {@link #maybeDetect}'s
+     * guard, never inside {@link #onDetectionResult} itself.
+     */
+    private final PullDetectionBinding pullDetection;
+
+    /**
      * Two more consumers on {@link #onDetectionResult}'s existing fan-out, built here rather than
      * injected for exactly the reason {@link #extrapolator} is (docs/plans/done/TRACKING-PLAN.md &sect;5.E,
      * TRACKING-ORCHESTRATION.md &sect;2.3): they are this pipeline's own per-stream bookkeeping, not
@@ -296,6 +309,10 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     private volatile Flow.Subscription subscription;
+
+    /** This pipeline's subscription to {@link #pullDetection}'s result publisher; {@code null} in push mode. */
+    private volatile Flow.Subscription pullSubscription;
+
     private volatile List<Detection> latestDetections = List.of();
     private volatile VideoFrame latestFrame;
 
@@ -492,8 +509,36 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
+     * Wiring seam: same as the 15-argument constructor, plus an optional pull-mode detection driver
+     * (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5/D6) — see {@link PullDetectionBinding}. Public, for the
+     * same reason the 15-argument constructor is: {@code DefaultStreamService} supplies its own
+     * resolved collaborators from a different feature package.
+     *
+     * @param pullDetection nullable — {@code null} (every other constructor's default) means push-mode
+     *                      detection exactly as before this capability existed: {@link #maybeDetect}
+     *                      samples frames and calls {@code detectionPort} directly, unchanged. When
+     *                      given, this pipeline instead subscribes to {@link
+     *                      PullDetectionBinding#results()} and forwards every arriving {@link
+     *                      DetectionResult} to the same {@link #onDetectionResult} fan-out push mode
+     *                      uses — push-mode sampling/submission never runs for this pipeline (see
+     *                      {@link #maybeDetect}'s guard).
+     */
+    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
+                   Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
+                   StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
+                   EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
+                   AssetId assetId, LiveUpdatePublisherPort liveUpdatePublisherPort,
+                   Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
+                   StreamPipelineSettings settings, PullDetectionBinding pullDetection) {
+        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
+                nanoTimeSource, settings, System::nanoTime, pullDetection);
+    }
+
+    /**
      * Package-private seam adding {@code latencyNanoSource} — see {@link #latencyNanoSource} for why
      * it is separate from {@code nanoTimeSource}. Only the same-package latency test injects it.
+     * Delegates to the 17-argument master constructor with {@code pullDetection=null} (push mode).
      */
     StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
@@ -502,6 +547,23 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                    AssetId assetId, LiveUpdatePublisherPort liveUpdatePublisherPort,
                    Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
                    StreamPipelineSettings settings, LongSupplier latencyNanoSource) {
+        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
+                nanoTimeSource, settings, latencyNanoSource, null);
+    }
+
+    /**
+     * Master constructor: same as the 16-argument (latency-seam) constructor, plus {@code
+     * pullDetection} — see the public 16-argument (settings + pullDetection) constructor's own javadoc.
+     */
+    StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
+                   Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
+                   StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
+                   EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
+                   AssetId assetId, LiveUpdatePublisherPort liveUpdatePublisherPort,
+                   Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
+                   StreamPipelineSettings settings, LongSupplier latencyNanoSource,
+                   PullDetectionBinding pullDetection) {
         this.latencyNanoSource = Objects.requireNonNull(latencyNanoSource, "latencyNanoSource must not be null");
         this.streamId = Objects.requireNonNull(streamId, "streamId must not be null");
         this.device = Objects.requireNonNull(device, "device must not be null");
@@ -518,6 +580,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
         this.telemetrySupplier = telemetrySupplier; // nullable: no telemetry-OSD input when absent
         this.nanoTimeSource = Objects.requireNonNull(nanoTimeSource, "nanoTimeSource must not be null");
+        this.pullDetection = pullDetection; // nullable: push-mode detection when absent (D5/D6)
         Objects.requireNonNull(settings, "settings must not be null");
         this.cameraHfovDegrees = settings.cameraHfovDegrees();
         this.assumedSourceFps = settings.assumedSourceFps();
@@ -532,19 +595,26 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.trackBook = new TrackBook(settings.trackRetention());
         this.trackingStats = new TrackingStatsWindow(settings.trackingStatsWindow());
         this.pipelineLatency = new PipelineLatencyWindow(settings.trackingStatsWindow());
-        this.detectionRate = new DetectionRateWindow(settings.trackingStatsWindow());
+        this.detectionRate = new DetectionRateWindow(settings.trackingStatsWindow(),
+                pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
         this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
         this.backoffNanos = this.detectionBackoffInitialNanos;
     }
 
     /**
      * Signals {@link StreamPublisherPort#streamStarted} and subscribes to the
-     * source publisher, beginning frame processing. Must be called exactly
-     * once.
+     * source publisher, beginning frame processing — plus, in pull mode
+     * (docs/plans/active/MEDIA-SOT-PLAN.md wave M5), subscribing {@link PullResultSubscriber} to {@link
+     * #pullDetection}'s result publisher, which is what actually opens the pull (its {@code opener}
+     * runs lazily, on this {@code subscribe} call, exactly like the video source's own supervised
+     * publisher). Must be called exactly once.
      */
     public void start() {
         streamPublisherPort.streamStarted(streamId, device);
         source.subscribe(this);
+        if (pullDetection != null) {
+            pullDetection.results().subscribe(new PullResultSubscriber());
+        }
     }
 
     /**
@@ -610,6 +680,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             pipelineLatency.clear();
             detectionRate.clear();
             rateController.clear();
+        }
+        // docs/plans/active/MEDIA-SOT-PLAN.md wave M5, item 7: PATCH .../config keeps working in pull mode -- its
+        // fields travel on the next PullControl via reconfigure() instead of the next FrameRequest,
+        // since there is no per-frame outbound call in pull mode to carry them on.
+        if (pullDetection != null) {
+            pullDetection.port().reconfigure(streamId, next);
         }
     }
 
@@ -996,9 +1072,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * returns immediately, so a disabled stream spends zero CPU on inference <i>and</i> stops
      * probing during an outage too — nothing below this check ever runs. Re-enabling resumes on the
      * next sampled frame, exactly where the (frozen, untouched) outage/backoff state left off.
+     *
+     * <p>Also gated on {@link #pullDetection} being absent (docs/plans/active/MEDIA-SOT-PLAN.md wave M5): in
+     * pull mode the worker runs its own (ported) deadline sampler and decides when to detect, so this
+     * pipeline's own sampler/in-flight bound/{@link #detectionPort} submission never runs — {@link
+     * PullResultSubscriber} is the whole of pull-mode detection. This is the one line push mode's own
+     * behavior depends on being a no-op for: {@code pullDetection} is {@code null} for every existing
+     * caller, so the check below always falls through exactly as it did before this capability existed.
      */
     private void maybeDetect(VideoFrame frame, long now) {
-        if (!config.detectionEnabled()) {
+        if (!config.detectionEnabled() || pullDetection != null) {
             return;
         }
         switch (outageDecision()) {
@@ -1214,6 +1297,79 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 result.inferenceLatency(), result.tracking());
     }
 
+    /**
+     * Folds a pull result's worker-reported diagnostics into {@link #detectionRate}/{@link
+     * #pipelineLatency}/{@link #rateController} — the pull-mode analogue of what {@link
+     * #submitDetection}'s completion callback does for push mode (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7).
+     * A {@code null} {@link DetectionResult#pullTelemetry()} (a malformed/early response,
+     * {@link DetectionFrameCodec}'s own all-zero-means-absent case) is skipped rather than guessed at.
+     *
+     * <p>{@code capture_skew_millis} has no read-model home this wave (&sect;5.4 stays frozen) — logged
+     * at DEBUG, not stored.
+     */
+    private void recordPullTelemetry(DetectionResult result) {
+        PullTelemetry telemetry = result.pullTelemetry();
+        if (telemetry == null) {
+            return;
+        }
+        long completedAtNanos = latencyNanoSource.getAsLong();
+        detectionRate.recordPull(telemetry, completedAtNanos);
+        Instant receivedAt = pullDetection.wallClock().get();
+        long roundTripNanos = Math.max(0L, Duration.between(result.capturedAt(), receivedAt).toNanos());
+        pipelineLatency.recordPullRoundTrip(completedAtNanos, roundTripNanos);
+        // §7: no Java -> Python round trip exists in pull mode, so the capacity ceiling the rate
+        // controller uses is fed from the worker's own reported cost instead of a measured
+        // submit->available duration -- DetectionRateController itself is unchanged.
+        long ceilingNanos = Duration.ofMillis(telemetry.decodeMillis()).plus(result.inferenceLatency()).toNanos();
+        rateController.recordRoundTrip(ceilingNanos);
+        LOG.log(System.Logger.Level.DEBUG, () -> "stream " + streamId.value() + " capture_skew_millis="
+                + telemetry.captureSkewMillis());
+    }
+
+    /**
+     * Pull-mode detection driver (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5/D6): subscribes to {@link
+     * #pullDetection}'s live result publisher and forwards every arriving {@link DetectionResult} to
+     * the same {@link #onDetectionResult} fan-out push mode uses, after folding its worker-reported
+     * diagnostics into the rate/latency windows ({@link #recordPullTelemetry}). Requests one item at a
+     * time, mirroring this pipeline's own video-path backpressure discipline ({@link #onSubscribe}).
+     *
+     * <p>{@code onError}/{@code onComplete} reuse {@link #handleError}/{@link #close()} exactly as the
+     * video-path {@link Flow.Subscriber} methods do — in practice these fire only when {@link
+     * #pullDetection}'s publisher is not itself a reopen-with-backoff {@code SupervisedPublisher} (a
+     * hand-faked port in a test), since {@code SupervisedPublisher} never forwards a terminal signal
+     * downstream (see its own javadoc).
+     */
+    private final class PullResultSubscriber implements Flow.Subscriber<DetectionResult> {
+
+        @Override
+        public void onSubscribe(Flow.Subscription subscription) {
+            pullSubscription = subscription;
+            subscription.request(1);
+        }
+
+        @Override
+        public void onNext(DetectionResult result) {
+            if (closed.get()) {
+                return;
+            }
+            recordPullTelemetry(result);
+            onDetectionResult(result);
+            if (!closed.get()) {
+                pullSubscription.request(1);
+            }
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+            handleError(throwable);
+        }
+
+        @Override
+        public void onComplete() {
+            close();
+        }
+    }
+
     @Override
     public void onError(Throwable throwable) {
         handleError(throwable);
@@ -1252,6 +1408,10 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         Flow.Subscription s = subscription;
         if (s != null) {
             s.cancel();
+        }
+        Flow.Subscription pulled = pullSubscription;
+        if (pulled != null) {
+            pulled.cancel();
         }
         streamPublisherPort.streamEnded(streamId);
     }

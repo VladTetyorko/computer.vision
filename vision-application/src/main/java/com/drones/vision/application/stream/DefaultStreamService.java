@@ -2,6 +2,7 @@ package com.drones.vision.application.stream;
 
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.Detection;
+import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
@@ -20,9 +21,11 @@ import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.OverlayPort;
+import com.drones.vision.domain.port.out.PulledDetectionPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.VideoSourcePort;
 
+import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -31,11 +34,14 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import com.drones.vision.application.discovery.DefaultDiscoveryService;
 import com.drones.vision.application.pipeline.DetectionEventEngine;
+import com.drones.vision.application.pipeline.PullDetectionBinding;
+import com.drones.vision.application.pipeline.PullDetectionSettings;
 import com.drones.vision.application.pipeline.StreamPipeline;
 import com.drones.vision.application.pipeline.StreamPipelineSettings;
 import com.drones.vision.application.pipeline.SupervisedPublisher;
@@ -89,6 +95,37 @@ public final class DefaultStreamService implements StreamService {
     private final DetectionEventRepositoryPort detectionEventRepositoryPort;
     private final LiveUpdatePublisherPort liveUpdatePublisherPort;
     private final StreamPipelineSettings settings;
+
+    /**
+     * Deployment-wide pull-mode wiring (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, switch B) — {@code null}
+     * (every constructor but the 12-argument one) means every stream this service starts uses push
+     * detection, exactly as before this capability existed. Non-null switches every stream this
+     * service starts to the pull-mode detection driver (D12's own note: B is one deployment-wide
+     * switch, not per-device — only proxying video, switch A via {@link StreamPublisherPort#proxiesSource},
+     * is decided per device).
+     */
+    private final PullDetectionSettings pullDetectionSettings;
+
+    /**
+     * A video publisher that never emits (D4: when {@link StreamPublisherPort#proxiesSource} is
+     * {@code true}, this service does not open a {@link VideoSourcePort} at all). Handed to {@link
+     * StreamPipeline} in place of a real source so its video-path half ({@code onNext}, overlay
+     * burn-in, {@code latestFrame}) simply never runs; {@code streamStarted}/{@code streamEnded} still
+     * fire (that is what lets a proxying publisher create/delete its mediamtx path), and detection
+     * results still flow in over the pull driver when one is wired.
+     */
+    private static final Flow.Publisher<VideoFrame> NO_VIDEO_SOURCE = subscriber ->
+            subscriber.onSubscribe(new Flow.Subscription() {
+                @Override
+                public void request(long n) {
+                    // no-op: a proxied source never has a frame for this JVM to produce
+                }
+
+                @Override
+                public void cancel() {
+                    // no-op
+                }
+            });
 
     /**
      * One dedicated daemon thread scheduling every stream's supervised-reopen retries
@@ -227,6 +264,27 @@ public final class DefaultStreamService implements StreamService {
                           OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
                           LiveUpdatePublisherPort liveUpdatePublisherPort,
                           StreamPipelineSettings settings) {
+        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort,
+                settings, null);
+    }
+
+    /**
+     * Same as the 11-argument constructor, plus deployment-wide pull-mode wiring (docs/plans/active/MEDIA-SOT-PLAN.md
+     * wave M5, switch B) threaded into every {@link StreamPipeline} this service starts.
+     *
+     * @param pullDetectionSettings nullable, following the same convention as {@code overlayPort}/
+     *                              {@code liveUpdatePublisherPort}: {@code null} (the 11-argument
+     *                              constructor's default) means every stream this service starts uses
+     *                              push detection, exactly as before this capability existed.
+     */
+    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
+                          DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
+                          DetectionRepositoryPort detectionRepositoryPort,
+                          EventPublisherPort eventPublisher, UsageTracker usageTracker,
+                          OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
+                          LiveUpdatePublisherPort liveUpdatePublisherPort,
+                          StreamPipelineSettings settings, PullDetectionSettings pullDetectionSettings) {
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
         this.detectionPort = Objects.requireNonNull(detectionPort, "detectionPort must not be null");
@@ -239,6 +297,7 @@ public final class DefaultStreamService implements StreamService {
         this.detectionEventRepositoryPort = detectionEventRepositoryPort; // nullable: no event tracking when absent
         this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
+        this.pullDetectionSettings = pullDetectionSettings; // nullable: every stream uses push detection when absent
     }
 
     /** Copies {@code base} with its source-reopen backoff bounds replaced. */
@@ -287,17 +346,55 @@ public final class DefaultStreamService implements StreamService {
                         lockSeq::incrementAndGet), lockSeq::incrementAndGet));
 
         try {
-            VideoSourcePort source = videoSourceRegistry.sourceFor(device.stream());
-            // docs/plans/done/MVP2-PLAN.md §S, S-a: never hand the adapter's own open() result straight to the
-            // pipeline -- wrap it so a source I/O error/completion is retried with backoff instead
-            // of ending the stream. See SupervisedPublisher's own javadoc and this class's javadoc
-            // for exactly what does/doesn't get re-invoked across a reconnect.
-            SupervisedPublisher<VideoFrame> supervisedSource = new SupervisedPublisher<>(
-                    () -> source.open(streamId, device.stream()),
-                    cause -> eventPublisher.publish(Event.of(streamId, EventType.PIPELINE_ERROR,
-                            "video source disconnected, reconnecting" + describeCauseSuffix(cause))),
-                    retryScheduler, settings.sourceReopenBackoffInitialNanos(),
-                    settings.sourceReopenBackoffMaxNanos());
+            // docs/plans/active/MEDIA-SOT-PLAN.md D4: when the active publisher itself dials this device's
+            // source (a proxied RTSP path), this service opens no VideoSourcePort at all -- NO_VIDEO_SOURCE
+            // stands in so StreamPipeline's video-path half (onNext, overlay burn-in, latestFrame) simply
+            // never runs, while streamStarted/streamEnded still fire (that is what lets the proxying
+            // publisher create/delete its mediamtx path).
+            boolean proxied = streamPublisherPort.proxiesSource(device);
+            VideoSourcePort source = null;
+            SupervisedPublisher<VideoFrame> supervisedSource = null;
+            Flow.Publisher<VideoFrame> videoPublisher = NO_VIDEO_SOURCE;
+            if (!proxied) {
+                source = videoSourceRegistry.sourceFor(device.stream());
+                VideoSourcePort openSource = source;
+                // docs/plans/done/MVP2-PLAN.md §S, S-a: never hand the adapter's own open() result straight to the
+                // pipeline -- wrap it so a source I/O error/completion is retried with backoff instead
+                // of ending the stream. See SupervisedPublisher's own javadoc and this class's javadoc
+                // for exactly what does/doesn't get re-invoked across a reconnect.
+                supervisedSource = new SupervisedPublisher<>(
+                        () -> openSource.open(streamId, device.stream()),
+                        cause -> eventPublisher.publish(Event.of(streamId, EventType.PIPELINE_ERROR,
+                                "video source disconnected, reconnecting" + describeCauseSuffix(cause))),
+                        retryScheduler, settings.sourceReopenBackoffInitialNanos(),
+                        settings.sourceReopenBackoffMaxNanos());
+                videoPublisher = supervisedSource;
+            }
+
+            // docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5: switch B (vision.cv.frame-transport) is one
+            // deployment-wide choice, not a per-device one -- every stream this service starts either
+            // pulls or pushes, decided once by whether pullDetectionSettings was ever wired in.
+            PulledDetectionPort pulledDetectionPort = null;
+            SupervisedPublisher<DetectionResult> supervisedPulledResults = null;
+            PullDetectionBinding pullDetection = null;
+            if (pullDetectionSettings != null) {
+                pulledDetectionPort = pullDetectionSettings.port();
+                PulledDetectionPort openPort = pulledDetectionPort;
+                // D2: the mediamtx path name is exactly streamId.value() -- the same convention the
+                // publish side already relies on, so the worker dials the identical path this stream's
+                // video (if any) is published to.
+                URI pullSourceUrl = URI.create(pullDetectionSettings.rtspBase() + "/" + streamId.value());
+                supervisedPulledResults = new SupervisedPublisher<>(
+                        () -> openPort.open(streamId, pullSourceUrl, config),
+                        cause -> eventPublisher.publish(Event.of(streamId, EventType.PIPELINE_ERROR,
+                                "pulled detection disconnected, reconnecting" + describeCauseSuffix(cause))),
+                        retryScheduler, settings.sourceReopenBackoffInitialNanos(),
+                        settings.sourceReopenBackoffMaxNanos());
+                pullDetection =
+                        new PullDetectionBinding(pulledDetectionPort, supervisedPulledResults,
+                                pullDetectionSettings.wallClock());
+            }
+
             DetectionEventEngine eventEngine = detectionEventRepositoryPort == null ? null
                     : new DetectionEventEngine(streamId, deviceId, config.eventRule(), usageTracker,
                             detectionEventRepositoryPort);
@@ -325,11 +422,17 @@ public final class DefaultStreamService implements StreamService {
                     (usageTracker != null && ownerAssetId != null && (overlayPort != null || attitudeWanted))
                             ? () -> usageTracker.latestTelemetry(ownerAssetId).orElse(null)
                             : null;
-            StreamPipeline pipeline = new StreamPipeline(streamId, device, config, supervisedSource, detectionPort,
+            StreamPipeline pipeline = new StreamPipeline(streamId, device, config, videoPublisher, detectionPort,
                     streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort, eventEngine,
-                    ownerAssetId, liveUpdatePublisherPort, telemetrySupplier, System::nanoTime, settings);
-            activeStreams.put(streamId,
-                    new RunningStream(deviceId, source, supervisedSource, pipeline, Instant.now(), lockSeq));
+                    ownerAssetId, liveUpdatePublisherPort, telemetrySupplier, System::nanoTime, settings,
+                    pullDetection);
+            // docs/plans/active/MEDIA-SOT-PLAN.md §5.4/D9: false exactly when nothing burns detection boxes into
+            // the published video -- no VideoSourcePort was opened (proxied), this stream's detections
+            // travel over the pull transport (OverlayPort's one call site is scoped to push mode), no
+            // OverlayPort is wired at all, or this stream's own overlayBurnIn is off.
+            boolean burnedIn = !proxied && pullDetection == null && overlayPort != null && config.overlayBurnIn();
+            activeStreams.put(streamId, new RunningStream(deviceId, source, supervisedSource, pulledDetectionPort,
+                    supervisedPulledResults, pipeline, Instant.now(), lockSeq, burnedIn));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,
                     "Stream started for device " + device.name()));
@@ -366,27 +469,43 @@ public final class DefaultStreamService implements StreamService {
             return; // unknown or already-stopped stream: no-op, per the interface contract
         }
         streamByDevice.remove(active.deviceId(), streamId);
-        active.supervisedSource().stop(); // fast, in-memory: no further reopen attempt is ever made
+        // Proxied streams open no VideoSourcePort (D4), and push-mode streams wire no pulled
+        // detection -- both supervised publishers are nullable and independently guarded here.
+        if (active.supervisedSource() != null) {
+            active.supervisedSource().stop(); // fast, in-memory: no further reopen attempt is ever made
+        }
+        if (active.supervisedPulledResults() != null) {
+            active.supervisedPulledResults().stop();
+        }
         eventPublisher.publish(Event.of(streamId, EventType.STREAM_STOPPED, "Stream stopped"));
         if (usageTracker != null) {
             usageTracker.onStreamStopped(active.deviceId());
         }
-        teardownAsync(active.pipeline(), active.source(), streamId);
+        teardownAsync(active.pipeline(), active.source(), active.pulledDetectionPort(), streamId);
     }
 
     /**
      * Releases the pipeline's subscription ({@link StreamPipeline#close()}, which also signals
-     * {@link com.drones.vision.domain.port.out.StreamPublisherPort#streamEnded}) and the underlying
-     * source ({@link VideoSourcePort#close}) off the calling thread — see {@link #stop}'s javadoc
-     * for why. A fire-and-forget virtual thread, the same idiom {@link DefaultDiscoveryService}
-     * already uses for its own scan calls: cheap, effectively daemon (a virtual thread never blocks
-     * JVM exit), never tracked or interrupted — there is nothing further to do with it once
-     * started, and both calls are already idempotent/best-effort by their own contracts.
+     * {@link com.drones.vision.domain.port.out.StreamPublisherPort#streamEnded}), the underlying video
+     * source ({@link VideoSourcePort#close}, skipped when {@code source} is {@code null} — a proxied
+     * stream opened none, D4), and the pulled detection port ({@link PulledDetectionPort#close},
+     * skipped when {@code null} — a push-mode stream wired none) off the calling thread — see {@link
+     * #stop}'s javadoc for why. A fire-and-forget virtual thread, the same idiom {@link
+     * DefaultDiscoveryService} already uses for its own scan calls: cheap, effectively daemon (a
+     * virtual thread never blocks JVM exit), never tracked or interrupted — there is nothing further
+     * to do with it once started, and every call here is already idempotent/best-effort by its own
+     * contract.
      */
-    private static void teardownAsync(StreamPipeline pipeline, VideoSourcePort source, StreamId streamId) {
+    private static void teardownAsync(StreamPipeline pipeline, VideoSourcePort source,
+                                       PulledDetectionPort pulledDetectionPort, StreamId streamId) {
         Thread.ofVirtual().name("stream-teardown-" + streamId.value()).start(() -> {
             pipeline.close();
-            source.close(streamId);
+            if (source != null) {
+                source.close(streamId);
+            }
+            if (pulledDetectionPort != null) {
+                pulledDetectionPort.close(streamId);
+            }
         });
     }
 
@@ -397,8 +516,16 @@ public final class DefaultStreamService implements StreamService {
     @Override
     public List<ActiveStream> streams() {
         return activeStreams.entrySet().stream()
-                .map(e -> new ActiveStream(e.getKey(), e.getValue().deviceId(), e.getValue().startedAt()))
+                .map(e -> new ActiveStream(e.getKey(), e.getValue().deviceId(), e.getValue().startedAt(),
+                        e.getValue().burnedIn()))
                 .toList();
+    }
+
+    @Override
+    public boolean burnedIn(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active != null && active.burnedIn();
     }
 
     @Override
@@ -529,15 +656,29 @@ public final class DefaultStreamService implements StreamService {
     /**
      * What this service holds per running stream; distinct from the {@link ActiveStream} read model.
      *
-     * @param lockSeq this stream's monotonic target-lock sequence (docs/plans/done/TRACKING-PLAN.md &sect;4.D).
-     *                Per-stream, not global: two streams' locks are unrelated, and a shared counter
-     *                would make one operator's click advance another's sequence. Starts at 0 and is
-     *                only ever incremented, so it never decreases within a stream's life; a stream
-     *                restart starts a fresh pipeline (and a fresh cv-service session) at 0 again.
-     *                Created by {@link #start} before the config is composed, since a start request
-     *                could in principle carry a lock and would then need the first number.
+     * @param source                  the video source this stream opened, or {@code null} for a
+     *                                 proxied stream that opened none (D4); {@code supervisedSource}
+     *                                 mirrors this nullability
+     * @param pulledDetectionPort     the pull-mode port this stream opened a pull against, or {@code
+     *                                 null} for a push-mode stream; {@code supervisedPulledResults}
+     *                                 mirrors this nullability (docs/plans/active/MEDIA-SOT-PLAN.md wave M5)
+     * @param lockSeq                 this stream's monotonic target-lock sequence (docs/plans/done/TRACKING-PLAN.md
+     *                                 &sect;4.D). Per-stream, not global: two streams' locks are unrelated, and
+     *                                 a shared counter would make one operator's click advance
+     *                                 another's sequence. Starts at 0 and is only ever incremented, so
+     *                                 it never decreases within a stream's life; a stream restart
+     *                                 starts a fresh pipeline (and a fresh cv-service session) at 0
+     *                                 again. Created by {@link #start} before the config is composed,
+     *                                 since a start request could in principle carry a lock and would
+     *                                 then need the first number
+     * @param burnedIn                whether server-side overlay burn-in is actually active for this
+     *                                 stream (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4), computed once at start
+     *                                 since neither {@code proxiesSource} nor the pull/push transport
+     *                                 nor {@code overlayBurnIn} can change over a running stream's life
      */
     private record RunningStream(DeviceId deviceId, VideoSourcePort source, SupervisedPublisher<VideoFrame> supervisedSource,
-                                  StreamPipeline pipeline, Instant startedAt, AtomicLong lockSeq) {
+                                  PulledDetectionPort pulledDetectionPort,
+                                  SupervisedPublisher<DetectionResult> supervisedPulledResults,
+                                  StreamPipeline pipeline, Instant startedAt, AtomicLong lockSeq, boolean burnedIn) {
     }
 }

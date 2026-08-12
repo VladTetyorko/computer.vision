@@ -9,6 +9,7 @@ import com.drones.vision.domain.model.DetectorReason;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.PixelFormat;
+import com.drones.vision.domain.model.PullTelemetry;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.TargetLock;
 import com.drones.vision.domain.model.TrackRef;
@@ -187,7 +188,32 @@ final class DetectionFrameCodec {
                 Instant.ofEpochMilli(response.getTimestampMillis()),
                 detections,
                 Duration.ofMillis(response.getInferenceMillis()),
-                toTrackingTelemetry(response));
+                toTrackingTelemetry(response),
+                toPullTelemetry(response));
+    }
+
+    /**
+     * Maps the response's six pull-mode-only diagnostic fields (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.1
+     * fields 16-21, decision D12) onto a {@link PullTelemetry} — the carrier M4 could decode the wire
+     * for but had nowhere in the domain to put. Returns {@code null} (push mode, matching this class's
+     * pre-D12 behavior byte-for-byte) exactly when every one of the six fields is still at its proto
+     * zero-value — the shape a {@code DetectStream} response always has, since a pull worker always
+     * reports a non-zero {@code source_fps}/{@code achieved_fps} once it has measured anything at all.
+     * Mirrors {@link #toTrackingTelemetry}'s own all-zero-means-absent reasoning.
+     */
+    private static PullTelemetry toPullTelemetry(DetectionResponse response) {
+        long decodeMillis = response.getDecodeMillis();
+        float sourceFps = response.getSourceFps();
+        float achievedFps = response.getAchievedFps();
+        long droppedFrames = response.getDroppedFrames();
+        long missedDeadlines = response.getMissedDeadlines();
+        long captureSkewMillis = response.getCaptureSkewMillis();
+        if (decodeMillis == 0 && sourceFps == 0f && achievedFps == 0f && droppedFrames == 0
+                && missedDeadlines == 0 && captureSkewMillis == 0) {
+            return null;
+        }
+        return new PullTelemetry(decodeMillis, sourceFps, achievedFps, droppedFrames, missedDeadlines,
+                captureSkewMillis);
     }
 
     /**

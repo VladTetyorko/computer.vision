@@ -21,8 +21,11 @@ import java.time.Instant;
  * @param viewUrl   where a viewer can watch the stream over HLS, or absent if the active publisher has no viewing endpoint
  * @param whepUrl   where a viewer can watch the stream over WebRTC/WHEP (sub-second latency), or absent
  *                  if the active publisher has no WebRTC viewing endpoint
+ * @param burnedIn  whether server-side overlay burn-in is actually active for this stream — see
+ *                  {@link StartStreamResponse#burnedIn()}'s own javadoc for the full contract; same
+ *                  "always serialized, never omitted" reasoning
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ActiveStreamResponse(String streamId, String deviceId, Instant startedAt, String viewUrl,
-                                    String whepUrl) {
+                                    String whepUrl, boolean burnedIn) {
 }

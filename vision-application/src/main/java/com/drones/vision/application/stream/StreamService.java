@@ -114,6 +114,23 @@ public interface StreamService {
     Optional<VideoFrame> latestRawFrame(StreamId streamId);
 
     /**
+     * Whether server-side overlay burn-in is actually active for a running stream
+     * (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4) — {@code false} exactly when nothing burns detection
+     * boxes into the published video (this device's source is proxied, D4 — no {@code
+     * VideoSourcePort} was opened at all — or this stream's detections travel over the pull
+     * transport, since {@code OverlayPort}'s one call site is scoped to push mode, D9), {@code true}
+     * otherwise (an {@code OverlayPort} is wired and {@link PipelineConfig#overlayBurnIn()} is on for
+     * this stream). Computed once at start, since none of the three facts it depends on can change
+     * over a running stream's life.
+     *
+     * @param streamId the stream to inspect
+     * @return whether burn-in is active, or {@code false} for an unknown/not-running stream — the
+     *         same honest "nothing burns boxes here" answer a proxied/pull stream already gives,
+     *         never an error
+     */
+    boolean burnedIn(StreamId streamId);
+
+    /**
      * The most recently completed detection result's detections on a running stream — exactly {@link
      * StreamPipeline#latestDetections()} (docs/plans/done/CV-TRAINING-PLAN.md &sect;2), surfaced here so a
      * caller outside the pipeline (e.g. training-sample capture) never needs to reach into pipeline

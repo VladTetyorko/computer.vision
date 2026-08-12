@@ -35,17 +35,51 @@ import java.util.Objects;
  * @param submittedFps     frames actually handed to the detection port per second, over the window
  * @param submitted        frames handed to the detection port in the window
  * @param droppedInFlight  samples discarded because {@code maxInFlightInferences} were outstanding —
- *                         the detector is slower than the requested rate
- * @param droppedOutage    samples withheld during a detection outage's backoff
+ *                         the detector is slower than the requested rate. In pull mode (docs/plans/active/MEDIA-SOT-PLAN.md
+ *                         &sect;7) this is the worker's own {@code dropped_frames} — the latest-wins
+ *                         discards its decode loop counts, the pull analogue of an in-flight drop
+ * @param droppedOutage    samples withheld during a detection outage's backoff; always {@code 0} in
+ *                         pull mode — outage backoff is push-mode-only bookkeeping
  * @param missedDeadlines  sample deadlines no frame arrived in time to serve — the source is slower
  *                         than the requested rate, so no amount of detector capacity would help
+ * @param transport        which loop counted these figures: {@link #TRANSPORT_PUSH} (the JVM's own
+ *                         sampler) or {@link #TRANSPORT_PULL} (the worker's, self-reported and mirrored
+ *                         here) — docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4/&sect;7. Also the reader's cue for which
+ *                         definition {@code PipelineLatency#roundTripMillis*} is using, since the two
+ *                         read models are always read together off the same stream
+ * @param decodeMillisP50  median local decode cost the worker reported, milliseconds; {@code 0} in
+ *                         push mode (there is no local decode step to report) and before a pull stream
+ *                         has reported anything yet
  */
 public record DetectionRate(Duration window, double sourceFps, double targetFps, double demandFps,
                              double submittedFps, long submitted, long droppedInFlight, long droppedOutage,
-                             long missedDeadlines) {
+                             long missedDeadlines, String transport, double decodeMillisP50) {
+
+    /** {@link #transport()} value for a stream the JVM samples and pushes frames from. */
+    public static final String TRANSPORT_PUSH = "push";
+
+    /** {@link #transport()} value for a stream whose worker pulls frames and reports its own rate. */
+    public static final String TRANSPORT_PULL = "pull";
 
     public DetectionRate {
         Objects.requireNonNull(window, "window must not be null");
+        if (!TRANSPORT_PUSH.equals(transport) && !TRANSPORT_PULL.equals(transport)) {
+            throw new IllegalArgumentException(
+                    "transport must be \"" + TRANSPORT_PUSH + "\" or \"" + TRANSPORT_PULL + "\", was " + transport);
+        }
+    }
+
+    /**
+     * The shape before {@link #transport()}/{@link #decodeMillisP50()} were added (docs/plans/active/MEDIA-SOT-PLAN.md
+     * &sect;5.4, wave M5), kept as a convenience constructor defaulting them to {@link #TRANSPORT_PUSH}/{@code
+     * 0} — every push-mode reading, byte-identical to before this pair existed. Same "N-1-arg
+     * convenience ctor" idiom the domain records use.
+     */
+    public DetectionRate(Duration window, double sourceFps, double targetFps, double demandFps,
+                          double submittedFps, long submitted, long droppedInFlight, long droppedOutage,
+                          long missedDeadlines) {
+        this(window, sourceFps, targetFps, demandFps, submittedFps, submitted, droppedInFlight, droppedOutage,
+                missedDeadlines, TRANSPORT_PUSH, 0.0);
     }
 
     /**
