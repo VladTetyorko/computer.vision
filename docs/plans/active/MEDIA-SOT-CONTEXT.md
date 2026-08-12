@@ -17,7 +17,7 @@ Waves commit onto this branch with disjoint file scopes. One commit per wave.
 | M3 | `cv-service/cv_service/pull/` — the worker | M0, M1 | **ready** |
 | M4 | `adapters/adapter-cv-grpc` — Java pull port | M1, M2 | **done** |
 | M5 | `vision-application` + `vision-api` — pull-mode pipeline | M2, M4 | blocked |
-| M6 | `adapters/adapter-publish-hls` — proxy publisher + frame grab | M2 | **ready** |
+| M6 | `adapters/adapter-publish-hls` — proxy publisher + frame grab | M2 | **done** |
 | M7 | `vision-app` + `docker-compose.yml` — wiring, flags | M5, M6 | blocked |
 | M8 | `vision-web` — client overlay truth + WHEP box timing | M1 | **done** |
 | M9 | `docs/` — measure, amend CV-SCALE §S5 | M7, M8 | blocked |
@@ -53,6 +53,12 @@ discharged; M3/M5/M6 may proceed against the amended contract.
   constructor by the new pull fields, and `vision-app`'s `CvWiring#toGrpcCvSettings` still calls the
   old arity. `vision-app` will not compile until M7 updates it. Expected, but it means **no
   reactor-wide build will pass until M7 lands** — keep every build scoped until then.
+- **M6 found two things M7 must respect.** (1) With `source-proxy.on-demand=true` mediamtx never
+  dials until a viewer connects, so the readiness poll is skipped in that mode — without that skip
+  every on-demand start would time out. (2) A proxied source pointing at another path on the *same*
+  mediamtx must use the container-internal RTSP port, not the host-mapped one; a wrong address
+  fails silently as a readiness timeout, not a create error.
+- **`MediamtxLiveFrameGrabber` is built but not wired** into `StreamService` — M7 plumbing.
 - **Boxes-mode logic lives in `shared/player/detection-overlay-logic.ts`**, not `fly-logic.ts` as
   §8 M8 assumed — the wall tile needed the identical burn-in-aware cycle.
 
