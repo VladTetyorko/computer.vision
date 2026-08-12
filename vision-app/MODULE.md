@@ -1561,8 +1561,9 @@ network.
 
 `docker-compose.yml`'s `mediamtx` service also gained: `MTX_API: "yes"` / `MTX_APIADDRESS: ":9997"`
 (pinned explicitly, the same "future-drift" reasoning already applied to `MTX_HLS*`/
-`MTX_PLAYBACKADDRESS`), and the host port mapping `"19997:9997"` (same collision-avoidance numbering
-convention as `18888`/`18889`/`19996`). The `vision-app` service gained
+`MTX_PLAYBACKADDRESS`), and a host port mapping for `9997` (same collision-avoidance numbering
+convention as `18888`/`18889`/`19996` — **see the follow-up hardening below for its current, corrected
+binding**). The `vision-app` service gained
 `VISION_CV_PULL_RTSP_BASE: ${VISION_CV_PULL_RTSP_BASE:-rtsp://mediamtx:8554}` — inert while
 `vision.cv.frame-transport` stays at its default `push`, and overridable via `.env` (documented in
 `.env.example`, mirroring `VISION_WEBRTC_HOST`'s own pattern) to a LAN address for a remote worker (the
@@ -1570,6 +1571,59 @@ GB4005 box) that cannot resolve this compose network's own `mediamtx` hostname.
 
 `docker compose config` is clean (verified — renders without error, the mount resolves, the new port
 mapping and env var both appear as expected in the rendered config).
+
+#### Follow-up hardening: the host port mapping was `19997:9997` (all interfaces), corrected to loopback-only
+
+M7 shipped the host mapping as `"19997:9997"`, binding all host interfaces — this was the actual
+security defect, found and fixed on `feat/media-sot` right after M7 landed (commit `25cd8f9`), not a
+separate wave. Combined with `mediamtx.yml`'s `ips: []` widening (needed so the sibling `vision-app`
+container stops 401ing), an all-interfaces publish meant: anyone who could reach the Docker host on
+port 19997 — from the LAN, or the internet if the host is exposed, which matters concretely because
+this stack is deployed on field servers as a drone command point (`CLAUDE.md`'s deployment section) —
+could create, repoint, or delete mediamtx paths with **zero credentials**. Unlike the media ports
+(`8554`/`18888`/`18889`) that mediamtx already serves openly by design, the Control API is a
+path-mutation surface — qualitatively different, and not something an unauthenticated stranger should
+reach.
+
+**Fix: `"127.0.0.1:19997:9997"`.** Verified, not assumed, that this loses nothing real:
+`MediamtxProxyPublisher` (used only when `source-proxy.enabled=true`, still off by default, D1) is
+called exclusively from inside the `vision-app` container, which reaches mediamtx's Control API over
+the compose network at `http://mediamtx:9997` — the container-internal port, never this host mapping
+at all, same "container port, not host port" rule already established for `rtsp-base`/`hls-base`
+above. A host-run `vision-app` (Quickstart, `application.yaml`'s own `http://localhost:19997`
+default) still reaches it fine — loopback *is* localhost. `docker compose config` (re-verified after
+this change) renders `host_ip: 127.0.0.1` on the `9997` mapping only. `mediamtx.yml`'s own header
+comment, which had asserted "mediamtx is never directly exposed past the compose network's own port
+mappings", was corrected to state the truth — that assertion was wrong (the host mapping *was* an
+exposure path; that's exactly what this fix closes), and the mistake is kept documented in that file
+rather than silently rewritten, so a future reader doesn't re-derive the same wrong assumption.
+
+**Port `19996` (Playback API) was checked for the same issue and deliberately left published on all
+interfaces** — a considered decision, not an oversight. It's read-only (`GET /get`/`GET /list`, no
+path create/patch/delete), and `UsageRecordingResponse#url` (`UsageTimelineController#recording`,
+vision-api) hands its URL straight to the *browser*, unproxied — the same "must be reachable by the
+viewer's browser, not just this app's own JVM" shape as WHEP's `18889`, not the Control API's
+"only vision-app itself ever calls this" shape. Binding it to loopback would silently break clip
+export/replay for every viewer not on the Docker host itself. It was also already unauthenticated by
+mediamtx's own stock default before M7 touched anything (the `playback` action already grants
+`ips: []` in mediamtx's baked-in `authInternalUsers`, grouped with `publish`/`read` — `mediamtx.yml`
+restates that grouping, it doesn't widen it).
+
+`application.yaml`'s `api-user`/`api-password`/`api-base` comments were strengthened to say plainly
+that a mediamtx **not co-located** with `vision-app` on the same Docker host (a different deployment
+shape than this file, which always runs both as sibling containers) cannot lean on loopback binding at
+all — that topology requires real Basic-auth credentials against a real user in the remote mediamtx's
+own `authInternalUsers`, not an `ips: []` widening. `.env.example` documents the worked example:
+`VISION_PUBLISH_MEDIAMTX_API_BASE` / `VISION_PUBLISH_MEDIAMTX_API_USER` /
+`VISION_PUBLISH_MEDIAMTX_API_PASSWORD`, mapping onto `vision.publish.mediamtx.api-base`/`api-user`/
+`api-password` via Spring's standard relaxed env-var binding (same convention as the already-wired
+`rtsp-base`/`hls-base`/`whep-base` vars) — documented for a deployment that departs from this compose
+file, not wired into it, since this file always co-locates mediamtx with `vision-app` and neither var
+is read here today.
+
+No Java code, application property defaults, or wiring changed — comments and the one port-binding
+string only. `./mvnw -B -pl vision-app test -DskipWeb`: 220/220 green, unchanged from before this
+correction (nothing it touches is exercised by any test).
 
 ### Tests
 

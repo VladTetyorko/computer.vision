@@ -18,9 +18,24 @@
 # no list-of-struct override for this field) -- mounting this file is the actual fix.
 #
 # `ips: []` means "no IP restriction" (verified against bluenviron/mediamtx:1.19.3 by wave M0's curl
-# transcript, cv-service/spikes/pull/results/mediamtx_api_transcript.txt). This is compose/private-
-# network-only permissiveness: mediamtx is never directly exposed past the compose network's own port
-# mappings, so "any caller, any IP" here means "any caller already inside this docker-compose stack".
+# transcript, cv-service/spikes/pull/results/mediamtx_api_transcript.txt). Widening it this far is
+# safe ONLY because docker-compose.yml's own host publish for this port is loopback-only
+# (`127.0.0.1:19997:9997` -- see that port's own comment in docker-compose.yml for the full
+# incident writeup), which leaves exactly two ways to reach this "any" user's widened api
+# permission: (a) another container on this same compose network (vision-app, trusted -- the whole
+# reason M7 needed this widening in the first place), or (b) a process on the Docker host itself via
+# loopback (equally trusted -- it's the same machine running the stack). Neither is "any caller on
+# the LAN or the internet".
+#
+# An earlier revision of this comment claimed "mediamtx is never directly exposed past the compose
+# network's own port mappings" -- that was WRONG, not just imprecise: docker-compose.yml originally
+# published this port as `19997:9997`, binding all host interfaces, which IS an exposure path past
+# the compose network. Until that binding was corrected to loopback-only, `ips: []` here genuinely
+# did mean "any caller who can reach this host on 19997, full stop" -- unauthenticated path
+# create/repoint/delete for anyone on the LAN, or the internet if the host was exposed (this stack
+# is deployed on field servers as a drone command point, per CLAUDE.md's deployment section). The
+# mistake is kept documented here, not silently rewritten, so nobody re-derives the same wrong
+# assumption from a stale copy of this file or an old comment.
 #
 # publish/read/playback are restated alongside api/metrics/pprof so this file doesn't accidentally
 # NARROW anything mediamtx already grants unauthenticated by default -- widening api access is the only

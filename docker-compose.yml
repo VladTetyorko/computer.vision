@@ -107,17 +107,65 @@ services:
       # MediamtxStreamPublisher#playbackUrl, adapter-publish-hls/MODULE.md)
       # and GET /list?path= (recorded ranges) over the recordings written by
       # MTX_PATHDEFAULTS_RECORD below.
+      #
+      # Deliberately left published on ALL interfaces, unlike the Control API's loopback-only
+      # binding just below -- checked and decided consistently, not left this way by oversight.
+      # Two facts distinguish it: (1) this is read-only egress, not a mutation surface -- GET only,
+      # no path create/patch/delete, same shape as the RTSP/HLS/WHEP media ports above that mediamtx
+      # already serves openly by design. (2) UsageRecordingResponse#url (vision-api,
+      # UsageTimelineController#recording) hands this server's URL straight to the BROWSER, verbatim
+      # -- vision-app never proxies it the way HlsProxyController proxies HLS -- so it has the same
+      # "must be reachable by the *viewer's* browser, not just this app's own JVM" shape as WHEP's
+      # 18889 above, not the Control API's "only vision-app itself ever calls this" shape. Binding
+      # this to loopback would silently break clip export/replay for every viewer not on the Docker
+      # host itself. It is unauthenticated by mediamtx's own stock default (the "playback" action
+      # already grants ips: [] in mediamtx's baked-in authInternalUsers, grouped with publish/read --
+      # ./mediamtx.yml restates it, it doesn't widen it, see that file's header), so this was already
+      # today's posture before wave M7 touched anything. Anyone who can reach the host can still
+      # list/download recorded clips with no credentials -- a real confidentiality question for a
+      # field-deployed command point, but a pre-existing one shared with every other unauthenticated
+      # mediamtx default (HLS/WHEP viewing has the same shape), not something this correction
+      # introduced or is scoped to fix.
       - "19996:9996" # Playback API (recording clip export)
-      # Control API (docs/plans/active/MEDIA-SOT-PLAN.md §5.3): host 19997, same 1:1 host:container
-      # style and collision-avoidance numbering as 18888/18889/19996 above -- container's own
-      # default is 9997 (mediamtx's own apiAddress default, ":9997"), set explicitly below via
-      # MTX_API/MTX_APIADDRESS for the same "pin, don't silently inherit" reason as the MTX_HLS*/
-      # MTX_PLAYBACKADDRESS blocks. Serves the create/patch/get/delete-path calls
-      # MediamtxProxyPublisher makes when vision.publish.source-proxy.enabled=true (vision-app's
-      # application.yaml) -- unreached, and therefore inert, whenever that flag is off (D1). Auth:
-      # see the ./mediamtx.yml mount below -- mediamtx's own baked-in Control API auth is IP-gated
-      # to 127.0.0.1/::1, which no docker-published port or sibling container satisfies.
-      - "19997:9997" # Control API (MediamtxProxyPublisher: dynamic path add/patch/get/delete)
+      # Control API (docs/plans/active/MEDIA-SOT-PLAN.md §5.3): container default is 9997 (mediamtx's
+      # own apiAddress default, ":9997"), set explicitly below via MTX_API/MTX_APIADDRESS for the
+      # same "pin, don't silently inherit" reason as the MTX_HLS*/MTX_PLAYBACKADDRESS blocks. Serves
+      # the create/patch/get/delete-path calls MediamtxProxyPublisher makes when
+      # vision.publish.source-proxy.enabled=true (vision-app's application.yaml) -- unreached, and
+      # therefore inert, whenever that flag is off (D1). Auth: see the ./mediamtx.yml mount below --
+      # mediamtx's own baked-in Control API auth is IP-gated to 127.0.0.1/::1, which no
+      # docker-published port or sibling container satisfies, so that file widens the "any" user's
+      # ips to [] (unrestricted) for the compose network.
+      #
+      # HOST BINDING IS LOOPBACK-ONLY (127.0.0.1:19997:9997), NOT 19997:9997 -- this is the actual
+      # fix for a real incident, not defensive styling. An earlier revision of this file published
+      # 19997:9997 on ALL host interfaces. Combined with mediamtx.yml's api ips: [] widening (needed
+      # so the sibling vision-app container stops 401ing), that meant: anyone who could reach the
+      # Docker host on port 19997 -- from the LAN, or the internet if the host is exposed, which
+      # matters concretely because this stack is deployed on field servers as a drone command point
+      # (CLAUDE.md's deployment section) -- could create, repoint, or delete mediamtx paths with zero
+      # credentials. Unlike the media ports above (openly exposed by design), this is a path-mutation
+      # surface; that combination was a real hole, not a theoretical one.
+      #
+      # Loses nothing real: MediamtxProxyPublisher (adapter-publish-hls, used only when
+      # source-proxy.enabled=true) is called exclusively from inside the vision-app container, which
+      # reaches this Control API over the compose network at http://mediamtx:9997 -- the
+      # container-internal port, same "container port, not host port" rule VISION_PUBLISH_MEDIAMTX_*
+      # below already establishes for rtsp-base/hls-base. It does NOT go through this host mapping at
+      # all, so binding the mapping to loopback changes nothing for the compose-network path (today
+      # inert anyway, since source-proxy.enabled defaults false, D1). A host-run vision-app
+      # (Quickstart, application.yaml's own http://localhost:19997 default) still reaches it fine --
+      # loopback IS localhost. What loopback binding does change: a caller on the LAN or internet can
+      # no longer reach this port at all, which is exactly the point.
+      #
+      # A mediamtx NOT co-located with vision-app on the same Docker host (a different deployment
+      # shape than this file, which always runs both as sibling containers) cannot use loopback
+      # binding to reach this API either -- that deployment must instead configure real Basic-auth
+      # credentials (vision.publish.mediamtx.api-user/api-password, application.yaml) against a real
+      # user in that remote mediamtx's own authInternalUsers config, not an ips: [] widening, which
+      # only makes sense on a network as trusted as this one compose stack's private bridge. See
+      # .env.example for the property/env-var names.
+      - "127.0.0.1:19997:9997" # Control API (MediamtxProxyPublisher: dynamic path add/patch/get/delete) -- loopback-only, see comment above
     environment:
       # mediamtx's default ICE candidate gathering (webrtcIPsFromInterfaces:
       # true) advertises this *container's* own network-namespace IPs (e.g.
@@ -252,7 +300,11 @@ services:
       # kept: MTX_API/MTX_APIADDRESS here for the same "pin explicitly" reason as MTX_PLAYBACK*
       # above (mediamtx.yml's own api/apiAddress lines would otherwise be the only place this is
       # set, and a future edit to that file could silently turn the API back off), MTX_APIADDRESS
-      # matching mediamtx's own default (":9997") like MTX_PLAYBACKADDRESS does for :9996.
+      # matching mediamtx's own default (":9997") like MTX_PLAYBACKADDRESS does for :9996. This
+      # widened ips allowlist is safe only paired with the loopback-only host publish of this same
+      # port above ("127.0.0.1:19997:9997") -- see that port's own comment for the incident where an
+      # earlier, all-interfaces publish turned this widening into an unauthenticated LAN/internet
+      # mutation surface.
       MTX_API: "yes"
       MTX_APIADDRESS: ":9997"
     volumes:
@@ -261,9 +313,10 @@ services:
       # lookup is "mediamtx.yml in the current directory", and that image's cwd is "/" (FROM
       # scratch, no WORKDIR -- same fact this file's own MTX_PATHDEFAULTS_RECORD comment already
       # established for the recordings path). See mediamtx.yml's own header comment for the full
-      # writeup and for why this is safe to mount unconditionally (it doesn't narrow anything
-      # mediamtx already grants unauthenticated by default, and every env var above still applies
-      # as an override on top of it, exactly as before this file existed).
+      # writeup, and the Control API port comment above for why widening ips: [] here is safe: it
+      # depends on that port's host publish staying loopback-only, it is not "safe unconditionally"
+      # regardless of how the port is published (every env var above still applies as an override on
+      # top of it, exactly as before this file existed -- that part is unaffected).
       - ./mediamtx.yml:/mediamtx.yml:ro
       # Named volume, NOT a repo bind mount (docs/plans/done/OPS-CORE-PLAN.md §R) --
       # recordings are potentially large fMP4 segments with a 72h retention

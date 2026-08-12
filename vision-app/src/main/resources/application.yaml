@@ -102,13 +102,22 @@ vision:
       # above). mediamtx's Control API is IP-gated by its own baked-in authInternalUsers config -- unauthenticated
       # api access is granted only to a caller at 127.0.0.1/::1, which neither a docker-published port nor a
       # sibling container satisfies. docker-compose.yml's mediamtx service mounts ./mediamtx.yml (see that file's
-      # own comments) to widen this for the compose network; api-user/api-password below are the alternative for
-      # a deployment that would rather authenticate than widen the IP allowlist.
+      # own comments) to widen this for the compose network, and binds the host port mapping to 127.0.0.1 only
+      # (127.0.0.1:19997:9997, not 19997:9997) so that widened allowlist stays reachable only from inside the
+      # compose network or this host's own loopback -- never the LAN or internet (see docker-compose.yml's
+      # "Control API" port comment for the incident that binding corrected). api-user/api-password below are
+      # REQUIRED, not merely a stylistic alternative, whenever mediamtx is NOT co-located with vision-app on the
+      # same Docker host -- a remote mediamtx's own loopback binding does nothing for a caller on a different
+      # machine, so a real Basic-auth credential (matching a real user configured in that mediamtx's own
+      # authInternalUsers, not an ips: [] widening, which only makes sense on a network as trusted as one
+      # compose stack's private bridge) is the only safe way to reach it; see .env.example for the worked example.
       # api-base: http://localhost:19997
-      # Optional mediamtx Control API Basic-auth credentials -- the alternative to mounting a widened mediamtx.yml
-      # (see api-base above). Unset by default (no Authorization header sent). api-password is required whenever
-      # api-user is set -- MediamtxProxySettings's (adapter-publish-hls) own compact constructor fails fast on a
-      # half-configured pair rather than 401ing at the first stream start.
+      # Optional mediamtx Control API Basic-auth credentials. REQUIRED for a mediamtx that isn't reachable via
+      # loopback or the compose network (see api-base above); optional for the co-located docker-compose.yml
+      # deployment this repo ships, where the mediamtx.yml mount already covers it. Unset by default (no
+      # Authorization header sent). api-password is required whenever api-user is set -- MediamtxProxySettings's
+      # (adapter-publish-hls) own compact constructor fails fast on a half-configured pair rather than 401ing at
+      # the first stream start.
       # api-user:
       # api-password:
     # "mediamtx dials the camera itself" switch (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch A, §5.5, D3/D10,
