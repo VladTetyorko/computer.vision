@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.pipeline.StreamPipeline;
+import com.drones.vision.application.pipeline.DetectionRate;
 import com.drones.vision.application.pipeline.PipelineLatency;
 import com.drones.vision.application.pipeline.TrackingStats;
 
@@ -165,6 +166,21 @@ public interface StreamService {
      *         #trackingStats(StreamId)}
      */
     Optional<PipelineLatency> pipelineLatency(StreamId streamId);
+
+    /**
+     * A running stream's sampler accounting over the stats window
+     * (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1) — exactly {@link StreamPipeline#detectionRate()}.
+     *
+     * <p>The companion to {@link #pipelineLatency(StreamId)}: that one reports what a detection
+     * cost, this one reports how many were asked for and what became of them, which is what turns
+     * "the stream is not running at its configured rate" from an observation into a diagnosis.
+     *
+     * @param streamId the stream to inspect
+     * @return the counters, or {@link Optional#empty()} if {@code streamId} is unknown or not
+     *         running on this instance — empty rather than zeroed, for the same reason as {@link
+     *         #trackingStats(StreamId)}
+     */
+    Optional<DetectionRate> detectionRate(StreamId streamId);
 
     /**
      * Live-updates a running stream's detection config (docs/plans/done/CV-CONTROL-PLAN.md &sect;5,

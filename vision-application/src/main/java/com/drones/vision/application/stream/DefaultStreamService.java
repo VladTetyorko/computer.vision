@@ -39,6 +39,7 @@ import com.drones.vision.application.pipeline.DetectionEventEngine;
 import com.drones.vision.application.pipeline.StreamPipeline;
 import com.drones.vision.application.pipeline.StreamPipelineSettings;
 import com.drones.vision.application.pipeline.SupervisedPublisher;
+import com.drones.vision.application.pipeline.DetectionRate;
 import com.drones.vision.application.pipeline.PipelineLatency;
 import com.drones.vision.application.pipeline.TrackingStats;
 import com.drones.vision.application.pipeline.UsageTracker;
@@ -445,6 +446,13 @@ public final class DefaultStreamService implements StreamService {
         Objects.requireNonNull(streamId, "streamId must not be null");
         RunningStream active = activeStreams.get(streamId);
         return active == null ? Optional.empty() : Optional.of(active.pipeline().pipelineLatency());
+    }
+
+    @Override
+    public Optional<DetectionRate> detectionRate(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? Optional.empty() : Optional.of(active.pipeline().detectionRate());
     }
 
     /**

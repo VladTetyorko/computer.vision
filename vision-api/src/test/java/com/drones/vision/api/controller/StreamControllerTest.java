@@ -8,6 +8,7 @@ import com.drones.vision.application.stream.TrackingConfigPatch;
 import com.drones.vision.application.stream.StreamService;
 import com.drones.vision.application.exception.UnsupportedProtocolException;
 import com.drones.vision.application.stream.UpdateOutcome;
+import com.drones.vision.application.pipeline.DetectionRate;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionQuery;
@@ -1008,6 +1009,41 @@ class StreamControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.stats").doesNotExist())
                 .andExpect(jsonPath("$.lockedTrackId").value(0));
+    }
+
+    @Test
+    void tracksReportsWhyTheStreamIsSamplingAtTheRateItIs() throws Exception {
+        // docs/plans/active/CV-RATE-CONTROL-PLAN.md §1: `rate` sits BESIDE `latency` because a completion
+        // rate cannot say why it fell short -- a starving source and a saturated detector look
+        // identical from `effectiveFps` alone and have opposite fixes.
+        StreamId streamId = StreamId.random();
+        when(streamService.tracks(streamId)).thenReturn(List.of());
+        when(streamService.detectionRate(streamId)).thenReturn(Optional.of(
+                new DetectionRate(Duration.ofSeconds(30), 24.0, 10.0, 7.5, 15L, 5L, 0L, 3L)));
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rate.windowSeconds").value(30))
+                .andExpect(jsonPath("$.rate.sourceFps").value(24.0))
+                .andExpect(jsonPath("$.rate.targetFps").value(10.0))
+                .andExpect(jsonPath("$.rate.submittedFps").value(7.5))
+                .andExpect(jsonPath("$.rate.submitted").value(15))
+                .andExpect(jsonPath("$.rate.droppedInFlight").value(5))
+                .andExpect(jsonPath("$.rate.droppedOutage").value(0))
+                .andExpect(jsonPath("$.rate.missedDeadlines").value(3))
+                .andExpect(jsonPath("$.rate.dropRatio").value(0.25));
+    }
+
+    @Test
+    void tracksOmitsTheRateObjectUntilADeadlineHasActuallyBeenServed() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.tracks(streamId)).thenReturn(List.of());
+        when(streamService.detectionRate(streamId))
+                .thenReturn(Optional.of(DetectionRate.empty(Duration.ofSeconds(30), 24.0, 10.0)));
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rate").doesNotExist());
     }
 
     @Test
