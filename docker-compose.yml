@@ -108,6 +108,16 @@ services:
       # and GET /list?path= (recorded ranges) over the recordings written by
       # MTX_PATHDEFAULTS_RECORD below.
       - "19996:9996" # Playback API (recording clip export)
+      # Control API (docs/plans/active/MEDIA-SOT-PLAN.md §5.3): host 19997, same 1:1 host:container
+      # style and collision-avoidance numbering as 18888/18889/19996 above -- container's own
+      # default is 9997 (mediamtx's own apiAddress default, ":9997"), set explicitly below via
+      # MTX_API/MTX_APIADDRESS for the same "pin, don't silently inherit" reason as the MTX_HLS*/
+      # MTX_PLAYBACKADDRESS blocks. Serves the create/patch/get/delete-path calls
+      # MediamtxProxyPublisher makes when vision.publish.source-proxy.enabled=true (vision-app's
+      # application.yaml) -- unreached, and therefore inert, whenever that flag is off (D1). Auth:
+      # see the ./mediamtx.yml mount below -- mediamtx's own baked-in Control API auth is IP-gated
+      # to 127.0.0.1/::1, which no docker-published port or sibling container satisfies.
+      - "19997:9997" # Control API (MediamtxProxyPublisher: dynamic path add/patch/get/delete)
     environment:
       # mediamtx's default ICE candidate gathering (webrtcIPsFromInterfaces:
       # true) advertises this *container's* own network-namespace IPs (e.g.
@@ -232,7 +242,29 @@ services:
       MTX_PATHDEFAULTS_RECORDDELETEAFTER: "1h"
       MTX_PLAYBACK: "yes"
       MTX_PLAYBACKADDRESS: ":9996"
+      # Control API (docs/plans/active/MEDIA-SOT-PLAN.md §5.3, wave M7): MTX_API=yes alone is NOT
+      # sufficient for MediamtxProxyPublisher's calls to succeed -- mediamtx's own baked-in
+      # authInternalUsers grants unauthenticated `api` action access only to a caller at
+      # 127.0.0.1/::1, which a sibling container (vision-app, calling over this compose network)
+      # never is. MTX_AUTHINTERNALUSERS as an env override was tried during wave M0's spike and
+      # does not work (no list-of-struct override for that field) -- the ./mediamtx.yml mount
+      # below is the actual fix, widening that same "any" user's `ips` to unrestricted. Both are
+      # kept: MTX_API/MTX_APIADDRESS here for the same "pin explicitly" reason as MTX_PLAYBACK*
+      # above (mediamtx.yml's own api/apiAddress lines would otherwise be the only place this is
+      # set, and a future edit to that file could silently turn the API back off), MTX_APIADDRESS
+      # matching mediamtx's own default (":9997") like MTX_PLAYBACKADDRESS does for :9996.
+      MTX_API: "yes"
+      MTX_APIADDRESS: ":9997"
     volumes:
+      # Widens mediamtx's own baked-in Control API auth (see the MTX_API comment above) --
+      # read-only, mounted at /mediamtx.yml because the mediamtx image's own default config-file
+      # lookup is "mediamtx.yml in the current directory", and that image's cwd is "/" (FROM
+      # scratch, no WORKDIR -- same fact this file's own MTX_PATHDEFAULTS_RECORD comment already
+      # established for the recordings path). See mediamtx.yml's own header comment for the full
+      # writeup and for why this is safe to mount unconditionally (it doesn't narrow anything
+      # mediamtx already grants unauthenticated by default, and every env var above still applies
+      # as an override on top of it, exactly as before this file existed).
+      - ./mediamtx.yml:/mediamtx.yml:ro
       # Named volume, NOT a repo bind mount (docs/plans/done/OPS-CORE-PLAN.md §R) --
       # recordings are potentially large fMP4 segments with a 72h retention
       # window; keeping them on a Docker-managed volume keeps the worktree
@@ -282,6 +314,16 @@ services:
       # for a host-run vision-app talking to mediamtx over localhost.
       VISION_PUBLISH_MEDIAMTX_RTSP_BASE: rtsp://mediamtx:8554
       VISION_PUBLISH_MEDIAMTX_HLS_BASE: http://mediamtx:8888
+      # docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M7: the address the WORKER (cv-service) dials
+      # for a pulled stream -- only read when vision.cv.frame-transport=pull (off by default, D1;
+      # this var is inert against the default push transport). Defaults to the same
+      # compose-internal "mediamtx" hostname as VISION_PUBLISH_MEDIAMTX_RTSP_BASE above, which is
+      # equally resolvable from the cv-service container on this same compose network. Override via
+      # .env (see .env.example) to the host's LAN address for a REMOTE worker (e.g. the GB4005 box)
+      # that cannot resolve this compose network's own "mediamtx" hostname at all -- the same reason
+      # this property is deliberately separate from vision.publish.mediamtx.rtsp-base in the first
+      # place (see VisionCvProperties.Pull's own javadoc).
+      VISION_CV_PULL_RTSP_BASE: ${VISION_CV_PULL_RTSP_BASE:-rtsp://mediamtx:8554}
       # Deliberately NOT mirroring the compose-internal-hostname pattern above
       # (docs/plans/done/MVP2-PLAN.md L-a): rtsp-base/hls-base are consumed by vision-app
       # itself (server-side), so the compose-internal "mediamtx" hostname is

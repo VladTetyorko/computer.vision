@@ -3,10 +3,12 @@ package com.drones.vision.app.config.wiring;
 import com.drones.vision.adapter.cvgrpc.GrpcCvSettings;
 import com.drones.vision.adapter.cvgrpc.WireFormat;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
+import com.drones.vision.adapter.cvgrpc.GrpcPulledDetectionPort;
 import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
 import com.drones.vision.domain.port.out.DetectionPort;
+import com.drones.vision.domain.port.out.PulledDetectionPort;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import org.springframework.beans.factory.ObjectProvider;
@@ -44,9 +46,12 @@ public class CvWiring {
      * {@code modelRegistryPort}/{@code trainingPort} beans ({@code Training/*}, control-plane) — so
      * the platform holds one connection to cv-service, not two independently configured ones.
      *
-     * <p>Present whenever either property enables a consumer: {@link VisionCvProperties#enabled()}
-     * (live detection) <strong>or</strong> {@code VisionTrainingProperties#enabled()} (the model
-     * registry <em>and</em> training port). With both off (the default), no channel is built at all.
+     * <p>Present whenever any property enables a consumer: {@link VisionCvProperties#enabled()}
+     * (live push-mode detection), {@code VisionTrainingProperties#enabled()} (the model registry
+     * <em>and</em> training port), <strong>or</strong> {@link VisionCvProperties#pullEnabled()}
+     * (docs/plans/active/MEDIA-SOT-PLAN.md wave M7, switch B — {@link #pulledDetectionPort} needs the
+     * same channel {@code DetectPulled} rides on). With every flag off (the default), no channel is
+     * built at all.
      *
      * <h2>Shutdown ownership</h2>
      * This bean — not either port — owns the channel's lifecycle ({@code destroyMethod =
@@ -54,7 +59,8 @@ public class CvWiring {
      * close()} destroy call via an explicit empty {@code destroyMethod}.
      */
     @Bean(destroyMethod = "shutdown")
-    @ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false}")
+    @ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false} "
+            + "or '${vision.cv.frame-transport:push}' == 'pull'")
     public ManagedChannel cvGrpcChannel(VisionCvProperties cvProperties) {
         GrpcCvSettings settings = toGrpcCvSettings(cvProperties);
         return ManagedChannelBuilder.forAddress(cvProperties.host(), cvProperties.port())
@@ -67,15 +73,18 @@ public class CvWiring {
 
     /**
      * Maps every {@code GrpcCvSettings} field off {@link VisionCvProperties} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
-     * wave F4) — shared by {@link #cvGrpcChannel}/{@link #detectionPort} here and {@code
-     * TrainingWiringConfiguration#datasetUploadPort}.
+     * wave F4, extended by docs/plans/active/MEDIA-SOT-PLAN.md wave M7 with the three {@code pull*}
+     * fields) — shared by {@link #cvGrpcChannel}/{@link #detectionPort}/{@link #pulledDetectionPort}
+     * here and {@code TrainingWiringConfiguration#datasetUploadPort}.
      */
     static GrpcCvSettings toGrpcCvSettings(VisionCvProperties properties) {
         VisionCvProperties.Upload upload = properties.upload();
+        VisionCvProperties.Pull pull = properties.pull();
         return new GrpcCvSettings(properties.responseTimeout(), properties.keepAliveTime(),
                 properties.keepAliveTimeout(), properties.keepAliveWithoutCalls(), properties.channelShutdownTimeout(),
                 properties.plaintext(), upload.timeout(), upload.chunkBytes(), properties.detectWidth(),
-                properties.jpegQuality(), WireFormat.parse(properties.wireFormat()));
+                properties.jpegQuality(), WireFormat.parse(properties.wireFormat()), pull.rtspBase(),
+                pull.reconnectInitialBackoff(), pull.reconnectMaxBackoff());
     }
 
     /**
@@ -94,6 +103,25 @@ public class CvWiring {
             return new GrpcDetectionPort(cvGrpcChannel.getObject(), toGrpcCvSettings(cvProperties));
         }
         return new NoopDetectionPort();
+    }
+
+    /**
+     * Present only when {@link VisionCvProperties#pullEnabled()} — switch B, docs/plans/active/MEDIA-SOT-PLAN.md
+     * §3/§5.5 — is {@code pull}: {@link ApplicationServiceWiring#streamService} then wraps this bean in
+     * a {@code PullDetectionSettings} and every stream this deployment starts subscribes to {@code
+     * DetectPulled} instead of pushing frames over {@link #detectionPort}. Absent (the default,
+     * {@code frame-transport=push}, D1) means {@code ApplicationServiceWiring} never builds a {@code
+     * PullDetectionSettings} at all — no behaviour change from before this port existed.
+     *
+     * <p>Shares {@link #cvGrpcChannel} with {@link #detectionPort}, the same "one connection to
+     * cv-service" contract every gRPC-backed bean in this class already follows — see that bean's own
+     * javadoc for why its condition includes {@code pullEnabled()} too.
+     */
+    @Bean
+    @ConditionalOnExpression("'${vision.cv.frame-transport:push}' == 'pull'")
+    public PulledDetectionPort pulledDetectionPort(VisionCvProperties cvProperties,
+                                                    ObjectProvider<ManagedChannel> cvGrpcChannel) {
+        return new GrpcPulledDetectionPort(cvGrpcChannel.getObject(), toGrpcCvSettings(cvProperties));
     }
 
     /**

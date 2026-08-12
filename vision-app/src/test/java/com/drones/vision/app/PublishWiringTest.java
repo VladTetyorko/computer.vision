@@ -2,6 +2,7 @@ package com.drones.vision.app;
 
 import com.drones.vision.adapter.publishhls.MediamtxReplayFrameExtractor;
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
+import com.drones.vision.adapter.publishhls.PublisherRouter;
 import com.drones.vision.api.proxy.HlsProxyController;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
@@ -37,6 +38,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the point of the HLS-proxy feature: browsers are never handed mediamtx's
  * own address.
  *
+ * <p>Extended for docs/plans/active/MEDIA-SOT-PLAN.md wave M7: the top-level bean is now a {@link
+ * PublisherRouter} wrapping {@code MediamtxStreamPublisher} (D1 — {@code
+ * vision.publish.source-proxy.enabled} defaults to {@code false}, so the router never routes anywhere
+ * else). {@code defaultConfigurationSelectsPublisherRouterWrappingMediamtxPublisher} (renamed from
+ * {@code defaultConfigurationSelectsMediamtxPublisher}) asserts the new top-level type; every
+ * URL-shape assertion below is unchanged and still exercises the same {@code MediamtxStreamPublisher}
+ * instance, reached through the router's own "no {@code streamStarted} call for this id yet ⇒ fall
+ * back to the direct publisher" degrade rule (see {@code PublisherRouter}'s own javadoc) — proof that
+ * the wrap is behaviourally invisible by default.
+ *
  * <p>This context never calls {@link StreamPublisherPort#publish}, so no
  * connection to mediamtx is ever attempted — {@code MediamtxStreamPublisher}
  * only opens its RTSP push lazily, on the first published frame (see
@@ -70,8 +81,12 @@ class PublishWiringTest {
     private ReplayFrameExtractionPort replayFrameExtractionPort;
 
     @Test
-    void defaultConfigurationSelectsMediamtxPublisher() {
-        assertInstanceOf(MediamtxStreamPublisher.class, streamPublisherPort);
+    void defaultConfigurationSelectsPublisherRouterWrappingMediamtxPublisher() {
+        // docs/plans/active/MEDIA-SOT-PLAN.md wave M7: the router is now always the top-level bean when
+        // publish is enabled; every URL-shape test below proves it behaves byte-identically to the
+        // plain MediamtxStreamPublisher this method used to assert directly, since
+        // vision.publish.source-proxy.enabled defaults to false (D1).
+        assertInstanceOf(PublisherRouter.class, streamPublisherPort);
     }
 
     @Test

@@ -64,6 +64,9 @@ import java.time.Duration;
  *                    a whole when absent
  * @param replay      {@code MediamtxReplayFrameExtractor}'s clip-window/read-timeout; defaulted as
  *                    a whole when absent
+ * @param sourceProxy {@code MediamtxProxyPublisher}/{@code PublisherRouter}'s "mediamtx dials the
+ *                    camera itself" switch (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch A, §5.5);
+ *                    defaulted as a whole when absent
  */
 @ConfigurationProperties(prefix = "vision.publish")
 public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
@@ -72,17 +75,23 @@ public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
                                        Encoder encoder,
                                        Resilience resilience,
                                        Cadence cadence,
-                                       Replay replay) {
+                                       Replay replay,
+                                       SourceProxy sourceProxy) {
 
     static final String DEFAULT_VIEW_BASE = "/hls";
 
     public VisionPublishProperties {
         if (mediamtx == null) {
             mediamtx = new Mediamtx(URI.create(Mediamtx.DEFAULT_RTSP_BASE), URI.create(Mediamtx.DEFAULT_HLS_BASE),
-                    URI.create(Mediamtx.DEFAULT_WHEP_BASE), URI.create(Mediamtx.DEFAULT_PLAYBACK_BASE));
+                    URI.create(Mediamtx.DEFAULT_WHEP_BASE), URI.create(Mediamtx.DEFAULT_PLAYBACK_BASE),
+                    URI.create(Mediamtx.DEFAULT_API_BASE), null, null);
         }
         if (viewBase == null) {
             viewBase = URI.create(DEFAULT_VIEW_BASE);
+        }
+        if (sourceProxy == null) {
+            sourceProxy = new SourceProxy(SourceProxy.DEFAULT_ENABLED, SourceProxy.DEFAULT_ON_DEMAND,
+                    SourceProxy.DEFAULT_RTSP_TRANSPORT, SourceProxy.DEFAULT_READY_TIMEOUT_DURATION);
         }
         if (encoder == null) {
             encoder = new Encoder(Encoder.DEFAULT_CRF_INT, Encoder.DEFAULT_MAXRATE_BPS_LONG,
@@ -121,16 +130,69 @@ public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
      * @param playbackBase base HTTP URL of mediamtx's playback server (docs/plans/done/OPS-CORE-PLAN.md §R,
      *                     docs/plans/done/CV-TRAINING-V2-PLAN.md §7), e.g. {@code http://localhost:19996};
      *                     default {@value Mediamtx#DEFAULT_PLAYBACK_BASE}
+     * @param apiBase      base HTTP URL of mediamtx's Control API (docs/plans/active/MEDIA-SOT-PLAN.md §5.3),
+     *                     e.g. {@code http://localhost:19997} — {@code MediamtxProxyPublisher} calls this
+     *                     to create/patch/delete a proxied path and poll its readiness; only reached when
+     *                     {@link #sourceProxy()}'s {@code enabled} is {@code true}. Default {@value
+     *                     Mediamtx#DEFAULT_API_BASE}
+     * @param apiUser      optional mediamtx Control API Basic-auth username. mediamtx's baked-in {@code
+     *                     authInternalUsers} grants unauthenticated {@code api} access only to a caller
+     *                     at {@code 127.0.0.1}/{@code ::1} — a docker-published port, or a sibling
+     *                     container, does not satisfy that, so this app's own {@code docker-compose.yml}
+     *                     instead mounts a widened {@code mediamtx.yml} (see that file's own comments)
+     *                     and leaves this unset. Set this pair as the alternative to widening
+     *                     {@code mediamtx.yml} when mediamtx is reached over something less trusted than
+     *                     a private compose network. {@code null}/blank (the default) sends no {@code
+     *                     Authorization} header
+     * @param apiPassword  password paired with {@code apiUser}; required (non-blank) whenever {@code
+     *                     apiUser} is set — {@code MediamtxProxySettings}'s own compact constructor fails
+     *                     fast on a half-configured pair rather than 401ing at the first stream start
      */
     public record Mediamtx(@DefaultValue(Mediamtx.DEFAULT_RTSP_BASE) URI rtspBase,
                             @DefaultValue(Mediamtx.DEFAULT_HLS_BASE) URI hlsBase,
                             @DefaultValue(Mediamtx.DEFAULT_WHEP_BASE) URI whepBase,
-                            @DefaultValue(Mediamtx.DEFAULT_PLAYBACK_BASE) URI playbackBase) {
+                            @DefaultValue(Mediamtx.DEFAULT_PLAYBACK_BASE) URI playbackBase,
+                            @DefaultValue(Mediamtx.DEFAULT_API_BASE) URI apiBase,
+                            String apiUser,
+                            String apiPassword) {
 
         static final String DEFAULT_RTSP_BASE = "rtsp://localhost:8554";
         static final String DEFAULT_HLS_BASE = "http://localhost:8888";
         static final String DEFAULT_WHEP_BASE = "http://localhost:8889";
         static final String DEFAULT_PLAYBACK_BASE = "http://localhost:19996";
+        static final String DEFAULT_API_BASE = "http://localhost:19997";
+    }
+
+    /**
+     * "mediamtx dials the camera itself" switch (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch A, §5.5,
+     * D3/D10) — read by {@code wiring.PublishWiring#streamPublisherPort} to decide whether the {@code
+     * StreamPublisherPort} bean is a plain {@code MediamtxStreamPublisher} or a {@code PublisherRouter}
+     * wrapping it alongside a {@code MediamtxProxyPublisher}.
+     *
+     * @param enabled       whether any device is ever routed to the proxy publisher — {@code
+     *                      PublisherRouter} additionally requires the device's stream protocol to be
+     *                      {@code rtsp} before it actually proxies one (see that class's own javadoc);
+     *                      default {@code false} (D1: today's behaviour, unchanged)
+     * @param onDemand      mediamtx {@code sourceOnDemand} for a created/patched path (D10): {@code
+     *                      false} (default) makes mediamtx dial the camera as soon as the path is
+     *                      created, so {@code MTX_PATHDEFAULTS_RECORD=yes} records it without waiting
+     *                      for a viewer. {@code true} defers the dial until a reader connects, and
+     *                      {@code MediamtxProxyPublisher#streamStarted} skips the readiness poll
+     *                      entirely in that case — see that method's own javadoc for why
+     * @param rtspTransport {@code rtspTransport} sent to mediamtx's Control API when creating/patching
+     *                      a path — i.e. how <i>mediamtx</i> dials the camera, not how this JVM talks to
+     *                      mediamtx; default {@value SourceProxy#DEFAULT_RTSP_TRANSPORT}
+     * @param readyTimeout  how long {@code MediamtxProxyPublisher#streamStarted} polls readiness before
+     *                      failing the start call rather than returning a viewer URL that would play
+     *                      nothing; default 10s. Ignored when {@code onDemand} is {@code true}
+     */
+    public record SourceProxy(@DefaultValue("false") boolean enabled, @DefaultValue("false") boolean onDemand,
+                               @DefaultValue(SourceProxy.DEFAULT_RTSP_TRANSPORT) String rtspTransport,
+                               @DefaultValue("10s") Duration readyTimeout) {
+        static final boolean DEFAULT_ENABLED = false;
+        static final boolean DEFAULT_ON_DEMAND = false;
+        static final String DEFAULT_RTSP_TRANSPORT = "automatic";
+        static final Duration DEFAULT_READY_TIMEOUT_DURATION = Duration.ofSeconds(10);
     }
 
     /**

@@ -18,9 +18,9 @@ Waves commit onto this branch with disjoint file scopes. One commit per wave.
 | M4 | `adapters/adapter-cv-grpc` — Java pull port | M1, M2 | **done** |
 | M5 | `vision-application` + `vision-api` — pull-mode pipeline | M2, M4 | **done** |
 | M6 | `adapters/adapter-publish-hls` — proxy publisher + frame grab | M2 | **done** |
-| M7 | `vision-app` + `docker-compose.yml` — wiring, flags | M5, M6 | **ready** |
+| M7 | `vision-app` + `docker-compose.yml` — wiring, flags | M5, M6 | **done** |
 | M8 | `vision-web` — client overlay truth + WHEP box timing | M1 | **done** |
-| M9 | `docs/` — measure, amend CV-SCALE §S5 | M7, M8 | blocked |
+| M9 | `docs/` — measure, amend CV-SCALE §S5 | M7, M8 | **ready** |
 
 ## 2. Gate
 
