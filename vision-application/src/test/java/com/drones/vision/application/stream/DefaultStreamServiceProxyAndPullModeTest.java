@@ -238,8 +238,35 @@ class DefaultStreamServiceProxyAndPullModeTest {
     }
 
     @Test
-    void burnedInIsFalseForAPullModeStreamEvenWithOverlayConfigured() {
+    void burnedInIsTrueForAJvmPublishPullDetectionStreamWithOverlayConfigured() {
+        // docs/plans/active/MEDIA-SOT-PLAN.md §5.4 defect fix: pull detection does NOT itself suppress
+        // burn-in. This is the A=JVM, B=pull combination (Phase 1's V4L2/MJPEG/sim answer) -- the JVM
+        // still opens a VideoSourcePort and still publishes frames through StreamPipeline#overlayIfNeeded,
+        // which knows nothing about how detections arrived. The video this viewer receives genuinely
+        // carries burned-in boxes, so a client that also draws canvas boxes off a false burnedIn would
+        // double-render them.
         OverlayPort overlayPort = mock(OverlayPort.class);
+        PulledDetectionPort pulledDetectionPort = mock(PulledDetectionPort.class);
+        when(pulledDetectionPort.open(any(), any(), any())).thenReturn(noOpResultPublisher());
+        PullDetectionSettings pullDetectionSettings =
+                new PullDetectionSettings(pulledDetectionPort, URI.create("rtsp://worker-host:8554"));
+        StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, overlayPort, null, null,
+                StreamPipelineSettings.defaults(), pullDetectionSettings);
+
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+
+        assertTrue(service.burnedIn(streamId));
+        verify(videoSourcePort).open(streamId, device.stream());
+    }
+
+    @Test
+    void burnedInIsFalseForAProxiedPullModeStream() {
+        // A=proxy, B=pull -- the target combination for RTSP cameras (§3). Proxied alone is sufficient
+        // to make burnedIn false, because in proxy mode publish() is a no-op and no JVM frame is ever
+        // published for overlayIfNeeded to burn into, regardless of the detection transport.
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        when(streamPublisherPort.proxiesSource(device)).thenReturn(true);
         PulledDetectionPort pulledDetectionPort = mock(PulledDetectionPort.class);
         when(pulledDetectionPort.open(any(), any(), any())).thenReturn(noOpResultPublisher());
         PullDetectionSettings pullDetectionSettings =

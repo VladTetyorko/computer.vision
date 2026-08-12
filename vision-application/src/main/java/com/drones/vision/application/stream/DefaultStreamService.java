@@ -426,11 +426,15 @@ public final class DefaultStreamService implements StreamService {
                     streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort, eventEngine,
                     ownerAssetId, liveUpdatePublisherPort, telemetrySupplier, System::nanoTime, settings,
                     pullDetection);
-            // docs/plans/active/MEDIA-SOT-PLAN.md §5.4/D9: false exactly when nothing burns detection boxes into
-            // the published video -- no VideoSourcePort was opened (proxied), this stream's detections
-            // travel over the pull transport (OverlayPort's one call site is scoped to push mode), no
-            // OverlayPort is wired at all, or this stream's own overlayBurnIn is off.
-            boolean burnedIn = !proxied && pullDetection == null && overlayPort != null && config.overlayBurnIn();
+            // docs/plans/active/MEDIA-SOT-PLAN.md §5.4/D9 (corrected -- pull mode does NOT itself suppress
+            // burn-in, see the defect note in that section): false exactly when nothing burns detection
+            // boxes into the published video -- no VideoSourcePort was opened (proxied, so no JVM frame is
+            // ever published for StreamPipeline#overlayIfNeeded to burn into), no OverlayPort is wired at
+            // all, or this stream's own overlayBurnIn is off. Whether detections arrive by push or pull is
+            // irrelevant: overlayIfNeeded burns whatever PipelineConfig.overlayBurnIn() and DetectionExtrapolator
+            // hand it regardless of which driver fed the extrapolator, so a JVM-published, pull-detected
+            // stream (Phase 1's V4L2/MJPEG/sim answer) burns boxes exactly like push mode does.
+            boolean burnedIn = !proxied && overlayPort != null && config.overlayBurnIn();
             activeStreams.put(streamId, new RunningStream(deviceId, source, supervisedSource, pulledDetectionPort,
                     supervisedPulledResults, pipeline, Instant.now(), lockSeq, burnedIn));
             pipeline.start();
@@ -672,9 +676,13 @@ public final class DefaultStreamService implements StreamService {
      *                                 since a start request could in principle carry a lock and would
      *                                 then need the first number
      * @param burnedIn                whether server-side overlay burn-in is actually active for this
-     *                                 stream (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4), computed once at start
-     *                                 since neither {@code proxiesSource} nor the pull/push transport
-     *                                 nor {@code overlayBurnIn} can change over a running stream's life
+     *                                 stream (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4): {@code
+     *                                 !proxiesSource && overlayPort != null && overlayBurnIn} — the
+     *                                 pull/push detection transport plays no part, since {@link
+     *                                 StreamPipeline}'s overlay render is driven by the published video
+     *                                 frame, not by how detections arrived. Computed once at start since
+     *                                 neither {@code proxiesSource} nor {@code overlayBurnIn} can change
+     *                                 over a running stream's life
      */
     private record RunningStream(DeviceId deviceId, VideoSourcePort source, SupervisedPublisher<VideoFrame> supervisedSource,
                                   PulledDetectionPort pulledDetectionPort,

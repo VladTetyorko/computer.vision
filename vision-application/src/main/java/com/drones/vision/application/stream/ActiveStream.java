@@ -13,9 +13,11 @@ import java.time.Instant;
  * @param startedAt when it started
  * @param burnedIn  whether server-side overlay burn-in is actually active for this stream
  *                  (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4) — {@code false} exactly when nothing burns
- *                  detection boxes into the published video (a proxied source, or a pull-transport
- *                  stream — {@code OverlayPort}'s one call site is scoped to push mode), {@code true}
- *                  otherwise
+ *                  detection boxes into the published video (a proxied source — no JVM frame is ever
+ *                  published for the overlay renderer to burn into — or no {@code OverlayPort} wired,
+ *                  or {@code overlayBurnIn} off for this stream), {@code true} otherwise. The
+ *                  detection transport (push or pull) plays no part: a JVM-published, pull-detected
+ *                  stream burns boxes exactly like push mode does
  */
 public record ActiveStream(StreamId streamId, DeviceId deviceId, Instant startedAt, boolean burnedIn) {
 
