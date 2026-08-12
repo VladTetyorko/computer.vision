@@ -58,6 +58,29 @@ in, which is the one place the gate is taken.
 Pure stdlib -- the frame arrives as an opaque object from a `frame` callable
 the servicer supplies (it does the `cv2` decode lazily and memoizes it), so
 nothing here imports `cv2` or `numpy`.
+
+**Reconnect (TRACKING-V2-PLAN wave C5b, review finding B5).** This class no
+longer assumes it lives for exactly one `DetectStream` call -- `cv_service.
+tracking.sessions.SessionRegistry` now pools instances by `stream_id` across
+a disconnect, and `reset_for_reconnect()` (below) is the ONE thing that
+happens at that boundary: every per-frame ENGINE is dropped (a fresh build
+is forced on the resumed stream's next active frame) while the book, the
+dormant gallery and the lock are left completely untouched. See that
+method's own docstring for why the split is exactly there and not somewhere
+looser.
+
+**Multi-target FOLLOW (TRACKING-V2-PLAN wave C5b, review finding C6).**
+`TrackingParams.follow_top_k` (default `1`, today's exact behaviour) raises
+the ceiling on how many boxes a tracker-only frame emits: the locked target,
+ALWAYS first and never displaced, plus up to `follow_top_k - 1` other,
+non-locked "extra" targets, each with its OWN `SingleObjectTracker`
+instance -- the registry's existing "a new engine per call, never shared"
+contract, extended to mean "never shared between TARGETS" either. Extras are
+opportunistic situational awareness, not a second lock: one that a verify
+pass cannot re-anchor, or whose engine fails between verify passes, is
+simply dropped (its engine released) rather than coasted/predicted/LOST --
+see `_extras_verify_observations`'s docstring for the full policy, and
+`_ExtraFollow` for the per-slot state this needs.
 """
 
 from __future__ import annotations
@@ -152,6 +175,45 @@ class TrackedBox:
 
 
 @dataclass(frozen=True)
+class _ExtraFollow:
+    """One auto-selected, non-locked FOLLOW target (TRACKING-V2-PLAN wave
+    C5b, review finding C6) -- situational awareness only, never the
+    operator's lock.
+
+    `track` is the SAME mutable `Track` object `TrackBook` holds for this
+    slot's booking key -- reading `.box`/`.label`/`.confidence` off it
+    always reflects this frame's warp/observation with no second copy to
+    keep in sync, the same reason `StreamTrackingSession._followed` holds a
+    `Track` reference rather than caching its own box. Frozen: a change of
+    engine, key or track is always a NEW slot (a re-anchor or a promotion),
+    never a mutation of an existing one -- `session.py`'s own tracks
+    themselves are the only mutable state here.
+    """
+
+    key: str
+    engine: Any
+    track: Track
+
+
+@dataclass(frozen=True)
+class _ExtraCandidate:
+    """One extra observation offered to a batched `TrackBook.apply()` call,
+    before the book has told us which `Track` it became.
+
+    Exists only inside `_extras_verify_observations` and its caller: `apply()`
+    ages EVERY live track once per call (TRACKING-ORCHESTRATION), so the
+    locked target's own observation and every extra's must be booked in ONE
+    call, not one apply() per extra -- this is the record that lets the
+    caller zip `apply()`'s returned tracks back onto (`key`, `engine`) pairs
+    once that one call returns.
+    """
+
+    key: str
+    engine: Any
+    det_index: int
+
+
+@dataclass(frozen=True)
 class FrameOutcome:
     """Everything the servicer needs to build one `DetectionResponse`.
 
@@ -200,6 +262,15 @@ class StreamTrackingSession:
         self._tracker_stalled = False
         self._followed: Optional[Track] = None
         self._degraded_engine_ids: set[str] = set()
+        # Multi-target FOLLOW (TRACKING-V2-PLAN wave C5b) -- up to
+        # `follow_top_k - 1` non-locked targets, each carrying its own
+        # engine instance. `_extra_key_seq` mints a fresh, permanently-
+        # unique book key per PROMOTED extra (mirrors `_run_cost_associate`'s
+        # own `object()`-sentinel reasoning for a brand-new candidate, just
+        # spelled as a readable string since this key also has to survive
+        # into log lines).
+        self._extras: "list[_ExtraFollow]" = []
+        self._extra_key_seq = 0
         # Ego-motion compensator (TRACKING-V2-PLAN wave C2) -- resolved
         # lazily on the first active FOLLOW frame, same build-once shape as
         # `_engine`/`_engine_id` above, but independent of it: which SOT
@@ -396,6 +467,62 @@ class StreamTrackingSession:
             motion_millis=motion_millis,
             motion_engine_id=motion_engine_id,
         )
+
+    # -- reconnect (TRACKING-V2-PLAN wave C5b, review finding B5) -----------
+
+    def reset_for_reconnect(self) -> None:
+        """A stream just disconnected: drop every per-frame ENGINE, keep
+        everything else.
+
+        Called by `cv_service.tracking.sessions.SessionRegistry.release()`
+        the moment a `DetectStream` call ends, so a session sitting inside
+        its grace window is already clean and a reconnect that DOES arrive
+        resumes into a ready-to-rebuild state rather than paying the reset
+        cost on the resumed stream's first frame.
+
+        **What this resets, and why.** `lk`/`flow` each hold a previous
+        DECODED FRAME; after a reconnect the very next frame that arrives is
+        not adjacent to whatever they last saw, so feeding it in would
+        compute optical flow (or a "camera motion" transform) across a
+        discontinuity -- a large, bogus estimate applied to every live track
+        at exactly the moment the stream is most fragile. `_release_engine`/
+        `_release_motion_compensator`/`_release_appearance_extractor` force
+        `_resolve_engine`/`_resolve_motion_compensator`/`_resolve_appearance_
+        extractor` to build fresh instances on the resumed stream's next
+        active frame -- the SAME lazy build-once path a brand-new session's
+        very first frame already takes, so a resumed stream's engines start
+        exactly as cleanly as a new stream's would.
+
+        **What this does NOT reset, and why that is the whole point of this
+        wave.** `_book` (ids, lifecycle, ages), `_memory` (the dormant
+        gallery) and `_lock`'s TARGET (what the operator asked FOLLOW to
+        hold -- `_release_engine`'s own `lock.unbind()` clears only the
+        BOUND track id, forcing a fresh re-anchor, never the target itself)
+        are all left completely alone. Resuming the SAME `TrackBook`/
+        `ObjectMemory`/`LockArbiter` OBJECTS (not rebuilding equivalent ones)
+        is what makes wave C4's dormant gallery -- built to survive a
+        NINE-SECOND occlusion -- actually able to survive a TWO-SECOND
+        reconnect too, which is this wave's whole reason to exist. Also
+        untouched: `_params`/`applied_wire_config` -- the wire restates
+        `TrackingConfig` on the very next frame regardless
+        (`_sync_tracking`), so there is nothing to gain by forgetting it a
+        frame early, and `self._params.active` still governs whether the
+        NEXT frame does any tracking work at all, exactly as it always has.
+        """
+        # The epoch exists to stop an ENGINE's restarted key numbering from
+        # landing on tracks that are still live -- `bytetrack` mints its own
+        # keys and restarts them at 1. On the `cost` path the BOOK mints the
+        # keys, so there is nothing to protect against, and bumping would
+        # orphan every track in the scene: the resumed stream's first pass
+        # re-books each object under a fresh key and hands it a new id.
+        #
+        # Which is precisely what this wave exists to prevent. Measured
+        # before this guard: ids 1,2 became 3,4 across a reconnect, so the
+        # session was pooled and resumed and the operator still lost every
+        # number -- the pooling working perfectly and buying nothing.
+        self._release_engine(bump_epoch=not self._book_owns_keys())
+        self._release_motion_compensator()
+        self._release_appearance_extractor()
 
     # -- mode A: associate --------------------------------------------------
 
@@ -628,7 +755,20 @@ class StreamTrackingSession:
     def _follow_verify(
         self, engine: Any, detections: Sequence[Any], frame: FrameFn, now: float
     ) -> list[TrackedBox]:
-        """A detector pass ran: re-anchor the held target, or start coasting."""
+        """A detector pass ran: re-anchor the held target, or start coasting.
+
+        TRACKING-V2-PLAN wave C5b: when the locked target re-anchors, this is
+        ALSO where up to `follow_top_k - 1` extra targets get their own
+        chance to re-anchor or be freshly promoted
+        (`_extras_verify_observations`) -- batched into the SAME `TrackBook.
+        apply()` call as the lock's own observation, because `apply()` ages
+        EVERY live track once per call and a second call in the same frame
+        would double-count it. Skipped entirely when the lock itself fails to
+        re-anchor (the coast-fallback branch below): a stream whose actual
+        lock cannot be confirmed is not the moment to spend effort on
+        situational-awareness boxes, and the next successful verify pass
+        picks extras back up from a clean slate.
+        """
         boxes = [Box(d.x, d.y, d.width, d.height) for d in detections]
         index = self._select_target(boxes, now)
 
@@ -639,7 +779,7 @@ class StreamTrackingSession:
                 self._reset_engine(exc)
                 return [_box_for(detection) for detection in detections]
             if anchored:
-                observation = observation_for(
+                locked_observation = observation_for(
                     detections[index],
                     self._follow_key(),
                     det_index=index,
@@ -649,12 +789,30 @@ class StreamTrackingSession:
                     # for ambient association -- does not apply.
                     authoritative=True,
                 )
-                track = self._book.apply([observation], now, detector_ran=True)[0]
-                self._followed = track
-                self._lock.bind(track.track_id)
+                claimed = {index}
+                extra_observations, extra_candidates = self._extras_verify_observations(
+                    boxes, detections, frame, now, claimed
+                )
+                tracks = self._book.apply(
+                    [locked_observation, *extra_observations], now, detector_ran=True
+                )
+                locked_track = tracks[0]
+                self._followed = locked_track
+                self._lock.bind(locked_track.track_id)
                 self._tracker_stalled = False
+                self._extras = [
+                    _ExtraFollow(key=candidate.key, engine=candidate.engine, track=track)
+                    for candidate, track in zip(extra_candidates, tracks[1:])
+                ]
+                tracks_by_index = {index: locked_track}
+                tracks_by_index.update(
+                    {
+                        candidate.det_index: track
+                        for candidate, track in zip(extra_candidates, tracks[1:])
+                    }
+                )
                 return [
-                    _box_for(detection, track if position == index else None)
+                    _box_for(detection, tracks_by_index.get(position))
                     for position, detection in enumerate(detections)
                 ]
 
@@ -675,17 +833,222 @@ class StreamTrackingSession:
             emitted.append(coasted)
         return emitted
 
+    def _extras_verify_observations(
+        self,
+        boxes: Sequence[Box],
+        detections: Sequence[Any],
+        frame: FrameFn,
+        now: float,
+        claimed: "set[int]",
+    ) -> "tuple[list[Observation], list[_ExtraCandidate]]":
+        """This verify pass's extra-target observations, built but NOT yet
+        booked (TRACKING-V2-PLAN wave C5b, review finding C6).
+
+        Batched into the SAME `TrackBook.apply()` call the caller makes for
+        the locked target's own re-anchor -- see this method's caller for
+        why one call, not several. Mutates `claimed` with every detection
+        index an extra takes, so the caller never lets one box serve two
+        slots.
+
+        **Policy, stated plainly per the plan's own instruction.** An
+        EXISTING extra re-anchors on the best-IoU UNCLAIMED detection at or
+        above `redetect_iou_threshold` -- the SAME test the locked target's
+        own re-anchor already uses (`lock.best_iou_match`), reused rather
+        than reinvented. One that fails to re-anchor is dropped outright
+        (its engine released): an extra is opportunistic situational
+        awareness, never a commitment, so it gets none of the locked
+        target's coast/predict/LOST machinery. Whatever OPEN slots remain
+        (a dropped extra, or `follow_top_k` freshly raised) are filled by
+        the highest-CONFIDENCE unclaimed detections -- confidence, and only
+        confidence, is the "worth a slot" policy. If this ever needs a
+        second sort key, it has grown past what belongs in this file.
+        """
+        capacity = max(0, self._params.follow_top_k - 1)
+        observations: "list[Observation]" = []
+        candidates: "list[_ExtraCandidate]" = []
+        if capacity <= 0:
+            self._release_extras()
+            return observations, candidates
+
+        for extra in self._extras:
+            available = [position for position in range(len(boxes)) if position not in claimed]
+            held_box = predict(extra.track, now).box
+            match = (
+                lock_module.best_iou_match(
+                    held_box, [boxes[position] for position in available], self._params.redetect_iou_threshold
+                )
+                if available
+                else -1
+            )
+            if match < 0:
+                self._drop_extra(extra)
+                continue
+            detection_index = available[match]
+            try:
+                anchored = extra.engine.init(frame(), boxes[detection_index])
+            except Exception:  # noqa: BLE001 - one extra's failure costs that extra only
+                self._drop_extra(extra)
+                continue
+            if not anchored:
+                self._drop_extra(extra)
+                continue
+            claimed.add(detection_index)
+            observations.append(
+                observation_for(detections[detection_index], extra.key, det_index=detection_index)
+            )
+            candidates.append(
+                _ExtraCandidate(key=extra.key, engine=extra.engine, det_index=detection_index)
+            )
+
+        open_slots = capacity - len(candidates)
+        if open_slots > 0:
+            registry = self._registry_provider()
+            if registry is not None:
+                ranked = sorted(
+                    (position for position in range(len(detections)) if position not in claimed),
+                    key=lambda position: detections[position].confidence,
+                    reverse=True,
+                )[:open_slots]
+                for detection_index in ranked:
+                    created = registry.follower(
+                        self._params.engine_id, max_age_frames=self._params.max_age_frames
+                    )
+                    if created is None:
+                        continue
+                    _engine_id, engine = created
+                    try:
+                        anchored = engine.init(frame(), boxes[detection_index])
+                    except Exception:  # noqa: BLE001 - a fresh extra's own failure, nothing else
+                        continue
+                    if not anchored:
+                        continue
+                    claimed.add(detection_index)
+                    self._extra_key_seq += 1
+                    key = f"follow-extra:{self._lock.generation}:{self._extra_key_seq}"
+                    observations.append(
+                        observation_for(detections[detection_index], key, det_index=detection_index)
+                    )
+                    candidates.append(
+                        _ExtraCandidate(key=key, engine=engine, det_index=detection_index)
+                    )
+
+        return observations, candidates
+
     def _follow_predict(self, engine: Any, frame: FrameFn, now: float) -> list[TrackedBox]:
-        """A tracker-only frame: move the held box and emit it alone."""
+        """A tracker-only frame: move the locked target AND up to
+        `follow_top_k - 1` extra targets, each by its own engine, in ONE
+        batched `TrackBook.apply()` call (TRACKING-V2-PLAN wave C5b, review
+        finding C6 -- FOLLOW used to be scene-blind between verify passes).
+
+        The locked target is ALWAYS first in the returned list, built
+        independently of the extras: if its OWN engine raises, this method
+        reports the frame untracked exactly as it always has
+        (`_build_coast_observation`'s exception path resets the locked
+        engine and returns `None`), and extras are never even touched that
+        frame -- a problem with the operator's actual lock is not the moment
+        to spend effort on situational-awareness boxes.
+        """
         if self._followed is None:  # pragma: no cover - the scheduler forbids it
             return []
-        coasted = self._coast(engine, frame, now, detector_ran=False)
-        return [coasted] if coasted is not None else []
+        held = self._followed
+        locked_observation = self._build_coast_observation(engine, held, frame, now, detector_ran=False)
+        if locked_observation is None:
+            return []
+
+        extra_observations, surviving_extras = self._extras_observations(frame)
+
+        tracks = self._book.apply([locked_observation, *extra_observations], now, detector_ran=False)
+        boxes = [self._settle_followed(tracks[0])]
+        self._extras = []
+        for extra, track in zip(surviving_extras, tracks[1:]):
+            # `track` is the SAME object `TrackBook` will keep handing back
+            # for this key going forward -- re-wrapping it here (rather than
+            # reusing `extra` as-is) is what keeps `_ExtraFollow.track`
+            # honest as "the book's own object", the property `predict()`/
+            # the next verify pass's re-anchor test both rely on.
+            self._extras.append(_ExtraFollow(key=extra.key, engine=extra.engine, track=track))
+            boxes.append(_from_track(track))
+        return boxes
+
+    def _extras_observations(
+        self, frame: FrameFn
+    ) -> "tuple[list[Observation], list[_ExtraFollow]]":
+        """Advance every currently-held extra by its OWN engine's `update()`
+        call (TRACKING-V2-PLAN wave C5b).
+
+        An extra whose engine raises, reports lost, or returns an invalid
+        box is simply DROPPED (its engine released, its slot freed for the
+        next verify pass to fill) rather than predicted or coasted -- see
+        `_extras_verify_observations`'s docstring for why an extra gets none
+        of the locked target's stall/LOST machinery. Never touches
+        `_tracker_failed`/`_box_invalid`/the `LockArbiter` -- the duty
+        cycle's scheduler answers to the LOCKED target only, and an extra
+        failing must never bring a verify pass forward on its account: that
+        would let situational-awareness boxes dictate the cadence the
+        operator's own lock is supposed to control.
+        """
+        observations: "list[Observation]" = []
+        survivors: "list[_ExtraFollow]" = []
+        for extra in self._extras:
+            try:
+                update = extra.engine.update(frame())
+            except Exception:  # noqa: BLE001 - one extra's failure costs that extra only
+                self._drop_extra(extra)
+                continue
+            if update is None or not update.box.valid:
+                self._drop_extra(extra)
+                continue
+            observations.append(
+                Observation(
+                    key=extra.key,
+                    box=update.box,
+                    label=extra.track.label,
+                    confidence=extra.track.confidence,
+                    source=SOURCE_TRACKER,
+                )
+            )
+            survivors.append(extra)
+        return observations, survivors
 
     def _coast(
         self, engine: Any, frame: FrameFn, now: float, *, detector_ran: bool
     ) -> Optional[TrackedBox]:
-        """Advance the held target by the tracker alone.
+        """Advance the LOCKED target by the tracker alone, and book it.
+
+        Single-target contract, used by the FOLLOW verify pass's own
+        coast-fallback branch (`detector_ran=True`, no extras touched -- see
+        `_follow_verify`'s docstring for why). `_follow_predict` does NOT
+        call this directly: it needs the locked observation batched together
+        with every extra's into ONE `TrackBook.apply()` call, so it calls
+        `_build_coast_observation`/`_settle_followed` itself instead. Kept as
+        a thin wrapper over both rather than removed, so this file's other
+        single-observation call site reads exactly as it did before this
+        wave.
+        """
+        held = self._followed
+        if held is None:  # pragma: no cover - guarded by both callers
+            return None
+        observation = self._build_coast_observation(engine, held, frame, now, detector_ran=detector_ran)
+        if observation is None:
+            return None
+        track = self._book.apply([observation], now, detector_ran=detector_ran)[0]
+        return self._settle_followed(track)
+
+    def _build_coast_observation(
+        self, engine: Any, held: Track, frame: FrameFn, now: float, *, detector_ran: bool
+    ) -> Optional[Observation]:
+        """Engine update / predict-on-stall for the LOCKED target, stopping
+        short of booking it into the book.
+
+        Split out of what used to be `_coast`'s own body (TRACKING-V2-PLAN
+        wave C5b) so a tracker-only frame can batch the locked target's
+        observation with every extra's into ONE `TrackBook.apply()` call --
+        `apply()` ages EVERY live track once per call, so calling it more
+        than once in the same frame would double-count `age_frames` for
+        every track in the book, not just the ones this frame's engines
+        touched. `None` means the engine raised: `_reset_engine` has already
+        reset it and bumped the book epoch, and the caller reports this
+        frame untracked, exactly `_coast`'s pre-existing contract.
 
         A tracker that reports lost, or returns a box that has collapsed or
         left the frame, keeps the last known box for this frame and raises
@@ -704,10 +1067,6 @@ class StreamTrackingSession:
         the miss counter and trigger (e) own the outcome: the track coasts
         and goes LOST on schedule.
         """
-        held = self._followed
-        if held is None:  # pragma: no cover - guarded by both callers
-            return None
-
         if self._tracker_stalled:
             # The tracker has already told us it lost this target AND the
             # verify pass that followed could not re-anchor it. Asking it
@@ -756,7 +1115,7 @@ class StreamTrackingSession:
                     # states for triggers (b)/(d)).
                     self._tracker_failed = True
 
-        observation = Observation(
+        return Observation(
             key=self._follow_key(),
             box=box,
             label=held.label,
@@ -766,7 +1125,10 @@ class StreamTrackingSession:
             # the engine -- see `Observation.predicted`.
             predicted=predicted,
         )
-        track = self._book.apply([observation], now, detector_ran=detector_ran)[0]
+
+    def _settle_followed(self, track: Track) -> TrackedBox:
+        """Post-`apply()` bookkeeping for the LOCKED target's own track,
+        shared by `_coast` and `_follow_predict`'s own batched apply call."""
         self._followed = track
         if track.state == STATE_LOST:
             # `max_age_frames` consecutive unconfirmed verify passes: the
@@ -1064,11 +1426,25 @@ class StreamTrackingSession:
             self._engine = None
             self._engine_id = ""
         self._book.bump_epoch()
+        self._release_extras()
         self._followed = None
         self._tracker_stalled = False
         self._lock.unbind()
 
-    def _release_engine(self) -> None:
+    def _book_owns_keys(self) -> bool:
+        """Whether track keys are minted by the book rather than by an engine.
+
+        True on the `cost` path, where a new candidate gets an `object()`
+        sentinel from `_run_cost_associate` and a matched one reuses its
+        track's existing key. False for `bytetrack`, which numbers tracks
+        from its own counter and restarts it whenever it is rebuilt.
+        """
+        return (
+            self._params.mode == MODE_ASSOCIATE
+            and self._params.engine_id == CostAssociator.engine_id
+        )
+
+    def _release_engine(self, *, bump_epoch: bool = True) -> None:
         """Drop the current engine instance so the next frame rebuilds one.
 
         Called on a config change that invalidates the engine (mode/
@@ -1077,13 +1453,44 @@ class StreamTrackingSession:
         switching FOLLOW's engine from `lk` to `ncc` mid-stream keeps every
         track's id instead of losing the whole scene's numbering. `OFF`
         (`_reset_state`, below) is the one caller that wants a real wipe.
+        Also the mechanism `reset_for_reconnect` (TRACKING-V2-PLAN wave C5b)
+        reuses for a disconnect, for the identical reason.
         """
         self._engine = None
         self._engine_id = ""
-        self._book.bump_epoch()
+        if bump_epoch:
+            self._book.bump_epoch()
+        self._release_extras()
         self._followed = None
         self._tracker_stalled = False
         self._lock.unbind()
+
+    def _release_extras(self) -> None:
+        """Drop every extra target's engine and forget the slot (TRACKING-V2-
+        PLAN wave C5b) -- never the `Track` itself, which stays in the book,
+        aging on the normal schedule, exactly like the locked target's own
+        `Track` after `_release_engine` drops ITS engine.
+
+        Called everywhere `_reset_engine`/`_release_engine` bump the book's
+        epoch: an extra's booking key stops resolving to its existing
+        `Track` the instant the epoch changes (`TrackBook._namespaced`), so
+        holding onto a now-orphaned `_ExtraFollow` past that point would only
+        let its NEXT re-anchor silently mint a fresh id under the same key
+        string -- clearing the slot here makes that explicit instead of
+        latent.
+        """
+        for extra in self._extras:
+            self._drop_extra(extra)
+        self._extras = []
+
+    def _drop_extra(self, extra: "_ExtraFollow") -> None:
+        """Release one extra's engine. Never raises -- a failed reset costs
+        that engine, not the stream (P5), same posture every other engine
+        teardown in this file takes."""
+        try:
+            extra.engine.reset()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _reset_state(self) -> None:
         """Tracking just went OFF (or degraded all the way down to it).

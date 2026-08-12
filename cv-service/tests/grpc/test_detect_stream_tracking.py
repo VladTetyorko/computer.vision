@@ -452,6 +452,42 @@ def test_the_tracker_update_never_acquires_the_inference_gate(clock):
     assert gate.acquisitions == 1
 
 
+def test_multi_target_follow_updates_never_acquire_the_inference_gate(clock):
+    """Extends the single-target proof above to the multi-target case
+    (TRACKING-V2-PLAN wave C5b, review finding C6, P2's own instruction):
+    K engine `update()` calls per frame -- one for the locked target, one
+    per extra -- must be exactly as gate-free as one."""
+    gate = RecordingGate()
+    subject = servicer(gate=gate, tracker_registry=StubTrackerRegistry(follower=StubFollower))
+    config = follow_config(verify_every_millis=100_000)  # exactly one pass, ever
+
+    session = servicers_module.StreamTrackingSession(
+        settings=dataclasses.replace(
+            Settings(),
+            track_follow_top_k=3,
+            track_max_age_millis=1_000_000,  # see the sibling test above for why
+        ),
+        registry_provider=subject._resolve_tracker_registry,
+    )
+    first = subject._handle_request(frame_request(0, config), session)
+    assert first.detector_ran is True
+    assert gate.acquisitions == 1
+    # FakeDetector's two detections (car + person): the locked target plus
+    # ONE extra, both carrying track ids on this same verify-pass frame.
+    assert len(first.detections) == 2
+    assert all(detection.track_id != 0 for detection in first.detections)
+
+    for frame in range(1, 60):
+        clock.seconds = frame / 15.0
+        response = subject._handle_request(frame_request(frame, config), session)
+        assert response.detector_ran is False
+        # The locked target AND the extra keep moving every tracker-only
+        # frame, each on its OWN engine -- neither ever touches the gate.
+        assert len(response.detections) == 2
+
+    assert gate.acquisitions == 1
+
+
 def test_associate_with_cost_motion_and_appearance_never_acquires_the_inference_gate(clock):
     # TRACKING-V2-PLAN wave C3's own P2 proof: `cost` gives ASSOCIATE a live
     # motion compensator AND a live appearance extractor for the first time
@@ -816,19 +852,65 @@ def test_no_tracker_registry_serves_detections_without_track_ids(clock):
     assert responses[0].tracker_engine_id == ""
 
 
-# --- the session lives where `_StreamReader` does -----------------------------
+# --- the session is pooled by stream_id (TRACKING-V2-PLAN wave C5b, review finding B5) --
 
 
-def test_detect_stream_creates_one_session_per_call(clock):
+def test_a_reconnect_within_the_grace_window_keeps_the_same_session(clock):
+    """The direct fix for finding B5: an RF blip must not cost the operator
+    the numbers they are watching.
+
+    Note what this asserts and what it deliberately does not. An earlier
+    version of this test accepted ids 3 and 4 -- "the counter did not restart
+    at 1" -- which the pooling satisfied while the operator's #1 still came
+    back as #3. That is not the fix; it is the defect with a different
+    number on it. The same physical objects must come back under the SAME
+    ids, which they only do once the reconnect stops bumping the book's key
+    epoch (`StreamTrackingSession._book_owns_keys`)."""
     subject = servicer()
     config = tracking(cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE, min_hits=1)
 
     first = list(subject.DetectStream(iter([frame_request(0, config)]), None))
-    second = list(subject.DetectStream(iter([frame_request(0, config)]), None))
+    clock.seconds = 0.5  # a brief reconnect gap, nowhere near the default grace window
+    second = list(subject.DetectStream(iter([frame_request(1, config)]), None))
 
-    # Two calls, two sessions: ids restart at 1 rather than continuing.
     assert [d.track_id for d in first[0].detections] == [1, 2]
     assert [d.track_id for d in second[0].detections] == [1, 2]
+    assert subject._session_registry.size() == 1
+
+
+def test_a_reconnect_after_the_grace_window_starts_a_fresh_session(clock):
+    """The other half of finding B5's fix: the grace window is a window, not
+    a promise -- a stream gone long enough is presumed gone for good, and
+    its book is discarded so a same-named stream_id reappearing much later
+    does not silently inherit a dead session's state."""
+    subject = servicer()
+    config = tracking(cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE, min_hits=1)
+
+    list(subject.DetectStream(iter([frame_request(0, config)]), None))
+    clock.seconds = 9999.0  # far past CV_TRACK_SESSION_GRACE_MILLIS's default
+    second = list(subject.DetectStream(iter([frame_request(1, config)]), None))
+
+    assert [d.track_id for d in second[0].detections] == [1, 2]
+
+
+def test_a_reconnect_does_not_resume_the_locked_engines_own_state(clock):
+    """The wave's one deliberate subtlety: `lk`/`flow` each hold a previous
+    decoded frame, so a resumed session must rebuild its ENGINES from
+    scratch even though it resumes its book/lock. Proven directly on the
+    resumed `StreamTrackingSession` object, not just inferred from track
+    ids: the engine reference is gone, forcing `_resolve_engine` to build a
+    brand-new instance on the next active frame, while the lock's own
+    target (not merely its bound track id) survives untouched."""
+    subject = servicer()
+    config = follow_config(verify_every_millis=100_000)
+
+    list(subject.DetectStream(iter([frame_request(0, config)]), None))
+    resumed = subject._session_registry.acquire("stream-1")
+
+    assert resumed._engine is None
+    assert resumed._lock.has_target  # the operator's FOLLOW target survives
+    assert resumed.tracks  # the book itself was not wiped
+    subject._session_registry.release("stream-1", resumed)
 
 
 def test_the_tracker_registry_is_built_lazily_and_only_once():

@@ -179,6 +179,14 @@ class TrackingParams:
     # turns that into "no `ObjectMemory` is even constructed", never an
     # empty gallery still being consulted every frame (P5).
     memory_params: MemoryParams
+    # TRACKING-V2-PLAN wave C5b addition (review finding C6). Same
+    # "deployment-only, no wire field" shape as `track_max_age_millis`/
+    # `min_tracker_confidence` above -- `session.py` reads it as "the LOCKED
+    # target plus up to `follow_top_k - 1` other targets, each with its own
+    # `SingleObjectTracker` instance". `1` reproduces FOLLOW's pre-C5b
+    # single-target behaviour exactly -- see `config.py`'s `DEFAULT_TRACK_
+    # FOLLOW_TOP_K` for why that, not a larger number, is what ships.
+    follow_top_k: int
 
     @property
     def active(self) -> bool:
@@ -339,4 +347,7 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
             blend_alpha=settings.track_memory_blend_alpha,
             min_confidence=settings.track_memory_min_confidence,
         ),
+        # No wire field (TRACKING-V2-PLAN wave C5b) -- straight from
+        # `Settings`, same shape as `track_max_age_millis` above.
+        follow_top_k=settings.track_follow_top_k,
     )

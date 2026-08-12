@@ -7,6 +7,7 @@ point of keeping everything but `engines/` stdlib-only.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 
 import pytest
@@ -906,6 +907,162 @@ def test_a_target_the_engine_cannot_anchor_reports_no_lock():
     assert all(box.track is None for box in outcome.boxes)
 
 
+# -- multi-target FOLLOW (TRACKING-V2-PLAN wave C5b, review finding C6) -----
+
+
+def multi_follow_session(follow_top_k, *, verify_every_millis=2000, **lock_kwargs):
+    """A FOLLOW session whose follower engine is a FRESH `FakeFollower`
+    PER CALL (unlike `follow_session`'s single shared instance, which would
+    corrupt multi-target state: the locked target and every extra each need
+    their OWN engine object). `created` lists every engine built, in
+    construction order -- index 0 is always the locked target's own.
+    """
+    created: "list[FakeFollower]" = []
+
+    def factory():
+        engine = FakeFollower()
+        created.append(engine)
+        return engine
+
+    settings = dataclasses.replace(Settings(), track_follow_top_k=follow_top_k)
+    subject = session(FakeRegistry(follower=factory), settings)
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            verify_every_millis=verify_every_millis,
+            min_hits=1,
+            lock=LockRequest(lock_seq=1, **(lock_kwargs or {"point_x": 0.15, "point_y": 0.15})),
+        )
+    )
+    return subject, created
+
+
+def test_k_equal_one_reproduces_todays_single_target_behaviour_exactly():
+    """The wave's own safety net: `follow_top_k=1` (the shipped default)
+    must never build an extra, never touch the registry an extra would need,
+    and emit exactly one box on a tracker-only frame -- byte-identical to
+    FOLLOW before this wave existed."""
+    subject, engines = multi_follow_session(1, verify_every_millis=100_000)
+    run(
+        subject,
+        now_millis=0.0,
+        detections=[det("car", x=0.1, y=0.1), det("person", x=0.4, y=0.4, confidence=0.8)],
+    )
+
+    tracker_only = run(subject, now_millis=66.0, detections=[det()])
+
+    assert len(tracker_only.boxes) == 1
+    assert len(engines) == 1  # no extra engine was ever built
+
+
+def test_follow_emits_more_than_one_box_between_verify_passes_when_k_exceeds_one():
+    subject, _engines = multi_follow_session(3, verify_every_millis=100_000)
+    born = run(
+        subject,
+        now_millis=0.0,
+        detections=[
+            det("car", x=0.1, y=0.1),
+            det("person", x=0.4, y=0.4, confidence=0.8),
+            det("bus", x=0.7, y=0.7, confidence=0.6),
+        ],
+    )
+    assert born.locked_track_id != 0
+
+    tracker_only = run(subject, now_millis=66.0, detections=[det()])
+
+    # The locked target plus both extras -- K=3 means a ceiling of 3, and
+    # all three candidates were available to fill it.
+    assert len(tracker_only.boxes) == 3
+    assert tracker_only.boxes[0].track.track_id == born.locked_track_id
+
+
+def test_the_locked_target_is_always_first_and_is_never_displaced():
+    subject, engines = multi_follow_session(3, verify_every_millis=100_000)
+    born = run(
+        subject,
+        now_millis=0.0,
+        detections=[
+            det("car", x=0.1, y=0.1),
+            det("person", x=0.4, y=0.4, confidence=0.8),
+            det("bus", x=0.7, y=0.7, confidence=0.6),
+        ],
+    )
+    locked_id = born.locked_track_id
+
+    # One extra's own engine fails; the locked target's engine is untouched.
+    engines[1].update_returns = "lost"
+    outcome = run(subject, now_millis=66.0, detections=[det()])
+
+    assert outcome.boxes[0].track.track_id == locked_id
+    assert len(outcome.boxes) == 2  # locked + the one surviving extra
+
+
+def test_a_dropped_extras_engine_is_released_and_its_slot_reopens():
+    subject, engines = multi_follow_session(2, verify_every_millis=1)
+    run(
+        subject,
+        now_millis=0.0,
+        detections=[det("car", x=0.1, y=0.1), det("person", x=0.4, y=0.4)],
+    )
+    assert len(engines) == 2
+    engines[1].update_returns = "lost"
+    dropped = run(subject, now_millis=10.0, detections=[det()])
+    assert len(dropped.boxes) == 1  # only the locked target survives this frame
+    assert engines[1].resets == 1  # the failed extra's engine was released
+
+    # The next verify pass has an unclaimed detection again -- a fresh extra
+    # is promoted into the now-open slot, with its OWN new engine.
+    refilled = run(
+        subject,
+        now_millis=20.0,
+        detections=[det("car", x=0.1, y=0.1), det("bus", x=0.7, y=0.7)],
+    )
+
+    assert len(refilled.boxes) == 2
+    assert len(engines) == 3  # a THIRD, brand-new engine for the new extra
+
+
+def test_an_existing_extra_re_anchors_on_the_best_iou_match_next_verify_pass():
+    subject, engines = multi_follow_session(2, verify_every_millis=1)
+    run(
+        subject,
+        now_millis=0.0,
+        detections=[det("car", x=0.1, y=0.1), det("person", x=0.4, y=0.4)],
+    )
+    extra_id = None
+    for track in subject.tracks:
+        if track.label == "person":
+            extra_id = track.track_id
+
+    # The SAME physical target, slightly moved -- still the best IoU match.
+    reanchored = run(
+        subject,
+        now_millis=10.0,
+        detections=[det("car", x=0.1, y=0.1), det("person", x=0.41, y=0.4)],
+    )
+
+    assert len(engines) == 2  # no third engine -- the same extra re-anchored
+    reanchored_extra = next(box for box in reanchored.boxes if box.track and box.track.label == "person")
+    assert reanchored_extra.track.track_id == extra_id
+
+
+def test_follow_top_k_never_touches_extras_when_the_lock_itself_fails_to_reanchor():
+    subject, engines = multi_follow_session(3, verify_every_millis=1)
+    run(
+        subject,
+        now_millis=0.0,
+        detections=[det("car", x=0.1, y=0.1), det("person", x=0.4, y=0.4)],
+    )
+    assert len(engines) == 2  # locked + one extra, promoted on the first pass
+
+    # The verify pass now sees nothing near the locked target at all.
+    coasting = run(subject, now_millis=10.0, detections=[det("bus", x=0.8, y=0.8)])
+
+    assert coasting.boxes[-1].track.state == "TRACK_STATE_COASTING"
+    # No third engine was built attempting to promote "bus" as an extra.
+    assert len(engines) == 2
+
+
 def test_a_coasting_box_moves_instead_of_freezing_where_it_was_last_seen():
     # THE fix for review finding C1: a tracker that reports lost must not
     # leave the box sitting exactly where it was last confirmed -- it has to
@@ -1227,6 +1384,97 @@ def test_switching_to_off_clears_the_state():
 
     assert subject.active is False
     assert subject.tracks == []
+
+
+# -- reconnect (TRACKING-V2-PLAN wave C5b, review finding B5) ----------------
+#
+# `reset_for_reconnect` is called by `cv_service.tracking.sessions.
+# SessionRegistry` when a stream disconnects (see that module's own tests
+# for the pool mechanics); these pin exactly what it does and does not touch
+# on the session itself.
+
+
+def test_reconnect_drops_the_engine_but_keeps_the_book_and_the_locks_target():
+    subject, _engine = follow_session()
+    run(subject, now_millis=0.0, detections=[det()])
+    assert subject._engine is not None
+    assert subject.tracks
+    assert subject._lock.bound_track_id != 0
+
+    subject.reset_for_reconnect()
+
+    # Engine state: NOT resumed -- forces a clean rebuild on the next frame.
+    assert subject._engine is None
+    assert subject._engine_id == ""
+    # Identity core: resumed untouched -- the book was not wiped, and the
+    # operator's own FOLLOW target survives (only the momentary BOUND track
+    # id resets, which correctly asks the next frame to re-verify it).
+    assert subject.tracks
+    assert subject._lock.has_target
+    assert subject._lock.bound_track_id == 0
+
+
+def test_reconnect_drops_the_motion_compensator():
+    compensator = FakeMotionCompensator()
+    subject, _engine = follow_session(compensator=compensator)
+    run(subject, now_millis=0.0, detections=[det()])
+    assert subject._motion_engine is not None
+
+    subject.reset_for_reconnect()
+
+    assert subject._motion_engine is None
+    assert subject._motion_resolved is False
+
+
+def test_reconnect_drops_the_appearance_extractor():
+    extractor = FakeAppearanceExtractor()
+    subject = session(FakeRegistry(associator=cost_engine(), appearance=extractor))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    run(subject, now_millis=0.0, detections=[det()])
+    assert subject._appearance_engine is not None
+
+    subject.reset_for_reconnect()
+
+    assert subject._appearance_engine is None
+    assert subject._appearance_resolved is False
+
+
+def test_reconnect_does_not_rebuild_the_dormant_gallery():
+    subject = session(FakeRegistry(associator=cost_engine()))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    run(subject, now_millis=0.0, detections=[det()])
+    memory_before = subject._memory
+    assert memory_before is not None
+
+    subject.reset_for_reconnect()
+
+    assert subject._memory is memory_before  # the SAME gallery object
+
+
+def test_a_reconnected_stream_re_verifies_and_continues_the_id_counter():
+    """End to end at the session level: after a reconnect, the very next
+    active frame still finds and locks the target again, via a freshly
+    built engine. Reconnect IS an engine reset (`reset_for_reconnect` calls
+    the same `_release_engine`/`bump_epoch` machinery review findings D1/D2
+    already built), so it inherits that mechanism's existing, deliberate
+    rule verbatim: a live target's OWN id is not preserved across an engine
+    reset (`test_an_engine_change_rebuilds_and_retires_the_ids` pins the
+    identical rule for an ordinary `engine_id` change) -- only the BOOK's
+    overall numbering survives, continuing from where it left off rather
+    than restarting at 1. Recovering the SAME id for the reconnecting
+    object specifically is what wave C4's `ObjectMemory` is for, and it is
+    already reachable here exactly as it is for any other engine reset --
+    this wave adds no new mechanism for it, it only makes the book survive
+    long enough to be asked."""
+    subject, engine = follow_session(verify_every_millis=100_000)
+    first = run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    subject.reset_for_reconnect()
+    assert engine.inits == 1  # the OLD engine was touched exactly once, pre-reconnect
+
+    resumed = run(subject, now_millis=1000.0, detections=[det("car", x=0.1)])
+
+    assert resumed.locked_track_id > first.locked_track_id
 
 
 # -- degradation ------------------------------------------------------------

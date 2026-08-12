@@ -67,6 +67,7 @@ from cv_service.tracking import params as tracking_params
 from cv_service.tracking.engines.base import CameraPose
 from cv_service.tracking.registry import TrackerRegistry
 from cv_service.tracking.session import FrameOutcome, StreamTrackingSession
+from cv_service.tracking.sessions import SessionRegistry
 from cv_service.training import dataset, orchestrator, trainer
 from cv_service.training.marker import write_active_model
 
@@ -437,6 +438,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         registry: object = _UNSET_REGISTRY,
         settings: Optional[Settings] = None,
         tracker_registry: object = _UNSET_REGISTRY,
+        session_registry: Optional[SessionRegistry] = None,
     ) -> None:
         self._inference_gate = inference_gate if inference_gate is not None else process_gate()
         self._warned_model_ids: set[str] = set()
@@ -451,6 +453,21 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         # registry instead -- that is what makes the roster get logged at
         # STARTUP, per TRACKING-PLAN R3/R11, rather than on first use.
         self._tracker_registry: object = tracker_registry
+        # `StreamTrackingSession` pool keyed by `stream_id` (TRACKING-V2-PLAN
+        # wave C5b, review finding B5) -- built eagerly, unlike the tracker
+        # registry above: it is pure stdlib bookkeeping with nothing to probe
+        # and no `cv` extra to defer, so there is no lazy-construction cost
+        # to avoid. Injectable so tests can use a tiny grace window instead
+        # of waiting on `CV_TRACK_SESSION_GRACE_MILLIS`'s real default.
+        self._session_registry = (
+            session_registry
+            if session_registry is not None
+            else SessionRegistry(
+                grace_millis=self._settings.track_session_grace_millis,
+                capacity=self._settings.track_session_capacity,
+                session_factory=self._new_session,
+            )
+        )
         if detector is not None:
             # Explicit single-detector injection: registry routing is
             # bypassed entirely, see class docstring.
@@ -477,21 +494,24 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                 yield self._echo(request)
             return
 
-        # Per-stream tracking state, created here for exactly the reason
-        # `_StreamReader` is: it belongs to one bidi call, not to this
-        # servicer, which every stream shares. Construction is free -- no
-        # engine exists until a frame asks for an active tracking mode.
-        session = StreamTrackingSession(
-            settings=self._settings, registry_provider=self._resolve_tracker_registry
-        )
-
         # Claim the first frame directly and synchronously -- see
         # _StreamReader's docstring for why the background reader thread
-        # only starts on the *rest* of the stream, not this one.
+        # only starts on the *rest* of the stream, not this one. It is also
+        # the earliest point `stream_id` is known, which is why session
+        # acquisition happens here rather than before this `next()` call.
         try:
             first_request = next(request_iterator)
         except StopIteration:
             return
+
+        # Per-stream tracking state, POOLED by `stream_id` (TRACKING-V2-PLAN
+        # wave C5b, review finding B5) rather than minted fresh per call: a
+        # reconnecting stream resumes its book/gallery/lock instead of every
+        # id in the scene restarting at 1. A blank `stream_id` never pools
+        # (`SessionRegistry.acquire`'s own doc) -- construction stays free
+        # either way, no engine exists until a frame asks for an active mode.
+        stream_id = first_request.stream_id
+        session = self._session_registry.acquire(stream_id)
 
         reader = _StreamReader(request_iterator)
         try:
@@ -503,6 +523,18 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                 yield self._handle_request(request, session)
         finally:
             reader.stop()
+            self._session_registry.release(stream_id, session)
+
+    def _new_session(self) -> StreamTrackingSession:
+        """Build a fresh `StreamTrackingSession`, wired identically regardless
+        of whether `SessionRegistry` is minting it for a brand-new
+        `stream_id` or as its concurrent-call fallback (see that class's
+        `acquire()`). The one construction site, so both paths stay in sync
+        by construction rather than by two call sites remembering to agree.
+        """
+        return StreamTrackingSession(
+            settings=self._settings, registry_provider=self._resolve_tracker_registry
+        )
 
     def _handle_request(
         self,

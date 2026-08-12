@@ -43,6 +43,8 @@ def params(mode: str, **overrides) -> TrackingParams:
         cost_weights=AssignWeights(),
         cost_gates=AssignGates(),
         memory_params=MemoryParams(),
+        # TRACKING-V2-PLAN wave C5b -- inert here too, same reason.
+        follow_top_k=1,
     )
     base.update(overrides)
     return TrackingParams(**base)

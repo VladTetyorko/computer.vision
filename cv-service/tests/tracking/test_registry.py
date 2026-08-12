@@ -246,6 +246,7 @@ def test_the_seven_shipped_engines_are_advertised(engine_id):
         "cv_service.tracking.lock",
         "cv_service.tracking.registry",
         "cv_service.tracking.session",
+        "cv_service.tracking.sessions",
         "cv_service.tracking.engines.base",
         "cv_service.tracking.predict",
     ],
@@ -266,7 +267,10 @@ def test_everything_but_the_engines_stays_pure_stdlib(module_name):
     assert not heavy & set(vars(module))
 
 
-@pytest.mark.parametrize("module_name", ["cv_service.tracking.registry", "cv_service.tracking.session"])
+@pytest.mark.parametrize(
+    "module_name",
+    ["cv_service.tracking.registry", "cv_service.tracking.session", "cv_service.tracking.sessions"],
+)
 def test_no_tracking_module_imports_cv_pb2(module_name):
     import importlib
 

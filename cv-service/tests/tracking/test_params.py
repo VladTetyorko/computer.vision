@@ -415,3 +415,52 @@ def test_garbage_memory_env_vars_fall_back_and_never_raise(monkeypatch):
         == Settings().track_memory_max_appearance_distance
     )
     assert settings.track_memory_min_confidence == Settings().track_memory_min_confidence
+
+
+# -- wave C5b additions: session pool + multi-target FOLLOW ------------------
+#
+# All three are deployment-only, same "no wire field, straight from Settings"
+# shape as `track_max_age_millis`/`min_tracker_confidence` (wave C1) above --
+# `CV_TRACK_SESSION_GRACE_MILLIS`/`CV_TRACK_SESSION_CAPACITY` are read
+# directly by `cv_service.tracking.sessions.SessionRegistry` (never by
+# `resolve()` -- see that module's own tests), `CV_TRACK_FOLLOW_TOP_K` is
+# the one of the three that DOES flow through `TrackingParams.follow_top_k`.
+
+
+def test_resolve_takes_follow_top_k_from_settings():
+    settings = dataclasses.replace(SETTINGS, track_follow_top_k=5)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_FOLLOW), settings)
+
+    assert resolved.follow_top_k == 5
+
+
+def test_follow_top_k_defaults_to_one():
+    # The wave's own safety net: shipping opt-in (see `config.py`'s
+    # `DEFAULT_TRACK_FOLLOW_TOP_K` for why) means today's exact single-
+    # target FOLLOW behaviour must be what a fresh deployment gets.
+    assert Settings().track_follow_top_k == 1
+
+
+def test_settings_read_the_wave_c5b_env_vars(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_SESSION_GRACE_MILLIS", "5000")
+    monkeypatch.setenv("CV_TRACK_SESSION_CAPACITY", "128")
+    monkeypatch.setenv("CV_TRACK_FOLLOW_TOP_K", "4")
+
+    settings = Settings.from_env()
+
+    assert settings.track_session_grace_millis == 5000
+    assert settings.track_session_capacity == 128
+    assert settings.track_follow_top_k == 4
+
+
+def test_garbage_wave_c5b_env_vars_fall_back_and_never_raise(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_SESSION_GRACE_MILLIS", "soon")
+    monkeypatch.setenv("CV_TRACK_SESSION_CAPACITY", "-4")
+    monkeypatch.setenv("CV_TRACK_FOLLOW_TOP_K", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert settings.track_session_grace_millis == Settings().track_session_grace_millis
+    assert settings.track_session_capacity == Settings().track_session_capacity
+    assert settings.track_follow_top_k == Settings().track_follow_top_k

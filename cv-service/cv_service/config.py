@@ -177,6 +177,51 @@ DEFAULT_TRACK_MEMORY_MAX_SPEED = 1.0
 DEFAULT_TRACK_MEMORY_BLEND_ALPHA = 0.7
 DEFAULT_TRACK_MEMORY_MIN_CONFIDENCE = 0.35
 
+# TRACKING-V2-PLAN wave C5b (review finding B5): `SessionRegistry`
+# (`cv_service/tracking/sessions.py`) pools `StreamTrackingSession` by
+# `stream_id` instead of minting one per `DetectStream` call, so a
+# reconnecting stream resumes its book/gallery/lock. These two are
+# SERVICER/pool-level knobs, not per-stream `TrackingParams` -- unlike every
+# `CV_TRACK_*` knob above, they are never threaded through `params.resolve()`
+# (there is no wire field for either, and there never should be: a client
+# choosing its own grace window or the pool's total capacity would let one
+# stream affect every other stream's resource bound).
+#
+# `grace_millis`: how long a DISCONNECTED session is held before its book/
+# gallery/lock are discarded for good. Longer than the Java-side outage
+# backoff's own upper bound (`GrpcDetectionPort`'s `MAX_BACKOFF_NANOS`=10s,
+# adapter-cv-grpc/MODULE.md) so a stream that survives a couple of backoff
+# cycles still finds its session waiting, not evicted mid-recovery.
+DEFAULT_TRACK_SESSION_GRACE_MILLIS = 15_000
+# How many DISCONNECTED sessions the registry holds at once across every
+# stream_id, bounding memory for a fleet where streams disconnect faster
+# than their grace window expires. Never evicts a session that is still
+# connected (`in_use`) -- that population is bounded elsewhere, by the gRPC
+# server's own thread pool (`CV_GRPC_WORKERS`), not by this cap.
+DEFAULT_TRACK_SESSION_CAPACITY = 64
+
+# TRACKING-V2-PLAN wave C5b (review finding C6): how many tracks FOLLOW
+# holds and emits between verify passes -- the locked target plus up to
+# `follow_top_k - 1` other, non-locked targets, each with its own
+# `SingleObjectTracker` instance (`session.py`'s `_extras_verify_
+# observations`/`_extras_observations`). No wire field exists (a
+# deployment-only knob, same "resolved straight from Settings" shape as
+# `track_max_age_millis` before it).
+#
+# `1` -- today's exact single-target behaviour -- is the shipped default,
+# same "ship the less-proven behaviour opt-in" posture `DEFAULT_TRACK_
+# ASSOCIATE_ENGINE`'s own comment documents for `cost`: multi-target FOLLOW
+# is new code, and while its OWN risk is low (P2 still holds -- K tracker
+# updates is K x ~0.3ms, never a YOLO pass -- and a wrong "extra" box is
+# cosmetic, not a mis-identified lock), it is still an operator-visible
+# behaviour change (more boxes on screen, more per-target engine instances)
+# that deserves the same "prove it, then flip the fleet default" discipline
+# rather than changing what every existing deployment sees for free. An
+# operator sets `CV_TRACK_FOLLOW_TOP_K=3` (or higher) to opt a fleet into
+# situational awareness between verify passes -- review finding C6's own
+# complaint ("the operator's display holds one target and NOTHING ELSE").
+DEFAULT_TRACK_FOLLOW_TOP_K = 1
+
 _ENV_MAX_CONCURRENT_INFERENCES = "CV_MAX_CONCURRENT_INFERENCES"
 
 
@@ -429,6 +474,9 @@ class Settings:
     track_memory_max_speed: float = DEFAULT_TRACK_MEMORY_MAX_SPEED
     track_memory_blend_alpha: float = DEFAULT_TRACK_MEMORY_BLEND_ALPHA
     track_memory_min_confidence: float = DEFAULT_TRACK_MEMORY_MIN_CONFIDENCE
+    track_session_grace_millis: int = DEFAULT_TRACK_SESSION_GRACE_MILLIS
+    track_session_capacity: int = DEFAULT_TRACK_SESSION_CAPACITY
+    track_follow_top_k: int = DEFAULT_TRACK_FOLLOW_TOP_K
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -572,5 +620,20 @@ class Settings:
                 os.environ.get("CV_TRACK_MEMORY_MIN_CONFIDENCE"),
                 DEFAULT_TRACK_MEMORY_MIN_CONFIDENCE,
                 "CV_TRACK_MEMORY_MIN_CONFIDENCE",
+            ),
+            track_session_grace_millis=_parse_positive_int(
+                os.environ.get("CV_TRACK_SESSION_GRACE_MILLIS"),
+                DEFAULT_TRACK_SESSION_GRACE_MILLIS,
+                "CV_TRACK_SESSION_GRACE_MILLIS",
+            ),
+            track_session_capacity=_parse_positive_int(
+                os.environ.get("CV_TRACK_SESSION_CAPACITY"),
+                DEFAULT_TRACK_SESSION_CAPACITY,
+                "CV_TRACK_SESSION_CAPACITY",
+            ),
+            track_follow_top_k=_parse_positive_int(
+                os.environ.get("CV_TRACK_FOLLOW_TOP_K"),
+                DEFAULT_TRACK_FOLLOW_TOP_K,
+                "CV_TRACK_FOLLOW_TOP_K",
             ),
         )

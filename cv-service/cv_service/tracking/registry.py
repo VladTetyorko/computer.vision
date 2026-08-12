@@ -2,7 +2,9 @@
 
 `docs/plans/done/TRACKING-PLAN.md` §5.A, `docs/extracts/TRACKING-ORCHESTRATION.md` §2.1,
 `docs/plans/active/TRACKING-V2-PLAN.md` §3 (wave C2 adds the motion roster;
-wave C3 adds the appearance roster and `cost` to the associator one).
+wave C3 adds the appearance roster and `cost` to the associator one; wave C5b
+adds no roster but leans harder on the follower roster's existing "a new
+instance every call" contract -- see `follower()`'s own docstring).
 Deliberately shaped like `cv_service/inference/registry.py`'s `ModelRegistry`
 -- lazy construction, unknown ids logged once and served the default, the
 roster logged once at INFO so an operator can see what is routable without
@@ -244,7 +246,15 @@ class TrackerRegistry:
         )
 
     def follower(self, engine_id: str, *, max_age_frames: int) -> Optional[tuple[str, Any]]:
-        """A NEW `SingleObjectTracker` for this stream, or `None`."""
+        """A NEW `SingleObjectTracker` for this stream, or `None`.
+
+        Multi-target FOLLOW (TRACKING-V2-PLAN wave C5b) calls this more than
+        once per stream -- once for the locked target, once more per "extra"
+        target up to `TrackingParams.follow_top_k - 1` -- which is exactly
+        what this method's own "a new instance every call, never shared"
+        contract already promises; nothing here changed for it. See
+        `session.py`'s `_extras_verify_observations`/`_ExtraFollow`.
+        """
         return self._create(
             self._followers, engine_id, self._default_follow_id, max_age_frames=max_age_frames
         )

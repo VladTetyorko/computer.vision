@@ -58,6 +58,10 @@ def params(**overrides) -> TrackingParams:
         # `_resolve_memory` does, to build the `ObjectMemory` this file
         # wires in directly via `TrackBook(memory=...)`/`set_memory`).
         memory_params=MemoryParams(),
+        # TRACKING-V2-PLAN wave C5b -- also inert here: only `session.py`
+        # reads `follow_top_k`; included only because `TrackingParams`
+        # requires it.
+        follow_top_k=1,
     )
     base.update(overrides)
     return TrackingParams(**base)
