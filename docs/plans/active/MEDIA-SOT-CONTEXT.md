@@ -11,7 +11,7 @@ Waves commit onto this branch with disjoint file scopes. One commit per wave.
 
 | Wave | Scope | Depends on | Status |
 |---|---|---|---|
-| M0 | `cv-service/spikes/pull/` — measure, decide decoder + clock mode | — | pending |
+| M0 | `cv-service/spikes/pull/` — measure, decide decoder + clock mode | — | **done — GO** |
 | M1 | `proto/vision/v1/cv.proto` + `vision-proto` | — | **done** |
 | M2 | `vision-domain` — `PulledDetectionPort`, `proxiesSource` | — | **done** |
 | M3 | `cv-service/cv_service/pull/` — the worker | M0, M1 | blocked |

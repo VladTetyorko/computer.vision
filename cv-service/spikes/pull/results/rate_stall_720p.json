@@ -1,0 +1,172 @@
+{
+  "url": "rtsp://localhost:18554/push720",
+  "target_fps": 10.0,
+  "duration_s": 25.0,
+  "stall_ms": 800.0,
+  "source_frames_seen": 786,
+  "samples_consumed": 31,
+  "missed_deadlines": 217,
+  "dropped_frames_final": 754,
+  "served_frame_age_ms": {
+    "p50": 4.5,
+    "max": 36.6,
+    "min": 1.0
+  },
+  "dropped_frames_timeline_sample": [
+    {
+      "elapsed_s": 0.8,
+      "dropped_frames_so_far": 40,
+      "served_age_ms": 1.2
+    },
+    {
+      "elapsed_s": 1.6,
+      "dropped_frames_so_far": 63,
+      "served_age_ms": 1.0
+    },
+    {
+      "elapsed_s": 2.4,
+      "dropped_frames_so_far": 85,
+      "served_age_ms": 33.9
+    },
+    {
+      "elapsed_s": 3.2,
+      "dropped_frames_so_far": 109,
+      "served_age_ms": 1.5
+    },
+    {
+      "elapsed_s": 4.0,
+      "dropped_frames_so_far": 132,
+      "served_age_ms": 1.2
+    },
+    {
+      "elapsed_s": 4.8,
+      "dropped_frames_so_far": 155,
+      "served_age_ms": 1.7
+    },
+    {
+      "elapsed_s": 5.6,
+      "dropped_frames_so_far": 178,
+      "served_age_ms": 2.1
+    },
+    {
+      "elapsed_s": 6.4,
+      "dropped_frames_so_far": 201,
+      "served_age_ms": 1.6
+    },
+    {
+      "elapsed_s": 7.2,
+      "dropped_frames_so_far": 224,
+      "served_age_ms": 2.1
+    },
+    {
+      "elapsed_s": 8.0,
+      "dropped_frames_so_far": 246,
+      "served_age_ms": 24.4
+    },
+    {
+      "elapsed_s": 8.8,
+      "dropped_frames_so_far": 270,
+      "served_age_ms": 2.1
+    },
+    {
+      "elapsed_s": 9.6,
+      "dropped_frames_so_far": 293,
+      "served_age_ms": 1.4
+    },
+    {
+      "elapsed_s": 10.4,
+      "dropped_frames_so_far": 316,
+      "served_age_ms": 2.5
+    },
+    {
+      "elapsed_s": 11.2,
+      "dropped_frames_so_far": 339,
+      "served_age_ms": 2.1
+    },
+    {
+      "elapsed_s": 12.0,
+      "dropped_frames_so_far": 362,
+      "served_age_ms": 2.3
+    },
+    {
+      "elapsed_s": 12.8,
+      "dropped_frames_so_far": 384,
+      "served_age_ms": 36.6
+    },
+    {
+      "elapsed_s": 13.6,
+      "dropped_frames_so_far": 408,
+      "served_age_ms": 3.6
+    },
+    {
+      "elapsed_s": 14.4,
+      "dropped_frames_so_far": 431,
+      "served_age_ms": 4.9
+    },
+    {
+      "elapsed_s": 15.2,
+      "dropped_frames_so_far": 454,
+      "served_age_ms": 4.8
+    },
+    {
+      "elapsed_s": 16.0,
+      "dropped_frames_so_far": 477,
+      "served_age_ms": 4.5
+    },
+    {
+      "elapsed_s": 16.8,
+      "dropped_frames_so_far": 500,
+      "served_age_ms": 5.0
+    },
+    {
+      "elapsed_s": 17.6,
+      "dropped_frames_so_far": 523,
+      "served_age_ms": 4.2
+    },
+    {
+      "elapsed_s": 18.4,
+      "dropped_frames_so_far": 546,
+      "served_age_ms": 5.4
+    },
+    {
+      "elapsed_s": 19.2,
+      "dropped_frames_so_far": 569,
+      "served_age_ms": 5.4
+    },
+    {
+      "elapsed_s": 20.0,
+      "dropped_frames_so_far": 592,
+      "served_age_ms": 5.8
+    },
+    {
+      "elapsed_s": 20.8,
+      "dropped_frames_so_far": 615,
+      "served_age_ms": 5.7
+    },
+    {
+      "elapsed_s": 21.6,
+      "dropped_frames_so_far": 638,
+      "served_age_ms": 5.9
+    },
+    {
+      "elapsed_s": 22.4,
+      "dropped_frames_so_far": 661,
+      "served_age_ms": 5.3
+    },
+    {
+      "elapsed_s": 23.2,
+      "dropped_frames_so_far": 684,
+      "served_age_ms": 5.5
+    },
+    {
+      "elapsed_s": 24.0,
+      "dropped_frames_so_far": 707,
+      "served_age_ms": 6.4
+    },
+    {
+      "elapsed_s": 24.8,
+      "dropped_frames_so_far": 730,
+      "served_age_ms": 6.4
+    }
+  ]
+}

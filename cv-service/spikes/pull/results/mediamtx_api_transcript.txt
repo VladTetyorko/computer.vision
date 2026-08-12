@@ -1,0 +1,107 @@
+M0 spike -- mediamtx Control API (v3) transcript against bluenviron/mediamtx:1.19.3
+=====================================================================================
+Container: throwaway `mtx-spike`, NOT the product docker-compose mediamtx service.
+  docker run -d --rm --name mtx-spike \
+    -v <this-dir>/mediamtx-spike.yml:/mediamtx.yml:ro \
+    -p 18554:8554 -p 9997:9997 -p 8000-8001:8000-8001/udp \
+    bluenviron/mediamtx:1.19.3
+Host ports 18554/9997 used instead of 8554/9997 because the product's own
+`vision-mediamtx-1` container (docker-compose.yml) already holds 8554 on this host.
+mediamtx-spike.yml is the DEFAULT baked-in config with two deliberate overrides -- see
+CV-PULL-SPIKE.md's "Contract correction: Control API auth" for why they were necessary.
+
+---------------------------------------------------------------------------------------
+0. Auth gate encountered BEFORE any of the calls below worked (first attempt, default
+   config, MTX_API=yes only):
+
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\n" http://localhost:9997/v3/paths/get/testpath
+{"status":"error","error":"authentication error"}
+HTTP_STATUS:401
+
+Fixed by mounting a custom mediamtx.yml widening the API/metrics/pprof `any` user's
+`ips` from the default `["127.0.0.1","::1"]` to `[]` (any IP) -- see transcript file
+mediamtx-spike.yml alongside this one. Confirmed this is genuinely an IP-source check,
+not a credentials check: the default "any" user has no password either way.
+
+---------------------------------------------------------------------------------------
+1. Readiness GET on a path that does not exist yet:
+
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\n" http://localhost:9997/v3/paths/get/testpath
+{"status":"error","error":"path not found"}
+HTTP_STATUS:404
+
+---------------------------------------------------------------------------------------
+2. Create path (POST /v3/config/paths/add/{name}):
+
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X POST http://localhost:9997/v3/config/paths/add/testpath \
+    -H "Content-Type: application/json" \
+    -d '{"source":"rtsp://127.0.0.1:9999/nonexistent","sourceOnDemand":false,"rtspTransport":"automatic"}'
+{"status":"ok"}
+HTTP_STATUS:200
+
+---------------------------------------------------------------------------------------
+3. Readiness GET right after add, source unreachable (sourceOnDemand:false so mediamtx
+   dials immediately and fails; path exists, is "online" but not "ready"):
+
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\n" http://localhost:9997/v3/paths/get/testpath
+{"name":"testpath","confName":"testpath","ready":false,"readyTime":null,"available":false,
+ "availableTime":null,"online":true,"onlineTime":"0001-01-01T00:00:00Z",
+ "source":{"type":"rtspSource","id":""},"tracks":[],"tracks2":[],"readers":[],
+ "inboundBytes":0,"outboundBytes":0,"inboundFramesInError":0,"bytesReceived":0,
+ "bytesSent":0}
+HTTP_STATUS:200
+
+---------------------------------------------------------------------------------------
+4. Create the SAME path again (idempotent-start probe):
+
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X POST http://localhost:9997/v3/config/paths/add/testpath \
+    -H "Content-Type: application/json" \
+    -d '{"source":"rtsp://127.0.0.1:9999/nonexistent","sourceOnDemand":false,"rtspTransport":"automatic"}'
+{"status":"error","error":"path already exists"}
+HTTP_STATUS:400
+
+---------------------------------------------------------------------------------------
+5. PATCH the existing path (the fallback the plan text names for the "already exists"
+   branch):
+
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X PATCH http://localhost:9997/v3/config/paths/patch/testpath \
+    -H "Content-Type: application/json" \
+    -d '{"source":"rtsp://127.0.0.1:9999/nonexistent","sourceOnDemand":false,"rtspTransport":"automatic"}'
+{"status":"ok"}
+HTTP_STATUS:200
+
+---------------------------------------------------------------------------------------
+6. Delete path:
+
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X DELETE http://localhost:9997/v3/config/paths/delete/testpath
+{"status":"ok"}
+HTTP_STATUS:200
+
+---------------------------------------------------------------------------------------
+7. Delete it again (idempotent-stop probe):
+
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X DELETE http://localhost:9997/v3/config/paths/delete/testpath
+{"status":"error","error":"path not found"}
+HTTP_STATUS:404
+
+---------------------------------------------------------------------------------------
+8. Readiness GET after delete:
+
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\n" http://localhost:9997/v3/paths/get/testpath
+{"status":"error","error":"path not found"}
+HTTP_STATUS:404
+
+---------------------------------------------------------------------------------------
+9. Delete a path that never existed:
+
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X DELETE http://localhost:9997/v3/config/paths/delete/never-existed
+{"status":"error","error":"path not found"}
+HTTP_STATUS:404
+
+=========================================================================================
+Verdict: §5.3's three calls and its documented 400/404 idempotency assumptions are all
+CONFIRMED against 1.19.3, verbatim -- see items 2/4 (400 "path already exists") and
+6/7/8/9 (404 "path not found"). The one thing §5.3 did NOT anticipate is item 0: the
+Control API is IP-gated by mediamtx's own DEFAULT config (not a mediamtx bug), and every
+one of these calls 401s until that is addressed. See CV-PULL-SPIKE.md for the correction
+this implies for wave M7/M6 (docker-compose.yml + MediamtxControlApi).

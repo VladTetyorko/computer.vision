@@ -1,0 +1,15 @@
+{
+  "url": "rtsp://localhost:18554/push720",
+  "target_fps": 10.0,
+  "duration_s": 20.03,
+  "source_frames_seen": 618,
+  "source_fps_measured": 30.85,
+  "frames_sampled": 200,
+  "achieved_fps": 9.984,
+  "missed_deadlines": 0,
+  "sample_interval_ms": {
+    "p50": 99.94,
+    "min": 57.69,
+    "max": 142.32
+  }
+}
