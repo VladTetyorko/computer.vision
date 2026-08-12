@@ -4,6 +4,7 @@ import com.drones.vision.domain.model.AnnotatedFrame;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.Detection;
+import com.drones.vision.domain.model.CameraAttitude;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
@@ -454,6 +455,60 @@ class DefaultStreamServiceTest {
         withTracker.start(device.id(), PipelineConfig.defaults());
 
         verify(usageTracker, never()).resolveAsset(any());
+    }
+
+    @Test
+    void threadsATelemetrySupplierWhenAFieldOfViewIsConfiguredEvenWithNoOverlayPort() {
+        // REGRESSION (docs/conclusions/CV-RATE-BUDGET.md gap 3). The telemetry supplier was built
+        // only when an OverlayPort was present, because the OSD was its only consumer. Camera
+        // attitude is a second, unrelated consumer, so a deployment with a configured field of view
+        // and no overlay silently sent NO CameraPose -- and no test could see it, because every
+        // existing test injects the supplier into StreamPipeline directly rather than exercising
+        // the construction here. Caught by watching the wire, pinned here.
+        UsageTracker usageTracker = mock(UsageTracker.class);
+        AssetId assetId = AssetId.random();
+        when(usageTracker.resolveAsset(device.id())).thenReturn(Optional.of(assetId));
+        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(
+                new Telemetry(device.id(), Instant.now(), 50.0, 30.0, 120.0, 137.5, 80.0, Map.of())));
+        StreamPipelineSettings withFov = settingsWithCameraHfov(62.0);
+        StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker,
+                null /* no overlay */, null, null, withFov);
+        VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
+                ByteBuffer.wrap(new byte[]{1, 2, 3}));
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
+        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO);
+        when(detectionPort.detect(any(), any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+
+        service.start(device.id(), PipelineConfig.defaults());
+
+        ArgumentCaptor<CameraAttitude> captor = ArgumentCaptor.forClass(CameraAttitude.class);
+        verify(detectionPort).detect(any(), any(), captor.capture());
+        assertEquals(137.5, captor.getValue().yawDegrees());
+        assertEquals(62.0, captor.getValue().hfovDegrees());
+    }
+
+    @Test
+    void buildsNoTelemetrySupplierWithNeitherAnOverlayPortNorAFieldOfView() {
+        // The cost gate the fix had to preserve: nothing reads telemetry, so nothing resolves it.
+        UsageTracker usageTracker = mock(UsageTracker.class);
+        StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker);
+
+        service.start(device.id(), PipelineConfig.defaults());
+
+        verify(usageTracker, never()).resolveAsset(any());
+        verify(detectionPort, never()).detect(any(), any(), any());
+    }
+
+    private static StreamPipelineSettings settingsWithCameraHfov(double hfovDegrees) {
+        StreamPipelineSettings base = StreamPipelineSettings.defaults();
+        return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(),
+                base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
+                base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
+                base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
+                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees);
     }
 
     // --- Telemetry-OSD input (closes adapter-overlay/MODULE.md's "OSD gate not reachable" gap) ---

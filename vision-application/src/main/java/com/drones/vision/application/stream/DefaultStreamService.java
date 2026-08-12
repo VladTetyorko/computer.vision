@@ -307,15 +307,23 @@ public final class DefaultStreamService implements StreamService {
             // (announces every completed result), or a configured OverlayPort (may need it to build
             // the telemetry supplier below) -- so a lookup nobody will ever read is never even
             // attempted.
-            AssetId ownerAssetId = (usageTracker == null || (liveUpdatePublisherPort == null && overlayPort == null))
+            // Telemetry has TWO consumers now, and they are unrelated: the OSD renders it, and
+            // (docs/conclusions/CV-RATE-BUDGET.md gap 3) CameraAttitude turns its heading into
+            // ego-motion compensation. This supplier used to be built only when an OverlayPort was
+            // present, which silently meant a deployment with a configured field of view but no
+            // overlay sent no CameraPose at all -- a defect invisible to any test that injects the
+            // supplier directly, and caught only by watching the wire.
+            boolean attitudeWanted = settings.cameraHfovDegrees() > 0.0;
+            AssetId ownerAssetId = (usageTracker == null
+                    || (liveUpdatePublisherPort == null && overlayPort == null && !attitudeWanted))
                     ? null : usageTracker.resolveAsset(deviceId).orElse(null);
-            // Telemetry-OSD input (closes the "OSD gate not reachable" gap, see
-            // adapter-overlay/MODULE.md): only built when StreamPipeline could ever actually read it
-            // -- an OverlayPort to render through and a resolved owning asset to read telemetry for.
-            // StreamPipeline itself further gates on PipelineConfig#overlayTelemetry() per call.
-            Supplier<Telemetry> telemetrySupplier = (usageTracker != null && overlayPort != null && ownerAssetId != null)
-                    ? () -> usageTracker.latestTelemetry(ownerAssetId).orElse(null)
-                    : null;
+            // Still not built when nothing could read it -- the original cost gate is preserved,
+            // widened by exactly the new consumer. StreamPipeline gates the OSD read on
+            // PipelineConfig#overlayTelemetry() and the attitude read on the field of view.
+            Supplier<Telemetry> telemetrySupplier =
+                    (usageTracker != null && ownerAssetId != null && (overlayPort != null || attitudeWanted))
+                            ? () -> usageTracker.latestTelemetry(ownerAssetId).orElse(null)
+                            : null;
             StreamPipeline pipeline = new StreamPipeline(streamId, device, config, supervisedSource, detectionPort,
                     streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort, eventEngine,
                     ownerAssetId, liveUpdatePublisherPort, telemetrySupplier, System::nanoTime, settings);
