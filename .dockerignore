@@ -1,0 +1,46 @@
+# Docker build context exclusions. BOTH images build from the repo root as their
+# context (./Dockerfile and ./cv-service/Dockerfile, see docker-compose.yml), so this
+# one file governs both — hence the `!` re-include for the fat jar below.
+#
+# WHY this exists: without it the context was 2.8 GB, of which the cv-service image
+# needs ~150 MB. The 1.7 GB virtualenv alone was being tarred and shipped to the
+# daemon on every build; combined with a 96%-full disk that is what exhausted it
+# during the MEDIA-SOT measurement run.
+
+# Java build output — but the root Dockerfile copies the fat jar OUT of it, so that
+# one path is re-included. Order matters: the later rule wins.
+**/target
+!vision-app/target/vision-app-*.jar
+
+# Frontend: the jar already contains the built SPA (frontend-maven-plugin), so no
+# image ever needs the sources or the toolchain.
+**/node_modules
+vision-web/dist
+vision-web/.angular
+
+# Python: the cv-service image builds its own environment with pip, and downloads
+# its own yolo11n weights. A host venv in the context is pure freight.
+cv-service/.venv
+**/__pycache__
+**/*.egg-info
+**/.pytest_cache
+.pytest_cache
+
+# CV working data: training runs, datasets, and throwaway spikes/demos are developer
+# artifacts, never image content.
+cv-service/runs
+cv-service/datasets
+cv-service/spikes
+cv-service/demo
+
+# Repo furniture no Dockerfile copies.
+.git
+.github
+.idea
+.claude
+docs
+contexts
+infra
+clips
+data
+*.iml

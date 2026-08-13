@@ -49,3 +49,6 @@ cv-service/cv_service/gen/
 ### CV training exports (docs/plans/done/CV-TRAINING-PLAN.md, Wave T4) ###
 # Default vision.training.export-dir -- generated YOLO dataset export zips, never committed.
 /data/
+
+# scripts/local-up.sh: host-process pids/logs for the local stack
+.local-run/
