@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.SampleImage;
-import com.drones.vision.domain.model.TrainingSampleId;
-import com.drones.vision.domain.port.out.SampleImageStorePort;
+import com.drones.vision.learning.domain.model.SampleImage;
+import com.drones.vision.learning.domain.model.TrainingSampleId;
+import com.drones.vision.learning.domain.port.SampleImageStorePort;
 
 import java.util.Map;
 import java.util.Optional;

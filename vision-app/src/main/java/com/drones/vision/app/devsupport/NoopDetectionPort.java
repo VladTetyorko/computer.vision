@@ -1,9 +1,9 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.DetectionPort;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.port.DetectionPort;
 
 import java.time.Duration;
 import java.util.List;

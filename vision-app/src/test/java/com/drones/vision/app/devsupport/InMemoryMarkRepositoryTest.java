@@ -1,19 +1,19 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.Affiliation;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.Mark;
-import com.drones.vision.domain.model.MarkId;
-import com.drones.vision.domain.model.MarkKind;
-import com.drones.vision.domain.model.MarkSource;
-import com.drones.vision.domain.model.MarkStatus;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.model.Verification;
-import com.drones.vision.domain.model.Verification.VerificationState;
-import com.drones.vision.domain.port.out.MarkRepositoryPort;
+import com.drones.vision.map.domain.model.Affiliation;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.Mark;
+import com.drones.vision.map.domain.model.MarkId;
+import com.drones.vision.map.domain.model.MarkKind;
+import com.drones.vision.map.domain.model.MarkSource;
+import com.drones.vision.map.domain.model.MarkStatus;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.map.domain.model.Verification;
+import com.drones.vision.map.domain.model.Verification.VerificationState;
+import com.drones.vision.map.domain.port.MarkRepositoryPort;
 
 import org.junit.jupiter.api.Test;
 

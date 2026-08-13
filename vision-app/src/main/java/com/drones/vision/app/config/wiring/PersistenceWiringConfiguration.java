@@ -1,10 +1,27 @@
 package com.drones.vision.app.config.wiring;
 
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
+import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
+import com.drones.vision.identity.domain.port.GroupRepositoryPort;
+import com.drones.vision.identity.domain.port.UserRepositoryPort;
+import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
+import com.drones.vision.learning.domain.port.SampleImageStorePort;
+import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
+import com.drones.vision.map.domain.port.DrawingRepositoryPort;
+import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
+import com.drones.vision.map.domain.port.MarkRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
+import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
 import com.drones.vision.adapter.persistence.repository.*;
 import com.drones.vision.app.config.properties.VisionPersistenceProperties;
 import com.drones.vision.app.devsupport.*;
-import com.drones.vision.domain.port.out.*;
+
 import jakarta.persistence.EntityManagerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

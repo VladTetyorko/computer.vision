@@ -6,16 +6,16 @@ import com.drones.vision.api.dto.RenameLayerRequest;
 import com.drones.vision.api.dto.SetGrantsRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.application.map.DrawingService;
-import com.drones.vision.application.map.LayerView;
-import com.drones.vision.application.map.MapAccessPolicy.Viewer;
-import com.drones.vision.application.map.MapLayerService;
-import com.drones.vision.application.mark.MarkService;
-import com.drones.vision.domain.model.AccessLevel;
-import com.drones.vision.domain.model.Drawing;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.model.Mark;
+import com.drones.vision.map.application.DrawingService;
+import com.drones.vision.map.application.LayerView;
+import com.drones.vision.map.application.MapAccessPolicy.Viewer;
+import com.drones.vision.map.application.MapLayerService;
+import com.drones.vision.map.application.mark.MarkService;
+import com.drones.vision.map.domain.model.AccessLevel;
+import com.drones.vision.map.domain.model.Drawing;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.map.domain.model.Mark;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -56,7 +56,7 @@ import java.util.stream.Collectors;
  * Entirely the services' own exceptions surfacing through {@link ApiExceptionHandler}: {@link
  * IllegalArgumentException} (malformed id, unrecognized {@code kind}/{@code level}, blank name) →
  * 400; {@link java.util.NoSuchElementException} (unknown <em>or</em> invisible layer) → 404; {@link
- * com.drones.vision.application.scope.AccessDeniedException} (visible but insufficient access) →
+ * com.drones.vision.platform.AccessDeniedException} (visible but insufficient access) →
  * 403; {@link IllegalStateException} (renaming/deleting the COP layer) → 409.
  */
 @RestController

@@ -1,8 +1,8 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.stream.TrackingConfigPatch;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.PipelineConfig;
+import com.drones.vision.perception.application.stream.TrackingConfigPatch;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.perception.domain.model.PipelineConfig;
 
 import java.util.List;
 

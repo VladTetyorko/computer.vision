@@ -9,7 +9,7 @@ import java.time.Duration;
  * {@value #LAG_LOG_INTERVAL_MILLIS}ms per stream.
  *
  * <p>Not thread-safe — mirrors {@link MediamtxStreamPublisher.StreamState}'s own per-stream,
- * single-writer contract ({@link com.drones.vision.domain.port.out.StreamPublisherPort} guarantees
+ * single-writer contract ({@link com.drones.vision.perception.domain.port.StreamPublisherPort} guarantees
  * calls for one {@code streamId} are never concurrent).
  */
 final class PublishDiagnostics {

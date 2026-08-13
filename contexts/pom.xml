@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.drones</groupId>
+        <artifactId>vision</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>contexts</artifactId>
+    <packaging>pom</packaging>
+    <name>contexts</name>
+    <description>Aggregator for the bounded-context modules — one module per context, holding both its domain and application layers (docs/plans/active/DOMAIN-SEPARATION-W1.md §16).</description>
+
+    <modules>
+        <module>vision-warehouse</module>
+        <module>vision-identity</module>
+        <module>vision-flight</module>
+        <module>vision-perception</module>
+        <module>vision-map</module>
+        <module>vision-events</module>
+        <module>vision-learning</module>
+        <module>vision-simulation</module>
+    </modules>
+
+</project>

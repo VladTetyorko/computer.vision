@@ -1,15 +1,16 @@
 package com.drones.vision.app;
 
 import com.drones.vision.app.devsupport.DevPrincipal;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.asset.AssetSpec;
-import com.drones.vision.application.device.DeviceRegistration;
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.perception.application.stream.AssetStreamService;
+import com.drones.vision.warehouse.application.asset.AssetSpec;
+import com.drones.vision.warehouse.application.device.DeviceRegistration;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.proto.v1.BoundingBox;
 import com.drones.vision.proto.v1.Detection;
 import com.drones.vision.proto.v1.DetectionResponse;
@@ -120,6 +121,9 @@ class TrackingAssociateE2ETest {
     private AssetService assetService;
 
     @Autowired
+    private AssetStreamService assetStreamService;
+
+    @Autowired
     private WebApplicationContext webApplicationContext;
 
     private MockMvc mockMvc;
@@ -140,7 +144,7 @@ class TrackingAssociateE2ETest {
                         new CategoryId("drone"), Map.of(), List.of(videoDevice)),
                 DevPrincipal.OWNERSHIP, DevPrincipal.USER_ID);
 
-        StreamId streamId = assetService.startStream(asset.id(), null, PipelineConfig.defaults());
+        StreamId streamId = assetStreamService.startStream(asset.id(), null, PipelineConfig.defaults());
         try {
             assertTrue(servicer.threeTrackedFrames.await(AWAIT_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
                     "expected >=3 frames stating TRACKING_MODE_ASSOCIATE within " + AWAIT_TIMEOUT

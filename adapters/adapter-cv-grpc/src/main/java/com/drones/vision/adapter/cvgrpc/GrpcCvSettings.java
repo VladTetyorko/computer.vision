@@ -70,7 +70,7 @@ import java.util.Objects;
  *                                worker (the GB4005 box) must dial the host's LAN address, not {@code
  *                                localhost}, even though both properties often point at the same
  *                                mediamtx instance. Not read by any class in this module today —
- *                                {@link com.drones.vision.domain.port.out.PulledDetectionPort#open}
+ *                                {@link com.drones.vision.perception.domain.port.PulledDetectionPort#open}
  *                                already takes a fully-formed {@code sourceUrl}, built by whichever
  *                                caller owns that decision (a later wave); carried here so the
  *                                {@code vision.cv.pull.*} config surface is pinned in one place ahead

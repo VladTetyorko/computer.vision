@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.SampleImageEntity;
-import com.drones.vision.domain.model.SampleImage;
-import com.drones.vision.domain.model.TrainingSampleId;
+import com.drones.vision.learning.domain.model.SampleImage;
+import com.drones.vision.learning.domain.model.TrainingSampleId;
 
 import java.time.Instant;
 

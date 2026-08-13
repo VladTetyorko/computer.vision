@@ -1,12 +1,12 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.MapDrawingEntity;
-import com.drones.vision.domain.model.Drawing;
-import com.drones.vision.domain.model.DrawingId;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.map.domain.model.Drawing;
+import com.drones.vision.map.domain.model.DrawingId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
 
 /**
  * {@link Drawing} ⟷ {@link MapDrawingEntity} (docs/plans/done/MAP-REWORK-PLAN.md §4.4).

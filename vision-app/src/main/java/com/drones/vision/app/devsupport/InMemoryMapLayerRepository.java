@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.port.out.MapLayerRepositoryPort;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 
 import java.util.List;
 import java.util.Map;

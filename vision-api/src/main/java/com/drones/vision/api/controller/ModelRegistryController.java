@@ -4,8 +4,8 @@ import com.drones.vision.api.dto.PromoteModelRequest;
 import com.drones.vision.api.dto.RegisteredModelResponse;
 import com.drones.vision.api.dto.RegisteredModelsResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.training.ModelRegistryService;
-import com.drones.vision.domain.model.ModelRef;
+import com.drones.vision.learning.application.ModelRegistryService;
+import com.drones.vision.perception.domain.model.ModelRef;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,7 +34,7 @@ import com.drones.vision.api.security.CurrentUser;
  * vision-app), and the one place a model gets promoted to production.
  *
  * <p>Error mapping is entirely {@link ModelRegistryService#promote}'s own exceptions surfacing
- * through {@link ApiExceptionHandler}: {@link com.drones.vision.application.scope.AccessDeniedException}
+ * through {@link ApiExceptionHandler}: {@link com.drones.vision.platform.AccessDeniedException}
  * (caller may not manage the organization) → 403; {@link IllegalStateException} (cv-service
  * refuses the promotion — e.g. an unknown model id, "rsync the artifact first" — or no registry
  * reachable at all) → 409; {@link IllegalArgumentException} ({@link ModelRef}'s own blank

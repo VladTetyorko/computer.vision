@@ -19,7 +19,7 @@ import java.util.OptionalInt;
  * byte-identical in behavior to the pre-extraction code.
  *
  * @param readTimeout             RX connect-timeout fallback used when a {@link
- *                                com.drones.vision.domain.model.StreamDescriptor}'s {@code
+ *                                com.drones.vision.kernel.StreamDescriptor}'s {@code
  *                                timeout} option is missing/blank/malformed; only bounds the
  *                                initial TCP connect, never the (intentionally unbounded) body
  *                                read — see {@code MjpegVideoSource}'s gotchas.

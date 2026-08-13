@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.LayerId;
+import com.drones.vision.map.domain.model.LayerId;
 
 /**
  * Body of {@code POST /api/map/marks/{id}/promote} (docs/plans/done/MAP-REWORK-PLAN.md §4.1) — DELTA's

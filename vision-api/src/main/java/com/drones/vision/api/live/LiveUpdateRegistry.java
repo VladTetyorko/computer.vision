@@ -13,19 +13,23 @@ import com.drones.vision.api.dto.LiveSubscriptionResponse;
 import com.drones.vision.api.dto.MapEventPayload;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.device.DeviceService;
-import com.drones.vision.application.stream.StreamService;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.model.MapEvent;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.device.DeviceService;
+import com.drones.vision.perception.application.stream.StreamService;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.perception.domain.model.DetectionEvent;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.platform.Event;
+import com.drones.vision.map.domain.model.MapEvent;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.kernel.Telemetry;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
+import com.drones.vision.platform.EventLiveUpdatePort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
+import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
+import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
+import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -53,10 +57,14 @@ import com.drones.vision.api.controller.EventController;
 import com.drones.vision.api.controller.StreamController;
 
 /**
- * The {@code /api/live} connection registry (docs/plans/done/REALTIME-PLAN.md §4) — the one {@link
- * LiveUpdatePublisherPort} implementation, a per-process ({@code single-instance deployment},
- * per the plan) hub fanning application-layer announcements out to every subscribed {@code
- * SseEmitter}.
+ * The {@code /api/live} connection registry (docs/plans/done/REALTIME-PLAN.md §4) — the one class
+ * that implements every publishing context's live-update port ({@link FleetLiveUpdatePort}, {@link
+ * TelemetryLiveUpdatePort}, {@link DetectionLiveUpdatePort}, {@link MapLiveUpdatePort}, {@link
+ * EventLiveUpdatePort} — five ports the former god-port {@code LiveUpdatePublisherPort} split into,
+ * docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b), a per-process ({@code single-instance
+ * deployment}, per the plan) hub fanning application-layer announcements out to every subscribed
+ * {@code SseEmitter}. An adapter is exactly the place that may depend on every context at once —
+ * each context's application code still only ever holds the one port it actually calls.
  *
  * <h2>Topics</h2>
  * {@link LiveTopic#FLEET}/{@link LiveTopic#EVENT}/{@link LiveTopic#DEVICES}/{@link
@@ -107,7 +115,7 @@ import com.drones.vision.api.controller.StreamController;
  * would need extra {@code ObjectProvider<MarkService>}/{@code ObjectProvider<DrawingService>}
  * constructor parameters (the same circular-dependency shape {@code assetService}/{@code
  * deviceService}/{@code streamService}/{@code detectionEventRepositoryPort} already carry — those
- * services themselves depend on {@link LiveUpdatePublisherPort}), pushing this constructor past the
+ * services themselves depend on one of this class's five ports), pushing this constructor past the
  * five-parameter ceiling (see {@code .claude/skills/java-clean-code/SKILL.md} §3, and this class's
  * own {@link #freshFleetEnvelope()} javadoc, which already declines a similar addition for the same
  * reason) — <em>and</em> a seeded snapshot would have to be re-scoped per recipient, which a shared
@@ -150,12 +158,13 @@ import com.drones.vision.api.controller.StreamController;
  * {@code devices} topic also needs to refresh on, so this class's own implementation of that one
  * method now recomputes and broadcasts <em>both</em> the {@code fleet} and {@code devices}
  * snapshots in the same dispatch, instead of {@code vision-app} needing a second call site (and
- * {@code LiveUpdatePublisherPort} a second, near-duplicate method) for what is, at every call site
+ * {@link FleetLiveUpdatePort} a second, near-duplicate method) for what is, at every call site
  * that matters, the same fact: "fleet-level state changed, re-derive your own snapshot(s)".
  */
 @Component
 @ConditionalOnProperty(prefix = "vision.live", name = "enabled", matchIfMissing = true)
-public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
+public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryLiveUpdatePort,
+        DetectionLiveUpdatePort, MapLiveUpdatePort, EventLiveUpdatePort {
 
     /** How often {@link #flushPending()} drains coalesced telemetry/detections (docs/plans/done/REALTIME-PLAN.md §4, item 3). */
     static final long COALESCE_MILLIS = 150L;
@@ -221,16 +230,17 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
      * type, deliberately: every one of them sits on the other side of a genuine circular bean
      * dependency from this class. {@code DefaultAssetService}/{@code DefaultDeviceService} depend
      * on {@code AuditTrailPort}, which (when {@code vision.live.enabled=true}) {@code vision-app}
-     * wraps in {@code LiveUpdateAuditTrail}, which depends on {@link LiveUpdatePublisherPort},
-     * which resolves to this class; {@code DefaultStreamService} depends on {@link
-     * LiveUpdatePublisherPort} directly; and the {@code detectionEventRepositoryPort} bean is
-     * itself wrapped in {@code LiveUpdateDetectionEventRepository}, which depends on this port too.
-     * A plain constructor-injected dependency on any of the four here would deadlock Spring's bean
-     * graph at startup; deferring the actual lookup to {@link #freshFleetEnvelope()}/{@link
+     * wraps in {@code LiveUpdateAuditTrail}, which depends on {@link FleetLiveUpdatePort}, which
+     * resolves to this class; {@code DefaultStreamService} depends on {@link DetectionLiveUpdatePort}
+     * directly; and the {@code detectionEventRepositoryPort} bean is itself wrapped in {@code
+     * LiveUpdateDetectionEventRepository}, which depends on {@link DetectionLiveUpdatePort} too — the
+     * four ports are distinct interfaces now, but every one of them still resolves to this same
+     * class. A plain constructor-injected dependency on any of the four here would deadlock Spring's
+     * bean graph at startup; deferring the actual lookup to {@link #freshFleetEnvelope()}/{@link
      * #freshDevicesEnvelope()}/{@link #seedDetectionEventsIfEmpty} (only ever called once the whole
      * context has finished starting) breaks every one of these cycles. {@code streamPublisherPort}
      * carries no such risk (neither {@code MediamtxStreamPublisher} nor {@code NoopStreamPublisher}
-     * depends on {@link LiveUpdatePublisherPort}), so it stays a plain constructor parameter. See
+     * depends on any of this class's five ports), so it stays a plain constructor parameter. See
      * vision-app/MODULE.md's own Gotcha for the full chain and the exact {@code
      * UnsatisfiedDependencyException} this pattern resolves.
      */

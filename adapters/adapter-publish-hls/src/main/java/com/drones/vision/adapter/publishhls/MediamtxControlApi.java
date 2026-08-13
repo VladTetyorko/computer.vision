@@ -127,7 +127,7 @@ final class MediamtxControlApi {
      * Deletes a path. A 404 — the path was already deleted, or never existed — is treated as success
      * (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.3 "delete path": verified 404 for both a
      * just-deleted and a never-existing path), matching {@link
-     * com.drones.vision.domain.port.out.StreamPublisherPort#streamEnded}'s own idempotency contract.
+     * com.drones.vision.perception.domain.port.StreamPublisherPort#streamEnded}'s own idempotency contract.
      */
     void deletePath(String pathName) {
         HttpResponse<String> response =

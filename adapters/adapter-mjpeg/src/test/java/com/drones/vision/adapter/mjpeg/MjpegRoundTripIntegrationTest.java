@@ -1,11 +1,11 @@
 package com.drones.vision.adapter.mjpeg;
 
-import com.drones.vision.domain.model.FeedId;
-import com.drones.vision.domain.model.FeedSpec;
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.FeedId;
+import com.drones.vision.perception.domain.model.FeedSpec;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.VideoFrame;
 
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;

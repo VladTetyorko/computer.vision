@@ -1,8 +1,8 @@
 package com.drones.vision.app.security;
 
 import com.drones.vision.api.security.SessionAuthenticator;
-import com.drones.vision.application.identity.AuthService;
-import com.drones.vision.domain.model.User;
+import com.drones.vision.identity.application.AuthService;
+import com.drones.vision.identity.domain.model.User;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;

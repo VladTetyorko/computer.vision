@@ -16,9 +16,9 @@ import com.drones.vision.app.config.properties.VisionOverlayProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
 import com.drones.vision.app.devsupport.NoopReplayFrameExtractor;
 import com.drones.vision.app.devsupport.NoopStreamPublisher;
-import com.drones.vision.domain.port.out.OverlayPort;
-import com.drones.vision.domain.port.out.ReplayFrameExtractionPort;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
+import com.drones.vision.perception.domain.port.OverlayPort;
+import com.drones.vision.events.domain.port.ReplayFrameExtractionPort;
+import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -52,7 +52,7 @@ public class PublishWiring {
 
     /**
      * Burns detection boxes/labels (and, once a telemetry input reaches {@code
-     * com.drones.vision.application.pipeline.StreamPipeline}, a telemetry OSD) onto published frames
+     * com.drones.vision.perception.application.pipeline.StreamPipeline}, a telemetry OSD) onto published frames
      * (docs/plans/done/MVP1-PLAN.md §C8 bullets 1-2). Threaded into {@code
      * ApplicationServiceWiring#streamService} below.
      */

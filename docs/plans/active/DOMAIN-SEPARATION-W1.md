@@ -1,0 +1,486 @@
+# DOMAIN-SEPARATION W1 — context walls: measured state and sub-waves
+
+Companion to [DOMAIN-SEPARATION-PLAN.md](DOMAIN-SEPARATION-PLAN.md). That doc freezes the *target*
+(8 contexts, 4 roles, urgency-classed communication). This one is the **context file for W1**: what
+the code actually looks like today, measured rather than assumed, and the sub-waves that follow from it.
+
+**Branch:** `feat/domain-separation` (parent) · one subbranch per sub-wave, merged back on green.
+
+---
+
+## 1. What the measurement changed
+
+W1 in the parent plan was one wave: *"split vision-domain + vision-application into per-context module
+pairs"*. Measuring the code first (scripts in the session scratchpad, method in §2) says that would have
+failed on day one, and that the real work is smaller and differently shaped than expected.
+
+| Assumption in the plan | Measured reality | Consequence |
+|---|---|---|
+| Split modules, then fix what breaks | **16 of 18 application packages are one strongly-connected component** — Maven cannot express a cycle | extraction is the *last* step, not the first |
+| The coupling is large | **98 of 185 cross-package imports are javadoc-only** `{@link}` references | over half the apparent knot is documentation |
+| Many contexts are entangled | on **real code edges**, only **one** context cycle survives: flight ↔ perception ↔ warehouse | five contexts are already extractable |
+| The domain bag needs untangling | domain needs **2 type relocations** to become acyclic | the 93-record bag is cleaner than the services above it |
+| ArchUnit must wait for the split | ArchUnit reads **bytecode** — javadoc-only imports are invisible to it | **walls can land first, before any file moves** |
+
+That last row reorders the whole wave. An unused import still has to *resolve at compile time*, so
+javadoc imports break the build the moment contexts become separate Maven modules — but they are
+inert until then. So: enforce walls now, clean javadoc just before extraction.
+
+---
+
+## 2. Method (reproducible)
+
+Three passes over `vision-application` and `vision-domain` sources, comments and string literals stripped:
+
+1. **Package graph** — `import com.drones.vision.application.<pkg>.<Type>` occurrences → directed edges, Tarjan SCC.
+2. **Real vs javadoc** — an import counts as *real* only if its simple name also appears in the body with
+   imports/comments removed; otherwise it exists purely so `{@link Type}` resolves.
+3. **Domain graph** — `domain.model` is one flat package, so coupling is by direct type reference, not
+   import: for each of the 93 models + 37 ports, which other domain types its source names.
+
+Contexts are then applied as a package→context map (§3) and the graph is collapsed to context level;
+intra-context cycles are irrelevant (same future module), only cross-context cycles block extraction.
+
+---
+
+## 3. Context assignment
+
+### Application packages → contexts
+
+| Context | Packages today |
+|---|---|
+| identity | `identity`, `scope` |
+| warehouse | `asset`, `device`, `category`, `discovery`, `fleet`, `usage`, (`exception` — dissolved, see W1.2) |
+| perception | `stream`, `pipeline` |
+| flight | `flight`, `geofence` |
+| map | `map`, `mark` |
+| learning | `training` |
+| events-replay | `replay` |
+| simulation | `simulation` |
+
+### Domain: shared kernel
+
+The only types every context may import. Deliberately tiny — ids and pure value objects, no aggregates:
+
+`AssetId · DeviceId · StreamId · UserId · GroupId · UsageId · CategoryId · GeoPosition · Ownership ·
+LifecycleState · Capability · BoundingBox · BearingDistance · GeoProjection` — plus `StreamDescriptor`
+after W1.2 (see below).
+
+Everything else is owned by exactly one context; the full 130-type assignment lives in the analysis
+script and is reproduced per context in each sub-wave's MODULE.md as it lands.
+
+---
+
+## 4. The real graph today
+
+**Application layer, real code edges only** (javadoc excluded):
+
+```
+warehouse  → perception(11), identity(6)
+flight     → identity(6), warehouse(4)
+learning   → identity(12), events(3), perception(2)
+map        → identity(3), perception(1)
+perception → flight(1), warehouse(1)
+simulation → warehouse(4), perception(1)
+events     → (none)
+```
+
+**One cycle:** `warehouse → perception → {warehouse, flight} → warehouse`. Everything else is a DAG.
+
+**Domain layer, cross-context references:**
+
+```
+events     → perception(4), map(1), flight(1)
+perception → warehouse(4), flight(1), events(1)
+flight     → warehouse(4)
+learning   → perception(1)
+```
+
+**One cycle:** `perception ↔ events`.
+
+---
+
+## 5. The cycle-breaking list — 15 edges total
+
+This is the entire burn-down. Each row is small, and each has a defensible answer independent of the
+distribution goal.
+
+| # | Edge | What it is | Fix | Why it is right anyway |
+|---|---|---|---|---|
+| C1 | perception → warehouse (1) | `VideoSourceRegistry` uses `UnsupportedProtocolException` | dissolve the `exception` package: `UnsupportedProtocolException` → perception, `ProbeFailedException` → warehouse | an exception belongs to the context that throws it; a two-class package that both sides reach into is not a layer |
+| C2 | perception → flight (1) | `UsageTracker` uses `GeofenceMonitor` | perception stops calling geofence directly; the worker composes telemetry → geofence at wiring level | breach evaluation is not the video pipeline's job |
+| C3 | **warehouse → perception (11)** | `AssetService`/`DeviceService`/`FleetSummaryService` call `StreamService`, `ActiveStream`, `UsageTracker`, `TrackingConfigPatch` to answer *"is this asset live?"* | invert: warehouse declares a small read port (`StreamStateView`) it owns; perception feeds it. Composition of "inventory + live state" moves to the gateway where it belongs | **the architectural finding of this wave** — a CRUD context must not depend on runtime state; this is precisely what makes warehouse un-replicable today |
+| C4 | domain: perception → events (1) | `PipelineConfig` references `EventRuleConfig` | `EventRuleConfig` → perception | it is a per-stream pipeline setting that the event engine *reads*; it was filed by consumer, not by owner |
+| C5 | domain: perception → warehouse (2 of 4) | `VideoSourcePort`/`FeedTransmitterPort` reference `StreamDescriptor` | `StreamDescriptor` → shared kernel | a protocol+URI+options value object with no behavior, produced by warehouse and consumed by perception — textbook kernel |
+| C6 | domain: ports taking whole `Device` (5) | `FlightCommandPort`, `ManualControlPort`, `TelemetrySourcePort`, `RecordingPort`, `StreamPublisherPort` | narrow to what they use (id + descriptor + capabilities) | ports should take what they need, not an aggregate from another context |
+
+C1–C3 break the application cycle. C4–C5 break the domain cycle. C6 is hygiene that makes extraction
+clean rather than being strictly required.
+
+> **Landed in W1.2 — and it turned out cheaper than this table implies.** C1 and C2 were perception's
+> *only* two outgoing cross-context edges, so removing them made perception a **sink**, and the whole
+> application graph went acyclic on the spot. **C3 is therefore not an extraction blocker** — it is a
+> design problem (a CRUD context reading runtime state is what stops warehouse from being replicated
+> independently), and it can be paid on its own schedule, most naturally alongside the gateway
+> composition in W2/W3. Two imports, not eleven, were standing between this codebase and separable
+> modules.
+>
+> C4/C5 are recorded as **assignment decisions, not code changes**: `domain.model` is still one flat
+> package, so nothing physically moves until W1.5 — there is no package boundary yet for a relocation
+> to mean anything.
+
+---
+
+## 6. Sub-waves
+
+Each is a subbranch off `feat/domain-separation`, each ends with its scoped build green and MODULE.md
+updated, each is independently revertable.
+
+| Wave | Scope | Risk | Exit criterion |
+|---|---|---|---|
+| **W1.1 — walls** | `ContextArchitectureTest` in vision-app: declare the 8 contexts, assert the measured edge set of §4 exactly, and freeze it. Known cycle recorded as explicit, named debt that must shrink | none — test only, no production file touched | test green; **any new cross-context edge fails CI** |
+| **W1.2 — break the cycles** | C1, C2, C4, C5 (the small five) | low | application + domain context graphs acyclic except C3 |
+| **W1.3 — warehouse ⇄ perception** | C3: `StreamStateView` port, composition moved to gateway | **medium — the design-heavy one** | warehouse has zero perception edges; fleet/asset/device responses unchanged on the wire |
+| **W1.4 — javadoc de-import** | rewrite 98 cross-context `{@link X}` to fully-qualified form, drop the imports | mechanical, zero behavior | no cross-context import without a real code use |
+| **W1.5 — package reorganization** | `domain.model.*` → `domain.<context>.model`, ports likewise; application packages regrouped under `application.<context>.*` | mechanical, huge blast radius (~390 files + every adapter/api import) | full build green, MODULE.md per context |
+| **W1.6 — Maven extraction** | one module pair per context; role flags in vision-app | high, but trivial once W1.1–W1.5 hold | `./mvnw -B verify` green; `vision.roles` selects modules |
+
+W1.1 and W1.2 are worth doing today. W1.3 deserves its own review. W1.5 must run alone on the branch —
+nothing else can be in flight while every import in the repo moves.
+
+---
+
+## 7. What this wave deliberately does **not** do
+
+- **No model divergence.** §9 of the parent plan (one drone as `Asset`/`Vehicle`/`Source`/`TrackedPosition`)
+  is a *modeling* change per context, driven by need. W1 moves what exists; it does not fork records.
+- **No broker, no roles, no network hops.** W2/W3 own those. Every call in W1 stays in-process.
+- **No behavior change.** Wire contracts, DTOs and SSE payloads are byte-identical at the end of W1.
+  The `verify` suite plus the existing REST/SSE tests are the proof.
+
+---
+
+## 8. Status
+
+- [x] measurement + context assignment (this doc)
+- [x] **W1.1 walls** — `ContextArchitectureTest`, 13 declared edges frozen
+- [x] **W1.2 small cycles** — C1 (`exception` package dissolved) + C2 (`UsageTracker` telemetry-observer seam).
+      **The application context graph is now acyclic**; mutual pairs held at zero by test.
+      Verified: `./mvnw -B -pl vision-application,vision-api,vision-app test` green (vision-app 222/222)
+- [ ] W1.3 warehouse → perception (C3) — *demoted from blocker to design debt; may move to W2 with the gateway*
+- [x] **W1.4 javadoc de-import** — 70 cross-context javadoc-only imports removed across 43 files, each
+      surviving `{@link}`/`@throws` reference rewritten fully-qualified. Delegated to three Sonnet
+      agents on disjoint directory scopes (warehouse+simulation · learning+events+map ·
+      flight+identity+perception); verified centrally, not from their reports: re-measurement reports
+      **0 remaining**, exactly 43 files touched, no dangling FQNs, and
+      `./mvnw -B -pl vision-domain,vision-application,vision-api,vision-app test` green
+      (518 + 819 + 551 + 222 = **2110 tests**).
+      The 98 measured earlier included intra-context imports; 70 is the cross-context subset that
+      actually breaks Maven extraction. `{@code X}` mentions were correctly left bare — they resolve
+      nothing and need no import.
+- [x] **W1.5a domain package reorganization** — 130 types into `com.drones.vision.kernel` (15) +
+      `com.drones.vision.<ctx>.domain.{model,port}`. Packages only; files stay in the `vision-domain`
+      Maven module so W1.6 is a pure directory→module move. 197 files moved, references rewritten in
+      573, 101 imports added where a same-package reference became cross-package. C4/C5 applied.
+      `ContextArchitectureTest` grew domain coverage (4 rules now, incl. kernel isolation);
+      ArchUnit's three domain/application rules gained `..kernel..`.
+      Verified: domain 518 · application 819 · api 551 · app 222 · adapters 366 — **identical counts
+      to before the move**.
+- [x] **W1.5b application package reorganization** — 191 files into `com.drones.vision.<ctx>.application.*`,
+      references rewritten in 234. Collapse rule: a feature package folds into `<ctx>.application`
+      when its name equals the context (no `flight.application.flight`) or when it is the context's
+      only feature (no `events.application.replay`); otherwise the feature subpackage is kept.
+      Verified: domain 518 · application 819 · api 551 · app 223 · adapters 396, all green.
+- [x] **W1.6 break the module cycles** — all seven paid (§14, specified in §15). The graph is a **DAG**:
+      `DECLARED_CYCLES` is now `Set.of()` and the rule that guards it was renamed
+      `theModuleGraphIsAcyclic` — it stopped being a burn-down and became an invariant.
+  - [x] W1.6a platform seams — cycles 7→6, edges 26→23
+  - [x] W1.6b events-as-sink, god-port split — cycles 6→2, edges 23→17
+  - [x] W1.6c Telemetry/FlightState→kernel, AssetUsage→warehouse — edges 17→16
+  - [x] W1.6d probe → perception — cycles 2→1, edges 16→15
+  - [x] W1.6e stream lifecycle off AssetService + `AssetLiveStatePort` — **cycles 1→0**, edges 15→14
+      Reactor-wide green at every one; domain 527 · application 816 · api 551 · app 224 · adapters unchanged.
+- [x] **W1.7 Maven extraction** — see §16. `vision-domain` and `vision-application` are gone.
+  - [x] W1.7a `vision-kernel` + `vision-platform` — pure `git mv` + POMs, not one `.java` changed
+  - [x] W1.7b the eight contexts under `contexts/` — 353 renames, again no package or import changed;
+        every consumer POM narrowed to the contexts it actually imports
+  - [x] W1.7c a `MODULE.md` per new module, redistributed from the two dissolved docs, and every
+        citation of those two files elsewhere in the repo repointed at its new home
+  Reactor: 29 modules green. The 410 + 816 tests became warehouse 170 · identity 91 · flight 144 ·
+  perception 345 · map 223 · events 24 · learning 158 · simulation 71 = **1226**, the pre-split total.
+
+**W1 is complete.** What W2 inherits: eight independently-buildable context modules over a measured,
+ArchUnit-frozen DAG, with `theModuleGraphIsAcyclic` keeping it that way. Role flags moved to W3.
+
+---
+
+## 14. The module-level graph — what only became visible after W1.5b
+
+Until both layers lived under one per-context tree, the walls could only be checked **per layer**:
+application→application, and domain→domain. Both were acyclic, and this document said so. Neither
+could see an edge that crosses layers — warehouse's *application* reaching perception's *domain*.
+
+With `com.drones.vision.<ctx>.**` now holding both layers, `ContextArchitectureTest` measures the
+graph Maven will actually have to express. It has **26 edges and 7 cycles**:
+
+```
+events <-> flight      events <-> learning     events <-> map      events <-> perception
+flight <-> warehouse   identity <-> warehouse  perception <-> warehouse
+```
+
+Every one blocks extraction for *all* contexts, since a Maven module graph cannot contain a cycle.
+They are held as an exact-match burn-down (`DECLARED_CYCLES`) rather than hidden behind a disabled
+test. Measured causes, per cycle:
+
+| Cycle | Forward edge | Back edge | Root cause |
+|---|---|---|---|
+| events ↔ map | `LiveUpdatePublisherPort` → `MapEvent` | 4 map services → `LiveUpdatePublisherPort` | **C7** |
+| events ↔ perception | `LiveUpdatePublisherPort`/`DetectionRepositoryPort` → `DetectionResult`, `VideoFrame` | `StreamPipeline`, `DetectionEventEngine` → `EventPublisherPort`, `DetectionEvent` | **C7** |
+| events ↔ flight | `LiveUpdatePublisherPort` → `Telemetry`; replay → `AssetUsage` | `GeofenceMonitor` → `EventPublisherPort` | **C7** + **C9** |
+| identity ↔ warehouse | `VisibilityScope`, `DefaultAssignmentService` → `Asset` | warehouse → `AuditTrailPort`, `VisibilityScope` | **C7** |
+| events ↔ learning | `ReplayCaptureSpec` → `DatasetId` | `LabelingService` → `ReplayCaptureSpec` | **C8** |
+| flight ↔ warehouse | `FlightCommandPort`, `ManualControlLink` → `Device` | `DefaultAssetStatsService`, `DefaultFleetSummaryService` → `AssetUsage` | **C9** + **C6** |
+| perception ↔ warehouse | ports → `Device` (5×) | asset/device services → `StreamService`, `ActiveStream` | **C3** + **C6** |
+
+### New entries on the cycle-breaking list
+
+| # | Problem | Fix |
+|---|---|---|
+| **C7** | **Cross-cutting platform seams filed inside contexts.** `EventPublisherPort`, `LiveUpdatePublisherPort`, `AuditTrailPort` and `VisibilityScope` are written to by every context, yet live in `events`/`identity`. Worse, `LiveUpdatePublisherPort`'s signatures name `Telemetry`, `MapEvent`, `DetectionResult` and `DetectionEvent` — it is a **god-port that knows every context's payload**. This single problem causes **four of the seven cycles** | Move the genuinely generic seams (`EventPublisherPort`+`Event`+`EventType`, `AuditTrailPort`+`AuditEntry` family) into the kernel or a `platform` package; **split `LiveUpdatePublisherPort` per context** so each publishes its own updates — which is what the target architecture's U1/U2 split (DOMAIN-SEPARATION-PLAN §3) requires anyway. `VisibilityScope` needs its `Asset` reference removed before it can join them |
+| **C8** | `ReplayCaptureSpec` sits in `events` but exists to capture frames *for a dataset*, so it names `DatasetId` while learning names it right back | Move `ReplayCaptureSpec` to `learning` |
+| **C9** | **Split ownership of a flight session.** `AssetUsage` and its repository are `flight`; the services that read them (`DefaultAssetStatsService`, `DefaultFleetSummaryService`, `UsageService`) are `warehouse` | Decide one owner. A usage *is* a flight, so `flight` is the better home — the read services move with it, leaving warehouse to inventory only |
+
+**C7 is the finding worth taking away from W1**: the platform's three write-seams and one god-port
+are what actually bind the contexts together, far more than any business coupling. Splitting the
+live-update port per context is not extra work invented by this refactor — DOMAIN-SEPARATION-PLAN
+already requires it for scoped U1 delivery.
+
+---
+
+## 15. W1.6 — the cycle break, specified
+
+Every cycle was traced to a concrete class-to-class reference (script: `scratchpad/edges.py`, which
+reproduces ArchUnit's 26/7 exactly, so it can be used as a fast inner loop without a Maven run).
+Four sub-waves, in order; each must end green and is independently revertable.
+
+### The rule that decides every direction
+
+Two contexts point at each other and only one direction may survive. The tie-breaker is the same one
+C3 already established:
+
+> **Inventory is the stable layer. Runtime reads inventory; inventory never reads runtime.**
+
+So `perception → warehouse` and `flight → warehouse` stay (a stream must resolve its device); the
+reverse edges must reach zero. Symmetrically, `events` is a pure *downstream reader* — replay and
+history — so it may read every context, and nothing may read it back.
+
+### W1.6a — `com.drones.vision.platform`
+
+A ninth package, universal like the kernel: every context may depend on it, it depends only on the
+kernel. Kernel stays what it is — pure values, no ports. Platform holds the **cross-cutting seams**,
+the things every context writes to.
+
+| Move | From | Why |
+|---|---|---|
+| `Event`, `EventType`, `EventPublisherPort` | `events` | already kernel-only in their references; nothing about them is replay-specific |
+| `AuditEntry`, `AuditId`, `AuditAction`, `AuditTargetType`, `AuditTrailPort` | `identity` | audit is not an identity concern, it is a platform concern that happens to name a `UserId` (kernel) |
+| `VisibilityScope`, `AccessDeniedException` | `identity.application.scope` | every context filters by the scope and throws the exception when the filter says no; it is the authorization *value*, not identity's aggregate |
+
+`VisibilityScope` needs two edits before it can move: `includes(Asset)` becomes
+`includes(AssetId, Ownership)` — both kernel types, and all 8 call sites already hold an `Asset` —
+and `maxGrantableRole()` moves to identity (its single caller is `DefaultUserService`; granting roles
+is user administration, not visibility).
+
+**Kills `identity ↔ warehouse`.**
+
+### W1.6b — events becomes a sink
+
+| Move | From → To | Why |
+|---|---|---|
+| `DetectionRepositoryPort`, `DetectionEvent`, `DetectionEventId`, `DetectionEventState`, `DetectionEventRepositoryPort` | events → **perception** | they store and shape *detections*; only perception's `DetectionEventEngine`/`DefaultStreamService` ever construct them. Filed by consumer, not by owner |
+| `ReplayCaptureSpec` (**C8**) | events → **learning** | it exists to capture frames *for a dataset*, so it names `DatasetId` and learning names it back |
+
+And the god-port dies (**C7b**). `LiveUpdatePublisherPort`'s six methods are six contexts' business;
+each becomes a port in the context that publishes it:
+
+```
+publishFleetChanged()                   -> warehouse.domain.port.FleetLiveUpdatePort
+publishTelemetryAppended(AssetId, …)    -> flight.domain.port.TelemetryLiveUpdatePort
+publishDetections(AssetId, …)           -> perception.domain.port.DetectionLiveUpdatePort
+publishDetectionEvent(DetectionEvent)   -> perception.domain.port.DetectionLiveUpdatePort
+publishMapEvent(MapEvent)               -> map.domain.port.MapLiveUpdatePort
+publishEvent(Event)                     -> platform.port.EventLiveUpdatePort
+```
+
+`LiveUpdateRegistry` (vision-api) implements all five — an adapter may depend on every context, that
+is what an adapter is for. This is not extra work invented by the refactor: DOMAIN-SEPARATION-PLAN §3
+requires per-context U1 delivery anyway, and a single port that names four contexts' payloads cannot
+be scoped.
+
+**Kills all four `events ↔ …` cycles.**
+
+### W1.6c — ownership of a session and a sample
+
+| Move | Why |
+|---|---|
+| `Telemetry`, `FlightState` → **kernel** | pure records (`DeviceId` + primitives, no ports) read by five contexts. They are the platform's shared payload in exactly the way `GeoPosition` and `BoundingBox` already are. Revisit if W2's wire DTOs make per-context divergence real |
+| `AssetUsage`, `AssetUsageRepositoryPort`: flight → **warehouse** (**C9**) | split ownership today: the record is flight, all four readers (`AssetDetails`, `DefaultAssetService`, `DefaultAssetStatsService`, `DefaultUsageService`) are warehouse. Moving the record is four imports; moving the readers would drag fleet-summary into flight and create `flight ↔ perception` instead |
+
+Also collapses `perception → flight` to just the two telemetry ports `UsageTracker` opens, and
+`warehouse → flight` to `DefaultProbeService` alone — which W1.6d takes.
+
+### W1.6d — the probe is not an inventory concern
+
+After W1.6c, the whole of `warehouse -> flight` is one class: `DefaultProbeService` opening a
+`TelemetrySourcePort`. And four of `warehouse -> perception`'s references are the same class opening
+a `VideoSourcePort`.
+
+`DefaultProbeService` (287 lines) answers *"does this device's plumbing actually work?"* by opening a
+video source and grabbing a frame, then opening a telemetry source and waiting for a sample. That is
+ingest work, not inventory work — it was filed under `device` because a device is what you probe, not
+because warehouse does the probing. **Move the feature to `perception.application.device`**:
+`ProbeService`, `DefaultProbeService`, `ProbeResult`, `ProbeFailedException` (which follows its
+thrower, the same rule C1 applied when it landed in warehouse).
+
+No new port is needed. Perception may read warehouse and flight; `ProbeResult`'s `VideoFrame` becomes
+a same-context reference; `DeviceProbeController` is an adapter and may call across contexts freely.
+
+**Kills `flight <-> warehouse`.**
+
+### W1.6e — C3 proper, warehouse stops reading runtime
+
+What remains of `warehouse -> perception` is two different problems wearing one label.
+
+**1. Warehouse is orchestrating perception.** `AssetService.startStream(assetId, PipelineConfig,
+TrackingConfigPatch)` resolves a device and calls `StreamService.start(...)`. That is the "core is one
+big orchestrator" complaint in miniature: the CRUD context drives the runtime one and takes its
+configuration types into its own published interface to do it. Move the stream lifecycle off
+`AssetService` into `perception.application.stream.AssetStreamService`, which resolves the asset
+itself (perception -> warehouse, the legal direction) and calls `StreamService` directly.
+`PipelineConfig`, `TrackingConfigPatch` and friends then stay in perception, where they are executed —
+no config cluster has to migrate.
+
+**2. Warehouse genuinely needs to read live state.** Four call shapes survive:
+
+```
+streamService.activeDeviceIds()            DefaultAssetService — the "is live" flag on a summary
+streamService.streams() / .stop(id)        DefaultAssetService, DefaultDeviceService — stop before delete
+usageTracker.latestTelemetry(assetId)      DefaultAssetStatsService, DefaultFleetSummaryService
+recent DetectionEvents per asset           DefaultFleetSummaryService
+```
+
+Invert them behind **`warehouse.domain.port.AssetLiveStatePort`**, declared by warehouse.
+Measured against what the four services actually consume, the whole port is expressible in kernel
+types — no `ActiveStream`, no `DetectionEvent`, and no new warehouse-owned record either:
+
+```java
+Map<DeviceId, StreamId> activeStreamsByDevice();      // summaries, details, fleet attention
+int   stopStreamsForDevices(Collection<DeviceId>);    // stop before retire/delete
+Optional<Telemetry>     latestTelemetry(AssetId);     // battery, staleness, flight mode
+Map<AssetId, Integer>   openDetectionEventCounts(int scanLimit);
+```
+
+`scanLimit` stays a parameter so the tuning constant stays warehouse's. **Perception implements it**
+(`perception.application.stream.StreamBackedAssetLiveState`, composing `StreamService`,
+`UsageTracker` and `DetectionEventRepositoryPort`) — `perception -> warehouse` is already legal, so
+the implementation needs no third home and vision-app only wires it. The four warehouse services get
+*smaller*: `DefaultFleetSummaryService` drops three collaborators for one.
+
+Stopping a stream before deleting a device stays a synchronous port call here; W2 is where it becomes
+an event warehouse publishes and perception reacts to.
+
+**Kills `perception <-> warehouse`** — the last one. `DECLARED_CYCLES` empties and W1.7 unblocks.
+
+### Package scheme (fixed in W1.5a, applies to W1.5b and W1.6)
+
+```
+com.drones.vision.kernel                       shared kernel — ids + pure value objects
+com.drones.vision.<context>.domain.model       records/enums owned by the context
+com.drones.vision.<context>.domain.port        that context's driven ports   (".out" dropped)
+com.drones.vision.<context>.application.<f>    services, keeping today's feature subpackage,
+                                               collapsed when the feature name equals the context
+```
+
+**The context is the outermost segment on purpose**: the context is the future Maven module, so
+extraction stays a directory move. A layer-first layout (`domain.warehouse`) could not be extracted
+without splitting a package tree in half.
+
+### Known collision ahead of W1.5/W1.6
+
+The branch `feat/visual-geo` adds two more adapters (`adapter-geo-grpc`, `adapter-tiles`) and a
+`vision-model-contracts` module — present in this working tree as untracked leftovers, and in that
+branch's `adapters/pom.xml`, but not on `master`. W1.5 rewrites every import in the repo, so that
+branch must be merged **before** W1.5 or it will conflict with essentially every file it touches.
+
+
+---
+
+## 16. W1.7 — the extraction, measured
+
+The graph is acyclic, so the module list and its build order are no longer a design question. Both
+fall straight out of measurement.
+
+### The 14 surviving edges
+
+```
+events     -> flight(1), perception(7), warehouse(4)
+flight     -> warehouse(11)
+identity   -> warehouse(2)
+learning   -> events(1), perception(12), warehouse(3)
+map        -> identity(2), perception(1)
+perception -> flight(4), warehouse(16)
+simulation -> perception(6), warehouse(7)
+warehouse  -> (nothing)
+```
+
+**Warehouse is a pure leaf.** That is the direction rule of §15 showing up as a property of the graph
+rather than as a convention anyone has to remember: inventory is the layer everything else reads and
+that reads nothing back.
+
+### Modules
+
+`vision-domain` and `vision-application` dissolve. Each context becomes **one** module holding both
+its layers — the package tree already has them under `com.drones.vision.<ctx>.domain` /
+`.application`, so extraction is a directory move, and the layer boundary stays ArchUnit-enforced
+exactly as it is today. A module *pair* per context would double the POMs to re-state a rule the
+tests already state.
+
+| Module | Depends on |
+|---|---|
+| `vision-kernel` | — (17 pure value types) |
+| `vision-platform` | kernel (10 cross-cutting seams) |
+| `contexts/vision-warehouse` | kernel, platform |
+| `contexts/vision-identity` | + warehouse |
+| `contexts/vision-flight` | + warehouse |
+| `contexts/vision-perception` | + warehouse, flight |
+| `contexts/vision-map` | + identity, perception |
+| `contexts/vision-events` | + warehouse, flight, perception |
+| `contexts/vision-learning` | + warehouse, perception, events |
+| `contexts/vision-simulation` | + warehouse, perception |
+
+`contexts/` gets an aggregator POM, mirroring `adapters/`.
+
+### Consumers — measured, not guessed
+
+Most adapters need two or three contexts, which is the first concrete payoff of the whole wave:
+
+| Module | Contexts it actually imports |
+|---|---|
+| adapter-rtsp, adapter-mjpeg, adapter-v4l2, adapter-overlay | kernel, perception |
+| adapter-discovery | kernel, warehouse |
+| adapter-cv-grpc | kernel, perception, learning |
+| adapter-publish-hls | kernel, warehouse, perception, events |
+| adapter-simulation | kernel, warehouse, flight, perception |
+| adapter-mavlink | kernel, warehouse, flight, perception |
+| adapter-persistence | kernel, warehouse, identity, flight, perception, map, learning |
+| vision-api, vision-app | all ten |
+
+**No test-only cross-context edges exist** — every test tree is already context-local, so no
+`<scope>test</scope>` dependency is needed beyond the compile graph above.
+
+### Not in this wave
+
+**Role flags move to W3.** §6's original W1.6 row bundled "`vision.roles` selects modules" with
+extraction; that is conditional wiring in vision-app, it depends on nothing in the module split, and
+W3 (worker role + leases) is where it belongs. W1.7 is extraction only: same wiring, same behaviour,
+same wire contract.

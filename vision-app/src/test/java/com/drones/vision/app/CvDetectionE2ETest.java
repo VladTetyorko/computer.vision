@@ -1,15 +1,16 @@
 package com.drones.vision.app;
 
 import com.drones.vision.app.devsupport.DevPrincipal;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.asset.AssetSpec;
-import com.drones.vision.application.device.DeviceRegistration;
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.perception.application.stream.AssetStreamService;
+import com.drones.vision.warehouse.application.asset.AssetSpec;
+import com.drones.vision.warehouse.application.device.DeviceRegistration;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.proto.v1.DetectionResponse;
 import com.drones.vision.proto.v1.FrameRequest;
 import com.drones.vision.proto.v1.InferenceGrpc;
@@ -43,8 +44,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * gRPC server, a {@code sim}-device stream's sampled frames actually reach the server as {@code
  * FrameRequest}s (proving {@link com.drones.vision.adapter.cvgrpc.GrpcDetectionPort} is wired all
  * the way from {@link WiringConfiguration} through {@link
- * com.drones.vision.application.pipeline.StreamPipeline}'s inference sampling), while video keeps flowing
- * to {@link com.drones.vision.domain.port.out.StreamPublisherPort} the whole time. Stopping the
+ * com.drones.vision.perception.application.pipeline.StreamPipeline}'s inference sampling), while video keeps flowing
+ * to {@link com.drones.vision.perception.domain.port.StreamPublisherPort} the whole time. Stopping the
  * stream then proves session cleanup: {@link DetectionSessionCleanupEventPublisher} calls {@code
  * GrpcDetectionPort#streamEnded}, which half-closes the client's request stream, which the server
  * observes as its {@code StreamObserver<FrameRequest>#onCompleted} firing.
@@ -92,6 +93,9 @@ class CvDetectionE2ETest {
     private AssetService assetService;
 
     @Autowired
+    private AssetStreamService assetStreamService;
+
+    @Autowired
     private FileSimulationSmokeTest.RecordingStreamPublisher recordingStreamPublisher;
 
     @Test
@@ -104,7 +108,7 @@ class CvDetectionE2ETest {
                         new CategoryId("drone"), Map.of(), List.of(videoDevice)),
                 DevPrincipal.OWNERSHIP, DevPrincipal.USER_ID);
 
-        StreamId streamId = assetService.startStream(asset.id(), null, PipelineConfig.defaults());
+        StreamId streamId = assetStreamService.startStream(asset.id(), null, PipelineConfig.defaults());
         try {
             boolean receivedFrame = recordingStreamPublisher.awaitFirstFrame(10, TimeUnit.SECONDS);
             assertTrue(receivedFrame, "expected at least one frame to reach StreamPublisherPort within 10s");

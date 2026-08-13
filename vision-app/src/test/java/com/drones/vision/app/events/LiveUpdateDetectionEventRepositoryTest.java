@@ -1,11 +1,11 @@
 package com.drones.vision.app.events;
 
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.DetectionEventId;
-import com.drones.vision.domain.model.DetectionEventState;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.perception.domain.model.DetectionEvent;
+import com.drones.vision.perception.domain.model.DetectionEventId;
+import com.drones.vision.perception.domain.model.DetectionEventState;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -25,13 +25,13 @@ import static org.mockito.Mockito.when;
 class LiveUpdateDetectionEventRepositoryTest {
 
     private DetectionEventRepositoryPort delegate;
-    private LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private DetectionLiveUpdatePort liveUpdatePublisherPort;
     private LiveUpdateDetectionEventRepository repository;
 
     @BeforeEach
     void setUp() {
         delegate = mock(DetectionEventRepositoryPort.class);
-        liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
         repository = new LiveUpdateDetectionEventRepository(delegate, liveUpdatePublisherPort);
     }
 

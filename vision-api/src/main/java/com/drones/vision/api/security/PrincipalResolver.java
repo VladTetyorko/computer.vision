@@ -1,10 +1,10 @@
 package com.drones.vision.api.security;
 
-import com.drones.vision.application.map.MapAccessPolicy;
-import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.Role;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.kernel.UserId;
 
 import java.util.Objects;
 import java.util.Set;

@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.DatasetStatus;
+import com.drones.vision.learning.domain.model.DatasetStatus;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * JPA row for {@code datasets} — mirrors {@link com.drones.vision.domain.model.Dataset}
+ * JPA row for {@code datasets} — mirrors {@link com.drones.vision.learning.domain.model.Dataset}
  * field-for-field (docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T1/T3); {@link
  * com.drones.vision.adapter.persistence.JpaDatasetRepository} owns the mapping in both
  * directions.

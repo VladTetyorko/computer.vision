@@ -1,7 +1,7 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.AuditEntryResponse;
-import com.drones.vision.application.identity.ActivityService;
+import com.drones.vision.identity.application.ActivityService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;

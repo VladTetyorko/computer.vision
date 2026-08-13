@@ -3,9 +3,9 @@ package com.drones.vision.adapter.persistence.repository;
 import com.drones.vision.adapter.persistence.config.JpaOperations;
 import com.drones.vision.adapter.persistence.entity.AssignmentEntity;
 import com.drones.vision.adapter.persistence.entity.AssignmentId;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
 

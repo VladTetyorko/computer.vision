@@ -5,8 +5,8 @@ import com.drones.vision.api.dto.DrawingResponse;
 import com.drones.vision.api.dto.PatchDrawingRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.application.map.DrawingService;
-import com.drones.vision.domain.model.DrawingId;
+import com.drones.vision.map.application.DrawingService;
+import com.drones.vision.map.domain.model.DrawingId;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,7 +30,7 @@ import java.util.Objects;
  * through {@link ApiExceptionHandler} unchanged — {@link IllegalArgumentException} (malformed id,
  * unrecognized {@code kind}, wrong point count for the kind, a non-kebab-case {@code colorToken}) →
  * 400; {@link java.util.NoSuchElementException} (unknown drawing or unknown layer) → 404; {@link
- * com.drones.vision.application.scope.AccessDeniedException} → 403.
+ * com.drones.vision.platform.AccessDeniedException} → 403.
  */
 @RestController
 @RequestMapping("/api/map/drawings")

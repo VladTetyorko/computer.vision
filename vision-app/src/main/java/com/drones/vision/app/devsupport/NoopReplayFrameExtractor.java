@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.ReplayFrameExtractionPort;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.events.domain.port.ReplayFrameExtractionPort;
 
 import java.time.Instant;
 import java.util.Optional;

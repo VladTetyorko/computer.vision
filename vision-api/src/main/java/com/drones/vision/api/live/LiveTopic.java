@@ -1,6 +1,6 @@
 package com.drones.vision.api.live;
 
-import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.kernel.AssetId;
 
 import java.util.LinkedHashSet;
 import java.util.Set;

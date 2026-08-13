@@ -1,12 +1,12 @@
 package com.drones.vision.adapter.publishhls;
 
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.VideoFrame;
 
 import org.junit.jupiter.api.Test;
 

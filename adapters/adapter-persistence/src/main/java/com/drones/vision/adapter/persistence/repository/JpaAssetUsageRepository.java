@@ -3,10 +3,10 @@ package com.drones.vision.adapter.persistence.repository;
 import com.drones.vision.adapter.persistence.config.JpaOperations;
 import com.drones.vision.adapter.persistence.entity.AssetUsageEntity;
 import com.drones.vision.adapter.persistence.mapper.AssetUsageMapper;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.AssetUsage;
-import com.drones.vision.domain.model.UsageId;
-import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
+import com.drones.vision.kernel.UsageId;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
 

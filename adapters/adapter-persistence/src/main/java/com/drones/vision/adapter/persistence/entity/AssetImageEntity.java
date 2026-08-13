@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * JPA row for {@code asset_images} — mirrors {@link com.drones.vision.domain.model.AssetImage}
+ * JPA row for {@code asset_images} — mirrors {@link com.drones.vision.warehouse.domain.model.AssetImage}
  * plus the owning asset's id as its primary key (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3); {@link
  * com.drones.vision.adapter.persistence.JpaAssetImageRepository} owns the mapping in both
  * directions.

@@ -1,6 +1,6 @@
 package com.drones.vision.api.live;
 
-import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.kernel.AssetId;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;

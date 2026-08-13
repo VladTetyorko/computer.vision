@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.v4l2;
 
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.StreamId;
 
 import org.junit.jupiter.api.Test;
 

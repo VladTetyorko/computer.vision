@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.GroupEntity;
-import com.drones.vision.domain.model.Group;
-import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.identity.domain.model.Group;
+import com.drones.vision.kernel.GroupId;
 
 /**
  * {@link Group} &harr; {@link GroupEntity} mapping, extracted from {@code JpaGroupRepository}

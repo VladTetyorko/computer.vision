@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.TrackingTelemetry;
+import com.drones.vision.perception.domain.model.TrackingTelemetry;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**

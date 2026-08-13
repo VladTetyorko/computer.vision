@@ -2,8 +2,8 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.api.dto.CvTrackerResponse;
 import com.drones.vision.app.config.properties.VisionTrackingProperties;
-import com.drones.vision.application.stream.TrackingConfigPatch;
-import com.drones.vision.domain.model.TrackingMode;
+import com.drones.vision.perception.application.stream.TrackingConfigPatch;
+import com.drones.vision.perception.domain.model.TrackingMode;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

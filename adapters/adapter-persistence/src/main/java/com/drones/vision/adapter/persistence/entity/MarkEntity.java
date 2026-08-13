@@ -1,10 +1,10 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.Affiliation;
-import com.drones.vision.domain.model.MarkKind;
-import com.drones.vision.domain.model.MarkSource;
-import com.drones.vision.domain.model.MarkStatus;
-import com.drones.vision.domain.model.Verification.VerificationState;
+import com.drones.vision.map.domain.model.Affiliation;
+import com.drones.vision.map.domain.model.MarkKind;
+import com.drones.vision.map.domain.model.MarkSource;
+import com.drones.vision.map.domain.model.MarkStatus;
+import com.drones.vision.map.domain.model.Verification.VerificationState;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -17,7 +17,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * JPA row for {@code marks} — mirrors {@link com.drones.vision.domain.model.Mark} field-for-field
+ * JPA row for {@code marks} — mirrors {@link com.drones.vision.map.domain.model.Mark} field-for-field
  * (docs/plans/done/TACTICAL-MARKS-PLAN.md §3, reworked by docs/plans/done/MAP-REWORK-PLAN.md §4.4 / {@code
  * V12__map_layers.sql}); {@code MarkMapper} owns the mapping in both directions.
  *
@@ -34,7 +34,7 @@ import java.util.UUID;
  * choice {@link AssetUsageEntity} makes for {@code GeoPosition} (rather than {@link
  * GeofenceZoneEntity}'s jsonb-column choice for a whole polygon). {@code ownership} is flattened
  * to {@code owner_id}/{@code group_id}, the same choice {@link AssetEntity} makes for {@link
- * com.drones.vision.domain.model.Ownership}.
+ * com.drones.vision.kernel.Ownership}.
  *
  * <p>{@code kind}/{@code status}/{@code source} reuse the domain {@link MarkKind}/{@link
  * MarkStatus}/{@link MarkSource} enums directly in {@code @Enumerated(EnumType.STRING)} fields —

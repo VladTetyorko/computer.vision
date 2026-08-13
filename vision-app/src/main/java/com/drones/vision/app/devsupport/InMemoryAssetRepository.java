@@ -1,9 +1,9 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.port.out.AssetRepositoryPort;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 
 import java.util.List;
 import java.util.Map;

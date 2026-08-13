@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * JPA row for {@code sample_images} — mirrors {@link com.drones.vision.domain.model.SampleImage}
+ * JPA row for {@code sample_images} — mirrors {@link com.drones.vision.learning.domain.model.SampleImage}
  * plus the owning training sample's id as its primary key (docs/plans/done/CV-TRAINING-PLAN.md §1/§C); {@link
  * com.drones.vision.adapter.persistence.JpaSampleImageStore} owns the mapping in both directions.
  *

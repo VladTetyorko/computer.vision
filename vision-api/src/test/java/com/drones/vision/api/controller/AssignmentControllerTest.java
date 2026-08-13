@@ -1,14 +1,14 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.scope.AccessDeniedException;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.identity.AssignmentService;
-import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.identity.application.AssignmentService;
+import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -43,7 +43,7 @@ class AssignmentControllerTest {
     private final AssetService assetService = mock(AssetService.class);
 
     private final UserId actor = UserId.random();
-    private final CurrentUser currentUser = new CurrentUser(new Ownership(actor, com.drones.vision.domain.model.GroupId.random()));
+    private final CurrentUser currentUser = new CurrentUser(new Ownership(actor, com.drones.vision.kernel.GroupId.random()));
 
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(new AssignmentController(assignmentService, assignmentRepository, assetService, currentUser))

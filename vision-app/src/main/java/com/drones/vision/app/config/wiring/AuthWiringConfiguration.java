@@ -1,5 +1,11 @@
 package com.drones.vision.app.config.wiring;
 
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
+import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.identity.domain.port.GroupRepositoryPort;
+import com.drones.vision.identity.domain.port.PasswordHasherPort;
+import com.drones.vision.identity.domain.port.UserRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.api.security.SessionAuthenticator;
 import com.drones.vision.app.bootstrap.AuthSeedRunner;
@@ -8,9 +14,9 @@ import com.drones.vision.app.security.DevPrincipalResolver;
 import com.drones.vision.app.security.NoopSessionAuthenticator;
 import com.drones.vision.app.security.SecurityContextPrincipalResolver;
 import com.drones.vision.app.security.SecuritySessionAuthenticator;
-import com.drones.vision.application.identity.*;
-import com.drones.vision.application.scope.*;
-import com.drones.vision.domain.port.out.*;
+import com.drones.vision.identity.application.*;
+import com.drones.vision.identity.application.scope.*;
+
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -71,7 +77,7 @@ public class AuthWiringConfiguration {
     /**
      * Visibility-scope resolution (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — turns the acting user's
      * memberships + the group tree + their pilot assignments into a {@link
-     * com.drones.vision.application.scope.VisibilityScope}. Wired unconditionally (auth on or off): {@link
+     * com.drones.vision.platform.VisibilityScope}. Wired unconditionally (auth on or off): {@link
      * SecurityContextPrincipalResolver} uses it when auth is on; the {@code DevPrincipalResolver}
      * short-circuits to unbounded without touching it when auth is off.
      */

@@ -3,9 +3,9 @@ package com.drones.vision.adapter.persistence.repository;
 import com.drones.vision.adapter.persistence.config.JpaOperations;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
 import com.drones.vision.adapter.persistence.mapper.UserMapper;
-import com.drones.vision.domain.model.User;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.UserRepositoryPort;
+import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.UserRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.NoResultException;

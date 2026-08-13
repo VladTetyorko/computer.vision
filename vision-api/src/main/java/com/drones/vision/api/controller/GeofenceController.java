@@ -3,8 +3,8 @@ package com.drones.vision.api.controller;
 import com.drones.vision.api.dto.GeofenceZoneRequest;
 import com.drones.vision.api.dto.GeofenceZoneResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.geofence.GeofenceService;
-import com.drones.vision.domain.model.ZoneId;
+import com.drones.vision.flight.application.geofence.GeofenceService;
+import com.drones.vision.flight.domain.model.ZoneId;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,7 +26,7 @@ import java.util.Objects;
  * second collaborator the way {@link AssetController}/{@link DeviceController} do for auditing.
  *
  * <p>Error mapping is entirely {@link GeofenceService}'s/{@link
- * com.drones.vision.application.geofence.GeofenceZoneSpec}'s own exceptions surfacing through {@link
+ * com.drones.vision.flight.application.geofence.GeofenceZoneSpec}'s own exceptions surfacing through {@link
  * ApiExceptionHandler}, no controller-side translation needed: {@link
  * java.util.NoSuchElementException} (unknown zone id on update/delete) → 404; {@link
  * IllegalArgumentException} (a malformed zone-id UUID, an unrecognized {@code kind}, or a

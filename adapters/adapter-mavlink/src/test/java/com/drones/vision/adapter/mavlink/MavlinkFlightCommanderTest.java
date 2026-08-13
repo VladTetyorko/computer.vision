@@ -1,11 +1,11 @@
 package com.drones.vision.adapter.mavlink;
 
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.CommandResult;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.FlightCapability;
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.flight.domain.model.CommandResult;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.flight.domain.model.FlightCapability;
+import com.drones.vision.kernel.StreamDescriptor;
 
 import io.dronefleet.mavlink.MavlinkConnection;
 import io.dronefleet.mavlink.MavlinkMessage;

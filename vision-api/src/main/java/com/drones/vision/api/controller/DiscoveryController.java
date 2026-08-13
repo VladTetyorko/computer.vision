@@ -2,8 +2,8 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.ScanRequestDto;
 import com.drones.vision.api.dto.ScanResultResponse;
-import com.drones.vision.application.discovery.DiscoveryService;
-import com.drones.vision.application.discovery.DiscoveryScanSpec;
+import com.drones.vision.warehouse.application.discovery.DiscoveryService;
+import com.drones.vision.warehouse.application.discovery.DiscoveryScanSpec;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;

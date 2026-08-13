@@ -3,9 +3,9 @@ package com.drones.vision.adapter.persistence.repository;
 import com.drones.vision.adapter.persistence.config.JpaOperations;
 import com.drones.vision.adapter.persistence.entity.DatasetEntity;
 import com.drones.vision.adapter.persistence.mapper.DatasetMapper;
-import com.drones.vision.domain.model.Dataset;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.port.out.DatasetRepositoryPort;
+import com.drones.vision.learning.domain.model.Dataset;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
 

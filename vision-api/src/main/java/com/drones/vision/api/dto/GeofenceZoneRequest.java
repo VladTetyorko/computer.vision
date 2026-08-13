@@ -1,9 +1,9 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.geofence.GeofenceZoneSpec;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.ZoneKind;
+import com.drones.vision.flight.application.geofence.GeofenceZoneSpec;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.flight.domain.model.ZoneKind;
 
 import java.util.Arrays;
 import java.util.List;

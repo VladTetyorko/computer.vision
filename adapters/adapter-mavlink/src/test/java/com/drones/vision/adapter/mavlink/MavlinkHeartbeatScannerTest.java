@@ -1,13 +1,13 @@
 package com.drones.vision.adapter.mavlink;
 
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.DiscoveredDevice;
-import com.drones.vision.domain.model.FeedId;
-import com.drones.vision.domain.model.FeedSpec;
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.perception.domain.model.FeedId;
+import com.drones.vision.perception.domain.model.FeedSpec;
+import com.drones.vision.kernel.StreamDescriptor;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * docs/plans/active/DRONE-INFRA-PLAN.md I-b: real loopback UDP exercise of {@link MavlinkHeartbeatScanner},
  * both paths (hub-borrow and self-bind), plus the bind-conflict/time-boxing guarantees {@link
- * com.drones.vision.domain.port.out.DeviceDiscoveryPort}'s contract requires. No hardware, no
+ * com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort}'s contract requires. No hardware, no
  * docker.
  *
  * <p><b>Gotcha this suite shares with {@link MavlinkFleetGatewayIntegrationTest}</b>: several

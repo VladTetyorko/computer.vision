@@ -1,8 +1,8 @@
 package com.drones.vision.api.support;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.perception.domain.model.VideoFrame;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;

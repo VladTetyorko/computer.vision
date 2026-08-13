@@ -1,5 +1,16 @@
 package com.drones.vision.app.config.wiring;
 
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
+import com.drones.vision.events.domain.port.ReplayFrameExtractionPort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
+import com.drones.vision.learning.domain.port.DatasetUploadPort;
+import com.drones.vision.learning.domain.port.ModelRegistryPort;
+import com.drones.vision.learning.domain.port.SampleImageStorePort;
+import com.drones.vision.learning.domain.port.TrainingPort;
+import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.adapter.cvgrpc.GrpcCvSettings;
 import com.drones.vision.adapter.cvgrpc.GrpcDatasetUploadPort;
 import com.drones.vision.adapter.cvgrpc.GrpcModelRegistryPort;
@@ -7,10 +18,10 @@ import com.drones.vision.adapter.cvgrpc.GrpcTrainingPort;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.config.properties.VisionTrainingProperties;
-import com.drones.vision.application.replay.*;
-import com.drones.vision.application.stream.*;
-import com.drones.vision.application.training.*;
-import com.drones.vision.domain.port.out.*;
+import com.drones.vision.events.application.*;
+import com.drones.vision.perception.application.stream.*;
+import com.drones.vision.learning.application.*;
+
 import io.grpc.ManagedChannel;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;

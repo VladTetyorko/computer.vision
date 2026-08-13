@@ -1,7 +1,7 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.platform.Event;
+import com.drones.vision.platform.EventPublisherPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

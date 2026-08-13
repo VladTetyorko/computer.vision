@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.cvgrpc;
 
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.DatasetUpload;
-import com.drones.vision.domain.port.out.DatasetUploadPort;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.model.DatasetUpload;
+import com.drones.vision.learning.domain.port.DatasetUploadPort;
 import com.drones.vision.proto.v1.DatasetChunk;
 import com.drones.vision.proto.v1.TrainingGrpc;
 import com.drones.vision.proto.v1.UploadAck;

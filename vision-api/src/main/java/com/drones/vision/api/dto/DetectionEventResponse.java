@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.DetectionEvent;
+import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;

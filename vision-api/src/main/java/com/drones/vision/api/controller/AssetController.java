@@ -6,23 +6,16 @@ import com.drones.vision.api.dto.AssetSummaryResponse;
 import com.drones.vision.api.dto.AssignDeviceRequest;
 import com.drones.vision.api.dto.CreateAssetRequest;
 import com.drones.vision.api.dto.SetLifecycleStateRequest;
-import com.drones.vision.api.dto.StartAssetStreamRequest;
-import com.drones.vision.api.dto.StartStreamResponse;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateAssetRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.stream.StreamService;
-import com.drones.vision.application.stream.TrackingConfigPatch;
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.UsageId;
-import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
-import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.UsageId;
+import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
+import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,30 +27,29 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.net.URI;
 import java.util.List;
 import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
  * Driving REST adapter for the asset-first control-plane flow: create an
- * asset (with its device(s)) in one call, list/inspect assets as the read
- * models the UI leads with, and start/stop streaming at the asset level.
- * Also exposes a usage's raw telemetry trail (unwindowed, un-downsampled — see
- * {@link #telemetry}). For a windowed, downsampled, 404-on-unknown-usage replay view (telemetry
- * plus, in future, detections), see {@link UsageTimelineController} instead (docs/plans/done/MVP2-PLAN.md
- * §R, R-a) — the two endpoints live on separate controllers, see that class's javadoc for why.
+ * asset (with its device(s)) in one call, and list/inspect assets as the read
+ * models the UI leads with. Also exposes a usage's raw telemetry trail (unwindowed,
+ * un-downsampled — see {@link #telemetry}). For a windowed, downsampled, 404-on-unknown-usage
+ * replay view (telemetry plus, in future, detections), see {@link UsageTimelineController} instead
+ * (docs/plans/done/MVP2-PLAN.md §R, R-a) — the two endpoints live on separate controllers, see that
+ * class's javadoc for why. **Starting/stopping a stream lives on {@link AssetStreamController}**
+ * (split off in docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e — adding {@code
+ * AssetStreamService} here would have pushed this constructor to six parameters, one past
+ * .claude/skills/java-clean-code/SKILL.md §3's five-parameter ceiling; see that class's own
+ * javadoc), not here.
  *
- * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, {@link StreamService}
- * (resolving {@code burnedIn} for {@link #startStream} — docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4 — the
- * same precedent {@link StreamController} already sets for reading {@code StreamService} directly
- * rather than through {@code AssetService}), and three driven ports used read-only: {@link
- * StreamPublisherPort} (resolving {@code viewUrl}/{@code whepUrl}, exactly like {@link
- * StreamController}), {@link TelemetryRepositoryPort} (serving the telemetry endpoint — there
- * is no service method for "read a usage's telemetry trail" yet, so this controller reads the
- * driven port directly, the same precedent {@link StreamController} already sets for {@code
- * viewUrl}), and {@link AssetImageRepositoryPort} (populating {@code hasImage} on every summary/
- * detail response — docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2 — via its cheap {@code
+ * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, and two driven ports
+ * used read-only: {@link TelemetryRepositoryPort} (serving the telemetry endpoint — there is no
+ * service method for "read a usage's telemetry trail" yet, so this controller reads the driven
+ * port directly, the same precedent {@link StreamController} sets for {@code viewUrl}), and {@link
+ * AssetImageRepositoryPort} (populating {@code hasImage} on every summary/detail response —
+ * docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2 — via its cheap {@code
  * existsByAssetId} check; the image bytes themselves are served by {@link AssetImageController}).
  * Per the hexagonal dependency rule (ARCHITECTURE.md §2, enforced by ArchUnit), this
  * module depends only on {@code vision-domain} and {@code vision-application} — never on an
@@ -72,7 +64,7 @@ import com.drones.vision.api.security.CurrentUser;
  * caller may see, and {@link #details} (and every post-mutation detail render) 404s an asset
  * outside the caller's scope exactly as it 404s an unknown id — existence is never revealed. Each
  * mutation ({@link #update}/{@link #setState}/{@link #delete}/{@link #assignDevice}/{@link
- * #unassignDevice}/{@link #startStream}) first re-reads through the scope, so an out-of-scope asset
+ * #unassignDevice}) first re-reads through the scope, so an out-of-scope asset
  * 404s before the mutation runs; wave 1 scoped only asset reads + command + assign, so this
  * cheap "read-scope guards the write" is the deliberate write-path posture until the asset services
  * take a scope on writes directly. With auth off the scope is unbounded, so all of this is a no-op
@@ -82,27 +74,21 @@ import com.drones.vision.api.security.CurrentUser;
  * An unknown asset id surfaces as {@link java.util.NoSuchElementException} from {@link
  * AssetService} and maps to 404 through {@link ApiExceptionHandler}; a malformed UUID fails
  * earlier in {@code AssetId.of}/{@code DeviceId.of} and maps to 400, as do genuine validation
- * failures such as an ambiguous device or a device that does not belong to the asset.
+ * failures such as a device that does not belong to the asset.
  */
 @RestController
 public class AssetController {
 
     private final AssetService assetService;
     private final CurrentUser currentUser;
-    private final StreamPublisherPort streamPublisherPort;
-    private final StreamService streamService;
     private final TelemetryRepositoryPort telemetryRepositoryPort;
     private final AssetImageRepositoryPort assetImageRepositoryPort;
 
     public AssetController(AssetService assetService, CurrentUser currentUser,
-                            StreamPublisherPort streamPublisherPort, StreamService streamService,
                             TelemetryRepositoryPort telemetryRepositoryPort,
                             AssetImageRepositoryPort assetImageRepositoryPort) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
-        this.streamPublisherPort =
-                Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
-        this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
         this.telemetryRepositoryPort =
                 Objects.requireNonNull(telemetryRepositoryPort, "telemetryRepositoryPort must not be null");
         this.assetImageRepositoryPort =
@@ -212,51 +198,6 @@ public class AssetController {
     }
 
     /**
-     * Starts a stream for one of the asset's devices. The optional request
-     * body's fields, if present, override the corresponding defaults (see
-     * {@link StartAssetStreamRequest}); {@code deviceId} absent means "the
-     * asset's single video-capable device".
-     *
-     * <p>What the body says about {@code tracking} travels as its own patch, folded onto the
-     * deployment's tracking seed inside the application layer — the same path {@code
-     * StreamController#start} and the simulation service take, so the deployment default never
-     * depends on which button the operator pressed (docs/extracts/TRACKING-ORCHESTRATION.md §4.1).
-     *
-     * @param id      the asset to stream from, as a canonical UUID string
-     * @param request optional overrides; {@code null}/absent means use every default
-     * @return the started stream's id and (if available) its viewer URLs
-     */
-    @PostMapping("/api/assets/{id}/stream")
-    @ResponseStatus(HttpStatus.CREATED)
-    public StartStreamResponse startStream(@PathVariable String id,
-                                            @RequestBody(required = false) StartAssetStreamRequest request) {
-        AssetId assetId = AssetId.of(id);
-        StartAssetStreamRequest effective = request == null ? StartAssetStreamRequest.EMPTY : request;
-        DeviceId device = effective.deviceIdOrNull(); // malformed device id / config is a 400, before the scope 404
-        PipelineConfig config = effective.mergeOntoDefaults();
-        TrackingConfigPatch tracking = effective.trackingPatch();
-        requireInScope(assetId);
-
-        StreamId streamId = assetService.startStream(assetId, device, config, tracking);
-        return new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId),
-                streamService.burnedIn(streamId));
-    }
-
-    /**
-     * Stops the asset's active stream(s), if any. Idempotent — an asset with
-     * no active stream (or an unknown asset id) is a no-op, mirroring {@link
-     * AssetService#stopStream(AssetId)}'s contract, so there is no 404 case
-     * here.
-     *
-     * @param id the asset to stop streaming, as a canonical UUID string
-     */
-    @DeleteMapping("/api/assets/{id}/stream")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void stopStream(@PathVariable String id) {
-        assetService.stopStream(AssetId.of(id));
-    }
-
-    /**
      * Assigns an existing, unowned device to this asset (docs/main/CYCLES-PLAN.md §8's pinned
      * contract).
      *
@@ -331,13 +272,5 @@ public class AssetController {
      */
     private void requireInScope(AssetId id) {
         assetService.details(currentUser.scope(), id);
-    }
-
-    private String viewUrl(StreamId streamId) {
-        return streamPublisherPort.viewUrl(streamId).map(URI::toString).orElse(null);
-    }
-
-    private String whepUrl(StreamId streamId) {
-        return streamPublisherPort.whepUrl(streamId).map(URI::toString).orElse(null);
     }
 }

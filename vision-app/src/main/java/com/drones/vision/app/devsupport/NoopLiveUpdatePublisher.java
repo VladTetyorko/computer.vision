@@ -1,23 +1,32 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.model.MapEvent;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.perception.domain.model.DetectionEvent;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
+import com.drones.vision.platform.Event;
+import com.drones.vision.platform.EventLiveUpdatePort;
+import com.drones.vision.map.domain.model.MapEvent;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
+import com.drones.vision.kernel.Telemetry;
+import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
+import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
 
 /**
- * No-op {@link LiveUpdatePublisherPort}: every method is a no-op. Wired when {@code
- * vision.live.enabled=false} (docs/plans/done/REALTIME-PLAN.md §4, item 4) — {@code vision-api}'s {@code
- * /api/live} endpoint itself 404s in that case (its controller/registry beans are conditionally
- * absent), but the application layer ({@code StreamPipeline}/{@code UsageTracker}/{@code
- * DefaultStreamService}) still needs <em>some</em> {@link LiveUpdatePublisherPort} bean to satisfy
- * their constructors, exactly as {@link NoopDetectionPort}/{@link NoopStreamPublisher} do for their
- * own ports when their feature is disabled.
+ * No-op implementation of all five live-update ports the former god-port {@code
+ * LiveUpdatePublisherPort} split into (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b) —
+ * every method is a no-op. Wired when {@code vision.live.enabled=false} (docs/plans/done/REALTIME-PLAN.md
+ * §4, item 4) — {@code vision-api}'s {@code /api/live} endpoint itself 404s in that case (its
+ * controller/registry beans are conditionally absent), but the application layer ({@code
+ * StreamPipeline}/{@code UsageTracker}/{@code DefaultStreamService}) still needs <em>some</em>
+ * implementation of whichever one of the five ports it depends on to satisfy its constructor,
+ * exactly as {@link NoopDetectionPort}/{@link NoopStreamPublisher} do for their own ports when
+ * their feature is disabled. Implementing all five on one class (rather than five separate no-op
+ * classes) mirrors {@code LiveUpdateRegistry}'s own shape — the one class that would otherwise
+ * announce this fact for real.
  */
-public final class NoopLiveUpdatePublisher implements LiveUpdatePublisherPort {
+public final class NoopLiveUpdatePublisher implements FleetLiveUpdatePort, TelemetryLiveUpdatePort,
+        DetectionLiveUpdatePort, MapLiveUpdatePort, EventLiveUpdatePort {
 
     @Override
     public void publishFleetChanged() {

@@ -1,9 +1,9 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.Drawing;
-import com.drones.vision.domain.model.MapEvent;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.model.Mark;
+import com.drones.vision.map.domain.model.Drawing;
+import com.drones.vision.map.domain.model.MapEvent;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.map.domain.model.Mark;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.Locale;

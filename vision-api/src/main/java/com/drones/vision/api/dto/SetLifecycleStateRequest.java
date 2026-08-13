@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.LifecycleState;
+import com.drones.vision.kernel.LifecycleState;
 
 import java.util.Arrays;
 import java.util.stream.Collectors;

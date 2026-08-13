@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.Device;
+import com.drones.vision.warehouse.domain.model.Device;
 
 import java.util.List;
 import java.util.Map;

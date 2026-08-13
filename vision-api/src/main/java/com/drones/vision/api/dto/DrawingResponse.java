@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.Drawing;
+import com.drones.vision.map.domain.model.Drawing;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;

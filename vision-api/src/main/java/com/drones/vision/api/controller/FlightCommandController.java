@@ -5,10 +5,10 @@ import com.drones.vision.api.dto.ForceCommandRequest;
 import com.drones.vision.api.dto.ReturnHomeResponse;
 import com.drones.vision.api.dto.SetModeRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.flight.FlightCommandService;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.CommandResult;
-import com.drones.vision.domain.model.FlightCapability;
+import com.drones.vision.flight.application.FlightCommandService;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.flight.domain.model.CommandResult;
+import com.drones.vision.flight.domain.model.FlightCapability;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,7 +41,7 @@ import com.drones.vision.api.security.CurrentUser;
  * IllegalArgumentException}, validated against the vehicle's capabilities before dispatch —
  * deliberately distinct from the not-commandable 409, see {@code DefaultFlightCommandService}); and
  * {@code 403} when the asset exists but is outside the caller's {@link CurrentUser#scope()}
- * ({@link com.drones.vision.application.scope.AccessDeniedException}, mapped by {@link
+ * ({@link com.drones.vision.platform.AccessDeniedException}, mapped by {@link
  * ApiExceptionHandler} — docs/plans/done/U-SCOPE-PLAN.md, feature 3).
  *
  * <p>{@code GET /api/assets/{id}/flight-capabilities} is instead a <em>read</em>: {@code 200} with

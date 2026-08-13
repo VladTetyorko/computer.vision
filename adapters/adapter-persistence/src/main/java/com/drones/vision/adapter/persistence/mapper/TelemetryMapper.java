@@ -1,9 +1,9 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.UsageId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.Telemetry;
+import com.drones.vision.kernel.UsageId;
 
 import java.util.UUID;
 

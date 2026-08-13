@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.discovery.onvif;
 
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DiscoveredDevice;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

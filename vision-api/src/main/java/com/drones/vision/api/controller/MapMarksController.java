@@ -8,9 +8,9 @@ import com.drones.vision.api.dto.PromoteMarkRequest;
 import com.drones.vision.api.dto.VerifyMarkRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.application.map.MapAccessPolicy.Viewer;
-import com.drones.vision.application.mark.MarkService;
-import com.drones.vision.domain.model.MarkId;
+import com.drones.vision.map.application.MapAccessPolicy.Viewer;
+import com.drones.vision.map.application.mark.MarkService;
+import com.drones.vision.map.domain.model.MarkId;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,7 +41,7 @@ import java.util.Objects;
  * IllegalArgumentException} (malformed id, unrecognized {@code kind}/{@code affiliation}/{@code
  * status}/{@code decision}, incomplete telemetry on {@link #geolocate}, an {@code UNVERIFIED}
  * verify decision) → 400; {@link java.util.NoSuchElementException} (unknown mark or unknown target
- * layer) → 404; {@link com.drones.vision.application.scope.AccessDeniedException} → 403.
+ * layer) → 404; {@link com.drones.vision.platform.AccessDeniedException} → 403.
  *
  * <p>Note the deliberate 403-not-404 split the service defines: acting on a mark whose layer the
  * caller cannot even view is {@code 403}, not a hiding {@code 404} — the same stance {@code

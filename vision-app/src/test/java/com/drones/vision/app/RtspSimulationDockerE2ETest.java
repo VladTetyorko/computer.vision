@@ -1,12 +1,12 @@
 package com.drones.vision.app;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.AssetUsage;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.UsageId;
-import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
-import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.kernel.Telemetry;
+import com.drones.vision.kernel.UsageId;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.jayway.jsonpath.JsonPath;
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;
@@ -59,7 +59,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * doctrine — {@code RtspFeedTransmitter} (TX) pushes it to a real <a
  * href="https://github.com/bluenviron/mediamtx">mediamtx</a> container, {@code FfmpegVideoSource}
  * (RX) ingests it back over the wire — through the actual production wiring from {@link
- * WiringConfiguration} (only {@link com.drones.vision.domain.port.out.StreamPublisherPort} swapped
+ * WiringConfiguration} (only {@link com.drones.vision.perception.domain.port.StreamPublisherPort} swapped
  * for a frame-recording test double, same technique as {@link FileSimulationSmokeTest}, whose
  * {@link FileSimulationSmokeTest.RecordingPublisherConfig}/{@link
  * FileSimulationSmokeTest.RecordingStreamPublisher} are reused here rather than duplicated — both

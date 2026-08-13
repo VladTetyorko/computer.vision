@@ -8,7 +8,7 @@ import jakarta.persistence.Table;
 import java.util.UUID;
 
 /**
- * JPA row for {@code groups} — mirrors {@link com.drones.vision.domain.model.Group} field-for-field
+ * JPA row for {@code groups} — mirrors {@link com.drones.vision.identity.domain.model.Group} field-for-field
  * (docs/plans/done/U-AUTH-PLAN.md, wave 3); {@link com.drones.vision.adapter.persistence.JpaGroupRepository}
  * owns the mapping in both directions.
  *

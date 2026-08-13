@@ -5,10 +5,14 @@ import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.app.events.LiveUpdateAuditTrail;
 import com.drones.vision.app.events.LiveUpdateDetectionEventRepository;
 import com.drones.vision.app.events.LiveUpdateEventPublisher;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.EventPublisherPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
+import com.drones.vision.platform.EventLiveUpdatePort;
+import com.drones.vision.platform.EventPublisherPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
+import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
+import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -19,11 +23,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 /**
  * Context test for the <em>default</em> {@code vision.live.*} configuration (no override, per
  * {@link VisionLiveProperties#enabled()}'s default of {@code true} — docs/plans/done/REALTIME-PLAN.md §4,
- * item 4): asserts {@link WiringConfiguration} wires the real {@link LiveUpdateRegistry} (not the
- * no-op fallback), that {@code GET /api/live}'s {@link LiveController} bean exists, and that {@link
- * EventPublisherPort}/{@link AuditTrailPort}/{@link DetectionEventRepositoryPort} are each wrapped
- * in their respective live-update decorators — see {@link LiveDisabledWiringTest} for the opposite
- * (disabled) counterpart.
+ * item 4): asserts {@link ApplicationServiceWiring} wires the real {@link LiveUpdateRegistry} (not
+ * the no-op fallback) behind every one of the five live-update ports ({@link FleetLiveUpdatePort},
+ * {@link TelemetryLiveUpdatePort}, {@link DetectionLiveUpdatePort}, {@link MapLiveUpdatePort},
+ * {@link EventLiveUpdatePort} — the ports the former god-port {@code LiveUpdatePublisherPort} split
+ * into, docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b), that {@code GET /api/live}'s {@link
+ * LiveController} bean exists, and that {@link EventPublisherPort}/{@link AuditTrailPort}/{@link
+ * DetectionEventRepositoryPort} are each wrapped in their respective live-update decorators — see
+ * {@link LiveDisabledWiringTest} for the opposite (disabled) counterpart.
  *
  * <p>{@code vision.publish.enabled=false} for the same determinism reasons as {@link
  * CvWiringTest}/{@link AssetWiringTest}.
@@ -32,7 +39,19 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 class LiveWiringTest {
 
     @Autowired
-    private LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private FleetLiveUpdatePort fleetLiveUpdatePort;
+
+    @Autowired
+    private TelemetryLiveUpdatePort telemetryLiveUpdatePort;
+
+    @Autowired
+    private DetectionLiveUpdatePort detectionLiveUpdatePort;
+
+    @Autowired
+    private MapLiveUpdatePort mapLiveUpdatePort;
+
+    @Autowired
+    private EventLiveUpdatePort eventLiveUpdatePort;
 
     @Autowired
     private LiveController liveController;
@@ -47,8 +66,12 @@ class LiveWiringTest {
     private DetectionEventRepositoryPort detectionEventRepositoryPort;
 
     @Test
-    void defaultConfigurationWiresTheRealLiveUpdateRegistry() {
-        assertInstanceOf(LiveUpdateRegistry.class, liveUpdatePublisherPort);
+    void defaultConfigurationWiresTheRealLiveUpdateRegistryForEveryPort() {
+        assertInstanceOf(LiveUpdateRegistry.class, fleetLiveUpdatePort);
+        assertInstanceOf(LiveUpdateRegistry.class, telemetryLiveUpdatePort);
+        assertInstanceOf(LiveUpdateRegistry.class, detectionLiveUpdatePort);
+        assertInstanceOf(LiveUpdateRegistry.class, mapLiveUpdatePort);
+        assertInstanceOf(LiveUpdateRegistry.class, eventLiveUpdatePort);
     }
 
     @Test

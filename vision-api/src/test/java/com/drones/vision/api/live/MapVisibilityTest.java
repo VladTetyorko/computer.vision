@@ -1,16 +1,16 @@
 package com.drones.vision.api.live;
 
-import com.drones.vision.application.map.LayerView;
-import com.drones.vision.application.map.MapAccessPolicy.Viewer;
-import com.drones.vision.application.map.MapLayerService;
-import com.drones.vision.domain.model.AccessLevel;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.LayerKind;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.Role;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.map.application.LayerView;
+import com.drones.vision.map.application.MapAccessPolicy.Viewer;
+import com.drones.vision.map.application.MapLayerService;
+import com.drones.vision.map.domain.model.AccessLevel;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.LayerKind;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -60,7 +60,7 @@ class MapVisibilityTest {
         }
 
         @Override
-        public MapLayer create(Viewer v, com.drones.vision.application.map.LayerSpec spec) {
+        public MapLayer create(Viewer v, com.drones.vision.map.application.LayerSpec spec) {
             throw new UnsupportedOperationException();
         }
 
@@ -76,7 +76,7 @@ class MapVisibilityTest {
 
         @Override
         public MapLayer setGrants(Viewer v, LayerId id,
-                                   List<com.drones.vision.domain.model.LayerGrant> grants) {
+                                   List<com.drones.vision.map.domain.model.LayerGrant> grants) {
             throw new UnsupportedOperationException();
         }
 
@@ -207,7 +207,7 @@ class MapVisibilityTest {
         }
 
         @Override
-        public MapLayer create(Viewer v, com.drones.vision.application.map.LayerSpec spec) {
+        public MapLayer create(Viewer v, com.drones.vision.map.application.LayerSpec spec) {
             throw new UnsupportedOperationException();
         }
 
@@ -223,7 +223,7 @@ class MapVisibilityTest {
 
         @Override
         public MapLayer setGrants(Viewer v, LayerId id,
-                                   List<com.drones.vision.domain.model.LayerGrant> grants) {
+                                   List<com.drones.vision.map.domain.model.LayerGrant> grants) {
             throw new UnsupportedOperationException();
         }
 

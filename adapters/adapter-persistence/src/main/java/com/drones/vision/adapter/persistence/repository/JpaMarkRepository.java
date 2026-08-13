@@ -3,9 +3,9 @@ package com.drones.vision.adapter.persistence.repository;
 import com.drones.vision.adapter.persistence.config.JpaOperations;
 import com.drones.vision.adapter.persistence.entity.MarkEntity;
 import com.drones.vision.adapter.persistence.mapper.MarkMapper;
-import com.drones.vision.domain.model.Mark;
-import com.drones.vision.domain.model.MarkId;
-import com.drones.vision.domain.port.out.MarkRepositoryPort;
+import com.drones.vision.map.domain.model.Mark;
+import com.drones.vision.map.domain.model.MarkId;
+import com.drones.vision.map.domain.port.MarkRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
 

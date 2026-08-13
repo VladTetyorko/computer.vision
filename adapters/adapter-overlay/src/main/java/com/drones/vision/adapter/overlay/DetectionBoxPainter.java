@@ -1,9 +1,9 @@
 package com.drones.vision.adapter.overlay;
 
-import com.drones.vision.domain.model.BoundingBox;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.TrackRef;
-import com.drones.vision.domain.model.TrackState;
+import com.drones.vision.kernel.BoundingBox;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.TrackRef;
+import com.drones.vision.perception.domain.model.TrackState;
 
 import java.awt.BasicStroke;
 import java.awt.Color;

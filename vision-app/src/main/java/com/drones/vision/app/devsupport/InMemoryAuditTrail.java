@@ -1,9 +1,9 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.AuditEntry;
-import com.drones.vision.domain.model.AuditTargetType;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AuditTrailPort;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditTargetType;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.platform.AuditTrailPort;
 
 import java.util.Comparator;
 import java.util.List;

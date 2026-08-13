@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.replay.UsageTimeline;
+import com.drones.vision.events.application.UsageTimeline;
 
 import java.time.Instant;
 import java.util.List;

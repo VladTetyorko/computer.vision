@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.rtsp;
 
-import com.drones.vision.domain.model.FeedId;
-import com.drones.vision.domain.model.FeedSpec;
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.perception.domain.model.FeedId;
+import com.drones.vision.perception.domain.model.FeedSpec;
+import com.drones.vision.kernel.StreamDescriptor;
 
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;

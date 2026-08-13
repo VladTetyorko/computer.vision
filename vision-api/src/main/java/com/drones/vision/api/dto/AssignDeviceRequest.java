@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.kernel.DeviceId;
 
 /**
  * Request body for {@code POST /api/assets/{id}/devices} (docs/main/CYCLES-PLAN.md §8's pinned

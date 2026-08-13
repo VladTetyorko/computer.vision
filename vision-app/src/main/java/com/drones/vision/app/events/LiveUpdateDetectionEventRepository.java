@@ -1,9 +1,9 @@
 package com.drones.vision.app.events;
 
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.perception.domain.model.DetectionEvent;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 
 import java.time.Instant;
 import java.util.List;
@@ -27,10 +27,10 @@ import java.util.Objects;
 public final class LiveUpdateDetectionEventRepository implements DetectionEventRepositoryPort {
 
     private final DetectionEventRepositoryPort delegate;
-    private final LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private final DetectionLiveUpdatePort liveUpdatePublisherPort;
 
     public LiveUpdateDetectionEventRepository(DetectionEventRepositoryPort delegate,
-                                              LiveUpdatePublisherPort liveUpdatePublisherPort) {
+                                              DetectionLiveUpdatePort liveUpdatePublisherPort) {
         this.delegate = Objects.requireNonNull(delegate, "delegate must not be null");
         this.liveUpdatePublisherPort =
                 Objects.requireNonNull(liveUpdatePublisherPort, "liveUpdatePublisherPort must not be null");

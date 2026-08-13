@@ -6,10 +6,14 @@ import com.drones.vision.app.devsupport.InMemoryAuditTrail;
 import com.drones.vision.app.devsupport.InMemoryDetectionEventRepository;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
 import com.drones.vision.app.devsupport.NoopLiveUpdatePublisher;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.EventPublisherPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
+import com.drones.vision.platform.EventLiveUpdatePort;
+import com.drones.vision.platform.EventPublisherPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
+import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
+import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,8 +24,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Context test for {@code vision.live.enabled=false} (docs/plans/done/REALTIME-PLAN.md §4, item 4): asserts
- * the context still loads cleanly but with {@link LiveUpdatePublisherPort} falling back to {@link
- * NoopLiveUpdatePublisher}, {@code GET /api/live}'s {@link LiveController}/{@link
+ * the context still loads cleanly but with every one of the five live-update ports ({@link
+ * FleetLiveUpdatePort}, {@link TelemetryLiveUpdatePort}, {@link DetectionLiveUpdatePort}, {@link
+ * MapLiveUpdatePort}, {@link EventLiveUpdatePort} — the ports the former god-port {@code
+ * LiveUpdatePublisherPort} split into, docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b) falling
+ * back to {@link NoopLiveUpdatePublisher}, {@code GET /api/live}'s {@link LiveController}/{@link
  * LiveUpdateRegistry} beans entirely absent (so the endpoint 404s, same as any other unmapped
  * route), and neither {@link EventPublisherPort} nor {@link AuditTrailPort} wrapped in their
  * live-update decorators — see {@link LiveWiringTest} for the opposite (enabled/default)
@@ -43,7 +50,19 @@ class LiveDisabledWiringTest {
     private ApplicationContext applicationContext;
 
     @Autowired
-    private LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private FleetLiveUpdatePort fleetLiveUpdatePort;
+
+    @Autowired
+    private TelemetryLiveUpdatePort telemetryLiveUpdatePort;
+
+    @Autowired
+    private DetectionLiveUpdatePort detectionLiveUpdatePort;
+
+    @Autowired
+    private MapLiveUpdatePort mapLiveUpdatePort;
+
+    @Autowired
+    private EventLiveUpdatePort eventLiveUpdatePort;
 
     @Autowired
     private EventPublisherPort eventPublisherPort;
@@ -55,8 +74,12 @@ class LiveDisabledWiringTest {
     private DetectionEventRepositoryPort detectionEventRepositoryPort;
 
     @Test
-    void disabledConfigurationFallsBackToTheNoopLiveUpdatePublisher() {
-        assertInstanceOf(NoopLiveUpdatePublisher.class, liveUpdatePublisherPort);
+    void disabledConfigurationFallsBackToTheNoopLiveUpdatePublisherForEveryPort() {
+        assertInstanceOf(NoopLiveUpdatePublisher.class, fleetLiveUpdatePort);
+        assertInstanceOf(NoopLiveUpdatePublisher.class, telemetryLiveUpdatePort);
+        assertInstanceOf(NoopLiveUpdatePublisher.class, detectionLiveUpdatePort);
+        assertInstanceOf(NoopLiveUpdatePublisher.class, mapLiveUpdatePort);
+        assertInstanceOf(NoopLiveUpdatePublisher.class, eventLiveUpdatePort);
     }
 
     @Test

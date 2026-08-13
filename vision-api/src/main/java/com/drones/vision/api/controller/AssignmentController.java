@@ -3,11 +3,11 @@ package com.drones.vision.api.controller;
 import com.drones.vision.api.dto.AssignmentResponse;
 import com.drones.vision.api.dto.PilotResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.identity.AssignmentService;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.identity.application.AssignmentService;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,7 +35,7 @@ import com.drones.vision.api.security.CurrentUser;
  * <h2>Status codes</h2>
  * {@code PUT}/{@code DELETE .../pilots/{userId}} → {@code 204}; {@code 404}
  * ({@link java.util.NoSuchElementException}) for an unknown asset; {@code 403}
- * ({@link com.drones.vision.application.scope.AccessDeniedException}, mapped by {@link ApiExceptionHandler})
+ * ({@link com.drones.vision.platform.AccessDeniedException}, mapped by {@link ApiExceptionHandler})
  * when the asset exists but is outside the granter's scope — a manager may not hand out an asset
  * they cannot themselves see (the &le;-own-scope rule). {@code 400} for a malformed asset/user UUID.
  * With auth off the granter's scope is unbounded, so every grant is permitted, exactly as before

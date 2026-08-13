@@ -1,12 +1,12 @@
 package com.drones.vision.app;
 
 import com.drones.vision.app.devsupport.InMemoryUserRepository;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.Membership;
-import com.drones.vision.domain.model.Role;
-import com.drones.vision.domain.model.User;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.UserRepositoryPort;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.identity.domain.model.Membership;
+import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.UserRepositoryPort;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

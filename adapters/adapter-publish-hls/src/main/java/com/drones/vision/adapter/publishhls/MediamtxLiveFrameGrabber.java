@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.publishhls;
 
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.VideoFrame;
 
 import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
@@ -46,7 +46,7 @@ import java.util.Optional;
  * <p>Stateless, safe for unbounded concurrent use — mirrors {@link MediamtxReplayFrameExtractor}'s
  * own "one grabber per call" threading note, for the same reason: this is a request-thread, on-demand
  * fetch, not the per-stream serialized egress {@link
- * com.drones.vision.domain.port.out.StreamPublisherPort} contracts.
+ * com.drones.vision.perception.domain.port.StreamPublisherPort} contracts.
  *
  * <p>Plain class with no framework dependency — instantiated directly by {@code vision-app}'s wiring
  * configuration.

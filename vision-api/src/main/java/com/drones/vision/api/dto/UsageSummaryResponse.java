@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.usage.UsageSummary;
+import com.drones.vision.warehouse.application.usage.UsageSummary;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;

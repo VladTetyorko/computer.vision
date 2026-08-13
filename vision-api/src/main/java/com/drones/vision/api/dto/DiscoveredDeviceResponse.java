@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.Map;

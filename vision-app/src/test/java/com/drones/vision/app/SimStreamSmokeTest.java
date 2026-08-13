@@ -1,23 +1,24 @@
 package com.drones.vision.app;
 
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.asset.AssetSpec;
-import com.drones.vision.application.device.DeviceRegistration;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.perception.application.stream.AssetStreamService;
+import com.drones.vision.warehouse.application.asset.AssetSpec;
+import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.app.devsupport.DevPrincipal;
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetUsage;
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.UsageId;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
-import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.kernel.Telemetry;
+import com.drones.vision.kernel.UsageId;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.perception.domain.port.StreamPublisherPort;
+import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -83,6 +84,9 @@ class SimStreamSmokeTest {
     private AssetService assetService;
 
     @Autowired
+    private AssetStreamService assetStreamService;
+
+    @Autowired
     private AssetUsageRepositoryPort assetUsageRepositoryPort;
 
     @Autowired
@@ -104,7 +108,7 @@ class SimStreamSmokeTest {
                 new CategoryId("drone"), Map.of(), List.of(videoDevice, telemetryDevice)),
                 DevPrincipal.OWNERSHIP, DevPrincipal.USER_ID);
 
-        StreamId streamId = assetService.startStream(asset.id(), null, PipelineConfig.defaults());
+        StreamId streamId = assetStreamService.startStream(asset.id(), null, PipelineConfig.defaults());
         try {
             boolean receivedFrame = recordingStreamPublisher.awaitFirstFrame(5, TimeUnit.SECONDS);
             assertTrue(receivedFrame, "expected at least one frame to reach StreamPublisherPort within 5s");

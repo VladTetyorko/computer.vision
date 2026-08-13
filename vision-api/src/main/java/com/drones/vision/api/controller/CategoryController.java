@@ -1,7 +1,7 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.CategoryResponse;
-import com.drones.vision.application.category.CategoryService;
+import com.drones.vision.warehouse.application.category.CategoryService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 

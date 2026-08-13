@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.publishhls;
 
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.VideoFrame;
 
 import org.bytedeco.javacv.Frame;
 
@@ -17,8 +17,8 @@ import java.nio.ByteBuffer;
  * <p>{@link #toFrame}/{@link #bgr24ToFrame}/{@link #jpegToFrame} go <b>into</b> JavaCV, ready to
  * hand to an {@link org.bytedeco.javacv.FFmpegFrameRecorder}. Per the platform's decision that
  * decoded BGR24 is the internal pixel currency (see {@code docs/plans/done/PHASE1-PLAN.md} §0.2), only two
- * source formats are understood: {@link com.drones.vision.domain.model.PixelFormat#BGR24} is
- * copied directly, and {@link com.drones.vision.domain.model.PixelFormat#JPEG} (produced by the
+ * source formats are understood: {@link com.drones.vision.perception.domain.model.PixelFormat#BGR24} is
+ * copied directly, and {@link com.drones.vision.perception.domain.model.PixelFormat#JPEG} (produced by the
  * simulation source) is decoded via {@link ImageIO} and re-packed as BGR.
  *
  * <p>{@link #copyBgr24(Frame)} goes the <b>other</b> direction — a {@link Frame} decoded by an

@@ -11,8 +11,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * default, today's behavior) keeps every training bean/controller entirely absent — {@code
  * DatasetController}/{@code LabelingController}/{@code TrainingJobController} routes 404, mirroring
  * {@code LiveController}'s own {@code vision.live.enabled} gating; {@code true} wires {@code
- * com.drones.vision.application.training.DatasetService}/{@code
- * com.drones.vision.application.training.LabelingService} plus the gRPC {@code DatasetUploadPort}
+ * com.drones.vision.learning.application.DatasetService}/{@code
+ * com.drones.vision.learning.application.LabelingService} plus the gRPC {@code DatasetUploadPort}
  * dataset delivers over.
  *
  * @param enabled whether to wire the training controllers/services instead of leaving them absent;

@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.overlay;
 
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.perception.domain.model.VideoFrame;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;

@@ -1,16 +1,16 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.Annotation;
-import com.drones.vision.domain.model.AnnotationSource;
-import com.drones.vision.domain.model.BoundingBox;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.SampleStatus;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TrainingSample;
-import com.drones.vision.domain.model.TrainingSampleId;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.learning.domain.model.Annotation;
+import com.drones.vision.learning.domain.model.AnnotationSource;
+import com.drones.vision.kernel.BoundingBox;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.model.SampleStatus;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.learning.domain.model.TrainingSample;
+import com.drones.vision.learning.domain.model.TrainingSampleId;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 
 import org.junit.jupiter.api.Test;
 

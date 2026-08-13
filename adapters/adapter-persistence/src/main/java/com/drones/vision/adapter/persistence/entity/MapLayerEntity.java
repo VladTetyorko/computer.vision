@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.LayerKind;
+import com.drones.vision.map.domain.model.LayerKind;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;

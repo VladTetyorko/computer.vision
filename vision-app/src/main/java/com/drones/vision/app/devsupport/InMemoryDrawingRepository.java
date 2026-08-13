@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.Drawing;
-import com.drones.vision.domain.model.DrawingId;
-import com.drones.vision.domain.port.out.DrawingRepositoryPort;
+import com.drones.vision.map.domain.model.Drawing;
+import com.drones.vision.map.domain.model.DrawingId;
+import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 
 import java.util.List;
 import java.util.Map;

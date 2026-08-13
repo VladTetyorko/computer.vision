@@ -1,6 +1,6 @@
 package com.drones.vision.app.bootstrap;
 
-import com.drones.vision.application.simulation.SimulationService;
+import com.drones.vision.simulation.application.SimulationService;
 import org.junit.jupiter.api.Test;
 
 import static org.mockito.Mockito.mock;

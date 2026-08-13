@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.TrainingSample;
+import com.drones.vision.learning.domain.model.TrainingSample;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;

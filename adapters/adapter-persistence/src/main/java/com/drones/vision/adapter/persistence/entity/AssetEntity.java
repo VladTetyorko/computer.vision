@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.LifecycleState;
+import com.drones.vision.kernel.LifecycleState;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
@@ -24,7 +24,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code assets} (plus its {@code asset_devices} element-collection table) — mirrors
- * {@link com.drones.vision.domain.model.Asset} field-for-field, with {@code category} flattened to
+ * {@link com.drones.vision.warehouse.domain.model.Asset} field-for-field, with {@code category} flattened to
  * its slug and {@code ownership} flattened to its two ids; {@link
  * com.drones.vision.adapter.persistence.JpaAssetRepository} owns the mapping in both directions.
  *

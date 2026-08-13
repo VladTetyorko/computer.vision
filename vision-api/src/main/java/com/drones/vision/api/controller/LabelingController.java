@@ -6,16 +6,16 @@ import com.drones.vision.api.dto.LabelAnnotationsRequest;
 import com.drones.vision.api.dto.SampleResponse;
 import com.drones.vision.api.dto.SamplesResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.training.CaptureSpec;
-import com.drones.vision.application.training.LabelingService;
-import com.drones.vision.application.replay.ReplayCaptureSpec;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.SampleImage;
-import com.drones.vision.domain.model.SampleStatus;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TrainingSample;
-import com.drones.vision.domain.model.TrainingSampleId;
-import com.drones.vision.domain.model.UsageId;
+import com.drones.vision.learning.application.CaptureSpec;
+import com.drones.vision.learning.application.LabelingService;
+import com.drones.vision.learning.application.ReplayCaptureSpec;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.model.SampleImage;
+import com.drones.vision.learning.domain.model.SampleStatus;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.learning.domain.model.TrainingSample;
+import com.drones.vision.learning.domain.model.TrainingSampleId;
+import com.drones.vision.kernel.UsageId;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -52,7 +52,7 @@ import com.drones.vision.api.security.CurrentUser;
  * collaborators along with those two handlers, since nothing else here ever needed them.
  *
  * <p>Error mapping is entirely {@link LabelingService}'s own exceptions surfacing through {@link
- * ApiExceptionHandler}: {@link com.drones.vision.application.scope.AccessDeniedException} (a dataset, or
+ * ApiExceptionHandler}: {@link com.drones.vision.platform.AccessDeniedException} (a dataset, or
  * its resolvable source asset, outside the caller's scope) → 403; {@link
  * java.util.NoSuchElementException} (unknown dataset/sample/usage, a stream with no frame published
  * yet, a usage with no recorded video stream, or no recorded frame at the requested replay instant)

@@ -1,7 +1,7 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.identity.GroupSpec;
-import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.identity.application.GroupSpec;
+import com.drones.vision.kernel.GroupId;
 
 /**
  * Request body for {@code POST /api/groups} (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — create a group,

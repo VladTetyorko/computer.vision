@@ -1,8 +1,8 @@
 package com.drones.vision.api.live;
 
-import com.drones.vision.application.map.LayerView;
-import com.drones.vision.application.map.MapAccessPolicy.Viewer;
-import com.drones.vision.application.map.MapLayerService;
+import com.drones.vision.map.application.LayerView;
+import com.drones.vision.map.application.MapAccessPolicy.Viewer;
+import com.drones.vision.map.application.MapLayerService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 

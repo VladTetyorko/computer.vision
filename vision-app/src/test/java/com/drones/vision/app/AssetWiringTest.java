@@ -9,6 +9,7 @@ import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
 import com.drones.vision.api.controller.ActivityController;
 import com.drones.vision.api.controller.AssetImageController;
 import com.drones.vision.api.controller.AssetStatsController;
+import com.drones.vision.api.controller.AssetStreamController;
 import com.drones.vision.api.controller.AssignmentController;
 import com.drones.vision.api.controller.CvModelsController;
 import com.drones.vision.api.controller.DeviceProbeController;
@@ -22,46 +23,48 @@ import com.drones.vision.api.controller.MapLayersController;
 import com.drones.vision.api.controller.MapMarksController;
 import com.drones.vision.api.controller.SimulationController;
 import com.drones.vision.api.controller.UserAdminController;
-import com.drones.vision.application.identity.ActivityService;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.identity.AssignmentService;
-import com.drones.vision.application.scope.ScopeResolver;
-import com.drones.vision.application.asset.AssetStatsService;
-import com.drones.vision.application.category.CategoryService;
-import com.drones.vision.application.device.DeviceService;
-import com.drones.vision.application.pipeline.FeedTransmitterRegistry;
-import com.drones.vision.application.fleet.FleetSummaryService;
-import com.drones.vision.application.flight.FlightCommandService;
-import com.drones.vision.application.geofence.GeofenceMonitor;
-import com.drones.vision.application.geofence.GeofenceService;
-import com.drones.vision.application.flight.ManualControlService;
-import com.drones.vision.application.map.DrawingService;
-import com.drones.vision.application.map.LayerResolver;
-import com.drones.vision.application.map.MapAccessPolicy;
-import com.drones.vision.application.map.MapLayerService;
-import com.drones.vision.application.mark.MarkService;
+import com.drones.vision.identity.application.ActivityService;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.perception.application.stream.AssetStreamService;
+import com.drones.vision.identity.application.AssignmentService;
+import com.drones.vision.identity.application.scope.ScopeResolver;
+import com.drones.vision.warehouse.application.asset.AssetStatsService;
+import com.drones.vision.warehouse.application.category.CategoryService;
+import com.drones.vision.warehouse.application.device.DeviceService;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
+import com.drones.vision.perception.application.pipeline.FeedTransmitterRegistry;
+import com.drones.vision.warehouse.application.fleet.FleetSummaryService;
+import com.drones.vision.flight.application.FlightCommandService;
+import com.drones.vision.flight.application.geofence.GeofenceMonitor;
+import com.drones.vision.flight.application.geofence.GeofenceService;
+import com.drones.vision.flight.application.ManualControlService;
+import com.drones.vision.map.application.DrawingService;
+import com.drones.vision.map.application.LayerResolver;
+import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.map.application.MapLayerService;
+import com.drones.vision.map.application.mark.MarkService;
 import com.drones.vision.api.dto.CvModelResponse;
-import com.drones.vision.application.device.ProbeService;
-import com.drones.vision.application.replay.ReplayService;
-import com.drones.vision.application.simulation.SimulationService;
+import com.drones.vision.perception.application.device.ProbeService;
+import com.drones.vision.events.application.ReplayService;
+import com.drones.vision.simulation.application.SimulationService;
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.domain.model.FeedSpec;
-import com.drones.vision.domain.model.LayerKind;
-import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
-import com.drones.vision.domain.port.out.AssetRepositoryPort;
-import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
-import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.CategoryRepositoryPort;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.DrawingRepositoryPort;
-import com.drones.vision.domain.port.out.FeedTransmitterPort;
-import com.drones.vision.domain.port.out.FlightCommandPort;
-import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
-import com.drones.vision.domain.port.out.MapLayerRepositoryPort;
-import com.drones.vision.domain.port.out.MarkRepositoryPort;
-import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
-import com.drones.vision.domain.port.out.TelemetrySourcePort;
+import com.drones.vision.perception.domain.model.FeedSpec;
+import com.drones.vision.map.domain.model.LayerKind;
+import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
+import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.map.domain.port.DrawingRepositoryPort;
+import com.drones.vision.perception.domain.port.FeedTransmitterPort;
+import com.drones.vision.flight.domain.port.FlightCommandPort;
+import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
+import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
+import com.drones.vision.map.domain.port.MarkRepositoryPort;
+import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
+import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationRunner;
@@ -145,6 +148,18 @@ class AssetWiringTest {
     @Autowired
     private AssetService assetService;
 
+    /** docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e: asset-level streaming, split off {@link AssetService}. */
+    @Autowired
+    private AssetStreamService assetStreamService;
+
+    /** docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e: {@code POST}/{@code DELETE /api/assets/{id}/stream}, split off {@code AssetController} to stay under the five-constructor-parameter ceiling. */
+    @Autowired
+    private AssetStreamController assetStreamController;
+
+    /** docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e: warehouse's declared read of live runtime state. */
+    @Autowired
+    private AssetLiveStatePort assetLiveStatePort;
+
     @Autowired
     private CategoryService categoryService;
 
@@ -205,7 +220,7 @@ class AssetWiringTest {
     @Autowired
     private CurrentUser currentUser;
 
-    /** Simulated-feed resume-on-boot (vision-application/MODULE.md's own design sketch) — always registered, resolves to a no-op with default (persistence-disabled) properties. */
+    /** Simulated-feed resume-on-boot (contexts/vision-simulation/MODULE.md's own design sketch) — always registered, resolves to a no-op with default (persistence-disabled) properties. */
     @Autowired
     private ApplicationRunner simulationResumeRunner;
 
@@ -360,6 +375,9 @@ class AssetWiringTest {
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
         assertNotNull(assetService, "AssetService bean must be registered");
+        assertNotNull(assetStreamService, "AssetStreamService bean must be registered (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e)");
+        assertNotNull(assetStreamController, "AssetStreamController must resolve its constructor dependencies (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e)");
+        assertNotNull(assetLiveStatePort, "AssetLiveStatePort bean must be registered (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e)");
         assertNotNull(categoryService, "CategoryService bean must be registered");
         assertNotNull(replayService, "ReplayService bean must be registered (docs/plans/done/MVP2-PLAN.md R-a2)");
         assertNotNull(deviceService, "DeviceService bean must be registered");

@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.ZoneKind;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.flight.domain.model.ZoneKind;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * JPA row for {@code geofence_zones} — mirrors {@link com.drones.vision.domain.model.GeofenceZone}
+ * JPA row for {@code geofence_zones} — mirrors {@link com.drones.vision.flight.domain.model.GeofenceZone}
  * field-for-field (docs/plans/done/OPS-CORE-PLAN.md §G); {@link
  * com.drones.vision.adapter.persistence.JpaGeofenceRepository} owns the mapping in both
  * directions.

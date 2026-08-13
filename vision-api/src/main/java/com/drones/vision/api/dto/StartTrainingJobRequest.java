@@ -5,9 +5,9 @@ package com.drones.vision.api.dto;
  * wire contract).
  *
  * @param baseModel the checkpoint to fine-tune from; must not be blank ({@link
- *                  com.drones.vision.domain.model.TrainingJobSpec}'s own compact constructor)
+ *                  com.drones.vision.learning.domain.model.TrainingJobSpec}'s own compact constructor)
  * @param epochs    number of training epochs to run; must be positive ({@link
- *                  com.drones.vision.domain.model.TrainingJobSpec}'s own compact constructor)
+ *                  com.drones.vision.learning.domain.model.TrainingJobSpec}'s own compact constructor)
  */
 public record StartTrainingJobRequest(String baseModel, int epochs) {
 }

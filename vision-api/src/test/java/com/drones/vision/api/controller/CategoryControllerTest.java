@@ -1,9 +1,9 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.category.CategoryService;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DeviceCategory;
+import com.drones.vision.warehouse.application.category.CategoryService;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.DeviceCategory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;

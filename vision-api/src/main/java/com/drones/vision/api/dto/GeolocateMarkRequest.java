@@ -1,11 +1,11 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.api.support.EnumParsing;
-import com.drones.vision.application.mark.GeolocateSpec;
-import com.drones.vision.domain.model.Affiliation;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.GeoProjection;
-import com.drones.vision.domain.model.MarkKind;
+import com.drones.vision.map.application.mark.GeolocateSpec;
+import com.drones.vision.map.domain.model.Affiliation;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.GeoProjection;
+import com.drones.vision.map.domain.model.MarkKind;
 
 /**
  * Request body for {@code POST /api/map/marks/geolocate} (docs/plans/done/MAP-REWORK-PLAN.md §4.1) — the

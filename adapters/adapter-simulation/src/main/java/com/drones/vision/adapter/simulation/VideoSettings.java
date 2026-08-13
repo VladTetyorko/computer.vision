@@ -4,7 +4,7 @@ package com.drones.vision.adapter.simulation;
  * Framework-free tunables for {@link SimulatedVideoSource}'s synthetic frame generation.
  *
  * <p>These are the <em>fallback</em> values a {@link SimulatedVideoSource} instance uses whenever
- * a given {@link com.drones.vision.domain.model.StreamDescriptor}'s {@code width}/{@code
+ * a given {@link com.drones.vision.kernel.StreamDescriptor}'s {@code width}/{@code
  * height}/{@code fps} options are absent — a per-{@code open()} option always takes priority (see
  * {@link SimulatedVideoSource} for that lenient-parsing convention). Per
  * docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3, this module never imports a {@code @ConfigurationProperties}

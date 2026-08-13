@@ -1,11 +1,11 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.BoundingBox;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionQuery;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.ModelRef;
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.kernel.BoundingBox;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionQuery;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.kernel.StreamId;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;

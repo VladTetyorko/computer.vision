@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.LifecycleState;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.LifecycleState;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
@@ -25,7 +25,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code devices} (plus its {@code device_capabilities} element-collection table) —
- * mirrors {@link com.drones.vision.domain.model.Device} field-for-field, with {@code stream}
+ * mirrors {@link com.drones.vision.warehouse.domain.model.Device} field-for-field, with {@code stream}
  * flattened into three columns; {@link com.drones.vision.adapter.persistence.JpaDeviceRepository}
  * owns the mapping in both directions.
  *

@@ -1,8 +1,8 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.api.support.EnumParsing;
-import com.drones.vision.domain.model.AccessLevel;
-import com.drones.vision.domain.model.LayerGrant;
+import com.drones.vision.map.domain.model.AccessLevel;
+import com.drones.vision.map.domain.model.LayerGrant;
 
 import java.util.UUID;
 

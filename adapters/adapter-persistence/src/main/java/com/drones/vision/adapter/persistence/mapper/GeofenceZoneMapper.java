@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.GeofenceZoneEntity;
-import com.drones.vision.domain.model.GeofenceZone;
-import com.drones.vision.domain.model.ZoneId;
+import com.drones.vision.flight.domain.model.GeofenceZone;
+import com.drones.vision.flight.domain.model.ZoneId;
 
 /**
  * {@link GeofenceZone} &harr; {@link GeofenceZoneEntity} mapping, extracted from {@code

@@ -1,7 +1,7 @@
 package com.drones.vision.app.config.properties;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import com.drones.vision.application.pipeline.AdaptiveRateSettings;
+import com.drones.vision.perception.application.pipeline.AdaptiveRateSettings;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
@@ -9,9 +9,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3/&sect;2.2 (Wave A). Mirrors {@link
  * VisionPublishProperties}'s record-plus-nested-record-plus-{@code @DefaultValue} idiom, one nested
  * record per feature package's plain settings record ({@code
- * com.drones.vision.application.replay.ReplayServiceSettings}, {@code
- * com.drones.vision.application.pipeline.StreamPipelineSettings}, {@code
- * com.drones.vision.application.simulation.SimulationServiceSettings}) or per bare tunable
+ * com.drones.vision.events.application.ReplayServiceSettings}, {@code
+ * com.drones.vision.perception.application.pipeline.StreamPipelineSettings}, {@code
+ * com.drones.vision.simulation.application.SimulationServiceSettings}) or per bare tunable
  * otherwise. {@code wiring.ApplicationServiceWiring}/{@code wiring.DiscoveryWiring}/{@code
  * wiring.CvWiring} map this record's fields onto the plain settings objects/constructor
  * parameters those services take — {@code vision-application} itself never imports this type

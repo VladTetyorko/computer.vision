@@ -2,11 +2,11 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.PayloadTooLargeException;
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.AssetImage;
-import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.warehouse.domain.model.AssetImage;
+import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;

@@ -1,14 +1,14 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.MarkEntity;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.Mark;
-import com.drones.vision.domain.model.MarkId;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.model.Verification;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.Mark;
+import com.drones.vision.map.domain.model.MarkId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.map.domain.model.Verification;
 
 /**
  * {@link Mark} ⟷ {@link MarkEntity} (docs/plans/done/TACTICAL-MARKS-PLAN.md §3, reworked by

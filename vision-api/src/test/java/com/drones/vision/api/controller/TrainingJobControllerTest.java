@@ -1,15 +1,15 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.scope.AccessDeniedException;
-import com.drones.vision.application.training.TrainingJobService;
-import com.drones.vision.application.training.TrainingJobView;
-import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.JobState;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.TrainingJobSpec;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.learning.application.TrainingJobService;
+import com.drones.vision.learning.application.TrainingJobView;
+import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.learning.domain.model.JobState;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.learning.domain.model.TrainingJobSpec;
+import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;

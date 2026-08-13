@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.Group;
+import com.drones.vision.identity.domain.model.Group;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**

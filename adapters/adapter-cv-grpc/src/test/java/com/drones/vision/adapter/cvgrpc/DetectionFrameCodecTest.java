@@ -1,17 +1,17 @@
 package com.drones.vision.adapter.cvgrpc;
 
-import com.drones.vision.domain.model.CameraAttitude;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.DetectionSource;
-import com.drones.vision.domain.model.DetectorReason;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TrackRef;
-import com.drones.vision.domain.model.TrackState;
-import com.drones.vision.domain.model.TrackingTelemetry;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.CameraAttitude;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.DetectionSource;
+import com.drones.vision.perception.domain.model.DetectorReason;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.TrackRef;
+import com.drones.vision.perception.domain.model.TrackState;
+import com.drones.vision.perception.domain.model.TrackingTelemetry;
+import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.proto.v1.BoundingBox;
 import com.drones.vision.proto.v1.CameraPose;
 import com.drones.vision.proto.v1.DetectionResponse;
@@ -227,7 +227,7 @@ class DetectionFrameCodecTest {
 
         DetectionResult result = DetectionFrameCodec.decode(STREAM_ID, response);
 
-        com.drones.vision.domain.model.PullTelemetry pullTelemetry = result.pullTelemetry();
+        com.drones.vision.perception.domain.model.PullTelemetry pullTelemetry = result.pullTelemetry();
         assertEquals(3L, pullTelemetry.decodeMillis());
         assertEquals(9.9f, pullTelemetry.sourceFps(), 1e-6);
         assertEquals(9.5f, pullTelemetry.achievedFps(), 1e-6);

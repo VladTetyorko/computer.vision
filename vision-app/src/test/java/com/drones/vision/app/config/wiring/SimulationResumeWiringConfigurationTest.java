@@ -2,7 +2,7 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.app.config.properties.VisionPersistenceProperties;
 import com.drones.vision.app.config.properties.VisionSimulationProperties;
-import com.drones.vision.application.simulation.SimulationService;
+import com.drones.vision.simulation.application.SimulationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.ApplicationRunner;
 

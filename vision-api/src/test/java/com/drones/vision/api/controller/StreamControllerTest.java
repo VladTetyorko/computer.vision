@@ -1,35 +1,35 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.pipeline.TrackingStats;
-import com.drones.vision.application.stream.ActiveStream;
-import com.drones.vision.application.stream.PipelineConfigPatch;
-import com.drones.vision.application.stream.TrackingConfigPatch;
-import com.drones.vision.application.stream.StreamService;
-import com.drones.vision.application.exception.UnsupportedProtocolException;
-import com.drones.vision.application.stream.UpdateOutcome;
-import com.drones.vision.application.pipeline.DetectionRate;
-import com.drones.vision.domain.model.BoundingBox;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionQuery;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.ModelRef;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TargetLock;
-import com.drones.vision.domain.model.TrackRef;
-import com.drones.vision.domain.model.TrackState;
-import com.drones.vision.domain.model.TrackedObject;
-import com.drones.vision.domain.model.TrackingConfig;
-import com.drones.vision.domain.model.TrackingMode;
-import com.drones.vision.domain.model.TrackingTelemetry;
-import com.drones.vision.domain.model.DetectionSource;
-import com.drones.vision.domain.model.DetectorReason;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.DetectionRepositoryPort;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
+import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.application.stream.ActiveStream;
+import com.drones.vision.perception.application.stream.PipelineConfigPatch;
+import com.drones.vision.perception.application.stream.TrackingConfigPatch;
+import com.drones.vision.perception.application.stream.StreamService;
+import com.drones.vision.perception.application.stream.UnsupportedProtocolException;
+import com.drones.vision.perception.application.stream.UpdateOutcome;
+import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.kernel.BoundingBox;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionQuery;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.TargetLock;
+import com.drones.vision.perception.domain.model.TrackRef;
+import com.drones.vision.perception.domain.model.TrackState;
+import com.drones.vision.perception.domain.model.TrackedObject;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.TrackingTelemetry;
+import com.drones.vision.perception.domain.model.DetectionSource;
+import com.drones.vision.perception.domain.model.DetectorReason;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -193,7 +193,7 @@ class StreamControllerTest {
         StreamId streamId = StreamId.random();
         DeviceId listedDeviceId = DeviceId.random();
         when(streamService.streams())
-                .thenReturn(List.of(new com.drones.vision.application.stream.ActiveStream(streamId, listedDeviceId,
+                .thenReturn(List.of(new com.drones.vision.perception.application.stream.ActiveStream(streamId, listedDeviceId,
                         Instant.now(), false)));
 
         mockMvc.perform(get("/api/streams"))

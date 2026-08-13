@@ -16,7 +16,19 @@
     <dependencies>
         <dependency>
             <groupId>com.drones</groupId>
-            <artifactId>vision-domain</artifactId>
+            <artifactId>vision-kernel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-warehouse</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-flight</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-perception</artifactId>
         </dependency>
         <dependency>
             <groupId>io.dronefleet.mavlink</groupId>

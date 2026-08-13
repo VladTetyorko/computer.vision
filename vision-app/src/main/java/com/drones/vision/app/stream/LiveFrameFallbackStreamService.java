@@ -1,20 +1,20 @@
 package com.drones.vision.app.stream;
 
 import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
-import com.drones.vision.application.pipeline.DetectionRate;
-import com.drones.vision.application.pipeline.PipelineLatency;
-import com.drones.vision.application.pipeline.TrackingStats;
-import com.drones.vision.application.stream.ActiveStream;
-import com.drones.vision.application.stream.PipelineConfigPatch;
-import com.drones.vision.application.stream.StreamService;
-import com.drones.vision.application.stream.TrackingConfigPatch;
-import com.drones.vision.application.stream.UpdateOutcome;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TrackedObject;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.perception.application.pipeline.PipelineLatency;
+import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.application.stream.ActiveStream;
+import com.drones.vision.perception.application.stream.PipelineConfigPatch;
+import com.drones.vision.perception.application.stream.StreamService;
+import com.drones.vision.perception.application.stream.TrackingConfigPatch;
+import com.drones.vision.perception.application.stream.UpdateOutcome;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.TrackedObject;
+import com.drones.vision.perception.domain.model.VideoFrame;
 
 import java.util.List;
 import java.util.Objects;

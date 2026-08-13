@@ -1,9 +1,9 @@
 package com.drones.vision.adapter.publishhls;
 
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.ReplayFrameExtractionPort;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.events.domain.port.ReplayFrameExtractionPort;
 
 import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.FFmpegFrameGrabber;

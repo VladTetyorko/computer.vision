@@ -1,11 +1,11 @@
 package com.drones.vision.app.events;
 
-import com.drones.vision.domain.model.AuditAction;
-import com.drones.vision.domain.model.AuditEntry;
-import com.drones.vision.domain.model.AuditTargetType;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.platform.AuditAction;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditTargetType;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,13 +21,13 @@ import static org.mockito.Mockito.when;
 class LiveUpdateAuditTrailTest {
 
     private AuditTrailPort delegate;
-    private LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private FleetLiveUpdatePort liveUpdatePublisherPort;
     private LiveUpdateAuditTrail auditTrail;
 
     @BeforeEach
     void setUp() {
         delegate = mock(AuditTrailPort.class);
-        liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        liveUpdatePublisherPort = mock(FleetLiveUpdatePort.class);
         auditTrail = new LiveUpdateAuditTrail(delegate, liveUpdatePublisherPort);
     }
 

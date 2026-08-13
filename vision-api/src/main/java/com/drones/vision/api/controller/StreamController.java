@@ -11,17 +11,17 @@ import com.drones.vision.api.dto.TrackResponse;
 import com.drones.vision.api.dto.TrackStatsResponse;
 import com.drones.vision.api.dto.UpdateStreamConfigRequest;
 import com.drones.vision.api.dto.UpdateStreamConfigResponse;
-import com.drones.vision.application.pipeline.TrackingStats;
-import com.drones.vision.application.stream.StreamService;
-import com.drones.vision.application.stream.UpdateOutcome;
-import com.drones.vision.domain.model.DetectionQuery;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.DetectionRepositoryPort;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
+import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.application.stream.StreamService;
+import com.drones.vision.perception.application.stream.UpdateOutcome;
+import com.drones.vision.perception.domain.model.DetectionQuery;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -61,7 +61,7 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  *
  * <p>Also exposes recent detections read-only over {@link DetectionRepositoryPort} (docs/plans/done/MVP1-PLAN.md
  * §C8 bullet 3) — the same precedent {@link AssetController} already sets for {@link
- * com.drones.vision.domain.port.out.TelemetryRepositoryPort}: no driving use-case exists for "read
+ * com.drones.vision.flight.domain.port.TelemetryRepositoryPort}: no driving use-case exists for "read
  * a stream's recent detections", so this controller reads the driven port directly instead.
  *
  * <p>{@link #snapshot} (docs/plans/done/MVP3-PLAN.md C-a) is the one binary (non-JSON) response in this
@@ -106,7 +106,7 @@ public class StreamController {
      *
      * <p>What the body says about {@code tracking} travels as its own patch rather than baked into
      * the config: the deployment's tracking seed ({@code vision.tracking.*}) is applied inside {@link
-     * StreamService#start(DeviceId, PipelineConfig, com.drones.vision.application.stream.TrackingConfigPatch)},
+     * StreamService#start(DeviceId, PipelineConfig, com.drones.vision.perception.application.stream.TrackingConfigPatch)},
      * so this endpoint, asset-level start and the simulation service all seed identically
      * (docs/extracts/TRACKING-ORCHESTRATION.md §4.1).
      *

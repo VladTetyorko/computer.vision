@@ -1,12 +1,12 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TrainingSample;
-import com.drones.vision.domain.model.TrainingSampleId;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.learning.domain.model.TrainingSample;
+import com.drones.vision.learning.domain.model.TrainingSampleId;
+import com.drones.vision.kernel.UserId;
 
 import java.util.UUID;
 

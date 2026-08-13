@@ -444,9 +444,8 @@
      by 5px, swallowing the gap and shoving the mark under the toggle (the head's min-content is
      60px, i.e. wider than the rail, so there is no arrangement that fits with `--space-8` gaps). */
   .sidebar.collapsed .sidebar-head {
-    padding: 0;
-    gap: var(--space-4);
-    justify-content: center;
+    padding: 12px;
+    gap: var(--space-2);
   }
 
   .sidebar.collapsed .brand {

@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.Dataset;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.port.out.DatasetRepositoryPort;
+import com.drones.vision.learning.domain.model.Dataset;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 
 import java.util.List;
 import java.util.Map;

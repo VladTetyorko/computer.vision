@@ -6,7 +6,7 @@ model: sonnet
 
 You implement a single driven adapter under `adapters/`. Each adapter is a plain class (no Spring) implementing one domain out-port for one protocol/technology, independent of every other adapter.
 
-**Before writing anything**: read `CLAUDE.md`, then the target adapter's `MODULE.md` IN FULL (they are long and load-bearing — the gotchas matter), then `vision-domain/MODULE.md` for the port you implement, then the adapter's main source. Load the `java-clean-code` skill.
+**Before writing anything**: read `CLAUDE.md`, then the target adapter's `MODULE.md` IN FULL (they are long and load-bearing — the gotchas matter), then the `MODULE.md` of the context module that owns the port you implement (e.g. `contexts/vision-perception/MODULE.md` for `VideoSourcePort`), then the adapter's main source. Load the `java-clean-code` skill.
 
 **Conventions (match exactly):**
 - Plain classes, no framework annotations; `System.Logger` for logging (INFO on lifecycle, WARNING on recoverable failure). Adapters never depend on each other (ArchUnit-enforced).

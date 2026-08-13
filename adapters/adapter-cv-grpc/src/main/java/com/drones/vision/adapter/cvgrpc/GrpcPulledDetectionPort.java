@@ -1,10 +1,10 @@
 package com.drones.vision.adapter.cvgrpc;
 
-import com.drones.vision.domain.model.CameraAttitude;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.port.out.PulledDetectionPort;
+import com.drones.vision.perception.domain.model.CameraAttitude;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.port.PulledDetectionPort;
 import com.drones.vision.proto.v1.InferenceGrpc;
 import io.grpc.ManagedChannel;
 

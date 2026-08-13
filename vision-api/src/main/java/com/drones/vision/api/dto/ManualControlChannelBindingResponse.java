@@ -8,7 +8,7 @@ import com.drones.vision.api.ws.ManualControlWebSocketHandler;
  * with a short human label for the cockpit UI to display next to it.
  *
  * <p>{@code source}/{@code sourceIndex}/{@code rcChannel} mirror {@code
- * com.drones.vision.domain.model.ControlBinding} field-for-field, serialized as plain wire values
+ * com.drones.vision.flight.domain.model.ControlBinding} field-for-field, serialized as plain wire values
  * ({@code source} as its enum name, e.g. {@code "AXIS"}/{@code "BUTTON"}) rather than exposing the
  * domain record itself across the boundary. {@code label} has no domain counterpart —
  * {@code ControlBinding} carries no label field — so {@code ManualControlWebSocketHandler} builds

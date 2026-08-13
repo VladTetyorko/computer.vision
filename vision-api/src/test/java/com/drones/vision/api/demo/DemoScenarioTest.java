@@ -1,13 +1,13 @@
 package com.drones.vision.api.demo;
 
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.application.identity.AssignmentService;
-import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.User;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.identity.application.AssignmentService;
+import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
