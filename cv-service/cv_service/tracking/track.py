@@ -29,6 +29,15 @@ long may the detector keep failing to re-find this" in both modes, and it is
 why "FOLLOW runs the detector at the configured cadence and no more" is true
 rather than approximately true.
 
+**`Track.history` (TRACKING-V3-PLAN wave V2, `history.py`)** is the evidence
+this module's state machine has always summarized but never kept: a bounded
+`ObservationRing` of the REAL observations behind `box`/`velocity_x/y`. This
+wave only populates it (`_born`/`_adopt`/`_observe` each record into it
+unconditionally, letting the ring itself decide what survives) -- nothing
+here reads it back. See `history.py`'s own module docstring for the full
+"why", including why `SOURCE_DETECTOR`, not merely "not predicted", is the
+bar for what counts as real.
+
 Pure stdlib.
 """
 
@@ -46,6 +55,7 @@ from cv_service.tracking.engines.base import (
     Observation,
     Transform,
 )
+from cv_service.tracking.history import ObservationRing
 from cv_service.tracking.params import TrackingParams
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps this module's own
@@ -116,6 +126,16 @@ class Track:
     from its own extrapolation would. `None` until the first detector-sourced
     appearance evidence arrives, or forever on a stream with no appearance
     extractor active.
+
+    `history` (TRACKING-V3-PLAN wave V2, `history.py`) is this track's own
+    bounded ring of REAL observations -- the same evidence-vs-extrapolation
+    discipline `velocity_x`/`velocity_y` and `descriptor` already apply,
+    extended to an actual record rather than only a current state. Every
+    booking path below (`_born`, `_adopt`, `_observe`) records into it
+    unconditionally; the ring itself, not its callers, decides what counts
+    as real (`ObservationRing.record`'s own docstring). A fresh
+    `ObservationRing` per `Track` via `default_factory` -- never shared,
+    never aliased from one track onto another.
     """
 
     track_id: int
@@ -134,6 +154,7 @@ class Track:
     hits: int = 0
     misses: int = 0
     descriptor: Optional[Descriptor] = None
+    history: ObservationRing = field(default_factory=ObservationRing)
     _confirmed: bool = field(default=False, repr=False)
 
 
@@ -273,6 +294,22 @@ class TrackBook:
         two positions, so any constant translation term cancels out of it
         by construction, and only rotation/scale changes how fast something
         reads in the now-current frame.
+
+        **Deliberately does NOT touch `track.history`** (TRACKING-V3-PLAN
+        wave V2). A recorded `Observation.box` stays expressed in whatever
+        frame it was captured in, forever -- unlike `box`/`velocity_*`, which
+        this method keeps current every frame precisely so a READER never has
+        to reconstruct history. Nothing reads `history` yet (this wave's own
+        "zero behavioural delta" constraint), so this is not yet a live
+        defect, but it is an open question this wave is flagging rather than
+        silently deciding: wave V3's `reupdate.py` interpolates directly
+        between two stored boxes, so a gap spanned by real camera rotation
+        would show spurious "target motion" in that interpolation unless V3
+        either re-warps ring entries into the current frame before using
+        them, or accepts the residual (small after `pose_gmc` cancels the
+        dominant ego-rotation term, per `CV-RATE-BUDGET.md` §2 -- but not
+        zero). Left to V3 to resolve with `reupdate()`'s own tests as the
+        judge, rather than guessed at here with nothing to measure it against.
         """
         if transform.identity:
             return
@@ -372,6 +409,12 @@ class TrackBook:
         # what makes a track read `age_frames == 0` on its birth frame
         # ("frames since this track was born", TRACKING-PLAN §4.A).
         track.age_frames = -1
+        # TRACKING-V3-PLAN wave V2 -- the birth observation is real evidence
+        # too (see the docstring comment above: a track is only ever born
+        # from `SOURCE_DETECTOR`), so it belongs in the ring same as every
+        # later update. Unconditional: `ObservationRing.record` itself is
+        # what decides what counts as real, not this call site.
+        track.history.record(observation, now)
         return track
 
     def _adopt(self, observation: Observation, recovery: RecoveredIdentity, now: float) -> Track:
@@ -433,6 +476,17 @@ class TrackBook:
         track.age_frames = -1
         if recovery.track_id >= self._next_id:
             self._next_id = recovery.track_id + 1
+        # TRACKING-V3-PLAN wave V2 -- same reasoning as `_born`'s own call:
+        # the observation that triggered this recovery is real evidence,
+        # even though the identity it is booked under is not new. Note what
+        # this deliberately does NOT do: `recovery` (from `ObjectMemory`)
+        # carries no observation history of its own -- a recovered track's
+        # ring starts fresh from this one entry, not backfilled with
+        # whatever evidence produced the ORIGINAL track before it went
+        # dormant. `ObjectMemory` was never asked to retain that (it keeps a
+        # box/velocity/descriptor snapshot, not a history), so there is
+        # nothing to restore even if this method wanted to.
+        track.history.record(observation, now)
         return track
 
     def _observe(
@@ -483,6 +537,11 @@ class TrackBook:
             # this frame is the tracker's own extrapolation (TRACKING-PLAN
             # §3.1, "IoU < threshold -> keep tracking, state COASTING").
             track.misses += 1
+        # TRACKING-V3-PLAN wave V2 -- unconditional, same as `_born`/`_adopt`
+        # above: `ObservationRing.record` is what decides whether THIS
+        # observation (coasted, tracker-produced, or a genuine detector
+        # confirmation) actually gets kept.
+        track.history.record(observation, now)
 
     def _settle(self, track: Track, now: float) -> None:
         # Two ageing rules, deliberately kept both (TRACKING-V2-PLAN §6,

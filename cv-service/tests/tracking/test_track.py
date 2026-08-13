@@ -17,6 +17,7 @@ from cv_service.tracking.engines.base import (
     Observation,
     Transform,
 )
+from cv_service.tracking.history import _DEFAULT_CAPACITY
 from cv_service.tracking.memory import MemoryParams, ObjectMemory
 from cv_service.tracking.params import MODE_ASSOCIATE, TrackingParams
 from cv_service.tracking.track import (
@@ -514,3 +515,90 @@ def test_recoveries_are_ignored_for_a_key_that_is_already_a_live_track():
     )[0]
 
     assert still_born.track_id == born.track_id
+
+
+# -- observation history (TRACKING-V3-PLAN wave V2) --------------------------
+
+
+def test_a_birth_observation_is_recorded_into_history():
+    book = TrackBook(params(min_hits=1))
+
+    born = book.apply([seen("car")], 3.0, detector_ran=True)[0]
+
+    latest = born.history.latest()
+    assert latest is not None
+    assert latest.timestamp == pytest.approx(3.0)
+    assert latest.observation.box == born.box
+
+
+def test_every_detector_confirmation_grows_history():
+    book = TrackBook(params(min_hits=1))
+    book.apply([seen("car")], 0.0, detector_ran=True)
+
+    track = book.apply([seen("car", x=0.2)], 1.0, detector_ran=True)[0]
+
+    assert len(track.history) == 2
+
+
+def test_coasting_never_grows_history():
+    # The direct proof this wave's own acceptance criteria call for: a track
+    # coasted across many tracker-only frames records nothing new, because
+    # none of those observations are `SOURCE_DETECTOR`.
+    book = TrackBook(params(min_hits=1, max_age_frames=1000))
+    born = book.apply([seen("car", authoritative=True)], 0.0, detector_ran=True)[0]
+    assert len(born.history) == 1
+
+    for frame in range(1, 50):
+        book.apply([seen("car", source=SOURCE_TRACKER)], float(frame), detector_ran=False)
+
+    assert len(book.get(born.track_id).history) == 1
+
+
+def test_a_verify_pass_that_fails_to_re_anchor_does_not_grow_history():
+    # A `SOURCE_TRACKER` observation on a verify frame that ran but did not
+    # confirm the track (COASTING, `misses` advances) is still not evidence.
+    book = TrackBook(params(min_hits=1, max_age_frames=5))
+    born = book.apply([seen("car", authoritative=True)], 0.0, detector_ran=True)[0]
+
+    track = book.apply([seen("car", source=SOURCE_TRACKER)], 1.0, detector_ran=True)[0]
+
+    assert track.state == STATE_COASTING
+    assert len(track.history) == 1
+    assert track.history.latest().timestamp == pytest.approx(0.0)
+
+
+def test_history_is_bounded_even_across_many_confirmations():
+    book = TrackBook(params(min_hits=1))
+    for frame in range(_DEFAULT_CAPACITY + 20):
+        track = book.apply([seen("car")], float(frame), detector_ran=True)[0]
+
+    assert len(track.history) == _DEFAULT_CAPACITY
+    # ...and it kept the newest, not an arbitrary/oldest subset.
+    assert track.history.latest().timestamp == pytest.approx(float(_DEFAULT_CAPACITY + 19))
+
+
+def test_each_track_gets_its_own_history_ring_not_a_shared_one():
+    # Aliasing guard: a `default_factory` gives every `Track` a FRESH ring --
+    # if it were a shared mutable default, recording into one track's history
+    # would silently leak into every other track's.
+    book = TrackBook(params(min_hits=1))
+    a, b = book.apply([seen("a", x=0.1), seen("b", x=0.5)], 0.0, detector_ran=True)
+
+    assert a.history is not b.history
+    assert len(a.history) == 1
+    assert len(b.history) == 1
+
+
+def test_a_recovered_track_starts_with_only_the_recovery_observation():
+    # `RecoveredIdentity` carries no observation history of its own (`Object
+    # Memory` never kept one) -- a recovered track's ring starts fresh with
+    # this one entry, not backfilled from before the object went dormant.
+    book = TrackBook(params(min_hits=5))
+    recovery = RecoveredIdentity(track_id=42, first_seen=-10.0)
+
+    recovered = book.apply(
+        [seen("x")], 3.0, detector_ran=True, recoveries={"x": recovery}
+    )[0]
+
+    assert len(recovered.history) == 1
+    assert recovered.history.latest().timestamp == pytest.approx(3.0)

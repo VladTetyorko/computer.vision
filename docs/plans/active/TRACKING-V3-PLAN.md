@@ -207,6 +207,11 @@ no record of the evidence that produced it. Every observation-centric mechanism 
 needs the opposite: the real observations themselves.
 
 ```
+@dataclass(frozen=True)
+class TimedObservation:
+    timestamp: float          # `Observation` itself carries no clock reading
+    observation: Observation
+
 class ObservationRing:
     """Bounded per-track ring of REAL observations (SOURCE_DETECTOR only).
 
@@ -214,14 +219,49 @@ class ObservationRing:
     point of an observation-centric method is that it never feeds its own
     extrapolation back in as if it were evidence."""
     def record(self, observation, now) -> None
-    def latest(self) -> Observation | None
-    def before(self, timestamp) -> Observation | None   # last real obs before a gap
-    def span(self, frames) -> tuple[Observation, Observation] | None   # OCM's Dt pair
+    def latest(self) -> TimedObservation | None
+    def before(self, timestamp) -> TimedObservation | None   # last real obs before a gap
+    def span(self, frames) -> tuple[TimedObservation, TimedObservation] | None   # OCM's Dt pair
 ```
+
+**`TimedObservation` is a correction to this section, made during wave V2.** The signatures
+above originally returned a bare `Observation` — which carries no timestamp, so §4.2's
+interpolation `z̃(t) = z(t₁) + (t−t₁)/(t₂−t₁)·(z(t₂)−z(t₁))` had no `t₁`/`t₂` to compute with.
+The ring pairs each observation with the clock reading it arrived at.
+
+**Exclusion is stricter than "not predicted", also decided in V2.** `SOURCE_TRACKER`
+observations arrive in two shapes: `predicted=True` (a coast on a stalled tracker) and
+`predicted=False` (LK/NCC's own successful per-frame match). **Both are excluded.** The second
+is the non-obvious one — it is a real pixel measurement, but it is the *visual tracker's own
+local estimate*, not independent evidence, so admitting it would let ORU bracket a gap with
+exactly the drift ORU exists to delete. FOLLOW's operator lock needs no special case: it is
+already `SOURCE_DETECTOR`.
 
 The exclusion of predicted boxes is the load-bearing rule. `Observation.predicted` already
 distinguishes them, and `velocity_x/y` already respects that distinction — the ring extends the same
 evidence-vs-extrapolation discipline to history.
+
+### 4.1b OPEN for wave V3 — which frame is a remembered observation expressed in?
+
+Wave V2 surfaced a question this plan had not asked, and V3 cannot avoid it.
+
+`TrackBook.warp()` moves every live track's `box` into the **current** frame's coordinates once
+per frame. Ring entries are not warped — each stays in the camera frame it was captured in. So
+interpolating between `z(t₁)` and `z(t₂)` mixes coordinate systems, and the error is exactly
+proportional to how much the camera moved during the gap — which, per `CV-RATE-BUDGET` §2, is
+the dominant term on a drone (~32 px/frame at 30°/s yaw against ~4 px/frame of target motion).
+**ORU would be reconstructing the gap in the wrong space precisely when the gap matters most.**
+
+Three candidates, to be decided by measurement in V3, not by preference:
+
+| Option | Cost | Risk |
+|---|---|---|
+| Warp every ring entry every frame | capacity × live tracks per frame | pure arithmetic, but the ring stops being free |
+| Record the cumulative `Transform` alongside each entry and compose on read (`Transform.compose` already exists) | one compose per ORU call | leading candidate — pays only when ORU actually runs |
+| Accept the error, bound the gap | zero | only defensible if measured drift over `reupdate_max_gap_millis` is small; on a panning camera it will not be |
+
+Whichever is chosen, the `nonlinear` and `pan_occlusion` scenarios are what settle it: the second
+superposes ego-motion on the gap and is the one that will expose a wrong answer here.
 
 ### 4.2 `reupdate.py` — ORU, the Observation-Centric Re-Update
 
