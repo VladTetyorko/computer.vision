@@ -322,9 +322,9 @@ small_target      0      2    1/1   100%
 Zero id switches everywhere; 100% recovery wherever there is a gap.
 
 **Open, deliberately not done.** `follow_top_k` ships at 1 — flipping it needs FOLLOW scoring in the
-harness that is multi-target-aware. `CameraPose` is consumed but never populated: an ~8-line change in
-`DetectionFrameCodec` (Java) turns `pose` compensation on and pays for S2 geolocation at the same
-time. ASSOCIATE's sample rate is unchanged at 10 fps (D1). None of it is blocked on cv-service.
+harness that is multi-target-aware. ~~`CameraPose` is consumed but never populated~~ — **closed since**: `DetectionFrameCodec:164`
+(push) and `PulledDetectionSession:141` (pull) both populate it, landed with the MEDIA-SOT /
+CV-RATE-CONTROL work, so `pose` compensation is live and S2 geolocation has its field. ASSOCIATE's sample rate is unchanged at 10 fps (D1). None of it is blocked on cv-service.
 
 **What the harness cost, and what it caught.** Five defects in the measurement apparatus itself,
 every one of which made the system look *worse or unchanged*, never better: a flat background so
