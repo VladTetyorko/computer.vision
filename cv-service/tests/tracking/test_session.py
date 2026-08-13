@@ -115,28 +115,28 @@ class FakeRegistry:
         self.compensator_calls = 0
         self.appearance_calls = 0
 
-    def associator(self, engine_id, *, max_age_frames):
+    def associator(self, engine_id, *, max_age_frames, level=None):
         self.associator_calls += 1
         if self._associator is None:
             return None
         engine = self._associator() if callable(self._associator) else self._associator
         return engine.engine_id, engine
 
-    def follower(self, engine_id, *, max_age_frames):
+    def follower(self, engine_id, *, max_age_frames, level=None):
         self.follower_calls += 1
         if self._follower is None:
             return None
         engine = self._follower() if callable(self._follower) else self._follower
         return engine.engine_id, engine
 
-    def compensator(self, engine_id):
+    def compensator(self, engine_id, *, level=None):
         self.compensator_calls += 1
         if self._compensator is None:
             return None
         engine = self._compensator() if callable(self._compensator) else self._compensator
         return engine.engine_id, engine
 
-    def appearance(self, engine_id):
+    def appearance(self, engine_id, *, level=None):
         self.appearance_calls += 1
         if self._appearance is None:
             return None
@@ -201,13 +201,13 @@ class PoseOrFlowRegistry:
         self.flow = FakeMotionCompensator(MOTION_ENGINE_FLOW)
         self.requested_ids = []
 
-    def associator(self, engine_id, *, max_age_frames):
+    def associator(self, engine_id, *, max_age_frames, level=None):
         return None
 
-    def follower(self, engine_id, *, max_age_frames):
+    def follower(self, engine_id, *, max_age_frames, level=None):
         return "fake-follow", FakeFollower()
 
-    def compensator(self, engine_id):
+    def compensator(self, engine_id, *, level=None):
         self.requested_ids.append(engine_id)
         if engine_id == MOTION_ENGINE_POSE:
             return self.pose.engine_id, self.pose
@@ -215,7 +215,7 @@ class PoseOrFlowRegistry:
             return self.flow.engine_id, self.flow
         return None
 
-    def appearance(self, engine_id):
+    def appearance(self, engine_id, *, level=None):
         return None
 
 

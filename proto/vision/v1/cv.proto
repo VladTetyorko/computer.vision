@@ -112,6 +112,10 @@ message TrackingConfig {
   string motion_engine_id       = 8;  // NEW -- ego-motion compensator; "" = server default, "off" disables
   string appearance_engine_id   = 9;  // NEW -- appearance descriptor;  "" = server default, "off" disables
   int32  memory_ttl_millis      = 10; // NEW -- dormant-gallery TTL for re-acquisition; <=0 = server default
+  // TRACKING-V3-PLAN wave V1 -- the capability ladder (§5). 0 = auto-probe: cv-service
+  // decides the highest level this host affords. 1-5 = an explicit CEILING (decision
+  // E12): the session serves min(requested, affordable), never more, never a refusal.
+  int32  capability_level       = 11;
 }
 
 // -------------------------------------------------------- MEDIA-SOT-PLAN wave M1
@@ -211,6 +215,12 @@ message DetectionResponse {
   int64 dropped_frames      = 19;  // NEW -- cumulative frames genuinely dropped, not merely unselected (D8)
   int64 missed_deadlines    = 20;  // NEW -- cumulative sampler deadlines no frame arrived to serve
   int64 capture_skew_millis = 21;  // NEW -- worker's estimate of (local receipt - capture); 0 = unknown
+
+  // TRACKING-V3-PLAN wave V1 -- the capability ladder (§5). Field numbers 22-24 are
+  // reserved for later V3 waves (reupdate_millis/reupdated_tracks/detection_lag_millis,
+  // §3's frozen diff); this wave adds only the two below.
+  int32  capability_level_served = 25; // NEW -- level that ACTUALLY ran; always <= requested
+  string capability_level_reason = 26; // NEW -- why it was capped; "" = served as requested
 }
 
 message TrainingJobSpec {

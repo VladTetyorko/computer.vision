@@ -68,6 +68,11 @@ def params(**overrides) -> TrackingParams:
         roi_enabled=False,
         roi_crop_factor=4.0,
         roi_min_iou=0.2,
+        # TRACKING-V3-PLAN wave V1 -- also inert here: only `session.py`'s
+        # `_resolve_capability_level` reads it; included only because
+        # `TrackingParams` requires it. `0` = auto-probe, the sentinel's own
+        # legitimate resolved value (see that field's own docstring).
+        capability_level=0,
     )
     base.update(overrides)
     return TrackingParams(**base)

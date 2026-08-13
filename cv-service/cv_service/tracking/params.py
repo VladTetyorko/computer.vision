@@ -121,6 +121,17 @@ class TrackingRequest:
     # DEPLOYMENT decision (`CV_TRACK_MEMORY_TTL_MILLIS<=0`, a legitimate
     # resolved value, not a sentinel -- see `resolve()` below).
     memory_ttl_millis: int = 0
+    # TRACKING-V3-PLAN wave V1 -- proto field 11. `<=0 = server default`
+    # (`CV_TRACK_CAPABILITY_LEVEL`), the SAME sentinel shape as `verify_
+    # every_millis`/`max_age_frames` above. Unlike those, the resolved
+    # value this module hands to `TrackingParams` may ITSELF still be `0`
+    # (the deployment default's own natural meaning, "auto-probe") --
+    # `resolve()` below never turns this into a concrete level number, the
+    # same "not fully resolved here" division of labour `motion_engine_id`'s
+    # own docstring draws: deciding what a resolved value actually SERVES
+    # needs live host state (`cv_service.tracking.levels.probe()`) this
+    # module does not have, so that is `session.py`'s job.
+    capability_level: int = 0
 
 
 @dataclass(frozen=True)
@@ -197,6 +208,15 @@ class TrackingParams:
     roi_enabled: bool
     roi_crop_factor: float
     roi_min_iou: float
+    # TRACKING-V3-PLAN wave V1 addition (§5). The REQUESTED ceiling, `<=0`
+    # sentinel already resolved against the deployment default -- but,
+    # deliberately unlike every int field above, `0` remains a legitimate
+    # RESOLVED value here (auto-probe), not merely "unset". `session.py`'s
+    # `_resolve_capability_level` is the only place this becomes an actual
+    # served level (`cv_service.tracking.levels.resolve`), exactly the
+    # "resolve the sentinel here, decide what serves it there" split
+    # `motion_engine_id`/`appearance_engine_id` already establish.
+    capability_level: int
 
     @property
     def active(self) -> bool:
@@ -365,4 +385,13 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
         roi_enabled=settings.track_roi_enabled,
         roi_crop_factor=settings.track_roi_crop_factor,
         roi_min_iou=settings.track_roi_min_iou,
+        # TRACKING-V3-PLAN wave V1 -- `<=0` (including the deployment
+        # default itself defaulting to `0`) falls back to `Settings`,
+        # exactly the `verify_every_millis` shape; `0` surviving into
+        # `TrackingParams` is intentional (see that field's own docstring).
+        capability_level=(
+            request.capability_level
+            if request.capability_level > 0
+            else settings.track_capability_level
+        ),
     )

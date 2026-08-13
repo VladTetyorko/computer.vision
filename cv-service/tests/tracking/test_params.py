@@ -537,3 +537,67 @@ def test_a_non_positive_roi_crop_factor_env_var_falls_back_to_default(monkeypatc
     settings = Settings.from_env()
 
     assert settings.track_roi_crop_factor == Settings().track_roi_crop_factor
+
+
+# -- wave V1 addition: the capability ladder's wire sentinel -----------------
+# (TRACKING-V3-PLAN §5). Same `<=0 = server default` shape `verify_every_
+# millis` uses above, with one deliberate difference exercised below: the
+# RESOLVED value may itself legitimately be `0` (auto-probe), which
+# `resolve()` never turns into a concrete level -- that is `session.py`'s job
+# (`cv_service.tracking.levels.resolve`, not this module).
+
+
+def test_capability_level_defaults_to_the_deployment_setting():
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), SETTINGS)
+
+    assert resolved.capability_level == SETTINGS.track_capability_level == 0
+
+
+def test_a_non_positive_capability_level_request_takes_the_deployment_default():
+    settings = dataclasses.replace(SETTINGS, track_capability_level=3)
+
+    for sentinel in (0, -1, -99):
+        resolved = params_module.resolve(
+            TrackingRequest(mode=MODE_ASSOCIATE, capability_level=sentinel), settings
+        )
+        assert resolved.capability_level == 3
+
+
+def test_a_positive_capability_level_request_wins_over_the_deployment_default():
+    settings = dataclasses.replace(SETTINGS, track_capability_level=4)
+
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_ASSOCIATE, capability_level=1), settings
+    )
+
+    assert resolved.capability_level == 1
+
+
+def test_the_deployment_default_may_itself_be_auto_probe():
+    # Unlike every other `<=0` sentinel in this module, `0` surviving all
+    # the way into `TrackingParams` is not a bug -- it is `levels.py`'s own
+    # "auto-probe" value, and `resolve()` deliberately never resolves it
+    # further (see this module's own docstring on `TrackingParams.
+    # capability_level`).
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_ASSOCIATE, capability_level=0),
+        dataclasses.replace(SETTINGS, track_capability_level=0),
+    )
+
+    assert resolved.capability_level == 0
+
+
+def test_settings_read_the_wave_v1_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_CAPABILITY_LEVEL", "2")
+
+    settings = Settings.from_env()
+
+    assert settings.track_capability_level == 2
+
+
+def test_garbage_wave_v1_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_CAPABILITY_LEVEL", "not-a-level")
+
+    settings = Settings.from_env()
+
+    assert settings.track_capability_level == Settings().track_capability_level

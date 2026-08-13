@@ -293,6 +293,17 @@ DEFAULT_TRACK_ROI_CROP_FACTOR = 4.0
 # primary gate instead cost `clutter` six id swaps -- measured, not supposed.
 DEFAULT_TRACK_ROI_MIN_IOU = 0.2
 
+# TRACKING-V3-PLAN wave V1 (§5): the capability ladder's deployment-wide default
+# CEILING -- `0` (auto-probe, `cv_service.tracking.levels.probe()` decides the highest
+# level this host affords) or `1`-`5` (an explicit level, TRACKING-V3-PLAN §5.2). Same
+# "<=0 = server default" wire sentinel shape as `verify_every_millis`/`max_age_frames`
+# above, EXCEPT here `0` is also the deployment default's own natural meaning (auto),
+# not merely "unset" -- so the request layer, the deployment layer and "no opinion at
+# all" all collapse onto the identical sentinel, which is exactly what decision E12's
+# "a level is a ceiling" wants: an operator who deploys a fleet of ARMv6 relays sets
+# `CV_TRACK_CAPABILITY_LEVEL=1` fleet-wide without touching a single client.
+DEFAULT_TRACK_CAPABILITY_LEVEL = 0
+
 # --- pull (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
 #
 # Back `cv_service.pull.{source,clock,loop}` -- the worker's own decode loop
@@ -589,6 +600,36 @@ def _parse_bool(raw: Optional[str], default: bool, var_name: str) -> bool:
     return default
 
 
+def _parse_capability_level(raw: Optional[str], default: int, var_name: str) -> int:
+    """Forgiving-parse for `CV_TRACK_CAPABILITY_LEVEL` (TRACKING-V3-PLAN §5).
+
+    `0` (or unset) means auto-probe -- `cv_service.tracking.levels.probe()`
+    decides. `1`-`5` pins a deployment-wide CEILING (decision E12: still a
+    ceiling here too -- a client's own positive per-request value still wins
+    over this default, exactly like every other `CV_TRACK_*` sentinel
+    `params.resolve()` interprets). The valid range is duplicated here
+    (`0`-`5`, not imported from `cv_service.tracking.levels.MAX_LEVEL`)
+    deliberately -- this module reads zero other `cv_service` modules today,
+    and `tests/test_config.py` cross-checks the literal against
+    `levels.MAX_LEVEL` so the two cannot silently drift. Out-of-range or
+    non-numeric input falls back to `default` rather than clamping, same
+    "a typo should be loud" posture `_parse_unit_fraction` documents.
+    """
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        LOGGER.warning("%s=%r is not a valid integer; using default %d", var_name, raw, default)
+        return default
+    if not 0 <= value <= 5:
+        LOGGER.warning(
+            "%s=%r must be 0 (auto-probe) or 1-5; using default %d", var_name, raw, default
+        )
+        return default
+    return value
+
+
 def _parse_positive_float(raw: Optional[str], default: float, var_name: str) -> float:
     """Forgiving-parse for an unbounded `> 0` float knob (TRACKING-V2-PLAN
     wave C5c's `CV_TRACK_ROI_CROP_FACTOR` -- a crop-size multiplier, where
@@ -662,6 +703,7 @@ class Settings:
     track_roi_enabled: bool = DEFAULT_TRACK_ROI_ENABLED
     track_roi_crop_factor: float = DEFAULT_TRACK_ROI_CROP_FACTOR
     track_roi_min_iou: float = DEFAULT_TRACK_ROI_MIN_IOU
+    track_capability_level: int = DEFAULT_TRACK_CAPABILITY_LEVEL
     pull_decoder: str = DEFAULT_PULL_DECODER
     pull_rtsp_transport: str = DEFAULT_PULL_RTSP_TRANSPORT
     pull_target_fps: float = DEFAULT_PULL_TARGET_FPS
@@ -848,6 +890,11 @@ class Settings:
                 os.environ.get("CV_TRACK_ROI_MIN_IOU"),
                 DEFAULT_TRACK_ROI_MIN_IOU,
                 "CV_TRACK_ROI_MIN_IOU",
+            ),
+            track_capability_level=_parse_capability_level(
+                os.environ.get("CV_TRACK_CAPABILITY_LEVEL"),
+                DEFAULT_TRACK_CAPABILITY_LEVEL,
+                "CV_TRACK_CAPABILITY_LEVEL",
             ),
             pull_decoder=_parse_string(os.environ.get("CV_PULL_DECODER"), DEFAULT_PULL_DECODER),
             pull_rtsp_transport=_parse_string(

@@ -49,6 +49,8 @@ def params(mode: str, **overrides) -> TrackingParams:
         roi_enabled=False,
         roi_crop_factor=4.0,
         roi_min_iou=0.2,
+        # TRACKING-V3-PLAN wave V1 -- inert here too, same reason.
+        capability_level=0,
     )
     base.update(overrides)
     return TrackingParams(**base)

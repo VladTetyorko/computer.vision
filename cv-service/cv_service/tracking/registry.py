@@ -42,6 +42,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Optional
 
+from cv_service.tracking import levels
 from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW
 
 LOGGER = logging.getLogger("cv_service.tracking.registry")
@@ -128,6 +129,30 @@ BUILTIN_COMPENSATORS: dict[str, MotionCompensatorFactory] = {
     MOTION_ENGINE_POSE: _pose,
 }
 BUILTIN_APPEARANCES: dict[str, AppearanceExtractorFactory] = {"histogram": _histogram}
+
+# The capability ladder (TRACKING-V3-PLAN §5, wave V1): the lowest level (`levels.py`)
+# at which each shipped engine may be SELECTED, independent of whether it happens to be
+# technically CONSTRUCTIBLE on a more capable host -- a level is a CONTRACT (invariant
+# P9), not "whatever this box can do", so a stream deliberately capped to L1 on a
+# workstation that has `cv2` fully installed must still get exactly what an ARMv6 relay
+# would get. `_create` below filters the candidate roster against these BEFORE calling
+# any factory, so a level-1 stream never even ATTEMPTS `_lk`/`_ncc`/`_flow`/
+# `_histogram`/`_bytetrack` -- which is what keeps L1 provably `cv2`/`numpy`-free
+# (invariant P8) even when this same process also serves higher-level streams.
+#
+# `cost` (`assign.py`, pure stdlib) and `pose` (`engines/pose_gmc.py`, pure trigonometry)
+# are affordable at L1. Everything needing `cv2` waits for L2. `bytetrack` specifically
+# waits for L3 -- decision E11, measured (§5.1): below ~25-30 simultaneous detections
+# `cost` is 5.5x cheaper (154us vs 840us @N=10) for +3.5 MiB against `bytetrack`'s
+# +17 MiB, because `bytetrack` drags `numpy` in on its own; by L3 `numpy` is already
+# resident for the detector, so that +17 MiB is already paid.
+_ASSOCIATOR_MIN_LEVEL: dict[str, int] = {"cost": levels.LEVEL_L1, "bytetrack": levels.LEVEL_L3}
+_FOLLOWER_MIN_LEVEL: dict[str, int] = {"lk": levels.LEVEL_L2, "ncc": levels.LEVEL_L2}
+_COMPENSATOR_MIN_LEVEL: dict[str, int] = {
+    MOTION_ENGINE_POSE: levels.LEVEL_L1,
+    MOTION_ENGINE_FLOW: levels.LEVEL_L2,
+}
+_APPEARANCE_MIN_LEVEL: dict[str, int] = {"histogram": levels.LEVEL_L2}
 
 # Probe-time construction arguments. Any positive value works -- the probe
 # only asks "can this be built on this box at all", and the real per-stream
@@ -239,13 +264,32 @@ class TrackerRegistry:
 
     # -- construction -------------------------------------------------------
 
-    def associator(self, engine_id: str, *, max_age_frames: int) -> Optional[tuple[str, Any]]:
-        """A NEW `Associator` for this stream, or `None` if none can be built."""
+    def associator(
+        self, engine_id: str, *, max_age_frames: int, level: Optional[int] = None
+    ) -> Optional[tuple[str, Any]]:
+        """A NEW `Associator` for this stream, or `None` if none can be built.
+
+        `level` (TRACKING-V3-PLAN wave V1), when given, is a CEILING on the
+        roster itself (`_ASSOCIATOR_MIN_LEVEL`), applied BEFORE `engine_id`/
+        the default/the fallback ladder are even considered -- see
+        `_create`'s own docstring for why filtering the roster first, rather
+        than filtering the outcome, is what keeps a capped stream from ever
+        attempting a factory it is not allowed to use. `None` (the default)
+        means no ceiling -- every pre-V1 call site, and every test that
+        never heard of levels, keeps working unchanged.
+        """
         return self._create(
-            self._associators, engine_id, self._default_associate_id, max_age_frames=max_age_frames
+            self._associators,
+            engine_id,
+            self._default_associate_id,
+            min_level=_ASSOCIATOR_MIN_LEVEL,
+            level=level,
+            max_age_frames=max_age_frames,
         )
 
-    def follower(self, engine_id: str, *, max_age_frames: int) -> Optional[tuple[str, Any]]:
+    def follower(
+        self, engine_id: str, *, max_age_frames: int, level: Optional[int] = None
+    ) -> Optional[tuple[str, Any]]:
         """A NEW `SingleObjectTracker` for this stream, or `None`.
 
         Multi-target FOLLOW (TRACKING-V2-PLAN wave C5b) calls this more than
@@ -254,39 +298,78 @@ class TrackerRegistry:
         what this method's own "a new instance every call, never shared"
         contract already promises; nothing here changed for it. See
         `session.py`'s `_extras_verify_observations`/`_ExtraFollow`.
+
+        `level`: see `associator()`'s own docstring -- same ceiling shape,
+        `_FOLLOWER_MIN_LEVEL` roster. L1 offers no follower at all (§5.2:
+        FOLLOW needs local pixels, which is exactly what L1 does not have),
+        so a level-1 stream always gets `None` here, which is precisely what
+        drives `session.py`'s existing `FOLLOW -> ASSOCIATE` degrade ladder.
         """
         return self._create(
-            self._followers, engine_id, self._default_follow_id, max_age_frames=max_age_frames
+            self._followers,
+            engine_id,
+            self._default_follow_id,
+            min_level=_FOLLOWER_MIN_LEVEL,
+            level=level,
+            max_age_frames=max_age_frames,
         )
 
-    def compensator(self, engine_id: str) -> Optional[tuple[str, Any]]:
+    def compensator(self, engine_id: str, *, level: Optional[int] = None) -> Optional[tuple[str, Any]]:
         """A NEW `MotionCompensator` for this stream, or `None`.
 
         No `max_age_frames` -- that concept belongs to the association
         engines' lost-track bookkeeping and means nothing to a motion
         compensator, so this call, unlike its two siblings, passes no
-        construction argument at all.
+        construction argument at all. `level`: see `associator()`'s own
+        docstring, `_COMPENSATOR_MIN_LEVEL` roster.
         """
-        return self._create(self._compensators, engine_id, self._default_motion_id)
+        return self._create(
+            self._compensators,
+            engine_id,
+            self._default_motion_id,
+            min_level=_COMPENSATOR_MIN_LEVEL,
+            level=level,
+        )
 
-    def appearance(self, engine_id: str) -> Optional[tuple[str, Any]]:
+    def appearance(self, engine_id: str, *, level: Optional[int] = None) -> Optional[tuple[str, Any]]:
         """A NEW `AppearanceExtractor` for this stream, or `None`.
 
         Same no-extra-argument shape as `compensator()` -- an appearance
         extractor needs nothing from `TrackingParams` to construct; the cost
         WEIGHTS/GATES that decide how much its output counts parametrize
         `assign.CostAssociator` downstream (`session.py`'s `_run_cost_
-        associate`), not this factory.
+        associate`), not this factory. `level`: see `associator()`'s own
+        docstring, `_APPEARANCE_MIN_LEVEL` roster.
         """
-        return self._create(self._appearances, engine_id, self._default_appearance_id)
+        return self._create(
+            self._appearances,
+            engine_id,
+            self._default_appearance_id,
+            min_level=_APPEARANCE_MIN_LEVEL,
+            level=level,
+        )
 
     def _create(
         self,
         roster: dict[str, Callable[..., Any]],
         engine_id: str,
         default_id: str,
+        *,
+        min_level: Optional[dict[str, int]] = None,
+        level: Optional[int] = None,
         **construct_kwargs: Any,
     ) -> Optional[tuple[str, Any]]:
+        if level is not None and min_level is not None:
+            # Filter FIRST, before `engine_id`/the default/the fallback
+            # ladder are even looked at -- a candidate this level cannot
+            # afford is not merely deprioritized, it is INVISIBLE, which is
+            # what stops a capped stream from ever calling a factory it is
+            # not allowed to use (TRACKING-V3-PLAN invariant P8/P9).
+            roster = {
+                candidate: factory
+                for candidate, factory in roster.items()
+                if min_level.get(candidate, levels.MIN_LEVEL) <= level
+            }
         candidates = []
         if engine_id and engine_id in roster:
             candidates.append(engine_id)

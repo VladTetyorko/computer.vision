@@ -177,6 +177,12 @@ def _tracking_request_from_wire(
         motion_engine_id=message.motion_engine_id,
         appearance_engine_id=message.appearance_engine_id,
         memory_ttl_millis=message.memory_ttl_millis,
+        # capability_level (field 11, TRACKING-V3-PLAN wave V1): the ONE
+        # extra line needed to make `capability_level_served`/`_reason`
+        # (below, `_tracked_response`) mean anything for a client that
+        # actually sets this -- `params.py`'s `resolve()` is what turns the
+        # `<=0` sentinel into a number, same as every field above it.
+        capability_level=message.capability_level,
     )
 
 
@@ -295,6 +301,11 @@ def _tracked_response(
         motion_millis=outcome.motion_millis,
         motion_engine_id=outcome.motion_engine_id,
         detector_roi=outcome.detector_roi,
+        # TRACKING-V3-PLAN wave V1 (fields 25/26) -- the capability ladder
+        # (§5): the level that ACTUALLY served this stream, and why, if it
+        # was capped below what was requested.
+        capability_level_served=outcome.capability_level_served,
+        capability_level_reason=outcome.capability_level_reason,
     )
 
 

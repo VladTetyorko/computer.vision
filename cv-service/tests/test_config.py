@@ -19,9 +19,11 @@ from cv_service.config import (
     DEFAULT_MODEL,
     DEFAULT_PORT,
     DEFAULT_SHUTDOWN_GRACE_SECONDS,
+    DEFAULT_TRACK_CAPABILITY_LEVEL,
     Settings,
     _default_max_concurrent_inferences,
     _parse_bool,
+    _parse_capability_level,
     _parse_device,
     _parse_imgsz,
     _parse_positive_float,
@@ -130,6 +132,43 @@ def test_default_max_concurrent_is_at_least_one_and_at_most_two():
     # count on the dev box this task ran in).
     value = _default_max_concurrent_inferences()
     assert 1 <= value <= 2
+
+
+# --- _parse_capability_level (TRACKING-V3-PLAN wave V1) -----------------------
+
+
+def test_parse_capability_level_defaults_when_unset():
+    assert _parse_capability_level(None, DEFAULT_TRACK_CAPABILITY_LEVEL, "X") == 0
+    assert _parse_capability_level("", 2, "X") == 2
+
+
+@pytest.mark.parametrize("raw", ["0", "1", "2", "3", "4", "5"])
+def test_parse_capability_level_accepts_the_whole_ladder(raw):
+    assert _parse_capability_level(raw, 0, "X") == int(raw)
+
+
+@pytest.mark.parametrize("raw", ["-1", "6", "99", "not-a-number", " "])
+def test_parse_capability_level_out_of_range_or_garbage_falls_back_to_default(raw):
+    assert _parse_capability_level(raw, 3, "X") == 3
+
+
+def test_parse_capability_level_zero_is_auto_probe_not_a_typo_to_reject():
+    # Unlike `_parse_positive_int`, `0` is a legitimate value here -- it is
+    # `levels.py`'s own auto-probe sentinel, not "unset".
+    assert _parse_capability_level("0", 4, "X") == 0
+
+
+def test_the_valid_range_stays_in_sync_with_levels_max_level():
+    # `_parse_capability_level` duplicates the `1`-`5` bound rather than
+    # importing `cv_service.tracking.levels` (config.py's own "zero internal
+    # imports" precedent) -- this guards the duplication against silently
+    # drifting if `levels.py` ever grows a sixth tier.
+    from cv_service.tracking.levels import MAX_LEVEL, MIN_LEVEL
+
+    assert MIN_LEVEL == 1
+    assert MAX_LEVEL == 5
+    assert _parse_capability_level(str(MAX_LEVEL), 0, "X") == MAX_LEVEL
+    assert _parse_capability_level(str(MAX_LEVEL + 1), 0, "X") == 0
 
 
 # --- Settings.from_env() ------------------------------------------------------

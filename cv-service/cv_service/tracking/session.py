@@ -91,6 +91,7 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Callable, Optional, Sequence
 
+from cv_service.tracking import levels as levels_module
 from cv_service.tracking import lock as lock_module
 from cv_service.tracking import params as params_module
 from cv_service.tracking.assign import Assignment, Candidate, CostAssociator, Target
@@ -249,6 +250,14 @@ class FrameOutcome:
     # frame `roi_enabled` is off on (the deployment default) and every
     # frame it fired on but found nothing worth merging.
     detector_roi: bool = False
+    # TRACKING-V3-PLAN wave V1 -- the capability ladder (§5). `served` is
+    # always <= the resolved `TrackingParams.capability_level` (decision
+    # E12's ceiling arithmetic, `cv_service.tracking.levels.resolve`);
+    # `reason` is `""` exactly when nothing was actually capped, the same
+    # "empty string = no degradation" convention `motion_engine_id`'s own
+    # docstring establishes for that field.
+    capability_level_served: int = 0
+    capability_level_reason: str = ""
 
 
 class StreamTrackingSession:
@@ -313,6 +322,16 @@ class StreamTrackingSession:
         # from within `_run_cost_associate` (`_resolve_memory` below).
         self._memory: Optional[ObjectMemory] = None
         self._memory_resolved = False
+        # Capability level (TRACKING-V3-PLAN wave V1) -- resolved lazily,
+        # same build-once-until-config-changes shape as the motion/
+        # appearance engines above, but resolved BEFORE any of them: every
+        # engine roster call below is filtered by the served level, so this
+        # has to be current before `_resolve_engine`/`_resolve_motion_
+        # compensator`/`_resolve_appearance_extractor` run (see `process()`).
+        self._capability_resolved = False
+        self._capability_level_served = 0
+        self._capability_level_reason = ""
+        self._degraded_capability_reasons: "set[str]" = set()
         # ROI re-detection bookkeeping (TRACKING-V2-PLAN wave C5c) -- reset
         # at the top of every `process()` call, read once at the bottom to
         # build this frame's `FrameOutcome`. No build-once-lazily state to
@@ -350,6 +369,14 @@ class StreamTrackingSession:
         self.applied_wire_config = wire_token
         self._scheduler.retune(self._params)
         self._book.retune(self._params)
+        if self._params.capability_level != previous.capability_level:
+            # TRACKING-V3-PLAN wave V1: the served level gates every engine
+            # roster below (`_create_engine`/`_resolve_motion_compensator`/
+            # `_resolve_appearance_extractor`), so a changed REQUESTED
+            # ceiling invalidates whatever was already built through the OLD
+            # one -- exactly like a mode/engine_id change (`_release_engine`
+            # below), just triggered by a different field.
+            self._release_capability()
         if (
             self._params.mode != previous.mode
             or self._params.engine_id != previous.engine_id
@@ -402,6 +429,12 @@ class StreamTrackingSession:
         pose: CameraPose = CameraPose(),
     ) -> FrameOutcome:
         """Run one frame through §3.1's sequence."""
+        # TRACKING-V3-PLAN wave V1: resolved FIRST, unconditionally -- every
+        # engine roster call below reads `self._capability_level_served`, so
+        # it has to be current before `_resolve_engine()` (next line) ever
+        # asks the registry for anything. Cheap after the first call: cached
+        # until `apply_config` sees the wire's requested ceiling change.
+        self._resolve_capability_level()
         engine = self._resolve_engine()
         # Resolved unconditionally, not only when `cost` is the serving
         # associator (TRACKING-V2-PLAN wave C4): `TrackBook._retire` must be
@@ -499,6 +532,8 @@ class StreamTrackingSession:
             motion_millis=motion_millis,
             motion_engine_id=motion_engine_id,
             detector_roi=self._roi_ran,
+            capability_level_served=self._capability_level_served,
+            capability_level_reason=self._capability_level_reason,
         )
 
     # -- reconnect (TRACKING-V2-PLAN wave C5b, review finding B5) -----------
@@ -1139,8 +1174,15 @@ class StreamTrackingSession:
                     reverse=True,
                 )[:open_slots]
                 for detection_index in ranked:
+                    # TRACKING-V3-PLAN wave V1: an extra respects the SAME
+                    # served-level ceiling as the locked target's own
+                    # engine -- otherwise a level-1 stream could grow a
+                    # `cv2`-backed extra through this side door even though
+                    # `_create_engine` never allows one for the lock itself.
                     created = registry.follower(
-                        self._params.engine_id, max_age_frames=self._params.max_age_frames
+                        self._params.engine_id,
+                        max_age_frames=self._params.max_age_frames,
+                        **self._level_kwargs(registry),
                     )
                     if created is None:
                         continue
@@ -1401,6 +1443,78 @@ class StreamTrackingSession:
         release yields a NEW id instead of resurrecting the previous one."""
         return f"follow:{self._lock.generation}"
 
+    # -- capability level (TRACKING-V3-PLAN wave V1, §5) ---------------------
+
+    def _resolve_capability_level(self) -> int:
+        """This stream's SERVED level, resolving (and probing the host)
+        once per config change.
+
+        `levels.probe()` reads live host state (importability + available
+        memory) rather than anything cached at process start (decision E12:
+        "what lets the workstation shed levels under load instead of
+        dropping streams"), but this method itself still caches the OUTCOME
+        until `apply_config` invalidates it (`_release_capability`) -- the
+        same "hot knob, re-resolved on config change" shape `_resolve_
+        motion_compensator`/`_resolve_appearance_extractor` already use, not
+        a per-frame re-probe, which `process()`'s own comment above this
+        call explains.
+
+        Every degradation is logged EXACTLY ONCE per distinct reason
+        (`_degraded_capability_reasons`, keyed by the reason string itself --
+        two different requested levels capped to the same served level by
+        the same host constraint share one log line, same dedup granularity
+        `_warn_unknown` already uses for engine ids) and NEVER raises
+        (invariant P5): `levels.resolve` is pure arithmetic with no failure
+        mode to propagate.
+        """
+        if self._capability_resolved:
+            return self._capability_level_served
+        self._capability_resolved = True
+        probed = levels_module.probe()
+        served, reason = levels_module.resolve(self._params.capability_level, probed)
+        self._capability_level_served = served
+        self._capability_level_reason = reason
+        if reason and reason not in self._degraded_capability_reasons:
+            self._degraded_capability_reasons.add(reason)
+            LOGGER.warning("tracking: capability level capped -- %s", reason)
+        return served
+
+    def _level_kwargs(self, registry: Any) -> "dict[str, int]":
+        """`{"level": served}` for the real `TrackerRegistry`, `{}` for
+        anything else offered through `registry_provider`.
+
+        `registry_provider` is a plain callable contract (`Callable[[],
+        Optional[TrackerRegistry]]`), not an enforced protocol -- tests
+        across this codebase substitute their own duck-typed stand-ins for
+        it, predating this wave, that implement `associator`/`follower`/
+        `compensator`/`appearance` WITHOUT a `level` parameter. Passing
+        `level=` unconditionally would break every one of them for a
+        capability distinction they were never written to care about.
+        `TrackerRegistry`'s own four accessors default `level=None` (no
+        ceiling), so omitting this kwarg entirely is exactly equivalent to
+        `level=None` for anything that DOES support it.
+        """
+        if isinstance(registry, TrackerRegistry):
+            return {"level": self._capability_level_served}
+        return {}
+
+    def _release_capability(self) -> None:
+        """Force the next active frame to re-probe/re-resolve the served
+        level, and drop every engine the OLD level's roster filter gated.
+
+        `_engine`/`_motion_engine`/`_appearance_engine` were each built
+        through `TrackerRegistry`'s level-filtered roster (`registry.py`'s
+        `_ASSOCIATOR_MIN_LEVEL` and siblings) using the level THEN in force
+        -- a changed requested ceiling can widen or narrow which engines are
+        even visible, so all three are invalidated exactly as a mode/
+        engine_id change already invalidates `_engine` (`_release_engine`'s
+        own docstring).
+        """
+        self._capability_resolved = False
+        self._release_engine()
+        self._release_motion_compensator()
+        self._release_appearance_extractor()
+
     # -- engines and degradation -------------------------------------------
 
     def _resolve_engine(self) -> Any:
@@ -1433,12 +1547,19 @@ class StreamTrackingSession:
         return self._engine
 
     def _create_engine(self, registry: TrackerRegistry) -> Optional[tuple[str, Any]]:
+        # TRACKING-V3-PLAN wave V1: the served level, already resolved by
+        # `process()` before `_resolve_engine()` (this method's only caller)
+        # ever runs -- see `_resolve_capability_level`'s own docstring. L1
+        # offers no follower at all, so a level-1 FOLLOW request returns
+        # `None` here and `_resolve_engine`'s existing `FOLLOW -> ASSOCIATE`
+        # ladder takes over with no new code needed for it.
+        level_kwargs = self._level_kwargs(registry)
         if self._params.mode == MODE_FOLLOW:
             return registry.follower(
-                self._params.engine_id, max_age_frames=self._params.max_age_frames
+                self._params.engine_id, max_age_frames=self._params.max_age_frames, **level_kwargs
             )
         return registry.associator(
-            self._params.engine_id, max_age_frames=self._params.max_age_frames
+            self._params.engine_id, max_age_frames=self._params.max_age_frames, **level_kwargs
         )
 
     def _degrade_to(self, mode: str, why: str) -> None:
@@ -1520,7 +1641,10 @@ class StreamTrackingSession:
         if registry is None:
             return None
 
-        created = registry.compensator(requested)
+        # TRACKING-V3-PLAN wave V1: the served level, already resolved by
+        # `process()` before this method's only two callers ever run.
+        level_kwargs = self._level_kwargs(registry)
+        created = registry.compensator(requested, **level_kwargs)
         if created is None:
             return None
         engine_id, engine = created
@@ -1533,8 +1657,14 @@ class StreamTrackingSession:
                     engine_id,
                     MOTION_ENGINE_FLOW,
                 )
-            created = registry.compensator(MOTION_ENGINE_FLOW)
-            if created is None:
+            created = registry.compensator(MOTION_ENGINE_FLOW, **level_kwargs)
+            if created is None or created[0] == MOTION_ENGINE_POSE:
+                # `flow` needs L2 (`registry._COMPENSATOR_MIN_LEVEL`); at L1
+                # the roster this level affords contains only `pose` -- the
+                # SAME engine that just failed its availability check --
+                # so re-offering it as a "fallback" would be a repeated
+                # failure dressed up as one, not a genuine second option.
+                # Uncompensated is the honest outcome (P5's "genuine no-op").
                 return None
             engine_id, engine = created
 
@@ -1573,7 +1703,10 @@ class StreamTrackingSession:
         registry = self._registry_provider()
         if registry is None:
             return None
-        created = registry.appearance(requested)
+        # TRACKING-V3-PLAN wave V1: the served level, already resolved by
+        # `process()` before this method's only caller (`_run_cost_
+        # associate`) ever runs.
+        created = registry.appearance(requested, **self._level_kwargs(registry))
         if created is None:
             return None
         self._appearance_engine_id, self._appearance_engine = created
@@ -1738,6 +1871,12 @@ class StreamTrackingSession:
         self._release_motion_compensator()
         self._release_appearance_extractor()
         self._release_memory()
+        # TRACKING-V3-PLAN wave V1: not a full `_release_capability()` --
+        # the engines it would drop are already handled by the three calls
+        # above -- just the cached served level itself, so the next active
+        # frame re-probes fresh rather than trusting a value from before
+        # this potentially-long OFF period.
+        self._capability_resolved = False
 
 
 def _box_for(
