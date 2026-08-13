@@ -1,0 +1,26 @@
+<component name="ProjectRunConfigurationManager">
+  <!-- Every mediamtx/publish base is left to application.yaml's own defaults
+       (localhost:8554 / 18888 / 18889): those defaults exist for exactly this
+       host-run shape, so restating them here would only create a second place to keep
+       in sync. Only what differs from the compiled defaults is set below.
+
+       Port 5433, not 5432: docker-compose.yml maps postgres there so it cannot collide
+       with a postgres already running on this machine. -->
+  <configuration default="false" name="3 vision-app" type="SpringBootApplicationConfigurationType"
+                factoryName="Spring Boot" nameIsGenerated="false">
+    <module name="vision-app" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.drones.vision.VisionApplication" />
+    <envs>
+      <env name="VISION_CV_ENABLED" value="true" />
+      <env name="VISION_CV_ENDPOINT" value="localhost:50051" />
+      <env name="VISION_PERSISTENCE_ENABLED" value="true" />
+      <env name="VISION_PERSISTENCE_JDBC_URL" value="jdbc:postgresql://localhost:5433/vision" />
+      <env name="VISION_PERSISTENCE_USERNAME" value="vision" />
+      <env name="VISION_PERSISTENCE_PASSWORD" value="vision" />
+      <env name="VISION_AUTH_ENABLED" value="true" />
+    </envs>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

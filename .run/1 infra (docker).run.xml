@@ -1,0 +1,20 @@
+<component name="ProjectRunConfigurationManager">
+  <!-- Postgres + mediamtx only. cv-service and vision-app deliberately stay out: their
+       images cost several GB to build, and running them from the IDE is what gives you
+       a debugger and hot restart. Run this first — the other two both need it up. -->
+  <configuration default="false" name="1 infra (docker)" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="docker compose up -d postgres mediamtx" />
+    <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+    <option name="SCRIPT_PATH" value="" />
+    <option name="SCRIPT_OPTIONS" value="" />
+    <option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="true" />
+    <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="INDEPENDENT_INTERPRETER_PATH" value="true" />
+    <option name="INTERPRETER_PATH" value="/bin/bash" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="EXECUTE_IN_TERMINAL" value="true" />
+    <option name="EXECUTE_SCRIPT_FILE" value="false" />
+    <envs />
+    <method v="2" />
+  </configuration>
+</component>

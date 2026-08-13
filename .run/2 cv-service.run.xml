@@ -1,0 +1,21 @@
+<component name="ProjectRunConfigurationManager">
+  <!-- A Shell Script config, not a Python one, on purpose: it names the venv interpreter
+       by path, so it works without the project having a configured Python SDK and cannot
+       drift from whichever SDK the IDE happens to pick. Takes ~30-60s to answer on
+       :50051 — it loads and warms the model before the gRPC server starts serving. -->
+  <configuration default="false" name="2 cv-service" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value=".venv/bin/python -m cv_service.grpc.server" />
+    <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+    <option name="SCRIPT_PATH" value="" />
+    <option name="SCRIPT_OPTIONS" value="" />
+    <option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="true" />
+    <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$/cv-service" />
+    <option name="INDEPENDENT_INTERPRETER_PATH" value="true" />
+    <option name="INTERPRETER_PATH" value="/bin/bash" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="EXECUTE_IN_TERMINAL" value="true" />
+    <option name="EXECUTE_SCRIPT_FILE" value="false" />
+    <envs />
+    <method v="2" />
+  </configuration>
+</component>
