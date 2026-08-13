@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.pipeline.StreamPipeline;
+import com.drones.vision.application.pipeline.DetectionRate;
 import com.drones.vision.application.pipeline.PipelineLatency;
 import com.drones.vision.application.pipeline.TrackingStats;
 
@@ -113,6 +114,25 @@ public interface StreamService {
     Optional<VideoFrame> latestRawFrame(StreamId streamId);
 
     /**
+     * Whether server-side overlay burn-in is actually active for a running stream
+     * (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4) — {@code false} exactly when nothing burns detection
+     * boxes into the published video (this device's source is proxied, D4 — no {@code
+     * VideoSourcePort} was opened at all, so no JVM frame is ever published for the overlay renderer
+     * to burn into — or no {@code OverlayPort} is wired, or this stream's own {@code overlayBurnIn} is
+     * off), {@code true} otherwise. Whether this stream's <em>detections</em> arrive by push or pull
+     * plays no part: the overlay render is driven by the published video frame, not by the detection
+     * transport, so a JVM-published, pull-detected stream (Phase 1's V4L2/MJPEG/sim answer) burns
+     * boxes exactly like push mode does. Computed once at start, since neither fact it depends on can
+     * change over a running stream's life.
+     *
+     * @param streamId the stream to inspect
+     * @return whether burn-in is active, or {@code false} for an unknown/not-running stream — the
+     *         same honest "nothing burns boxes here" answer a proxied stream already gives, never an
+     *         error
+     */
+    boolean burnedIn(StreamId streamId);
+
+    /**
      * The most recently completed detection result's detections on a running stream — exactly {@link
      * StreamPipeline#latestDetections()} (docs/plans/done/CV-TRAINING-PLAN.md &sect;2), surfaced here so a
      * caller outside the pipeline (e.g. training-sample capture) never needs to reach into pipeline
@@ -165,6 +185,21 @@ public interface StreamService {
      *         #trackingStats(StreamId)}
      */
     Optional<PipelineLatency> pipelineLatency(StreamId streamId);
+
+    /**
+     * A running stream's sampler accounting over the stats window
+     * (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1) — exactly {@link StreamPipeline#detectionRate()}.
+     *
+     * <p>The companion to {@link #pipelineLatency(StreamId)}: that one reports what a detection
+     * cost, this one reports how many were asked for and what became of them, which is what turns
+     * "the stream is not running at its configured rate" from an observation into a diagnosis.
+     *
+     * @param streamId the stream to inspect
+     * @return the counters, or {@link Optional#empty()} if {@code streamId} is unknown or not
+     *         running on this instance — empty rather than zeroed, for the same reason as {@link
+     *         #trackingStats(StreamId)}
+     */
+    Optional<DetectionRate> detectionRate(StreamId streamId);
 
     /**
      * Live-updates a running stream's detection config (docs/plans/done/CV-CONTROL-PLAN.md &sect;5,

@@ -1,6 +1,7 @@
 package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
+import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
@@ -16,6 +17,7 @@ import com.drones.vision.app.events.DetectionSessionCleanupEventPublisher;
 import com.drones.vision.app.events.LiveUpdateAuditTrail;
 import com.drones.vision.app.events.LiveUpdateDetectionEventRepository;
 import com.drones.vision.app.events.LiveUpdateEventPublisher;
+import com.drones.vision.app.stream.LiveFrameFallbackStreamService;
 import com.drones.vision.application.asset.*;
 import com.drones.vision.application.category.*;
 import com.drones.vision.application.device.*;
@@ -295,6 +297,22 @@ public class ApplicationServiceWiring {
      * {@code liveUpdatePublisherPort} is threaded through unconditionally, same reasoning as {@link
      * #usageTracker} above — every stream pipeline this service starts announces its completed
      * detection results regardless of {@link VisionLiveProperties#enabled()}.
+     *
+     * <h2>docs/plans/active/MEDIA-SOT-PLAN.md wave M7 — switch B and the live-frame fallback</h2>
+     * {@code pullDetectionSettings} is built here, not injected, because it is a composite of two
+     * things this method already has separate access to: {@link VisionCvProperties#pull()}'s {@code
+     * rtsp-base} (the address the <b>worker</b> dials, D5) and {@code CvWiring}'s conditionally-present
+     * {@code pulledDetectionPort} bean (absent unless {@link VisionCvProperties#pullEnabled()}). {@code
+     * null} (the default, {@code frame-transport=push}) reproduces the pre-wave-M5 11-arg constructor's
+     * behaviour exactly — see {@code DefaultStreamService}'s own javadoc on that parameter.
+     *
+     * <p>The returned {@link StreamService} is wrapped in {@code
+     * com.drones.vision.app.stream.LiveFrameFallbackStreamService} only when {@link
+     * VisionPublishProperties.SourceProxy#enabled()} is {@code true} — the one condition under which a
+     * running stream's pipeline cache can be permanently empty (D4: a proxied stream opens no {@code
+     * VideoSourcePort} at all). With that flag at its default {@code false} (D1), this method returns
+     * the plain {@code DefaultStreamService} exactly as before this wave, so {@code
+     * LiveFrameFallbackStreamService} is never even constructed in the default configuration.
      */
     @Bean
     public StreamService streamService(DeviceRepositoryPort deviceRepositoryPort,
@@ -308,11 +326,22 @@ public class ApplicationServiceWiring {
                                         DetectionEventRepositoryPort detectionEventRepositoryPort,
                                         LiveUpdatePublisherPort liveUpdatePublisherPort,
                                         VisionApplicationProperties applicationProperties,
-                                        VisionTrackingProperties trackingProperties) {
-        return new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort,
-                detectionEventRepositoryPort, liveUpdatePublisherPort,
-                streamPipelineSettings(applicationProperties, trackingProperties));
+                                        VisionTrackingProperties trackingProperties,
+                                        VisionCvProperties cvProperties,
+                                        VisionPublishProperties publishProperties,
+                                        ObjectProvider<PulledDetectionPort> pulledDetectionPort,
+                                        MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber) {
+        PullDetectionSettings pullDetectionSettings = cvProperties.pullEnabled()
+                ? new PullDetectionSettings(pulledDetectionPort.getObject(), cvProperties.pull().rtspBase())
+                : null;
+        StreamService defaultStreamService = new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker,
+                overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort,
+                streamPipelineSettings(applicationProperties, trackingProperties), pullDetectionSettings);
+        if (publishProperties.sourceProxy().enabled()) {
+            return new LiveFrameFallbackStreamService(defaultStreamService, mediamtxLiveFrameGrabber);
+        }
+        return defaultStreamService;
     }
 
     /**
@@ -352,7 +381,9 @@ public class ApplicationServiceWiring {
                 Duration.ofSeconds(tracking.statsWindowSeconds()),
                 Duration.ofSeconds(tracking.trackRetentionSeconds()),
                 TrackingWiring.streamStartTrackingSeed(tracking),
-                pipeline.cameraHfovDegrees());
+                pipeline.cameraHfovDegrees(),
+                new AdaptiveRateSettings(pipeline.adaptiveRate().enabled(), pipeline.adaptiveRate().maxFps(),
+                        pipeline.adaptiveRate().ewmaAlpha()));
     }
 
     /**

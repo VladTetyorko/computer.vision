@@ -2,8 +2,8 @@
 
 H.264 RTSP push to a mediamtx sidecar so browsers can watch live streams via mediamtx's HLS egress.
 
-**Depends on:** vision-domain, org.bytedeco:javacv, org.bytedeco:ffmpeg-platform-gpl · **Used by:** vision-app
-**Build/test:** `./mvnw -B -pl adapters/adapter-publish-hls test` — green (72 tests as of docs/plans/active/LAYERING-REFACTOR-PLAN.md E3, see "E3: layering-refactor split" below; use `-am` if the local `vision-domain` artifact predates a port this module now depends on, e.g. `ReplayFrameExtractionPort`).
+**Depends on:** vision-domain, org.bytedeco:javacv, org.bytedeco:ffmpeg-platform-gpl (plus JDK-only `java.net.http.HttpClient`/`com.sun.net.httpserver.HttpServer` for the mediamtx Control API client and its tests — no new Maven dependency) · **Used by:** vision-app
+**Build/test:** `./mvnw -B -pl adapters/adapter-publish-hls test` — green (111 tests as of docs/plans/active/MEDIA-SOT-PLAN.md M6, see "M6: mediamtx proxy publisher + live frame grab" below; use `-am` if the local `vision-domain` artifact predates a port this module now depends on, e.g. `ReplayFrameExtractionPort`).
 
 ## API surface
 ### `com.drones.vision.adapter.publishhls`
@@ -23,6 +23,12 @@ H.264 RTSP push to a mediamtx sidecar so browsers can watch live streams via med
 - `final class LagTracker` (package-private, pure, no I/O) — docs/plans/done/MVP2-PLAN.md V-c. `LagTracker(int capacity)`; `void record(long lagMillis)` (`O(1)`, no allocation — drop-oldest ring buffer); `long p50()`/`long p95()` (nearest-rank percentile over a sorted defensive copy — `O(n log n)`, only meant to be called occasionally, e.g. once per periodic summary log, never per-frame); `int sampleCount()`. Returns `0` for both percentiles when empty. Constructor rejects `capacity <= 0`.
 - `final class MediamtxPlaybackUrls` (package-private, stateless, pure string formatting) — the one place that knows mediamtx's playback `/get` query shape: `static String getUrl(URI playbackBase, String pathName, Instant start, long durationSeconds)` → `{playbackBase}/get?path={pathName}&start={start}&duration={durationSeconds}` (trailing-slash on `playbackBase` tolerated). Shared by `MediamtxStreamPublisher#playbackUrl` and `MediamtxReplayFrameExtractor#frameAt` — see "Replay frame extraction" below.
 - `final class MediamtxReplayFrameExtractor implements ReplayFrameExtractionPort` (public; docs/plans/done/CV-TRAINING-V2-PLAN.md §6) — `MediamtxReplayFrameExtractor(URI playbackBase)`, `playbackBase` nullable (unconfigured playback ⇒ every call returns `Optional.empty()`). `frameAt(StreamId, Instant): Optional<VideoFrame>` pulls one decoded BGR24 frame out of a stream's mediamtx recording. See "Replay frame extraction" below for the full design.
+- `final class MediamtxControlApi` (package-private; docs/plans/active/MEDIA-SOT-PLAN.md §5.3, M6) — thin client for mediamtx's v3 Control API, used only by `MediamtxProxyPublisher`. `MediamtxControlApi(URI apiBase, String apiUser, String apiPassword)` — credentials nullable (no `Authorization` header sent when absent, today's default). `void createOrUpdatePath(String pathName, String sourceUrl, boolean sourceOnDemand, String rtspTransport)` — `POST /v3/config/paths/add/{name}`, and on an HTTP 400 whose body is mediamtx's `"path already exists"` error, falls through to `PATCH /v3/config/paths/patch/{name}` with the same body (the idempotent-start fallback). `boolean isReady(String pathName)` — `GET /v3/paths/get/{name}`; HTTP 404 is reported as `false` (not-ready, not an error — callers poll in a loop), any other non-200 throws. `void deletePath(String pathName)` — `DELETE /v3/config/paths/delete/{name}`; HTTP 200 or 404 (already gone) both succeed (idempotent stop). Every non-2xx/404 outcome throws `MediamtxControlApiException`; an HTTP 401 gets a message that explicitly names "authentication" and the fix (configure `vision.publish.mediamtx.api-user`/`api-password`, or mount a widened `mediamtx.yml`) rather than a bare status code. Package-private test seams `static boolean bodyIndicatesPathAlreadyExists(String)` / `static boolean extractReadyField(String)` — small regex-based JSON field extraction, not a JSON library dependency (the four response shapes are fixed and version-pinned, verified against 1.19.3 by M0's transcript).
+- `final class MediamtxControlApiException extends RuntimeException` (public; M6) — thrown by `MediamtxControlApi` and (for a readiness timeout) `MediamtxProxyPublisher#streamStarted`. Deliberately allowed to escape `streamStarted` (unlike this module's usual "nothing escapes" posture, see `MediamtxStreamPublisher`'s own javadoc) — a proxied start call that cannot reach a ready path must fail loud, not hand back a URL that plays nothing; `streamEnded` still catches and logs it at `WARNING`, since teardown must not block a caller.
+- `public record MediamtxProxySettings(String rtspTransport, Duration readyTimeout, boolean sourceOnDemand, String apiUser, String apiPassword)` (M6) — `MediamtxProxyPublisher`'s tunables, mirrors `PublishSettings`'s "vision-app maps `application.yaml` onto this record" shape. `static defaults()` = `("automatic", 10s, false, null, null)` — D1: reproduces today's (proxy-disabled) behaviour exactly. Compact ctor requires `apiPassword` whenever `apiUser` is set (fails fast at construction, not at the first 401).
+- `final class MediamtxProxyPublisher implements StreamPublisherPort` (public; docs/plans/active/MEDIA-SOT-PLAN.md D3, M6) — `MediamtxProxyPublisher(URI apiBase, URI hlsViewBase, URI whepViewBase, URI playbackViewBase, MediamtxProxySettings settings)`. `streamStarted(StreamId, Device)` creates/idempotently re-points a mediamtx path at `device.stream().uri()` via `MediamtxControlApi`, then — unless `settings.sourceOnDemand()` — polls readiness (100ms interval, not configurable) up to `settings.readyTimeout()` before returning; a path that never becomes ready throws `MediamtxControlApiException` rather than returning silently. `publish(StreamId, VideoFrame)` is an intentional no-op — mediamtx, not this JVM, holds the frames. `streamEnded(StreamId)` deletes the path and swallows `MediamtxControlApiException` (logs `WARNING`). `viewUrl`/`whepUrl`/`playbackUrl` delegate to the same `MediamtxUrls`/`MediamtxPlaybackUrls` helpers `MediamtxStreamPublisher` uses (D2: the path name is `streamId.value()` regardless of which publisher created it). `proxiesSource(Device)` always returns `true`.
+- `final class PublisherRouter implements StreamPublisherPort` (public; docs/plans/active/MEDIA-SOT-PLAN.md §3 switch A, M6) — `PublisherRouter(StreamPublisherPort directPublisher, StreamPublisherPort proxyPublisher, boolean sourceProxyEnabled)`. Routes to `proxyPublisher` iff `sourceProxyEnabled && device.stream().protocol().equals("rtsp")`, else `directPublisher` — the one `StreamPublisherPort` `vision-app` wires; neither `StreamPipeline` nor `DefaultStreamService` needs to know two publishers exist. `proxiesSource(Device)` evaluates the same rule (pure, no side effect — the application layer calls it *before* `streamStarted`). `streamStarted` remembers which publisher a `StreamId` routed to (a `ConcurrentHashMap`) so later calls carrying only a `StreamId` (`publish`/`streamEnded`/the URL methods) stay on the same publisher; an unrouted `StreamId` falls back to `directPublisher`.
+- `final class MediamtxLiveFrameGrabber` (public; docs/plans/active/MEDIA-SOT-PLAN.md M6) — `MediamtxLiveFrameGrabber(URI rtspBase)` / `MediamtxLiveFrameGrabber(URI rtspBase, Duration connectTimeout, Duration readTimeout)`. `grab(StreamId): Optional<VideoFrame>` opens `{rtspBase}/{streamId}` as an RTSP **read** client (the same address/path `MediamtxStreamPublisher` pushes to, and the same address a proxied path is reachable at) and decodes exactly one frame — `grabImage()` not `grab()`, `rtsp_transport=tcp` (fixed, not configurable — reliability matters more than latency for a one-shot grab), BGR24, `FrameConverter.copyBgr24`. Never throws; an unreachable/malformed base or no decodable video returns `Optional.empty()`, logged once at `WARNING`. `capturedAt` is stamped at grab time (`Instant.now()`), not derived from the RTSP PTS — a live grab has no RTCP-anchored wallclock without lower-level access neither this class nor `cv2`-equivalent grabbing provides (docs/plans/active/MEDIA-SOT-PLAN.md §6). Exists to fill the gap proxy mode opens: nothing in the JVM decodes a proxied stream's video, so `StreamPipeline`'s own cached `latestFrame`/`latestRawFrame` (vision-application) would otherwise sit empty for a proxied stream — **not yet wired into `StreamService`**, that is a future wave's job (out of this module's own scope), this class only provides the capability. Reuses `MediamtxStreamPublisher.ensureQuietLogging()` and `MediamtxUrls.pushUrl` (as a read address, not a push one) — no new machinery duplicated.
 
 ## Conventions
 - Plain classes, no Spring — instantiated directly by `vision-app`'s wiring config.
@@ -305,6 +311,124 @@ Every collaborator class gained a **new, additional** settings-taking constructo
 - `MediamtxReplayFrameExtractor(URI, Duration window, Duration readTimeout)` — new 3-arg constructor; the pre-existing 1-arg one delegates `this(playbackBase, Duration.ofSeconds(WINDOW_DURATION_SECONDS), Duration.ofMillis(15_000L))`. `WINDOW_DURATION_SECONDS`/`READ_TIMEOUT_MICROS` constants are kept as documented defaults; the actual `frameAt` call now reads `windowDurationSeconds`/`readTimeoutMicros` instance fields.
 
 `vision-app`'s own `VisionPublishProperties` extension (`encoder`/`resilience`/`cadence`/`replay` nested records, config extraction target: `com.drones.vision.app.config.wiring.PublishWiring`) now actually constructs a `PublishSettings` from `application.yaml` and threads it into `MediamtxStreamPublisher`'s 5-arg constructor, and a `Duration` pair into `MediamtxReplayFrameExtractor`'s 3-arg one — see vision-app/MODULE.md's own "Package shape" section for the full wiring-side mapping. `./mvnw -B -pl adapters/adapter-publish-hls test`: **72/72 green, unchanged count**.
+
+## M6: mediamtx proxy publisher + live frame grab (docs/plans/active/MEDIA-SOT-PLAN.md, wave M6)
+
+**Goal.** Let mediamtx itself dial an RTSP camera (D3: "who publishes video into mediamtx" switch A)
+instead of the JVM decoding it and pushing frames — the enabling move for CV-SCALE's N-workers-one-path
+target. `MediamtxStreamPublisher` is completely untouched by this wave; every one of its 72 pre-existing
+tests stayed green, unedited.
+
+**New classes**, all in this package (see API surface above for exact signatures): `MediamtxControlApi`
+(package-private thin client for §5.3's four operations), `MediamtxControlApiException` (public, the
+diagnosable-failure type), `MediamtxProxySettings` (public record), `MediamtxProxyPublisher` (public,
+implements `StreamPublisherPort`), `PublisherRouter` (public, implements `StreamPublisherPort`,
+per-device dispatch), `MediamtxLiveFrameGrabber` (public, not a port implementation — see below).
+
+**Router decision.** `PublisherRouter` is the *only* `StreamPublisherPort` `vision-app` needs to wire
+(a future wave's job, out of this module's scope) — it decides per `streamStarted` call whether a
+device's stream reaches `MediamtxProxyPublisher` or the JVM's own `MediamtxStreamPublisher`, based
+purely on `(sourceProxyEnabled flag, device.stream().protocol())`. The flag defaults `false` (D1), so
+the router's default behaviour is "always direct" — byte-identical to today. Because `proxiesSource`
+(called by the application layer *before* `streamStarted`, to decide whether to open a
+`VideoSourcePort` at all) and `streamStarted` (which needs a `Device` to route, but whose sibling
+calls — `publish`/`streamEnded`/the URL methods — only ever carry a `StreamId`) must agree on the same
+routing decision for one stream's whole lifetime, `PublisherRouter` remembers the choice per
+`StreamId` in a `ConcurrentHashMap`, populated in `streamStarted` and cleared in `streamEnded`. A
+`StreamId` this router never saw `streamStarted` for (caller bug, or state lost across a restart)
+falls back to the direct publisher rather than throwing — this module's existing "degrade, don't
+throw outside the lifecycle" posture.
+
+**Readiness poll.** `MediamtxProxyPublisher#streamStarted` creates (or idempotently PATCH-repoints)
+the mediamtx path, then polls `GET /v3/paths/get/{name}` at a fixed 100ms interval (not a config knob
+— §5.5 only budgets the overall `ready-timeout`) until either `ready:true` or
+`MediamtxProxySettings.readyTimeout()` (default 10s) elapses. **On timeout it throws
+`MediamtxControlApiException` out of `streamStarted`** — a deliberate departure from
+`MediamtxStreamPublisher`'s "nothing escapes" posture, because `StreamPipeline#start` calls
+`streamPublisherPort.streamStarted` synchronously and that call chain runs synchronously from
+`DefaultStreamService`'s own start path (verified by reading `StreamPipeline.java`), so a thrown
+exception here genuinely fails the operator-facing start call rather than being swallowed on a
+background thread — exactly what "must fail the start call... rather than returning a URL that plays
+nothing" (docs/plans/active/MEDIA-SOT-PLAN.md §12) requires. `streamEnded`, by contrast, catches
+`MediamtxControlApiException` and logs it at `WARNING` — teardown must not block a caller.
+
+**A robustness case the plan text didn't spell out, found while implementing the poll:** when
+`MediamtxProxySettings.sourceOnDemand()` is `true` (D10's opt-out), mediamtx does not dial the camera
+until a *reader* connects — so polling readiness at start time, before any viewer or worker has
+subscribed, would time out on every single start call, making on-demand mode simply broken rather
+than merely slower to become watchable. `streamStarted` therefore **skips the readiness poll entirely**
+when `sourceOnDemand` is `true` and returns as soon as the path is created, logging why. This is the
+concrete reason `MediamtxProxySettings.sourceOnDemand()`'s javadoc calls this out explicitly — a future
+reader of this class would otherwise "fix" the poll to also run in on-demand mode and silently reinstate
+the very failure mode D10 exists to describe.
+
+**Un-annotated live frame grab, and why it isn't the playback server.** `MediamtxLiveFrameGrabber`
+fills the gap proxy mode opens: nothing in the JVM decodes a proxied stream's video (`publish` is a
+no-op), so `StreamPipeline`'s in-memory `latestFrame`/`latestRawFrame` caches (vision-application)
+would sit permanently empty for a proxied stream, breaking the snapshot endpoint and training capture.
+The obvious-looking reuse — pointing `MediamtxReplayFrameExtractor`'s machinery at "now minus a
+second" — does **not** work: this module's own R-a section above documents that mediamtx only
+finalizes a recording segment on path *unpublish*, so a request against a still-live path's playback
+window 404s indefinitely. `MediamtxLiveFrameGrabber` instead opens the mediamtx **RTSP read** address
+directly (`{rtspBase}/{streamId}` — the exact same address `MediamtxStreamPublisher` pushes to, used
+here as a read client) with a plain `FFmpegFrameGrabber`, reusing the *style* (bounded connect/read
+I/O, `grabImage()` not `grab()`, `FrameConverter.copyBgr24`, shared `ensureQuietLogging`) but not the
+playback server itself. Every frame it returns is un-annotated by construction — a proxied path's
+source is the camera's own feed, and no overlay code ever touches it (unlike push mode, where
+`StreamPipeline` burns boxes in before `MediamtxStreamPublisher#publish`). **Not yet wired into
+`StreamService`** — that plumbing (deciding when to call this class vs. read `StreamPipeline`'s cache)
+belongs to whichever wave next touches `vision-application`/`vision-app`; this module only supplies the
+capability, per its own file-scope boundary.
+
+**The one non-obvious gotcha found writing the integration test, worth flagging for whoever wires M7's
+`docker-compose.yml` or writes further tests against a proxied path:** a device's source URL that
+happens to be *another path on the same mediamtx instance* (as this wave's own IT uses for a
+docker-free "camera" stand-in) must be addressed by mediamtx's **container-internal** RTSP port
+(`rtsp://127.0.0.1:8554/...`), never by the host-mapped port the *test JVM* uses to reach the same
+server from outside. mediamtx dials `source` URLs from *inside its own container's network
+namespace* — a host-mapped port (`docker port` output) is meaningless there, and the create call
+still succeeds (mediamtx doesn't validate reachability at path-creation time), so this fails silently
+as a readiness timeout, not as a create-time error, which took a debugging pass to track down. A real
+camera has one real address and this confusion doesn't arise there; it only bites the "mediamtx pulls
+from another path on itself" test/dev pattern.
+
+**§5.3's amended contract, checked against real 1.19.3.** All four operations, both idempotency
+fallbacks (create → patch on "already exists"; delete → 404-is-success), and the 401 IP-gating M0
+found blocking were re-verified by this wave's own docker-gated IT (below) against a *freshly started*
+mediamtx container — not just re-read from M0's transcript. It held with zero surprises: the create
+call succeeds even when the source is unreachable (mediamtx defers the actual dial), readiness flips
+from `false` to `true` only once mediamtx's own RTSP client to the source connects, and delete is
+genuinely idempotent. `MTX_AUTHINTERNALUSERS` was not re-tried as an env override (M0 already
+confirmed it doesn't work); this wave's IT mounts a `mediamtx.yml` with a widened `api` user's `ips`,
+matching M0's own verified fix, self-contained in a per-run temp file rather than depending on
+`cv-service/spikes/pull/results/mediamtx-spike.yml`'s path or survival.
+
+**Auth credentials.** `MediamtxProxySettings.apiUser`/`apiPassword` (unset by default) become an HTTP
+Basic `Authorization` header on every Control API call when both are set; the compact constructor
+requires `apiPassword` whenever `apiUser` is set, so a half-configured pair fails at construction, not
+at the first 401 in production. Fixing the *deployment* (mounting a widened `mediamtx.yml`, or setting
+these two properties to match server-side credentials) is wave M7's job — this class only supports
+either path.
+
+**Tests.** 39 new: `MediamtxControlApiTest` 16 (unit, no docker — an in-process
+`com.sun.net.httpserver.HttpServer` standing in for mediamtx, real sockets rather than a mocked
+`HttpClient`, covering create/patch fallback, readiness true/false/404, delete 200/404/500, the 401
+auth-failure message, Basic-auth header presence/absence, and the two JSON-field-extraction test
+seams directly), `MediamtxProxyPublisherTest` 10 (unit, same in-process-server idiom — readiness
+success, readiness timeout's diagnosable message, the on-demand skip, the 401 propagation, `publish`
+being a verified no-op, `streamEnded` never throwing, URL delegation, `proxiesSource` always `true`),
+`PublisherRouterTest` 8 (unit, two hand-fake `StreamPublisherPort`s, no I/O — routing by protocol+flag,
+per-stream stickiness across the whole lifecycle, the unrouted-`StreamId` fallback),
+`MediamtxLiveFrameGrabberTest` 4 (unit — unreachable/malformed base, null-argument rejection, never
+throws), `MediamtxProxyPublisherDockerIntegrationTest` 1 (docker-gated, ran genuinely — not
+skipped — in this environment: starts a real `bluenviron/mediamtx:1.19.3` with the auth-widening
+config, publishes a synthetic "camera" stream via the existing `MediamtxStreamPublisher`, proxies it
+through `MediamtxProxyPublisher`, asserts the path exists with `source.type=="rtspSource"` and
+`ready:true`, grabs a live un-annotated frame via `MediamtxLiveFrameGrabber` and asserts positive
+BGR24 dimensions, then asserts the path is gone after `streamEnded`). `./mvnw -B -pl
+adapters/adapter-publish-hls clean test`, run twice consecutively: **111/111 green, 0 skipped, both
+runs** (`MediamtxDockerIntegrationTest` 5 + `MediamtxProxyPublisherDockerIntegrationTest` 1, both
+docker-gated, both confirmed actually running against real containers, not skipped).
 
 ## Status
 **Fully implemented and green.** `src/test/*` was migrated to the current `vision-domain` shapes after the domain refactor that deleted `DeviceType` and moved `Device`/`StreamId` to their present forms: `Device` is now constructed without a type argument (`new Device(DeviceId, String, Set<Capability>, StreamDescriptor)`), and `StreamId` fixed-value tests use `StreamId.of("<uuid>")` (a literal valid UUID) instead of the old free-form string constructor; other call sites use `StreamId.random()`/`DeviceId.random()`.

@@ -88,6 +88,14 @@ export interface RegisterDeviceRequest {
  * (WHEP) viewing endpoint — unlike `viewUrl`, which can be app-relative (`HlsProxyController`
  * reverse-proxies HLS byte fetches), WHEP is a POST/SDP + ICE exchange a stateless proxy cannot
  * forward, so this is never app-relative and must never be proxied — POST straight to it.
+ *
+ * `burnedIn` (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§8 wave M8) says whether this stream's video
+ * itself actually carries burned-in detection boxes (`PipelineConfig.overlayBurnIn` at start time,
+ * wave M5's own addition to the wire — this field does not exist on the wire yet as of M8). **An
+ * absent field means `true`** — that is today's behaviour (`overlayBurnIn` defaults `true`
+ * server-side, and a pre-M5 backend never sends this key at all), so every reader of this field goes
+ * through `detection-overlay-logic.ts#resolveBurnedIn` rather than a bare truthiness check, per
+ * MEDIA-SOT-PLAN.md D1's "defaults reproduce today's behaviour exactly" rule.
  */
 export interface ActiveStream {
   readonly streamId: string;
@@ -95,6 +103,7 @@ export interface ActiveStream {
   readonly startedAt: string;
   readonly viewUrl?: string;
   readonly whepUrl?: string;
+  readonly burnedIn?: boolean;
 }
 
 /**
@@ -427,11 +436,14 @@ export interface CvTrackersResponse {
   readonly trackers: readonly CvTracker[];
 }
 
-/** Mirrors `dto.StartStreamResponse`. `whepUrl` follows the same absolute-origin rule as `ActiveStream#whepUrl`. */
+/** Mirrors `dto.StartStreamResponse`. `whepUrl` follows the same absolute-origin rule as
+ *  `ActiveStream#whepUrl`; `burnedIn` follows the same "absent means true" rule as
+ *  `ActiveStream#burnedIn` — see that field's own doc comment. */
 export interface StartStreamResult {
   readonly streamId: string;
   readonly viewUrl?: string;
   readonly whepUrl?: string;
+  readonly burnedIn?: boolean;
 }
 
 /**

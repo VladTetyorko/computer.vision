@@ -14,7 +14,7 @@ import java.util.List;
  * /api/streams/{streamId}/detections} already uses, and the reason a polling client needs one code
  * path instead of two.
  *
- * <p>{@code @JsonInclude(NON_NULL)} covers {@code stats} and {@code latency}: {@code stats} is absent whenever
+ * <p>{@code @JsonInclude(NON_NULL)} covers {@code stats}, {@code latency} and {@code rate}: {@code stats} is absent whenever
  * there is nothing honest to report (see {@code StreamController#tracks}), never a zeroed object —
  * the flow strip hides itself rather than showing a strip of zeros.
  *
@@ -28,12 +28,27 @@ import java.util.List;
  * @param latency       what detections cost in wall-clock time, or absent before the first result.
  *                      Independent of {@code stats}: present whatever the tracking mode is
  *                      (docs/conclusions/CV-RATE-BUDGET.md &sect;3)
+ * @param rate          why the stream is sampling at the rate it is, or absent before the first
+ *                      sample. The companion to {@code latency} — that one is what a detection
+ *                      cost, this one is how many were asked for and what became of them
+ *                      (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1)
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
-                                    TrackStatsResponse stats, PipelineLatencyResponse latency) {
+                                    TrackStatsResponse stats, PipelineLatencyResponse latency,
+                                    DetectionRateResponse rate) {
 
     public StreamTracksResponse {
         tracks = List.copyOf(tracks);
+    }
+
+    /**
+     * The shape before {@code rate} was added, kept as a convenience constructor defaulting it to
+     * absent — same "N-1-arg convenience ctor" idiom the domain records use, so every pre-existing
+     * caller (and every test asserting the old body) compiles and behaves unchanged.
+     */
+    public StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
+                                 TrackStatsResponse stats, PipelineLatencyResponse latency) {
+        this(streamId, lockedTrackId, tracks, stats, latency, null);
     }
 }

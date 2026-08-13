@@ -137,6 +137,56 @@ frame width, on the most favourable deployment there is.
 > accuracy half; the latency half is now closed too, and the first thing it did was prove the
 > estimate above too generous.
 
+### Re-measured, 2026-08-12, after `CV-RATE-CONTROL-PLAN.md` R1–R3
+
+`file`-protocol source (FFmpeg → `BGR24` 1280×720, downscaled to 640×360), `yolo26n.pt`,
+`ASSOCIATE`/`cost`, `inferenceFps=10`, 300 samples, local cv-service.
+
+| figure | before (§3 above) | after | note |
+|---|---|---|---|
+| **effective fps** (configured 10) | **7.58** | **9.998** | |
+| update interval p50 | 131.9 ms | 100.3 ms | |
+| **worst box age** | **208.4 ms** | **143.7 ms** | −31% |
+| round trip p50 | 53.8 ms | 38.6 ms | **not comparable** — different source |
+| `droppedInFlight` / `droppedOutage` / `missedDeadlines` | *not counted* | **0 / 0 / 0** | the shortfall is now zero, not merely unexplained |
+
+**The one directly attributable rate result.** The two rows above were measured on different
+sources (`sim`/JPEG before, `file`/BGR24 after), so the round trip cannot be compared across them.
+The sampler can: a **24 fps** source asked for 10 fps now achieves **10.002**. The integer stride
+this replaced computed `round(24/10) = 2` and could only have produced **12** — a 20% overshoot
+with no mechanism to correct it, and one frame rate over (25 fps) it would have undershot to 8.3.
+That comparison is arithmetic, not a re-run.
+
+**BGR24 vs JPEG, same file, same run conditions** — and the estimate was too optimistic again,
+in the other direction this time:
+
+| figure | `wire-format=jpeg` | `wire-format=bgr24` |
+|---|---|---|
+| round trip p50 | 38.6 ms | **35.7 ms** |
+| round trip p95 | 43.4 ms | 44.7 ms |
+| round trip max | 46.4 ms | **102.6 ms** |
+| payload / frame | 12.1 KB | 691.2 KB |
+
+So: the median improves by ~3 ms (−7.6%), and **the tail gets worse** — 691 KB per frame adds
+variance even on loopback. This is a real but modest win, not the removal of "half the round trip"
+§3 implied; on this source the whole non-inference term is ~9 ms, not 25. Worth keeping as the
+loopback default, not worth claiming more than that. Note also that 12.1 KB of JPEG is a *synthetic
+test pattern* compressing unusually well — real footage narrows the ratio.
+
+**Verified on the wire, not in a property.** `wire-format` was checked by pointing the running app
+at a probe server that reports what actually arrived: `bgr24` → 100/100 frames
+`IMAGE_ENCODING_BGR24` at exactly 691,200 bytes (`3 × 640 × 360`); `jpeg` → `IMAGE_ENCODING_JPEG`
+at ~12 KB; **no key set at all** → BGR24 against a loopback endpoint, i.e. the shipped `auto` rule
+works end to end. Same instrument, same reason, as the `CameraPose` defect below.
+
+**What is NOT verified.** The adaptive rate (R2) never engaged in these runs: a `testsrc` pattern
+contains nothing `yolo26n` detects, so no track existed, so demand stayed 0 and the rate stayed at
+the configured 10 — correct behaviour, and exactly why it is not evidence. The loop is covered at
+the unit and pipeline level (`DetectionRateControllerTest`, and a pipeline test that samples >40
+frames in two seconds where the configured rate allows 20), but **its live effect is unmeasured
+until it runs against footage with real targets.** Stated here rather than left implicit, because
+§5's standing lesson is that green tests are not an outcome.
+
 ## 4. What we actually implement
 
 | Need | Implemented | Verdict |
@@ -193,7 +243,7 @@ two-stage match non-trivial, and **this scenario does not demonstrate that**.
 
 | # | Gap | Status |
 |---|---|---|
-| 1 | Hold rate fixed at 10/15 fps, never derived from motion | **open** — next, and now measurable |
+| 1 | Hold rate fixed at 10/15 fps, never derived from motion | **built, live effect unverified** — `DetectionRateController`, see above |
 | 2 | No ego-motion compensation | **done** — V2 merged (`flow`/`pose`) |
 | 3 | `CameraPose` never populated | **done** — yaw-only; see the defect below |
 | 4 | One confidence for acquisition + continuation | **done + measured** (§4) |
@@ -222,22 +272,22 @@ Steps 1–4 of the original recommendation are done and merged (`56c7354`), meas
 V2 re-merged, then the latency instrument, then `CameraPose`, then the confidence split — each with
 its outcome checked by running the real path rather than by reading a green suite.
 
+**Done since, on `feat/cv-rate-control`** (docs/plans/active/CV-RATE-CONTROL-PLAN.md): items 1 and 2
+below, plus the sampler defect that turned out to underlie the 7.58 — see the re-measurement in §3.
+The pipeline had no rate control loop at all: it quantized a fixed rate to an integer frame stride
+and counted none of what it dropped.
+
 **Next, in order:**
 
-1. **Adaptive rate (gap 1).** Now unblocked in both senses: pose gives predicted px/frame, and
-   `PipelineLatency` gives the feedback signal. The principled form of "spend resources not to lose
-   it" — raise the sample rate only when displacement approaches the association budget of §2.
-   The measurement already argues for it: `effectiveFps` is 7.58 against a configured 10, so the
-   rate control loop currently has no idea what it is actually achieving.
-2. **Shrink the ~25 ms of non-inference round trip.** On loopback it is half the round trip and it
-   is pure overhead: JPEG encode on the Java side, decode on the Python side. A BGR24 path for
-   local deployments, or a smaller `detectWidth`, both target it directly.
-3. **Decode `motion_engine_id` Java-side.** V2 added the wire field and nothing reads it, so which
+1. **Run the adaptive rate against real footage.** It is built and unit-covered; it has never had a
+   track to react to. Until then gap 1 is "built", not "closed".
+2. **Decode `motion_engine_id` Java-side.** V2 added the wire field and nothing reads it, so which
    compensator served a frame is invisible from the operator's side — the same "built but not
    surfaced" shape that made `CameraPose` dead for a release.
-4. **Per-asset field of view.** `camera-hfov-degrees` is one value per instance; a deployment
-   mixing lenses needs it on the asset.
-5. **MAVLink `ATTITUDE`.** Yaw-only captures the dominant term; pitch/roll would complete it, and
+3. **Per-asset field of view.** `camera-hfov-degrees` is one value per instance; a deployment
+   mixing lenses needs it on the asset — and the adaptive rate's ego-motion term now needs it too,
+   which raises the value of doing it.
+4. **MAVLink `ATTITUDE`.** Yaw-only captures the dominant term; pitch/roll would complete it, and
    the decoder does not exist yet.
 
 Gap 7 (auto-promote to FOLLOW, multi-target) and gap 9 (tracker on-board, next to the camera) remain

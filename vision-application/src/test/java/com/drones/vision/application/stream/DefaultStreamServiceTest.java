@@ -61,6 +61,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
@@ -816,12 +817,36 @@ class DefaultStreamServiceTest {
         return service.start(device.id(), started);
     }
 
-    /** Pushes one frame and returns the {@link TrackingConfig} it carried into {@code detect}. */
+    /** Bound on {@link #runningTracking}'s push loop — a stuck sampler must fail, not hang. */
+    private static final Duration SAMPLE_WAIT = Duration.ofSeconds(2);
+
+    /**
+     * Pushes frames until one serves a sample deadline, and returns the {@link TrackingConfig} it
+     * carried into {@code detect}.
+     *
+     * <p>Sampling is deadline-based (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R1) and this test
+     * pushes frames microseconds apart, so a push made right after a config change usually lands
+     * inside the previous sample interval and is correctly held back. Pushing until one lands keeps
+     * this helper about the config it set out to observe rather than about the sampler's cadence.
+     */
     private TrackingConfig runningTracking(ControllableFramePublisher publisher, StreamId streamId, long sequence) {
-        publisher.push(frameOn(streamId, sequence));
-        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(detectionPort, atLeastOnce()).detect(any(), captor.capture());
-        return captor.getValue().tracking();
+        int before = detectInvocationCount();
+        long waitUntilNanos = System.nanoTime() + SAMPLE_WAIT.toNanos();
+        while (System.nanoTime() < waitUntilNanos) {
+            publisher.push(frameOn(streamId, sequence));
+            if (detectInvocationCount() > before) {
+                ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+                verify(detectionPort, atLeastOnce()).detect(any(), captor.capture());
+                return captor.getValue().tracking();
+            }
+        }
+        throw new AssertionError("no pushed frame served a sample deadline within " + SAMPLE_WAIT);
+    }
+
+    private int detectInvocationCount() {
+        return (int) mockingDetails(detectionPort).getInvocations().stream()
+                .filter(invocation -> "detect".equals(invocation.getMethod().getName()))
+                .count();
     }
 
     @Test

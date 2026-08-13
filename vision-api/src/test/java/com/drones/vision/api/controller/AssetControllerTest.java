@@ -27,6 +27,7 @@ import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.model.UserId;
+import com.drones.vision.application.stream.StreamService;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
@@ -69,6 +70,7 @@ class AssetControllerTest {
 
     private AssetService assetService;
     private StreamPublisherPort streamPublisherPort;
+    private StreamService streamService;
     private TelemetryRepositoryPort telemetryRepositoryPort;
     private AssetImageRepositoryPort assetImageRepositoryPort;
     private MockMvc mockMvc;
@@ -81,11 +83,12 @@ class AssetControllerTest {
     void setUp() {
         assetService = mock(AssetService.class);
         streamPublisherPort = mock(StreamPublisherPort.class);
+        streamService = mock(StreamService.class);
         telemetryRepositoryPort = mock(TelemetryRepositoryPort.class);
         assetImageRepositoryPort = mock(AssetImageRepositoryPort.class);
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new AssetController(assetService, currentUser, streamPublisherPort,
+                .standaloneSetup(new AssetController(assetService, currentUser, streamPublisherPort, streamService,
                         telemetryRepositoryPort, assetImageRepositoryPort))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();

@@ -2,11 +2,16 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.adapter.overlay.Java2DOverlayRenderer;
 import com.drones.vision.adapter.overlay.OverlaySettings;
+import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
+import com.drones.vision.adapter.publishhls.MediamtxProxyPublisher;
+import com.drones.vision.adapter.publishhls.MediamtxProxySettings;
 import com.drones.vision.adapter.publishhls.MediamtxReplayFrameExtractor;
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
 import com.drones.vision.adapter.publishhls.PublishSettings;
+import com.drones.vision.adapter.publishhls.PublisherRouter;
 import com.drones.vision.api.support.SnapshotJpegEncoder;
 import com.drones.vision.app.config.properties.VisionApiProperties;
+import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.config.properties.VisionOverlayProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
 import com.drones.vision.app.devsupport.NoopReplayFrameExtractor;
@@ -42,7 +47,7 @@ import java.net.URI;
  */
 @Configuration
 @EnableConfigurationProperties({VisionOverlayProperties.class, VisionPublishProperties.class,
-        VisionApiProperties.class})
+        VisionApiProperties.class, VisionCvProperties.class})
 public class PublishWiring {
 
     /**
@@ -60,20 +65,59 @@ public class PublishWiring {
 
     /**
      * Selects the {@link StreamPublisherPort} implementation per {@link
-     * VisionPublishProperties#enabled()}: the mediamtx-backed publisher (default) pushes RTSP to
-     * the mediamtx sidecar; disabling it falls back to the no-op publisher. {@code
-     * PublishSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F3) carries the encoder/resilience/
-     * cadence tunables that used to be {@code H264RecorderFactory}/{@code PublishBackoff}/{@code
-     * CadenceEstimator}'s own hardcoded constants.
+     * VisionPublishProperties#enabled()}: {@code false} falls back to the no-op publisher (e.g.
+     * running or testing without mediamtx), exactly as before. {@code true} (the default) now builds a
+     * {@link PublisherRouter} (docs/plans/active/MEDIA-SOT-PLAN.md D3) wrapping {@code
+     * MediamtxStreamPublisher} (today's publisher, unchanged — {@code PublishSettings},
+     * docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F3, still carries the encoder/resilience/cadence
+     * tunables that used to be {@code H264RecorderFactory}/{@code PublishBackoff}/{@code
+     * CadenceEstimator}'s own hardcoded constants) and {@link MediamtxProxyPublisher} — the router
+     * itself decides, per device, which one actually handles a stream (see its own javadoc), so this
+     * stays the <em>one</em> {@link StreamPublisherPort} bean regardless of {@link
+     * VisionPublishProperties.SourceProxy#enabled()}'s value. With that flag at its default {@code
+     * false} (D1), the router never routes anywhere but the direct publisher, so runtime behaviour is
+     * byte-identical to the plain {@code MediamtxStreamPublisher} bean this method used to return.
+     *
+     * <p>Fails fast (docs/plans/active/MEDIA-SOT-PLAN.md §3's legal-combination table) on the one
+     * rejected row — see {@link #rejectProxyWithPushTransport}.
      */
     @Bean
-    public StreamPublisherPort streamPublisherPort(VisionPublishProperties properties) {
-        if (properties.enabled()) {
-            VisionPublishProperties.Mediamtx mediamtx = properties.mediamtx();
-            return new MediamtxStreamPublisher(mediamtx.rtspBase(), properties.viewBase(), mediamtx.whepBase(),
-                    mediamtx.playbackBase(), toPublishSettings(properties));
+    public StreamPublisherPort streamPublisherPort(VisionPublishProperties properties,
+                                                    VisionCvProperties cvProperties) {
+        rejectProxyWithPushTransport(properties, cvProperties);
+        if (!properties.enabled()) {
+            return new NoopStreamPublisher();
         }
-        return new NoopStreamPublisher();
+        VisionPublishProperties.Mediamtx mediamtx = properties.mediamtx();
+        StreamPublisherPort directPublisher = new MediamtxStreamPublisher(mediamtx.rtspBase(), properties.viewBase(),
+                mediamtx.whepBase(), mediamtx.playbackBase(), toPublishSettings(properties));
+        StreamPublisherPort proxyPublisher = new MediamtxProxyPublisher(mediamtx.apiBase(), properties.viewBase(),
+                mediamtx.whepBase(), mediamtx.playbackBase(), toProxySettings(properties));
+        return new PublisherRouter(directPublisher, proxyPublisher, properties.sourceProxy().enabled());
+    }
+
+    /**
+     * docs/plans/active/MEDIA-SOT-PLAN.md §3's rejected legal-combination row (A=proxy, B=push):
+     * checked once here, at wiring time, rather than per-stream-start inside {@code
+     * DefaultStreamService} — that class lives in {@code vision-application}, a module this wave does
+     * not touch. {@code vision.publish.source-proxy.enabled=true} declares this deployment's intent to
+     * let mediamtx dial at least one RTSP camera directly (D3); with {@code
+     * vision.cv.frame-transport} left at {@code push}, such a stream's video never reaches this JVM at
+     * all (D4), so there would be nothing for push-mode detection to send cv-service — a stream that
+     * can never detect. Both flags default to the legal (A={@code false}, B={@code push}) row, so this
+     * never fires in the default configuration (D1).
+     */
+    private static void rejectProxyWithPushTransport(VisionPublishProperties properties,
+                                                      VisionCvProperties cvProperties) {
+        if (properties.sourceProxy().enabled() && !cvProperties.pullEnabled()) {
+            throw new IllegalStateException(
+                    "vision.publish.source-proxy.enabled=true (mediamtx dials the camera itself) requires "
+                            + "vision.cv.frame-transport=pull -- a proxied source means this JVM never holds a "
+                            + "video frame (docs/plans/active/MEDIA-SOT-PLAN.md D4), so leaving "
+                            + "vision.cv.frame-transport=push (its current value) would start a stream that can "
+                            + "never detect: there would be nothing for push mode to send cv-service. Set "
+                            + "vision.cv.frame-transport=pull, or leave vision.publish.source-proxy.enabled=false.");
+        }
     }
 
     private static PublishSettings toPublishSettings(VisionPublishProperties properties) {
@@ -87,6 +131,36 @@ public class PublishWiring {
                 new PublishSettings.Cadence(cadence.measurementFrames(), cadence.minMeasuredFps(),
                         cadence.maxMeasuredFps(), cadence.driftRatioHigh(), cadence.driftEwmaAlpha(),
                         cadence.sustainedDriftWindow(), cadence.defaultFrameRateFps()));
+    }
+
+    /**
+     * Maps {@link VisionPublishProperties.SourceProxy} + the API-credential pair off {@link
+     * VisionPublishProperties.Mediamtx} onto {@link MediamtxProxySettings} — the same "this record
+     * maps onto that adapter settings object" shape {@link #toPublishSettings} already has.
+     */
+    private static MediamtxProxySettings toProxySettings(VisionPublishProperties properties) {
+        VisionPublishProperties.SourceProxy sourceProxy = properties.sourceProxy();
+        VisionPublishProperties.Mediamtx mediamtx = properties.mediamtx();
+        return new MediamtxProxySettings(sourceProxy.rtspTransport(), sourceProxy.readyTimeout(),
+                sourceProxy.onDemand(), mediamtx.apiUser(), mediamtx.apiPassword());
+    }
+
+    /**
+     * On-demand live-frame grab against mediamtx's own RTSP output (docs/plans/active/MEDIA-SOT-PLAN.md
+     * waves M6/M7) — the collaborator {@code ApplicationServiceWiring#streamService} wraps {@code
+     * DefaultStreamService} with ({@code com.drones.vision.app.stream.LiveFrameFallbackStreamService})
+     * when {@link VisionPublishProperties.SourceProxy#enabled()} is {@code true}, so the snapshot
+     * endpoint and training-sample capture still return a real frame for a proxied stream, where the
+     * pipeline's own cache is permanently empty (D4 — no {@code VideoSourcePort} was ever opened).
+     *
+     * <p>Unconditional (unlike {@link #streamPublisherPort}/{@link #replayFrameExtractionPort}):
+     * building one is cheap (no I/O — {@link MediamtxLiveFrameGrabber#grab} is what actually dials
+     * mediamtx, lazily, per call), so there is no reason to make its presence track {@link
+     * VisionPublishProperties#enabled()} the way an actual publisher/extractor implementation must.
+     */
+    @Bean
+    public MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber(VisionPublishProperties properties) {
+        return new MediamtxLiveFrameGrabber(properties.mediamtx().rtspBase());
     }
 
     /**

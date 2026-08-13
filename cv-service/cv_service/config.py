@@ -293,6 +293,35 @@ DEFAULT_TRACK_ROI_CROP_FACTOR = 4.0
 # primary gate instead cost `clutter` six id swaps -- measured, not supposed.
 DEFAULT_TRACK_ROI_MIN_IOU = 0.2
 
+# --- pull (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
+#
+# Back `cv_service.pull.{source,clock,loop}` -- the worker's own decode loop
+# for `Inference.DetectPulled`, none of which has a `PullControl` wire
+# counterpart EXCEPT the two that do (see each constant's own comment): these
+# are deployment knobs, resolved once like every `CV_TRACK_*` knob above, not
+# per-request state.
+DEFAULT_PULL_DECODER = "opencv"  # M0's measured choice (CV-PULL-SPIKE.md §7); D7's other named backends
+DEFAULT_PULL_RTSP_TRANSPORT = "tcp"
+# `PullControl.target_fps <= 0` falls back to this (§5.1 field 7) -- the
+# floor `DeadlineSampler` samples at when the Java rate controller (which
+# still owns the actual demand decision, MEDIA-SOT-PLAN §7) sends no opinion.
+DEFAULT_PULL_TARGET_FPS = 10.0
+# `PullControl.detect_width <= 0` falls back to this (§5.1 field 8) --
+# matches `MAX_DETECT_WIDTH` (adapter-cv-grpc/GrpcCvSettings.java), so a
+# worker with no explicit instruction downscales exactly as much as the push
+# path's own default does.
+DEFAULT_PULL_MAX_WIDTH = 640
+DEFAULT_PULL_OPEN_TIMEOUT_MILLIS = 5000
+DEFAULT_PULL_STALL_TIMEOUT_MILLIS = 5000
+DEFAULT_PULL_CLOCK_MODE = "anchor"  # M0's measured choice (CV-PULL-SPIKE.md §7); "arrival" remains selectable
+_PULL_CLOCK_MODES = ("anchor", "arrival")
+# NOT named by MEDIA-SOT-PLAN §5.1/§5.5 -- §6 only says "re-anchoring when
+# measured skew exceeds A THRESHOLD" without pinning the number.
+# `cv_service.pull.clock.DEFAULT_REANCHOR_THRESHOLD_MILLIS` (100ms) is that
+# number's home; this is its `CV_*`-configurable override, kept here rather
+# than hardcoded in `clock.py` per rule 1 (no un-configurable magic numbers).
+DEFAULT_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS = 100.0
+
 _ENV_MAX_CONCURRENT_INFERENCES = "CV_MAX_CONCURRENT_INFERENCES"
 
 
@@ -501,6 +530,40 @@ def _parse_engine_id(raw: Optional[str], default: str) -> str:
     return stripped or default
 
 
+def _parse_string(raw: Optional[str], default: str) -> str:
+    """Unset/blank -> `default`; anything else passes through stripped.
+
+    For freeform string knobs with no fixed roster to validate against here
+    -- the consuming module degrades gracefully for a value it doesn't
+    recognize (e.g. `cv_service.pull.source.open_source`'s `CV_PULL_DECODER`
+    fallback logs a warning and uses `opencv` instead of raising), so there
+    is nothing for this parser to reject.
+    """
+    if raw is None:
+        return default
+    stripped = raw.strip()
+    return stripped or default
+
+
+def _parse_choice(raw: Optional[str], default: str, choices: tuple, var_name: str) -> str:
+    """Forgiving-parse for a small FIXED roster (`CV_PULL_CLOCK_MODE`'s
+    `anchor`/`arrival`) -- unlike `_parse_string` above, an unrecognized
+    non-blank value here IS a typo to guard against: the consuming module
+    (`cv_service.pull.clock.CaptureClock`) raises on an unknown mode rather
+    than degrading, so this validates against `choices` and falls back with
+    a logged warning instead of ever passing a bad value through to that
+    raise. Case-insensitive, matching this file's other roster-adjacent
+    parsers.
+    """
+    if not raw:
+        return default
+    stripped = raw.strip().lower()
+    if stripped in choices:
+        return stripped
+    LOGGER.warning("%s=%r is not one of %s; using default %r", var_name, raw, choices, default)
+    return default
+
+
 _BOOL_TRUE = {"1", "true", "yes", "on"}
 _BOOL_FALSE = {"0", "false", "no", "off"}
 
@@ -599,6 +662,14 @@ class Settings:
     track_roi_enabled: bool = DEFAULT_TRACK_ROI_ENABLED
     track_roi_crop_factor: float = DEFAULT_TRACK_ROI_CROP_FACTOR
     track_roi_min_iou: float = DEFAULT_TRACK_ROI_MIN_IOU
+    pull_decoder: str = DEFAULT_PULL_DECODER
+    pull_rtsp_transport: str = DEFAULT_PULL_RTSP_TRANSPORT
+    pull_target_fps: float = DEFAULT_PULL_TARGET_FPS
+    pull_max_width: int = DEFAULT_PULL_MAX_WIDTH
+    pull_open_timeout_millis: int = DEFAULT_PULL_OPEN_TIMEOUT_MILLIS
+    pull_stall_timeout_millis: int = DEFAULT_PULL_STALL_TIMEOUT_MILLIS
+    pull_clock_mode: str = DEFAULT_PULL_CLOCK_MODE
+    pull_clock_reanchor_threshold_millis: float = DEFAULT_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -777,5 +848,36 @@ class Settings:
                 os.environ.get("CV_TRACK_ROI_MIN_IOU"),
                 DEFAULT_TRACK_ROI_MIN_IOU,
                 "CV_TRACK_ROI_MIN_IOU",
+            ),
+            pull_decoder=_parse_string(os.environ.get("CV_PULL_DECODER"), DEFAULT_PULL_DECODER),
+            pull_rtsp_transport=_parse_string(
+                os.environ.get("CV_PULL_RTSP_TRANSPORT"), DEFAULT_PULL_RTSP_TRANSPORT
+            ),
+            pull_target_fps=_parse_positive_float(
+                os.environ.get("CV_PULL_TARGET_FPS"), DEFAULT_PULL_TARGET_FPS, "CV_PULL_TARGET_FPS"
+            ),
+            pull_max_width=_parse_positive_int(
+                os.environ.get("CV_PULL_MAX_WIDTH"), DEFAULT_PULL_MAX_WIDTH, "CV_PULL_MAX_WIDTH"
+            ),
+            pull_open_timeout_millis=_parse_positive_int(
+                os.environ.get("CV_PULL_OPEN_TIMEOUT_MILLIS"),
+                DEFAULT_PULL_OPEN_TIMEOUT_MILLIS,
+                "CV_PULL_OPEN_TIMEOUT_MILLIS",
+            ),
+            pull_stall_timeout_millis=_parse_positive_int(
+                os.environ.get("CV_PULL_STALL_TIMEOUT_MILLIS"),
+                DEFAULT_PULL_STALL_TIMEOUT_MILLIS,
+                "CV_PULL_STALL_TIMEOUT_MILLIS",
+            ),
+            pull_clock_mode=_parse_choice(
+                os.environ.get("CV_PULL_CLOCK_MODE"),
+                DEFAULT_PULL_CLOCK_MODE,
+                _PULL_CLOCK_MODES,
+                "CV_PULL_CLOCK_MODE",
+            ),
+            pull_clock_reanchor_threshold_millis=_parse_positive_float(
+                os.environ.get("CV_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS"),
+                DEFAULT_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS,
+                "CV_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS",
             ),
         )

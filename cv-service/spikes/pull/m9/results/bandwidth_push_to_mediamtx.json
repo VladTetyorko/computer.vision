@@ -1,0 +1,7 @@
+{
+  "note": "mediamtx-side inboundBytes delta over a 10.02s window, 720p 30fps synthetic H.264 source (same source in both push and proxy legs, since mediamtx always receives the camera's own H.264 regardless of who dials it)",
+  "measured_mbps": 1.76,
+  "measured_kbps": 219.8,
+  "comparison_bgr24_640x360_10fps_mbps": 55.30,
+  "comparison_source": "CV-RATE-BUDGET.md §3: 691200 B/frame BGR24 at 640x360"
+}

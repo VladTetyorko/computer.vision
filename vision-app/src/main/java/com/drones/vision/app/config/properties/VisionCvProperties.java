@@ -1,9 +1,11 @@
 package com.drones.vision.app.config.properties;
 
+import com.drones.vision.adapter.cvgrpc.WireFormat;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
+import java.net.URI;
 import java.time.Duration;
 
 /**
@@ -35,6 +37,19 @@ import java.time.Duration;
  * @param jpegQuality            JPEG encoder quality {@code GrpcDetectionPort} uses for that same
  *                               downscale path; must be in {@code (0, 1]}; default
  *                               {@value #DEFAULT_JPEG_QUALITY}
+ * @param wireFormat             {@code auto} | {@code jpeg} | {@code bgr24} — how a downscaled frame
+ *                               reaches cv-service; default {@value #DEFAULT_WIRE_FORMAT}, which
+ *                               sends raw {@code BGR24} to a loopback endpoint (no encode here, no
+ *                               decode there) and JPEG to anything further away
+ * @param frameTransport         {@code push} | {@code pull} (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch
+ *                               B, §5.5) — {@code push} (default, {@value #DEFAULT_FRAME_TRANSPORT}) is
+ *                               today's behavior unchanged: the JVM samples frames and sends them to
+ *                               cv-service over {@code DetectStream}. {@code pull} switches every stream
+ *                               this deployment starts (D5/D12: one deployment-wide choice, not a
+ *                               per-device one) to {@code DetectPulled} instead — cv-service dials
+ *                               mediamtx itself and decodes/infers on its own schedule; see {@link #pull()}
+ *                               for where it dials. Validated in the compact constructor so a typo fails
+ *                               at context startup, the same treatment {@link #wireFormat} already gets
  * @param responseTimeout        per-pending-future response timeout on the detection bidi stream; default 2s
  * @param keepAliveTime          HTTP/2 keepalive PING interval; default 20s
  * @param keepAliveTimeout       keepalive PING ack deadline; default 5s
@@ -46,12 +61,17 @@ import java.time.Duration;
  *                               defaulted as a whole when absent
  * @param registry               {@code GrpcModelRegistryPort}'s per-call deadline; defaulted as a whole
  *                               when absent
+ * @param pull                   worker-pull config surface (docs/plans/active/MEDIA-SOT-PLAN.md §5.5);
+ *                               defaulted as a whole when absent; only read when {@link #frameTransport()}
+ *                               is {@code pull}
  */
 @ConfigurationProperties(prefix = "vision.cv")
 public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                   @DefaultValue(VisionCvProperties.DEFAULT_ENDPOINT) String endpoint,
                                   @DefaultValue(VisionCvProperties.DEFAULT_DETECT_WIDTH) int detectWidth,
                                   @DefaultValue(VisionCvProperties.DEFAULT_JPEG_QUALITY) float jpegQuality,
+                                  @DefaultValue(VisionCvProperties.DEFAULT_WIRE_FORMAT) String wireFormat,
+                                  @DefaultValue(VisionCvProperties.DEFAULT_FRAME_TRANSPORT) String frameTransport,
                                   @DefaultValue("2s") Duration responseTimeout,
                                   @DefaultValue("20s") Duration keepAliveTime,
                                   @DefaultValue("5s") Duration keepAliveTimeout,
@@ -59,11 +79,15 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                   @DefaultValue("5s") Duration channelShutdownTimeout,
                                   @DefaultValue("true") boolean plaintext,
                                   Upload upload,
-                                  Registry registry) {
+                                  Registry registry,
+                                  Pull pull) {
 
     static final String DEFAULT_ENDPOINT = "localhost:50051";
     static final String DEFAULT_DETECT_WIDTH = "640";
     static final String DEFAULT_JPEG_QUALITY = "0.8";
+    static final String DEFAULT_WIRE_FORMAT = "auto";
+    static final String DEFAULT_FRAME_TRANSPORT = "push";
+    private static final String PULL_FRAME_TRANSPORT = "pull";
     private static final int MIN_DETECT_WIDTH = 64;
 
     @ConstructorBinding
@@ -78,23 +102,45 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
         if (jpegQuality <= 0f || jpegQuality > 1f) {
             throw new IllegalArgumentException("vision.cv.jpeg-quality must be in (0,1], was " + jpegQuality);
         }
+        try {
+            WireFormat.parse(wireFormat);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("vision.cv.wire-format must be auto|jpeg|bgr24, was " + wireFormat, e);
+        }
+        if (!DEFAULT_FRAME_TRANSPORT.equals(frameTransport) && !PULL_FRAME_TRANSPORT.equals(frameTransport)) {
+            throw new IllegalArgumentException(
+                    "vision.cv.frame-transport must be push|pull, was " + frameTransport);
+        }
         if (upload == null) {
             upload = new Upload(Upload.DEFAULT_TIMEOUT_DURATION, Upload.DEFAULT_CHUNK_BYTES_INT);
         }
         if (registry == null) {
             registry = new Registry(Registry.DEFAULT_CALL_TIMEOUT_DURATION);
         }
+        if (pull == null) {
+            pull = new Pull(Pull.DEFAULT_RTSP_BASE_URI, Pull.DEFAULT_RECONNECT_INITIAL_BACKOFF,
+                    Pull.DEFAULT_RECONNECT_MAX_BACKOFF);
+        }
     }
 
     /**
      * Convenience constructor covering just the four original {@code vision.cv.*} fields (docs/plans/done/MVP1-PLAN.md
-     * §C7/docs/plans/done/REMOTE-CV-PLAN.md P1 item 5, predating wave F4's extension) — every field wave F4 added
-     * defaults to {@code GrpcCvSettings}'s own literal, so behavior constructing an instance this way
-     * is unchanged.
+     * §C7/docs/plans/done/REMOTE-CV-PLAN.md P1 item 5, predating wave F4's extension) — every field wave F4 (and
+     * docs/plans/active/MEDIA-SOT-PLAN.md wave M7) added defaults to {@code GrpcCvSettings}'s own literal, so
+     * behavior constructing an instance this way is unchanged.
      */
     public VisionCvProperties(boolean enabled, String endpoint, int detectWidth, float jpegQuality) {
-        this(enabled, endpoint, detectWidth, jpegQuality, Duration.ofSeconds(2), Duration.ofSeconds(20),
-                Duration.ofSeconds(5), true, Duration.ofSeconds(5), true, null, null);
+        this(enabled, endpoint, detectWidth, jpegQuality, DEFAULT_WIRE_FORMAT, DEFAULT_FRAME_TRANSPORT,
+                Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true, Duration.ofSeconds(5),
+                true, null, null, null);
+    }
+
+    /**
+     * @return {@code true} when {@link #frameTransport()} is {@code pull} — the switch-B check every
+     *         wiring decision in this deployment reads instead of comparing the raw string a second time
+     */
+    public boolean pullEnabled() {
+        return PULL_FRAME_TRANSPORT.equals(frameTransport);
     }
 
     /**
@@ -142,5 +188,33 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
      */
     public record Registry(@DefaultValue("10s") Duration callTimeout) {
         static final Duration DEFAULT_CALL_TIMEOUT_DURATION = Duration.ofSeconds(10);
+    }
+
+    /**
+     * Worker-pull config surface (docs/plans/active/MEDIA-SOT-PLAN.md §5.5) — mirrors {@code
+     * GrpcCvSettings}'s own {@code pullRtspBase}/{@code pullReconnectInitialBackoff}/{@code
+     * pullReconnectMaxBackoff} fields one-to-one, the same "this record maps onto that adapter
+     * settings object" shape {@link Upload}/{@link Registry} already have.
+     *
+     * @param rtspBase                base RTSP URL the <b>worker</b> (cv-service) dials for a pulled
+     *                                stream — deliberately separate from {@code
+     *                                vision.publish.mediamtx.rtsp-base}: a remote worker (the GB4005
+     *                                box) must dial the host's LAN address, not {@code localhost}, even
+     *                                though both properties often point at the same mediamtx instance
+     *                                in a single-box deployment. Default {@value #DEFAULT_RTSP_BASE},
+     *                                the local compose mediamtx
+     * @param reconnectInitialBackoff how long a pulled stream's reopen waits before its first retry
+     *                                after a failure; mirrors {@code vision.publish.resilience
+     *                                .initial-backoff}'s shape and default (500ms)
+     * @param reconnectMaxBackoff     cap the doubling reconnect backoff never exceeds; mirrors {@code
+     *                                vision.publish.resilience.max-backoff}'s shape and default (10s)
+     */
+    public record Pull(@DefaultValue(Pull.DEFAULT_RTSP_BASE) URI rtspBase,
+                        @DefaultValue("500ms") Duration reconnectInitialBackoff,
+                        @DefaultValue("10s") Duration reconnectMaxBackoff) {
+        static final String DEFAULT_RTSP_BASE = "rtsp://localhost:8554";
+        static final URI DEFAULT_RTSP_BASE_URI = URI.create(DEFAULT_RTSP_BASE);
+        static final Duration DEFAULT_RECONNECT_INITIAL_BACKOFF = Duration.ofMillis(500);
+        static final Duration DEFAULT_RECONNECT_MAX_BACKOFF = Duration.ofSeconds(10);
     }
 }

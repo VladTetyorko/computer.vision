@@ -183,6 +183,7 @@
           [detectionResults]="facade.detections.results()"
           [boxesMode]="facade.boxesMode()"
           (boxesModeChange)="facade.boxesMode.set($event)"
+          [burnedIn]="facade.stream()?.burnedIn"
           [open]="isPanelOpen('cv')"
           (close)="panels.close()"
         />

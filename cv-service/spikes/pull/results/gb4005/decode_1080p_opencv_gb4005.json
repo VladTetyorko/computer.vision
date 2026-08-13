@@ -1,0 +1,28 @@
+{
+  "backend": "opencv",
+  "label": "1080p",
+  "resolution": "1920x1080",
+  "url": "rtsp://192.168.0.104:18554/push1080",
+  "frames_requested": 40,
+  "frames_decoded": 40,
+  "frames_dropped_or_eof": 0,
+  "wall_seconds": 8.42,
+  "decode_ms": {
+    "p50": 4.335,
+    "p95": 7.256,
+    "max": 7.438,
+    "n": 40
+  },
+  "inference_ms": {
+    "p50": 199.0,
+    "p95": 201.1,
+    "max": 232.0,
+    "n": 40,
+    "model": "yolo26n.pt"
+  },
+  "process": {
+    "rss_max_mb": 379.5,
+    "rss_final_mb": 379.5,
+    "cpu_percent_avg": 99.9
+  }
+}

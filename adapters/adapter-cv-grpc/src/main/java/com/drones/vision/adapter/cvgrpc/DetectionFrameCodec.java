@@ -9,6 +9,7 @@ import com.drones.vision.domain.model.DetectorReason;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.PixelFormat;
+import com.drones.vision.domain.model.PullTelemetry;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.TargetLock;
 import com.drones.vision.domain.model.TrackRef;
@@ -54,9 +55,10 @@ import java.util.List;
  * &asymp; 2.7&nbsp;MB uncompressed) — too large to push over gRPC at a useful detection rate. A
  * {@code BGR24} frame wider than this instance's {@code detectWidth} is downscaled to exactly
  * {@code detectWidth} wide (aspect preserved, {@code Math.round}-ed height) via Java2D bilinear
- * {@code drawImage}, then JPEG-encoded ({@link ImageIO}, explicit {@link ImageWriter}, quality =
- * this instance's {@code jpegQuality}) and sent as {@code IMAGE_ENCODING_JPEG} with the scaled
- * width/height. {@code JPEG} frames and {@code BGR24} frames already at or narrower than
+ * {@code drawImage}, then sent with the scaled width/height in this instance's {@link WireFormat}:
+ * JPEG-encoded ({@link ImageIO}, explicit {@link ImageWriter}, quality = this instance's {@code
+ * jpegQuality}), or raw {@code IMAGE_ENCODING_BGR24} when the endpoint is local enough that the
+ * encode costs more than the bytes. {@code JPEG} frames and {@code BGR24} frames already at or narrower than
  * {@code detectWidth} pass through byte-identical (only {@code >}, not {@code >=}, triggers the
  * downscale — a frame exactly {@code detectWidth}px wide is untouched).
  *
@@ -98,9 +100,20 @@ final class DetectionFrameCodec {
     private final int detectWidth;
     private final float jpegQuality;
 
+    /**
+     * Already resolved — never {@link WireFormat#AUTO}. Resolution belongs to whoever knows the
+     * endpoint ({@link GrpcDetectionPort}); this class only encodes.
+     */
+    private final WireFormat wireFormat;
+
     DetectionFrameCodec(int detectWidth, float jpegQuality) {
+        this(detectWidth, jpegQuality, WireFormat.JPEG);
+    }
+
+    DetectionFrameCodec(int detectWidth, float jpegQuality, WireFormat wireFormat) {
         this.detectWidth = detectWidth;
         this.jpegQuality = jpegQuality;
+        this.wireFormat = wireFormat == WireFormat.AUTO ? WireFormat.JPEG : wireFormat;
     }
 
     /**
@@ -152,7 +165,7 @@ final class DetectionFrameCodec {
         }
 
         if (encoding == ImageEncoding.IMAGE_ENCODING_BGR24 && frame.width() > detectWidth) {
-            return withDownscaledJpeg(builder, frame);
+            return withDownscaled(builder, frame);
         }
 
         return builder
@@ -175,7 +188,32 @@ final class DetectionFrameCodec {
                 Instant.ofEpochMilli(response.getTimestampMillis()),
                 detections,
                 Duration.ofMillis(response.getInferenceMillis()),
-                toTrackingTelemetry(response));
+                toTrackingTelemetry(response),
+                toPullTelemetry(response));
+    }
+
+    /**
+     * Maps the response's six pull-mode-only diagnostic fields (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.1
+     * fields 16-21, decision D12) onto a {@link PullTelemetry} — the carrier M4 could decode the wire
+     * for but had nowhere in the domain to put. Returns {@code null} (push mode, matching this class's
+     * pre-D12 behavior byte-for-byte) exactly when every one of the six fields is still at its proto
+     * zero-value — the shape a {@code DetectStream} response always has, since a pull worker always
+     * reports a non-zero {@code source_fps}/{@code achieved_fps} once it has measured anything at all.
+     * Mirrors {@link #toTrackingTelemetry}'s own all-zero-means-absent reasoning.
+     */
+    private static PullTelemetry toPullTelemetry(DetectionResponse response) {
+        long decodeMillis = response.getDecodeMillis();
+        float sourceFps = response.getSourceFps();
+        float achievedFps = response.getAchievedFps();
+        long droppedFrames = response.getDroppedFrames();
+        long missedDeadlines = response.getMissedDeadlines();
+        long captureSkewMillis = response.getCaptureSkewMillis();
+        if (decodeMillis == 0 && sourceFps == 0f && achievedFps == 0f && droppedFrames == 0
+                && missedDeadlines == 0 && captureSkewMillis == 0) {
+            return null;
+        }
+        return new PullTelemetry(decodeMillis, sourceFps, achievedFps, droppedFrames, missedDeadlines,
+                captureSkewMillis);
     }
 
     /**
@@ -210,8 +248,13 @@ final class DetectionFrameCodec {
      * {@code 0} straight through when the domain does not know it — the wire's own spelling of
      * "derive it from the horizontal FOV and the frame aspect ratio", which is exactly what
      * cv-service's {@code pose_gmc} does with it.
+     *
+     * <p>Package-private (not {@code private}), docs/plans/active/MEDIA-SOT-PLAN.md wave M4:
+     * {@link PulledDetectionSession} reuses this exact mapping for {@code PullControl.camera_pose} —
+     * the wire shape is identical between {@code FrameRequest} and {@code PullControl}, so this is the
+     * one place either builds one.
      */
-    private static CameraPose toWireCameraPose(CameraAttitude attitude) {
+    static CameraPose toWireCameraPose(CameraAttitude attitude) {
         return CameraPose.newBuilder()
                 .setYawDegrees((float) attitude.yawDegrees())
                 .setPitchDegrees((float) attitude.pitchDegrees())
@@ -222,7 +265,14 @@ final class DetectionFrameCodec {
                 .build();
     }
 
-    private static com.drones.vision.proto.v1.TrackingConfig toWireTrackingConfig(TrackingConfig tracking) {
+    /**
+     * Package-private (not {@code private}), docs/plans/active/MEDIA-SOT-PLAN.md wave M4: {@link
+     * PulledDetectionSession} reuses this exact mapping for {@code PullControl.tracking} — {@code
+     * PullControl} carries the identical wire {@code TrackingConfig} message {@code FrameRequest}
+     * does (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.1: "reused verbatim, including TargetLock/lock_seq
+     * semantics"), so this is the one place either builds one.
+     */
+    static com.drones.vision.proto.v1.TrackingConfig toWireTrackingConfig(TrackingConfig tracking) {
         com.drones.vision.proto.v1.TrackingConfig.Builder builder = com.drones.vision.proto.v1.TrackingConfig.newBuilder()
                 .setMode(toWireTrackingMode(tracking.mode()))
                 .setEngineId(tracking.engineId())
@@ -327,7 +377,19 @@ final class DetectionFrameCodec {
         };
     }
 
-    private FrameRequest withDownscaledJpeg(FrameRequest.Builder builder, VideoFrame frame) throws IOException {
+    /**
+     * Downscales an oversized {@code BGR24} frame to {@code detectWidth} and sends it in this
+     * instance's {@link #wireFormat} — JPEG-encoded, or raw when the endpoint is close enough that
+     * the encode costs more than the bytes do (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R3).
+     *
+     * <p>The raw branch skips {@link #encodeJpeg} here <b>and</b> a decode inside cv-service, which
+     * together were most of the ~25 ms of non-inference round trip measured in
+     * docs/conclusions/CV-RATE-BUDGET.md &sect;3. What it costs instead is payload: 640&times;360 of
+     * BGR24 is about 691 KB against roughly 40 KB of JPEG. That trade is free over loopback and
+     * indefensible over a radio link, which is exactly why the choice is configured rather than
+     * made here.
+     */
+    private FrameRequest withDownscaled(FrameRequest.Builder builder, VideoFrame frame) throws IOException {
         int scaledWidth = detectWidth;
         int scaledHeight = Math.round((float) frame.height() * detectWidth / frame.width());
 
@@ -341,12 +403,19 @@ final class DetectionFrameCodec {
             g.dispose();
         }
 
-        byte[] jpeg = encodeJpeg(scaled, jpegQuality);
+        builder.setWidth(scaledWidth).setHeight(scaledHeight);
+        if (wireFormat == WireFormat.BGR24) {
+            // TYPE_3BYTE_BGR's backing array is already packed BGR with no row padding -- the same
+            // layout the wire declares -- so this is a straight handover, not a conversion.
+            byte[] pixels = ((DataBufferByte) scaled.getRaster().getDataBuffer()).getData();
+            return builder
+                    .setEncoding(ImageEncoding.IMAGE_ENCODING_BGR24)
+                    .setData(ByteString.copyFrom(pixels))
+                    .build();
+        }
         return builder
-                .setWidth(scaledWidth)
-                .setHeight(scaledHeight)
                 .setEncoding(ImageEncoding.IMAGE_ENCODING_JPEG)
-                .setData(ByteString.copyFrom(jpeg))
+                .setData(ByteString.copyFrom(encodeJpeg(scaled, jpegQuality)))
                 .build();
     }
 

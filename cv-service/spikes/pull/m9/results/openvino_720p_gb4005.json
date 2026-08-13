@@ -1,0 +1,18 @@
+{
+  "model": "yolo26n_openvino_model",
+  "label": "720p",
+  "resolution": "1280x720",
+  "frames": 120,
+  "wall_seconds": 16.44,
+  "inference_ms": {
+    "p50": 136.0,
+    "p95": 143.0,
+    "max": 198.0,
+    "mean": 136.942,
+    "n": 120
+  },
+  "implied_fps_ceiling": 7.35,
+  "cpu_percent_avg_over_run": 194.2,
+  "rss_mb_final": 426.3,
+  "_note": "Reproduced on GB4005 (vlad@192.168.0.106) in an isolated throwaway tree, live systemctl cv-service.service untouched. yolo26n.pt exported to OpenVINO IR at imgsz=416 per cv-service/DEPLOY-GPU.md's documented command. Remote temp tree deleted after measurement; this file reconstructed from the session's captured stdout."
+}

@@ -32,7 +32,8 @@ rewrite the citations in the same commit.
 
 | Doc | State |
 |---|---|
-| [CV-SCALE-PLAN.md](plans/active/CV-SCALE-PLAN.md) | S1/S2 shipped via CV-CONTROL; **S3 model roster, S4 multi-worker pool, S5 pull-based frames unbuilt** |
+| [CV-SCALE-PLAN.md](plans/active/CV-SCALE-PLAN.md) | S1/S2 shipped via CV-CONTROL; **S3 model roster, S4 multi-worker pool unbuilt; S5 decided GO, executed as MEDIA-SOT-PLAN** |
+| [MEDIA-SOT-PLAN.md](plans/active/MEDIA-SOT-PLAN.md) | waves M0–M9 all shipped and measured (results: [MEDIA-SOT-RESULTS.md](conclusions/MEDIA-SOT-RESULTS.md)); **real-camera glass-to-glass and the §6 clock-drift re-measurement stay gated on the H1 camera purchase** |
 | [LAYERING-REFACTOR-PLAN.md](plans/active/LAYERING-REFACTOR-PLAN.md) | conventions in force and widely cited; **the class decompositions (matrix K3) are not done** |
 | [DRONE-INFRA-PLAN.md](plans/active/DRONE-INFRA-PLAN.md) | I-a/b/e/g shipped; **edge kits (I-d) and command TX stage 3 remain, stage 3 gated** |
 | [RC-CONTROL-PLAN.md](plans/active/RC-CONTROL-PLAN.md) | Phase 0 + Phase 1 shipped; **Phase 2 (real airframe) gated on explicit user go** |
@@ -42,6 +43,7 @@ rewrite the citations in the same commit.
 | Doc | Verdict it carries |
 |---|---|
 | [MOAT.md](conclusions/MOAT.md) | the four structural inversions of a vendor platform — which capabilities are ours alone |
+| [MEDIA-SOT-RESULTS.md](conclusions/MEDIA-SOT-RESULTS.md) | MEDIA-SOT-PLAN's five §1 claims, all held, measured against a live compose stack — CPU/RSS, restart survival, box age, GB4005 OpenVINO reproduced; one defect found (pull-mode `dropRatio` pinned at 1.0) |
 | [ANY-DRONE-PLAN.md](conclusions/ANY-DRONE-PLAN.md) | the adoption funnel: PROBE → DIAGNOSE → REMEDIATE → VERIFY |
 | [BASE-COMPUTE-MATRIX.md](conclusions/BASE-COMPUTE-MATRIX.md) | the offload law — what the base computes so the drone doesn't have to |
 | [DRONE-COMPONENTS-MATRIX.md](conclusions/DRONE-COMPONENTS-MATRIX.md) | position stack, link classes, component ladder, what each feature costs the owner |

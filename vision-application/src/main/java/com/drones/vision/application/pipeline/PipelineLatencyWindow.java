@@ -83,7 +83,27 @@ final class PipelineLatencyWindow {
      * @param completedAtNanos the reading when its result arrived
      */
     synchronized void record(long submittedAtNanos, long completedAtNanos) {
-        long elapsed = Math.max(0L, completedAtNanos - submittedAtNanos);
+        recordElapsed(completedAtNanos, completedAtNanos - submittedAtNanos);
+    }
+
+    /**
+     * Pull-mode counterpart to {@link #record} (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7): {@code
+     * roundTripMillis} is redefined as {@code receivedAt - capturedAt} — box age at arrival — since
+     * there is no Java&rarr;Python frame submission to measure a round trip from. The caller computes
+     * that elapsed duration (wall-clock, since {@code capturedAt} is the worker's wall-clock capture
+     * instant); this window only needs somewhere to file it, so it shares {@link #samples} and every
+     * derived figure ({@link #snapshot}, {@link #effectiveFps()}) with push mode unchanged.
+     *
+     * @param completedAtNanos the pipeline's nano-source reading at result receipt, purely for
+     *                         windowing/eviction — not part of the reported figure
+     * @param roundTripNanos   {@code receivedAt - capturedAt} in nanoseconds, already non-negative
+     */
+    synchronized void recordPullRoundTrip(long completedAtNanos, long roundTripNanos) {
+        recordElapsed(completedAtNanos, roundTripNanos);
+    }
+
+    private void recordElapsed(long completedAtNanos, long roundTripNanos) {
+        long elapsed = Math.max(0L, roundTripNanos);
         samples.addLast(new Sample(completedAtNanos, elapsed));
         evict(completedAtNanos);
     }

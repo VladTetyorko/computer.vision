@@ -1,0 +1,50 @@
+<article class="tile">
+  <vision-player
+    [src]="stream().viewUrl ?? null"
+    [whepUrl]="stream().whepUrl ?? null"
+    [suspended]="!visible()"
+    [compact]="true"
+    [detections]="detections.results()"
+    [boxesMode]="boxesMode()"
+  />
+  <footer>
+    <span class="name truncate" [title]="device()?.name ?? stream().deviceId">
+      {{ device()?.name ?? stream().deviceId }}
+    </span>
+    <div class="row chips">
+      @if (telemetry.hasTelemetry()) {
+        <span class="chip telemetry-chip" [class.stale]="telemetry.stale()">
+          @if (batteryLabel(); as battery) {
+            <span>⬢{{ battery }}</span>
+          }
+          @if (altitudeLabel(); as altitude) {
+            <span>▲{{ altitude }}</span>
+          }
+        </span>
+      }
+      <!-- Mode badge (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — red when failsafe, otherwise the
+           plain neutral chip look every other wall-tile chip already uses; omitted entirely
+           with no flightState yet, never a fabricated placeholder. -->
+      @if (modeLabel(); as mode) {
+        <span class="chip mode-chip" [class.failsafe]="failsafe()">{{ mode }}</span>
+      }
+      <!-- Verb dictionary (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §1) — this tile's one navigating action
+           used to be the bare device name itself, silently clickable; it now states itself. -->
+      <a
+        class="btn secondary small watch-link"
+        [routerLink]="['/live', stream().deviceId]"
+        [title]="'Watch live: ' + (device()?.name ?? stream().deviceId)"
+      >
+        Watch live
+      </a>
+      <button
+        type="button"
+        class="boxes-btn"
+        (click)="cycleBoxesMode()"
+        [title]="'Detection boxes: ' + boxesMode() + ' (click to cycle)'"
+      >
+        ▢{{ boxesMode() === 'overlay' ? '' : boxesMode() === 'burned' ? '·' : '×' }}
+      </button>
+    </div>
+  </footer>
+</article>

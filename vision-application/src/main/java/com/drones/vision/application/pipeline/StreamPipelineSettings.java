@@ -71,6 +71,15 @@ import com.drones.vision.application.stream.TrackingConfigPatch;
  *                                        alone; never {@code null}, use {@link
  *                                        TrackingConfigPatch#NOTHING} for "the deployment states
  *                                        nothing"
+ * @param cameraHfovDegrees              the camera's horizontal field of view in degrees, the scale
+ *                                        that turns an attitude delta into a frame-relative shift;
+ *                                        must be in {@code [0, 180)}, where {@code 0} means the
+ *                                        deployment has not described its optics
+ * @param adaptiveRate                   whether and how far the sample rate may rise above {@code
+ *                                        inferenceFps} when the tracked target is about to leave
+ *                                        its association budget (docs/plans/active/CV-RATE-CONTROL-PLAN.md
+ *                                        wave R2); never {@code null}, use {@link
+ *                                        AdaptiveRateSettings#disabled()} to pin the rate
  */
 public record StreamPipelineSettings(
         int assumedSourceFps,
@@ -87,7 +96,8 @@ public record StreamPipelineSettings(
         Duration trackingStatsWindow,
         Duration trackRetention,
         TrackingConfigPatch trackingSeed,
-        double cameraHfovDegrees) {
+        double cameraHfovDegrees,
+        AdaptiveRateSettings adaptiveRate) {
 
     /** @see #trackRetention() */
     private static final Duration DEFAULT_TRACK_RETENTION = Duration.ofSeconds(5);
@@ -138,6 +148,24 @@ public record StreamPipelineSettings(
                 detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
                 sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
                 trackRetention, TrackingConfigPatch.NOTHING);
+    }
+
+    /**
+     * The canonical constructor before {@code adaptiveRate} was added, kept as a convenience
+     * constructor defaulting it to {@link AdaptiveRateSettings#defaults()}. Same "N-1-arg
+     * convenience ctor" idiom as the others here.
+     */
+    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
+                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
+                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
+                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
+                                   double extrapolationMatchGate, Duration trackingStatsWindow,
+                                   Duration trackRetention, TrackingConfigPatch trackingSeed,
+                                   double cameraHfovDegrees) {
+        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
+                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
+                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
+                trackRetention, trackingSeed, cameraHfovDegrees, AdaptiveRateSettings.defaults());
     }
 
     /**
@@ -203,6 +231,10 @@ public record StreamPipelineSettings(
         if (!Double.isFinite(cameraHfovDegrees) || cameraHfovDegrees < 0.0 || cameraHfovDegrees >= 180.0) {
             throw new IllegalArgumentException(
                     "cameraHfovDegrees must be in [0, 180), was " + cameraHfovDegrees);
+        }
+        if (adaptiveRate == null) {
+            throw new IllegalArgumentException(
+                    "adaptiveRate must not be null; use AdaptiveRateSettings.disabled()");
         }
     }
 

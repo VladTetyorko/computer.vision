@@ -7,19 +7,18 @@ import {
   effect,
   inject,
   input,
+  linkedSignal,
   signal,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Player, type BoxesMode } from '../../shared/player/player';
+import { cycleBoxesMode, defaultBoxesMode } from '../../shared/player/detection-overlay-logic';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import type { ActiveStream, Device } from '../../core/api/models';
 
 /** Start decoding slightly before a tile scrolls into view, so it is ready on arrival. */
 const PREROLL_MARGIN = '250px';
-
-/** `boxesMode` cycles through these three in order — see `cycleBoxesMode`. */
-const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
 
 /**
  * One live tile.
@@ -42,140 +41,8 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
   imports: [Player, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [TelemetryStore, DetectionsStore],
-  template: `
-    <article class="tile">
-      <vision-player
-        [src]="stream().viewUrl ?? null"
-        [whepUrl]="stream().whepUrl ?? null"
-        [suspended]="!visible()"
-        [compact]="true"
-        [detections]="detections.results()"
-        [boxesMode]="boxesMode()"
-      />
-      <footer>
-        <span class="name truncate" [title]="device()?.name ?? stream().deviceId">
-          {{ device()?.name ?? stream().deviceId }}
-        </span>
-        <div class="row chips">
-          @if (telemetry.hasTelemetry()) {
-            <span class="chip telemetry-chip" [class.stale]="telemetry.stale()">
-              @if (batteryLabel(); as battery) {
-                <span>⬢{{ battery }}</span>
-              }
-              @if (altitudeLabel(); as altitude) {
-                <span>▲{{ altitude }}</span>
-              }
-            </span>
-          }
-          <!-- Mode badge (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — red when failsafe, otherwise the
-               plain neutral chip look every other wall-tile chip already uses; omitted entirely
-               with no flightState yet, never a fabricated placeholder. -->
-          @if (modeLabel(); as mode) {
-            <span class="chip mode-chip" [class.failsafe]="failsafe()">{{ mode }}</span>
-          }
-          <!-- Verb dictionary (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §1) — this tile's one navigating action
-               used to be the bare device name itself, silently clickable; it now states itself. -->
-          <a
-            class="btn secondary small watch-link"
-            [routerLink]="['/live', stream().deviceId]"
-            [title]="'Watch live: ' + (device()?.name ?? stream().deviceId)"
-          >
-            Watch live
-          </a>
-          <button
-            type="button"
-            class="boxes-btn"
-            (click)="cycleBoxesMode()"
-            [title]="'Detection boxes: ' + boxesMode() + ' (click to cycle)'"
-          >
-            ▢{{ boxesMode() === 'overlay' ? '' : boxesMode() === 'burned' ? '·' : '×' }}
-          </button>
-        </div>
-      </footer>
-    </article>
-  `,
-  styles: `
-    .tile {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      transition: border-color 0.15s ease;
-    }
-
-    .tile:hover {
-      border-color: var(--border-strong);
-    }
-
-    footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: var(--space-4) var(--space-8);
-      padding: var(--space-8);
-    }
-
-    .chips {
-      gap: var(--space-4);
-    }
-
-    .name {
-      color: var(--text);
-      font-size: 0.85rem;
-      font-weight: 500;
-      min-width: 0;
-    }
-
-    .telemetry-chip {
-      font-size: 0.72rem;
-      white-space: nowrap;
-      /* docs/plans/done/UX-REWORK-PLAN.md §U-b item 3 — battery/altitude readouts. */
-      font-variant-numeric: tabular-nums;
-    }
-
-    .telemetry-chip.stale {
-      color: var(--color-danger);
-      border-color: var(--color-danger);
-    }
-
-    .mode-chip {
-      font-size: 0.72rem;
-      white-space: nowrap;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-
-    /* --live red is reserved for exactly this — a genuine failsafe (see styles.css's own token
-       doc comment) — never the generic .telemetry-chip.stale's --danger. */
-    .mode-chip.failsafe {
-      color: var(--color-live);
-      border-color: var(--color-live);
-    }
-
-    /* Verb dictionary (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §1) — sized down from the global .btn.small's
-       own default to fit alongside the telemetry chip and boxes toggle at wall-tile scale. */
-    .watch-link {
-      font-size: 0.72rem;
-      padding: var(--space-4) var(--space-8);
-    }
-
-    .boxes-btn {
-      cursor: pointer;
-      background: transparent;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      color: var(--text-faint);
-      font-size: 0.7rem;
-      line-height: 1;
-      padding: var(--space-2) var(--space-8);
-    }
-
-    .boxes-btn:hover {
-      color: var(--text);
-      border-color: var(--border-strong);
-    }
-  `,
+  templateUrl: './wall-tile.html',
+  styleUrl: './wall-tile.css',
 })
 export class WallTile {
   readonly stream = input.required<ActiveStream>();
@@ -184,17 +51,26 @@ export class WallTile {
   protected readonly visible = signal(true);
   protected readonly telemetry = inject(TelemetryStore);
   protected readonly detections = inject(DetectionsStore);
+
+  /** `stream()#burnedIn` projected to a primitive (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) —
+   * `stream` is a plain input, re-bound (not necessarily re-identical) on every `WallPage` poll tick,
+   * so this mirrors `CockpitFacade#streamBurnedIn`'s identical "guard `boxesMode`'s default on a
+   * primitive, not the whole object" reasoning. */
+  private readonly streamBurnedIn = computed(() => this.stream().burnedIn);
+
   /** Defaults to `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s
-   * own `boxesMode` input default matches for the same reason). */
-  protected readonly boxesMode = signal<BoxesMode>('burned');
+   * own `boxesMode` input default matches for the same reason) **unless this stream is confirmed
+   * burn-in-free**, in which case `'overlay'` is the only mode that shows anything
+   * (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) — see `CockpitFacade#boxesMode`'s identical
+   * `linkedSignal` doc comment for the full reasoning. */
+  protected readonly boxesMode = linkedSignal<BoxesMode>(() => defaultBoxesMode(this.streamBurnedIn()));
 
   private readonly hasTelemetryCapability = computed(() =>
     (this.device()?.capabilities ?? []).includes('TELEMETRY'),
   );
 
   protected cycleBoxesMode(): void {
-    const currentIndex = BOXES_MODE_CYCLE.indexOf(this.boxesMode());
-    this.boxesMode.set(BOXES_MODE_CYCLE[(currentIndex + 1) % BOXES_MODE_CYCLE.length]);
+    this.boxesMode.update((current) => cycleBoxesMode(current, this.streamBurnedIn()));
   }
 
   protected readonly batteryLabel = computed(() => {

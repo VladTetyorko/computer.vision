@@ -85,4 +85,30 @@ class DetectionResultTest {
 
         assertEquals(tracking, result.tracking());
     }
+
+    @Test
+    void sixArgConstructorEqualsSevenArgConstructorWithNullPullTelemetry() {
+        StreamId streamId = StreamId.random();
+        Instant now = Instant.now();
+        List<Detection> detections = List.of(detection());
+        Duration latency = Duration.ofMillis(10);
+        TrackingTelemetry tracking = new TrackingTelemetry(false, null, Duration.ZERO, "lk", 0L);
+
+        DetectionResult viaConvenience = new DetectionResult(streamId, 0L, now, detections, latency, tracking);
+        DetectionResult viaCanonical = new DetectionResult(streamId, 0L, now, detections, latency, tracking, null);
+
+        assertEquals(viaCanonical, viaConvenience);
+        assertNull(viaConvenience.pullTelemetry());
+    }
+
+    @Test
+    void canonicalConstructorAcceptsExplicitPullTelemetry() {
+        PullTelemetry pullTelemetry = new PullTelemetry(3L, 9.9f, 9.5f, 2L, 1L, 12L);
+
+        DetectionResult result = new DetectionResult(StreamId.random(), 0L, Instant.now(), List.of(detection()),
+                Duration.ofMillis(10), null, pullTelemetry);
+
+        assertEquals(pullTelemetry, result.pullTelemetry());
+        assertNull(result.tracking());
+    }
 }

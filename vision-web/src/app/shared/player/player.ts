@@ -3,6 +3,7 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  afterNextRender,
   computed,
   effect,
   inject,
@@ -17,10 +18,12 @@ import type { Detection, DetectionResult } from '../../core/api/models';
 import {
   DEFAULT_SLACK_BATCHES,
   TRAIL_WINDOW_MS,
+  canvasBackingSize,
   detectionModelKey,
   distinctModelKeys,
   formatDetectionLabel,
   modelHue,
+  overlaySyncLatencySeconds,
   selectDetectionResult,
   shouldDrawOverlay,
   trackHue,
@@ -82,6 +85,10 @@ export type { BoxesMode } from './detection-overlay-logic';
 const LOG_PREFIX = '[player]';
 
 const LATENCY_SAMPLE_MS = 1_000;
+/** Overlay redraw cadence for a browser with no `HTMLVideoElement#requestVideoFrameCallback` — see
+ *  `startOverlayLoop`'s own doc comment (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8). Everywhere the API
+ *  exists, the overlay redraws once per actually-displayed video frame instead, a tighter and less
+ *  wasteful cadence than this fixed interval. */
 const OVERLAY_REDRAW_MS = 200;
 const WATCHDOG_TICK_MS = 2_000;
 
@@ -186,11 +193,14 @@ interface DrawnBox {
  *    while unmeasured — a user told "≈6 s behind live" understands the trade, while a user shown a
  *    spinner concludes the app is broken. WHEP's own badge figure is a `getStats()`-derived estimate
  *    (half the measured round-trip time plus jitter, `player-recovery.ts#estimateWhepLatencySeconds`
- *    — see `refreshWhepStatsProgress`), kept deliberately separate from `behindLive`, which stays
- *    pinned to `0` the moment a track arrives (a real, meaningful number, not `null`, for a
- *    different consumer: the detection-overlay sync matcher,
- *    `detection-overlay-logic.ts#selectDetectionResult`, needs an actual latency estimate to pick
- *    the right batch, and `0` is what "near-zero" means there).
+ *    — see `refreshWhepStatsProgress`), kept in its own `whepLatencySeconds` signal, separate from
+ *    `behindLive`, which stays pinned to `0` the moment a WHEP track arrives — `behindLive` is HLS's
+ *    live-edge distance and (via `maybeSnapToLive`) what decides whether a *seek* is worth doing,
+ *    neither of which WHEP has (no seekable buffer to fall behind in). The detection-overlay sync
+ *    matcher (`detection-overlay-logic.ts#selectDetectionResult`) reads **neither signal directly**:
+ *    `overlaySyncLatencySeconds` (docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8) picks `behindLive` for
+ *    HLS and `whepLatencySeconds` for WHEP, so a WHEP box no longer leads the picture by the ~0.2–0.5s
+ *    glass-to-glass delay a pinned `0` used to silently claim away.
  *  - The player never gives up. `shared/player/player-recovery.ts`'s pure state machine drives every
  *    transition; a fatal hls.js error or a silent stall (the watchdog: no fragment progress for
  *    `STALL_WATCHDOG_MS`) destroys and reattaches with capped exponential backoff, indefinitely,
@@ -249,10 +259,13 @@ interface DrawnBox {
  *
  * **Detection overlay** (docs/main/CYCLES-PLAN.md §11 item 6): an optional `detections`/`boxesMode`
  * input pair draws a canvas overlay of the freshest detection batch matched against this player's
- * own measured live-edge latency (`shared/player/detection-overlay-logic.ts#selectDetectionResult`) — crisp
- * at any video bitrate, and hoverable (label + confidence), unlike the server's burned-in boxes
- * (which stay; this is additive, see that module's doc comment on `'burned'`/`'off'`). Callers
- * that never pass `detections` simply never see the canvas draw anything.
+ * own measured live-edge latency (`shared/player/detection-overlay-logic.ts#selectDetectionResult`,
+ * fed via `overlaySyncLatencySeconds` — HLS's `behindLive`, WHEP's own `whepLatencySeconds`, see that
+ * function's own doc comment and docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8) — crisp at any video
+ * bitrate (backing store scaled to `devicePixelRatio`, §8 wave M8), and hoverable (label +
+ * confidence), unlike the server's burned-in boxes (which stay; this is additive, see that module's
+ * doc comment on `'burned'`/`'off'`). Callers that never pass `detections` simply never see the
+ * canvas draw anything.
  *
  * **Always a dark video surface, wherever it's mounted** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4): the
  * `.frame` host carries `.surface-dark` itself rather than depending on an ambient enclave, because
@@ -413,10 +426,11 @@ export class Player {
   });
 
   /**
-   * Seconds behind the live edge, or `null` while unknown. Pinned to `0` for a live WHEP track —
-   * this is the number the detection-overlay sync matcher needs (see class doc), *not* the latency
-   * badge's own WebRTC figure below; kept separate on purpose so that invariant never has to share a
-   * signal with a display-only estimate.
+   * Seconds behind the live edge, or `null` while unknown. Pinned to `0` for a live WHEP track — HLS
+   * is the only transport this actually measures a *buffer* distance for; `maybeSnapToLive`'s own
+   * seek-to-edge logic is the one remaining consumer that cares about that HLS-specific meaning.
+   * **No longer** what the detection-overlay sync matcher reads for WHEP — see
+   * `overlaySyncLatencySeconds`'s own doc comment and docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8.
    */
   private readonly behindLive = signal<number | null>(null);
 
@@ -424,10 +438,24 @@ export class Player {
    * The latency badge's WebRTC figure (docs/plans/done/UX-QUICKWINS-PLAN.md QF-4) — `null` until the first
    * `getStats()` tick that reports a round-trip time (`estimateWhepLatencySeconds`,
    * `player-recovery.ts`), refreshed on the same `WATCHDOG_TICK_MS` cadence as the stall watchdog's
-   * own poll (`refreshWhepStatsProgress`). Purely a display concern — never read by the overlay sync
-   * matcher or the snap-to-live logic, both of which keep using `behindLive` above exactly as before.
+   * own poll (`refreshWhepStatsProgress`). Originally a display-only concern; **also** the detection-
+   * overlay sync matcher's own WHEP-transport latency estimate as of docs/plans/active/MEDIA-SOT-PLAN.md §8
+   * wave M8 (`overlaySyncLatencySeconds`) — the exact number the badge already showed the operator is
+   * now the same number boxes sync against, closing the gap where WHEP boxes led the picture by the
+   * real glass-to-glass delay a hard-pinned `0` used to claim didn't exist.
    */
   private readonly whepLatencySeconds = signal<number | null>(null);
+
+  /**
+   * The latency the detection-overlay sync matcher (`selectDetectionResult`) actually syncs against
+   * — `behindLive` for HLS (unchanged), `whepLatencySeconds` for WHEP (docs/plans/active/MEDIA-SOT-PLAN.md
+   * §6/§8 wave M8 — see `overlaySyncLatencySeconds`'s own doc comment for the full reasoning and the
+   * `null`-degrades-to-`0` rule). Read by both {@link overlayResult} and `redrawOverlay`, so the
+   * legend chip and the canvas draw always agree on which batch is "on screen right now".
+   */
+  private readonly overlaySyncLatency = computed(() =>
+    overlaySyncLatencySeconds(this.transport(), this.behindLive(), this.whepLatencySeconds()),
+  );
 
   /** The player chrome's latency badge text — see `live-edge-logic.ts#transportLatencyLabel`'s own doc comment for the exact wording rules per transport. */
   protected readonly latencyLabel = computed(() =>
@@ -462,13 +490,13 @@ export class Player {
    * The batch the canvas overlay is currently drawing — the same `selectDetectionResult` pick
    * `redrawOverlay` uses, mirrored here as a `computed` purely so the legend chip below has a
    * reactive read of "what's on screen right now" without duplicating the sync logic. Recomputes
-   * whenever `detections()`/`boxesMode()`/`phase()`/`behindLive()` change; a legend a redraw-cycle
-   * stale by a frame or two (this doesn't tick on the overlay's own `OVERLAY_REDRAW_MS` timer) is a
+   * whenever `detections()`/`boxesMode()`/`phase()`/{@link overlaySyncLatency} change; a legend a
+   * redraw-cycle stale by a frame or two (this doesn't tick on the overlay's own redraw loop) is a
    * non-issue for a chip that only ever says "which models are present", not exact box positions.
    */
   private readonly overlayResult = computed<DetectionResult | undefined>(() =>
     shouldDrawOverlay(this.boxesMode(), this.detections().length > 0) && this.phase() === 'playing'
-      ? selectDetectionResult(this.detections(), Date.now(), this.behindLive(), DEFAULT_SLACK_BATCHES)
+      ? selectDetectionResult(this.detections(), Date.now(), this.overlaySyncLatency(), DEFAULT_SLACK_BATCHES)
       : undefined,
   );
 
@@ -488,6 +516,21 @@ export class Player {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   private overlayTimer: ReturnType<typeof setInterval> | null = null;
+  /** `HTMLVideoElement#requestVideoFrameCallback`'s own handle, for `cancelVideoFrameCallback` — see
+   *  `startOverlayLoop`'s own doc comment. `null` whenever the fallback interval is driving instead. */
+  private videoFrameCallbackHandle: number | null = null;
+  /** Whether the overlay redraw loop (either mechanism) is currently running — lets every call site
+   *  that used to check `this.overlayTimer === null` ask one question regardless of which mechanism
+   *  this browser actually uses (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8). */
+  private overlayLoopActive = false;
+  /** Re-sizes the overlay canvas the moment its container's box actually changes (docs/plans/active/
+   *  MEDIA-SOT-PLAN.md §8 wave M8) — before this, a resize was only ever caught on the next redraw
+   *  tick (up to `OVERLAY_REDRAW_MS`, or never, while paused/off-screen), a visible drift between the
+   *  canvas and the video underneath it on any layout change (a rail collapsing, a window resize, a
+   *  Wall grid reflow). Started once in the constructor (`afterNextRender`) and left running for this
+   *  component's whole lifetime — mirrors this class's own already-persistent viewChild refs, cheaper
+   *  than tearing it down/recreating it every attach cycle for no behavioral gain. */
+  private resizeObserver: ResizeObserver | null = null;
   private mediaAbort: AbortController | null = null;
   /** Consecutive `recoverMediaError()` calls since the last real progress — see `MEDIA_ERROR_RECOVERY_LIMIT`. */
   private mediaErrorRecoveryCount = 0;
@@ -584,14 +627,29 @@ export class Player {
       this.transportChanged.emit(this.transport());
     });
 
-    // Redraws follow phase/mode/detections changes; a low-frequency timer (started/stopped
-    // alongside playback, see `beginAttach`/`teardownMedia`) covers the continuous drift of
-    // "on-screen instant" between polls even when nothing else changed.
+    // Redraws follow phase/mode/detections changes; the redraw loop itself (started/stopped
+    // alongside playback, see `beginAttach`/`teardownMedia`/`startOverlayLoop`) covers the continuous
+    // drift of "on-screen instant" between polls even when nothing else changed.
     effect(() => {
       this.boxesMode();
       this.detections();
       this.phase();
       this.redrawOverlay();
+    });
+
+    // Container-driven canvas resize (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) — before this, a
+    // resize (a rail collapsing, a Wall grid reflow, the window itself) was only ever caught on the
+    // next redraw tick, which could be up to `OVERLAY_REDRAW_MS` away, or never while paused/off-
+    // screen. `redrawOverlay` already re-measures `video.clientWidth`/`clientHeight` on every call, so
+    // observing the box and triggering one more redraw the instant it changes is the whole fix — no
+    // separate resize-handling code path. `afterNextRender` is this codebase's own idiom for "run
+    // once the DOM this needs actually exists" (mirrors `shared/ui/side-panel.ts`'s identical use);
+    // started once and left running for this component's whole lifetime, same as the persistent
+    // `video`/`overlayCanvas` viewChild refs it observes.
+    afterNextRender(() => {
+      const video = this.video().nativeElement;
+      this.resizeObserver = new ResizeObserver(() => this.redrawOverlay());
+      this.resizeObserver.observe(video);
     });
 
     // `pagehide` — not `beforeunload`/`unload` — is the reliable signal a real tab close/navigation
@@ -610,6 +668,7 @@ export class Player {
 
     inject(DestroyRef).onDestroy(() => {
       window.removeEventListener('pagehide', onPageHide);
+      this.resizeObserver?.disconnect();
       this.teardown();
     });
   }
@@ -1041,8 +1100,59 @@ export class Player {
     return seekable.length === 0 ? null : seekable.end(seekable.length - 1);
   }
 
+  /**
+   * Starts the overlay redraw loop — idempotent (a repeat call while already running is a no-op),
+   * so every call site (`beginAttach`, `watchNativePlayback`, WHEP's own `ontrack` — which can fire
+   * more than once per attach on renegotiation) can call this unconditionally rather than each
+   * hand-rolling its own "already running?" check.
+   *
+   * **`requestVideoFrameCallback` where the browser supports it** (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave
+   * M8), instead of the fixed `OVERLAY_REDRAW_MS` interval every browser used before this wave: redraws
+   * once per frame the browser actually composites, self-rescheduling from inside the callback
+   * (`scheduleVideoFrameRedraw`) rather than a timer running regardless of whether a new frame ever
+   * arrived — tighter sync with what is genuinely on screen, and no wasted redraws while stalled
+   * (rVFC simply doesn't fire without a new frame). Falls back to the old interval wherever the API
+   * doesn't exist (Firefox before ~132, older Safari) — feature-detected once per loop start, not
+   * cached across the component's lifetime, in case a future browser gains support mid-session on a
+   * long-lived tab.
+   */
   private startOverlayLoop(): void {
-    this.overlayTimer = setInterval(() => this.redrawOverlay(), OVERLAY_REDRAW_MS);
+    if (this.overlayLoopActive) {
+      return;
+    }
+    this.overlayLoopActive = true;
+    const video = this.video().nativeElement;
+    if (typeof video.requestVideoFrameCallback === 'function') {
+      this.scheduleVideoFrameRedraw(video);
+    } else {
+      this.overlayTimer = setInterval(() => this.redrawOverlay(), OVERLAY_REDRAW_MS);
+    }
+  }
+
+  /** One `requestVideoFrameCallback` cycle: redraw, then re-arm for the next frame — see
+   *  `startOverlayLoop`'s own doc comment. Re-checks {@link overlayLoopActive} before re-arming so a
+   *  callback that was already in flight when `stopOverlayLoop` ran doesn't resurrect the loop. */
+  private scheduleVideoFrameRedraw(video: HTMLVideoElement): void {
+    this.videoFrameCallbackHandle = video.requestVideoFrameCallback(() => {
+      if (!this.overlayLoopActive) {
+        return;
+      }
+      this.redrawOverlay();
+      this.scheduleVideoFrameRedraw(video);
+    });
+  }
+
+  /** Stops whichever redraw mechanism {@link startOverlayLoop} started — safe to call unconditionally, including when neither is running. */
+  private stopOverlayLoop(): void {
+    this.overlayLoopActive = false;
+    if (this.overlayTimer !== null) {
+      clearInterval(this.overlayTimer);
+      this.overlayTimer = null;
+    }
+    if (this.videoFrameCallbackHandle !== null) {
+      this.video()?.nativeElement.cancelVideoFrameCallback(this.videoFrameCallbackHandle);
+      this.videoFrameCallbackHandle = null;
+    }
   }
 
   // --- WHEP attach (docs/plans/done/MVP2-PLAN.md §L / §U3) --------------------------------------------------
@@ -1123,9 +1233,7 @@ export class Player {
         this.clearWhepNoTrackTimer();
         this.dispatchRecovery('firstSegment');
         this.dispatchPacing('playing', Date.now()); // docs/plans/done/MVP2-PLAN.md §S, S-c
-        if (this.overlayTimer === null) {
-          this.startOverlayLoop(); // ontrack can fire more than once on renegotiation
-        }
+        this.startOverlayLoop(); // idempotent — ontrack can fire more than once on renegotiation
       };
 
       // `connectionState` (not `iceConnectionState`) drives ICE-restart-first recovery
@@ -1683,12 +1791,23 @@ export class Player {
       return;
     }
 
+    // HiDPI backing store (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8): the canvas's CSS box stays
+    // exactly `video.clientWidth`/`clientHeight` (unchanged — `letterboxRect`/hit-testing below both
+    // still work in that same CSS-pixel space), only the *backing store* scales with
+    // `devicePixelRatio` so boxes/labels/trails rasterize crisp on a HiDPI display instead of at 1
+    // device pixel per CSS pixel. `ctx.setTransform` maps every draw call below back into CSS-pixel
+    // coordinates, so nothing past this point needs to know the backing store is larger than the CSS
+    // box — including `onOverlayMouseMove`/`onOverlayClick`, which read `getBoundingClientRect()`
+    // (the CSS box) and compare against `drawnBoxes` (also CSS-pixel), neither of which this touches.
     const width = video.clientWidth;
     const height = video.clientHeight;
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+    const devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const backing = canvasBackingSize(width, height, devicePixelRatio);
+    if (canvas.width !== backing.width || canvas.height !== backing.height) {
+      canvas.width = backing.width;
+      canvas.height = backing.height;
     }
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     ctx.clearRect(0, 0, width, height);
     this.drawnBoxes = [];
 
@@ -1699,7 +1818,7 @@ export class Player {
     const result = selectDetectionResult(
       results,
       Date.now(),
-      this.behindLive(),
+      this.overlaySyncLatency(),
       DEFAULT_SLACK_BATCHES,
     );
     if (!result || video.videoWidth === 0 || video.videoHeight === 0) {
@@ -1872,10 +1991,7 @@ export class Player {
       clearInterval(this.latencyTimer);
       this.latencyTimer = null;
     }
-    if (this.overlayTimer !== null) {
-      clearInterval(this.overlayTimer);
-      this.overlayTimer = null;
-    }
+    this.stopOverlayLoop();
     if (this.watchdogTimer !== null) {
       clearInterval(this.watchdogTimer);
       this.watchdogTimer = null;

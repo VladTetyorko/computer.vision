@@ -1,5 +1,6 @@
 package com.drones.vision.adapter.cvgrpc;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
 
@@ -29,7 +30,15 @@ import java.util.Objects;
  *   framing size.</li>
  *   <li>{@link #detectWidth()}/{@link #jpegQuality()} &rarr; {@code vision.cv.detect-width}/{@code
  *   .jpeg-quality} — {@link GrpcDetectionPort}'s wide-{@code BGR24} downscale threshold/target width
- *   and JPEG re-encode quality (see {@link DetectionFrameCodec}).</li>
+ *   and JPEG re-encode quality (see {@link DetectionFrameCodec}). {@link #detectWidth()} doubles as
+ *   {@link GrpcPulledDetectionPort}'s {@code PullControl.detect_width} (docs/plans/active/MEDIA-SOT-PLAN.md
+ *   &sect;5.1, wave M4) — the same "how wide should the CV side work with" knob, whether the JVM
+ *   downscales before sending (push) or tells the worker to downscale locally (pull).</li>
+ *   <li>{@link #pullRtspBase()}/{@link #pullReconnectInitialBackoff()}/{@link
+ *   #pullReconnectMaxBackoff()} &rarr; {@code vision.cv.pull.rtsp-base}/{@code
+ *   .pull.reconnect-backoff.*} (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.5, wave M4) — see their own
+ *   javadoc below for why these are config-surface only in this module today, not consumed by any
+ *   class here.</li>
  * </ul>
  *
  * <p>{@code vision.cv.registry.call-timeout} ({@code GrpcModelRegistryPort.CALL_TIMEOUT_SECONDS}) is
@@ -52,6 +61,30 @@ import java.util.Objects;
  *                                JPEG-encoded instead of sent raw; must be {@code >=} {@value
  *                                #MIN_DETECT_WIDTH}
  * @param jpegQuality            JPEG encoder quality for the downscale path; must be in {@code (0,1]}
+ * @param wireFormat             how a downscaled frame reaches cv-service; must not be {@code null},
+ *                                defaults to {@link WireFormat#AUTO} which picks raw {@code BGR24}
+ *                                for a loopback endpoint and JPEG for anything else
+ * @param pullRtspBase            base RTSP URL the worker dials for a pulled stream (docs/plans/active/MEDIA-SOT-PLAN.md
+ *                                &sect;5.5), e.g. {@code rtsp://localhost:8554} — <b>deliberately
+ *                                separate</b> from {@code vision.publish.mediamtx.rtsp-base}: a remote
+ *                                worker (the GB4005 box) must dial the host's LAN address, not {@code
+ *                                localhost}, even though both properties often point at the same
+ *                                mediamtx instance. Not read by any class in this module today —
+ *                                {@link com.drones.vision.domain.port.out.PulledDetectionPort#open}
+ *                                already takes a fully-formed {@code sourceUrl}, built by whichever
+ *                                caller owns that decision (a later wave); carried here so the
+ *                                {@code vision.cv.pull.*} config surface is pinned in one place ahead
+ *                                of that wiring. Must not be {@code null}
+ * @param pullReconnectInitialBackoff how long a pulled stream's reopen waits before its first retry
+ *                                after a failure; mirrors {@code vision.publish.resilience.initial-backoff}'s
+ *                                shape. <b>Not applied by this module</b> — docs/plans/active/MEDIA-SOT-PLAN.md
+ *                                decision D5 is explicit that {@link GrpcPulledDetectionPort} must not
+ *                                build reconnect/backoff itself; the existing generic {@code
+ *                                SupervisedPublisher<DetectionResult>} (vision-application) applies it
+ *                                instead. Carried here for the same config-surface-pinning reason as
+ *                                {@link #pullRtspBase()}. Must be positive
+ * @param pullReconnectMaxBackoff cap the doubling reconnect backoff never exceeds; must be {@code >=}
+ *                                {@link #pullReconnectInitialBackoff()}
  */
 public record GrpcCvSettings(
         Duration responseTimeout,
@@ -63,7 +96,11 @@ public record GrpcCvSettings(
         Duration uploadTimeout,
         int uploadChunkBytes,
         int detectWidth,
-        float jpegQuality) {
+        float jpegQuality,
+        WireFormat wireFormat,
+        URI pullRtspBase,
+        Duration pullReconnectInitialBackoff,
+        Duration pullReconnectMaxBackoff) {
 
     /** Default {@link #responseTimeout()} — see {@code GrpcDetectionPort}'s class javadoc, "hung service" case. */
     static final long RESPONSE_TIMEOUT_SECONDS = 2;
@@ -102,6 +139,18 @@ public record GrpcCvSettings(
     /** Default {@link #jpegQuality()} — balances size vs. detail. */
     static final float JPEG_QUALITY = 0.8f;
 
+    /** Default {@link #wireFormat()} — see {@link WireFormat#AUTO} for why the default is a rule. */
+    static final WireFormat WIRE_FORMAT = WireFormat.AUTO;
+
+    /** Default {@link #pullRtspBase()} — the local compose mediamtx; see this field's own javadoc. */
+    static final String PULL_RTSP_BASE = "rtsp://localhost:8554";
+
+    /** Default {@link #pullReconnectInitialBackoff()} — mirrors {@code PublishSettings.Resilience}'s default. */
+    static final long PULL_RECONNECT_INITIAL_BACKOFF_MILLIS = 500;
+
+    /** Default {@link #pullReconnectMaxBackoff()} — mirrors {@code PublishSettings.Resilience}'s default. */
+    static final long PULL_RECONNECT_MAX_BACKOFF_SECONDS = 10;
+
     public GrpcCvSettings {
         Objects.requireNonNull(responseTimeout, "responseTimeout must not be null");
         Objects.requireNonNull(keepAliveTime, "keepAliveTime must not be null");
@@ -120,8 +169,19 @@ public record GrpcCvSettings(
             throw new IllegalArgumentException(
                     "detectWidth must be >= " + MIN_DETECT_WIDTH + ", was " + detectWidth);
         }
+        if (wireFormat == null) {
+            throw new IllegalArgumentException("wireFormat must not be null; use WireFormat.AUTO");
+        }
         if (jpegQuality <= 0f || jpegQuality > 1f) {
             throw new IllegalArgumentException("jpegQuality must be in (0,1], was " + jpegQuality);
+        }
+        Objects.requireNonNull(pullRtspBase, "pullRtspBase must not be null");
+        Objects.requireNonNull(pullReconnectInitialBackoff, "pullReconnectInitialBackoff must not be null");
+        Objects.requireNonNull(pullReconnectMaxBackoff, "pullReconnectMaxBackoff must not be null");
+        requirePositive(pullReconnectInitialBackoff, "pullReconnectInitialBackoff");
+        if (pullReconnectMaxBackoff.compareTo(pullReconnectInitialBackoff) < 0) {
+            throw new IllegalArgumentException("pullReconnectMaxBackoff must be >= pullReconnectInitialBackoff: "
+                    + pullReconnectMaxBackoff + " < " + pullReconnectInitialBackoff);
         }
     }
 
@@ -143,18 +203,38 @@ public record GrpcCvSettings(
                 Duration.ofSeconds(UPLOAD_TIMEOUT_SECONDS),
                 CHUNK_BYTES,
                 MAX_DETECT_WIDTH,
-                JPEG_QUALITY);
+                JPEG_QUALITY,
+                WIRE_FORMAT,
+                URI.create(PULL_RTSP_BASE),
+                Duration.ofMillis(PULL_RECONNECT_INITIAL_BACKOFF_MILLIS),
+                Duration.ofSeconds(PULL_RECONNECT_MAX_BACKOFF_SECONDS));
     }
 
     /** Copy of this settings object with just {@link #detectWidth()} replaced — a test/tuning convenience. */
     public GrpcCvSettings withDetectWidth(int newDetectWidth) {
         return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
-                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, newDetectWidth, jpegQuality);
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, newDetectWidth, jpegQuality,
+                wireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff);
+    }
+
+    /** Copy of this settings object with just {@link #wireFormat()} replaced — a test/tuning convenience. */
+    public GrpcCvSettings withWireFormat(WireFormat newWireFormat) {
+        return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, jpegQuality,
+                newWireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff);
     }
 
     /** Copy of this settings object with just {@link #jpegQuality()} replaced — a test/tuning convenience. */
     public GrpcCvSettings withJpegQuality(float newJpegQuality) {
         return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
-                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, newJpegQuality);
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, newJpegQuality,
+                wireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff);
+    }
+
+    /** Copy of this settings object with just {@link #pullRtspBase()} replaced — a test/tuning convenience. */
+    public GrpcCvSettings withPullRtspBase(URI newPullRtspBase) {
+        return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, jpegQuality,
+                wireFormat, newPullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff);
     }
 }

@@ -1,0 +1,62 @@
+# Mounted into the mediamtx service by docker-compose.yml (/mediamtx.yml -- that image's own
+# `mediamtx.yml`-in-cwd default lookup, and its own scratch-image cwd is "/", already established by
+# this repo's docker-compose.yml comments for the recording-path setting). This file replaces
+# mediamtx's baked-in default config wholesale, so every key it doesn't mention keeps mediamtx's own
+# normal default value -- confirmed by wave M0's spike (cv-service/spikes/pull/results/
+# mediamtx-spike.yml, whose own transcript describes it as "the DEFAULT baked-in config with two
+# deliberate overrides": read that file for the measurement, this one is the deploy artifact derived
+# from it, not a copy of scratch space). docker-compose.yml's own MTX_* environment variables still
+# apply as overrides on top of whatever this file sets, exactly as they already do against mediamtx's
+# un-mounted baked-in config today.
+#
+# docs/plans/active/MEDIA-SOT-PLAN.md §5.3, blocking correction: mediamtx's Control API is IP-gated by
+# its own baked-in `authInternalUsers` -- the "any" user's `ips` list grants unauthenticated `api`
+# access only to a caller at 127.0.0.1/::1. A docker-published port does not preserve that view (the
+# container sees the compose bridge's gateway IP, not loopback), so vision-app calling from a sibling
+# container 401s on every Control API call. Setting MTX_API alone does not widen this, and
+# MTX_AUTHINTERNALUSERS as an env override was tried and does not work (mediamtx's env-var loader has
+# no list-of-struct override for this field) -- mounting this file is the actual fix.
+#
+# `ips: []` means "no IP restriction" (verified against bluenviron/mediamtx:1.19.3 by wave M0's curl
+# transcript, cv-service/spikes/pull/results/mediamtx_api_transcript.txt). Widening it this far is
+# safe ONLY because docker-compose.yml's own host publish for this port is loopback-only
+# (`127.0.0.1:19997:9997` -- see that port's own comment in docker-compose.yml for the full
+# incident writeup), which leaves exactly two ways to reach this "any" user's widened api
+# permission: (a) another container on this same compose network (vision-app, trusted -- the whole
+# reason M7 needed this widening in the first place), or (b) a process on the Docker host itself via
+# loopback (equally trusted -- it's the same machine running the stack). Neither is "any caller on
+# the LAN or the internet".
+#
+# An earlier revision of this comment claimed "mediamtx is never directly exposed past the compose
+# network's own port mappings" -- that was WRONG, not just imprecise: docker-compose.yml originally
+# published this port as `19997:9997`, binding all host interfaces, which IS an exposure path past
+# the compose network. Until that binding was corrected to loopback-only, `ips: []` here genuinely
+# did mean "any caller who can reach this host on 19997, full stop" -- unauthenticated path
+# create/repoint/delete for anyone on the LAN, or the internet if the host was exposed (this stack
+# is deployed on field servers as a drone command point, per CLAUDE.md's deployment section). The
+# mistake is kept documented here, not silently rewritten, so nobody re-derives the same wrong
+# assumption from a stale copy of this file or an old comment.
+#
+# publish/read/playback are restated alongside api/metrics/pprof so this file doesn't accidentally
+# NARROW anything mediamtx already grants unauthenticated by default -- widening api access is the only
+# actual behaviour change from mediamtx's own baked-in config.
+api: yes
+apiAddress: :9997
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: api
+      - action: metrics
+      - action: pprof
+
+# Preserves mediamtx's own default per-path behaviour: any path name (a per-start random StreamId,
+# docs/plans/active/MEDIA-SOT-PLAN.md D2) is accepted with no explicit per-path configuration block --
+# exactly what the plain RTSP push path already relies on today, and what MediamtxProxyPublisher's
+# dynamically created paths (POST /v3/config/paths/add/{streamId}) need too.
+paths:
+  all_others:

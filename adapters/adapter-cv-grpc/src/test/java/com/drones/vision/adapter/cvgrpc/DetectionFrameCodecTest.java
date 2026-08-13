@@ -206,6 +206,37 @@ class DetectionFrameCodecTest {
     }
 
     @Test
+    void responseWithNoPullFieldsDecodesPullTelemetryNull() {
+        DetectionResponse response = responseBuilder().build();
+
+        DetectionResult result = DetectionFrameCodec.decode(STREAM_ID, response);
+
+        assertNull(result.pullTelemetry());
+    }
+
+    @Test
+    void pullModeDiagnosticFieldsRoundTripIntoPullTelemetry() {
+        DetectionResponse response = responseBuilder()
+                .setDecodeMillis(3)
+                .setSourceFps(9.9f)
+                .setAchievedFps(9.5f)
+                .setDroppedFrames(2)
+                .setMissedDeadlines(1)
+                .setCaptureSkewMillis(12)
+                .build();
+
+        DetectionResult result = DetectionFrameCodec.decode(STREAM_ID, response);
+
+        com.drones.vision.domain.model.PullTelemetry pullTelemetry = result.pullTelemetry();
+        assertEquals(3L, pullTelemetry.decodeMillis());
+        assertEquals(9.9f, pullTelemetry.sourceFps(), 1e-6);
+        assertEquals(9.5f, pullTelemetry.achievedFps(), 1e-6);
+        assertEquals(2L, pullTelemetry.droppedFrames());
+        assertEquals(1L, pullTelemetry.missedDeadlines());
+        assertEquals(12L, pullTelemetry.captureSkewMillis());
+    }
+
+    @Test
     void trackedDetectionMapsAllSixTrackRefFields() {
         com.drones.vision.proto.v1.Detection wireDetection = detectionBuilder()
                 .setTrackId(3)

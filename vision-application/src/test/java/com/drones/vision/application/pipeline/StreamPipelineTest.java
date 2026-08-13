@@ -152,6 +152,36 @@ class StreamPipelineTest {
                 detectionRepositoryPort, eventPublisher, null, null, assetId, liveUpdatePublisherPort);
     }
 
+    /**
+     * A pipeline whose cadence clock advances one {@code sourceFps} interval per frame — the seam
+     * every "sample every frame" test needs now that sampling is deadline-based rather than a frame
+     * stride. Pair it with a {@code config} whose {@code inferenceFps} is at least {@code sourceFps}
+     * and every delivered frame serves a deadline; the default {@code System::nanoTime} cannot,
+     * because a synchronous publisher delivers its whole script inside one sample interval.
+     */
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
+                                     OverlayPort overlayPort, double sourceFps) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, overlayPort, null, null, null, null,
+                fixedFpsClock(sourceFps));
+    }
+
+    /** @see #pipeline(ScriptedVideoPublisher, PipelineConfig, OverlayPort, double) */
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
+                                     DetectionEventEngine eventEngine, double sourceFps) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, null, eventEngine, null, null, null,
+                fixedFpsClock(sourceFps));
+    }
+
+    /** @see #pipeline(ScriptedVideoPublisher, PipelineConfig, OverlayPort, double) */
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, AssetId assetId,
+                                     LiveUpdatePublisherPort liveUpdatePublisherPort, double sourceFps) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, null, null, assetId, liveUpdatePublisherPort, null,
+                fixedFpsClock(sourceFps));
+    }
+
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, LongSupplier clock) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
                 detectionRepositoryPort, eventPublisher, null, null, null, null, null, clock);
@@ -490,7 +520,7 @@ class StreamPipelineTest {
     }
 
     @Test
-    void samplesEveryNthFrameBasedOnMeasuredSourceFpsOnceWarmedUp() {
+    void samplesAtTheRequestedRateAgainstASourceRateThatIsAMultipleOfIt() {
         // inferenceFps=10 against a real (constant-cadence) 30fps source ->
         // sample every 3rd frame (sequence % 3 == 0), same outcome the old
         // hardcoded-30fps assumption produced -- but now driven by the
@@ -511,27 +541,75 @@ class StreamPipelineTest {
     }
 
     @Test
-    void usesAssumedThirtyFpsDuringWarmupRegardlessOfActualSourceRate() {
-        // A slow, constant 5fps clock, but only 4 frames arrive -- fewer
-        // than StreamPipeline.WARMUP_FRAMES (5) -- so every one of them is
-        // still governed by the ASSUMED_SOURCE_FPS(30) fallback, not the
-        // (very different) measured rate: everyNth = round(30/10) = 3.
+    void achievesExactlyTheRequestedRateForASourceRateItIsNotAMultipleOf() {
+        // THE regression this sampler exists for (docs/plans/active/CV-RATE-CONTROL-PLAN.md §1, loss L1).
+        // A 24fps source asked for 10fps: the integer stride this replaced could only pick
+        // round(24/10) = every 2nd frame -- 12fps, a 20% overshoot it had no way to correct, and
+        // one frame rate off in the other direction (25fps) would have undershot to 8.3 instead.
+        // A deadline is served by exactly one frame, so one second of a 24fps source yields
+        // exactly 10 samples whatever the source rate happens to be.
+        List<VideoFrame> frames = new ArrayList<>();
+        for (long i = 0; i < 24; i++) {
+            frames.add(frame(i));
+        }
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        StreamPipeline pipeline = pipeline(publisher, config(10, 5), fixedFpsClock(24));
+        pipeline.start();
+
+        verify(detectionPort, times(10)).detect(any(), any());
+        DetectionRate rate = pipeline.detectionRate();
+        assertEquals(10L, rate.submitted());
+        assertEquals(0L, rate.missedDeadlines(), "a source faster than the target starves no deadline");
+    }
+
+    @Test
+    void samplesEveryFrameAndCountsMissedDeadlinesWhenTheSourceIsSlowerThanTheRequestedRate() {
+        // A 5fps source asked for 10fps. Every frame is sampled -- there is nothing to hold back --
+        // and the deadlines no frame arrived to serve are counted rather than silently absorbed,
+        // because "the source cannot feed this rate" and "the detector cannot keep up" have
+        // different fixes and used to be indistinguishable from the outside.
+        List<VideoFrame> frames = new ArrayList<>();
+        for (long i = 0; i < 6; i++) {
+            frames.add(frame(i));
+        }
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        StreamPipeline pipeline = pipeline(publisher, config(10, 5), fixedFpsClock(5));
+        pipeline.start();
+
+        verify(detectionPort, times(6)).detect(any(), any());
+        DetectionRate rate = pipeline.detectionRate();
+        assertEquals(6L, rate.submitted());
+        assertTrue(rate.missedDeadlines() > 0L, "half the deadlines had no frame to serve them");
+        assertEquals(0.0, rate.dropRatio(), "starvation is not a drop -- nothing was thrown away");
+    }
+
+    @Test
+    void reportsTheAssumedSourceRateUntilTheMeasurementIsTrusted() {
+        // The measured source rate no longer DRIVES sampling -- it reports, and bounds what any
+        // rate could achieve. The warmup contract it always had still holds: fewer than
+        // StreamPipelineSettings.warmupFrames() arrivals and the configured assumption is what
+        // gets reported, rather than a rate measured from too few samples to mean anything.
         List<VideoFrame> frames = List.of(frame(0), frame(1), frame(2), frame(3));
         ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
 
-        pipeline(publisher, config(10, 5), fixedFpsClock(5)).start();
+        StreamPipeline pipeline = pipeline(publisher, config(10, 5), fixedFpsClock(5));
+        pipeline.start();
 
-        verify(detectionPort, times(2)).detect(any(), any()); // sequences 0, 3
+        assertEquals(StreamPipelineSettings.defaults().assumedSourceFps(),
+                pipeline.detectionRate().sourceFps(), 1e-9);
     }
 
     @Test
-    void samplesEveryOtherFrameAfterWarmupWhenMeasuredRateIsSlowerThanAssumed() {
-        // 10fps source, inferenceFps=5. Warmup (frame indices 0-3, assumed
-        // 30fps) -> everyNth = round(30/5) = 6, sampling only sequence 0.
-        // Once WARMUP_FRAMES=5 frames have been observed (from frame index
-        // 4 onward), the measured 10fps takes over -> everyNth =
-        // round(10/5) = 2, sampling sequences 4, 6, 8.
+    void clampsTheReportedSourceRateToTheConfiguredMaximum() {
+        // An absurdly fast synthetic clock (a source far above any real camera, or a replay adapter
+        // pushing as fast as it can) must clamp the MEASURED rate to maxMeasuredFps rather than
+        // report an unbounded value -- and the sample rate must stay the requested one regardless,
+        // which is the whole point of holding a deadline instead of a frame stride.
         List<VideoFrame> frames = new ArrayList<>();
         for (long i = 0; i < 10; i++) {
             frames.add(frame(i));
@@ -539,30 +617,13 @@ class StreamPipelineTest {
         ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
 
-        pipeline(publisher, config(5, 10), fixedFpsClock(10)).start();
+        StreamPipeline pipeline = pipeline(publisher, config(60, 10), fixedFpsClock(1_000_000));
+        pipeline.start();
 
-        verify(detectionPort, times(4)).detect(any(), any()); // sequences 0, 4, 6, 8
-    }
-
-    @Test
-    void clampsMeasuredFpsToTheConfiguredMaximum() {
-        // An absurdly fast synthetic clock (source far above any real
-        // camera) must clamp the measured rate to
-        // StreamPipeline.MAX_MEASURED_FPS (240) rather than an unbounded
-        // value. inferenceFps=60: warmup (frame indices 0-3) uses assumed
-        // 30fps -> everyNth = round(30/60) = 1 (every frame). From frame
-        // index 4 onward the clamped 240fps measurement applies -> everyNth
-        // = round(240/60) = 4, sampling sequences 4 and 8.
-        List<VideoFrame> frames = new ArrayList<>();
-        for (long i = 0; i < 10; i++) {
-            frames.add(frame(i));
-        }
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
-        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
-
-        pipeline(publisher, config(60, 10), fixedFpsClock(1_000_000)).start();
-
-        verify(detectionPort, times(6)).detect(any(), any()); // sequences 0,1,2,3 (warmup) + 4,8 (clamped-measured)
+        assertEquals(StreamPipelineSettings.defaults().maxMeasuredFps(),
+                pipeline.detectionRate().sourceFps(), 1e-9);
+        // 10 frames spanning 10 microseconds cannot contain a second 60fps deadline.
+        verify(detectionPort, times(1)).detect(any(), any());
     }
 
     @Test
@@ -590,9 +651,41 @@ class StreamPipelineTest {
         // Never completes, so in-flight count never drains during this test.
         when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>());
 
-        pipeline(publisher, config(30, 1)).start(); // every frame sampled, at most 1 in flight
+        // 30fps clock against inferenceFps=30: every frame serves a deadline, so all three reach
+        // the in-flight bound and exactly one gets through it.
+        StreamPipeline pipeline = pipeline(publisher, config(30, 1), (OverlayPort) null, 30.0);
+        pipeline.start();
 
         verify(detectionPort, times(1)).detect(any(), any());
+        DetectionRate rate = pipeline.detectionRate();
+        assertEquals(1L, rate.submitted());
+        assertEquals(2L, rate.droppedInFlight(), "the two skipped samples are counted, not silently lost");
+        assertEquals(3L, rate.due());
+        assertEquals(2.0 / 3.0, rate.dropRatio(), 1e-9);
+    }
+
+    @Test
+    void countsSamplesWithheldDuringADetectionOutageSeparatelyFromInFlightDrops() {
+        // The two losses have opposite fixes -- raise maxInFlightInferences vs. bring cv-service
+        // back -- so an operator reading a rate shortfall must be able to tell them apart. Before
+        // these counters both looked identical from outside: a completion rate below the
+        // configured one, with nothing to say why.
+        SettableClock clock = new SettableClock(0L);
+        when(detectionPort.detect(any(), any())).thenAnswer(invocation -> failedFuture("cv down"));
+
+        StreamPipeline pipeline = manualPipeline(config(10, 5), clock);
+        pipeline.onNext(frame(0)); // first failure: enters the outage
+
+        // Well inside the initial backoff, but past several sample deadlines.
+        for (long sequence = 1; sequence <= 3; sequence++) {
+            clock.advance(100_000_000L); // one 10fps sample interval
+            pipeline.onNext(frame(sequence));
+        }
+
+        DetectionRate rate = pipeline.detectionRate();
+        assertEquals(1L, rate.submitted(), "only the frame that entered the outage was ever sent");
+        assertEquals(3L, rate.droppedOutage());
+        assertEquals(0L, rate.droppedInFlight(), "an outage skip must never be reported as saturation");
     }
 
     @Test
@@ -642,7 +735,7 @@ class StreamPipelineTest {
                 .thenReturn(CompletableFuture.completedFuture(empty));
         DetectionEventEngine eventEngine = mock(DetectionEventEngine.class);
 
-        pipeline(publisher, config(30, 2), eventEngine).start();
+        pipeline(publisher, config(30, 2), eventEngine, 30.0).start();
 
         verify(eventEngine).accept(nonEmpty);
         verify(eventEngine).accept(empty);
@@ -674,7 +767,7 @@ class StreamPipelineTest {
         AssetId assetId = AssetId.random();
         LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
 
-        pipeline(publisher, config(30, 2), assetId, liveUpdatePublisherPort).start();
+        pipeline(publisher, config(30, 2), assetId, liveUpdatePublisherPort, 30.0).start();
 
         verify(liveUpdatePublisherPort).publishDetections(assetId, nonEmpty);
         verify(liveUpdatePublisherPort).publishDetections(assetId, empty);
@@ -1073,7 +1166,7 @@ class StreamPipelineTest {
         VideoFrame rendered = frame(99);
         when(overlayPort.render(any())).thenReturn(rendered);
 
-        pipeline(publisher, config(1000, 5), overlayPort).start();
+        pipeline(publisher, config(1000, 5), overlayPort, 1000.0).start();
 
         ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
         verify(overlayPort).render(captor.capture());
@@ -1100,7 +1193,7 @@ class StreamPipelineTest {
         VideoFrame rendered = frame(99);
         when(overlayPort.render(any())).thenReturn(rendered);
 
-        pipeline(publisher, config(1000, 5), overlayPort).start();
+        pipeline(publisher, config(1000, 5), overlayPort, 1000.0).start();
 
         ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
         verify(overlayPort, atLeastOnce()).render(captor.capture());
@@ -1135,7 +1228,7 @@ class StreamPipelineTest {
         VideoFrame rendered = frame(99);
         when(overlayPort.render(any())).thenReturn(rendered);
 
-        pipeline(publisher, config(1000, 5), overlayPort).start();
+        pipeline(publisher, config(1000, 5), overlayPort, 1000.0).start();
 
         ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
         verify(overlayPort, atLeastOnce()).render(captor.capture());
@@ -1334,6 +1427,64 @@ class StreamPipelineTest {
     }
 
     // --- docs/plans/done/TRACKING-PLAN.md §5.D/§5.E, wave T3: track book, stats window, follow sampling ---
+
+    // --- docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2: the adaptive rate, end to end -------------
+
+    private static StreamPipelineSettings settingsWithAdaptiveRate(AdaptiveRateSettings adaptiveRate) {
+        StreamPipelineSettings base = StreamPipelineSettings.defaults();
+        return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(),
+                base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
+                base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
+                base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
+                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(),
+                base.cameraHfovDegrees(), adaptiveRate);
+    }
+
+    /** A result whose single box is small and fast enough to demand far more than 10 fps. */
+    private DetectionResult escapingTargetResult(long sequence) {
+        Detection detection = new Detection("person", 0.9, new BoundingBox(0.4, 0.4, 0.05, 0.05),
+                new ModelRef("yolo", "latest"),
+                new TrackRef(1L, TrackState.CONFIRMED, DetectionSource.TRACKER, 2.0, 0.0, 10));
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5));
+    }
+
+    private int samplesOverTwoSecondsOfA60FpsSource(AdaptiveRateSettings adaptiveRate) {
+        List<VideoFrame> frames = new ArrayList<>();
+        for (long i = 0; i < 120; i++) {
+            frames.add(frame(i));
+        }
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any()))
+                .thenAnswer(invocation -> CompletableFuture.completedFuture(escapingTargetResult(0)));
+
+        new StreamPipeline(streamId, device, trackingConfig(10, TrackingConfig.defaults()), publisher,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
+                null, null, fixedFpsClock(60), settingsWithAdaptiveRate(adaptiveRate), System::nanoTime).start();
+
+        return mockingDetails(detectionPort).getInvocations().size();
+    }
+
+    @Test
+    void raisesTheSampleRateWhenATrackedTargetIsAboutToLeaveItsAssociationBudget() {
+        // The wiring test, not the arithmetic one -- DetectionRateControllerTest owns the formula.
+        // A 0.05-wide box crossing at 2 frame widths/s demands ~74fps against its association
+        // budget; the ceiling holds it at the configured 30. Two seconds of a 60fps source
+        // therefore yields far more than the 20 samples inferenceFps=10 alone would allow.
+        int samples = samplesOverTwoSecondsOfA60FpsSource(AdaptiveRateSettings.defaults());
+
+        assertTrue(samples > 40, "expected the rate to be raised well above 10fps, sampled " + samples);
+        assertTrue(samples <= 61, "and still capped at the configured 30fps ceiling, sampled " + samples);
+    }
+
+    @Test
+    void leavesTheSampleRateAtTheConfiguredOneWhenTheAdaptiveLoopIsDisabled() {
+        // Same target, same source: with the loop off the operator's 10fps is exactly what runs,
+        // which is what makes the previous test evidence of the loop rather than of the clock.
+        int samples = samplesOverTwoSecondsOfA60FpsSource(AdaptiveRateSettings.disabled());
+
+        assertEquals(20, samples, 1, "two seconds at exactly the configured 10fps");
+    }
 
     private static PipelineConfig trackingConfig(int inferenceFps, TrackingConfig tracking) {
         return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, 5, true, Set.of(),

@@ -588,7 +588,7 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
         List<ActiveStreamResponse> streams = streamService.getObject().streams().stream()
                 .map(stream -> new ActiveStreamResponse(stream.streamId().value().toString(),
                         stream.deviceId().value().toString(), stream.startedAt(), viewUrl(stream.streamId()),
-                        whepUrl(stream.streamId())))
+                        whepUrl(stream.streamId()), stream.burnedIn()))
                 .toList();
         DevicesSnapshotResponse snapshot = new DevicesSnapshotResponse(devices, streams);
         return new LiveEnvelopeResponse(sequencer.incrementAndGet(), null, LiveTopicKind.DEVICES.wire(), snapshot);

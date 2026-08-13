@@ -4,6 +4,7 @@ import com.drones.vision.api.dto.ActiveStreamResponse;
 import com.drones.vision.api.dto.DetectionResultResponse;
 import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
+import com.drones.vision.api.dto.DetectionRateResponse;
 import com.drones.vision.api.dto.PipelineLatencyResponse;
 import com.drones.vision.api.dto.StreamTracksResponse;
 import com.drones.vision.api.dto.TrackResponse;
@@ -120,7 +121,8 @@ public class StreamController {
         StartStreamRequest body = request == null ? StartStreamRequest.EMPTY : request;
         StreamId streamId =
                 streamService.start(DeviceId.of(deviceId), body.mergeOntoDefaults(), body.trackingPatch());
-        StartStreamResponse response = new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId));
+        StartStreamResponse response = new StartStreamResponse(streamId.value().toString(), viewUrl(streamId),
+                whepUrl(streamId), streamService.burnedIn(streamId));
         LOG.log(System.Logger.Level.INFO, () -> "Started stream " + response.streamId() + " for device " + deviceId
                 + " viewUrl=" + response.viewUrl() + " whepUrl=" + response.whepUrl());
         return response;
@@ -135,7 +137,7 @@ public class StreamController {
     public List<ActiveStreamResponse> list() {
         return streamService.streams().stream()
                 .map(s -> new ActiveStreamResponse(s.streamId().value().toString(), s.deviceId().value().toString(),
-                        s.startedAt(), viewUrl(s.streamId()), whepUrl(s.streamId())))
+                        s.startedAt(), viewUrl(s.streamId()), whepUrl(s.streamId()), s.burnedIn()))
                 .toList();
     }
 
@@ -235,8 +237,14 @@ public class StreamController {
                 .filter(latency -> latency.samples() > 0L)
                 .map(PipelineLatencyResponse::from)
                 .orElse(null);
+        // Gated on a served deadline rather than on a completed one, so a stream whose samples are
+        // ALL being dropped -- the case this object exists to diagnose -- still reports why.
+        DetectionRateResponse rateResponse = streamService.detectionRate(id)
+                .filter(rate -> rate.due() > 0L)
+                .map(DetectionRateResponse::from)
+                .orElse(null);
         return new StreamTracksResponse(id.value().toString(), stats == null ? 0L : stats.lockedTrackId(), tracks,
-                statsResponse, latencyResponse);
+                statsResponse, latencyResponse, rateResponse);
     }
 
     /**

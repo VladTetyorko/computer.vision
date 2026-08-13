@@ -48,6 +48,8 @@ com.drones.vision.app
 | `VisionApplicationProperties` | moved (Wave A) | `vision.application` | `vision-application`'s own settings records (`StreamPipelineSettings`, `ReplayServiceSettings`, `SimulationServiceSettings`) |
 
 `vision.application.pipeline.camera-hfov-degrees` (default `0.0` = unknown) is the newest key here and the only one that is a **physical** property rather than a tuning knob: it is the camera's horizontal field of view, the scale that turns a telemetry attitude delta into a pixel shift, and therefore what lets cv-service's `pose` ego-motion compensator run at all (docs/conclusions/CV-RATE-BUDGET.md §2). `0` ships deliberately rather than a plausible-looking `60`: a wrong FOV produces a confidently wrong pixel shift, which is worse than the `flow` fallback it would displace. It is **one value per instance, not per camera** — a deployment mixing lenses needs it lifted onto the asset, which is the recorded follow-up.
+
+`vision.application.pipeline.adaptive-rate.{enabled,max-fps,ewma-alpha}` (defaults `true`, `30.0`, `0.2` — mapped onto `AdaptiveRateSettings`) is the rate control loop of docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2. It raises the sampler's rate toward what a tracked target's own motion demands against its association budget, and leaves it exactly at `inferenceFps` whenever nothing is tracked or nothing is moving. **On by default, unlike `camera-hfov-degrees`**, and the difference is not inconsistency: a missing FOV means the deployment has stated nothing, so inventing one would be a guess, whereas the loop derives everything it uses from facts already measured. It can only ever *raise* the configured rate, and is bounded at runtime by the source rate and by measured detector capacity, so the worst case of enabling it is that it does nothing. The ego-motion half still needs `camera-hfov-degrees`; the target-motion half does not.
 | `VisionPersistenceProperties` | moved, unchanged | `vision.persistence` | `adapter-persistence`'s `PersistenceUnit` |
 | `VisionLiveProperties` | moved, unchanged | `vision.live` | selects `LiveUpdateRegistry` (vision-api) vs. `NoopLiveUpdatePublisher` |
 | `VisionTrainingProperties` | moved, unchanged | `vision.training` | gates `TrainingWiringConfiguration`'s whole bean cluster |
@@ -89,7 +91,9 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 | `detectionRepositoryPort` | `DetectionRepositoryPort` | `PersistenceWiringConfiguration`: `JpaDetectionRepository` (adapter-persistence) if `vision.persistence.enabled=true` else `InMemoryDetectionRepository` (devsupport) — append-only ring, capped per stream (docs/plans/done/MVP1-PLAN.md §C8 bullet 3) |
 | `overlayRenderer` | `OverlayPort` | `Java2DOverlayRenderer` (adapter-overlay) — docs/plans/done/MVP1-PLAN.md §C8 bullets 1-2; stateless, no config |
 | `eventPublisherPort` | `EventPublisherPort` | `LoggingEventPublisher` (devsupport), wrapped in `DetectionSessionCleanupEventPublisher` when `vision.cv.enabled=true` and `detectionPort` resolved to a `GrpcDetectionPort` — see "CV inference wiring" below; further wrapped in `LiveUpdateEventPublisher` when `vision.live.enabled=true` (default) — see "Server-push data plane" below |
-| `streamPublisherPort` | `StreamPublisherPort` | `MediamtxStreamPublisher` if `vision.publish.enabled` else `NoopStreamPublisher` (devsupport); constructed with `mediamtx.rtspBase()` to push, `VisionPublishProperties#viewBase()` (**not** `mediamtx.hlsBase()`) as `hlsViewBase`, `mediamtx.whepBase()` as `whepViewBase` (docs/plans/done/MVP2-PLAN.md L-a), and `mediamtx.playbackBase()` as `playbackViewBase` (docs/plans/done/CV-TRAINING-V2-PLAN.md §7 — the 4-arg constructor, replacing the old 3-arg overload's derived guess) — see below |
+| `streamPublisherPort` | `StreamPublisherPort` | **docs/plans/active/MEDIA-SOT-PLAN.md wave M7**: `NoopStreamPublisher` (devsupport) if `vision.publish.enabled=false`, else a `PublisherRouter` (adapter-publish-hls) wrapping `MediamtxStreamPublisher` (unchanged 4-arg construction: `mediamtx.rtspBase()` to push, `VisionPublishProperties#viewBase()` — **not** `mediamtx.hlsBase()` — as `hlsViewBase`, `mediamtx.whepBase()` as `whepViewBase`, `mediamtx.playbackBase()` as `playbackViewBase`) as its direct publisher and `MediamtxProxyPublisher` (`mediamtx.apiBase()`, same view bases, `MediamtxProxySettings` mapped from `VisionPublishProperties.SourceProxy` + `mediamtx.apiUser()`/`apiPassword()`) as its proxy publisher, routed by `vision.publish.source-proxy.enabled` (default `false`, D1) — see "Media source-of-truth wiring" below |
+| `mediamtxLiveFrameGrabber` | `MediamtxLiveFrameGrabber` | **docs/plans/active/MEDIA-SOT-PLAN.md wave M7**: `new MediamtxLiveFrameGrabber(mediamtx.rtspBase())` (adapter-publish-hls) — unconditional (cheap, no I/O at construction); consumed by `LiveFrameFallbackStreamService` when wired — see "Media source-of-truth wiring" below |
+| `pulledDetectionPort` | `PulledDetectionPort` | **docs/plans/active/MEDIA-SOT-PLAN.md wave M7**: `CvWiring` — `GrpcPulledDetectionPort(cvGrpcChannel, toGrpcCvSettings(cvProperties))` present only when `VisionCvProperties#pullEnabled()` (`vision.cv.frame-transport=pull`); absent by default — see "Media source-of-truth wiring" below |
 | `replayFrameExtractionPort` | `ReplayFrameExtractionPort` | `MediamtxReplayFrameExtractor(mediamtx.playbackBase())` if `vision.publish.enabled` else `NoopReplayFrameExtractor` (devsupport) — docs/plans/done/CV-TRAINING-V2-PLAN.md §7; same if/else split as `streamPublisherPort`, consumed by `TrainingWiringConfiguration#replaySources` |
 | `hlsProxyUpstreamBase` | `URI` | `properties.mediamtx().hlsBase()` — the collaborator `HlsProxyController` (`vision-api`, component-scanned) needs; see Gotchas for why this is a bean rather than `HlsProxyController` being hand-constructed here |
 | `cvModelRoster` | `List<CvModelResponse>` | a static, in-source constant (docs/plans/done/CV-CONTROL-PLAN.md §4) — the collaborator `CvModelsController` (`vision-api`, component-scanned) needs, the same "raw collaborator, not a domain port" pattern as `hlsProxyUpstreamBase`; see "Detection-model roster" below |
@@ -119,7 +123,7 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 | `mapLayerService` | `MapLayerService` | `new DefaultMapLayerService(layerResolver, markRepositoryPort, drawingRepositoryPort, liveUpdatePublisherPort, mapAccessPolicy)` — docs/plans/done/MAP-REWORK-PLAN.md §3; layer CRUD + grants behind `MapLayersController`. Takes the mark/drawing **repositories** directly rather than their services, because the only thing it does with them is cascade a layer deletion — for which the services' own viewer-gated methods would be both wrong (the cascade is already authorized) and circular |
 | `drawingService` | `DrawingService` | `new DefaultDrawingService(drawingRepositoryPort, liveUpdatePublisherPort, mapAccessPolicy, layerResolver)` — docs/plans/done/MAP-REWORK-PLAN.md §3; lines/polygons/arrows/text behind `MapDrawingsController`; `markService`'s shape minus the telemetry collaborator a drawing has no use for |
 | `mapLayerBootstrapRunner` | `ApplicationRunner` | `args -> mapLayerService.copLayerId()` — docs/plans/done/MAP-REWORK-PLAN.md §3's "ensured at startup". **Not a correctness requirement** (`copLayerId()` is a synchronized find-or-create, already idempotent) but a **timing** one: without it the first caller to promote a mark, or the first `GET /api/map/layers`, would be the one to create the COP layer, racing its own `CREATED` SSE event against its own response. With Postgres, `V12__map_layers.sql` has already inserted the row and this call merely finds it; in memory, this call is what creates it |
-| `streamService` | `StreamService` | `new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort)` — the 10-arg ctor (docs/plans/done/REALTIME-PLAN.md §4), wired with `usageTracker`, `overlayRenderer` (docs/plans/done/MVP1-PLAN.md §C8 bullet 2), `detectionEventRepositoryPort` (docs/plans/done/MVP2-PLAN.md §E, E-a) and `liveUpdatePublisherPort` — same "always a real bean, unconditional wiring" note as `usageTracker` above |
+| `streamService` | `StreamService` | **docs/plans/active/MEDIA-SOT-PLAN.md wave M7**: `ApplicationServiceWiring#streamService` now builds `DefaultStreamService`'s **12-arg ctor** — the 10-arg shape (docs/plans/done/REALTIME-PLAN.md §4: `deviceRepositoryPort, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort`) plus `streamPipelineSettings(...)` and a `PullDetectionSettings` (`null` unless `VisionCvProperties#pullEnabled()`, built inline from `CvWiring`'s conditional `pulledDetectionPort` bean + `cvProperties.pull().rtspBase()`). The bean method then wraps the result in `com.drones.vision.app.stream.LiveFrameFallbackStreamService` when `VisionPublishProperties.SourceProxy#enabled()` is `true` — see "Media source-of-truth wiring" below for both. With every wave-M7 flag at its default, this bean is byte-identical (same type, same behaviour) to before the wave |
 | `liveUpdatePublisherPort` | `LiveUpdatePublisherPort` | `LiveUpdateRegistry` (vision-api, `com.drones.vision.api.live`) if `vision.live.enabled` (default `true`) else `NoopLiveUpdatePublisher` (devsupport) — see "Server-push data plane" below |
 | `detectionEventRepositoryPort` | `DetectionEventRepositoryPort` | `InMemoryDetectionEventRepository` (devsupport) — docs/plans/done/MVP2-PLAN.md §E, E-a; persistence explicitly deferred, same posture as `auditTrailPort`; wrapped in `LiveUpdateDetectionEventRepository` when `vision.live.enabled=true` (default — backend follow-up batch, extends the `detection-events` live topic) — see "Server-push data plane" below |
 | `assetService` | `AssetService` | `new DefaultAssetService(assetRepositoryPort, categoryRepositoryPort, assetUsageRepositoryPort, auditTrailPort, deviceService, streamService)` — devices reached through `deviceService`, never the device repository directly |
@@ -140,7 +144,7 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 
 `DiscoveryWiringConfiguration`: `onvifWsDiscoveryScanner`/`mdnsScanner`/`v4l2Scanner`/`mavlinkHeartbeatScanner` (`DeviceDiscoveryPort`, each `@ConditionalOnProperty(vision.discovery.enabled, default true)`) and `discoveryService` (`ScanDevicesUseCase` → `new DiscoveryService(List<DeviceDiscoveryPort>)`) — **always** registered regardless of the property, since `DiscoveryController` needs it unconditionally; `DiscoveryService` tolerates an empty port list (degrades to an empty `ScanResult`). `mavlinkHeartbeatScanner` (docs/plans/active/DRONE-INFRA-PLAN.md I-b) is `new MavlinkHeartbeatScanner(mavlinkTelemetrySource, 14550)` — the **same** `MavlinkTelemetrySource` bean `WiringConfiguration` already wires for real telemetry ingest (so the scanner's hub-borrow path actually sees devices that instance has open), autowired across the two `@Configuration` classes by type; the port is a hardcoded constant (`DiscoveryWiringConfiguration.MAVLINK_HEARTBEAT_SCAN_PORT`), not a new `vision.*` property — none of the other three scanners has a per-scanner property either, so there was no config precedent to follow. Lives in `adapter-mavlink`, not `adapter-discovery` like its three siblings — see adapter-mavlink/MODULE.md for why (adapters never depend on each other; this scanner needs to see `MavlinkTelemetrySource` directly to borrow its socket).
 
-`VisionPublishProperties` (`@ConfigurationProperties(prefix="vision.publish")`): `enabled` (`@DefaultValue("true")`), `viewBase: URI` (`@DefaultValue("/hls")`, defaulted again in the compact ctor if null — the URL base actually handed to viewers, app-relative by default so mediamtx's own address is never exposed to browsers), `mediamtx: Mediamtx` (defaulted as a whole in the compact ctor if null); nested `Mediamtx(rtspBase: URI, hlsBase: URI, whepBase: URI)` defaulting to `rtsp://localhost:8554` / `http://localhost:8888` / `http://localhost:8889` — **`hlsBase` is now purely the internal upstream `HlsProxyController` forwards to** (see `com.drones.vision.api.proxy.HlsProxyController`, vision-api), not a viewer-facing URL; that role moved to `viewBase`. **`whepBase` (docs/plans/done/MVP2-PLAN.md L-a) gets no such split** — `WiringConfiguration` hands `mediamtx.whepBase()` straight to `MediamtxStreamPublisher` as `whepViewBase` and it reaches the viewer unchanged, because a WHEP session (POST/SDP + ICE) cannot be reverse-proxied the trivial way HLS segments are; see "WHEP viewing (docs/plans/done/MVP2-PLAN.md L-a)" below.
+`VisionPublishProperties` (`@ConfigurationProperties(prefix="vision.publish")`): `enabled` (`@DefaultValue("true")`), `viewBase: URI` (`@DefaultValue("/hls")`, defaulted again in the compact ctor if null — the URL base actually handed to viewers, app-relative by default so mediamtx's own address is never exposed to browsers), `mediamtx: Mediamtx` (defaulted as a whole in the compact ctor if null); nested `Mediamtx(rtspBase: URI, hlsBase: URI, whepBase: URI, playbackBase: URI, apiBase: URI, apiUser: String, apiPassword: String)` defaulting to `rtsp://localhost:8554` / `http://localhost:8888` / `http://localhost:8889` / `http://localhost:19996` / `http://localhost:19997` / unset / unset — **`hlsBase` is now purely the internal upstream `HlsProxyController` forwards to** (see `com.drones.vision.api.proxy.HlsProxyController`, vision-api), not a viewer-facing URL; that role moved to `viewBase`. **`whepBase` (docs/plans/done/MVP2-PLAN.md L-a) gets no such split** — `WiringConfiguration` hands `mediamtx.whepBase()` straight to `MediamtxStreamPublisher` as `whepViewBase` and it reaches the viewer unchanged, because a WHEP session (POST/SDP + ICE) cannot be reverse-proxied the trivial way HLS segments are; see "WHEP viewing (docs/plans/done/MVP2-PLAN.md L-a)" below. `apiBase`/`apiUser`/`apiPassword` (docs/plans/active/MEDIA-SOT-PLAN.md wave M7) are `MediamtxProxyPublisher`'s Control API endpoint/credentials — see "Media source-of-truth wiring" below. A sibling `SourceProxy` record (`enabled`/`onDemand`/`rtspTransport`/`readyTimeout`, all defaulted, `enabled` defaulting `false`) rides alongside `mediamtx` on this same properties record — same wave, same section.
 
 `vision.discovery.enabled` (plain `boolean`, no `@ConfigurationProperties` record — read directly via `@ConditionalOnProperty` in `DiscoveryWiringConfiguration`, default `true`).
 
@@ -323,9 +327,9 @@ New bean, `PublishWiring#replayFrameExtractionPort(VisionPublishProperties)` —
 
 ## CV inference wiring (docs/plans/done/MVP1-PLAN.md §C7 bullet 4)
 
-`VisionCvProperties` (`@ConfigurationProperties(prefix="vision.cv")`, mirrors `VisionPublishProperties`'s record-plus-`@DefaultValue` idiom): `enabled` (`@DefaultValue("false")` — today's behavior, no cv-service required), `endpoint: String` (`@DefaultValue("localhost:50051")`, e.g. `host:port`; an optional `scheme://` prefix is tolerated and stripped), `detectWidth: int` (`@DefaultValue("640")`, docs/plans/done/REMOTE-CV-PLAN.md P1 item 5) and `jpegQuality: float` (`@DefaultValue("0.8")`) — the last two thread straight into `GrpcDetectionPort`'s own wire-tuning knobs (see adapter-cv-grpc/MODULE.md's "Payload shrinking" section) so per-network tuning (e.g. `vision.cv.detect-width=480` over a slow VPN link) needs no rebuild. `host()`/`port()` parse `endpoint` on demand (not cached — cheap, called once per bean construction) and throw `IllegalArgumentException` for a malformed value; there is no `URI`-typed field like `VisionPublishProperties.Mediamtx`'s bases because `"localhost:50051"` is not a valid absolute `java.net.URI` (a bare `host:port` string parses as an opaque URI with scheme `localhost` and scheme-specific-part `50051` — not what's wanted), so this property stays a plain validated `String` instead. The compact constructor validates all three non-`enabled` fields the same manual `if (...) throw new IllegalArgumentException(...)` way: `endpoint` non-blank, `detectWidth >= 64`, `jpegQuality` in `(0, 1]` — the same bounds `GrpcDetectionPort`'s own canonical constructor enforces (adapter-cv-grpc), so an invalid value fails fast at Spring context startup rather than later inside the adapter.
+`VisionCvProperties` (`@ConfigurationProperties(prefix="vision.cv")`, mirrors `VisionPublishProperties`'s record-plus-`@DefaultValue` idiom): `enabled` (`@DefaultValue("false")` — today's behavior, no cv-service required), `endpoint: String` (`@DefaultValue("localhost:50051")`, e.g. `host:port`; an optional `scheme://` prefix is tolerated and stripped), `detectWidth: int` (`@DefaultValue("640")`, docs/plans/done/REMOTE-CV-PLAN.md P1 item 5) `jpegQuality: float` (`@DefaultValue("0.8")`), `wireFormat: String` (`@DefaultValue("auto")`, validated in the compact ctor via `WireFormat.parse` so a typo fails at context startup rather than silently falling back — docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R3) and `frameTransport: String` (docs/plans/active/MEDIA-SOT-PLAN.md wave M7, `@DefaultValue("push")`, validated `push|pull`; `pullEnabled()` is the boolean convenience every wiring decision reads) — the first three thread straight into `GrpcDetectionPort`'s own wire-tuning knobs (see adapter-cv-grpc/MODULE.md's "Payload shrinking" section) so per-network tuning (e.g. `vision.cv.detect-width=480` over a slow VPN link) needs no rebuild; `frameTransport` is switch B, see "Media source-of-truth wiring" below. `host()`/`port()` parse `endpoint` on demand (not cached — cheap, called once per bean construction) and throw `IllegalArgumentException` for a malformed value; there is no `URI`-typed field like `VisionPublishProperties.Mediamtx`'s bases because `"localhost:50051"` is not a valid absolute `java.net.URI` (a bare `host:port` string parses as an opaque URI with scheme `localhost` and scheme-specific-part `50051` — not what's wanted), so this property stays a plain validated `String` instead. The compact constructor validates all non-`enabled` fields the same manual `if (...) throw new IllegalArgumentException(...)` way: `endpoint` non-blank, `detectWidth >= 64`, `jpegQuality` in `(0, 1]`, `frameTransport` in `{push, pull}` — the first three are the same bounds `GrpcDetectionPort`'s own canonical constructor enforces (adapter-cv-grpc), so an invalid value fails fast at Spring context startup rather than later inside the adapter. A `pull: Pull` record (`rtspBase: URI`, `reconnectInitialBackoff`/`reconnectMaxBackoff: Duration`, defaulted as a whole when absent) rides alongside — see "Media source-of-truth wiring" below.
 
-**Shared channel (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 — T9, then extended by the training-job wave and docs/plans/done/CV-TRAINING-V2-PLAN.md §3's upload port)**: `CvWiring#cvGrpcChannel(VisionCvProperties)` builds one plaintext `ManagedChannel` to cv-service — the same HTTP/2 keepalive tuning `GrpcDetectionPort`'s own host/port convenience constructor used to build internally (20s ping / 5s timeout / pings-without-calls; duplicated as plain constants in `WiringConfiguration` since `GrpcDetectionPort`'s own constants are package-private to `adapter-cv-grpc`) — gated by `@ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false}")`, so it exists whenever *either* property enables a consumer: `detectionPort` below (`vision.cv.enabled=true`) or `TrainingWiringConfiguration#modelRegistryPort`/`trainingPort`/`datasetUploadPort` (`vision.training.enabled=true`, see "CV training loop wiring" above — all three training-side consumers share the one property, so there is no third expression term to add). With both flags at their default `false`, no channel is built at all — the opt-in guardrail, proven by `TrainingDisabledWiringTest`/`CvWiringTest`. `detectionPort`, `modelRegistryPort`, `trainingPort`, and (as of docs/plans/done/CV-TRAINING-V2-PLAN.md §3) `datasetUploadPort` all consume this **one** bean instance rather than each independently building/configuring their own connection to cv-service — see `GrpcModelRegistryPort`'s own javadoc ("Channel reuse") for the motivation. `CvAndTrainingSharedChannelWiringTest` (both flags `true`) is the one test that actually proves sharing: exactly one `ManagedChannel` bean exists and `detectionPort`/`modelRegistryPort`/`trainingPort` all resolved against it (`datasetUploadPort` isn't separately asserted there — `TrainingEnabledWiringTest` already proves it resolves to `GrpcDatasetUploadPort` over the shared channel).
+**Shared channel (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 — T9, then extended by the training-job wave, docs/plans/done/CV-TRAINING-V2-PLAN.md §3's upload port, and docs/plans/active/MEDIA-SOT-PLAN.md wave M7's pull port)**: `CvWiring#cvGrpcChannel(VisionCvProperties)` builds one plaintext `ManagedChannel` to cv-service — the same HTTP/2 keepalive tuning `GrpcDetectionPort`'s own host/port convenience constructor used to build internally (20s ping / 5s timeout / pings-without-calls; duplicated as plain constants in `WiringConfiguration` since `GrpcDetectionPort`'s own constants are package-private to `adapter-cv-grpc`) — gated by `@ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false} or '${vision.cv.frame-transport:push}' == 'pull'")` (the third disjunct added by wave M7), so it exists whenever *any* property enables a consumer: `detectionPort` below (`vision.cv.enabled=true`), `TrainingWiringConfiguration#modelRegistryPort`/`trainingPort`/`datasetUploadPort` (`vision.training.enabled=true`, see "CV training loop wiring" above), or `pulledDetectionPort` below (`vision.cv.frame-transport=pull`). With every flag at its default (`false`/`false`/`push`), no channel is built at all — the opt-in guardrail, proven by `TrainingDisabledWiringTest`/`CvWiringTest`. `detectionPort`, `modelRegistryPort`, `trainingPort`, and (as of docs/plans/done/CV-TRAINING-V2-PLAN.md §3) `datasetUploadPort` all consume this **one** bean instance rather than each independently building/configuring their own connection to cv-service — see `GrpcModelRegistryPort`'s own javadoc ("Channel reuse") for the motivation. `CvAndTrainingSharedChannelWiringTest` (both flags `true`) is the one test that actually proves sharing: exactly one `ManagedChannel` bean exists and `detectionPort`/`modelRegistryPort`/`trainingPort` all resolved against it (`datasetUploadPort` isn't separately asserted there — `TrainingEnabledWiringTest` already proves it resolves to `GrpcDatasetUploadPort` over the shared channel).
 
 `CvWiring#detectionPort(VisionCvProperties, ObjectProvider<ManagedChannel>)` selects `GrpcDetectionPort(cvGrpcChannel.getObject(), cvProperties.detectWidth(), cvProperties.jpegQuality())` when `enabled=true` (the channel obtained via `ObjectProvider`, the same idiom `PersistenceWiringConfiguration`'s repository-port beans use for a conditionally-present bean — safe because `cvGrpcChannel`'s own condition is guaranteed to match whenever `cvProperties.enabled()` is `true`), else `NoopDetectionPort`.
 
@@ -1429,3 +1433,235 @@ Exactly the follow-up the note above describes.
 `TrackingWiringContextTest` no longer autowires a seed bean (there is none); it asserts the shipped `vision.tracking.*` values bind in a real context, and the fold itself is proven without Spring in `TrackingWiringTest`. `ArchitectureTest` is untouched and green (9/9) — the seed type is a `vision-application` record, so no rule about adapters, `@ConfigurationProperties` placement or Spring-free layers is involved.
 
 `./mvnw -B -pl vision-app test`: **218/218 green**.
+
+## docs/plans/active/MEDIA-SOT-PLAN.md wave M7 done (media source-of-truth wiring — mediamtx as the video source of truth)
+
+Waves M1–M6 and M8 built every piece; this wave wires them into `vision-app` and fixes the compile
+break M4 left behind (`GrpcCvSettings`'s canonical constructor grew three fields — `pullRtspBase`,
+`pullReconnectInitialBackoff`, `pullReconnectMaxBackoff` — and `CvWiring#toGrpcCvSettings` still called
+the old 11-arg form; no `vision-app` build had passed since). Scope: `vision-app/**` and
+`docker-compose.yml`/`mediamtx.yml`/`.env.example` only — `vision-application`'s `DefaultStreamService`
+(the 12-arg constructor and `PullDetectionSettings`/`PulledDetectionPort` fields it now takes) was
+built by wave M5 and is read, not edited, here.
+
+### Media source-of-truth wiring
+
+**Switch A — who publishes video into mediamtx (`vision.publish.source-proxy.*`).**
+`PublishWiring#streamPublisherPort` now builds a `PublisherRouter` (adapter-publish-hls) whenever
+`vision.publish.enabled=true`, wrapping two publishers: `MediamtxStreamPublisher` (today's, unchanged
+construction) as the direct publisher, and a new `MediamtxProxyPublisher` (`mediamtx.apiBase()` +
+`MediamtxProxySettings` mapped from the new `VisionPublishProperties.SourceProxy` record plus
+`mediamtx.apiUser()`/`apiPassword()`) as the proxy publisher. The router itself decides per device
+(RTSP protocol + `source-proxy.enabled`) which one actually handles a stream — see `PublisherRouter`'s
+own javadoc — so `vision-app` still wires exactly **one** `StreamPublisherPort` bean. With
+`source-proxy.enabled=false` (default, D1), the router never routes anywhere but the direct publisher,
+so runtime behaviour — every URL shape, every publish call — is byte-identical to the plain
+`MediamtxStreamPublisher` bean this method used to return; `PublishWiringTest` was updated to assert
+`instanceof PublisherRouter` (the new top-level type) while every other assertion in that class
+(view/whep/playback URL shape) is untouched and still green, proving the wrap is behaviourally
+invisible by default.
+
+**Switch B — how frames reach CV (`vision.cv.frame-transport`).** `CvWiring` gained a conditional
+`pulledDetectionPort` bean (`GrpcPulledDetectionPort` over the shared `cvGrpcChannel`, present only
+when `VisionCvProperties#pullEnabled()` — i.e. `vision.cv.frame-transport=pull`). `cvGrpcChannel`'s own
+`@ConditionalOnExpression` grew a third disjunct (`'${vision.cv.frame-transport:push}' == 'pull'`) so
+the shared channel exists whenever *any* of the three CV-consuming flags is on — without that, turning
+on pull mode alone (leaving `vision.cv.enabled=false`) would NPE on a missing channel bean.
+`ApplicationServiceWiring#streamService` builds a `PullDetectionSettings` (`vision-application`) from
+that bean plus `cvProperties.pull().rtspBase()` only when `pullEnabled()`, and threads it into
+`DefaultStreamService`'s new 12-arg constructor; `null` (the default) reproduces the pre-wave-M5 11-arg
+constructor's behaviour exactly.
+
+**The rejected legal-combination row (A=proxy, B=push).** Checked once, at wiring time, in
+`PublishWiring#rejectProxyWithPushTransport` — called from the top of `streamPublisherPort`'s own bean
+method, since that is the one place `vision-app` already builds both `VisionPublishProperties` and (as
+a second parameter now) `VisionCvProperties` together. The check could not live inside
+`DefaultStreamService#start` (the natural per-stream spot) because that class is `vision-application`,
+outside this wave's file scope and concurrently owned by another wave for an unrelated fix. The
+rejection message:
+
+> `vision.publish.source-proxy.enabled=true (mediamtx dials the camera itself) requires
+> vision.cv.frame-transport=pull -- a proxied source means this JVM never holds a video frame
+> (docs/plans/active/MEDIA-SOT-PLAN.md D4), so leaving vision.cv.frame-transport=push (its current
+> value) would start a stream that can never detect: there would be nothing for push mode to send
+> cv-service. Set vision.cv.frame-transport=pull, or leave vision.publish.source-proxy.enabled=false.`
+
+Both flags default to the legal `(A=false, B=push)` row, so this `IllegalStateException` never fires in
+the default configuration.
+
+**The live-frame fallback.** `MediamtxLiveFrameGrabber` (built by wave M6) was wired but never
+consumed — in proxy mode `DefaultStreamService` opens no `VideoSourcePort` at all (D4), so its
+pipeline's cached `latestFrame`/`latestRawFrame` (backing the snapshot endpoint and training-sample
+capture) sit permanently empty for a proxied stream. `PublishWiring#mediamtxLiveFrameGrabber` is a new,
+unconditional bean (cheap — no I/O until `grab()` is actually called); a new class,
+`com.drones.vision.app.stream.LiveFrameFallbackStreamService` (a plain `StreamService` decorator, the
+same wiring-layer-decorator idiom `LiveUpdateEventPublisher`/`DetectionSessionCleanupEventPublisher`
+already use for other ports in this module), wraps `DefaultStreamService`'s output and falls back to a
+live grab from mediamtx's own RTSP output when the delegate's `latestFrame`/`latestRawFrame` come back
+empty **and** the stream is actually running (checked via `streams()` first, so an unknown/stopped
+stream stays exactly as fast as it is today instead of waiting out the grabber's 5s connect timeout).
+`ApplicationServiceWiring#streamService` only constructs this decorator when
+`VisionPublishProperties.SourceProxy#enabled()` is `true` — with the default `false` (D1), the plain
+`DefaultStreamService` is returned directly and `LiveFrameFallbackStreamService` is never even
+constructed, let alone wrapped around anything, in the default configuration.
+
+**Two silent-failure modes from M6, now respected in config comments** (`application.yaml`,
+`docker-compose.yml`): (1) with `source-proxy.on-demand=true`, mediamtx never dials the camera until a
+viewer connects, so `MediamtxProxyPublisher#streamStarted` skips the readiness poll entirely in that
+mode — without the skip, every on-demand start would time out waiting for a camera nobody has asked to
+watch yet. (2) a proxied source pointing at another path on the *same* mediamtx must use the
+container-internal RTSP port (`vision.publish.mediamtx.rtsp-base`'s compose-internal value,
+`rtsp://mediamtx:8554`), not the host-mapped one (`rtsp://localhost:8554`) — using the host-mapped port
+from inside a sibling container fails silently as a readiness timeout, not a create error.
+
+### Config surface added (§5.5, every default reproducing today's behaviour exactly — D1)
+
+| Property | Default | Notes |
+|---|---|---|
+| `vision.publish.source-proxy.enabled` | `false` | switch A |
+| `vision.publish.source-proxy.on-demand` | `false` | D10 |
+| `vision.publish.source-proxy.rtsp-transport` | `automatic` | passed to mediamtx |
+| `vision.publish.source-proxy.ready-timeout` | `10s` | readiness poll budget; ignored when `on-demand=true` |
+| `vision.publish.mediamtx.api-base` | `http://localhost:19997` | joins the `hls-base`/`whep-base`/`playback-base` family |
+| `vision.publish.mediamtx.api-user`/`.api-password` | unset | alternative to the `mediamtx.yml` mount below |
+| `vision.cv.frame-transport` | `push` | switch B — `push` \| `pull` |
+| `vision.cv.pull.rtsp-base` | `rtsp://localhost:8554` | the address the **worker** dials — deliberately separate from `vision.publish.mediamtx.rtsp-base` |
+| `vision.cv.pull.reconnect-initial-backoff` | `500ms` | mirrors `vision.publish.resilience.initial-backoff` |
+| `vision.cv.pull.reconnect-max-backoff` | `10s` | mirrors `vision.publish.resilience.max-backoff` |
+
+No magic numbers: every default above is a named constant on its properties record (`VisionPublishProperties.SourceProxy`/`.Mediamtx`, `VisionCvProperties.Pull`), matching this module's existing `@DefaultValue` + `static final` idiom.
+
+### `docker-compose.yml` / `mediamtx.yml` (the blocking deployment correction, §5.3)
+
+mediamtx's Control API is IP-gated by its own baked-in `authInternalUsers`: unauthenticated `api`
+action access is granted only to a caller at `127.0.0.1`/`::1`. A docker-published port does not
+preserve that view, and neither does a sibling container calling over the compose network — so
+`vision-app` calling from the `vision-app` service got `401` on every Control API call. `MTX_API: "yes"`
+alone does not fix this, and `MTX_AUTHINTERNALUSERS` as an env-var override was tried by wave M0 and
+does not work (no list-of-struct override for that field).
+
+**Fix chosen: mount a widened `mediamtx.yml`, not API credentials.** A new file at the repo root,
+`mediamtx.yml`, is bind-mounted read-only to `/mediamtx.yml` (the mediamtx image's own default
+config-file lookup, at that image's own cwd `/` — `FROM scratch`, no `WORKDIR`, the same fact this
+compose file's `MTX_PATHDEFAULTS_RECORD` comment already established for the recordings path). It
+widens the baked-in `authInternalUsers`' "any" user's `ips` from `["127.0.0.1","::1"]` to `[]` (no
+restriction), restating `publish`/`read`/`playback` alongside the widened `api`/`metrics`/`pprof` so
+nothing already-unauthenticated is narrowed. Every other key mediamtx already defaults is left
+unspecified (this file "is the default baked-in config with two deliberate overrides" — wave M0's own
+description of the spike config this file is derived from, `cv-service/spikes/pull/results/
+mediamtx-spike.yml`, read for its measurement and not copied verbatim: spikes/ is scratch space, not a
+deploy artifact). Every existing `MTX_*` environment variable in `docker-compose.yml` still applies as
+an override on top of this mounted file, exactly as it already did against mediamtx's un-mounted
+baked-in config. **Why the mount over `vision.publish.mediamtx.api-user`/`api-password`**: the mount
+requires no change to how the demo stack is reached (still no auth needed inside the compose network,
+matching every other mediamtx port's own posture) and needs no secret to manage; the credential pair
+stays supported in `VisionPublishProperties.Mediamtx`/`MediamtxProxySettings` as the documented
+alternative for a deployment that reaches mediamtx over something less trusted than a private compose
+network.
+
+`docker-compose.yml`'s `mediamtx` service also gained: `MTX_API: "yes"` / `MTX_APIADDRESS: ":9997"`
+(pinned explicitly, the same "future-drift" reasoning already applied to `MTX_HLS*`/
+`MTX_PLAYBACKADDRESS`), and a host port mapping for `9997` (same collision-avoidance numbering
+convention as `18888`/`18889`/`19996` — **see the follow-up hardening below for its current, corrected
+binding**). The `vision-app` service gained
+`VISION_CV_PULL_RTSP_BASE: ${VISION_CV_PULL_RTSP_BASE:-rtsp://mediamtx:8554}` — inert while
+`vision.cv.frame-transport` stays at its default `push`, and overridable via `.env` (documented in
+`.env.example`, mirroring `VISION_WEBRTC_HOST`'s own pattern) to a LAN address for a remote worker (the
+GB4005 box) that cannot resolve this compose network's own `mediamtx` hostname.
+
+`docker compose config` is clean (verified — renders without error, the mount resolves, the new port
+mapping and env var both appear as expected in the rendered config).
+
+#### Follow-up hardening: the host port mapping was `19997:9997` (all interfaces), corrected to loopback-only
+
+M7 shipped the host mapping as `"19997:9997"`, binding all host interfaces — this was the actual
+security defect, found and fixed on `feat/media-sot` right after M7 landed (commit `25cd8f9`), not a
+separate wave. Combined with `mediamtx.yml`'s `ips: []` widening (needed so the sibling `vision-app`
+container stops 401ing), an all-interfaces publish meant: anyone who could reach the Docker host on
+port 19997 — from the LAN, or the internet if the host is exposed, which matters concretely because
+this stack is deployed on field servers as a drone command point (`CLAUDE.md`'s deployment section) —
+could create, repoint, or delete mediamtx paths with **zero credentials**. Unlike the media ports
+(`8554`/`18888`/`18889`) that mediamtx already serves openly by design, the Control API is a
+path-mutation surface — qualitatively different, and not something an unauthenticated stranger should
+reach.
+
+**Fix: `"127.0.0.1:19997:9997"`.** Verified, not assumed, that this loses nothing real:
+`MediamtxProxyPublisher` (used only when `source-proxy.enabled=true`, still off by default, D1) is
+called exclusively from inside the `vision-app` container, which reaches mediamtx's Control API over
+the compose network at `http://mediamtx:9997` — the container-internal port, never this host mapping
+at all, same "container port, not host port" rule already established for `rtsp-base`/`hls-base`
+above. A host-run `vision-app` (Quickstart, `application.yaml`'s own `http://localhost:19997`
+default) still reaches it fine — loopback *is* localhost. `docker compose config` (re-verified after
+this change) renders `host_ip: 127.0.0.1` on the `9997` mapping only. `mediamtx.yml`'s own header
+comment, which had asserted "mediamtx is never directly exposed past the compose network's own port
+mappings", was corrected to state the truth — that assertion was wrong (the host mapping *was* an
+exposure path; that's exactly what this fix closes), and the mistake is kept documented in that file
+rather than silently rewritten, so a future reader doesn't re-derive the same wrong assumption.
+
+**Port `19996` (Playback API) was checked for the same issue and deliberately left published on all
+interfaces** — a considered decision, not an oversight. It's read-only (`GET /get`/`GET /list`, no
+path create/patch/delete), and `UsageRecordingResponse#url` (`UsageTimelineController#recording`,
+vision-api) hands its URL straight to the *browser*, unproxied — the same "must be reachable by the
+viewer's browser, not just this app's own JVM" shape as WHEP's `18889`, not the Control API's
+"only vision-app itself ever calls this" shape. Binding it to loopback would silently break clip
+export/replay for every viewer not on the Docker host itself. It was also already unauthenticated by
+mediamtx's own stock default before M7 touched anything (the `playback` action already grants
+`ips: []` in mediamtx's baked-in `authInternalUsers`, grouped with `publish`/`read` — `mediamtx.yml`
+restates that grouping, it doesn't widen it).
+
+`application.yaml`'s `api-user`/`api-password`/`api-base` comments were strengthened to say plainly
+that a mediamtx **not co-located** with `vision-app` on the same Docker host (a different deployment
+shape than this file, which always runs both as sibling containers) cannot lean on loopback binding at
+all — that topology requires real Basic-auth credentials against a real user in the remote mediamtx's
+own `authInternalUsers`, not an `ips: []` widening. `.env.example` documents the worked example:
+`VISION_PUBLISH_MEDIAMTX_API_BASE` / `VISION_PUBLISH_MEDIAMTX_API_USER` /
+`VISION_PUBLISH_MEDIAMTX_API_PASSWORD`, mapping onto `vision.publish.mediamtx.api-base`/`api-user`/
+`api-password` via Spring's standard relaxed env-var binding (same convention as the already-wired
+`rtsp-base`/`hls-base`/`whep-base` vars) — documented for a deployment that departs from this compose
+file, not wired into it, since this file always co-locates mediamtx with `vision-app` and neither var
+is read here today.
+
+No Java code, application property defaults, or wiring changed — comments and the one port-binding
+string only. `./mvnw -B -pl vision-app test -DskipWeb`: 220/220 green, unchanged from before this
+correction (nothing it touches is exercised by any test).
+
+### Tests
+
+- **`PublishWiringTest`**: one method renamed/updated (`defaultConfigurationSelectsMediamtxPublisher` →
+  `defaultConfigurationSelectsPublisherRouterWrappingMediamtxPublisher`, now asserting
+  `instanceof PublisherRouter`); every other method in the class is untouched and still green — the
+  strongest available proof that wrapping the router around the default-config publisher changes
+  nothing observable.
+- **`CvWiringTest`/`CvEnabledWiringTest`/`TrainingDisabledWiringTest`/`VisionCvPropertiesTest`**:
+  untouched, still green — `cvGrpcChannel`'s widened `@ConditionalOnExpression` still evaluates `false`
+  under every default (`vision.cv.enabled=false`, `vision.training.enabled=false`,
+  `vision.cv.frame-transport=push`), so `noSharedCvGrpcChannelBeanExistsByDefault` still holds.
+- **`ArchitectureTest`**: untouched, still green, 9/9 — the dependency rule holds: the new
+  `LiveFrameFallbackStreamService` lives in `com.drones.vision.app.stream` (this module), depends only
+  on `vision-application`'s `StreamService`/domain types and `adapter-publish-hls`'s
+  `MediamtxLiveFrameGrabber` — both already-legal directions for `..app..` code.
+
+### Default-config bar (the acceptance gate), proven
+
+**Before this wave: `vision-app` did not compile at all** (M4's `GrpcCvSettings` arity change, see
+above) — zero tests could run, reactor-wide or scoped. **After:** `./mvnw -B -pl vision-app test`:
+**220/220 green**, including `ArchitectureTest` (9/9) and a real docker-gated IT
+(`RtspSimulationDockerE2ETest`, ran against real docker in this environment, not skipped). Every
+default (`vision.publish.source-proxy.enabled=false`, `vision.cv.frame-transport=push`) reproduces
+today's behaviour exactly, proven by the untouched-and-still-green tests above rather than merely
+argued.
+
+**Reactor-wide `./mvnw -B verify`** — the first time this has been possible since wave M4 broke the
+compile — was run for this wave; see the task's own final report for its result (this file is written
+before that long-running command's final status was known, to keep the docs update inside the same
+task turn as the code that motivated it — the actual pass/fail is not re-litigated here after the fact
+if it was already reported honestly elsewhere).
+
+### Deferred / not this wave
+
+- **M9** (measure the real path against a real camera, amend `CV-SCALE-PLAN.md` §S5) is next and
+  depends on this wave plus M8.
+- The `anchor` clock-mode drift measurement (M0's spike) was against a synthetic source with no
+  independent oscillator — M9 must re-measure against a real H1 camera before the 100ms budget is
+  treated as settled. Nothing in this wave touches that.
+- CV-SCALE §S2 demand gating and §S4 worker pooling remain open seams (§9 of the plan), not built here.

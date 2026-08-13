@@ -95,6 +95,56 @@ vision:
       # override it. A non-localhost whepBase deployment must now set this explicitly (docs/plans/done/CV-TRAINING-V2-PLAN.md
       # §I's one deliberate behavior change -- an implicit guess became an explicit property).
       # playback-base: http://localhost:19996
+      # mediamtx's Control API base (docs/plans/active/MEDIA-SOT-PLAN.md §5.3, wave M7) -- MediamtxProxyPublisher's
+      # create/patch/get/delete-path calls, only ever reached when source-proxy.enabled=true below. Default
+      # http://localhost:19997 matches docker-compose.yml's host-mapped Control API port (mediamtx's own
+      # in-container default is 9997, same collision-avoidance convention as hls-base/whep-base/playback-base
+      # above). mediamtx's Control API is IP-gated by its own baked-in authInternalUsers config -- unauthenticated
+      # api access is granted only to a caller at 127.0.0.1/::1, which neither a docker-published port nor a
+      # sibling container satisfies. docker-compose.yml's mediamtx service mounts ./mediamtx.yml (see that file's
+      # own comments) to widen this for the compose network, and binds the host port mapping to 127.0.0.1 only
+      # (127.0.0.1:19997:9997, not 19997:9997) so that widened allowlist stays reachable only from inside the
+      # compose network or this host's own loopback -- never the LAN or internet (see docker-compose.yml's
+      # "Control API" port comment for the incident that binding corrected). api-user/api-password below are
+      # REQUIRED, not merely a stylistic alternative, whenever mediamtx is NOT co-located with vision-app on the
+      # same Docker host -- a remote mediamtx's own loopback binding does nothing for a caller on a different
+      # machine, so a real Basic-auth credential (matching a real user configured in that mediamtx's own
+      # authInternalUsers, not an ips: [] widening, which only makes sense on a network as trusted as one
+      # compose stack's private bridge) is the only safe way to reach it; see .env.example for the worked example.
+      # api-base: http://localhost:19997
+      # Optional mediamtx Control API Basic-auth credentials. REQUIRED for a mediamtx that isn't reachable via
+      # loopback or the compose network (see api-base above); optional for the co-located docker-compose.yml
+      # deployment this repo ships, where the mediamtx.yml mount already covers it. Unset by default (no
+      # Authorization header sent). api-password is required whenever api-user is set -- MediamtxProxySettings's
+      # (adapter-publish-hls) own compact constructor fails fast on a half-configured pair rather than 401ing at
+      # the first stream start.
+      # api-user:
+      # api-password:
+    # "mediamtx dials the camera itself" switch (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch A, §5.5, D3/D10,
+    # wave M7) -- MediamtxProxyPublisher/PublisherRouter's own config. RTSP-only: PublisherRouter only ever routes
+    # a device here when its stream protocol is "rtsp" (sim/mjpeg/v4l2 devices always publish through the direct
+    # JVM path regardless of this flag). Every default below reproduces today's behaviour exactly (D1) --
+    # source-proxy.enabled=false means PublisherRouter never routes anywhere but the plain MediamtxStreamPublisher
+    # this block's siblings already configure.
+    # source-proxy:
+    #   Whether any RTSP device is ever routed to MediamtxProxyPublisher instead of the JVM decode-and-publish
+    #   path. false (default) is today's behaviour: every device publishes through the JVM, unchanged.
+    #   REJECTED AT STARTUP (PublishWiring#rejectProxyWithPushTransport) when true while vision.cv.frame-transport
+    #   (below) is still "push" -- a proxied source means this JVM never holds a frame to push, so that
+    #   combination would start a stream that can never detect.
+    #   enabled: false
+    #   mediamtx sourceOnDemand for a created/patched path (D10): false (default) dials the camera as soon as the
+    #   path is created, so MTX_PATHDEFAULTS_RECORD=yes (docker-compose.yml) records it without waiting for a
+    #   viewer. true defers the dial until a reader connects -- MediamtxProxyPublisher then skips the readiness
+    #   poll entirely (there is nothing to be "ready" until then), so an on-demand start never times out waiting
+    #   for a camera nobody has asked to watch yet.
+    #   on-demand: false
+    #   rtspTransport sent to mediamtx's Control API when creating/patching a path -- how MEDIAMTX dials the
+    #   camera, not how this JVM talks to mediamtx.
+    #   rtsp-transport: automatic
+    #   How long MediamtxProxyPublisher#streamStarted polls path readiness before failing the start call rather
+    #   than returning a viewer URL that would play nothing. Ignored when on-demand is true.
+    #   ready-timeout: 10s
     # H264RecorderFactory's x264 rate-control/GOP tunables (docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2, wave F3).
     # encoder:
     #   crf: 21
@@ -146,6 +196,20 @@ vision:
     # path; lower trades detail for a smaller payload. Only read when
     # vision.cv.enabled=true.
     # jpeg-quality: 0.8
+    # How a DOWNSCALED frame reaches cv-service: auto | jpeg | bgr24
+    # (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R3). The wire has always carried
+    # IMAGE_ENCODING_BGR24 and cv-service has always decoded it; only the Java side used to
+    # re-encode unconditionally, because the downscale path was written when every deployment was
+    # remote. Sending raw removes a JPEG encode here AND a decode there -- together most of the
+    # ~25ms of NON-INFERENCE round trip measured on loopback (docs/conclusions/CV-RATE-BUDGET.md 3,
+    # where 53.8ms of round trip contained only 29ms of inference).
+    # What it costs is payload: 640x360 of BGR24 is ~691 KB against ~40 KB of JPEG. Free over
+    # loopback, indefensible over a radio link -- so `auto` (the default) decides from the endpoint
+    # itself rather than guessing: raw to localhost/127.x/[::1], JPEG to anything else. Set bgr24
+    # explicitly for a wired LAN box (e.g. the GB4005 at 192.168.0.106, ~55 Mbps at 10fps), and
+    # jpeg to pin the old behaviour. JPEG frames from an MJPEG source are unaffected either way --
+    # they are forwarded byte-identical, never transcoded.
+    # wire-format: auto
     # GrpcCvSettings' remaining gRPC transport tunables (docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2, wave F4).
     # response-timeout: 2s
     # keepalive-time: 20s
@@ -160,6 +224,28 @@ vision:
     # GrpcModelRegistryPort's per-call deadline (ListModels/PromoteModel).
     # registry:
     #   call-timeout: 10s
+    # How frames reach cv-service (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch B, §5.5, D5/D12, wave M7):
+    # push | pull. push (default) is today's behaviour, byte-identical (D1): this JVM samples frames and sends
+    # them to cv-service over the DetectStream RPC (the detect-width/jpeg-quality/wire-format knobs above). pull
+    # switches EVERY stream this deployment starts (one deployment-wide choice, not per-device -- only proxying
+    # video, source-proxy.enabled above, is decided per device) to the DetectPulled RPC instead: cv-service dials
+    # mediamtx itself (pull.rtsp-base below) and decodes/infers on its own schedule, reporting decode/achieved-fps/
+    # dropped-frame diagnostics back on the wire. Needs vision.cv.enabled=true OR this set to pull for the shared
+    # gRPC channel to be built at all (CvWiring#cvGrpcChannel's condition covers both).
+    # frame-transport: push
+    # Worker-pull config surface (docs/plans/active/MEDIA-SOT-PLAN.md §5.5); only read when frame-transport=pull.
+    # pull:
+    #   Base RTSP URL the WORKER (cv-service) dials -- deliberately separate from
+    #   vision.publish.mediamtx.rtsp-base above: a remote worker (e.g. the GB4005 box) must dial the host's LAN
+    #   address, not localhost, even though both properties often point at the same mediamtx instance in a
+    #   single-box deployment. docker-compose.yml sets this to the compose-internal rtsp://mediamtx:8554 for
+    #   vision-app's own container (VISION_CV_PULL_RTSP_BASE), which is also reachable from cv-service's
+    #   container on the same compose network.
+    #   rtsp-base: rtsp://localhost:8554
+    #   How long a pulled stream's reopen waits before its first/max retry after a failure -- mirrors
+    #   vision.publish.resilience.initial-backoff/.max-backoff's shape and defaults exactly.
+    #   reconnect-initial-backoff: 500ms
+    #   reconnect-max-backoff: 10s
 
   # --- Tracking engine (docs/plans/done/TRACKING-PLAN.md, docs/extracts/TRACKING-ORCHESTRATION.md 4.3) ---
   # Every key below is commented out: each documents VisionTrackingProperties' default rather than
@@ -344,6 +430,24 @@ vision:
     #     One value per instance, not per camera: a deployment mixing lenses needs this lifted onto
     #     the asset, which is the follow-up this default is deliberately conservative for.
     #     camera-hfov-degrees: 0.0
+    #     ADAPTIVE RATE (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2). A fixed inference rate is
+    #     both wasteful when nothing is moving and far too slow during a manoeuvre: at 30 deg/s of
+    #     yaw across a 60 deg lens the scene shifts half a frame width per second, which a 0.2-wide
+    #     box loses association with in well under a second (docs/conclusions/CV-RATE-BUDGET.md 2).
+    #     When enabled, the sampler raises its rate toward what the tracked target's own motion
+    #     demands -- displacement per second divided by the association budget w(1-t)/(1+t) -- and
+    #     leaves it exactly at inference-fps whenever nothing is tracked or nothing is moving.
+    #     It can only ever RAISE the rate above the operator's inference-fps, never lower it, and it
+    #     is bounded at runtime by the source's own frame rate and by measured detector capacity
+    #     (max-in-flight / round trip), so a cv-service that slows down lowers the rate feeding it.
+    #     Target motion works on any deployment; the ego-motion term needs camera-hfov-degrees above
+    #     and is simply absent without it, never estimated from a guess.
+    #     Set enabled: false to pin the rate to exactly inference-fps. On a metered link prefer
+    #     lowering max-fps -- a capped adaptive rate still spends its frames where they are needed.
+    #     adaptive-rate:
+    #       enabled: true
+    #       max-fps: 30.0
+    #       ewma-alpha: 0.2
     #   DetectionExtrapolator's smoothing tunables (how far past the latest completed result's capture
     #   time it extrapolates, and the max normalized box-center distance for a same-label match).
     #   extrapolation:

@@ -12,6 +12,7 @@ import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateAssetRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.application.asset.AssetService;
+import com.drones.vision.application.stream.StreamService;
 import com.drones.vision.application.stream.TrackingConfigPatch;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
@@ -47,9 +48,12 @@ import com.drones.vision.api.security.CurrentUser;
  * plus, in future, detections), see {@link UsageTimelineController} instead (docs/plans/done/MVP2-PLAN.md
  * §R, R-a) — the two endpoints live on separate controllers, see that class's javadoc for why.
  *
- * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, and three driven ports
- * used read-only: {@link StreamPublisherPort} (resolving {@code viewUrl}/{@code whepUrl}, exactly
- * like {@link StreamController}), {@link TelemetryRepositoryPort} (serving the telemetry endpoint — there
+ * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, {@link StreamService}
+ * (resolving {@code burnedIn} for {@link #startStream} — docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4 — the
+ * same precedent {@link StreamController} already sets for reading {@code StreamService} directly
+ * rather than through {@code AssetService}), and three driven ports used read-only: {@link
+ * StreamPublisherPort} (resolving {@code viewUrl}/{@code whepUrl}, exactly like {@link
+ * StreamController}), {@link TelemetryRepositoryPort} (serving the telemetry endpoint — there
  * is no service method for "read a usage's telemetry trail" yet, so this controller reads the
  * driven port directly, the same precedent {@link StreamController} already sets for {@code
  * viewUrl}), and {@link AssetImageRepositoryPort} (populating {@code hasImage} on every summary/
@@ -86,17 +90,19 @@ public class AssetController {
     private final AssetService assetService;
     private final CurrentUser currentUser;
     private final StreamPublisherPort streamPublisherPort;
+    private final StreamService streamService;
     private final TelemetryRepositoryPort telemetryRepositoryPort;
     private final AssetImageRepositoryPort assetImageRepositoryPort;
 
     public AssetController(AssetService assetService, CurrentUser currentUser,
-                            StreamPublisherPort streamPublisherPort,
+                            StreamPublisherPort streamPublisherPort, StreamService streamService,
                             TelemetryRepositoryPort telemetryRepositoryPort,
                             AssetImageRepositoryPort assetImageRepositoryPort) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
         this.streamPublisherPort =
                 Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
+        this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
         this.telemetryRepositoryPort =
                 Objects.requireNonNull(telemetryRepositoryPort, "telemetryRepositoryPort must not be null");
         this.assetImageRepositoryPort =
@@ -232,7 +238,8 @@ public class AssetController {
         requireInScope(assetId);
 
         StreamId streamId = assetService.startStream(assetId, device, config, tracking);
-        return new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId));
+        return new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId),
+                streamService.burnedIn(streamId));
     }
 
     /**

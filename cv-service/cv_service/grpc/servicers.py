@@ -18,6 +18,20 @@ living in ``cv_service/training/`` and ``cv_service/grpc/server.py``.
   yields a ``DetectionResponse`` with the same stream_id / sequence /
   timestamp_millis / model_id / model_version and an empty ``detections``
   list. Either way the service never crash-loops for lack of a model.
+* ``Inference.DetectPulled`` (MEDIA-SOT-PLAN wave M3, docs/plans/active/
+  MEDIA-SOT-PLAN.md §5.1/§8) is the worker-pull counterpart: the client sends
+  a declarative ``PullControl`` (restated on every message, same self-healing
+  doctrine as ``TrackingConfig``) instead of frame bytes, and this worker
+  dials the pulled RTSP source itself (``cv_service.pull.source``), decodes
+  it on its own deadline schedule (``cv_service.pull.loop`` -- the ported
+  rate-control sampler + D8 latest-wins decode) and anchors a local capture
+  clock (``cv_service.pull.clock``). Every SERVED frame is translated into a
+  synthetic ``FrameRequest`` and run through the exact same ``_handle_
+  request``/``_tracked_response``/``SessionRegistry``/``ModelRegistry``/
+  ``InferenceGate`` machinery ``DetectStream`` uses -- ``DetectPulled`` adds
+  no second inference path, only a second way frames arrive at the first
+  one -- then the response is decorated with fields 16-21, which are zero in
+  push mode and populated here.
 * ``Training.ListModels`` / ``Training.PromoteModel`` are implemented against
   the same ``ModelRegistry`` the inference path uses: ``ListModels`` reports
   the roster (``stage="active"`` for the current default, ``"available"`` for
@@ -64,6 +78,9 @@ import grpc
 
 from cv_service.config import DEFAULT_CONFIDENCE, DEFAULT_MAX_UPLOAD_BYTES, Settings
 from cv_service.inference.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
+from cv_service.pull.clock import CaptureClock
+from cv_service.pull.loop import PullDecodeLoop, PullStalledError
+from cv_service.pull.source import PullSource, PullSourceError
 from cv_service.tracking import params as tracking_params
 from cv_service.tracking.engines.base import Box, CameraPose
 from cv_service.tracking.registry import TrackerRegistry
@@ -478,6 +495,156 @@ class _StreamReader:
         self._mailbox.close()
 
 
+# ------------------------------------------------------------- DetectPulled
+#
+# Everything below supports `InferenceServicer.DetectPulled` only. Kept
+# module-level (not nested in the class) for the same reason `_StreamReader`
+# above is: each is a focused, independently-testable piece of one RPC's
+# machinery, not servicer state.
+
+
+def _default_pull_source_open(url: str, **kwargs: Any) -> PullSource:
+    """The real `PullSource` factory `DetectPulled` uses when no
+    `pull_source_open=` was injected -- a thin, lazy-imported wrapper so
+    `cv_service.grpc.servicers` stays importable without the `cv` extra
+    (`cv_service.pull.source` only touches `cv2` inside `OpenCvPullSource`
+    itself, but importing this wrapper eagerly would be one more reason to
+    trip over that if it ever changed)."""
+    from cv_service.pull.source import open_source
+
+    return open_source(url, **kwargs)
+
+
+def _resolve_pull_target_fps(message: "cv_pb2.PullControl", settings: Settings) -> float:
+    """`PullControl.target_fps <= 0` -> the deployment default (§5.1 field 7:
+    "the Java rate controller's output"; MEDIA-SOT-PLAN §7 -- that
+    controller keeps running in Java and its output travels on this field,
+    so <=0 here means "no opinion yet", not "stop detecting")."""
+    return message.target_fps if message.target_fps > 0 else settings.pull_target_fps
+
+
+def _resolve_pull_detect_width(message: "cv_pb2.PullControl", settings: Settings) -> int:
+    """`PullControl.detect_width <= 0` -> the deployment default (§5.1 field 8)."""
+    return message.detect_width if message.detect_width > 0 else settings.pull_max_width
+
+
+def _downscale_for_detection(image: Any, detect_width: int) -> tuple[Any, int, int]:
+    """Mirrors `DetectionFrameCodec`'s own rule (adapter-cv-grpc,
+    `withDownscaled`): a frame wider than `detect_width` is downscaled to
+    EXACTLY `detect_width`, aspect preserved, height rounded; a frame already
+    at or under `detect_width` passes through byte-identical (only `>`, not
+    `>=`, triggers the downscale). Returns `(image, width, height)`."""
+    height, width = image.shape[0], image.shape[1]
+    if detect_width <= 0 or width <= detect_width:
+        return image, width, height
+    import cv2
+
+    scaled_height = round(height * detect_width / width)
+    resized = cv2.resize(image, (detect_width, scaled_height), interpolation=cv2.INTER_AREA)
+    return resized, detect_width, scaled_height
+
+
+class _PullStreamIdMismatch(ValueError):
+    """A later `PullControl` message named a different `stream_id` than the
+    call's first message (§5.1 "Identity": a mismatch is `INVALID_ARGUMENT`)."""
+
+
+class _PullControlState:
+    """Thread-safe holder for a `DetectPulled` call's latest `PullControl`
+    message.
+
+    Every field is HOT except `source_url`/`rtsp_transport` (read from the
+    FIRST message only, §5.1 "Ordering") -- restated on every message by the
+    same self-healing doctrine `TrackingConfig` already uses (a message can
+    be lost with no error/retry, so only a restated desired state survives
+    that). Protobuf messages are never mutated in place here, only swapped
+    (one fresh message object per stream item) -- so holding the lock only
+    around the swap/read, not the whole message, is enough; no deep copy
+    needed.
+    """
+
+    def __init__(self, first_message: "cv_pb2.PullControl") -> None:
+        self._lock = threading.Lock()
+        self._message = first_message
+
+    def apply(self, message: "cv_pb2.PullControl") -> None:
+        with self._lock:
+            self._message = message
+
+    def snapshot(self) -> "cv_pb2.PullControl":
+        with self._lock:
+            return self._message
+
+
+class _PullControlReader:
+    """Background thread draining the *rest* of a `DetectPulled` call's
+    `PullControl` stream into `state`, mirroring `_StreamReader`'s role for
+    `DetectStream`'s `FrameRequest` stream -- but control messages are
+    applied IN PLACE (declarative desired state, always overwrite-to-latest),
+    never dropped-and-counted the way `LatestOnlyMailbox` drops frames (D8
+    is about decoded VIDEO frames; a superseded `PullControl` message is not
+    a loss, its restated fields are exactly as valid the moment a newer one
+    lands).
+
+    `should_stop` becomes true when the control stream ends for ANY reason --
+    an explicit `stop=true` message, the client half-closing (the iterator
+    simply ends), or a read error -- so `DetectPulled`'s main loop has one
+    signal to check regardless of *why* the call is ending (§5.1 "Teardown").
+    `error` is `None` for the first two (clean ends) and set for the third,
+    so the caller can tell "drain cleanly" apart from "abort and say why".
+    """
+
+    def __init__(
+        self,
+        request_iterator: Iterable["cv_pb2.PullControl"],
+        stream_id: str,
+        state: _PullControlState,
+    ) -> None:
+        self._iterator = request_iterator
+        self._stream_id = stream_id
+        self._state = state
+        self._error: Optional[BaseException] = None
+        self._closed = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="cv-pull-control-reader", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            for message in self._iterator:
+                if message.stream_id != self._stream_id:
+                    self._error = _PullStreamIdMismatch(
+                        f"PullControl.stream_id changed mid-call "
+                        f"({self._stream_id!r} -> {message.stream_id!r})"
+                    )
+                    return
+                self._state.apply(message)
+                if message.stop:
+                    return
+        except Exception as exc:  # noqa: BLE001 - re-surfaced via `error`, never crashes this thread silently
+            self._error = exc
+        finally:
+            self._closed.set()
+
+    @property
+    def error(self) -> Optional[BaseException]:
+        return self._error
+
+    @property
+    def should_stop(self) -> bool:
+        return self._closed.is_set()
+
+    def stop(self) -> None:
+        """Best-effort: nothing more to apply for a decode loop that's ending
+        on its own (a source stall/error) -- same posture `_StreamReader.
+        stop()` takes: a message that arrives right at teardown just isn't
+        applied. Does not (and cannot) interrupt a blocking read already in
+        progress on `request_iterator`; gRPC itself unblocks that once the
+        call ends, same as `_StreamReader` relies on."""
+        self._closed.set()
+
+
 class InferenceServicer(cv_pb2_grpc.InferenceServicer):
     """Real-YOLO-when-available, echo-otherwise implementation of ``Inference``.
 
@@ -528,8 +695,17 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         settings: Optional[Settings] = None,
         tracker_registry: object = _UNSET_REGISTRY,
         session_registry: Optional[SessionRegistry] = None,
+        pull_source_open: Optional[Callable[..., PullSource]] = None,
     ) -> None:
         self._inference_gate = inference_gate if inference_gate is not None else process_gate()
+        # `DetectPulled` only -- injectable so tests can drive it against a
+        # fake `PullSource` instead of a real RTSP/mediamtx dependency, same
+        # "explicit injection beats a real backend" seam `detector=`/
+        # `registry=` already are for DetectStream. Omitted -> the real
+        # `cv_service.pull.source.open_source` (imported lazily here so this
+        # class stays importable without the `cv` extra when nobody ever
+        # calls DetectPulled).
+        self._pull_source_open = pull_source_open if pull_source_open is not None else _default_pull_source_open
         self._warned_model_ids: set[str] = set()
         # TRACKING-V2-PLAN wave C5c -- log-once set for `_warn_roi_degraded`,
         # same shape as `_warned_model_ids` above.
@@ -617,6 +793,171 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
             reader.stop()
             self._session_registry.release(stream_id, session)
 
+    # --------------------------------------------------------- DetectPulled
+    #
+    # MEDIA-SOT-PLAN wave M3 (§5.1, §8). The worker dials `first_message.
+    # source_url` itself and decodes it on its own schedule
+    # (`cv_service.pull.loop.PullDecodeLoop`), instead of receiving frame
+    # bytes over the RPC -- everything from "translate one decoded frame into
+    # a DetectionResponse" downward is the exact same machinery DetectStream
+    # already uses (`_handle_request`/`_echo`, `SessionRegistry`,
+    # `ModelRegistry`, `InferenceGate`): a served pull frame is packaged into
+    # a synthetic `cv_pb2.FrameRequest` and handed to `_handle_request`
+    # unchanged, then the response is decorated with fields 16-21.
+
+    def DetectPulled(
+        self,
+        request_iterator: Iterable["cv_pb2.PullControl"],
+        context: grpc.ServicerContext,
+    ) -> Iterator["cv_pb2.DetectionResponse"]:
+        try:
+            first_message = next(request_iterator)
+        except StopIteration:
+            return
+        if not first_message.source_url:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "PullControl.source_url is required on the first message of a DetectPulled call",
+            )
+            return
+
+        # `source_url`/`rtsp_transport` are read from THIS message only (§5.1
+        # "Ordering") -- later messages restate every other (hot) field, see
+        # `_PullControlState`/`_PullControlReader` below.
+        stream_id = first_message.stream_id
+        state = _PullControlState(first_message)
+        control_reader = _PullControlReader(request_iterator, stream_id, state)
+        session = self._session_registry.acquire(stream_id)
+        # Same "never crash-loop for lack of a model" guard DetectStream
+        # applies before it ever calls `_handle_request` -- `_run_detector`'s
+        # non-registry branch assumes `self._detector` is set, which is false
+        # in full echo mode (see that method).
+        no_model = self._detector is None and self._registry is None
+
+        pull_loop: Optional[PullDecodeLoop] = None
+        try:
+            source = self._open_pull_source(first_message)
+        except Exception as exc:  # noqa: BLE001 - §5.1: an unopenable source always ends the call with
+            # UNAVAILABLE, never an unhandled crash -- `PullSourceError`/`ImportError` (no `cv` extra) are
+            # the expected cases; anything else is logged as unexpected rather than silently reported the
+            # same way, so a real bug here is still visible in the logs, not just a client-facing status.
+            if not isinstance(exc, (PullSourceError, ImportError)):
+                LOGGER.exception(
+                    "DetectPulled: unexpected error opening pulled source %r", first_message.source_url
+                )
+            control_reader.stop()
+            self._session_registry.release(stream_id, session)
+            context.abort(
+                grpc.StatusCode.UNAVAILABLE,
+                f"DetectPulled could not open {first_message.source_url!r}: {exc}",
+            )
+            return
+
+        try:
+            clock = CaptureClock(
+                mode=self._settings.pull_clock_mode,
+                reanchor_threshold_millis=self._settings.pull_clock_reanchor_threshold_millis,
+            )
+            pull_loop = PullDecodeLoop(
+                source,
+                target_fps=_resolve_pull_target_fps(first_message, self._settings),
+                clock=clock,
+                stall_timeout_millis=self._settings.pull_stall_timeout_millis,
+            )
+            sequence = 0
+            for frame, captured_at_millis, diagnostics in pull_loop.frames(
+                should_continue=lambda: not control_reader.should_stop and _context_active(context)
+            ):
+                snapshot = state.snapshot()
+                # Hot (§5.1): `target_fps` may change on any PullControl
+                # message; re-applied every served frame so a rate-controller
+                # update (the Java side's own output, MEDIA-SOT-PLAN §7)
+                # takes effect on the NEXT deadline, not just the next call.
+                pull_loop.set_target_fps(_resolve_pull_target_fps(snapshot, self._settings))
+                sequence += 1  # worker-minted, per pull, monotonic (§5.1 "Correlation")
+                request = self._build_pull_frame_request(
+                    stream_id=stream_id,
+                    sequence=sequence,
+                    captured_at_millis=captured_at_millis,
+                    frame=frame,
+                    snapshot=snapshot,
+                )
+                response = self._echo(request) if no_model else self._handle_request(request, session)
+                # Pull-only diagnostics (§5.1 fields 16-21) -- zero in push
+                # mode; the complete, honest accounting of a decode-and-infer
+                # loop that now runs on another machine (D8).
+                response.decode_millis = round(frame.decode_millis)
+                response.source_fps = diagnostics.source_fps
+                response.achieved_fps = diagnostics.achieved_fps
+                response.dropped_frames = diagnostics.dropped_frames
+                response.missed_deadlines = diagnostics.missed_deadlines
+                response.capture_skew_millis = diagnostics.capture_skew_millis
+                yield response
+        except PullStalledError as exc:
+            context.abort(grpc.StatusCode.UNAVAILABLE, str(exc))
+            return
+        finally:
+            control_reader.stop()
+            if pull_loop is not None:
+                pull_loop.close()
+            self._session_registry.release(stream_id, session)
+
+        if control_reader.error is not None:
+            if isinstance(control_reader.error, _PullStreamIdMismatch):
+                context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(control_reader.error))
+            else:
+                context.abort(
+                    grpc.StatusCode.UNKNOWN, f"DetectPulled control stream failed: {control_reader.error}"
+                )
+
+    def _open_pull_source(self, first_message: "cv_pb2.PullControl") -> PullSource:
+        transport = first_message.rtsp_transport or self._settings.pull_rtsp_transport
+        return self._pull_source_open(
+            first_message.source_url,
+            backend=self._settings.pull_decoder,
+            rtsp_transport=transport,
+            open_timeout_millis=self._settings.pull_open_timeout_millis,
+            read_timeout_millis=self._settings.pull_stall_timeout_millis,
+        )
+
+    def _build_pull_frame_request(
+        self,
+        *,
+        stream_id: str,
+        sequence: int,
+        captured_at_millis: int,
+        frame: "Any",
+        snapshot: "cv_pb2.PullControl",
+    ) -> "cv_pb2.FrameRequest":
+        """One served `PulledFrame` -> the same `cv_pb2.FrameRequest` shape
+        `DetectStream` receives over the wire, so `_handle_request` cannot
+        tell the two transports apart. `detect_width` is applied HERE (not
+        inside `cv_service.pull.loop`, which never imports `cv2`/`numpy`) --
+        mirrors `DetectionFrameCodec`'s own downscale rule
+        (adapter-cv-grpc/DetectionFrameCodec.java): only when wider than the
+        target, aspect preserved, rounded height, so a frame already at or
+        under `detect_width` is untouched.
+        """
+        import numpy as np
+
+        detect_width = _resolve_pull_detect_width(snapshot, self._settings)
+        image, width, height = _downscale_for_detection(frame.image, detect_width)
+        data = np.ascontiguousarray(image).tobytes()
+        return cv_pb2.FrameRequest(
+            stream_id=stream_id,
+            sequence=sequence,
+            timestamp_millis=captured_at_millis,
+            width=width,
+            height=height,
+            encoding=cv_pb2.IMAGE_ENCODING_BGR24,
+            data=data,
+            model_id=snapshot.model_id,
+            model_version=snapshot.model_version,
+            confidence_threshold=snapshot.confidence_threshold,
+            tracking=snapshot.tracking,
+            camera_pose=snapshot.camera_pose,
+        )
+
     def _new_session(self) -> StreamTrackingSession:
         """Build a fresh `StreamTrackingSession`, wired identically regardless
         of whether `SessionRegistry` is minting it for a brand-new
@@ -642,11 +983,20 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                 loader = _frame_loader(request)
                 outcome = session.process(
                     # A LOCAL monotonic clock, deliberately, not
-                    # `request.timestamp_millis`: the duty cycle is about how
-                    # much wall time this host has spent since its last
-                    # detector pass, and a capture timestamp comes from
-                    # another machine's clock and can go backwards across a
-                    # reconnect.
+                    # `request.timestamp_millis`. Under DetectStream (push),
+                    # that timestamp is stamped by the JVM -- another
+                    # machine's clock, which can jump or go backwards across
+                    # a reconnect; under DetectPulled (pull), it is minted by
+                    # THIS process (`cv_service.pull.clock.CaptureClock`), so
+                    # the "another machine's clock" distrust no longer
+                    # literally applies there. The reason to keep reading
+                    # `time.monotonic()` here is independent of either
+                    # transport, though: the duty cycle is about how much
+                    # WALL TIME THIS HOST has spent since its last detector
+                    # pass, not about when a frame was captured -- a
+                    # monotonic clock is also immune to the wall-clock
+                    # corrections/NTP steps a capture timestamp is not, which
+                    # matters for pull's own anchored `timestamp_millis` too.
                     now_millis=time.monotonic() * 1000.0,
                     detect=lambda roi=None: self._run_detector(
                         request, roi, loader, self._detect_floor_for(request)

@@ -1,0 +1,22 @@
+{
+  "backend": "pyav",
+  "label": "720p",
+  "resolution": "1280x720",
+  "url": "rtsp://localhost:18554/push720",
+  "frames_requested": 120,
+  "frames_decoded": 120,
+  "frames_dropped_or_eof": 0,
+  "wall_seconds": 3.42,
+  "decode_ms": {
+    "p50": 33.005,
+    "p95": 34.551,
+    "max": 75.886,
+    "n": 120
+  },
+  "inference_ms": null,
+  "process": {
+    "rss_max_mb": 73.9,
+    "rss_final_mb": 73.6,
+    "cpu_percent_avg": 19.4
+  }
+}

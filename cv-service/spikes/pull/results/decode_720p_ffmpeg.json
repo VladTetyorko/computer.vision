@@ -1,0 +1,28 @@
+{
+  "backend": "ffmpeg",
+  "label": "720p",
+  "resolution": "1280x720",
+  "url": "rtsp://localhost:18554/push720",
+  "frames_requested": 120,
+  "frames_decoded": 120,
+  "frames_dropped_or_eof": 0,
+  "wall_seconds": 9.85,
+  "decode_ms": {
+    "p50": 5.907,
+    "p95": 10.903,
+    "max": 12.578,
+    "n": 120
+  },
+  "inference_ms": {
+    "p50": 43.0,
+    "p95": 157.8,
+    "max": 1311.0,
+    "n": 120,
+    "model": "yolo26n.pt"
+  },
+  "process": {
+    "rss_max_mb": 351.6,
+    "rss_final_mb": 348.0,
+    "cpu_percent_avg": 649.9
+  }
+}
