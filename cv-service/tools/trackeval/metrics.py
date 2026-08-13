@@ -31,10 +31,27 @@ Pure stdlib: consumes `cv_service.tracking.session.FrameOutcome`/
 `TrackedBox` and `tools.trackeval.sequences.GroundTruthObject`, all of which
 are themselves pure stdlib at module scope -- so a metrics regression can be
 reproduced and debugged with no `cv` extra installed at all.
+
+**Coast ADE/FDE (TRACKING-V3-PLAN wave V0).** IDSW/FM/MT all read the
+MATCHED-frame timeline -- did SOME id cover this frame -- and are blind to
+how far off that id's own box is. A track can hold its id perfectly and
+still be 40 px away from the truth the entire time; the average and final
+displacement error over COASTING frames (`ReplayResult.coast_track_ids`,
+`track.source != SOURCE_DETECTOR`) is what wave V3-V5's drift reductions
+move and what this file's other metrics cannot see. **Populated for FOLLOW,
+essentially never for ASSOCIATE**: `_run_cost_associate` builds `boxes_out`
+from `detections`, one box per DETECTION (`session.py`), so an unmatched
+candidate that is merely coasting is never emitted at all in ASSOCIATE mode
+-- there is no box to measure drift on. FOLLOW's `_coast`/`_build_coast_
+observation` emit a box on EVERY frame, coasting or not, which is exactly
+why this number exists there and reads `n/a` everywhere else. That
+asymmetry is a fact about today's shipped associator, not a defect in this
+metric -- recorded here because it is easy to mistake for one.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from statistics import mean, median
 from typing import Optional
@@ -87,6 +104,16 @@ class Metrics:
     detector_passes_per_sec: float
     mean_tracker_millis: float
     p95_tracker_millis: float
+    # TRACKING-V3-PLAN wave V0 -- see the module docstring's "Coast ADE/FDE"
+    # section. `coast_sample_count` is how many (matched, coasting) frames
+    # contributed; the four error fields are `None` exactly when it is 0
+    # (nothing to average), same "concept does not apply" convention
+    # `recovery_rate`/the lifetime fields already use above.
+    coast_sample_count: int = 0
+    coast_ade_norm: Optional[float] = None
+    coast_fde_norm: Optional[float] = None
+    coast_ade_px: Optional[float] = None
+    coast_fde_px: Optional[float] = None
 
 
 def compute(result: ReplayResult) -> Metrics:
@@ -156,6 +183,8 @@ def compute(result: ReplayResult) -> Metrics:
     passes_per_sec = detector_passes / duration_seconds if duration_seconds > 0 else 0.0
     tracker_millis = [outcome.tracker_millis for outcome in result.outcomes]
 
+    coast_all, coast_finals = _coast_samples(result, matches_by_frame, windows)
+
     return Metrics(
         scenario=result.scenario,
         mode=result.mode,
@@ -176,6 +205,11 @@ def compute(result: ReplayResult) -> Metrics:
         detector_passes_per_sec=passes_per_sec,
         mean_tracker_millis=mean(tracker_millis) if tracker_millis else 0.0,
         p95_tracker_millis=_percentile(tracker_millis, TRACKER_MILLIS_PERCENTILE),
+        coast_sample_count=len(coast_all),
+        coast_ade_norm=mean(sample.norm for sample in coast_all) if coast_all else None,
+        coast_fde_norm=mean(sample.norm for sample in coast_finals) if coast_finals else None,
+        coast_ade_px=mean(sample.px for sample in coast_all) if coast_all else None,
+        coast_fde_px=mean(sample.px for sample in coast_finals) if coast_finals else None,
     )
 
 
@@ -217,6 +251,136 @@ def _match_frame(
         matched[gt_id] = track_id
         used_tracks.add(track_id)
     return matched
+
+
+# -- coast ADE/FDE (TRACKING-V3-PLAN wave V0) ---------------------------------
+
+
+@dataclass(frozen=True)
+class _CoastSample:
+    """One (matched, coasting) frame's displacement error, in both units at
+    once -- computed together because a normalized Euclidean distance cannot
+    be rescaled into pixels after the fact when width != height (x and y
+    scale by different factors), so both have to come from the same dx/dy."""
+
+    norm: float
+    px: float
+
+
+def _center_distance(track_box: Box, gt_box: Box, width: int, height: int) -> _CoastSample:
+    dx = track_box.center[0] - gt_box.center[0]
+    dy = track_box.center[1] - gt_box.center[1]
+    return _CoastSample(norm=math.hypot(dx, dy), px=math.hypot(dx * width, dy * height))
+
+
+def _gt_box(objects: TypingSequence[GroundTruthObject], gt_id: int) -> Optional[Box]:
+    for obj in objects:
+        if obj.gt_id == gt_id:
+            return obj.box
+    return None
+
+
+def _box_for_track(outcome: FrameOutcome, track_id: int) -> Optional[Box]:
+    for candidate_id, box in _tracked_boxes(outcome):
+        if candidate_id == track_id:
+            return box
+    return None
+
+
+def _coast_samples(
+    result: ReplayResult,
+    matches_by_frame: TypingSequence[dict[int, int]],
+    windows: dict[int, tuple[int, int]],
+) -> "tuple[list[_CoastSample], list[_CoastSample]]":
+    """`(every coast-frame sample, one FINAL sample per maximal coasting run)`
+    -- ADE is the mean of the first list, FDE the mean of the second (`compute`).
+
+    **Deliberately follows the identity through INVISIBLE frames, unlike
+    `matches_by_frame`.** `_match_frame` only ever links a gt object to a
+    track on a frame that object is VISIBLE (an invisible object cannot be
+    IoU-matched to anything, correctly -- IDSW/FM/MT's own "coverage" concept
+    has nothing to say about a frame nobody could see on). Drift is a
+    different question: a coasting box's distance from the TRUE (possibly
+    hidden) position is exactly what a full occlusion gap is FOR measuring,
+    and it is the single highest-value case this metric exists to catch --
+    `occlusion`/`long_occlusion`/`nonlinear`/`pan_occlusion` would otherwise
+    contribute nothing here at all, despite being the scenarios the whole
+    metric was built for. So this walk tracks its OWN notion of "current
+    identity": the last track id a REAL (visible, IoU-confirmed) match
+    established, carried forward across however many invisible/unmatched
+    frames follow, for as long as that same track id keeps emitting a box.
+    The true gt box (`_gt_box`, visibility-blind) is what its drift is
+    measured against throughout.
+
+    A "run" is a maximal stretch of CONSECUTIVE frames scored this way --
+    mirroring `_walk_timeline`'s own gap-run bookkeeping below, just walking
+    coast/non-coast instead of matched/unmatched. `result.coast_track_ids`
+    defaulting to `()` (older/hand-built `ReplayResult`s, or a mode with
+    nothing to report -- see the module docstring) is treated as "no coast
+    data", not an error: every scored object then simply contributes zero
+    samples.
+
+    **Stops at the object's LAST VISIBLE frame, not its last matched one.**
+    Those are different questions, and only one of them bounds a fair
+    measurement. `pan`'s world-fixed landmarks leave the frame for good once
+    the camera has panned past them -- past that point there is no true
+    on-screen position left to measure drift against, and a coasting box
+    compared to a ground truth that is running off to infinity would report
+    an unbounded, meaningless number. But `nonlinear`'s object is fully
+    VISIBLE again from the moment it re-emerges: if the coasting box has
+    drifted far enough that it never satisfies `_match_frame`'s IoU gate
+    again for the rest of the clip, that is not "the object left the scene",
+    it is the tracker permanently losing something that stayed in full view
+    the whole time -- the single most important case this metric exists to
+    catch, and cutting the walk off at the last MATCH (rather than the last
+    VISIBLE frame) would have hidden exactly that.
+    """
+    if len(result.coast_track_ids) != len(result.outcomes):
+        return [], []
+
+    all_samples: list[_CoastSample] = []
+    final_samples: list[_CoastSample] = []
+    for gt_id, (start, end) in windows.items():
+        visible_frames = [
+            frame_index
+            for frame_index in range(start, end + 1)
+            if any(obj.gt_id == gt_id and obj.visible for obj in result.ground_truth_by_frame[frame_index])
+        ]
+        if not visible_frames:
+            continue  # never visible at all -- `windows` already excludes this, guarded anyway
+        last_visible_frame = visible_frames[-1]
+
+        current_run: list[_CoastSample] = []
+        active_track_id: Optional[int] = None
+        for frame_index in range(start, last_visible_frame + 1):
+            fresh_match = matches_by_frame[frame_index].get(gt_id)
+            if fresh_match is not None:
+                active_track_id = fresh_match
+
+            sample = None
+            if active_track_id is not None:
+                track_box = _box_for_track(result.outcomes[frame_index], active_track_id)
+                if track_box is None:
+                    # This identity has stopped emitting a box at all (ASSOCIATE
+                    # never coasts one for an unmatched candidate -- see the
+                    # module docstring -- or the track was finally retired):
+                    # nothing left to keep scoring under it.
+                    active_track_id = None
+                elif active_track_id in result.coast_track_ids[frame_index]:
+                    gt_box = _gt_box(result.ground_truth_by_frame[frame_index], gt_id)
+                    if gt_box is not None:
+                        sample = _center_distance(track_box, gt_box, result.width, result.height)
+
+            if sample is not None:
+                all_samples.append(sample)
+                current_run.append(sample)
+                continue
+            if current_run:
+                final_samples.append(current_run[-1])
+                current_run = []
+        if current_run:
+            final_samples.append(current_run[-1])
+    return all_samples, final_samples
 
 
 # -- per-object timelines -----------------------------------------------------
@@ -314,6 +478,78 @@ def _percentile(values: TypingSequence[float], fraction: float) -> float:
     return ordered[index]
 
 
+# -- real-footage recordings (TRACKING-V3-PLAN wave V0) -----------------------
+
+
+@dataclass(frozen=True)
+class RecordingSummary:
+    """What can be measured about a real-footage replay with NO ground truth
+    to score against -- `tools.trackeval.recording.replay_recording`'s
+    counterpart to `Metrics` above. Cost + structural facts only: the same
+    axis `cv-service/MODULE.md`'s "Tracking engine" section already reports
+    in production, not an accuracy number. IDSW/FM/MT/coast-ADE all need a
+    KNOWN true position to compare against, which real footage does not
+    carry unless it has also been hand-labelled -- a separate, later concern
+    this summary deliberately does not pretend to answer.
+    """
+
+    name: str
+    total_frames: int
+    distinct_track_ids: int
+    mean_track_lifetime_frames: Optional[float]
+    median_track_lifetime_frames: Optional[float]
+    detector_passes: int
+    detector_passes_per_sec: float
+    mean_tracker_millis: float
+    p95_tracker_millis: float
+    # Fraction of frames that emitted at least one COASTING box, of the
+    # frames that emitted any tracked box at all -- the one thing this
+    # summary can say about drift-worthiness without a ground truth: how
+    # often the tracker was extrapolating rather than freshly confirmed.
+    # `None` when `coast_track_ids` was not supplied or nothing was ever
+    # tracked (nothing to take a fraction OF).
+    coast_frame_fraction: Optional[float]
+
+
+def summarize_recording(
+    outcomes: TypingSequence[FrameOutcome],
+    *,
+    fps: float,
+    coast_track_ids: TypingSequence[frozenset[int]] = (),
+    name: str = "",
+) -> RecordingSummary:
+    """Score one `recording.replay_recording` result. Reuses the SAME
+    private helpers `compute` above does for the cost/lifetime axis
+    (`_track_lifetimes`, `_percentile`) rather than a second implementation
+    of either -- `compute` itself is untouched by this function existing."""
+    lifetimes_by_track = _track_lifetimes(outcomes)
+    lifetimes = list(lifetimes_by_track.values())
+    detector_passes = sum(1 for outcome in outcomes if outcome.detector_ran)
+    duration_seconds = len(outcomes) / fps if fps > 0 else 0.0
+    passes_per_sec = detector_passes / duration_seconds if duration_seconds > 0 else 0.0
+    tracker_millis = [outcome.tracker_millis for outcome in outcomes]
+
+    coast_frame_fraction = None
+    if len(coast_track_ids) == len(outcomes):
+        tracked_frame_count = sum(1 for outcome in outcomes if _tracked_boxes(outcome))
+        if tracked_frame_count > 0:
+            coasted_frame_count = sum(1 for frame_ids in coast_track_ids if frame_ids)
+            coast_frame_fraction = coasted_frame_count / tracked_frame_count
+
+    return RecordingSummary(
+        name=name,
+        total_frames=len(outcomes),
+        distinct_track_ids=len(lifetimes_by_track),
+        mean_track_lifetime_frames=mean(lifetimes) if lifetimes else None,
+        median_track_lifetime_frames=median(lifetimes) if lifetimes else None,
+        detector_passes=detector_passes,
+        detector_passes_per_sec=passes_per_sec,
+        mean_tracker_millis=mean(tracker_millis) if tracker_millis else 0.0,
+        p95_tracker_millis=_percentile(tracker_millis, TRACKER_MILLIS_PERCENTILE),
+        coast_frame_fraction=coast_frame_fraction,
+    )
+
+
 # -- rendering ------------------------------------------------------------
 
 _COLUMN_HEADERS: tuple[str, ...] = (
@@ -335,6 +571,11 @@ _COLUMN_HEADERS: tuple[str, ...] = (
     "det/s",
     "trk_ms_avg",
     "trk_ms_p95",
+    "coast_n",
+    "cADE",
+    "cFDE",
+    "cADE_px",
+    "cFDE_px",
 )
 
 
@@ -358,6 +599,10 @@ def _row_cells(metrics: Metrics) -> list[str]:
     life_median = (
         "n/a" if metrics.median_track_lifetime_frames is None else f"{metrics.median_track_lifetime_frames:.1f}"
     )
+    coast_ade = "n/a" if metrics.coast_ade_norm is None else f"{metrics.coast_ade_norm:.3f}"
+    coast_fde = "n/a" if metrics.coast_fde_norm is None else f"{metrics.coast_fde_norm:.3f}"
+    coast_ade_px = "n/a" if metrics.coast_ade_px is None else f"{metrics.coast_ade_px:.1f}"
+    coast_fde_px = "n/a" if metrics.coast_fde_px is None else f"{metrics.coast_fde_px:.1f}"
     return [
         metrics.scenario,
         metrics.mode,
@@ -377,4 +622,9 @@ def _row_cells(metrics: Metrics) -> list[str]:
         f"{metrics.detector_passes_per_sec:.2f}",
         f"{metrics.mean_tracker_millis:.2f}",
         f"{metrics.p95_tracker_millis:.2f}",
+        str(metrics.coast_sample_count),
+        coast_ade,
+        coast_fde,
+        coast_ade_px,
+        coast_fde_px,
     ]

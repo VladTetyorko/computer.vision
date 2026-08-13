@@ -48,7 +48,7 @@ from typing import Optional
 from typing import Sequence as TypingSequence
 
 from cv_service.config import Settings
-from cv_service.tracking.engines.base import Box
+from cv_service.tracking.engines.base import SOURCE_DETECTOR, Box
 from cv_service.tracking.params import MODE_FOLLOW, LockRequest, TrackingRequest
 from cv_service.tracking.registry import TrackerRegistry, build_default_registry
 from cv_service.tracking.session import FrameOutcome, StreamTrackingSession
@@ -125,6 +125,21 @@ class DetectorNoiseConfig:
     # `CV_DETECT_FLOOR` does, and the operator's threshold applies to the
     # RESPONSE instead. A/B this to measure the change.
     detect_threshold: float = 0.0
+    # TRACKING-V3-PLAN wave V0, the `latency` scenario -- how many frames
+    # late the detector's answer arrives. 0 = instant (the pre-existing
+    # behaviour: the detector always describes the CURRENT frame). N > 0
+    # means a `detect()` call issued while processing frame `i` reports the
+    # ground truth as it was on frame `i - N`, modelling an offboard
+    # detector that takes real wall-clock time to return -- the normal case
+    # TRACKING-V3-PLAN §5.2 ("L1 RELAY") describes, not an edge case. This
+    # knob lives on the CONFIG, not on `SyntheticDetector`, because which
+    # frame's ground truth a call sees has to be decided by `run_replay`'s
+    # own frame-index loop (see `_ground_truth_for_detection`) -- doing it
+    # inside `SyntheticDetector.detect()` would tie the lag to CALL COUNT
+    # instead of FRAME INDEX, which silently breaks the moment a scenario
+    # also uses ROI re-detection (a second, conditional `detect()` call on
+    # the same frame).
+    latency_frames: int = 0
 
 
 # A false positive's box: small, and placed uniformly within this leading
@@ -260,7 +275,14 @@ class SyntheticDetector:
 
 @dataclass(frozen=True)
 class ReplayResult:
-    """Everything `metrics.py` needs, and nothing it has to recompute."""
+    """Everything `metrics.py` needs, and nothing it has to recompute.
+
+    `width`/`height` default to 0 and `coast_track_ids` to `()` so hand-built
+    `ReplayResult`s in `tests/trackeval/test_metrics.py` that predate
+    TRACKING-V3-PLAN wave V0 keep constructing without change -- `metrics.py`
+    treats a length mismatch between `coast_track_ids` and `outcomes` as "no
+    coast data available" rather than an error (see `metrics.compute`).
+    """
 
     scenario: str
     mode: str
@@ -269,6 +291,61 @@ class ReplayResult:
     outcomes: tuple[FrameOutcome, ...]
     ground_truth_by_frame: tuple[tuple[GroundTruthObject, ...], ...]
     scored_gt_ids: frozenset[int]
+    width: int = 0
+    height: int = 0
+    # TRACKING-V3-PLAN wave V0 -- `coast_track_ids[i]` is the set of emitted
+    # track ids on frame `i` whose box this frame came from the TRACKER, not
+    # a fresh `SOURCE_DETECTOR` observation (`metrics.py`'s coast ADE/FDE).
+    # Captured HERE, immediately after each `session.process()` call, rather
+    # than read back out of `FrameOutcome.boxes[i].track` later: `Track` is a
+    # mutable, per-stream-unique object (`track.py`'s own docstring -- "the
+    # book's own entry, updated in place once per frame") and `TrackedBox`
+    # holds a REFERENCE to it, not a snapshot. Every past frame's `TrackedBox`
+    # for a still-live track therefore aliases the SAME object the book keeps
+    # mutating -- reading `.source`/`.state` off it after the replay has
+    # finished would report this frame's status for EVERY frame that track
+    # ever appeared in, not each frame's own. `TrackedBox.box` has no such
+    # problem (`Box` is frozen, and `track.box = ...` REBINDS the attribute
+    # rather than mutating the old `Box` in place), which is exactly why
+    # every metric before this one could read `outcome.boxes[i].box` safely
+    # after the fact and this is the first one that could not just do the
+    # same for `.track`.
+    coast_track_ids: tuple[frozenset[int], ...] = ()
+
+
+def _ground_truth_for_detection(
+    sequence: Sequence, frame_index: int, latency_frames: int
+) -> "TypingSequence[GroundTruthObject]":
+    """What a detector running `latency_frames` behind would be reporting on,
+    while processing frame `frame_index` -- the ground truth from an OLDER
+    frame, not the current one (TRACKING-V3-PLAN wave V6's target, modelled
+    here for wave V0's harness; see `DetectorNoiseConfig.latency_frames`).
+
+    Before enough history exists (`frame_index < latency_frames`) a real late
+    detector would not have produced anything yet either -- returns no
+    detections at all rather than repeating frame 0, which would invent
+    evidence a real pipeline warming up does not have.
+    """
+    if latency_frames <= 0:
+        return sequence.frames[frame_index].ground_truth
+    source_index = frame_index - latency_frames
+    if source_index < 0:
+        return ()
+    return sequence.frames[source_index].ground_truth
+
+
+def _coast_ids_this_frame(outcome: FrameOutcome) -> frozenset[int]:
+    """Emitted track ids on this ALREADY-RETURNED `FrameOutcome` whose most
+    recent touch was the tracker, not the detector -- see `ReplayResult.
+    coast_track_ids` for why this must be read right after `process()`
+    returns, not later."""
+    if outcome.boxes is None:
+        return frozenset()
+    return frozenset(
+        tracked.track.track_id
+        for tracked in outcome.boxes
+        if tracked.track is not None and tracked.track.source != SOURCE_DETECTOR
+    )
 
 
 def run_replay(
@@ -306,21 +383,31 @@ def run_replay(
     )
 
     outcomes: list[FrameOutcome] = []
+    coast_track_ids: list[frozenset[int]] = []
     for frame in sequence.frames:
         now_millis = frame.index * (MILLIS_PER_SECOND / sequence.fps)
 
         def detect(
-            roi: Optional[Box] = None, ground_truth=frame.ground_truth
+            roi: Optional[Box] = None, frame_index=frame.index
         ) -> "tuple[list[_SyntheticDetection], int]":
             # Optional-argument, so this harness works against a session that
             # asks for a crop and one that does not -- the production side of
-            # ROI re-detection lands separately.
+            # ROI re-detection lands separately. `frame_index`, not
+            # `frame.ground_truth` directly (as this used to read), so
+            # `detector_config.latency_frames` can redirect which frame's
+            # truth is reported -- see `_ground_truth_for_detection`.
+            ground_truth = _ground_truth_for_detection(sequence, frame_index, detector_config.latency_frames)
             return detector.detect(ground_truth, roi), 0
 
         def load_frame(image=frame.image):
             return image
 
-        outcomes.append(session.process(now_millis=now_millis, detect=detect, frame=load_frame))
+        outcome = session.process(now_millis=now_millis, detect=detect, frame=load_frame)
+        outcomes.append(outcome)
+        # Captured immediately, before the NEXT iteration's `process()` call
+        # mutates the same live `Track` objects -- see `ReplayResult.
+        # coast_track_ids`'s own docstring for why this cannot be done later.
+        coast_track_ids.append(_coast_ids_this_frame(outcome))
 
     engine_id_served = next((outcome.engine_id for outcome in reversed(outcomes) if outcome.engine_id), "")
     scored_gt_ids = frozenset({sequence.primary_gt_id}) if mode == MODE_FOLLOW else sequence.gt_ids
@@ -333,6 +420,9 @@ def run_replay(
         outcomes=tuple(outcomes),
         ground_truth_by_frame=tuple(frame.ground_truth for frame in sequence.frames),
         scored_gt_ids=scored_gt_ids,
+        width=sequence.width,
+        height=sequence.height,
+        coast_track_ids=tuple(coast_track_ids),
     )
 
 

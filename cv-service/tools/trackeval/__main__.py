@@ -51,6 +51,24 @@ _DROPOUT_PROBABILITY = 0.35
 _CROSSING_NOISE_SEED = 0
 _CROSSING_POSITION_JITTER = 0.02
 _SMALL_TARGET_NOISE_SEED = 90210
+#
+# TRACKING-V3-PLAN wave V0 additions.
+#
+# `latency` needs no position jitter or dropout -- its own failure mode is
+# the systematic lag `latency_frames` injects (see `sequences.py`'s module
+# comment on this scenario). Measured while tuning this baseline: 8 frames
+# at this scenario's own speed (`LATENCY_TRAVEL_END`-`LATENCY_TRAVEL_START`
+# over `LATENCY_FRAME_COUNT`-1) is a ~0.11 position bias, comfortably larger
+# than half the object's own `OBJECT_WIDTH_FRACTION` -- enough to cost
+# coverage every single frame rather than only occasionally.
+_LATENCY_FRAMES = 8
+# `crossing_similar` needs the SAME small, realistic jitter `crossing`'s own
+# baseline does (`_CROSSING_POSITION_JITTER`) -- a perfect detector lets pure
+# geometry resolve even a symmetric crossing (see `crossing`'s own comment
+# above), and this scenario's whole point is that colour can no longer help
+# once geometry alone is ambiguous. A different seed so its own draw is
+# independent of `crossing`'s.
+_CROSSING_SIMILAR_NOISE_SEED = 1
 
 DEFAULT_NOISE_BY_SCENARIO: dict[str, replay_module.DetectorNoiseConfig] = {
     "dropout": replay_module.DetectorNoiseConfig(seed=_DROPOUT_NOISE_SEED, dropout_probability=_DROPOUT_PROBABILITY),
@@ -63,6 +81,10 @@ DEFAULT_NOISE_BY_SCENARIO: dict[str, replay_module.DetectorNoiseConfig] = {
     "small_target": replay_module.DetectorNoiseConfig(
         seed=_SMALL_TARGET_NOISE_SEED,
         reliable_size=SMALL_TARGET_RELIABLE_SIZE,
+    ),
+    "latency": replay_module.DetectorNoiseConfig(latency_frames=_LATENCY_FRAMES),
+    "crossing_similar": replay_module.DetectorNoiseConfig(
+        seed=_CROSSING_SIMILAR_NOISE_SEED, position_jitter=_CROSSING_POSITION_JITTER
     ),
 }
 

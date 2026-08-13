@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("numpy")
 
-from tools.trackeval.sequences import SCENARIOS
+from tools.trackeval.sequences import OBJECT_WIDTH_FRACTION, SCENARIOS
 
 
 @pytest.mark.parametrize("name", sorted(SCENARIOS))
@@ -114,3 +114,110 @@ def test_dropout_ground_truth_is_always_visible() -> None:
     or the scenario would silently turn into a second `occlusion`."""
     sequence = SCENARIOS["dropout"](seed=0)
     assert all(obj.visible for frame in sequence.frames for obj in frame.ground_truth)
+
+
+# -- TRACKING-V3-PLAN wave V0 scenarios ---------------------------------------
+
+
+def test_nonlinear_reverses_direction_during_the_gap() -> None:
+    """The whole point of this scenario -- constant-velocity extrapolation
+    from the pre-gap heading must point the OPPOSITE way from where the
+    object actually goes, or this is just `occlusion` again."""
+    from tools.trackeval.sequences import NONLINEAR_GAP_START
+
+    sequence = SCENARIOS["nonlinear"](seed=0)
+    before = [f for f in sequence.frames if f.index < NONLINEAR_GAP_START]
+    after_gap_start = [f for f in sequence.frames if f.index >= NONLINEAR_GAP_START]
+    pre_velocity = before[-1].ground_truth[0].box.x - before[0].ground_truth[0].box.x
+    post_velocity = after_gap_start[-1].ground_truth[0].box.x - after_gap_start[0].ground_truth[0].box.x
+    assert pre_velocity > 0, "the object must be heading one way before the gap"
+    assert post_velocity < 0, "and the OPPOSITE way once hidden -- the reversal is the scenario"
+
+
+def test_nonlinear_has_an_internal_visibility_gap() -> None:
+    sequence = SCENARIOS["nonlinear"](seed=0)
+    visibility = [obj.visible for frame in sequence.frames for obj in frame.ground_truth]
+    assert True in visibility[:10]
+    assert False in visibility
+    assert True in visibility[-10:]
+
+
+def test_tiny_fast_landmarks_are_smaller_than_the_normal_object() -> None:
+    """"A handful of pixels" is the whole premise -- these boxes must be
+    meaningfully smaller than every other scenario's `OBJECT_WIDTH_FRACTION`
+    object, or this is just another `pan`."""
+    from tools.trackeval.sequences import TINY_FAST_SIZE
+
+    sequence = SCENARIOS["tiny_fast"](seed=0)
+    for frame in sequence.frames:
+        for obj in frame.ground_truth:
+            assert obj.box.width == pytest.approx(TINY_FAST_SIZE)
+            assert obj.box.width < OBJECT_WIDTH_FRACTION / 2.0
+
+
+def test_tiny_fast_has_multiple_competing_landmarks() -> None:
+    """A single-object ASSOCIATE scenario can never show an id switch (one
+    candidate, one target, always force-matched regardless of geometric
+    quality) -- this scenario needs real competition to have a chance of
+    showing one."""
+    sequence = SCENARIOS["tiny_fast"](seed=0)
+    assert len(sequence.gt_ids) >= 2
+
+
+def test_tiny_fast_has_a_large_frame_to_frame_shift() -> None:
+    """Faster than `pan`'s own steady sweep -- see the scenario's own module
+    comment for why."""
+    from tools.trackeval.sequences import PAN_CAMERA_VELOCITY, TINY_FAST_CAMERA_VELOCITY
+
+    assert TINY_FAST_CAMERA_VELOCITY > PAN_CAMERA_VELOCITY
+
+
+def test_pan_occlusion_has_camera_motion_and_a_visibility_gap() -> None:
+    """Both failure modes at once -- neither `pan` alone nor `occlusion`
+    alone would exercise this scenario's own interaction."""
+    sequence = SCENARIOS["pan_occlusion"](seed=0)
+    max_shift = 0.0
+    previous_x = None
+    visibility = []
+    for frame in sequence.frames:
+        obj = frame.ground_truth[0]
+        visibility.append(obj.visible)
+        if obj.visible and previous_x is not None:
+            max_shift = max(max_shift, abs(obj.box.x - previous_x))
+        if obj.visible:
+            previous_x = obj.box.x
+    assert max_shift > 0.02, "the camera must actually be panning while the object is visible"
+    assert False in visibility, "there must be a genuine occlusion window"
+    assert True in visibility[:5]
+    assert True in visibility[-5:]
+
+
+def test_latency_ground_truth_is_always_visible() -> None:
+    """Same discipline as `dropout` -- the lag is injected by the detector
+    (`replay.DetectorNoiseConfig.latency_frames`), never by this ground
+    truth."""
+    sequence = SCENARIOS["latency"](seed=0)
+    assert all(obj.visible for frame in sequence.frames for obj in frame.ground_truth)
+
+
+def test_crossing_similar_objects_actually_overlap_at_some_frame() -> None:
+    sequence = SCENARIOS["crossing_similar"](seed=0)
+    best_iou = 0.0
+    for frame in sequence.frames:
+        boxes = [obj.box for obj in frame.ground_truth]
+        assert len(boxes) == 2
+        best_iou = max(best_iou, boxes[0].iou(boxes[1]))
+    assert best_iou > 0.3, "the two objects must genuinely overlap, not just pass near each other"
+
+
+def test_crossing_similar_has_a_simultaneous_visibility_gap() -> None:
+    """Both objects coast through the crossing moment -- see the scenario's
+    own module comment for why that, not just same-colour, is the point."""
+    sequence = SCENARIOS["crossing_similar"](seed=0)
+    for frame in sequence.frames:
+        visible_flags = {obj.visible for obj in frame.ground_truth}
+        # Both objects share visibility on every frame -- either both hidden
+        # (the gap) or both shown, never one without the other.
+        assert len(visible_flags) == 1
+    any_hidden = any(not obj.visible for frame in sequence.frames for obj in frame.ground_truth)
+    assert any_hidden, "the crossing-point gap must actually exist"
