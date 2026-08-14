@@ -8748,3 +8748,189 @@ E/F, which will be exercising these surfaces anyway.
   `features/command/asset-panel.ts`, `features/command/marks-panel.ts`. `core/marks/marks-store.ts` still
   names both deleted selectors in its own doc comment — left alone deliberately, it is Wave E's file (that
   store moves to `core/map-data/` there).
+
+## Status — TRACKING-V3-BAND1 wave J4: the capability ladder and a downgrade become visible to the operator (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md) — 2026-08-14
+
+**Done.** The last wave of TRACKING-V3-BAND1 — J1 (`contexts/vision-perception`) widened the domain
+records, J2 (`adapter-cv-grpc`) put them on the gRPC wire, J3 (`vision-app`/`vision-api`) exposed
+them over REST; this wave is what an operator actually sees and sets, in the existing Fly cockpit CV
+control panel (`features/fly/cv-control-panel.*`) — no new component, no new route, matching the
+task's own instruction to extend the panel that already owns per-stream CV control rather than
+inventing a second one.
+
+### What shipped
+
+- **`core/api/models.ts`**: `DetectionTrack`/`StreamTrack` both gain `reupdated: boolean`
+  (`TrackRef#reupdated()`/`TrackResponse#reupdated` verbatim — this track's gap was just
+  reconstructed by ORU on this frame). `FrameTracking` gains `detectionLagMillis`/`reupdateMillis`/
+  `reupdatedTracks` (whole numbers, `0` = "none"/"unknown" per the domain's own `Duration.ZERO`
+  sentinel) and a new nested `capability?: TrackingCapability`. New **`TrackingCapability(levelServed,
+  reason)`** — mirrors `TrackingCapabilityResponse` exactly; absent entirely on a pre-V3 cv-service
+  (invariant B3), never a zeroed placeholder. `TrackingConfigRequest` gains `capabilityLevel?`/
+  `reupdateMaxGapMillis?` (both ordinary absent-means-unchanged patch fields, inserted before `lock`
+  to match `TrackingConfigRequest`'s wire order). No `vision-api.ts`/`fleet-store.ts` change needed —
+  both new request fields ride the existing generic `tracking` object `patchStreamConfig` already
+  forwards verbatim, and the new response fields ride the existing `DetectionResult.tracking` this
+  app already reads via `DetectionsStore`/the `detectionResults` input.
+- **`features/fly/cv-control-panel-logic.ts`** (pure, unit-tested — no Angular/HTTP/timers, matching
+  every other builder in this file): a new **Capability ladder** section —
+  `CAPABILITY_LEVEL_OPTIONS`/`capabilityLevelOption`/`capabilityLevelLabel`/`capabilityLevelHint`
+  (the picker's own 6 options, `0`=Auto through `5`=Study, each with a short label + a fuller
+  cost/benefit hint traced to `TRACKING-V3-PLAN.md` §5.1/§5.2 — see the labels paragraph below),
+  `buildCapabilityLevelPatch` (the ceiling picker's own PATCH body), `isCapabilityDowngraded` (**the
+  wave's central predicate** — see its own paragraph below), `latestFrameTracking` (the newest
+  result's `tracking` object, or `undefined` — deliberately `results[0]` only, never a scan past a
+  tracking-less newest frame to an older, stale one), `DETECTION_LAG_BUDGET_MILLIS`/
+  `isDetectionLagOverBudget`/`formatDetectionLag` (the lag health figure — see its own paragraph).
+- **`features/fly/cv-control-panel.ts`**: `capabilityLevel` (local draft `signal(0)`, **no server
+  readback** — unlike `trackingMode`/`trackingEngineId`, which re-sync from `TrackStats` every poll,
+  there is no "requested level" field on the wire to sync from, only the outcome; same "local draft,
+  no readback" posture this component already has for `verifyEveryMillis`/`followFps`),
+  `onCapabilityLevel` (sets the draft, fires an immediate, uncoalesced `tracking`-only PATCH via the
+  existing `patchTracking` — same posture as every other tracking control here, never debounced with
+  a hot knob). `frameTracking` (computed, `latestFrameTracking(detectionResults())`),
+  `servedCapability` (computed, `frameTracking()?.capability`), `capabilityDowngraded` (computed,
+  `isCapabilityDowngraded(servedCapability())`), `detectionLagText`/`detectionLagOverBudget`
+  (computed, off `frameTracking()?.detectionLagMillis`).
+- **`features/fly/cv-control-panel.html`/`.css`**: a `<select>` ceiling picker (native `<select>`,
+  this app's own idiom for "pick one of an ordered few options" — `flight-command-panel.html`'s mode
+  picker is the precedent) inside the existing Tracking section, plus a new **served-capability +
+  detection-lag readout** card — see the next two paragraphs.
+
+### The level labels (§5 of TRACKING-V3-PLAN, restated so the picker's words stay true to it)
+
+`Auto` (`0`, the default) · `L1 · Relay` (identity only, no pixels, ~13 MB, runs on anything
+including an ARMv6 companion) · `L2 · Fill` (+ local visual fill and motion compensation, ~68 MB,
+needs a real OpenCV build) · `L3 · Detect` (+ local duty-cycled YOLO, ~350 MB, ≥2 GB RAM
+realistically) · `L4 · Identify` (+ ROI-pooled/OpenVINO re-identification, an Intel box or
+workstation) · `L5 · Study` (+ capture/training/promotion, workstation only, never the airframe).
+`capabilityLevelLabel` is the single function that names a level, shared verbatim by the picker's own
+options and the served-level readout, so both name the same level the same way.
+
+### The readout — a downgrade is a distinct state, never the same grey text as a normal reading
+
+`isCapabilityDowngraded(capability)` reads **only `capability.reason`** — `''` iff the wire's own
+`levelServed` matched what the running stream actually asked for when that frame was produced
+(`TRACKING-V3-BAND1-CONTEXT.md` §2's own contract), any other string names why it was capped. It
+**deliberately does not** compare against this panel's own locally-picked `capabilityLevel` — three
+reasons, spelled out in the function's own doc comment: (1) the wire already carries the exact
+request-vs-outcome fact, recomputing it client-side risks disagreeing with the server that actually
+knows; (2) the local ceiling has no server readback and can be stale (a page opened mid-session
+against a stream configured earlier, or between an edit and its PATCH landing); (3) `reason` also
+covers a host that sheds a level *after* auto-probing under `capabilityLevel: 0`, a case with no
+explicit ceiling to compare against but still a downgrade worth surfacing.
+
+**Rendering**: a quiet reading is `.chip.accent` (this app's existing quiet/confirmed chip intent) —
+`"L2 · Fill"` on a plain hairline card, identical in weight to the existing `.tracking-flow-strip`
+beside it. A downgrade swaps the chip to `.chip.warn`, tints the whole card's border/background with
+the shared `--color-warn-*` tokens (`.capability-readout.downgraded`), and adds a `.notice.warn` line
+quoting the server's own `reason` string verbatim underneath — three visually distinct signals (chip
+color, card tint, an explanatory line) rather than one, so a downgrade cannot be mistaken for a normal
+reading at a glance. `capability` being **absent** (a pre-V3 cv-service) renders `"no level
+reported"` in a plain chip — never hidden, and never the local `capabilityLevel` draft substituted
+into that slot (invariant B5, this wave's one way to get it wrong). The whole readout card is hidden
+only when `frameTracking()` itself is absent — no tracking telemetry has arrived this session at all
+(tracking off, or nothing received yet) — the same "nothing to report yet" posture the pre-existing
+flow strip already has; once a frame has arrived, `capability`'s own absence is shown, not folded into
+that same "nothing yet" silence.
+
+### Detection lag — a health figure beside the existing flow-strip rate readouts
+
+`DETECTION_LAG_BUDGET_MILLIS = 50` lives in `cv-control-panel-logic.ts` — `docs/conclusions/CV-RATE-
+BUDGET.md` §1's *Hold* budget (staying locked onto an already-found target), the one place this
+number is defined; the template reads it only through `detectionLagBudgetMillis`, never as a literal
+(invariant B4's UI-side counterpart). Rendered `"42 ms"` in `.mono` beside the "Serving" row inside the
+same readout card (the flow strip mentioned in the task brief is this panel's existing `TrackStats`-fed
+rate/duty-cycle line — the lag figure sits directly beside it, in the same drawer section, rather than
+in a new surface). `0`/negative/non-finite renders `—` — the domain's own `Duration.ZERO` sentinel
+means "unknown", not "zero lag", so it is never shown as an actual reading, good or bad. Past the
+budget the figure turns `--color-danger-text` + bold and a `.notice.danger` line explains the budget
+and why it matters ("staying locked on gets harder above this") — a harder-edged treatment than the
+capability downgrade's amber, since this is a hard, named threshold rather than "affordability capped
+below a request".
+
+### Degrade / role-gate / dev-parity notes
+
+- **`capability` absent** (pre-V3 cv-service, or this exact stream's tracking session hasn't produced
+  a frame with it yet): renders the explicit "no level reported" chip, per B5 — never hidden, never
+  filled in with the local ceiling pick.
+- **No tracking telemetry at all** (tracking off, endpoint unreachable, or the panel just opened):
+  the whole capability+lag readout hides, same posture as the pre-existing flow strip beside it.
+  `latestFrameTracking` reads only `results[0]` (the newest result) rather than scanning past a
+  tracking-less newest frame to an older tracked one — switching tracking off is reflected
+  immediately as "nothing to report", never a stale-but-real-looking capability/lag reading held
+  over from before the switch.
+- **A failed capability-level PATCH**: `onCapabilityLevel` calls the same `patchTracking` every other
+  tracking control here already uses — `FleetStore.patchStreamConfig` is `run()`-wrapped, so a
+  transport failure produces exactly one toast, identical to a failed mode/engine/cadence/lock PATCH.
+  No new error handling needed; this control inherits the existing behavior verbatim.
+- **Role-gating**: none, unchanged from the rest of the CV control panel (T7's own precedent) —
+  tracking/capability is a stream/detection knob, not a fleet-management or command action, unrelated
+  to `MeResponse.topRole`. Still hidden in watch mode alongside the rest of the panel (the existing
+  `!facade.watchMode()` gate on `<vision-cv-control-panel>`, untouched).
+- **Dev-parity**: nothing in this wave reads `vision.auth.enabled` or any role; behavior is identical
+  whether auth is on or off.
+
+### Tests
+
+`npx ng test --watch=false` → **115 files / 1929 passed** (was 115 / 1905 — the type/track-literal
+fixes alone, before this wave's own new spec cases, measured first to isolate the delta precisely
+since a `git stash`/checkout baseline wasn't available on this shared branch — **+24 new cases**, all
+in `cv-control-panel-logic.spec.ts`): `CAPABILITY_LEVEL_OPTIONS`/`capabilityLevelOption`/
+`capabilityLevelLabel`/`capabilityLevelHint` (6 — full ladder shape, `Auto` naming, every option
+carries a non-blank hint, known-level naming, unrecognized-level fallback for both the label and the
+hint), `buildCapabilityLevelPatch` (2 — the patch body, and that `0`/Auto is sent explicitly per B2),
+`isCapabilityDowngraded` (4 — absent capability is never a downgrade, an empty `reason` is quiet, any
+non-empty `reason` is a downgrade regardless of the levels involved, a whitespace-only `reason` counts
+as "no reason"), `latestFrameTracking` (4 — empty results, newest-with-no-tracking, newest-with-
+tracking, and the load-bearing case: never falling back to an older frame's stale tracking once the
+newest has none), `isDetectionLagOverBudget`/`formatDetectionLag` (8 — budget constant is 50, exactly-
+at-budget is not over, just-past is over, `0`/`NaN` are never flagged, positive values format/round to
+whole ms, `0`/negative/non-finite format to `—`). Two pre-existing `detection-overlay-logic.spec.ts`
+track literals updated to add `reupdated: false` (a required field now) — no behavior change, no new
+case. `npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`. No new component spec
+for `cv-control-panel.ts` — this repo's own established precedent (pure-logic vitest over component
+specs) held throughout, same as every prior tracking wave.
+
+### Build
+
+`ng build --configuration production`, measured against a same-commit baseline built in a separate
+`git worktree add --detach` at this wave's own starting commit (`1833ff1`, J3's own commit — this
+wave made no commits of its own), not a `git stash` (this task's own constraints ruled out any git
+write on the primary tree; a detached worktree touches nothing there):
+
+- **Initial bundle**: 396.50 kB → 396.50 kB raw / 111.69 kB → 111.74 kB transfer (+0.00 kB raw /
+  +0.05 kB transfer) — every new type in `core/api/models.ts` (`TrackingCapability`, the widened
+  `FrameTracking`/`DetectionTrack`/`StreamTrack`/`TrackingConfigRequest`) is TypeScript-only and
+  erases at build time; the near-zero transfer delta is gzip-boundary noise, not new shipped code.
+  The pre-existing "exceeds 390 kB budget" warning is unchanged (confirmed present on the baseline
+  build too — not introduced or worsened by this wave).
+- **`cockpit` lazy chunk** (this wave's real weight — the ceiling picker + readout card + their
+  logic, all inside `features/fly/cv-control-panel.*`): 101.52 kB → 106.56 kB raw / 22.55 kB →
+  23.73 kB transfer (**+5.04 kB raw / +1.18 kB transfer**).
+- Every other lazy chunk untouched by this task.
+
+### Files touched
+
+Modified: `core/api/models.ts`, `features/fly/cv-control-panel.ts`/`.html`/`.css`,
+`features/fly/cv-control-panel-logic.ts`+`.spec.ts`, `shared/player/detection-overlay-logic.spec.ts`
+(two track literals gained `reupdated: false`), this file (`vision-web/MODULE.md`). No new files —
+every three-file-component rule was already satisfied by `cv-control-panel.ts`/`.html`/`.css` before
+this task; nothing here needed a split.
+
+### Left incomplete / deferred, named honestly
+
+- **`reupdateMaxGapMillis` is typed on `TrackingConfigRequest` but has no control in this panel** —
+  the task's own "what to build" list asked for the capability-ceiling control specifically, not a
+  second knob for the ORU gap; `0`/absent keeps the server default, and nothing in this app ever
+  sends a non-zero value yet. Wiring it up (if ever wanted) is a small, disjoint follow-up — the type
+  is already in place.
+- **`reupdated` (per-track ORU flag) is typed on `DetectionTrack`/`StreamTrack` but has no new visual
+  treatment in `shared/player/player.ts`** — the task's JSON-shape section mentioned the field, but
+  "what to build" scoped this wave to the capability control + the served-level/lag readout only, not
+  a new box treatment alongside the existing dashed-`COASTING` stroke. `player.ts` was not touched.
+- **Not verified live in a browser** — implemented and tested against the frozen wire contract
+  (`vision-api/MODULE.md`'s J3 section) with `tsc`/vitest/a production build only, matching this
+  branch's own established precedent for waves integrating ahead of/alongside a concurrently-landing
+  backend (e.g. the T7 entry above). Both themes should get a live check next time `/fly` is opened
+  against a running stream with tracking on.

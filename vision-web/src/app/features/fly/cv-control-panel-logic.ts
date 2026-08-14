@@ -3,7 +3,9 @@ import type {
   CvTracker,
   DetectionResult,
   DetectorReason,
+  FrameTracking,
   PatchStreamConfigResponse,
+  TrackingCapability,
   TrackingMode,
   TrackStats,
   UpdateStreamConfigRequest,
@@ -323,6 +325,158 @@ export function buildFollowLockPatch(trackId: number): UpdateStreamConfigRequest
  *  policy (docs/plans/done/TRACKING-PLAN.md §4.A's `TargetLock#release`). Leaves `mode` untouched. */
 export function buildReleaseLockPatch(): UpdateStreamConfigRequest {
   return { tracking: { lock: { release: true } } };
+}
+
+// --- Capability ladder (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md, wave J4) ---------------------------
+// The operator picks a *ceiling* (plan decision E12) — `0` = auto-probe, `1`-`5` caps how much of the
+// pipeline this stream's host is allowed to spend on it (TRACKING-V3-PLAN.md §5). What actually ran
+// is a completely different, server-reported fact (`TrackingCapability`, above) — this section never
+// mixes the two: `CAPABILITY_LEVEL_OPTIONS` only ever labels the *request* side of the panel, and
+// `isCapabilityDowngraded`/`capabilityLevelLabel` below are the only readers of the *outcome* side,
+// each reading the server's own fields, never a local comparison against the ceiling picked here.
+
+/** One entry of the capability-ceiling picker (`cv-control-panel.html`'s `<select>`) — `label` is
+ *  also reused, unmodified, to name whatever level the server reports actually serving (see
+ *  {@link capabilityLevelLabel}), so the picker and the readout always use the exact same words for
+ *  the same level. `hint` is the fuller cost/benefit sentence shown under the picker for whichever
+ *  level is currently selected (`TRACKING-V3-PLAN.md` §5.1/§5.2 — the ladder's own measured costs,
+ *  not a guess: "L1 works on an ARMv6 companion" and "L3 needs ~2 GB RAM" are both load-bearing
+ *  claims from that measurement, so the wording here must stay true to it, not just plausible). */
+export interface CapabilityLevelOption {
+  readonly value: number;
+  readonly label: string;
+  readonly hint: string;
+}
+
+/** The full picker, `0` (Auto) through `5` (Study) — every label/hint pair traces to
+ *  `TRACKING-V3-PLAN.md` §5.2's own ladder table; nothing here is invented. */
+export const CAPABILITY_LEVEL_OPTIONS: readonly CapabilityLevelOption[] = [
+  {
+    value: 0,
+    label: 'Auto',
+    hint: 'Serves the highest level this host can afford — probed automatically, nothing to configure. The default, and the safest choice for a host you have not measured.',
+  },
+  {
+    value: 1,
+    label: 'L1 · Relay',
+    hint: 'Identity only, no pixels — boxes come from offboard, over the wire. ~13 MB, pure stdlib. Runs on anything, including an ARMv6 companion with no camera library at all.',
+  },
+  {
+    value: 2,
+    label: 'L2 · Fill',
+    hint: 'Adds local visual fill between detector passes (optical-flow + telemetry motion compensation) and appearance matching. ~68 MB — needs a real OpenCV build (ARMv7/aarch64, not ARMv6).',
+  },
+  {
+    value: 3,
+    label: 'L3 · Detect',
+    hint: 'Adds the local, duty-cycled YOLO detector — boxes come from this host, not offboard. ~350 MB, realistically ≥2 GB RAM.',
+  },
+  {
+    value: 4,
+    label: 'L4 · Identify',
+    hint: 'Adds ROI-pooled and optional OpenVINO re-identification appearance matching — the full identity tier. An Intel inference box or a workstation.',
+  },
+  {
+    value: 5,
+    label: 'L5 · Study',
+    hint: 'Adds capture, training and model promotion. Workstation only — this level never runs on the airframe.',
+  },
+];
+
+/** The picker option for `level`, or `undefined` for a value outside `0`-`5` (should not happen —
+ *  every control in this panel only ever offers {@link CAPABILITY_LEVEL_OPTIONS}' own values — but a
+ *  server-reported `levelServed` is external input and gets the same defensive treatment as every
+ *  other wire-sourced number in this file). */
+export function capabilityLevelOption(level: number): CapabilityLevelOption | undefined {
+  return CAPABILITY_LEVEL_OPTIONS.find((option) => option.value === level);
+}
+
+/** The short name for `level` (e.g. `"L2 · Fill"`) — shared by the picker's own options and the
+ *  served-level readout, so both name the same level the same way. Falls back to a bare `"L{level}"`
+ *  for a level this app's ladder doesn't recognize, never a blank or fabricated name. */
+export function capabilityLevelLabel(level: number): string {
+  return capabilityLevelOption(level)?.label ?? `L${level}`;
+}
+
+/** The picker's own hint line for whichever level is currently selected — {@link CAPABILITY_LEVEL_OPTIONS}'
+ *  `hint`, or `''` for an unrecognized value (never shown; the picker only ever selects a known
+ *  option). */
+export function capabilityLevelHint(level: number): string {
+  return capabilityLevelOption(level)?.hint ?? '';
+}
+
+/** The capability-ceiling picker's own patch body — `0` sends the proto zero-value (auto-probe,
+ *  byte-identical to not setting the field, invariant B2), `1`-`5` caps the level this stream's host
+ *  may serve (a ceiling, not a demand — decision E12; the host may still serve less if it cannot
+ *  afford the ceiling, see {@link isCapabilityDowngraded}). */
+export function buildCapabilityLevelPatch(level: number): UpdateStreamConfigRequest {
+  return { tracking: { capabilityLevel: level } };
+}
+
+/**
+ * Whether the most recent frame's capability facts should render as a **downgrade** rather than a
+ * quiet reading (invariant B5, the point of this whole wave). Reads only `capability.reason` — the
+ * server's own account of whether `levelServed` matched what the running stream actually asked for
+ * when this frame was produced — **never** a comparison against this panel's own locally-picked
+ * ceiling. Three reasons that is the honest choice, not a shortcut:
+ *
+ * 1. The wire contract already carries this exact fact: `reason` is `''` **iff** `levelServed`
+ *    matched the request (`TRACKING-V3-BAND1-CONTEXT.md` §2) — recomputing it client-side would be
+ *    duplicating logic the server already ran, with a real chance of disagreeing with it.
+ * 2. This panel's own ceiling picker has **no server readback** (unlike `trackingMode`/
+ *    `trackingEngineId`, which re-sync from `TrackStats` every poll) — the local value can be stale
+ *    the moment a page loads mid-session against a stream configured earlier, or between an edit and
+ *    its PATCH landing. Comparing a possibly-stale local value against the wire would risk exactly
+ *    the "quiet, wrong reading" this wave exists to prevent.
+ * 3. `reason` also covers a case a local comparison could never see at all: a host that shed a level
+ *    *after* auto-probing under `capabilityLevel: 0` (§5.3's "the level is hot… a loaded host can
+ *    shed a level") — there was never an explicit ceiling to compare against, but it is still a
+ *    downgrade worth surfacing.
+ *
+ * `undefined` (no `capability` reported at all) is never a downgrade — see
+ * `cv-control-panel.html`'s own "no level reported" branch for how that absence is rendered instead
+ * (B5: never silently substitute anything in this slot).
+ */
+export function isCapabilityDowngraded(capability: TrackingCapability | undefined): boolean {
+  return capability !== undefined && capability.reason.trim().length > 0;
+}
+
+/**
+ * The most recent frame's tracking telemetry, or `undefined` if the newest result has none
+ * (tracking off for this stream right now, an old server, or no frame received yet). `results` is
+ * assumed newest-first (`DetectionsStore.results()`'s own documented contract), so this reads
+ * `results[0]` alone — **deliberately not a scan for the nearest result that happens to carry
+ * `tracking`**: once tracking is switched off, every new frame arrives with `tracking` absent, and
+ * scanning past that absence to an older, still-tracked frame would render a stale capability/lag
+ * reading as if it were current. Reading only the newest entry means "tracking just turned off"
+ * shows up immediately as "nothing to report", not as one stale-but-real-looking number.
+ */
+export function latestFrameTracking(results: readonly DetectionResult[]): FrameTracking | undefined {
+  return results[0]?.tracking;
+}
+
+/** `docs/conclusions/CV-RATE-BUDGET.md` §1 — the *Hold* job (staying locked onto an already-found
+ *  target) budgets detection→association lag at under this many milliseconds; a stream running above
+ *  it is starting to lose that job even before any box actually goes missing. Lives here, the one
+ *  place this number is defined, rather than inline in the template (invariant B4's UI-side
+ *  counterpart: no magic number hardcoded where it's used). */
+export const DETECTION_LAG_BUDGET_MILLIS = 50;
+
+/** `detectionLagMillis` renders as over-budget only for a genuinely measured, positive value — `0`
+ *  means "unknown" on the wire (`Duration.ZERO`, see `FrameTracking#detectionLagMillis`'s own doc
+ *  comment), never "instantaneous", so it is never flagged as either good or bad. */
+export function isDetectionLagOverBudget(detectionLagMillis: number): boolean {
+  return Number.isFinite(detectionLagMillis) && detectionLagMillis > DETECTION_LAG_BUDGET_MILLIS;
+}
+
+/** `"42 ms"`, or `—` for `0`/negative/non-finite — the wire's own "unknown" sentinel
+ *  (`FrameTracking#detectionLagMillis`'s doc comment), rendered honestly rather than as a fabricated
+ *  "0 ms" reading. */
+export function formatDetectionLag(detectionLagMillis: number): string {
+  if (!Number.isFinite(detectionLagMillis) || detectionLagMillis <= 0) {
+    return '—';
+  }
+  return `${Math.round(detectionLagMillis)} ms`;
 }
 
 /**
