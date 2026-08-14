@@ -47,6 +47,20 @@ observation` emit a box on EVERY frame, coasting or not, which is exactly
 why this number exists there and reads `n/a` everywhere else. That
 asymmetry is a fact about today's shipped associator, not a defect in this
 metric -- recorded here because it is easy to mistake for one.
+
+**Velocity plausibility (TRACKING-V3-PLAN §6b finding O3).** IDSW/FM/MT/ML
+all read the MATCHED-frame timeline -- "did SOME id cover this frame" --
+and coast ADE/FDE reads the box's distance from the truth. Neither asks
+whether the track's own reported STATE makes physical sense: a track whose
+velocity estimate has diverged to `1e16` and a track that is merely LOST
+both score `ML=1`, and every column above is blind to the difference. That
+blindness is exactly why a real capture-time defect (`ObservationRing`
+timestamping entries at arrival instead of capture, see `BASELINE.md`'s
+`latency` writeup) survived an entire wave: the reconstructed velocity ran
+to `1e14`-`1e32` and nothing in this table noticed. `implausible_velocity_
+count` is a plausibility DETECTOR, not a clamp -- it counts, never corrects,
+and touches no tracker behaviour. See `MAX_PLAUSIBLE_VELOCITY_PER_SECOND`
+below for the bound's own derivation.
 """
 
 from __future__ import annotations
@@ -73,6 +87,35 @@ MOSTLY_TRACKED_COVERAGE = 0.8
 MOSTLY_LOST_COVERAGE = 0.2
 
 TRACKER_MILLIS_PERCENTILE = 0.95
+
+# TRACKING-V3-PLAN §6b finding O3 -- the bound `implausible_velocity_count`
+# checks `track.velocity_x`/`_y` against, in normalized frame-WIDTHS/HEIGHTS
+# per second respectively (proto `Detection.velocity_x`/`_y`'s own comment;
+# each axis checked independently below, never combined into one Euclidean
+# magnitude, for the same width != height reason `_CoastSample` keeps its
+# norm/px pair separate rather than mixing units).
+#
+# Derived from the fastest apparent motion this project has ever measured or
+# modelled anywhere, real or synthetic -- not a round number picked to feel
+# safe:
+#   - `sequences.TINY_FAST_CAMERA_VELOCITY` (0.06 frame-widths/frame at
+#     `sequences.DEFAULT_FPS=10`) is 0.6 frame-widths/sec, the single
+#     fastest apparent motion any scenario in this harness produces, and it
+#     is already a deliberately extreme synthetic pan (`BASELINE.md`'s
+#     `tiny_fast` writeup: "nearly double `pan`'s own steady rate").
+#   - `docs/conclusions/CV-RATE-BUDGET.md` §2's own most aggressive
+#     documented case -- a 90 deg/s "aggressive" search yaw -- is 960 px/s
+#     on a 640 px frame, 1.5 frame-widths/sec of PURELY camera-induced
+#     apparent motion, faster than the harness's own synthetic worst case.
+# A target crossing the ENTIRE frame -- width or height -- in under a fifth
+# of a second (5.0/sec) is more than 3x that documented real-world maximum,
+# so neither a legitimate fast pan nor a fast-moving target ever trips it,
+# while a divergent estimate (the `latency` defect this bound exists to
+# catch reconstructed a velocity of `1e14`-`1e32`, `BASELINE.md`'s own
+# `latency` writeup) trips it by thirteen-plus orders of magnitude -- there
+# is no tuning knife-edge between "physically fast" and "numerically broken"
+# for this bound to sit on.
+MAX_PLAUSIBLE_VELOCITY_PER_SECOND = 5.0
 
 
 @dataclass(frozen=True)
@@ -114,6 +157,13 @@ class Metrics:
     coast_fde_norm: Optional[float] = None
     coast_ade_px: Optional[float] = None
     coast_fde_px: Optional[float] = None
+    # TRACKING-V3-PLAN §6b finding O3 -- how many (track, frame) reports
+    # exceeded `MAX_PLAUSIBLE_VELOCITY_PER_SECOND` on either axis. Always a
+    # plain count, never `None`: unlike coast ADE/FDE there is no "concept
+    # does not apply" case -- a replay with no velocity data simply reports
+    # zero occurrences, which is also the correct answer for "how many did
+    # this bound catch".
+    implausible_velocity_count: int = 0
 
 
 def compute(result: ReplayResult) -> Metrics:
@@ -184,6 +234,7 @@ def compute(result: ReplayResult) -> Metrics:
     tracker_millis = [outcome.tracker_millis for outcome in result.outcomes]
 
     coast_all, coast_finals = _coast_samples(result, matches_by_frame, windows)
+    implausible_velocity_count = _count_implausible_velocities(result)
 
     return Metrics(
         scenario=result.scenario,
@@ -210,6 +261,7 @@ def compute(result: ReplayResult) -> Metrics:
         coast_fde_norm=mean(sample.norm for sample in coast_finals) if coast_finals else None,
         coast_ade_px=mean(sample.px for sample in coast_all) if coast_all else None,
         coast_fde_px=mean(sample.px for sample in coast_finals) if coast_finals else None,
+        implausible_velocity_count=implausible_velocity_count,
     )
 
 
@@ -381,6 +433,48 @@ def _coast_samples(
         if current_run:
             final_samples.append(current_run[-1])
     return all_samples, final_samples
+
+
+# -- velocity plausibility (TRACKING-V3-PLAN §6b finding O3) ------------------
+
+
+def _count_implausible_velocities(result: ReplayResult) -> int:
+    """How many `(track, frame)` reports exceeded
+    `MAX_PLAUSIBLE_VELOCITY_PER_SECOND` on either axis -- see that
+    constant's own derivation for what the bound is and why.
+
+    Reads `result.track_velocities`, captured immediately after each
+    `session.process()` call by `replay.run_replay` (mirroring
+    `coast_track_ids`), **never** `outcome.boxes[i].track.velocity_x` after
+    the fact -- `Track` is mutable and handed out by reference
+    (`ReplayResult.coast_track_ids`'s own docstring), so reading it back out
+    post-replay would report only the LAST frame's velocity for every frame
+    a track ever appeared in, hiding exactly the divergence this check
+    exists to catch.
+
+    Deliberately unscoped by match/visibility, unlike coast ADE/FDE: a
+    diverged estimate is a property of the track's own reported state, not
+    of whether it happens to be sitting on a ground-truth object this frame
+    -- the `latency` defect this check exists to catch corrupted a box that
+    had already stopped being useful for matching. `()` (no velocity data --
+    an older/hand-built `ReplayResult`, or a mode/mismatch this harness
+    never produces) reads as zero, the same "nothing to report" convention
+    `coast_track_ids`'s length-mismatch guard uses.
+
+    A DETECTOR, not a clamp: this function only counts. It never touches
+    `track.velocity_x`/`_y`, `result.outcomes`, or anything else a tracker
+    reads back -- see the module docstring's own "velocity plausibility"
+    section.
+    """
+    if len(result.track_velocities) != len(result.outcomes):
+        return 0
+    bound = MAX_PLAUSIBLE_VELOCITY_PER_SECOND
+    return sum(
+        1
+        for frame_velocities in result.track_velocities
+        for velocity_x, velocity_y in frame_velocities.values()
+        if abs(velocity_x) > bound or abs(velocity_y) > bound
+    )
 
 
 # -- per-object timelines -----------------------------------------------------
@@ -576,6 +670,7 @@ _COLUMN_HEADERS: tuple[str, ...] = (
     "cFDE",
     "cADE_px",
     "cFDE_px",
+    "implaus_n",
 )
 
 
@@ -627,4 +722,5 @@ def _row_cells(metrics: Metrics) -> list[str]:
         coast_fde,
         coast_ade_px,
         coast_fde_px,
+        str(metrics.implausible_velocity_count),
     ]

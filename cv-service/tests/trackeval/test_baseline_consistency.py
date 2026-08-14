@@ -103,6 +103,7 @@ _INT_COLUMN_FIELD: dict[str, str] = {
     "gaps": "gap_count",
     "recov": "recovered_count",
     "coast_n": "coast_sample_count",
+    "implaus_n": "implausible_velocity_count",
 }
 
 # Column name -> `(Metrics field, decimal places `_row_cells` formats it

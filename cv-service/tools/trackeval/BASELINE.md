@@ -23,6 +23,29 @@ closed, `latency`/ASSOCIATE's own row below is the only one in this table that m
 `latency`/FOLLOW and every other scenario are produced by the SAME `cv_service/` code every
 prior wave measured against, still untouched by this repair.
 
+**2026-08-14 O3 closed -- velocity plausibility.** `docs/plans/active/TRACKING-V3-PLAN.md`
+§6b finding O3: every column in this table reads the MATCHED-frame timeline or the box's
+distance from the truth, and none of them asks whether a track's own reported velocity is
+physically sensible -- a track whose estimate diverged to `1e16` and a track that is merely
+lost both scored `ML=1`, which is exactly how the instrument-repair defect above survived a
+whole wave undetected. `metrics.py` gains `implausible_velocity_count` (table column
+`implaus_n`) -- a DETECTOR, not a clamp, counting `(track, frame)` reports whose
+`velocity_x`/`velocity_y` exceeds `MAX_PLAUSIBLE_VELOCITY_PER_SECOND` (5.0 frame-widths or
+-heights/sec, derived in `metrics.py`'s own module-level comment from the fastest apparent
+motion this project has ever measured or modelled -- `tiny_fast`'s own 0.6/sec synthetic pan
+and `CV-RATE-BUDGET.md` §2's 1.5/sec "aggressive" 90 deg/s search yaw, both real numbers, not
+guesses). `replay.py` gains `ReplayResult.track_velocities`, captured immediately after each
+`session.process()` call the SAME way `coast_track_ids` is (and for the identical reason --
+`Track` is mutable and handed out by reference, so reading `track.velocity_x` back out after
+the whole replay finishes would report only the LAST frame's value for every frame a track
+ever appeared in). **Every scenario x mode below reports `implaus_n=0`** -- the shipped
+configuration is clean; the column exists to catch a FUTURE regression like the one above, not
+because this run found one. Proven to fire on a synthetic diverging-velocity track by
+`tests/trackeval/test_velocity_plausibility.py`. No product code under `cv_service/` touched;
+every pre-existing column in the table below is unchanged (verified: the fresh run this task
+regenerated it from reproduces all twenty-two prior columns exactly, `trk_ms_*` aside per this
+file's own noise convention below).
+
 Reproduce with (see `cv-service/MODULE.md` for the full `PYTHONPATH` explanation):
 
 ```bash
@@ -38,38 +61,38 @@ server's own defaults: `cost` for ASSOCIATE, `lk` for FOLLOW (`CV_TRACK_ASSOCIAT
 ## 1. The V0 table -- all fifteen scenarios
 
 ```
-scenario          | mode                    | engine | frames | gt | IDSW | FM | MT | PT | ML | gaps | recov | recov% | life_mean | life_med | det/s | trk_ms_avg | trk_ms_p95 | coast_n | cADE  | cFDE  | cADE_px | cFDE_px
-------------------+-------------------------+--------+--------+----+------+----+----+----+----+------+-------+--------+-----------+----------+-------+------------+------------+---------+-------+-------+---------+--------
-clutter           | TRACKING_MODE_ASSOCIATE | cost   | 60     | 10 | 0    | 0  | 10 | 0  | 0  | 0    | 0     | n/a    | 55.8      | 60.0     | 10.00 | ~4         | ~5         | 0       | n/a   | n/a   | n/a     | n/a
-clutter           | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 60.0      | 60.0     | 0.83  | ~1         | ~1         | 55      | 0.218 | 0.324 | 69.9    | 103.8
-crossing          | TRACKING_MODE_ASSOCIATE | cost   | 50     | 2  | 0    | 0  | 2  | 0  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a
-crossing          | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 0.80  | ~0.4       | ~1         | 48      | 0.194 | 0.228 | 62.1    | 72.9
-crossing_similar  | TRACKING_MODE_ASSOCIATE | cost   | 50     | 2  | 0    | 2  | 2  | 0  | 0  | 2    | 2     | 100%   | 44.0      | 44.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a
-crossing_similar  | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 0.80  | ~0.4       | ~1         | 48      | 0.357 | 0.752 | 95.9    | 196.8
-crowd_recall      | TRACKING_MODE_ASSOCIATE | cost   | 150    | 6  | 0    | 6  | 6  | 0  | 0  | 6    | 6     | 100%   | 60.0      | 60.0     | 10.00 | ~0.8       | ~2         | 0       | n/a   | n/a   | n/a     | n/a
-crowd_recall      | TRACKING_MODE_FOLLOW    | lk     | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 101.0     | 101.0    | 1.47  | ~0.4       | ~1         | 98      | 0.016 | 0.022 | 4.9     | 6.8
-dropout           | TRACKING_MODE_ASSOCIATE | cost   | 50     | 1  | 0    | 4  | 1  | 0  | 0  | 4    | 4     | 100%   | 41.0      | 41.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
-dropout           | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 35.0      | 35.0     | 1.40  | ~0.7       | ~1         | 33      | 0.002 | 0.003 | 0.6     | 0.8
-latency           | TRACKING_MODE_ASSOCIATE | cost   | 60     | 1  | 0    | 4  | 0  | 1  | 0  | 4    | 4     | 100%   | 52.0      | 52.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
-latency           | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  | 0  | 0  | 1  | 0    | 0     | n/a    | 48.0      | 48.0     | 1.17  | ~0.8       | ~1         | 0       | n/a   | n/a   | n/a     | n/a
-linear            | TRACKING_MODE_ASSOCIATE | cost   | 60     | 3  | 0    | 0  | 3  | 0  | 0  | 0    | 0     | n/a    | 60.0      | 60.0     | 10.00 | ~1         | ~1         | 0       | n/a   | n/a   | n/a     | n/a
-linear            | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 60.0      | 60.0     | 0.50  | ~1         | ~1         | 57      | 0.002 | 0.002 | 0.6     | 0.6
-long_occlusion    | TRACKING_MODE_ASSOCIATE | cost   | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 60.0      | 60.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
-long_occlusion    | TRACKING_MODE_FOLLOW    | lk     | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 101.0     | 101.0    | 1.47  | ~0.4       | ~1         | 98      | 0.006 | 0.007 | 1.4     | 1.8
-nonlinear         | TRACKING_MODE_ASSOCIATE | cost   | 70     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 50.0      | 50.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
-nonlinear         | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 70.0      | 70.0     | 0.71  | ~0.4       | ~1         | 66      | 0.029 | 0.045 | 9.1     | 14.3
-occlusion         | TRACKING_MODE_ASSOCIATE | cost   | 110    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 70.0      | 70.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
-occlusion         | TRACKING_MODE_FOLLOW    | lk     | 110    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 110.0     | 110.0    | 0.55  | ~0.6       | ~1         | 106     | 0.008 | 0.009 | 1.9     | 2.1
-pan               | TRACKING_MODE_ASSOCIATE | cost   | 70     | 4  | 0    | 0  | 4  | 0  | 0  | 0    | 0     | n/a    | 24.8      | 26.0     | 10.00 | ~0.3       | ~1         | 0       | n/a   | n/a   | n/a     | n/a
-pan               | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 70.0      | 70.0     | 0.86  | ~0.3       | ~1         | 13      | 0.011 | 0.040 | 3.3     | 12.8
-pan_occlusion     | TRACKING_MODE_ASSOCIATE | cost   | 90     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 65.0      | 65.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
-pan_occlusion     | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 87.0      | 87.0     | 0.78  | ~0.3       | ~1         | 84      | 0.260 | 0.328 | 83.3    | 104.8
-pan_step          | TRACKING_MODE_ASSOCIATE | cost   | 90     | 2  | 0    | 2  | 2  | 0  | 0  | 2    | 2     | 100%   | 60.0      | 60.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a
-pan_step          | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 3  | 1  | 0  | 0  | 3    | 3     | 100%   | 90.0      | 90.0     | 0.56  | ~1         | ~1         | 87      | 0.013 | 0.016 | 3.8     | 4.9
-small_target      | TRACKING_MODE_ASSOCIATE | cost   | 80     | 1  | 0    | 2  | 1  | 0  | 0  | 2    | 2     | 100%   | 78.0      | 78.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
-small_target      | TRACKING_MODE_FOLLOW    | lk     | 80     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 80.0      | 80.0     | 0.50  | ~1         | ~1         | 78      | 0.001 | 0.001 | 0.3     | 0.3
-tiny_fast         | TRACKING_MODE_ASSOCIATE | cost   | 70     | 3  | 2    | 0  | 3  | 0  | 0  | 0    | 0     | n/a    | 19.0      | 19.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
-tiny_fast         | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 0  | 0  | 0  | 1  | 0    | 0     | n/a    | 62.0      | 62.0     | 1.00  | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a
+scenario         | mode                    | engine | frames | gt | IDSW | FM | MT | PT | ML | gaps | recov | recov% | life_mean | life_med | det/s | trk_ms_avg | trk_ms_p95 | coast_n | cADE  | cFDE  | cADE_px | cFDE_px | implaus_n
+-----------------+-------------------------+--------+--------+----+------+----+----+----+----+------+-------+--------+-----------+----------+-------+------------+------------+---------+-------+-------+---------+---------+----------
+clutter          | TRACKING_MODE_ASSOCIATE | cost   | 60     | 10 | 0    | 0  | 10 | 0  | 0  | 0    | 0     | n/a    | 55.8      | 60.0     | 10.00 | ~4         | ~5         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+clutter          | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 60.0      | 60.0     | 0.83  | ~1         | ~1         | 55      | 0.218 | 0.324 | 69.9    | 103.8   | 0        
+crossing         | TRACKING_MODE_ASSOCIATE | cost   | 50     | 2  | 0    | 0  | 2  | 0  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+crossing         | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 0.80  | ~0.4       | ~1         | 48      | 0.194 | 0.228 | 62.1    | 72.9    | 0        
+crossing_similar | TRACKING_MODE_ASSOCIATE | cost   | 50     | 2  | 0    | 2  | 2  | 0  | 0  | 2    | 2     | 100%   | 44.0      | 44.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+crossing_similar | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 0.80  | ~0.4       | ~1         | 48      | 0.357 | 0.752 | 95.9    | 196.8   | 0        
+crowd_recall     | TRACKING_MODE_ASSOCIATE | cost   | 150    | 6  | 0    | 6  | 6  | 0  | 0  | 6    | 6     | 100%   | 60.0      | 60.0     | 10.00 | ~0.8       | ~2         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+crowd_recall     | TRACKING_MODE_FOLLOW    | lk     | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 101.0     | 101.0    | 1.47  | ~0.4       | ~1         | 98      | 0.016 | 0.022 | 4.9     | 6.8     | 0        
+dropout          | TRACKING_MODE_ASSOCIATE | cost   | 50     | 1  | 0    | 4  | 1  | 0  | 0  | 4    | 4     | 100%   | 41.0      | 41.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+dropout          | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 35.0      | 35.0     | 1.40  | ~0.7       | ~1         | 33      | 0.002 | 0.003 | 0.6     | 0.8     | 0        
+latency          | TRACKING_MODE_ASSOCIATE | cost   | 60     | 1  | 0    | 4  | 0  | 1  | 0  | 4    | 4     | 100%   | 52.0      | 52.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+latency          | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  | 0  | 0  | 1  | 0    | 0     | n/a    | 48.0      | 48.0     | 1.17  | ~0.8       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+linear           | TRACKING_MODE_ASSOCIATE | cost   | 60     | 3  | 0    | 0  | 3  | 0  | 0  | 0    | 0     | n/a    | 60.0      | 60.0     | 10.00 | ~1         | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+linear           | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 60.0      | 60.0     | 0.50  | ~1         | ~1         | 57      | 0.002 | 0.002 | 0.6     | 0.6     | 0        
+long_occlusion   | TRACKING_MODE_ASSOCIATE | cost   | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 60.0      | 60.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+long_occlusion   | TRACKING_MODE_FOLLOW    | lk     | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 101.0     | 101.0    | 1.47  | ~0.4       | ~1         | 98      | 0.006 | 0.007 | 1.4     | 1.8     | 0        
+nonlinear        | TRACKING_MODE_ASSOCIATE | cost   | 70     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 50.0      | 50.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+nonlinear        | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 70.0      | 70.0     | 0.71  | ~0.4       | ~1         | 66      | 0.029 | 0.045 | 9.1     | 14.3    | 0        
+occlusion        | TRACKING_MODE_ASSOCIATE | cost   | 110    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 70.0      | 70.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+occlusion        | TRACKING_MODE_FOLLOW    | lk     | 110    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 110.0     | 110.0    | 0.55  | ~0.6       | ~1         | 106     | 0.008 | 0.009 | 1.9     | 2.1     | 0        
+pan              | TRACKING_MODE_ASSOCIATE | cost   | 70     | 4  | 0    | 0  | 4  | 0  | 0  | 0    | 0     | n/a    | 24.8      | 26.0     | 10.00 | ~0.3       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+pan              | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 70.0      | 70.0     | 0.86  | ~0.3       | ~1         | 13      | 0.011 | 0.040 | 3.3     | 12.8    | 0        
+pan_occlusion    | TRACKING_MODE_ASSOCIATE | cost   | 90     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 65.0      | 65.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+pan_occlusion    | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 87.0      | 87.0     | 0.78  | ~0.3       | ~1         | 84      | 0.260 | 0.328 | 83.3    | 104.8   | 0        
+pan_step         | TRACKING_MODE_ASSOCIATE | cost   | 90     | 2  | 0    | 2  | 2  | 0  | 0  | 2    | 2     | 100%   | 60.0      | 60.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+pan_step         | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 3  | 1  | 0  | 0  | 3    | 3     | 100%   | 90.0      | 90.0     | 0.56  | ~1         | ~1         | 87      | 0.013 | 0.016 | 3.8     | 4.9     | 0        
+small_target     | TRACKING_MODE_ASSOCIATE | cost   | 80     | 1  | 0    | 2  | 1  | 0  | 0  | 2    | 2     | 100%   | 78.0      | 78.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+small_target     | TRACKING_MODE_FOLLOW    | lk     | 80     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 80.0      | 80.0     | 0.50  | ~1         | ~1         | 78      | 0.001 | 0.001 | 0.3     | 0.3     | 0        
+tiny_fast        | TRACKING_MODE_ASSOCIATE | cost   | 70     | 3  | 2    | 0  | 3  | 0  | 0  | 0    | 0     | n/a    | 19.0      | 19.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
+tiny_fast        | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 0  | 0  | 0  | 1  | 0    | 0     | n/a    | 62.0      | 62.0     | 1.00  | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
 ```
 
 `trk_ms_avg`/`trk_ms_p95` are rounded to `~N` here on purpose -- they are real

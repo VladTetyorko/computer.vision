@@ -372,6 +372,20 @@ class ReplayResult:
     # after the fact and this is the first one that could not just do the
     # same for `.track`.
     coast_track_ids: tuple[frozenset[int], ...] = ()
+    # TRACKING-V3-PLAN §6b finding O3 -- `track_velocities[i]` is
+    # `{track_id: (velocity_x, velocity_y)}` for every box `outcome.boxes[i]`
+    # emitted, captured the SAME way and for the SAME reason `coast_track_ids`
+    # is: `track.velocity_x`/`_y` lives on the identical mutable, aliased
+    # `Track` object `coast_track_ids`'s own docstring above describes, so
+    # reading it back out of `FrameOutcome.boxes[i].track` after the whole
+    # replay has finished would report only the LAST frame's velocity for
+    # every frame that track ever appeared in -- silently hiding the exact
+    # defect (a reconstructed velocity diverging to 1e14-1e32, `BASELINE.md`'s
+    # `latency` writeup) this field exists to let `metrics.py` see. Defaults
+    # to `()`, read by `metrics.py` as "no velocity data" (count 0), so
+    # hand-built `ReplayResult`s predating this field keep constructing
+    # unchanged.
+    track_velocities: tuple[dict[int, tuple[float, float]], ...] = ()
 
 
 def _ground_truth_for_detection(
@@ -448,6 +462,21 @@ def _coast_ids_this_frame(outcome: FrameOutcome) -> frozenset[int]:
     )
 
 
+def _track_velocities_this_frame(outcome: FrameOutcome) -> dict[int, tuple[float, float]]:
+    """`{emitted track_id: (velocity_x, velocity_y)}` on this
+    ALREADY-RETURNED `FrameOutcome` -- see `ReplayResult.track_velocities`
+    for why this must be read right after `process()` returns, not later
+    (the same `Track`-aliasing trap `_coast_ids_this_frame` above exists
+    to avoid)."""
+    if outcome.boxes is None:
+        return {}
+    return {
+        tracked.track.track_id: (tracked.track.velocity_x, tracked.track.velocity_y)
+        for tracked in outcome.boxes
+        if tracked.track is not None
+    }
+
+
 def run_replay(
     sequence: Sequence,
     *,
@@ -484,6 +513,7 @@ def run_replay(
 
     outcomes: list[FrameOutcome] = []
     coast_track_ids: list[frozenset[int]] = []
+    track_velocities: list[dict[int, tuple[float, float]]] = []
     # One stream for the WHOLE replay, not one per frame -- a fresh
     # `Random()` every frame would make every draw independent of the ones
     # around it, which is not what "spread around a slowly-drifting skew
@@ -521,6 +551,9 @@ def run_replay(
         # mutates the same live `Track` objects -- see `ReplayResult.
         # coast_track_ids`'s own docstring for why this cannot be done later.
         coast_track_ids.append(_coast_ids_this_frame(outcome))
+        # Same reasoning, same frame, same reason it cannot wait -- see
+        # `ReplayResult.track_velocities`'s own docstring.
+        track_velocities.append(_track_velocities_this_frame(outcome))
 
     engine_id_served = next((outcome.engine_id for outcome in reversed(outcomes) if outcome.engine_id), "")
     scored_gt_ids = frozenset({sequence.primary_gt_id}) if mode == MODE_FOLLOW else sequence.gt_ids
@@ -536,6 +569,7 @@ def run_replay(
         width=sequence.width,
         height=sequence.height,
         coast_track_ids=tuple(coast_track_ids),
+        track_velocities=tuple(track_velocities),
     )
 
 
