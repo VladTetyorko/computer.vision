@@ -477,6 +477,19 @@ the whole L1 story — before a single line that needs a GPU, a model asset, or 
 
 ---
 
+## 6b. Open, after the first five waves
+
+Three findings the delivered waves surfaced and deliberately did not close. None blocks L1; all are
+cheap, and the first is the only one with a measured cost attached.
+
+| # | Finding | Where | Why it was left |
+|---|---|---|---|
+| **O1** | **FOLLOW does not benefit from late-detection correction.** `_run_cost_associate` writes the corrected box into the booked `Observation`, so every consumer sees it. `_follow_verify` calls `engine.init()` on the **raw** box before `_late_corrected_box` runs — so LK is anchored on the uncorrected patch and tracks it through every coast frame between verify passes. The correction patches the reported number, never the pixels being followed. | `session.py` | Diagnosed, not fixed: re-anchoring the SOT on a corrected box changes what FOLLOW *tracks*, not merely what it reports, and deserves its own wave and its own measurement. `latency`/FOLLOW is the scenario waiting for it |
+| **O2** | **`ObservationRing.before()` assumes non-decreasing timestamps.** With a jittering lag estimate, `captured_at` can in principle arrive slightly out of order, so the reverse scan returns a valid but not-necessarily-closest bracket. | `history.py` | Pre-existing and unexercised — the regression scenarios use a fixed lag. But it is now a known soft spot in exactly the path L1 uses, and the measured ±15 ms jitter from `pull/clock.py` is real |
+| **O3** | **The harness cannot see non-physical state.** A track whose velocity diverged to 1e16 and a track that is merely lost both score `ML=1`; every column in the table is blind to the difference. That is why the capture-time defect survived a wave. | `tools/trackeval/metrics.py` | A plausibility check — reject or flag a reconstructed velocity beyond any physically sensible bound — would have caught it in V6 rather than a wave later. Cheap, and the natural companion to coast ADE/FDE |
+
+---
+
 ## 7. Non-goals
 
 Unchanged from V2 §5, plus, stated so they are not re-proposed:
