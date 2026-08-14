@@ -60,6 +60,35 @@ decides *which boxes reach the associator*. It does **not** model the response
 filter (`servicers._reportable`), which is what the operator finally sees —
 that half is covered by `tests/grpc/test_confidence_split.py` only.
 
+### Measuring late-detection back-correction (`latency`)
+
+`--lag-jitter-millis` (default `0`, i.e. the exact/idealised case, so a bare run
+still reproduces [`BASELINE.md`](BASELINE.md) exactly) re-runs `latency` with a
+realistic companion reading alongside it. Before a 2026-08-14 instrument repair,
+`replay.py` injected the scenario's own lag by shifting *which* ground truth
+`SyntheticDetector` returned but never told `session.process()` about it —
+`detection_lag_millis` defaulted to `0` ("unknown"), so wave V6's correction
+(`docs/plans/active/TRACKING-V3-PLAN.md` §4.5) had no way to fire and the
+scenario was unwinnable by construction, not merely hard (`L` is unidentifiable
+from position/arrival-time pairs alone under constant velocity and constant lag).
+
+```bash
+# exact/idealised: the harness's own injected lag, reported perfectly
+PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --scenario latency --mode ASSOCIATE
+# realistic companion: +/-15ms spread, sourced from pull/clock.py's own M0 measurement
+PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --scenario latency --mode ASSOCIATE --lag-jitter-millis 15
+```
+
+Both readings score identically (`ML=1`, unchanged from before the repair) — not
+because nothing improved, but because wiring the signal through exposed a SECOND,
+previously-invisible defect, this time a genuine one in `cv_service/tracking/`
+(`ObservationRing`'s arrival-time timestamps vs. `late_correction`'s implicit
+capture-time assumption, causing the corrected box to diverge rather than
+converge once a bracket exists). See [`BASELINE.md`](BASELINE.md)'s `latency`
+writeup for the full diagnosis, and `tests/trackeval/test_replay.py::
+test_persistent_per_frame_lag_correction_diverges_past_the_dead_zone` for the
+regression that locks it down until a future wave fixes it.
+
 `--scenario` is any key of `sequences.SCENARIOS` (see "Scenarios" below);
 `--mode` is `ASSOCIATE` or `FOLLOW`. `--all` runs every scenario in both modes
 and prints the full matrix — this is what [`BASELINE.md`](BASELINE.md) §1 is a
@@ -193,10 +222,14 @@ onward and why wave V0 exists. Of the five new ones, `crossing_similar`/
 ASSOCIATE shows `IDSW=2` (appearance made uninformative by an identical
 colour reopens the pre-C3 `crossing` defect); `tiny_fast`/ASSOCIATE shows
 `IDSW=2` (three "handful of pixels" landmarks under a fast pan); `latency`
-shows `ML=1` in both modes from a purely systematic 8-frame lag; and
-`nonlinear`/`pan_occlusion`'s real claim is their FOLLOW row's coast ADE/FDE
-(up to `~105 px` on a 320x240 frame) — a defect the ten old scenarios'
-own metrics literally cannot express.
+shows `ML=1` in both modes from a purely systematic 8-frame lag, unmoved by
+a 2026-08-14 instrument repair that finally wires `detection_lag_millis`
+through and, in the process, found a genuine `cv_service/tracking/` defect
+(see [`BASELINE.md`](BASELINE.md)'s `latency` writeup, and "Measuring
+late-detection back-correction" above); and `nonlinear`/`pan_occlusion`'s
+real claim is their FOLLOW row's coast ADE/FDE (up to `~105 px` on a
+320x240 frame) — a defect the ten old scenarios' own metrics literally
+cannot express.
 
 ## What happens with fewer dependencies installed
 
@@ -255,11 +288,14 @@ to score against unless the recording is separately hand-labelled later).
 `tests/trackeval/` mirrors this package: `test_sequences.py` (determinism +
 every scenario generates without raising, needs `numpy`), `test_replay.py`
 (every scenario replays in every mode without raising, determinism, the
-`latency` lag mechanism, needs `numpy`), `test_metrics.py` (metric
-correctness on hand-built inputs, including coast ADE/FDE — pure stdlib, no
-`cv` extra needed at all), `test_recording.py` (record/write/read/replay
-round-trip against a synthetic "live" source, needs `numpy` to build that
-source), `test_main.py` (the CLI). Run from `cv-service/`:
+`latency` lag mechanism including `detection_lag_millis` wiring/jitter and
+the divergence regression the 2026-08-14 instrument repair added, needs
+`numpy`), `test_metrics.py` (metric correctness on hand-built inputs,
+including coast ADE/FDE — pure stdlib, no `cv` extra needed at all),
+`test_recording.py` (record/write/read/replay round-trip against a
+synthetic "live" source, needs `numpy` to build that source), `test_main.py`
+(the CLI), `test_baseline_consistency.py` (`BASELINE.md`'s own table,
+diffed against a fresh `--all` run every `pytest -q`). Run from `cv-service/`:
 
 ```bash
 PYTHONPATH="$PWD" .venv/bin/python -m pytest -q tests/trackeval/

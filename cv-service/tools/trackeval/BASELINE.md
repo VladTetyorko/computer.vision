@@ -13,6 +13,14 @@ pre-existing scenarios is produced by the SAME session code C5 shipped. What cha
 the HARNESS: five new scenarios built to isolate exactly the failure modes waves V2-V6
 exist to fix, and two new metrics (coast ADE/FDE) that can see drift IDSW/FM/MT cannot.
 
+**2026-08-14 instrument repair.** `latency`'s own harness never told `session.process()`
+about the lag it injected (`detection_lag_millis` defaulted to `0`, "unknown"), which made
+that scenario unwinnable by construction, not merely hard -- see its own writeup in §2 below
+for the fix, why the table row is unchanged regardless, and the genuine `cv_service/tracking/`
+defect (out of that repair's own file scope to fix) it exposed once wired through. No other
+row changed -- every number below for the other fourteen scenarios is produced by the SAME
+`cv_service/` code every prior wave measured against, still untouched by this repair.
+
 Reproduce with (see `cv-service/MODULE.md` for the full `PYTHONPATH` explanation):
 
 ```bash
@@ -172,6 +180,86 @@ ADE/FDE, by its own honest scope (see `metrics.py`'s module docstring), only mea
 `SOURCE_TRACKER` frames. IDSW/MT catch this defect fine; coast ADE/FDE, correctly, does
 not -- the two metrics are covering genuinely different failure shapes, which is the point
 of shipping both.
+
+**Instrument repair (2026-08-14): the seventh apparatus defect, and what fixing it found.**
+Every number above was produced by a harness that injected an 8-frame detector lag and then
+never told `StreamTrackingSession.process()` about it -- `replay.py` called `process(now_millis=
+..., detect=..., frame=...)` with no `detection_lag_millis`, which defaults to `0` ("unknown").
+Wave V6's late-detection back-correction (`docs/plans/active/TRACKING-V3-PLAN.md` §4.5, commit
+`1665969`) reads exactly that argument and had no way to fire. Worse: under constant velocity
+and constant lag `L`, a late stream `p(t-L) = (p0 - vL) + vt` is mathematically indistinguishable
+from an on-time stream starting `vL` further back -- `L` is unidentifiable from (position,
+arrival-time) pairs alone, so no algorithm the tracker could ship would ever have closed this
+row. The scenario was unwinnable by construction, not merely hard.
+
+`replay.py` now computes the lag it already knows (it is the config that shifted the ground
+truth) and passes it as `detection_lag_millis`, mirroring how pull mode obtains the SAME signal
+for real: `cv_service/pull/clock.py`'s `CaptureClock.capture_time` reports `capture_skew_millis =
+now_wall - captured_at`, a same-process, same-clock estimate `grpc/servicers.py`'s
+`_handle_request` threads straight into `session.process()`. The default reports the exact
+injected lag (`DetectorNoiseConfig.detection_lag_jitter_millis=0.0`) -- the IDEALISED case,
+perfect lag knowledge a real estimate never quite has. `--lag-jitter-millis 15` (`replay.
+DETECTION_LAG_JITTER_TYPICAL_MILLIS`, sourced from `pull/clock.py`'s own module docstring --
+M0 measured `capture_skew_millis` at "+/-15 ms typical spread over 10 minutes, worst spike
+~80 ms") adds a realistic companion reading:
+
+```bash
+PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --scenario latency --mode ASSOCIATE
+PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --scenario latency --mode ASSOCIATE --lag-jitter-millis 15
+```
+
+**The row above is unchanged by either reading -- `ML=1` in both modes, exact and jittered
+alike -- and the reason is not "no improvement": it is a SECOND, previously-invisible defect,
+this time a genuine one in `cv_service/tracking/` (out of this repair task's file scope,
+`tools/trackeval/**` and `tests/trackeval/**` only, to fix).** With `detection_lag_millis`
+finally nonzero, wave V6's correction DOES fire -- and diverges. Traced directly (`tests/
+trackeval/test_replay.py::test_persistent_per_frame_lag_correction_diverges_past_the_dead_zone`,
+and independently reproduced with round numbers straight against `StreamTrackingSession`,
+bypassing this package entirely): the reported box stays exactly stale through a `2 * lag`-frame
+"dead zone" (`late_correction` correctly refuses to correct a track with no bracketing prior
+observation -- `reupdate.py`'s own "brand-new track has nothing to bracket against" contract),
+then, the instant a bracket becomes available, the corrected box does not converge toward the
+true position -- it runs away to physically meaningless magnitudes (`1e14`-`1e32` within a few
+dozen frames, in BOTH the exact and the 15ms-jittered reading; jitter does not soften this).
+
+**Root cause.** `ObservationRing.record()` (`cv_service/tracking/history.py`) timestamps every
+entry with the frame it was PROCESSED at (`now`), not the instant its content was actually true.
+That is correct exactly when a `late_correction` succeeds (a corrected box legitimately
+represents "position AT now") -- and wrong for any entry `late_correction` could not correct,
+which is every entry through the dead zone above: each one's stale content gets filed under a
+timestamp `lag_seconds` LATER than when it was true, with nothing recording the mislabelling. The
+next `reupdate()` call that brackets against one of those entries divides a REAL position delta
+(spanning close to a full `lag_seconds` of true motion) by an ARTIFICIALLY SMALL elapsed time
+(the bracket's inflated timestamp), inflating the reconstructed velocity by roughly
+`lag_seconds / true_elapsed`. The resulting (wrong, usually off-frame) box is then written back
+into the SAME ring, poisoning the next bracket the same way -- a positive feedback loop, not a
+one-off error, and why this diverges rather than merely staying imprecise. It bites hardest
+exactly where wave V6 is supposed to help most: a persistent, near-constant `capture_skew_millis`
+(`pull/clock.py`'s own documented steady state between re-anchors) applied every matched-detection
+frame (`_run_cost_associate`'s per-candidate call, ASSOCIATE's `det/s=10.00` cadence) -- not a
+corner case this scenario invented, but the ordinary shape of a pulled stream's own signal.
+
+**Why the scoreboard row does not move even though the underlying box now behaves far worse.**
+`ML=1` already scored the PRE-repair stale case at the metric's own floor: IoU against the true
+box was already ~0 every frame (`latency_frames=8` was tuned to guarantee exactly that -- see
+`__main__.py`'s own comment on `_LATENCY_FRAMES`), and a box that is even-further wrong cannot
+score below that floor. The row is therefore an honest, unchanged report of a defect the metric
+was never built to distinguish by DEGREE, only by threshold -- which is also why this repair
+adds a dedicated regression test (`test_persistent_per_frame_lag_correction_diverges_past_the_
+dead_zone`) rather than relying on `BASELINE.md`'s own numeric table to carry this finding: a
+future wave that fixes the `ObservationRing` timestamp mismatch will make THAT test start
+failing, which is the correct signal to revisit this paragraph, while `ML=1` here would still
+report nothing wrong on its own.
+
+**The scenario is not winnable today, and tuning it further would hide that, not fix it.**
+The mathematical-unidentifiability defect (five of seven apparatus defects have now been found
+in this harness's OWN measurement code, never the tracker -- `TRACKING-V2-PLAN.md` §5b, this
+file's §2 `crossing_similar` entry, and this section) is genuinely closed: the signal production
+has is now the signal this harness supplies. What remains is a real defect in the code this
+harness measures, discovered only because the instrument finally works. Per this task's own
+acceptance criteria, that is reported here rather than papered over by shrinking `latency_frames`
+until the correction's own bug stops mattering, which would make the scenario winnable "by
+accident" in exactly the sense this repair was told not to allow.
 
 ## 3. What this wave found about the HARNESS itself, not the tracker
 

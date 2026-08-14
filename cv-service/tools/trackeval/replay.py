@@ -27,6 +27,28 @@ as-is -- it is a COST number, not an identity one, and real wall-clock noise
 on it is expected and already labelled that way everywhere else in this
 codebase.
 
+**`detection_lag_millis` is now wired too (instrument-repair, 2026-08).**
+`session.process()` has taken an optional `detection_lag_millis` since wave
+V6 (`cv_service/tracking/session.py` §"Late-detection back-correction"), but
+this driver never passed one -- the `latency` scenario shifted WHICH ground
+truth `SyntheticDetector` returned without ever telling the session it was
+stale, which made the scenario unwinnable by construction (a late,
+constant-velocity stream is mathematically indistinguishable from an
+on-time one starting further back; `L` is unidentifiable from
+(position, arrival-time) alone). `_detection_lag_millis_for` below closes
+that gap the same way pull mode does: production computes its lag from
+`CaptureClock.capture_time` (`cv_service/pull/clock.py`, `capture_skew_millis`
+= `now_wall - captured_at`), a same-process, same-clock estimate threaded
+into `session.process()` by `grpc/servicers.py`'s `_handle_request`. This
+harness knows the injected lag EXACTLY (it is the config that shifted the
+ground truth), so the default (`detection_lag_jitter_millis=0.0`) reports it
+exactly -- the IDEALISED case, perfect lag knowledge a real worker's
+estimate never quite has. `detection_lag_jitter_millis` > 0 adds the spread
+`pull/clock.py`'s own M0 measurement recorded around that estimate, for a
+companion reading that shows whether the correction degrades gracefully
+under the real signal's own noise rather than only a noiseless one. See
+`BASELINE.md` §2's `latency` writeup for both readings.
+
 Pure stdlib at module scope, deliberately: `cv_service.config`,
 `cv_service.tracking.{params,registry,session}` are all pure stdlib
 (`cv_service/tracking/__init__.py`'s own invariant), and `_SyntheticDetection`
@@ -60,6 +82,19 @@ MILLIS_PER_SECOND = 1000.0
 # strictly-increasing values (`lock.py`), and a replay never re-locks.
 _LOCK_SEQ = 1
 _WIRE_TOKEN = "trackeval"
+
+# Typical per-frame spread of a REAL `capture_skew_millis` estimate around
+# its true value, for `DetectorNoiseConfig.detection_lag_jitter_millis`.
+# Sourced from `cv_service/pull/clock.py`'s own module docstring: "M0
+# measured anchor ... at +/-15 ms typical spread over 10 minutes, worst
+# spike ~80 ms -- inside the plan's 100 ms/10-min gate". The worst spike
+# stayed under that gate's 100 ms re-anchor threshold
+# (`DEFAULT_REANCHOR_THRESHOLD_MILLIS`), so no re-anchor transient fires
+# within a measurement window this short (`latency`'s own 60 frames / 6 s at
+# 10 fps, against M0's 10-minute run) -- modelling the typical spread alone
+# is therefore the right level of realism here, not a simplification chosen
+# because it is convenient.
+DETECTION_LAG_JITTER_TYPICAL_MILLIS = 15.0
 
 
 @dataclass(frozen=True)
@@ -139,7 +174,33 @@ class DetectorNoiseConfig:
     # instead of FRAME INDEX, which silently breaks the moment a scenario
     # also uses ROI re-detection (a second, conditional `detect()` call on
     # the same frame).
+    #
+    # N > 0 ALSO makes `run_replay` pass this same lag to `session.process()`
+    # as `detection_lag_millis` (see `_detection_lag_millis_for`) -- mirroring
+    # how pull mode's worker obtains that signal for real
+    # (`cv_service/pull/clock.py`'s `capture_skew_millis`), rather than
+    # injecting a stale stream and leaving the session with no way to know
+    # it. See `detection_lag_jitter_millis` below for how exact that report is.
     latency_frames: int = 0
+    # How much spread to add around `latency_frames`' own exact lag when
+    # reporting `detection_lag_millis` -- 0.0 (default) reports the exact
+    # value, the IDEALISED case: this harness knows precisely how many
+    # frames late the detector is (it is the config that shifted the ground
+    # truth), which a real pull-mode worker's `capture_skew_millis` estimate
+    # never quite does. > 0 draws a per-frame `uniform(-jitter, +jitter)`
+    # offset instead (via `lag_jitter_seed`'s own RNG, independent of
+    # `SyntheticDetector`'s), modelling that estimate's real measurement
+    # error. `DETECTION_LAG_JITTER_TYPICAL_MILLIS` below is the value
+    # sourced from `pull/clock.py`'s own M0 measurement, not tuned to make
+    # any scenario's numbers look better.
+    detection_lag_jitter_millis: float = 0.0
+    # Seeds the RNG `detection_lag_jitter_millis` draws from -- deliberately
+    # a SEPARATE stream from `SyntheticDetector`'s own `seed` (used for
+    # dropout/position-jitter/false-positive draws), so enabling lag jitter
+    # can never re-roll a scenario's existing detection draw sequence, the
+    # same reasoning `_miss_probability`'s "draw taken only when in play"
+    # comment gives for `reliable_size`.
+    lag_jitter_seed: int = 0
 
 
 # A false positive's box: small, and placed uniformly within this leading
@@ -334,6 +395,45 @@ def _ground_truth_for_detection(
     return sequence.frames[source_index].ground_truth
 
 
+def _detection_lag_millis_for(
+    frame_index: int,
+    fps: float,
+    detector_config: DetectorNoiseConfig,
+    lag_rng: random.Random,
+) -> int:
+    """This frame's `detection_lag_millis` -- `session.process()`'s own
+    signal for late-detection back-correction (`cv_service/tracking/
+    session.py` §"Late-detection back-correction", wave V6), modelled the
+    way pull mode's worker actually obtains it: `CaptureClock.capture_time`
+    (`cv_service/pull/clock.py`) reports `now_wall - captured_at`, an
+    ESTIMATE of the same quantity `latency_frames` injects here, not a copy
+    of the config read back out.
+
+    `0` (unknown) whenever there is nothing to report: no latency injected
+    (`latency_frames <= 0`), or not enough history yet for
+    `_ground_truth_for_detection` to have produced a real detection to
+    correct (`frame_index < latency_frames` -- the SAME guard, because a lag
+    estimate for a detection that never happened is not a real signal
+    either).
+
+    Otherwise the exact injected lag (`latency_frames` frames, in millis at
+    this sequence's own fps), plus a `uniform(-jitter, +jitter)` offset when
+    `detection_lag_jitter_millis` is positive -- see that field's own
+    docstring for what 0 vs positive means and where the magnitude comes
+    from. The offset is drawn from `lag_jitter_seed`'s own RNG, so this is
+    deterministic given a seed but never perturbs `SyntheticDetector`'s
+    independent draw sequence.
+    """
+    latency_frames = detector_config.latency_frames
+    if latency_frames <= 0 or frame_index < latency_frames:
+        return 0
+    exact_millis = latency_frames * (MILLIS_PER_SECOND / fps)
+    jitter = detector_config.detection_lag_jitter_millis
+    if jitter <= 0.0:
+        return round(exact_millis)
+    return round(exact_millis + lag_rng.uniform(-jitter, jitter))
+
+
 def _coast_ids_this_frame(outcome: FrameOutcome) -> frozenset[int]:
     """Emitted track ids on this ALREADY-RETURNED `FrameOutcome` whose most
     recent touch was the tracker, not the detector -- see `ReplayResult.
@@ -384,8 +484,16 @@ def run_replay(
 
     outcomes: list[FrameOutcome] = []
     coast_track_ids: list[frozenset[int]] = []
+    # One stream for the WHOLE replay, not one per frame -- a fresh
+    # `Random()` every frame would make every draw independent of the ones
+    # around it, which is not what "spread around a slowly-drifting skew
+    # estimate" means; a single seeded stream at least keeps the sequence
+    # reproducible frame-to-frame, same discipline `SyntheticDetector.
+    # __init__` uses for its own RNG.
+    lag_rng = random.Random(detector_config.lag_jitter_seed)
     for frame in sequence.frames:
         now_millis = frame.index * (MILLIS_PER_SECOND / sequence.fps)
+        detection_lag_millis = _detection_lag_millis_for(frame.index, sequence.fps, detector_config, lag_rng)
 
         def detect(
             roi: Optional[Box] = None, frame_index=frame.index
@@ -402,7 +510,12 @@ def run_replay(
         def load_frame(image=frame.image):
             return image
 
-        outcome = session.process(now_millis=now_millis, detect=detect, frame=load_frame)
+        outcome = session.process(
+            now_millis=now_millis,
+            detect=detect,
+            frame=load_frame,
+            detection_lag_millis=detection_lag_millis,
+        )
         outcomes.append(outcome)
         # Captured immediately, before the NEXT iteration's `process()` call
         # mutates the same live `Track` objects -- see `ReplayResult.
