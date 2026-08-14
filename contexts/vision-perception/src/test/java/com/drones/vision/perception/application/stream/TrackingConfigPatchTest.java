@@ -26,7 +26,7 @@ class TrackingConfigPatchTest {
     }
 
     private static TrackingConfig running() {
-        return new TrackingConfig(TrackingMode.FOLLOW, "lk", 5000, 25, 45, 60, 2,
+        return new TrackingConfig(TrackingMode.FOLLOW, "lk", 5000, 25, 45, 60, 2, 3, 900,
                 new TargetLock(4, 7L, null, null, false));
     }
 
@@ -51,10 +51,48 @@ class TrackingConfigPatchTest {
     }
 
     @Test
+    void capabilityLevelAndReupdateMaxGapMillisFoldIndependently() {
+        TrackingConfig current = running();
+
+        TrackingConfig capabilityFolded = fold(
+                new TrackingConfigPatch(null, null, null, null, null, null, null, 1, null, null), current);
+        assertEquals(1, capabilityFolded.capabilityLevel());
+        assertEquals(current.reupdateMaxGapMillis(), capabilityFolded.reupdateMaxGapMillis());
+
+        TrackingConfig gapFolded = fold(
+                new TrackingConfigPatch(null, null, null, null, null, null, null, null, 400, null), current);
+        assertEquals(400, gapFolded.reupdateMaxGapMillis());
+        assertEquals(current.capabilityLevel(), gapFolded.capabilityLevel());
+    }
+
+    @Test
+    void absentCapabilityLevelAndReupdateMaxGapMillisKeepTheRunningOnes() {
+        TrackingConfig folded = fold(only(null, "ncc", null, null, null, null, null), running());
+
+        assertEquals(running().capabilityLevel(), folded.capabilityLevel());
+        assertEquals(running().reupdateMaxGapMillis(), folded.reupdateMaxGapMillis());
+    }
+
+    @Test
+    void eightArgConvenienceConstructorLeavesCapabilityLevelAndReupdateMaxGapMillisAbsent() {
+        TrackingConfigPatch patch = new TrackingConfigPatch(null, "ncc", null, null, null, null, null, null);
+
+        assertNull(patch.capabilityLevel());
+        assertNull(patch.reupdateMaxGapMillis());
+    }
+
+    @Test
+    void anOutOfRangeCapabilityLevelIsRejectedByTheDomainRecordRatherThanDuplicatedHere() {
+        assertThrows(IllegalArgumentException.class, () -> fold(
+                new TrackingConfigPatch(null, null, null, null, null, null, null, 6, null, null), running()));
+    }
+
+    @Test
     void aSingleKnobPatchLeavesEveryOtherKnobExactlyAsItWas() {
         TrackingConfig folded = fold(only(null, "ncc", null, null, null, null, null), running());
 
-        assertEquals(new TrackingConfig(TrackingMode.FOLLOW, "ncc", 5000, 25, 45, 60, 2, running().lock()), folded);
+        assertEquals(new TrackingConfig(TrackingMode.FOLLOW, "ncc", 5000, 25, 45, 60, 2, 3, 900, running().lock()),
+                folded);
     }
 
     @Test

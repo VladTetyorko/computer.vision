@@ -3,7 +3,9 @@ package com.drones.vision.perception.domain.model;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TrackRefTest {
 
@@ -62,5 +64,26 @@ class TrackRefTest {
         assertEquals(0.012, ref.velocityX());
         assertEquals(-0.001, ref.velocityY());
         assertEquals(143, ref.ageFrames());
+    }
+
+    @Test
+    void sixArgConvenienceConstructorDefaultsReupdatedToFalse() {
+        TrackRef ref = new TrackRef(7L, TrackState.COASTING, DetectionSource.TRACKER, 0.012, -0.001, 143);
+
+        assertFalse(ref.reupdated());
+    }
+
+    @Test
+    void threeArgConvenienceConstructorDefaultsReupdatedToFalse() {
+        TrackRef ref = new TrackRef(1L, TrackState.TENTATIVE, DetectionSource.TRACKER);
+
+        assertFalse(ref.reupdated());
+    }
+
+    @Test
+    void acceptsAnExplicitlyReupdatedTrack() {
+        TrackRef ref = new TrackRef(7L, TrackState.CONFIRMED, DetectionSource.TRACKER, 0.0, 0.0, 5, true);
+
+        assertTrue(ref.reupdated());
     }
 }

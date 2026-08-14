@@ -17,9 +17,11 @@ package com.drones.vision.perception.domain.model;
  * @param velocityX normalized frame-widths per second; must be finite
  * @param velocityY normalized frame-heights per second; must be finite
  * @param ageFrames frames since this track was born; must not be negative
+ * @param reupdated whether this track's gap was reconstructed by ORU on this frame
+ *                  (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2)
  */
 public record TrackRef(long trackId, TrackState state, DetectionSource source, double velocityX, double velocityY,
-                        int ageFrames) {
+                        int ageFrames, boolean reupdated) {
 
     public TrackRef {
         if (trackId < 1) {
@@ -41,6 +43,17 @@ public record TrackRef(long trackId, TrackState state, DetectionSource source, d
         if (ageFrames < 0) {
             throw new IllegalArgumentException("TrackRef ageFrames must not be negative: " + ageFrames);
         }
+    }
+
+    /**
+     * Convenience constructor for callers that don't care about {@link #reupdated()} — defaults it
+     * to {@code false}, unchanged behavior. This was the canonical constructor before
+     * docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md added the field; every pre-existing 6-arg call
+     * site compiles <em>and behaves</em> unchanged.
+     */
+    public TrackRef(long trackId, TrackState state, DetectionSource source, double velocityX, double velocityY,
+                     int ageFrames) {
+        this(trackId, state, source, velocityX, velocityY, ageFrames, false);
     }
 
     /**

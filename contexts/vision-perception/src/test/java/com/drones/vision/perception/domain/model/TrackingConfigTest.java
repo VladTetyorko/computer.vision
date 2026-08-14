@@ -78,4 +78,55 @@ class TrackingConfigTest {
 
         assertEquals(lock, config.lock());
     }
+
+    @Test
+    void eightArgConvenienceConstructorDefaultsCapabilityLevelAndReupdateMaxGapMillisToZero() {
+        TrackingConfig config = new TrackingConfig(TrackingMode.FOLLOW, "lk", 2000, 15, 30, 30, 3, null);
+
+        assertEquals(0, config.capabilityLevel());
+        assertEquals(0, config.reupdateMaxGapMillis());
+    }
+
+    @Test
+    void offAndDefaultsBothCapabilityLevelZero() {
+        assertEquals(0, TrackingConfig.off().capabilityLevel(), "0 = auto-probe, today's behaviour exactly");
+        assertEquals(0, TrackingConfig.defaults().capabilityLevel());
+        assertEquals(0, TrackingConfig.off().reupdateMaxGapMillis(), "0 = server default");
+        assertEquals(0, TrackingConfig.defaults().reupdateMaxGapMillis());
+    }
+
+    @Test
+    void rejectsOutOfRangeCapabilityLevel() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new TrackingConfig(TrackingMode.OFF, "", 2000, 15, 30, 30, 3, -1, 0, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> new TrackingConfig(TrackingMode.OFF, "", 2000, 15, 30, 30, 3, 6, 0, null));
+    }
+
+    @Test
+    void acceptsBoundaryCapabilityLevel() {
+        new TrackingConfig(TrackingMode.OFF, "", 2000, 15, 30, 30, 3, 0, 0, null);
+        new TrackingConfig(TrackingMode.OFF, "", 2000, 15, 30, 30, 3, 5, 0, null);
+    }
+
+    @Test
+    void rejectsNegativeReupdateMaxGapMillis() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new TrackingConfig(TrackingMode.OFF, "", 2000, 15, 30, 30, 3, 0, -1, null));
+    }
+
+    @Test
+    void acceptsZeroReupdateMaxGapMillisAsServerDefault() {
+        TrackingConfig config = new TrackingConfig(TrackingMode.OFF, "", 2000, 15, 30, 30, 3, 0, 0, null);
+
+        assertEquals(0, config.reupdateMaxGapMillis());
+    }
+
+    @Test
+    void acceptsAnExplicitCapabilityLevelAndReupdateMaxGapMillis() {
+        TrackingConfig config = new TrackingConfig(TrackingMode.FOLLOW, "lk", 2000, 15, 30, 30, 3, 2, 600, null);
+
+        assertEquals(2, config.capabilityLevel());
+        assertEquals(600, config.reupdateMaxGapMillis());
+    }
 }

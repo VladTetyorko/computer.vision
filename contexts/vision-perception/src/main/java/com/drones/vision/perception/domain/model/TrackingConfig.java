@@ -13,21 +13,36 @@ package com.drones.vision.perception.domain.model;
  * {@code redetect_iou_threshold}. {@code lock} is {@code null} whenever no lock request/
  * confirmation is in flight for the stream — not a {@link TargetLock} with every form absent.
  *
- * @param mode               how the two perception loops cooperate for this stream
- * @param engineId           tracker engine to use; empty ({@code ""}) means the server picks the
- *                           mode's default
- * @param verifyEveryMillis  {@code FOLLOW} detector re-verify cadence, milliseconds; must be positive
- * @param followFps          the Java-side sampler's target frame rate while {@code FOLLOW} is
- *                           active — no cv-service knob, since cv-service must never care how
- *                           often it is fed; must be positive
- * @param redetectIouPercent re-anchor when detector&harr;tracker IoU is at least this percent, [0,100]
- * @param maxAgeFrames       unmatched frames before a track goes {@code LOST}; must be positive
- * @param minHits            detector hits needed for {@code TENTATIVE} &rarr; {@code CONFIRMED};
- *                           must be positive
- * @param lock                the target {@code FOLLOW} should hold, or {@code null} if none
+ * <p>{@code capabilityLevel} and {@code reupdateMaxGapMillis} (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
+ * §2) are the two settable request fields of cv-service's V3 capability ladder and ORU that this
+ * side never sent before this wave. {@code capabilityLevel} is a <strong>ceiling, not a
+ * demand</strong> (E12): the session serves {@code min(requested, affordable)}, never more, never a
+ * refusal, so a value that turns out to be too ambitious degrades instead of failing. What actually
+ * ran is reported back as {@link TrackingCapability}, never this field echoed — see {@link
+ * TrackingTelemetry#capability()}.
+ *
+ * @param mode                  how the two perception loops cooperate for this stream
+ * @param engineId              tracker engine to use; empty ({@code ""}) means the server picks the
+ *                              mode's default
+ * @param verifyEveryMillis     {@code FOLLOW} detector re-verify cadence, milliseconds; must be positive
+ * @param followFps             the Java-side sampler's target frame rate while {@code FOLLOW} is
+ *                              active — no cv-service knob, since cv-service must never care how
+ *                              often it is fed; must be positive
+ * @param redetectIouPercent    re-anchor when detector&harr;tracker IoU is at least this percent, [0,100]
+ * @param maxAgeFrames          unmatched frames before a track goes {@code LOST}; must be positive
+ * @param minHits               detector hits needed for {@code TENTATIVE} &rarr; {@code CONFIRMED};
+ *                              must be positive
+ * @param capabilityLevel       ceiling on the capability ladder level cv-service may serve, [0,5];
+ *                              {@code 0} = auto-probe, cv-service decides the highest level this
+ *                              host affords
+ * @param reupdateMaxGapMillis  longest gap, milliseconds, ORU may reconstruct from the two real
+ *                              observations bracketing it; must not be negative; {@code 0} = server
+ *                              default
+ * @param lock                  the target {@code FOLLOW} should hold, or {@code null} if none
  */
 public record TrackingConfig(TrackingMode mode, String engineId, int verifyEveryMillis, int followFps,
-                              int redetectIouPercent, int maxAgeFrames, int minHits, TargetLock lock) {
+                              int redetectIouPercent, int maxAgeFrames, int minHits, int capabilityLevel,
+                              int reupdateMaxGapMillis, TargetLock lock) {
 
     /** Default {@code FOLLOW} detector re-verify cadence (docs/plans/done/TRACKING-PLAN.md §4.A), milliseconds. */
     public static final int DEFAULT_VERIFY_EVERY_MILLIS = 2000;
@@ -68,6 +83,26 @@ public record TrackingConfig(TrackingMode mode, String engineId, int verifyEvery
         if (minHits <= 0) {
             throw new IllegalArgumentException("TrackingConfig minHits must be positive: " + minHits);
         }
+        if (capabilityLevel < 0 || capabilityLevel > 5) {
+            throw new IllegalArgumentException(
+                    "TrackingConfig capabilityLevel must be within [0,5]: " + capabilityLevel);
+        }
+        if (reupdateMaxGapMillis < 0) {
+            throw new IllegalArgumentException(
+                    "TrackingConfig reupdateMaxGapMillis must not be negative: " + reupdateMaxGapMillis);
+        }
+    }
+
+    /**
+     * Convenience constructor for callers that don't care about {@link #capabilityLevel()}/{@link
+     * #reupdateMaxGapMillis()} — defaults both to {@code 0} (auto-probe / server default), which is
+     * byte-identical to not setting either wire field at all (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
+     * invariant B2). This was the canonical constructor before that wave added the two fields; every
+     * pre-existing 8-arg call site compiles <em>and behaves</em> unchanged.
+     */
+    public TrackingConfig(TrackingMode mode, String engineId, int verifyEveryMillis, int followFps,
+                           int redetectIouPercent, int maxAgeFrames, int minHits, TargetLock lock) {
+        this(mode, engineId, verifyEveryMillis, followFps, redetectIouPercent, maxAgeFrames, minHits, 0, 0, lock);
     }
 
     /**
