@@ -34,3 +34,8 @@ active_model.json
 # ultralytics training run outputs -- runtime data, never source.
 datasets/
 runs/
+
+# MOT17 real-footage benchmark data (benchmarks/mot17.py, fetch_mot17.sh) --
+# CC BY-NC-SA licensed third-party dataset, never committed. Reproduced via
+# benchmarks/fetch_mot17.sh; see benchmarks/__init__.py for what this data feeds.
+benchmarks/data/
