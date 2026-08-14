@@ -19,7 +19,7 @@ from cv_service.tracking.engines.base import (
     Observation,
     Transform,
 )
-from cv_service.tracking.reupdate import reupdate
+from cv_service.tracking.reupdate import late_correction, reupdate
 from cv_service.tracking.track import Track
 
 
@@ -233,6 +233,82 @@ def test_the_most_recent_real_observation_is_used_not_an_older_one():
     assert result.velocity_x == pytest.approx(0.3)  # (1.0 - 0.4) / (6.0 - 4.0), not from t=0.0
 
 
+# -- late_correction (TRACKING-V3-PLAN wave V6, §4.5) ------------------------
+
+
+def test_late_correction_is_none_for_a_non_positive_lag():
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    assert late_correction(subject, subject.history, Box(0.1, 0.0, 0.1, 0.1), now=1.0, lag_seconds=0.0, max_gap_millis=10_000) is None
+    assert late_correction(subject, subject.history, Box(0.1, 0.0, 0.1, 0.1), now=1.0, lag_seconds=-0.5, max_gap_millis=10_000) is None
+
+
+def test_late_correction_is_none_with_no_bracket_to_reconstruct_from():
+    subject = track()  # empty ring -- a brand-new track has nothing to bracket
+
+    assert late_correction(subject, subject.history, Box(0.1, 0.0, 0.1, 0.1), now=1.0, lag_seconds=0.5, max_gap_millis=10_000) is None
+
+
+def test_late_correction_projects_the_box_forward_by_the_reconstructed_velocity():
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)  # the last REAL observation
+
+    # `box` is this frame's raw, just-arrived detection: `lag_seconds=0.5`
+    # says it describes `now(1.0) - 0.5 = 0.5`, so `reupdate()` reconstructs
+    # velocity from the t=0.0 -> t=0.5 bracket: (0.2-0.0)/0.5 = 0.4/s.
+    raw_box = Box(0.2, 0.0, 0.1, 0.1)
+
+    corrected = late_correction(subject, subject.history, raw_box, now=1.0, lag_seconds=0.5, max_gap_millis=10_000)
+
+    assert corrected is not None
+    # Projected forward the SAME 0.5s, at the SAME reconstructed rate: +0.2.
+    assert corrected.x == pytest.approx(0.4)
+    assert corrected.y == pytest.approx(0.0)
+    assert corrected.width == pytest.approx(0.1)
+    assert corrected.height == pytest.approx(0.1)
+
+
+def test_late_correction_is_none_when_the_reconstructed_gap_exceeds_the_ceiling():
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    # captured_at = 1.0 - 0.5 = 0.5s; the bracket at t=0.0 is a 500ms gap,
+    # over the 100ms ceiling given here.
+    assert (
+        late_correction(subject, subject.history, Box(0.2, 0.0, 0.1, 0.1), now=1.0, lag_seconds=0.5, max_gap_millis=100)
+        is None
+    )
+
+
+def test_a_non_positive_ceiling_disables_late_correction_too():
+    # invariant P7: the SAME `reupdate_max_gap_millis` sentinel that
+    # switches post-occlusion ORU off must switch this correction off too --
+    # reused, not duplicated, so there is only one knob to reason about.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    assert late_correction(subject, subject.history, Box(0.2, 0.0, 0.1, 0.1), now=1.0, lag_seconds=0.5, max_gap_millis=0) is None
+
+
+def test_late_correction_reuses_history_transform_for_the_bracket():
+    # A world-static object, correctly reported at the panned position:
+    # `history_transform` warps the t=0.0 bracket to read (0.2, 0.0) too, so
+    # the reconstructed velocity is genuinely zero and the box is returned
+    # unmoved -- the SAME coordinate-frame fix `reupdate()` itself proves
+    # (see the tests above), reached through this function instead.
+    pan = Transform(c=0.2)
+    subject = track(history_transform=pan)
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    raw_box = Box(0.2, 0.0, 0.1, 0.1)
+    corrected = late_correction(subject, subject.history, raw_box, now=1.0, lag_seconds=0.5, max_gap_millis=10_000)
+
+    assert corrected is not None
+    assert corrected.x == pytest.approx(0.2, abs=1e-9)
+    assert corrected.y == pytest.approx(0.0, abs=1e-9)
+
+
 # -- P8: pure stdlib, importable at capability level L1 -----------------------
 #
 # TRACKING-V3-PLAN invariant P8: "Level 1 must import no cv2, no numpy, no
@@ -247,7 +323,7 @@ _PURITY_SCRIPT = textwrap.dedent(
     """
     import sys
 
-    from cv_service.tracking.reupdate import Reupdate, reupdate
+    from cv_service.tracking.reupdate import Reupdate, late_correction, reupdate
     from cv_service.tracking.history import ObservationRing
     from cv_service.tracking.engines.base import Box, Observation, SOURCE_DETECTOR
     from cv_service.tracking.track import Track
@@ -267,6 +343,13 @@ _PURITY_SCRIPT = textwrap.dedent(
         now=1.0, max_gap_millis=10_000,
     )
     assert result is not None, "reupdate() must succeed on a genuine bracket"
+
+    # TRACKING-V3-PLAN wave V6 -- the per-detection extension, same P8 bar.
+    corrected = late_correction(
+        track, track.history, Box(0.5, 0.0, 0.1, 0.1), now=1.0, lag_seconds=0.5,
+        max_gap_millis=10_000,
+    )
+    assert corrected is not None, "late_correction() must succeed on a genuine bracket"
 
     leaked = sorted({"cv2", "numpy", "ultralytics", "torch", "lap"} & set(sys.modules))
     assert not leaked, "reupdate.py imported: %r" % (leaked,)

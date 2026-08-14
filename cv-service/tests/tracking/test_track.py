@@ -80,6 +80,11 @@ def params(**overrides) -> TrackingParams:
         # to set it; `test_track.py`'s own ORU section overrides this
         # explicitly where the exact ceiling matters.
         reupdate_max_gap_millis=60_000,
+        # TRACKING-V3-PLAN wave V6 -- also inert here: `TrackBook`/`_observe`
+        # never read it (only `session.py`'s `_late_corrected_box` does,
+        # entirely outside this module); included only because
+        # `TrackingParams` requires it.
+        detection_lag_correction_enabled=True,
     )
     base.update(overrides)
     return TrackingParams(**base)

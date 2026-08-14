@@ -342,6 +342,19 @@ DEFAULT_TRACK_CAPABILITY_LEVEL = 0
 # ceiling).
 DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS = 15_000
 
+# TRACKING-V3-PLAN wave V6 (§4.5): whether `session.py` applies late-
+# detection back-correction at all when a caller measures a positive
+# `detection_lag_millis` for a frame (today, only `DetectPulled`'s own
+# capture-skew estimate -- `cv_service/pull/clock.py`). Independent of
+# `DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS` above, which still bounds HOW FAR
+# any one correction may reconstruct (reused, not duplicated) -- this is
+# the dedicated P7 off switch for the correction MECHANISM itself, so a
+# fleet can keep post-occlusion ORU on while ruling this specific
+# correction out, or the reverse, without one knob answering two different
+# questions. Defaults on: §5.2 calls back-correction the normal case for an
+# offboard detector, not an opt-in.
+DEFAULT_TRACK_DETECTION_LAG_CORRECTION_ENABLED = True
+
 # --- pull (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
 #
 # Back `cv_service.pull.{source,clock,loop}` -- the worker's own decode loop
@@ -743,6 +756,7 @@ class Settings:
     track_roi_min_iou: float = DEFAULT_TRACK_ROI_MIN_IOU
     track_capability_level: int = DEFAULT_TRACK_CAPABILITY_LEVEL
     track_reupdate_max_gap_millis: int = DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS
+    track_detection_lag_correction_enabled: bool = DEFAULT_TRACK_DETECTION_LAG_CORRECTION_ENABLED
     pull_decoder: str = DEFAULT_PULL_DECODER
     pull_rtsp_transport: str = DEFAULT_PULL_RTSP_TRANSPORT
     pull_target_fps: float = DEFAULT_PULL_TARGET_FPS
@@ -939,6 +953,11 @@ class Settings:
                 os.environ.get("CV_TRACK_REUPDATE_MAX_GAP_MILLIS"),
                 DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS,
                 "CV_TRACK_REUPDATE_MAX_GAP_MILLIS",
+            ),
+            track_detection_lag_correction_enabled=_parse_bool(
+                os.environ.get("CV_TRACK_DETECTION_LAG_CORRECTION_ENABLED"),
+                DEFAULT_TRACK_DETECTION_LAG_CORRECTION_ENABLED,
+                "CV_TRACK_DETECTION_LAG_CORRECTION_ENABLED",
             ),
             pull_decoder=_parse_string(os.environ.get("CV_PULL_DECODER"), DEFAULT_PULL_DECODER),
             pull_rtsp_transport=_parse_string(

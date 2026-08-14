@@ -235,6 +235,19 @@ class TrackingParams:
     # `gap_millis > max_gap_millis` check rejects every gap once the ceiling
     # is non-positive, since a gap is by definition positive.
     reupdate_max_gap_millis: int
+    # TRACKING-V3-PLAN wave V6 addition (§4.5). Deployment-only, no wire
+    # field -- same "no per-request override to fall back FROM" shape as
+    # `follow_top_k`/`roi_enabled` above. Whether `session.py` applies
+    # late-detection back-correction AT ALL when a caller measures a
+    # positive `detection_lag_millis` for this frame (today, only
+    # `DetectPulled`'s own capture-skew estimate). `reupdate_max_gap_millis`
+    # above already bounds HOW FAR any one correction may reconstruct
+    # (reused, not duplicated -- both share the same "too old to trust"
+    # ceiling); this is the INDEPENDENT switch invariant P7 needs for the
+    # correction MECHANISM itself, so a fleet can run post-occlusion ORU
+    # without also opting into per-detection back-correction, or the
+    # reverse, rather than one knob answering two different questions.
+    detection_lag_correction_enabled: bool
 
     @property
     def active(self) -> bool:
@@ -423,4 +436,7 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
             if request.reupdate_max_gap_millis > 0
             else settings.track_reupdate_max_gap_millis
         ),
+        # TRACKING-V3-PLAN wave V6 -- straight from `Settings`, no wire
+        # field (same shape as `follow_top_k`/`roi_enabled` above).
+        detection_lag_correction_enabled=settings.track_detection_lag_correction_enabled,
     )

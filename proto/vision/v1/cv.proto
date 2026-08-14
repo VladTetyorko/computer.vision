@@ -223,10 +223,12 @@ message DetectionResponse {
   int64 missed_deadlines    = 20;  // NEW -- cumulative sampler deadlines no frame arrived to serve
   int64 capture_skew_millis = 21;  // NEW -- worker's estimate of (local receipt - capture); 0 = unknown
 
-  // TRACKING-V3-PLAN wave V3 -- ORU (§4.2). Field number 24 (detection_lag_millis) is
-  // reserved for a later wave (§3's frozen diff).
+  // TRACKING-V3-PLAN wave V3 -- ORU (§4.2).
   int64  reupdate_millis    = 22; // NEW -- ORU cost this frame, milliseconds; 0 = none ran
   int32  reupdated_tracks   = 23; // NEW -- tracks backfilled by ORU this frame
+  // TRACKING-V3-PLAN wave V6 -- late-detection back-correction (§4.5): ORU applied
+  // per-detection, binding a detection to its own capture time rather than "now".
+  int64  detection_lag_millis = 24; // NEW -- measured capture -> association lag; 0 = unknown
 
   // TRACKING-V3-PLAN wave V1 -- the capability ladder (§5).
   int32  capability_level_served = 25; // NEW -- level that ACTUALLY ran; always <= requested

@@ -321,6 +321,12 @@ def _tracked_response(
         # convention `motion_millis`/`tracker_millis` already use.
         reupdate_millis=outcome.reupdate_millis,
         reupdated_tracks=outcome.reupdated_tracks,
+        # TRACKING-V3-PLAN wave V6 (field 24) -- late-detection back-
+        # correction (§4.5): the measured capture -> association lag this
+        # frame's `session.process()` call was given (`_handle_request`'s
+        # `capture_skew_millis`, pull-only today), echoed straight through.
+        # `0` on every push-mode frame -- genuinely unknown, never fabricated.
+        detection_lag_millis=outcome.detection_lag_millis,
     )
 
 
@@ -908,7 +914,13 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     frame=frame,
                     snapshot=snapshot,
                 )
-                response = self._echo(request) if no_model else self._handle_request(request, session)
+                response = (
+                    self._echo(request)
+                    if no_model
+                    else self._handle_request(
+                        request, session, capture_skew_millis=diagnostics.capture_skew_millis
+                    )
+                )
                 # Pull-only diagnostics (§5.1 fields 16-21) -- zero in push
                 # mode; the complete, honest accounting of a decode-and-infer
                 # loop that now runs on another machine (D8).
@@ -999,7 +1011,19 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         self,
         request: "cv_pb2.FrameRequest",
         session: Optional[StreamTrackingSession] = None,
+        *,
+        capture_skew_millis: int = 0,
     ) -> "cv_pb2.DetectionResponse":
+        """`capture_skew_millis` (TRACKING-V3-PLAN wave V6, §4.5) is
+        `DetectPulled`'s own `PullDiagnostics.capture_skew_millis` -- already
+        computed, same-process, wall-clock-consistent (`pull/clock.py`'s
+        `CaptureClock`, entirely `time.time()`-based) -- threaded straight
+        into `session.process()`. `DetectStream` never passes one: `push`
+        mode's `request.timestamp_millis` is JVM-stamped, another machine's
+        clock, and reading it against this host's own wall clock without a
+        synchronized time base would risk a bogus correction rather than a
+        conservative "unknown" -- `0` (the default) stays exactly that.
+        """
         try:
             if session is not None and self._sync_tracking(session, request):
                 # Built ONCE and shared between `frame=` (the FOLLOW path's
@@ -1029,6 +1053,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     ),
                     frame=loader,
                     pose=_camera_pose_from_wire(request.camera_pose),
+                    detection_lag_millis=capture_skew_millis,
                 )
                 if outcome.boxes is None:
                     return self._echo(request)

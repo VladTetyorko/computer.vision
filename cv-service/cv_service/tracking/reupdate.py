@@ -99,6 +99,28 @@ below carries `velocity_x`/`velocity_y`, a field the plan's literal
 caller needs to apply the correction. Recorded here as the one place §4.2
 turned out underspecified, not silently patched over.
 
+## Wave V6: `late_correction` -- the SAME math, run per-detection
+
+§4.5 asks for "ORU applied per-detection rather than only post-occlusion":
+`session.py`'s own clock (pull mode's `capture_skew_millis`, `pull/clock.py`)
+tells it a just-arrived detection describes a frame that is already
+`detection_lag_millis` old by the time it lands -- an offboard detector is a
+late detector by construction (§5.2, "L1 RELAY"), not an occasional gap.
+Booking that box against `now` as though it were fresh is the exact same
+lag-as-drift error `reupdate()` above deletes after a miss; the only
+difference is WHEN it fires.
+
+`late_correction` does not duplicate `reupdate()`'s interpolant -- it CALLS
+it, at `now - lag_seconds` instead of `now`, to get an honest velocity from
+the two REAL observations that bracket the detection's OWN capture instant,
+then projects the detection's box forward by that SAME `lag_seconds` using
+that velocity. `z̃(t2)` (`reupdate()`'s `t2`, here the capture instant) is
+computed once and never re-derived; only the forward projection past it is
+new arithmetic, and it is the same constant-velocity extrapolation
+`predict.py` already performs, just inlined on a bare `Box` instead of a
+`Track` (this module has no reason to import `predict.py` for six lines of
+`x + v*t`).
+
 Pure stdlib (`math`, `dataclasses`) -- this module carries the wave's whole
 accuracy win and must run at capability level L1 (invariant P8), the same
 ARMv6-companion constraint `history.py`/`predict.py` already meet.
@@ -110,7 +132,7 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
-from cv_service.tracking.engines.base import Observation
+from cv_service.tracking.engines.base import Box, Observation
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from cv_service.tracking.history import ObservationRing
@@ -211,4 +233,76 @@ def _distance(a: "tuple[float, float]", b: "tuple[float, float]") -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-__all__ = ["Reupdate", "reupdate"]
+def late_correction(
+    track: "Track",
+    ring: "ObservationRing",
+    box: Box,
+    now: float,
+    lag_seconds: float,
+    *,
+    max_gap_millis: int,
+) -> Optional[Box]:
+    """`box` re-propagated to `now`, when this stream measured a positive
+    `lag_seconds` for it (TRACKING-V3-PLAN §4.5, wave V6) -- `None` when
+    there is nothing honest to correct with, in which case the caller keeps
+    `box` as given.
+
+    Binds `box` -- this frame's raw, just-arrived detection -- to its own
+    capture instant (`now - lag_seconds`) rather than `now`, and asks
+    `reupdate()` to re-derive velocity from the two REAL observations that
+    bracket THAT instant: the ring's last entry strictly before it, and
+    `box` itself. That velocity, not `track.velocity_x`/`velocity_y` (the
+    estimator's own possibly-stale state -- `reupdate()`'s own docstring is
+    explicit that this is the exact error the whole mechanism exists to
+    correct), then projects `box` forward by the SAME `lag_seconds`,
+    landing on this function's best estimate of where the object is at
+    `now`.
+
+    `None` -- exactly `reupdate()`'s own contract, reused rather than
+    re-decided here -- when `lag_seconds` is not positive, or `ring` has no
+    real observation before the capture instant (a brand-new track has
+    nothing to bracket against yet), or the resulting gap exceeds
+    `max_gap_millis`. That ceiling is the SAME one that bounds post-
+    occlusion ORU (`TrackingParams.reupdate_max_gap_millis`) -- reused, not
+    duplicated: a gap too old to reconstruct honestly for one purpose is too
+    old for the other, and `max_gap_millis <= 0` is therefore invariant P7's
+    off switch for this correction too, with no second knob needed just to
+    disable it. Callers must treat `None` as "keep the raw box" and never
+    fabricate a correction from nothing (**P5**).
+
+    **Known simplification, stated rather than hidden.** The bracket
+    `reupdate()` reads is warped into `box`'s frame by `track.
+    history_transform`, which accumulates ego-motion from the ring's last
+    entry up to `now` (`TrackBook.warp()`), not up to the capture instant
+    `lag_seconds` short of it -- `history.py` keeps one running total, not a
+    per-frame log a caller could warp to an arbitrary earlier instant. On a
+    stream with ego-motion DURING the lag window, this over-warps the
+    bracket by that remainder. `latency`'s own harness scenario (the one
+    this wave is measured against) has no ego-motion at all, so this never
+    bites the case in front of it; a stream with both a moving camera and a
+    lagged detector is a real refinement, not one this wave's file scope
+    (`history.py`'s ring has no timestamped transform log to add one) reaches.
+    """
+    if lag_seconds <= 0.0:
+        return None
+    captured_at = now - lag_seconds
+    # `reupdate()` only reads `.box` off this -- key/label/confidence carry
+    # no meaning for gap reconstruction, so `track`'s own are harmless
+    # stand-ins rather than plumbing the real detection's through for no
+    # arithmetic reason.
+    stand_in = Observation(key=track.key, box=box, label=track.label, confidence=track.confidence)
+    reconstruction = reupdate(track, ring, stand_in, captured_at, max_gap_millis=max_gap_millis)
+    if reconstruction is None:
+        return None
+    center_x, center_y = box.center
+    projected_x = center_x + reconstruction.velocity_x * lag_seconds
+    projected_y = center_y + reconstruction.velocity_y * lag_seconds
+    return Box(
+        projected_x - box.width / 2.0,
+        projected_y - box.height / 2.0,
+        box.width,
+        box.height,
+    )
+
+
+__all__ = ["Reupdate", "reupdate", "late_correction"]
