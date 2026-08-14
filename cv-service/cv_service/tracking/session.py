@@ -258,6 +258,13 @@ class FrameOutcome:
     # docstring establishes for that field.
     capability_level_served: int = 0
     capability_level_reason: str = ""
+    # TRACKING-V3-PLAN wave V3 -- ORU (§4.2), `DetectionResponse.reupdate_
+    # millis`/`.reupdated_tracks` (wire fields 22/23). Both `0` on every
+    # frame that never calls `TrackBook.apply()` at all (OFF, or no engine
+    # constructible) -- see `TrackBook.reset_reupdate_stats`'s own docstring
+    # for why that is guaranteed rather than merely usual.
+    reupdate_millis: int = 0
+    reupdated_tracks: int = 0
 
 
 class StreamTrackingSession:
@@ -459,6 +466,11 @@ class StreamTrackingSession:
         # `FrameOutcome`/`inference_millis`.
         self._roi_ran = False
         self._roi_millis = 0
+        # TRACKING-V3-PLAN wave V3 -- reset every frame, BEFORE the mode
+        # dispatch below (which may or may not call `self._book.apply()` --
+        # see `TrackBook.reset_reupdate_stats`'s own docstring for why the
+        # reset cannot live inside `apply()` itself).
+        self._book.reset_reupdate_stats()
 
         detections: Optional[list] = None
         inference_millis = 0
@@ -534,6 +546,12 @@ class StreamTrackingSession:
             detector_roi=self._roi_ran,
             capability_level_served=self._capability_level_served,
             capability_level_reason=self._capability_level_reason,
+            # TRACKING-V3-PLAN wave V3 -- read AFTER the mode dispatch above,
+            # which is where `TrackBook.apply()` (the only thing that ever
+            # advances these) is called, at most once, per `apply()`'s own
+            # "ages every live track once per call" contract.
+            reupdate_millis=self._book.last_reupdate_millis,
+            reupdated_tracks=self._book.last_reupdated_tracks,
         )
 
     # -- reconnect (TRACKING-V2-PLAN wave C5b, review finding B5) -----------
@@ -1424,15 +1442,55 @@ class StreamTrackingSession:
         since it was last read, so `predict()` here needs no transform of
         its own -- `self._followed.box` is already expressed in THIS
         frame's coordinates.
+
+        TRACKING-V3-PLAN wave V3: when that PREDICTED test fails, one more
+        attempt is made before giving up on this pass -- matching against
+        the LAST REAL observation this track ever received, carried into
+        THIS frame by the same accumulated ego-motion transform ORU itself
+        reads (`Track.history_transform`, `reupdate.py`'s own module
+        docstring), not the compounded, possibly-wrong-direction VELOCITY
+        `predict()` is still trusting. This is the prospective half of the
+        same evidence-vs-extrapolation swap ORU makes retrospectively at
+        the moment of a successful re-anchor: `nonlinear`'s object reverses
+        heading the instant it is hidden, so the constant-velocity
+        prediction runs the wrong way for the whole gap and can never
+        clear the re-anchor test on its own, while the last REAL box it
+        was ever seen in barely differs from where a reversed-but-still-
+        nearby object actually is.
+
+        Not gated on `track.misses > 0` -- deliberately, and unlike
+        `track.py`'s own ORU gate: `misses` only advances INSIDE `_observe`
+        (this frame's, not yet run when `_select_target` is called), so the
+        VERY FIRST verify pass after a real confirmation would otherwise
+        never get this fallback, which is exactly the attempt where the
+        drift is smallest and the fallback's odds are best. Gated instead
+        by `reupdate_max_gap_millis` -- the SAME ceiling that bounds what
+        ORU itself will reconstruct, deliberately: a gap too old to trust
+        for one is too old to trust for the other, and `memory.py`'s
+        dormant gallery is what serves it once genuinely LOST. A no-op, not
+        a widened gate, when the PRIMARY test already succeeded: this is a
+        SECOND candidate offered only on failure, never a looser threshold
+        applied to the first one, so it cannot make an existing correct
+        match worse.
         """
         held_box = predict(self._followed, now).box if self._followed is not None else None
-        return lock_module.select_target(
+        index = lock_module.select_target(
             boxes,
             held_box=held_box,
             target=self._lock.target,
             min_iou=self._params.redetect_iou_threshold,
             box_of_track=lambda track_id: self._box_of_track(track_id, now),
         )
+        if index < 0 and held_box is not None:
+            anchor = self._followed.history.latest()
+            if anchor is not None:
+                gap_millis = (now - anchor.timestamp) * 1000.0
+                if 0.0 < gap_millis <= self._params.reupdate_max_gap_millis:
+                    frozen_box = self._followed.history_transform.apply_box(anchor.observation.box)
+                    index = lock_module.best_iou_match(
+                        frozen_box, boxes, self._params.redetect_iou_threshold
+                    )
+        return index
 
     def _box_of_track(self, track_id: int, now: float) -> Optional[Box]:
         known = self._book.get(track_id)

@@ -601,3 +601,64 @@ def test_garbage_wave_v1_env_var_falls_back_and_never_raises(monkeypatch):
     settings = Settings.from_env()
 
     assert settings.track_capability_level == Settings().track_capability_level
+
+
+# -- wave V3 addition: reupdate_max_gap_millis (proto field 14) --------------
+# (TRACKING-V3-PLAN §4.2). Same `<=0 = server default` request-level shape as
+# `memory_ttl_millis` above, and the SAME "the deployment default itself may
+# legitimately be non-positive" exception -- disabling ORU fleet-wide is a
+# deployment choice, not something a per-request sentinel can express.
+
+
+def test_a_non_positive_reupdate_gap_request_takes_the_deployment_default():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_gap_millis=9_000)
+
+    for sentinel in (0, -1, -99):
+        resolved = params_module.resolve(
+            TrackingRequest(mode=MODE_FOLLOW, reupdate_max_gap_millis=sentinel), settings
+        )
+        assert resolved.reupdate_max_gap_millis == 9_000
+
+
+def test_a_positive_reupdate_gap_request_wins_over_the_deployment_default():
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_FOLLOW, reupdate_max_gap_millis=5_000), SETTINGS
+    )
+
+    assert resolved.reupdate_max_gap_millis == 5_000
+
+
+def test_a_non_positive_deployment_reupdate_gap_is_a_legitimate_disabled_value():
+    # Unlike every other `<=0` sentinel in this module (except `memory_ttl_
+    # millis`), a non-positive DEPLOYMENT default is not replaced by
+    # anything -- it is the operator's own choice to run with ORU off
+    # fleet-wide (`reupdate.py`'s own `gap_millis > max_gap_millis` check
+    # rejects every gap once the ceiling is non-positive, since a gap is by
+    # definition positive).
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_gap_millis=0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_FOLLOW), settings)
+
+    assert resolved.reupdate_max_gap_millis == 0
+
+
+def test_settings_read_the_wave_v3_reupdate_gap_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_GAP_MILLIS", "20000")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_gap_millis == 20_000
+
+
+def test_a_negative_reupdate_gap_env_var_disables_rather_than_falling_back(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_GAP_MILLIS", "0")
+
+    assert Settings.from_env().track_reupdate_max_gap_millis == 0
+
+
+def test_garbage_reupdate_gap_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_GAP_MILLIS", "soon")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_gap_millis == Settings().track_reupdate_max_gap_millis

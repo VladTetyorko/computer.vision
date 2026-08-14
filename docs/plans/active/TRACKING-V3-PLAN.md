@@ -241,7 +241,7 @@ The exclusion of predicted boxes is the load-bearing rule. `Observation.predicte
 distinguishes them, and `velocity_x/y` already respects that distinction — the ring extends the same
 evidence-vs-extrapolation discipline to history.
 
-### 4.1b OPEN for wave V3 — which frame is a remembered observation expressed in?
+### 4.1b CLOSED by wave V3 — which frame is a remembered observation expressed in?
 
 Wave V2 surfaced a question this plan had not asked, and V3 cannot avoid it.
 
@@ -262,6 +262,19 @@ Three candidates, to be decided by measurement in V3, not by preference:
 
 Whichever is chosen, the `nonlinear` and `pan_occlusion` scenarios are what settle it: the second
 superposes ego-motion on the gap and is the one that will expose a wrong answer here.
+
+**Decision: compose on read, and the measurement was not close.** Wave V3 added
+`Track.history_transform`, composed forward once per live track per frame by `TrackBook.warp()`
+(**O(1) per track, not O(capacity)**) and reset to `IDENTITY` exactly when the ring admits a new
+real observation; `reupdate.py` warps the bracketing entry through it before interpolating.
+Replaying `pan_occlusion`'s own construction (world-static target, 0.02 frame-widths/frame of pan,
+a 25-frame gap) through the real `warp()`/`reupdate()` path gives **0.5 normalized — 160 px on a
+320 px frame — of reconstruction error uncorrected, against 0.0 corrected.** That is exactly the
+full pan displacement: uncorrected, ORU would have rebuilt the gap while ignoring every pixel the
+camera moved. `nonlinear`, which has no ego-motion, is the control and both options agree there —
+which is what says the measurement is measuring the right thing. Option 3 ("accept the error") is
+therefore refuted, not merely rejected. No `Transform.inverse()` is needed: `history_transform`
+only ever composes forward.
 
 ### 4.2 `reupdate.py` — ORU, the Observation-Centric Re-Update
 
@@ -437,7 +450,7 @@ one commit. **Level** states the lowest capability level (§5) at which the wave
 | **V0** | `tools/trackeval/` only — no product code | n/a | New scenarios `nonlinear`, `tiny_fast`, `pan_occlusion`, `latency`, `crossing_similar`; new metrics **ADE/FDE during coast** beside IDSW/FM/MT; a real-footage recorder + offline replay. **The wave passes when the shipped V2 configuration scores visibly imperfect on the new scenarios** — a harness that cannot see the defect cannot prove the fix. V2's ten existing scenarios must still score exactly as `BASELINE.md` records |
 | **V1** | `levels.py` NEW · `params.py` · `registry.py` · `session.py` | builds the ladder | Five levels resolve; `capability_level = 0` auto-probes; a level is a ceiling and `capability_level_served` ≤ requested (**E12**); **L1 provably imports no `cv2`, `numpy`, `ultralytics` or model asset** — asserted by inspecting `sys.modules`, not by reading the source; every downgrade logged exactly once (**P5**); §5.1's cost table reproduced by a committed micro-benchmark |
 | **V2** | `history.py` NEW · `track.py` | **L1** | Ring is bounded by construction; predicted boxes are never recorded; **zero behavioural delta** — the full V0 scoreboard reproduces the V2 baseline exactly |
-| **V3** | `reupdate.py` NEW · `session.py` | **L1** | On `nonlinear` and `long_occlusion`, **ADE at re-anchor improves ≥ 25 %** vs the V0 baseline; IDSW does not regress on any of the ten V2 scenarios; `reupdated` / `reupdate_millis` on the wire |
+| **V3** | `reupdate.py` NEW · `session.py` · `track.py` | **L1** | **Delivered.** `nonlinear` coast ADE **39.8 → 9.1 px (−77 %)**, PT→MT; 29 of 30 rows byte-identical; P7 reproduction proven with `CV_TRACK_REUPDATE_MAX_GAP_MILLIS=0`. **`long_occlusion` was struck from this criterion** — its motion is genuinely constant-velocity, so the pre-V3 estimate already converges to the right answer (≈0.0401 at re-anchor, measured, both before and after), and its 1.4 px sits at the position-jitter noise floor (`POSITION_JITTER=0.004` → 1.28 px). There was no drift there to remove; asking ORU to improve it was an error in this plan, not a shortfall in the wave |
 | **V4** | `assign.py` · `params.py` | **L1** | `crossing_similar` stops **fragmenting** — V0 measured `IDSW=0 / FM=2` there, *not* the id-swap this row originally assumed, so the criterion is `FM → 0` with `IDSW` still 0 (`tools/trackeval/BASELINE.md` §2 records why); `tiny_fast`'s `IDSW=2` → 0; each of `w_mom`/`w_cue`/`w_occ` set to zero individually reproduces the V2 scoreboard (**P7**) |
 | **V5** | `track.py` · `assign.py` · `predict.py` · `params.py` | **L1** | A sequence of deliberately low-confidence detections no longer whipsaws velocity; the widened gate recovers a track that V0 drops after a long coast |
 | **V6** | `session.py` · `history.py` · `scheduler.py` | **L1** | `latency` scenario: with detections delivered N frames late, track position error is within X of the zero-latency run; `detection_lag_millis` populated and non-zero in pull mode. **This is the wave that makes L1 worth carrying** — an offboard detector is a late detector by definition |
@@ -478,6 +491,7 @@ are hypotheses to test against our own footage, not forecasts.
 | Wave | Mechanism | Source | Reported effect |
 |---|---|---|---|
 | V3 | ORU — observation-centric re-update | OC-SORT, arXiv:2203.14360 (CVPR'23) | MOT17-val 64.9 → 66.3 HOTA from ORU alone; linear interpolation beat GPR |
+| V3 | **OCR — observation-centric recovery** (re-anchor against the last *real* observation when the prediction-based test fails) | OC-SORT, same paper, third module | Not planned for this wave — re-derived from first principles during implementation because **ORU is unreachable without it in FOLLOW**: `reupdate()` only fires after a successful re-anchor, and a prediction running the wrong way can never clear the IoU test that gates it. Offered as a *second candidate on failure* at the same threshold, never a widened gate, so it cannot spoil a match the primary already made |
 | V4 | OCM — observation-centric momentum | OC-SORT, same | DanceTrack-val 48.5 → 52.1 HOTA; runs at **793 fps on one CPU core** |
 | V4 | Weak cues (confidence, height, direction) | Hybrid-SORT, arXiv:2308.00783 (AAAI'24) | Training-free plug-in; largest gains on occlusion + non-linear motion |
 | V4 | Occlusion-aware cost offset | OAS, arXiv:2603.06034 (CVPR'26) | +2.08 HOTA / +3.05 IDF1 averaged across four host trackers |

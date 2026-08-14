@@ -47,7 +47,7 @@ linear            | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  |
 long_occlusion    | TRACKING_MODE_ASSOCIATE | cost   | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 60.0      | 60.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
 long_occlusion    | TRACKING_MODE_FOLLOW    | lk     | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 101.0     | 101.0    | 1.47  | ~0.4       | ~1         | 98      | 0.006 | 0.007 | 1.4     | 1.8
 nonlinear         | TRACKING_MODE_ASSOCIATE | cost   | 70     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 50.0      | 50.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
-nonlinear         | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 70.0      | 70.0     | 0.71  | ~0.4       | ~1         | 68      | 0.125 | 0.186 | 39.8    | 59.3
+nonlinear         | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 70.0      | 70.0     | 0.71  | ~0.4       | ~1         | 66      | 0.029 | 0.045 | 9.1     | 14.3
 occlusion         | TRACKING_MODE_ASSOCIATE | cost   | 110    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 70.0      | 70.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
 occlusion         | TRACKING_MODE_FOLLOW    | lk     | 110    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 110.0     | 110.0    | 0.55  | ~0.6       | ~1         | 106     | 0.008 | 0.009 | 1.9     | 2.1
 pan               | TRACKING_MODE_ASSOCIATE | cost   | 70     | 4  | 0    | 0  | 4  | 0  | 0  | 0    | 0     | n/a    | 24.8      | 26.0     | 10.00 | ~0.3       | ~1         | 0       | n/a   | n/a   | n/a     | n/a
@@ -128,14 +128,24 @@ This is not a bug in `nonlinear`; it is a genuine, load-bearing fact about singl
 ASSOCIATE scenarios that this wave's own tuning surfaced (see `tiny_fast`'s writeup, which
 is a direct response to it): **a lone target can never demonstrate a geometric tracking
 defect under `cost`, only a coverage one.** `nonlinear` / FOLLOW is where the real defect
-shows: `PT=1` (not MT -- coverage genuinely degrades) and **`coast_ade_px=39.8`,
-`coast_fde_px=59.3`** on a 320x240 frame -- the box drifts nearly a fifth of the frame's own
-width by the time it should have re-anchored, and constant-velocity extrapolation runs the
-WRONG WAY the entire time because the object reversed heading the instant it went behind
-the bar. **This is precisely the number IDSW/FM/MT cannot see** (the plan's own words for
-wave V0's charter) -- `nonlinear`'s id never changes and its coverage classification is a
-single bucket (PT), and neither of those says anything about HOW FAR OFF the box was. Coast
-ADE/FDE is the only column in this table that does.
+showed: at wave V0 it scored `PT=1` (not MT -- coverage genuinely degraded) and
+**`coast_ade_px=39.8`, `coast_fde_px=59.3`** on a 320x240 frame -- the box drifted nearly a
+fifth of the frame's own width by the time it should have re-anchored, because
+constant-velocity extrapolation ran the WRONG WAY the entire time: the object reverses
+heading the instant it goes behind the bar. **This is precisely the number IDSW/FM/MT
+cannot see** (the plan's own words for wave V0's charter) -- the id never changed and the
+coverage classification was a single bucket (PT), and neither says anything about HOW FAR
+OFF the box was. Coast ADE/FDE is the only column in this table that does.
+
+> **Closed by wave V3 (ORU + OCR).** The row above now reads `MT=1`, `FM=1`, recovery 100%,
+> **`coast_ade_px=9.1` / `coast_fde_px=14.3`** -- a 77%/76% reduction in drift, and the
+> track is promoted from Partially to Mostly Tracked. It is the only one of the thirty rows
+> in §1 that wave V3 moved; the other twenty-nine are byte-identical, and setting
+> `CV_TRACK_REUPDATE_MAX_GAP_MILLIS=0` reproduces the whole table including this row
+> (invariant P7). Both halves of the fix were needed and neither alone would have shown
+> here: ORU rebuilds the gap retrospectively, and the observation-centric re-anchor
+> fallback is what lets the re-anchor fire at all -- a drifted prediction running the wrong
+> way can never clear the IoU test that gates ORU's own invocation.
 
 **`pan_occlusion` / FOLLOW -- `coast_ade_px=83.3`, `coast_fde_px=104.8`, the largest drift
 in this table.** `pan` alone (continuous ego-motion, no gap) and `occlusion` alone (a gap,

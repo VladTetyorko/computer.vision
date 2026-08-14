@@ -304,6 +304,44 @@ DEFAULT_TRACK_ROI_MIN_IOU = 0.2
 # `CV_TRACK_CAPABILITY_LEVEL=1` fleet-wide without touching a single client.
 DEFAULT_TRACK_CAPABILITY_LEVEL = 0
 
+# TRACKING-V3-PLAN wave V3 (§4.2): the longest gap ORU (`cv_service.
+# tracking.reupdate`) will reconstruct from the two real observations that
+# bracket it, before deferring to `memory.py`'s dormant-gallery recovery
+# instead (`reupdate()`'s own docstring: "a gap too long to reconstruct
+# honestly"). Same `<=0`-is-a-legitimate-disabled-value shape as
+# `DEFAULT_TRACK_MEMORY_TTL_MILLIS` -- `_parse_int_allow_nonpositive`, not
+# `_parse_positive_int` -- because ORU needs a fleet-wide off switch for
+# invariant P7 (reversibility: with it off, the harness must reproduce
+# `BASELINE.md` exactly), and "no gap this ceiling will ever accept" (every
+# real gap is positive) is that switch.
+#
+# 15 seconds, not a round number picked in the abstract, and not simply
+# `long_occlusion`'s own 90-frame/9-second OCCLUSION window either --
+# measured directly against what `ObservationRing.before()` actually
+# brackets from in that scenario's FOLLOW replay (`tools/trackeval/
+# sequences.py`, `DEFAULT_FPS=10.0`), one of the two scenarios this wave's
+# acceptance criterion is measured against. The ring's last REAL entry
+# there is NOT the frame occlusion starts -- FOLLOW's own verify cadence
+# (`DEFAULT_TRACK_VERIFY_MILLIS=2000`) means the LAST successful cadence
+# re-anchor lands two seconds before that, and reacquisition after the
+# object reappears does not land on the exact frame it becomes visible
+# either (`CV_TRACK_REACQUIRE_MILLIS=250`'s own cadence, tried repeatedly
+# once the wall clock has declared the target LOST and unbound it). The
+# actually-measured bracketed gap in that replay is ~11.1s, not 9s -- this
+# ships with real margin above that rather than a value that happens to
+# clear it by a few hundred milliseconds, while staying well short of
+# `DEFAULT_TRACK_MEMORY_TTL_MILLIS` (30s): a track ORU can still see (its
+# `ObservationRing` never wiped, only LOST in `state`) is, by construction,
+# a track that has not yet been retired from `TrackBook` at all, which
+# happens on a much shorter, `max_age_frames`-driven schedule than the
+# dormant gallery's own TTL. This keeps the two recovery mechanisms' roles
+# distinct: ORU for a still-live track's ring-remembered gap, `memory.py`
+# for one that has genuinely been deleted and re-adopted under a recovered
+# identity (whose ring, per `track.py`'s own `_adopt` docstring, starts
+# fresh -- nothing left for ORU to bracket from there regardless of this
+# ceiling).
+DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS = 15_000
+
 # --- pull (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
 #
 # Back `cv_service.pull.{source,clock,loop}` -- the worker's own decode loop
@@ -704,6 +742,7 @@ class Settings:
     track_roi_crop_factor: float = DEFAULT_TRACK_ROI_CROP_FACTOR
     track_roi_min_iou: float = DEFAULT_TRACK_ROI_MIN_IOU
     track_capability_level: int = DEFAULT_TRACK_CAPABILITY_LEVEL
+    track_reupdate_max_gap_millis: int = DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS
     pull_decoder: str = DEFAULT_PULL_DECODER
     pull_rtsp_transport: str = DEFAULT_PULL_RTSP_TRANSPORT
     pull_target_fps: float = DEFAULT_PULL_TARGET_FPS
@@ -895,6 +934,11 @@ class Settings:
                 os.environ.get("CV_TRACK_CAPABILITY_LEVEL"),
                 DEFAULT_TRACK_CAPABILITY_LEVEL,
                 "CV_TRACK_CAPABILITY_LEVEL",
+            ),
+            track_reupdate_max_gap_millis=_parse_int_allow_nonpositive(
+                os.environ.get("CV_TRACK_REUPDATE_MAX_GAP_MILLIS"),
+                DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS,
+                "CV_TRACK_REUPDATE_MAX_GAP_MILLIS",
             ),
             pull_decoder=_parse_string(os.environ.get("CV_PULL_DECODER"), DEFAULT_PULL_DECODER),
             pull_rtsp_transport=_parse_string(

@@ -183,6 +183,9 @@ def _tracking_request_from_wire(
         # actually sets this -- `params.py`'s `resolve()` is what turns the
         # `<=0` sentinel into a number, same as every field above it.
         capability_level=message.capability_level,
+        # reupdate_max_gap_millis (field 14, TRACKING-V3-PLAN wave V3) --
+        # same shape as `memory_ttl_millis` above.
+        reupdate_max_gap_millis=message.reupdate_max_gap_millis,
     )
 
 
@@ -243,6 +246,12 @@ def _tracked_detection(box: "object") -> "cv_pb2.Detection":
         detection.velocity_x = track.velocity_x
         detection.velocity_y = track.velocity_y
         detection.track_age_frames = track.age_frames
+        # TRACKING-V3-PLAN wave V3 (field 14) -- read straight off `Track`,
+        # same as `velocity_x`/`state`/`age_frames` above; see `Track.
+        # reupdated`'s own docstring for why that is safe (a THIS-FRAME
+        # flag `_observe` resets on every call, and every path that reaches
+        # here already called `_observe` on this exact track this frame).
+        detection.reupdated = track.reupdated
     return detection
 
 
@@ -306,6 +315,12 @@ def _tracked_response(
         # was capped below what was requested.
         capability_level_served=outcome.capability_level_served,
         capability_level_reason=outcome.capability_level_reason,
+        # TRACKING-V3-PLAN wave V3 (fields 22/23) -- ORU (§4.2): what it cost
+        # this frame, and how many tracks it backfilled. Both proto3 zero
+        # (`0`) on every frame that ran none, the same "0 = none ran"
+        # convention `motion_millis`/`tracker_millis` already use.
+        reupdate_millis=outcome.reupdate_millis,
+        reupdated_tracks=outcome.reupdated_tracks,
     )
 
 

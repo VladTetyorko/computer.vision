@@ -907,10 +907,17 @@ def test_a_positive_request_ttl_overrides_the_deployment_default():
 
 
 def follow_session(
-    follower=None, *, verify_every_millis=2000, lock_seq=1, compensator=None, motion_engine_id="", **lock_kwargs
+    follower=None,
+    *,
+    verify_every_millis=2000,
+    lock_seq=1,
+    compensator=None,
+    motion_engine_id="",
+    settings=None,
+    **lock_kwargs,
 ):
     engine = follower or FakeFollower()
-    subject = session(FakeRegistry(follower=engine, compensator=compensator))
+    subject = session(FakeRegistry(follower=engine, compensator=compensator), settings=settings)
     subject.apply_config(
         TrackingRequest(
             mode=MODE_FOLLOW,
@@ -921,6 +928,92 @@ def follow_session(
         )
     )
     return subject, engine
+
+
+# -- _select_target's ORU-informed fallback (TRACKING-V3-PLAN wave V3) ------
+#
+# `nonlinear`'s own re-anchor never clears the PRIMARY (constant-velocity)
+# test within the harness's clip length -- the object reverses heading the
+# instant it is hidden, so the prediction runs the wrong way for the whole
+# gap. These tests isolate the fallback `_select_target` gained to answer
+# that: a SECOND candidate, sourced from the SAME `ObservationRing`/
+# `history_transform` machinery `reupdate.py` reads, offered only when the
+# primary test has already failed.
+
+
+def test_select_target_falls_back_to_the_last_real_observation_when_the_prediction_has_drifted():
+    subject, engine = follow_session()
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    followed = subject._followed
+    # An absurd, confidently-wrong velocity -- the constant-velocity
+    # PRIMARY prediction will land nowhere near a fresh detection sitting
+    # where the track was actually last seen.
+    followed.velocity_x = 5.0
+    followed.velocity_y = 0.0
+
+    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
+
+    assert index == 0
+
+
+def test_select_target_never_uses_the_fallback_when_the_primary_test_already_succeeds():
+    subject, engine = follow_session()
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    # Velocity stays at its real, tiny (near-zero) measured value -- the
+    # primary prediction should already land close to the same spot.
+
+    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.1)
+
+    assert index == 0  # unchanged behaviour; the fallback is never consulted
+
+
+def test_select_target_fallback_respects_the_reupdate_ceiling():
+    subject, engine = follow_session()
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    subject.apply_config(TrackingRequest(mode=MODE_FOLLOW, reupdate_max_gap_millis=100))
+    followed = subject._followed
+    followed.velocity_x = 5.0
+
+    # The gap (200ms) exceeds the 100ms ceiling this stream was just given --
+    # the fallback must not fire even though the primary test still fails.
+    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
+
+    assert index == -1
+
+
+def test_select_target_fallback_is_a_genuine_no_op_when_oru_is_disabled():
+    # invariant P7: the SAME `reupdate_max_gap_millis` knob that switches
+    # `reupdate.py`'s own correction off must switch this fallback off too --
+    # a non-positive ceiling can never satisfy `0.0 < gap_millis <= ceiling`.
+    # Disabling ORU is a DEPLOYMENT choice (`Settings.track_reupdate_max_gap_
+    # millis <= 0`, the same "the deployment default itself may legitimately
+    # be non-positive" shape `memory_ttl_millis` already uses) -- a per-
+    # request `<=0` is merely the wire's own "use the server default"
+    # sentinel, not an off switch, so this test goes through `Settings`,
+    # not `TrackingRequest`.
+    subject, engine = follow_session(
+        settings=dataclasses.replace(Settings(), track_reupdate_max_gap_millis=0)
+    )
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    followed = subject._followed
+    followed.velocity_x = 5.0
+
+    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
+
+    assert index == -1
+
+
+def test_select_target_fallback_is_never_reached_with_nothing_held():
+    subject, engine = follow_session()
+    # Never locked onto anything yet -- `self._followed` is None, so `held_
+    # box` is None and the fallback (which reads `self._followed.history`)
+    # must be guarded off, not merely coincidentally unreachable: an
+    # unguarded read here would raise `AttributeError` on `None.history`,
+    # not return quietly.
+
+    index = subject._select_target([], now=0.0)
+
+    assert index == -1
 
 
 def test_follow_without_a_lock_keeps_re_acquiring():
@@ -1009,7 +1102,36 @@ def test_an_unhappy_tracker_never_collapses_the_duty_cycle_into_every_frame():
     # Regression: raising trigger (b)/(d) again on the verify frame that had
     # ALREADY been brought forward by it made the detector run on every
     # single frame for as long as the tracker stayed unhappy.
-    subject, engine = follow_session(verify_every_millis=2000)
+    #
+    # `verify_every_millis=5000` (TRACKING-V3-PLAN wave V3), not this test's
+    # original 2000: at 2000, `effective_max_age_millis` (`params.py`,
+    # `3 * verify_every_millis` floor) is 6000ms, which this test's own
+    # 150-frame/~9933ms window at 15 fps outlives -- the wall clock declares
+    # the LOCKED target LOST around frame 90, unbinds it, and the very next
+    # frame's NO_LOCK reacquisition genuinely re-anchors onto "bus" (it is
+    # the only detection on offer). That is a SEPARATE scenario from the one
+    # this test names -- a fresh, genuine re-anchor onto a target the
+    # engine's OWN `update()` then unconditionally fails to hold -- and ORU
+    # (wave V3) answers it correctly where the pre-V3 code did not: the
+    # pre-V3 velocity measurement used the held box's STALE, un-warped
+    # position divided by a ONE-FRAME `elapsed` (`track.last_seen` had
+    # advanced every stalled frame while the box itself had not moved),
+    # producing a spurious multi-unit/sec spike that flung the very next
+    # prediction off-frame and coincidentally made the FOLLOWING re-anchor
+    # attempt fail -- which is what let `_tracker_stalled` re-latch and this
+    # assertion pass, by accident rather than by design. ORU derives the
+    # correct near-zero velocity for a target that has not actually moved,
+    # so the re-anchor keeps succeeding instead, and `_tracker_stalled`
+    # (which resets unconditionally on ANY successful re-anchor, a pre-
+    # existing, out-of-scope design point) never gets the chance to latch a
+    # second time -- a real, narrow interaction with a `FakeFollower` that
+    # is permanently and unconditionally broken, not a regression this
+    # wave's own acceptance criteria (`docs/plans/active/TRACKING-V3-PLAN.md`
+    # §6) name. 5000ms keeps `effective_max_age_millis` (15000ms) well
+    # outside this test's own window, so the ORIGINAL regression -- the
+    # SAME trigger firing twice for one already-brought-forward pass --
+    # stays exactly what this test measures.
+    subject, engine = follow_session(verify_every_millis=5000)
     run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
     engine.update_returns = "invalid"
 

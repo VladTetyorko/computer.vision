@@ -74,6 +74,12 @@ def params(**overrides) -> TrackingParams:
         # `TrackingParams` requires it. `0` = auto-probe, the sentinel's own
         # legitimate resolved value (see that field's own docstring).
         capability_level=0,
+        # TRACKING-V3-PLAN wave V3 -- ORU's gap ceiling. A generous default
+        # here (not `0`/disabled) so ORU tests below opt IN by building a
+        # real gap, rather than every test in this file having to remember
+        # to set it; `test_track.py`'s own ORU section overrides this
+        # explicitly where the exact ceiling matters.
+        reupdate_max_gap_millis=60_000,
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -602,3 +608,146 @@ def test_a_recovered_track_starts_with_only_the_recovery_observation():
 
     assert len(recovered.history) == 1
     assert recovered.history.latest().timestamp == pytest.approx(3.0)
+
+
+# -- ORU (TRACKING-V3-PLAN wave V3) ------------------------------------------
+
+
+def test_history_transform_accumulates_across_warps_and_resets_on_a_real_observation():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a", x=0.1)], 0.0, detector_ran=True)[0]
+    step = Transform(c=0.01)
+
+    book.warp(step)
+    book.warp(step)
+    book.warp(step)
+    tracked = book.get(born.track_id)
+    # Three single-frame warps compose to one 0.03 translation -- the SAME
+    # accumulation invariant `warp()`'s own box/velocity tests already prove,
+    # extended to `history_transform`.
+    assert tracked.history_transform.apply_point(0.0, 0.0) == pytest.approx((0.03, 0.0))
+
+    # A genuinely NEW real observation resets it: the freshest ring entry was
+    # just captured in THIS frame, so there is no accumulated motion between
+    # it and "now" yet.
+    book.apply([seen("a", x=0.5)], 4.0, detector_ran=True)
+    assert book.get(born.track_id).history_transform.identity
+
+
+def test_history_transform_does_not_reset_on_a_coasted_touch():
+    # Only a REAL (`SOURCE_DETECTOR`) observation moves the ring's own
+    # "latest" -- a coasted/tracker touch must not silently zero out
+    # accumulated ego-motion that `reupdate()` still needs to warp the OLD
+    # bracket by.
+    book = TrackBook(params(min_hits=1, max_age_frames=5))
+    born = book.apply([seen("a", x=0.1, authoritative=True)], 0.0, detector_ran=True)[0]
+    book.warp(Transform(c=0.01))
+
+    book.apply([seen("a", x=0.11, source=SOURCE_TRACKER)], 1.0, detector_ran=True)
+
+    assert not book.get(born.track_id).history_transform.identity
+
+
+def test_a_track_born_or_adopted_starts_with_an_identity_transform():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a")], 0.0, detector_ran=True)[0]
+
+    assert born.history_transform.identity
+
+    recovery = RecoveredIdentity(track_id=99, first_seen=-5.0)
+    recovered = book.apply([seen("x")], 3.0, detector_ran=True, recoveries={"x": recovery})[0]
+    assert recovered.history_transform.identity
+
+
+def test_a_real_reanchor_after_a_gap_replaces_velocity_with_orus_reconstruction():
+    # The end-to-end proof, at the book level: a track re-anchors after
+    # several failed verify passes (misses > 0), and the velocity ORU
+    # reconstructs -- NOT the estimator's own (here, deliberately absurd)
+    # `track.box`-based measurement -- is what survives.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, y=0.0, authoritative=True)], 0.0, detector_ran=True)
+    # Several failed verify passes: a coasted (SOURCE_TRACKER, not booked as
+    # a miss unless detector_ran) touch, then explicit misses via untouched
+    # `apply()` calls (the SAME mechanism ASSOCIATE's own gap accrual uses).
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)  # nothing touches "a" -> misses += 1
+
+    reanchored = book.apply([seen("a", x=0.5, y=0.0, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is True
+    # (0.5 - 0.0) / (5.0 - 0.0) = 0.1, the TRUE average velocity over the
+    # real gap -- not a one-frame measurement against a stale/frozen box.
+    assert reanchored.velocity_x == pytest.approx(0.1)
+
+
+def test_reupdated_is_reset_every_frame_never_stale_from_a_prior_touch():
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+    reanchored = book.apply([seen("a", x=0.5, authoritative=True)], 5.0, detector_ran=True)[0]
+    assert reanchored.reupdated is True
+
+    # A normal, ungapped confirmation right afterward must NOT still report
+    # last frame's reupdate.
+    settled = book.apply([seen("a", x=0.51, authoritative=True)], 5.1, detector_ran=True)[0]
+    assert settled.reupdated is False
+
+
+def test_reupdate_never_fires_for_a_track_that_has_not_actually_gapped():
+    # `misses == 0` at the moment of confirmation (continuously matched,
+    # nothing to reconstruct) must take the ordinary measured-and-blended
+    # path, not ORU's -- ORU firing unconditionally would silently discard
+    # the EMA smoothing every other confirmation relies on.
+    book = TrackBook(params(min_hits=1))
+    book.apply([seen("a", x=0.0)], 0.0, detector_ran=True)
+
+    touched = book.apply([seen("a", x=0.1)], 1.0, detector_ran=True)[0]
+
+    assert touched.reupdated is False
+
+
+def test_a_gap_older_than_the_ceiling_falls_back_to_the_ordinary_measurement():
+    book = TrackBook(params(min_hits=1, max_age_frames=30, reupdate_max_gap_millis=2_000))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    # The gap (5s) exceeds the 2s ceiling -- ORU must not fire, even though
+    # `misses > 0`.
+    reanchored = book.apply([seen("a", x=0.5, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is False
+
+
+def test_reupdate_stats_reset_and_accumulate_across_one_apply_call():
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    book.reset_reupdate_stats()
+    assert book.last_reupdate_millis == 0
+    assert book.last_reupdated_tracks == 0
+
+    book.apply([seen("a", x=0.5, authoritative=True)], 5.0, detector_ran=True)
+
+    assert book.last_reupdated_tracks == 1
+    assert book.last_reupdate_millis >= 0  # a real, if tiny, perf_counter measurement
+
+
+def test_reset_reupdate_stats_is_what_a_frame_with_no_apply_call_must_use():
+    # `session.py`'s own contract (`reset_reupdate_stats`'s docstring): a
+    # frame that never calls `apply()` at all must not report a STALE
+    # nonzero value from the last frame that did.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+    book.apply([seen("a", x=0.5, authoritative=True)], 5.0, detector_ran=True)
+    assert book.last_reupdated_tracks == 1  # sanity: a reupdate really happened
+
+    book.reset_reupdate_stats()
+
+    assert book.last_reupdate_millis == 0
+    assert book.last_reupdated_tracks == 0

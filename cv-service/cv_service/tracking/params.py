@@ -132,6 +132,16 @@ class TrackingRequest:
     # needs live host state (`cv_service.tracking.levels.probe()`) this
     # module does not have, so that is `session.py`'s job.
     capability_level: int = 0
+    # TRACKING-V3-PLAN wave V3 -- proto field 14. `<=0 = server default`
+    # (`CV_TRACK_REUPDATE_MAX_GAP_MILLIS`), the SAME sentinel shape as
+    # `verify_every_millis`/`max_age_frames` above. Unlike those, but
+    # exactly like `memory_ttl_millis` above, the DEPLOYMENT default itself
+    # may legitimately be `<=0` -- see that field's own comment and
+    # `config.py`'s `DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS`: a gap ORU can
+    # never reconstruct (a non-positive ceiling, against every real gap
+    # being positive) is how ORU is switched off fleet-wide, which invariant
+    # P7 (reversibility) needs a way to do.
+    reupdate_max_gap_millis: int = 0
 
 
 @dataclass(frozen=True)
@@ -217,6 +227,14 @@ class TrackingParams:
     # "resolve the sentinel here, decide what serves it there" split
     # `motion_engine_id`/`appearance_engine_id` already establish.
     capability_level: int
+    # TRACKING-V3-PLAN wave V3 addition. Fully resolved (unlike `capability_
+    # level` above, `0` is never a legitimate value here once resolved) --
+    # `track.py`'s `_observe` reads this straight, no further translation.
+    # `<=0` (a resolved value, not merely a sentinel this field could still
+    # carry) means ORU never fires for this stream: `reupdate.py`'s own
+    # `gap_millis > max_gap_millis` check rejects every gap once the ceiling
+    # is non-positive, since a gap is by definition positive.
+    reupdate_max_gap_millis: int
 
     @property
     def active(self) -> bool:
@@ -393,5 +411,16 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
             request.capability_level
             if request.capability_level > 0
             else settings.track_capability_level
+        ),
+        # TRACKING-V3-PLAN wave V3 -- `<=0` falls back to `Settings`, exactly
+        # the `memory_ttl_millis` shape: the DEPLOYMENT value itself may be
+        # `<=0` too (see `TrackingParams.reupdate_max_gap_millis`'s own
+        # docstring), and that is a legitimate "ORU off fleet-wide" choice
+        # this call passes through unchanged, never replaced by a second
+        # fallback.
+        reupdate_max_gap_millis=(
+            request.reupdate_max_gap_millis
+            if request.reupdate_max_gap_millis > 0
+            else settings.track_reupdate_max_gap_millis
         ),
     )

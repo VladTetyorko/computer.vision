@@ -116,6 +116,10 @@ message TrackingConfig {
   // decides the highest level this host affords. 1-5 = an explicit CEILING (decision
   // E12): the session serves min(requested, affordable), never more, never a refusal.
   int32  capability_level       = 11;
+  // Field numbers 12-13 are reserved for a later V3 wave (history_size, momentum_span_frames).
+  // TRACKING-V3-PLAN wave V3 -- ORU (§4.2). Longest gap, in milliseconds, cv-service will
+  // reconstruct from the two real observations bracketing it; <=0 = server default.
+  int32  reupdate_max_gap_millis = 14;
 }
 
 // -------------------------------------------------------- MEDIA-SOT-PLAN wave M1
@@ -181,6 +185,9 @@ message Detection {
   int32 track_age_frames  = 9;  // NEW -- frames since this track was born
   float identity_confidence = 10; // NEW -- >0 => this id was RECOVERED from memory, at this score; 0 => not a recovery
   int64 dormant_millis      = 11; // NEW -- how long this identity was dormant before it was recovered; 0 => not a recovery
+  // Field numbers 12-13 are reserved for a later wave (coast_millis, motion_confidence).
+  // TRACKING-V3-PLAN wave V3 -- ORU (§4.2).
+  bool  reupdated           = 14; // NEW -- true => this track's gap was reconstructed by ORU this frame
 }
 
 // Inference result for one frame.
@@ -216,9 +223,12 @@ message DetectionResponse {
   int64 missed_deadlines    = 20;  // NEW -- cumulative sampler deadlines no frame arrived to serve
   int64 capture_skew_millis = 21;  // NEW -- worker's estimate of (local receipt - capture); 0 = unknown
 
-  // TRACKING-V3-PLAN wave V1 -- the capability ladder (§5). Field numbers 22-24 are
-  // reserved for later V3 waves (reupdate_millis/reupdated_tracks/detection_lag_millis,
-  // §3's frozen diff); this wave adds only the two below.
+  // TRACKING-V3-PLAN wave V3 -- ORU (§4.2). Field number 24 (detection_lag_millis) is
+  // reserved for a later wave (§3's frozen diff).
+  int64  reupdate_millis    = 22; // NEW -- ORU cost this frame, milliseconds; 0 = none ran
+  int32  reupdated_tracks   = 23; // NEW -- tracks backfilled by ORU this frame
+
+  // TRACKING-V3-PLAN wave V1 -- the capability ladder (§5).
   int32  capability_level_served = 25; // NEW -- level that ACTUALLY ran; always <= requested
   string capability_level_reason = 26; // NEW -- why it was capped; "" = served as requested
 }
