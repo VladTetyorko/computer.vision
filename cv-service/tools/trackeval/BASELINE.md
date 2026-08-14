@@ -15,11 +15,13 @@ exist to fix, and two new metrics (coast ADE/FDE) that can see drift IDSW/FM/MT 
 
 **2026-08-14 instrument repair.** `latency`'s own harness never told `session.process()`
 about the lag it injected (`detection_lag_millis` defaulted to `0`, "unknown"), which made
-that scenario unwinnable by construction, not merely hard -- see its own writeup in §2 below
-for the fix, why the table row is unchanged regardless, and the genuine `cv_service/tracking/`
-defect (out of that repair's own file scope to fix) it exposed once wired through. No other
-row changed -- every number below for the other fourteen scenarios is produced by the SAME
-`cv_service/` code every prior wave measured against, still untouched by this repair.
+that scenario unwinnable by construction, not merely hard -- fixed by wiring the lag through
+(`replay.py`, commit `66b5043`). That exposed a second, genuine `cv_service/tracking/` defect
+(`ObservationRing` timestamping entries at arrival instead of capture, out of that repair's own
+file scope to fix), fixed separately; see §2 below for the full two-defect account. With both
+closed, `latency`/ASSOCIATE's own row below is the only one in this table that moved --
+`latency`/FOLLOW and every other scenario are produced by the SAME `cv_service/` code every
+prior wave measured against, still untouched by this repair.
 
 Reproduce with (see `cv-service/MODULE.md` for the full `PYTHONPATH` explanation):
 
@@ -48,7 +50,7 @@ crowd_recall      | TRACKING_MODE_ASSOCIATE | cost   | 150    | 6  | 0    | 6  |
 crowd_recall      | TRACKING_MODE_FOLLOW    | lk     | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 101.0     | 101.0    | 1.47  | ~0.4       | ~1         | 98      | 0.016 | 0.022 | 4.9     | 6.8
 dropout           | TRACKING_MODE_ASSOCIATE | cost   | 50     | 1  | 0    | 4  | 1  | 0  | 0  | 4    | 4     | 100%   | 41.0      | 41.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
 dropout           | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 35.0      | 35.0     | 1.40  | ~0.7       | ~1         | 33      | 0.002 | 0.003 | 0.6     | 0.8
-latency           | TRACKING_MODE_ASSOCIATE | cost   | 60     | 1  | 0    | 0  | 0  | 0  | 1  | 0    | 0     | n/a    | 52.0      | 52.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
+latency           | TRACKING_MODE_ASSOCIATE | cost   | 60     | 1  | 0    | 4  | 0  | 1  | 0  | 4    | 4     | 100%   | 52.0      | 52.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a
 latency           | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  | 0  | 0  | 1  | 0    | 0     | n/a    | 48.0      | 48.0     | 1.17  | ~0.8       | ~1         | 0       | n/a   | n/a   | n/a     | n/a
 linear            | TRACKING_MODE_ASSOCIATE | cost   | 60     | 3  | 0    | 0  | 3  | 0  | 0  | 0    | 0     | n/a    | 60.0      | 60.0     | 10.00 | ~1         | ~1         | 0       | n/a   | n/a   | n/a     | n/a
 linear            | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 60.0      | 60.0     | 0.50  | ~1         | ~1         | 57      | 0.002 | 0.002 | 0.6     | 0.6
@@ -168,98 +170,79 @@ of one. `ASSOCIATE`'s own row (`FM=1`, recovery 100%) is the same single-object
 force-match artefact `nonlinear`'s is -- read the FOLLOW row for this scenario's real
 claim.
 
-**`latency` / both modes -- `ML=1`, a clean, strong result from a purely SYSTEMATIC
-bias, not sporadic noise.** `latency_frames=8` (800 ms at this harness's 10 fps) makes the
-detector describe a position the object left 8 frames ago; ASSOCIATE's single track stays
-alive and CONTINUOUSLY confirmed (`life_mean=52` of 60 frames, `IDSW=0`, `FM=0`, `gaps=0`)
-but its own reported box is *wrong* almost every frame, dragging coverage down to Mostly
-Lost without ever registering as an identity or coverage-fragmentation event. **`coast_n=0`
-in both modes is itself the finding, not a gap in the harness**: `latency`'s failure lives
-entirely in `Track.source == SOURCE_DETECTOR` frames that are simply WRONG, and coast
-ADE/FDE, by its own honest scope (see `metrics.py`'s module docstring), only measures
-`SOURCE_TRACKER` frames. IDSW/MT catch this defect fine; coast ADE/FDE, correctly, does
-not -- the two metrics are covering genuinely different failure shapes, which is the point
-of shipping both.
+**`latency` -- two apparatus defects hid the tracker's real behaviour here, both now
+closed; ASSOCIATE recovers what it used to lose outright, FOLLOW does not.**
+`latency_frames=8` (800 ms at this harness's 10 fps) makes the detector describe a position
+the object left 8 frames ago. The first defect: `replay.py` injected that lag but never told
+`StreamTrackingSession.process()` about it (`detection_lag_millis` defaulted to `0`,
+"unknown"), so wave V6's late-detection back-correction (`docs/plans/active/
+TRACKING-V3-PLAN.md` §4.5, commit `1665969`) had no way to fire at all -- fixed by wiring
+`replay.py` to compute and pass the lag it already knows (commit `66b5043`), mirroring how
+pull mode obtains the SAME signal for real: `cv_service/pull/clock.py`'s `CaptureClock.
+capture_time` reports `capture_skew_millis = now_wall - captured_at`, threaded into
+`session.process()` by `grpc/servicers.py`'s `_handle_request`. Once wired, the correction
+fired -- and diverged: `ObservationRing.record()` (`cv_service/tracking/history.py`)
+timestamped every entry with the frame it was PROCESSED at, not the instant its content was
+actually true, so a `reupdate()` bracket built from one of those mistimed entries divided a
+REAL position delta by an ARTIFICIALLY SMALL elapsed time, inflating the reconstructed
+velocity into a positive feedback loop that ran the reported box to `1e14`-`1e32` within a
+few dozen frames. That second defect is now also fixed (`ObservationRing`/`reupdate.py`/
+`track.py` thread the observation's own CAPTURE instant instead of its arrival instant, plus
+a floor on `reupdate()`'s own elapsed-time denominator) -- a separate task from this one, per
+this file's own delegation model, so only its effect on this scenario's numbers is recorded
+here.
 
-**Instrument repair (2026-08-14): the seventh apparatus defect, and what fixing it found.**
-Every number above was produced by a harness that injected an 8-frame detector lag and then
-never told `StreamTrackingSession.process()` about it -- `replay.py` called `process(now_millis=
-..., detect=..., frame=...)` with no `detection_lag_millis`, which defaults to `0` ("unknown").
-Wave V6's late-detection back-correction (`docs/plans/active/TRACKING-V3-PLAN.md` §4.5, commit
-`1665969`) reads exactly that argument and had no way to fire. Worse: under constant velocity
-and constant lag `L`, a late stream `p(t-L) = (p0 - vL) + vt` is mathematically indistinguishable
-from an on-time stream starting `vL` further back -- `L` is unidentifiable from (position,
-arrival-time) pairs alone, so no algorithm the tracker could ship would ever have closed this
-row. The scenario was unwinnable by construction, not merely hard.
+With both defects closed:
 
-`replay.py` now computes the lag it already knows (it is the config that shifted the ground
-truth) and passes it as `detection_lag_millis`, mirroring how pull mode obtains the SAME signal
-for real: `cv_service/pull/clock.py`'s `CaptureClock.capture_time` reports `capture_skew_millis =
-now_wall - captured_at`, a same-process, same-clock estimate `grpc/servicers.py`'s
-`_handle_request` threads straight into `session.process()`. The default reports the exact
-injected lag (`DetectorNoiseConfig.detection_lag_jitter_millis=0.0`) -- the IDEALISED case,
-perfect lag knowledge a real estimate never quite has. `--lag-jitter-millis 15` (`replay.
+- **ASSOCIATE: `ML=1` -> `PT=1, ML=0`.** `FM=4`, all four recovered (`recov=4`, 100%),
+  `IDSW=0` throughout. `life_mean`/`life_med` stay `52.0` and `det/s` stays `10.00` -- the
+  SAME continuously-confirmed track as before the timestamp fix, now reporting a corrected
+  box good enough to clear the coverage-match gate instead of a systematically-stale one that
+  never could.
+- **FOLLOW: unchanged -- still `ML=1`, `life_mean=48.0`, `det/s=1.17`, `coast_n=0`.**
+  Late-detection back-correction does not move this row at all, even though `_follow_verify`
+  (`cv_service/tracking/session.py`) calls the SAME `_late_corrected_box` `_run_cost_associate`
+  does.
+
+**Diagnosis: ASSOCIATE and FOLLOW re-anchor through different paths, and only one of them
+lets the correction stick.** `_run_cost_associate` writes `corrected_box` straight into the
+`Observation` it books (`session.py`) -- the SAME value every downstream consumer then sees:
+the ring, the next frame's constant-velocity prediction, the reported box, all at once,
+because ASSOCIATE has no separate visual state to keep in sync. `_follow_verify` calls
+`engine.init(frame(), boxes[index])` -- telling the LK optical-flow engine which PATCH of the
+actual frame to visually track from now on -- *before* `_late_corrected_box` ever runs;
+the correction it computes afterward is applied only to `locked_observation`'s box, for
+booking/reporting, and is never fed back into the engine's own visual anchor. FOLLOW spends
+most of its frames coasting on that anchor between rare verify passes (`det/s=1.17` here
+against ASSOCIATE's `10.00` -- a detector pass roughly every 8-9 frames, not every one), so a
+verify pass that re-anchors LK on the stale box commits the visual tracker to following
+whatever is actually AT that patch -- not the object, `latency_frames` frames of real motion
+away -- for every coasted frame afterward, regardless of what that same frame's corrected,
+reported number says. The correction can fix the SCORE on the one frame it runs; it cannot
+fix the PATCH the engine is physically looking at, which is what every frame between verify
+passes actually depends on. This is established directly from `_follow_verify`'s own call
+order, not inferred from the unchanged row alone; nothing here has instrumented what LK
+actually locks onto pixel-for-pixel, so treat the mechanism as diagnosed, the exact drift
+magnitude as not separately measured.
+
+**The idealised reading versus the honest one.** The ASSOCIATE row above is the EXACT-lag
+case (`detection_lag_jitter_millis=0.0`) -- this harness knows precisely how many frames late
+the detector is, because it is the config that shifted the ground truth; a real pull-mode
+worker's `capture_skew_millis` estimate never quite does. `--lag-jitter-millis 15` (`replay.
 DETECTION_LAG_JITTER_TYPICAL_MILLIS`, sourced from `pull/clock.py`'s own module docstring --
 M0 measured `capture_skew_millis` at "+/-15 ms typical spread over 10 minutes, worst spike
-~80 ms") adds a realistic companion reading:
+~80 ms") is the operator-relevant reading: ASSOCIATE degrades gracefully to `FM=5 | PT=1 |
+ML=0 | gaps=5 | recov=5 | 100%` -- one extra fragmentation, still fully recovered, not a
+collapse back to `ML=1`. That is the difference between "works in the lab" (perfect lag
+knowledge) and "works on a link" (a noisy estimate of it), worth stating outright: the
+exact-lag row is an idealisation, and the jittered figure -- one extra fragmentation, not a
+regression to total loss -- is the one to trust when reasoning about a real deployment.
 
 ```bash
 PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --scenario latency --mode ASSOCIATE
+PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --scenario latency --mode FOLLOW
 PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --scenario latency --mode ASSOCIATE --lag-jitter-millis 15
 ```
-
-**The row above is unchanged by either reading -- `ML=1` in both modes, exact and jittered
-alike -- and the reason is not "no improvement": it is a SECOND, previously-invisible defect,
-this time a genuine one in `cv_service/tracking/` (out of this repair task's file scope,
-`tools/trackeval/**` and `tests/trackeval/**` only, to fix).** With `detection_lag_millis`
-finally nonzero, wave V6's correction DOES fire -- and diverges. Traced directly (`tests/
-trackeval/test_replay.py::test_persistent_per_frame_lag_correction_diverges_past_the_dead_zone`,
-and independently reproduced with round numbers straight against `StreamTrackingSession`,
-bypassing this package entirely): the reported box stays exactly stale through a `2 * lag`-frame
-"dead zone" (`late_correction` correctly refuses to correct a track with no bracketing prior
-observation -- `reupdate.py`'s own "brand-new track has nothing to bracket against" contract),
-then, the instant a bracket becomes available, the corrected box does not converge toward the
-true position -- it runs away to physically meaningless magnitudes (`1e14`-`1e32` within a few
-dozen frames, in BOTH the exact and the 15ms-jittered reading; jitter does not soften this).
-
-**Root cause.** `ObservationRing.record()` (`cv_service/tracking/history.py`) timestamps every
-entry with the frame it was PROCESSED at (`now`), not the instant its content was actually true.
-That is correct exactly when a `late_correction` succeeds (a corrected box legitimately
-represents "position AT now") -- and wrong for any entry `late_correction` could not correct,
-which is every entry through the dead zone above: each one's stale content gets filed under a
-timestamp `lag_seconds` LATER than when it was true, with nothing recording the mislabelling. The
-next `reupdate()` call that brackets against one of those entries divides a REAL position delta
-(spanning close to a full `lag_seconds` of true motion) by an ARTIFICIALLY SMALL elapsed time
-(the bracket's inflated timestamp), inflating the reconstructed velocity by roughly
-`lag_seconds / true_elapsed`. The resulting (wrong, usually off-frame) box is then written back
-into the SAME ring, poisoning the next bracket the same way -- a positive feedback loop, not a
-one-off error, and why this diverges rather than merely staying imprecise. It bites hardest
-exactly where wave V6 is supposed to help most: a persistent, near-constant `capture_skew_millis`
-(`pull/clock.py`'s own documented steady state between re-anchors) applied every matched-detection
-frame (`_run_cost_associate`'s per-candidate call, ASSOCIATE's `det/s=10.00` cadence) -- not a
-corner case this scenario invented, but the ordinary shape of a pulled stream's own signal.
-
-**Why the scoreboard row does not move even though the underlying box now behaves far worse.**
-`ML=1` already scored the PRE-repair stale case at the metric's own floor: IoU against the true
-box was already ~0 every frame (`latency_frames=8` was tuned to guarantee exactly that -- see
-`__main__.py`'s own comment on `_LATENCY_FRAMES`), and a box that is even-further wrong cannot
-score below that floor. The row is therefore an honest, unchanged report of a defect the metric
-was never built to distinguish by DEGREE, only by threshold -- which is also why this repair
-adds a dedicated regression test (`test_persistent_per_frame_lag_correction_diverges_past_the_
-dead_zone`) rather than relying on `BASELINE.md`'s own numeric table to carry this finding: a
-future wave that fixes the `ObservationRing` timestamp mismatch will make THAT test start
-failing, which is the correct signal to revisit this paragraph, while `ML=1` here would still
-report nothing wrong on its own.
-
-**The scenario is not winnable today, and tuning it further would hide that, not fix it.**
-The mathematical-unidentifiability defect (five of seven apparatus defects have now been found
-in this harness's OWN measurement code, never the tracker -- `TRACKING-V2-PLAN.md` §5b, this
-file's §2 `crossing_similar` entry, and this section) is genuinely closed: the signal production
-has is now the signal this harness supplies. What remains is a real defect in the code this
-harness measures, discovered only because the instrument finally works. Per this task's own
-acceptance criteria, that is reported here rather than papered over by shrinking `latency_frames`
-until the correction's own bug stops mattering, which would make the scenario winnable "by
-accident" in exactly the sense this repair was told not to allow.
 
 ## 3. What this wave found about the HARNESS itself, not the tracker
 

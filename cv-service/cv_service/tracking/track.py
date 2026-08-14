@@ -402,6 +402,7 @@ class TrackBook:
         *,
         detector_ran: bool,
         recoveries: "Optional[dict[object, RecoveredIdentity]]" = None,
+        captured_at: "Optional[dict[object, float]]" = None,
     ) -> list[Track]:
         """Book `observations` and age every track they did not touch.
 
@@ -416,22 +417,38 @@ class TrackBook:
         update to an existing live track is never affected by it. `None`/
         absent is the overwhelming common case and costs one dict lookup per
         new birth.
+
+        `captured_at` (2026-08-14 repair, TRACKING-V3-PLAN §4.1) maps an
+        observation's OWN `key` to the instant ITS content was actually
+        true, for `ObservationRing.record` alone (`history.py`'s own
+        `TimedObservation`/`record` docstrings carry the full "why"). `None`,
+        or a key this map does not carry, means exactly what it always has:
+        `now` IS this observation's own capture instant, correct for every
+        caller that has no lag to report (push mode, `bytetrack` ASSOCIATE,
+        FOLLOW's extras, a fresh birth, a dormant-gallery recovery) and
+        every call site written before this repair. Only `session.py`'s
+        `_late_corrected_box` -- the one place in this package that
+        resolves a per-detection capture instant different from arrival --
+        ever populates a real entry.
         """
         touched: set[object] = set()
         booked: list[Track] = []
         for observation in observations:
             book_key = self._namespaced(observation.key)
+            observed_at = captured_at.get(observation.key, now) if captured_at else now
             track = self._tracks.get(book_key)
             if track is None:
                 recovery = recoveries.get(observation.key) if recoveries else None
                 track = (
-                    self._adopt(observation, recovery, now)
+                    self._adopt(observation, recovery, now, captured_at=observed_at)
                     if recovery is not None
-                    else self._born(observation, now)
+                    else self._born(observation, now, captured_at=observed_at)
                 )
                 self._tracks[book_key] = track
             else:
-                self._observe(track, observation, now, detector_ran=detector_ran)
+                self._observe(
+                    track, observation, now, detector_ran=detector_ran, captured_at=observed_at
+                )
                 if track.reupdated:
                     self._last_reupdated_tracks += 1
             touched.add(book_key)
@@ -463,7 +480,7 @@ class TrackBook:
 
     # -- state machine ------------------------------------------------------
 
-    def _born(self, observation: Observation, now: float) -> Track:
+    def _born(self, observation: Observation, now: float, *, captured_at: float) -> Track:
         track = Track(
             track_id=self._next_id,
             key=observation.key,
@@ -492,10 +509,21 @@ class TrackBook:
         # from `SOURCE_DETECTOR`), so it belongs in the ring same as every
         # later update. Unconditional: `ObservationRing.record` itself is
         # what decides what counts as real, not this call site.
-        track.history.record(observation, now)
+        #
+        # `captured_at` (2026-08-14 repair): `apply()`'s own resolved value,
+        # `now` for every caller with no lag to report -- a brand-new birth
+        # (an unmatched target, a `bytetrack` key, a fresh FOLLOW lock) is
+        # never a `_late_corrected_box` candidate (that path only ever reads
+        # an EXISTING track's `.history`, `session.py`'s own module
+        # docstring), so this is `now` in every real call today. Stated
+        # rather than assumed: see `TrackBook.apply`'s own docstring for why
+        # that is a deliberate scope boundary, not an oversight.
+        track.history.record(observation, captured_at)
         return track
 
-    def _adopt(self, observation: Observation, recovery: RecoveredIdentity, now: float) -> Track:
+    def _adopt(
+        self, observation: Observation, recovery: RecoveredIdentity, now: float, *, captured_at: float
+    ) -> Track:
         """Book `observation` under a REMEMBERED identity instead of minting
         one (TRACKING-V2-PLAN wave C4).
 
@@ -564,11 +592,22 @@ class TrackBook:
         # dormant. `ObjectMemory` was never asked to retain that (it keeps a
         # box/velocity/descriptor snapshot, not a history), so there is
         # nothing to restore even if this method wanted to.
-        track.history.record(observation, now)
+        #
+        # `captured_at` (2026-08-14 repair): same reasoning as `_born`'s own
+        # comment -- a recovery is a BRAND-NEW booking as far as this ring
+        # is concerned, never a `_late_corrected_box` candidate, so this is
+        # `now` in every real call today.
+        track.history.record(observation, captured_at)
         return track
 
     def _observe(
-        self, track: Track, observation: Observation, now: float, *, detector_ran: bool
+        self,
+        track: Track,
+        observation: Observation,
+        now: float,
+        *,
+        detector_ran: bool,
+        captured_at: float,
     ) -> None:
         # TRACKING-V3-PLAN wave V3 -- reset FIRST, unconditionally, so a
         # track this method does not reconstruct this frame never reports a
@@ -596,11 +635,27 @@ class TrackBook:
                 # average -- a regression, not a fix, and not what any
                 # scenario in `BASELINE.md` needs.
                 started = perf_counter()
+                # `captured_at`, not `now` -- 2026-08-14 repair. `reupdate()`
+                # treats its own temporal argument as `observation`'s OWN
+                # capture instant (`z2` in its docstring's interpolant), and
+                # `captured_at` is precisely that (`apply()`'s own docstring:
+                # `now` whenever the caller has no lag to report, which is
+                # every call before this repair -- so this is a no-op change
+                # for every existing caller and only differs for a
+                # `_late_corrected_box` candidate). Passing `now` here
+                # unconditionally was a SECOND instance of the exact defect
+                # `TimedObservation`'s own docstring documents: a lagged,
+                # UNCORRECTED `observation` (late correction failed this
+                # frame -- no bracket yet, or past `max_gap_millis`) is true
+                # at `now - lag`, not `now`, and this is the one other call
+                # in this package that treats `observation` as being AT a
+                # caller-supplied instant rather than reading it off the
+                # observation itself.
                 reconstruction = reupdate(
                     track,
                     track.history,
                     observation,
-                    now,
+                    captured_at,
                     max_gap_millis=self._params.reupdate_max_gap_millis,
                 )
                 self._last_reupdate_millis += int(round((perf_counter() - started) * 1000.0))
@@ -676,7 +731,7 @@ class TrackBook:
         # entry was captured on THIS frame, so there is (yet) no camera
         # motion between it and now for `reupdate()`'s next read to correct.
         before_latest = track.history.latest()
-        track.history.record(observation, now)
+        track.history.record(observation, captured_at)
         if track.history.latest() is not before_latest:
             track.history_transform = IDENTITY
 

@@ -122,7 +122,29 @@ _DEFAULT_CAPACITY = 16
 
 @dataclass(frozen=True)
 class TimedObservation:
-    """A recorded `Observation`, paired with the clock reading it arrived at.
+    """A recorded `Observation`, paired with the instant its content was
+    actually TRUE -- its CAPTURE instant, never the clock reading it was
+    merely PROCESSED at.
+
+    **Corrected 2026-08-14, wave V6's instrument repair.** This module's own
+    docstring, and every prior revision of this one, called `timestamp` "the
+    clock reading it arrived at" -- indistinguishable from capture time for
+    every caller that existed through wave V3, because none of them knew of
+    a detector lag to separate the two. Wave V6 (`reupdate.py`'s
+    `late_correction`, §4.5) introduced the first caller that DOES: an
+    offboard detector's box describes a frame that was already stale by
+    `detection_lag_millis` when it landed. Recording that box's arrival
+    time here instead of its capture time mixes two clocks in every later
+    `reupdate()` call that brackets against it -- `now - bracket.timestamp`
+    silently loses exactly `lag_seconds` off a real elapsed time, and once
+    that elapsed time is small enough for the lost `lag_seconds` to
+    dominate it, the reconstructed velocity does not merely err, it diverges
+    (traced in `tests/trackeval/test_replay.py`'s own regression test and
+    `tools/trackeval/BASELINE.md`'s `latency` writeup). `record()`'s own
+    docstring below states the caller's obligation this creates; `session.
+    py`'s `_late_corrected_box` is the one caller that actually has a lag to
+    account for, and threads the resolved capture instant down through
+    `TrackBook.apply()`'s `captured_at` parameter for exactly that reason.
 
     `Observation` itself carries no notion of "when" -- it is a per-frame,
     wire-shaped value. `reupdate.py`'s virtual-trajectory math (TRACKING-V3-
@@ -175,22 +197,45 @@ class ObservationRing:
     def capacity(self) -> int:
         return self._capacity
 
-    def record(self, observation: Observation, now: float) -> None:
-        """Record `observation` if, and only if, it is REAL evidence.
+    def record(self, observation: Observation, captured_at: float) -> None:
+        """Record `observation` if, and only if, it is REAL evidence,
+        timestamped at `captured_at` -- the instant `observation`'s content
+        was actually TRUE, never merely the instant this call happens to be
+        running at.
 
-        A silent no-op for anything else (predicted, tracker-produced, or
-        any future observation shape that is not `SOURCE_DETECTOR`) --
-        deliberately not an error and not logged: a caller is expected to
-        call this for every observation a track ever receives (`track.py`
-        does, from `_born`/`_adopt`/`_observe` alike) and let the ring itself
-        own the decision, precisely so the evidence-vs-extrapolation rule
-        lives in exactly one place rather than being re-derived correctly at
-        every call site. See this module's docstring for why `source ==
-        SOURCE_DETECTOR` is the test, not merely `not observation.predicted`.
+        **The parameter is named for the obligation it places on the
+        caller, not for convenience.** For the overwhelming common case
+        (push mode, or any pull stream whose skew is unknown -- every caller
+        this ring had until wave V6) arrival and capture coincide, so
+        passing the frame's own processing clock (`now`) is correct and
+        `track.py`'s `_born`/`_adopt`/`_observe` do exactly that by default.
+        It stops being correct the moment a caller knows the observation
+        describes an EARLIER instant than the one it is processing it at --
+        an offboard detector's box is stale by `detection_lag_millis` before
+        it even lands (§4.5) -- and passing arrival time THERE is the exact
+        defect `TimedObservation`'s own docstring documents: two later
+        `reupdate()` brackets end up expressed in different clocks, and the
+        elapsed time between them is wrong by the lag that got dropped on
+        the floor. There is no way for this method to catch a caller that
+        gets this wrong (a `float` carries no provenance), which is why the
+        obligation is spelled out here instead: **if `observation` is not
+        fresh, `captured_at` must be `now` minus however stale it is, never
+        `now` itself.**
+
+        A silent no-op for anything that is not REAL evidence (predicted,
+        tracker-produced, or any future observation shape that is not
+        `SOURCE_DETECTOR`) -- deliberately not an error and not logged: a
+        caller is expected to call this for every observation a track ever
+        receives (`track.py` does, from `_born`/`_adopt`/`_observe` alike)
+        and let the ring itself own the decision, precisely so the
+        evidence-vs-extrapolation rule lives in exactly one place rather
+        than being re-derived correctly at every call site. See this
+        module's docstring for why `source == SOURCE_DETECTOR` is the test,
+        not merely `not observation.predicted`.
         """
         if observation.source != SOURCE_DETECTOR or observation.predicted:
             return
-        self._entries.append(TimedObservation(now, observation))
+        self._entries.append(TimedObservation(captured_at, observation))
 
     def latest(self) -> Optional[TimedObservation]:
         """The most recently recorded REAL observation, or `None` for an

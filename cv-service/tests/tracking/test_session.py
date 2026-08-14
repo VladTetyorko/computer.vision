@@ -2016,6 +2016,78 @@ def test_uncorrected_raw_box_is_what_late_correction_replaces():
     assert outcome.detection_lag_millis == 0
 
 
+def test_persistent_constant_lag_reconstructs_a_bounded_convergent_velocity():
+    """2026-08-14 regression -- "a test that would have caught this
+    originally" (a constant-velocity target under a constant, PERSISTENT
+    measured lag, fed every frame for many frames), at the level the
+    defect actually lived at (`session.py` -> `track.py` -> `history.py`/
+    `reupdate.py`), independent of `tools/trackeval`'s own scenario
+    machinery. `tests/trackeval/test_replay.py::test_per_frame_lag_
+    correction_converges_instead_of_diverging_past_the_dead_zone` is this
+    same guard's harness-level counterpart, checking the WIRE box instead
+    of `track.velocity_x` directly.
+
+    Before the fix, `ObservationRing.record()` (`history.py`) timestamped
+    every entry with the frame it was PROCESSED at rather than the instant
+    its content was actually true -- harmless for a ONE-SHOT correction
+    (`nonlinear`/`pan_occlusion`'s post-occlusion ORU), but `late_
+    correction` runs every matched-detection frame under a persistent lag
+    (§4.5's own steady-state case), so a mistimed bracket's wrong output
+    got written straight back into the ring and poisoned the next one --
+    traced directly (this task's own reproduction) to `track.velocity_x`
+    reaching `1e14`-`1e16` within a handful of frames.
+    """
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    lag_millis = 300.0
+    step_millis = 100.0
+    velocity = 0.10  # frame-widths per second, matching this test's own bound below
+    origin_x = 0.10
+    frame_count = 24  # long enough to run well past the dead zone and stay there
+
+    velocities: "list[float]" = []
+    for frame_index in range(frame_count):
+        now_millis = frame_index * step_millis
+        true_x_at_capture = origin_x + velocity * ((now_millis - lag_millis) / 1000.0)
+        x = max(0.0, min(0.9, true_x_at_capture))
+        outcome = subject.process(
+            now_millis=now_millis,
+            detect=detect_returning(det("car", x=x, y=0.4)),
+            frame=lambda: FRAME,
+            detection_lag_millis=int(lag_millis),
+        )
+        track = outcome.boxes[0].track if outcome.boxes else None
+        if track is not None:
+            velocities.append(track.velocity_x)
+
+    assert len(velocities) == frame_count
+
+    # `sane_factor`: generous enough to never false-fail on ordinary
+    # reconstruction noise (a floor-rejected bracket falling back to one
+    # RAW reading for a single frame, observed directly against this exact
+    # scenario to peak under 2x the true rate) while remaining separated
+    # from the historical failure -- `1e14`-`1e16`, i.e. roughly
+    # 10**15 / 0.10 ~= 10**16 times the true rate -- by fourteen orders of
+    # magnitude, so there is no plausible reconstruction noise this bound
+    # could be confused with a regression of the original defect.
+    sane_factor = 5.0
+    bound = sane_factor * velocity
+    for measured in velocities:
+        assert -bound <= measured <= bound, (
+            f"track.velocity_x={measured!r} left a sane neighbourhood of the true rate "
+            f"({velocity!r}/s, bound +/-{bound!r}) -- this is what the pre-fix divergence looked "
+            "like on its way to 1e14+, not merely reconstruction noise"
+        )
+
+    # Convergence, not only boundedness: well past the dead zone, the
+    # reconstruction should track the true rate closely, not merely stay
+    # inside the generous `sane_factor` band above.
+    settled = velocities[-5:]
+    assert sum(settled) / len(settled) == pytest.approx(velocity, abs=0.03)
+
+
 def test_late_detection_lag_correction_applies_to_follows_reanchor():
     subject, engine = follow_session(verify_every_millis=100)
     run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])

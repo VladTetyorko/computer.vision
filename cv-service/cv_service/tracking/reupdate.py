@@ -124,6 +124,24 @@ new arithmetic, and it is the same constant-velocity extrapolation
 Pure stdlib (`math`, `dataclasses`) -- this module carries the wave's whole
 accuracy win and must run at capability level L1 (invariant P8), the same
 ARMv6-companion constraint `history.py`/`predict.py` already meet.
+
+## 2026-08-14 repair: the ring's two clocks, and a floor on this one
+
+`late_correction`'s own reasoning above already says it plainly: `reupdate()`
+needs `t1`'s timestamp and `t2`'s (`captured_at`, here) to be honest capture
+instants, in the SAME time base, or the elapsed time between them is wrong.
+It was: `ObservationRing.record()` (`history.py`) filed every entry under
+its ARRIVAL time regardless of caller, which this function's own `t1`
+(`ring.before(now)`) silently inherited -- correct only when `t1` was never
+late, which stopped being true the moment `late_correction` started calling
+this function with a genuinely lagged `t2`. `history.py`'s `TimedObservation`
+docstring carries the full account and the fix (a `captured_at` parameter
+threaded down from `session.py` through `TrackBook.apply()`); this module's
+own share of the repair is `_MIN_RECONSTRUCTION_GAP_SECONDS` below -- a
+floor on the denominator itself, since aligning the clocks removes this
+defect's specific MECHANISM without removing the general risk any two
+independently-supplied floats can be closer together than either caller
+intended.
 """
 
 from __future__ import annotations
@@ -137,6 +155,32 @@ from cv_service.tracking.engines.base import Box, Observation
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from cv_service.tracking.history import ObservationRing
     from cv_service.tracking.track import Track
+
+# The shortest elapsed time this module will ever divide by to reconstruct a
+# velocity -- insurance against the SHAPE of the 2026-08-14 divergence
+# defect (`history.py`'s own docstring on `TimedObservation`), not only its
+# one known cause. Aligning `ObservationRing`'s two clocks (done, this same
+# repair) removes the specific mechanism that produced a near-zero
+# denominator; it does not remove the possibility of one -- `bracket.
+# timestamp` and `now` are two independently-supplied floats this function
+# does not control the provenance of, and a future caller (or a bug in one)
+# handing it a genuinely tiny-but-positive gap would still divide by it
+# without this floor.
+#
+# Sized against the fastest FRAME rate this platform's own measurement doc
+# ever attributes to a real camera, not a round number: `docs/conclusions/
+# CV-RATE-BUDGET.md`'s "Hold" row puts raw video at "25-30 Hz", the ceiling
+# every other rate in that table (10 fps ASSOCIATE, 15 fps FOLLOW verify,
+# the sampler's own 9.998 fps measured result) sits under. `ObservationRing`
+# only ever holds `SOURCE_DETECTOR` entries (`history.py`'s own module
+# docstring), which arrive no faster than the DETECTOR's cadence -- itself
+# always looser than the raw 30 Hz ceiling in every configuration this
+# service ships. So no two REAL bracketing entries this function is ever
+# handed in production can be genuinely `1/30`s apart or closer; a gap
+# smaller than that is not a fast frame, it is two clocks disagreeing about
+# when something happened, and reconstructing a velocity from it would
+# report false precision instead of refusing to answer.
+_MIN_RECONSTRUCTION_GAP_SECONDS = 1.0 / 30.0
 
 
 @dataclass(frozen=True)
@@ -199,7 +243,12 @@ def reupdate(
     if bracket is None:
         return None
     gap_seconds = now - bracket.timestamp
-    if gap_seconds <= 0.0:
+    # Subsumes the old `<= 0.0` check (the floor is positive): a gap this
+    # small is either genuinely non-positive or too small to trust -- see
+    # `_MIN_RECONSTRUCTION_GAP_SECONDS`'s own module-level comment for why
+    # dividing by it would fabricate precision the evidence cannot support,
+    # not merely round awkwardly.
+    if gap_seconds < _MIN_RECONSTRUCTION_GAP_SECONDS:
         return None
     gap_millis = int(round(gap_seconds * 1000.0))
     if gap_millis > max_gap_millis:

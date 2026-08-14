@@ -227,7 +227,16 @@ class ObservationRing:
 **`TimedObservation` is a correction to this section, made during wave V2.** The signatures
 above originally returned a bare `Observation` — which carries no timestamp, so §4.2's
 interpolation `z̃(t) = z(t₁) + (t−t₁)/(t₂−t₁)·(z(t₂)−z(t₁))` had no `t₁`/`t₂` to compute with.
-The ring pairs each observation with the clock reading it arrived at.
+The ring pairs each observation with the instant its content was actually true (its **capture**
+instant) — **corrected here 2026-08-14, wave V6's instrument repair.** This section originally
+said "the clock reading it arrived at," which is indistinguishable from capture time for every
+caller that existed through wave V3 (none of them knew of a detector lag to separate the two).
+Wave V6 introduced the first caller that does (`late_correction`, §4.5): recording an offboard
+detector's box under its arrival time instead of its capture time mixes two clocks in every later
+`reupdate()` bracket built against it, which diverges rather than merely erring once the elapsed
+time it divides by is dominated by the dropped lag. See `cv_service/tracking/history.py`'s own
+`TimedObservation`/`ObservationRing.record` docstrings for the fix, and `tools/trackeval/
+BASELINE.md`'s `latency` writeup for how the repair that found this defect traced it.
 
 **Exclusion is stricter than "not predicted", also decided in V2.** `SOURCE_TRACKER`
 observations arrive in two shapes: `predicted=True` (a coast on a stalled tracker) and

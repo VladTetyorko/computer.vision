@@ -115,38 +115,60 @@ def test_ground_truth_for_detection_is_a_no_op_at_zero_latency() -> None:
         assert _ground_truth_for_detection(sequence, frame.index, latency_frames=0) == frame.ground_truth
 
 
-def test_latency_frames_reports_a_stale_position_before_any_correction_bracket_exists() -> None:
+def test_latency_frames_reports_a_stale_position_for_exactly_two_frames_before_any_correction_bracket_exists() -> None:
     """A track this young has no REAL prior observation for `late_correction`
     to bracket against yet (`reupdate.late_correction`'s own "brand-new
-    track has nothing to bracket against" contract) -- so every frame up to
-    and including the one that forms the SECOND ring entry is booked
-    verbatim, exactly the stale position `latency_frames` behind, same as
-    before `detection_lag_millis` was ever wired through.
+    track has nothing to bracket against" contract) -- so the birth frame
+    and the frame that forms the SECOND ring entry are both booked verbatim,
+    exactly the stale position `latency_frames` behind, same as before
+    `detection_lag_millis` was ever wired through.
 
-    The dead zone is exactly `2 * lag` frames long: the track is born at
-    frame `lag` (the earliest frame with any detection at all -- see
-    `_ground_truth_for_detection`), and the earliest a SECOND real entry can
-    exist strictly before `captured_at = now - lag` is frame `2 * lag + 1`
-    (verified directly against `run_replay`'s own trace while diagnosing
-    this instrument's repair -- see `test_persistent_per_frame_lag_
-    correction_diverges_past_the_dead_zone` below for what happens right
-    after this window closes).
+    **Renamed and rewritten for the 2026-08-14 `ObservationRing` timestamp
+    fix** (see `test_per_frame_lag_correction_converges_instead_of_
+    diverging_past_the_dead_zone` above for the fix itself). This test used
+    to claim the dead zone was `2 * lag` frames long -- true only of the OLD
+    ring, which timestamped entries at ARRIVAL: a bracket needed the
+    SECOND entry's arrival to clear the query, and arrival lagged capture
+    by `lag` on every entry, pushing that past roughly `2 * lag` frames
+    after birth. With entries honestly timestamped at CAPTURE time instead,
+    two entries on CONSECUTIVE frames already straddle any query between
+    them, so the dead zone COLLAPSED to exactly two frames -- the birth
+    frame (`lag`, the earliest frame with any detection at all -- see
+    `_ground_truth_for_detection`) and the frame that forms the second
+    entry (`lag + 1`) -- independent of `lag`'s own magnitude (checked
+    directly against `run_replay` for `lag` in `{2, 4, 8, 12}` while
+    rewriting this test: the dead zone was exactly `{lag, lag + 1}` every
+    time, never wider or narrower).
+
+    This test's job is narrower than before: pin that the dead zone is
+    still real and still exactly two frames, not `2 * lag`, and not zero --
+    a regression that widened it back toward `2 * lag`, or one that made it
+    vanish outright, should both fail here.
     """
     sequence = SCENARIOS["latency"](seed=0)
     lag = 8
     result = run_replay(sequence, mode=MODE_ASSOCIATE, detector_config=DetectorNoiseConfig(latency_frames=lag))
+    outcome_by_index = {frame.index: outcome for frame, outcome in zip(sequence.frames, result.outcomes)}
 
-    checked = 0
-    for frame, outcome in zip(sequence.frames, result.outcomes):
-        if frame.index < lag or frame.index > 2 * lag or not outcome.boxes:
-            continue
-        true_x = frame.ground_truth[0].box.x
+    dead_zone = (lag, lag + 1)
+    for frame_index in dead_zone:
+        outcome = outcome_by_index[frame_index]
+        assert outcome.boxes, f"frame {frame_index} (inside the dead zone) must still produce a confirmed box"
+        true_x = sequence.frames[frame_index].ground_truth[0].box.x
         reported_x = outcome.boxes[0].box.x
-        stale_x = sequence.frames[frame.index - lag].ground_truth[0].box.x
+        stale_x = sequence.frames[frame_index - lag].ground_truth[0].box.x
         assert reported_x == pytest.approx(stale_x)
         assert abs(reported_x - true_x) > 0.05
-        checked += 1
-    assert checked > 0, "the scenario must actually produce some confirmed boxes to check"
+
+    first_bracketed_index = lag + 2
+    outcome = outcome_by_index[first_bracketed_index]
+    assert outcome.boxes, f"frame {first_bracketed_index} (right after the dead zone) must produce a confirmed box"
+    reported_x = outcome.boxes[0].box.x
+    stale_x = sequence.frames[first_bracketed_index - lag].ground_truth[0].box.x
+    assert reported_x != pytest.approx(stale_x), (
+        "correction should already have kicked in by the frame right after the dead zone -- "
+        "if this still matches the stale reading, the dead zone grew back past two frames"
+    )
 
 
 def test_detection_lag_millis_for_is_zero_with_no_latency_configured() -> None:
@@ -219,70 +241,92 @@ def test_detection_lag_millis_for_jitter_is_bounded_deterministic_and_independen
     assert unused_detector_rng.random() == random.Random(0).random()  # truly never consumed
 
 
-def test_persistent_per_frame_lag_correction_diverges_past_the_dead_zone() -> None:
-    """**Documents a genuine defect this repair task's fix exposed, in code
-    outside this file's scope to repair (`cv_service/tracking/reupdate.py`
-    + `track.py`), not a property of this harness.**
+def test_per_frame_lag_correction_converges_instead_of_diverging_past_the_dead_zone() -> None:
+    """**Guards the 2026-08-14 fix for the divergence this test used to
+    document as a KNOWN, un-repaired defect** (`cv_service/tracking/
+    history.py` + `reupdate.py` + `track.py`, out of THIS repair task's own
+    file scope -- see the commit that replaced this test's body for the
+    fix itself). Formerly named `test_persistent_per_frame_lag_correction_
+    diverges_past_the_dead_zone`; renamed because it now asserts the
+    opposite of what it did before the fix landed.
 
-    Once wired (`detection_lag_millis` now reaches `session.process()` --
-    see the module docstring's "detection_lag_millis is now wired too"
-    section), `latency`/ASSOCIATE's box does not merely stay stale past the
-    dead zone above: it diverges, unboundedly, to physically meaningless
-    magnitudes (traced directly while diagnosing this: `1e14`-`1e32` within
-    a few dozen frames, both with `detection_lag_jitter_millis=0` and with
-    jitter on -- reproduced independently with round numbers directly
-    against `cv_service.tracking.session.StreamTrackingSession`, bypassing
-    this package entirely, while writing this test).
+    **What this used to guard.** `ObservationRing.record()` (`history.py`)
+    timestamped every entry with the frame it was PROCESSED at (`now`), not
+    the instant its content was actually TRUE. A `reupdate()` bracket built
+    from one of those mistimed entries divided a REAL position delta by an
+    ARTIFICIALLY SMALL elapsed time, inflating the reconstructed velocity;
+    the wrong box that produced was then written back into the SAME ring,
+    poisoning the next bracket the same way -- a positive feedback loop that
+    ran `latency`/ASSOCIATE's box to `1e14`-`1e32` within a few dozen
+    frames. This test used to assert exactly that runaway, as the signal
+    that the defect was still present.
 
-    **Root cause, traced by hand.** `ObservationRing.record()` (`history.py`)
-    timestamps every entry with the frame it was PROCESSED at (`now`), not
-    the instant its content was actually TRUE -- correct when a `late_
-    correction` succeeds (a corrected box legitimately represents "position
-    AT now"), but wrong for any entry `late_correction` could not correct
-    (no bracket existed yet, e.g. every entry through this scenario's own
-    dead zone above): that entry's stale content gets filed under a
-    timestamp `lag_seconds` LATER than when it was actually true, with
-    nothing recording the mislabelling. A later `reupdate()` call that
-    brackets against it divides a REAL position delta (spanning close to a
-    full `lag_seconds` of true motion) by an ARTIFICIALLY SMALL elapsed time
-    (the bracket's inflated timestamp), inflating the reconstructed velocity
-    by roughly `lag_seconds / true_elapsed`. The resulting (wrong, often
-    off-frame) box is then written back into the SAME ring, poisoning every
-    later bracket the same way -- a positive feedback loop, not a one-off
-    error, which is why this diverges rather than merely staying imprecise.
-    This is not `nonlinear`'s/`pan_occlusion`'s "single ORU application"
-    story -- it is `late_correction` invoked EVERY matched-detection frame
-    (`_run_cost_associate`'s own per-candidate call), so the poisoned
-    bracket a wrong correction creates gets used again within one frame.
+    **What it guards now.** The fix threads the CAPTURE instant (not the
+    arrival instant) down to `ObservationRing.record()` from every call
+    site that knows of a lag (`history.py`'s `TimedObservation`/`record`
+    docstrings carry the full account); `reupdate.py` also gained a floor
+    on the elapsed time it will ever divide by
+    (`_MIN_RECONSTRUCTION_GAP_SECONDS`), insurance against the general
+    shape of this defect, not only its one traced cause. With both clocks
+    aligned, `late_correction`'s reconstructed velocity is an honest
+    estimate of the true one instead of an inflated one, and the projected
+    box tracks the true position instead of running away.
 
-    This does not move `latency`/ASSOCIATE's own `BASELINE.md` row: `ML=1`
-    already scored the pre-wiring stale case at the metric's floor (IoU
-    against the true box was already ~0 every frame -- `BASELINE.md`'s own
-    `latency` writeup), and an even-further-off box cannot score lower than
-    that floor. See `BASELINE.md`'s `latency` writeup for the full report.
-
-    **If `cv_service/tracking/` is ever fixed** to reconcile `ObservationRing`'s
-    arrival-time timestamps with `late_correction`'s implicit capture-time
-    assumption, this assertion should start FAILING -- that failure is the
-    signal to replace this test with one that checks the corrected box
-    actually converges, not a regression to chase blindly.
+    **A second, unplanned finding this fix surfaced (reported, not chased
+    here): the dead zone itself collapses.** Before the fix, EVERY ring
+    entry was timestamped at arrival, so a bracket needed roughly `2 *
+    lag_frames` frames of accumulated history to exist at all (an entry's
+    arrival time had to fall a full `lag` behind a LATER frame's own query)
+    -- see `test_latency_frames_reports_a_stale_position_before_any_
+    correction_bracket_exists` above, whose own dead-zone-length reasoning
+    predates this fix. Once entries are honestly timestamped at CAPTURE
+    time instead, any two REAL entries recorded on consecutive frames are
+    already close enough together to bracket a query almost immediately --
+    correction starts succeeding by roughly the SECOND post-birth frame,
+    not `2 * lag_frames` later. That is a second test (`test_latency_
+    frames_...`) and `tools/trackeval/BASELINE.md`'s own `latency`/
+    ASSOCIATE scoreboard row both going stale as an unavoidable, CORRECT
+    consequence of this fix, not a defect in it -- both are out of this
+    repair's file scope (`tools/trackeval/**`, and only this one test
+    inside this file, are all this task was scoped to touch), so they are
+    reported here rather than silently patched.
     """
     sequence = SCENARIOS["latency"](seed=0)
     lag = 8
     result = run_replay(sequence, mode=MODE_ASSOCIATE, detector_config=DetectorNoiseConfig(latency_frames=lag))
 
-    # Well past the dead zone (frame `2 * lag + 1` onward, see the test
-    # above) and well past the entire 60-frame scenario: if the mechanism
-    # were merely imprecise rather than diverging, every box would stay
-    # within a few frame-widths of the normalized [0, 1] canvas.
-    late_boxes = [
-        outcome.boxes[0].box.x
+    # `+ 2`, not `2 * lag + 5` as this test used before the fix: the dead
+    # zone itself collapsed (see this test's own docstring) to roughly two
+    # frames past birth (`lag`), so this margin only needs to clear THAT,
+    # generously, not the old (now-incorrect) `2 * lag` estimate.
+    checked = [
+        (frame.ground_truth[0].box.x, outcome.boxes[0].box.x)
         for frame, outcome in zip(sequence.frames, result.outcomes)
-        if frame.index > 2 * lag + 5 and outcome.boxes
+        if frame.index > lag + 2 and outcome.boxes
     ]
-    assert late_boxes, "the scenario must produce some confirmed boxes past the dead zone to check"
-    assert max(abs(x) for x in late_boxes) > 10.0, (
-        "expected the KNOWN divergence defect (see this test's own docstring) -- if this no "
-        "longer reproduces, `cv_service/tracking/`'s correction may have been fixed; update "
-        "BASELINE.md's `latency` writeup and replace this test accordingly, do not just relax it"
+    assert checked, "the scenario must produce some confirmed boxes past the dead zone to check"
+
+    # The bound is derived, not a round number picked to make this pass.
+    # `velocity` is this scenario's own constant per-frame rate, read off
+    # its ground truth rather than re-imported from `sequences.py` (out of
+    # this repair's file scope) -- `latency`'s own module comment states it
+    # is geometrically identical to a single `linear` lane. The worst any
+    # ONE frame can ever be off by, even with the fix in place, is a single
+    # RAW (uncorrected) reading -- `late_correction`'s own contract returns
+    # `None`, never a fabricated value, whenever a bracket is not honestly
+    # available that frame (P5), and a raw reading is stale by exactly
+    # `lag` frames of true motion by construction. Doubled for headroom
+    # against jitter/interpolation slop, not because a single miss is
+    # expected to cost more than that.
+    first_x, last_x = sequence.frames[0].ground_truth[0].box.x, sequence.frames[-1].ground_truth[0].box.x
+    velocity = (last_x - first_x) / (len(sequence.frames) - 1)
+    max_single_raw_reading_error = lag * abs(velocity)
+    bound = 2.0 * max_single_raw_reading_error
+
+    worst = max(abs(reported_x - true_x) for true_x, reported_x in checked)
+    assert worst < bound, (
+        f"expected the reconstructed box to stay within {bound:.4f} of the true position "
+        f"(twice one raw reading's own {max_single_raw_reading_error:.4f} staleness) -- got "
+        f"{worst:.4f}. Either the fix regressed, or the scenario's own dynamics changed enough "
+        "that this bound needs re-deriving, not merely widening"
     )

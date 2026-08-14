@@ -94,6 +94,18 @@ late_correction` -- mechanically the SAME ORU interpolant §4.2 already
 ships, run per-detection instead of only after a miss. See `reupdate.py`'s
 own module docstring for why this reuses that function rather than a second
 interpolator, and `_late_corrected_box`'s for the full no-op contract.
+
+**2026-08-14 repair.** `_late_corrected_box` now returns a `(box, captured_
+at)` pair, not just `box` -- the SAME `box` it always returned, plus the
+instant ITS content is actually true, for `TrackBook.apply()`'s own
+`captured_at` parameter to carry down into `ObservationRing.record`
+(`history.py`). Booking every one of this method's boxes under `now`
+regardless -- including the RAW, never-corrected ones `late_correction`
+declined to touch -- was the defect: a mistimed ring entry poisons every
+later bracket built against it, which is why a PERSISTENT lag (this
+mechanism's own steady-state case, not an occasional gap) used to diverge
+rather than merely stay imprecise. See `history.py`'s `TimedObservation`
+docstring for the full account.
 """
 
 from __future__ import annotations
@@ -606,9 +618,12 @@ class StreamTrackingSession:
 
     # -- late-detection back-correction (TRACKING-V3-PLAN wave V6, §4.5) ----
 
-    def _late_corrected_box(self, track: Track, box: Box, now: float) -> Box:
-        """`box`, or `reupdate.late_correction`'s re-propagated answer when
-        this frame carries a measured capture lag worth correcting for.
+    def _late_corrected_box(self, track: Track, box: Box, now: float) -> "tuple[Box, float]":
+        """`(box, now)`, or `reupdate.late_correction`'s re-propagated answer
+        paired with `now` too, when this frame carries a measured capture
+        lag worth correcting for -- `(box, now - self._frame_lag_seconds)`
+        for the one case in between: a lag WAS measured but there was
+        nothing honest to correct `box` with.
 
         Mechanically ORU (`reupdate.py`) applied to EVERY confirmed
         detection, not only after a miss: an offboard detector (§5.2, "L1
@@ -617,20 +632,42 @@ class StreamTrackingSession:
         is the same systematic lag bias `reupdate()` already deletes after
         an occlusion -- just arriving every frame instead of only some.
 
-        A genuine no-op (returns `box` unchanged, P5) whenever there is
-        nothing to correct with: the deployment knob is off, this frame
-        measured no lag (`_frame_lag_seconds <= 0.0` -- every push-mode
-        frame today, and pull mode's own first frame before a skew estimate
-        exists), or `track` has no real prior observation for `late_
-        correction` to bracket against (a brand-new track, or a gap past
-        `reupdate_max_gap_millis`) -- so a stream that never measures a lag,
-        or has this disabled, is untouched by construction, which is P7's
-        reversibility proof for this mechanism without a second code path.
+        **The second return value, added in the 2026-08-14 repair.** Every
+        caller of this method immediately hands `box` to `TrackBook.apply()`
+        for booking into `track.history` (`ObservationRing`, `history.py`)
+        -- and that ring's own contract (`ObservationRing.record`'s own
+        docstring) is that its timestamp must be the instant `box`'s content
+        was actually true, never merely `now`. This method is the ONE place
+        in the session that knows the answer for each of the three cases a
+        caller cannot tell apart just by looking at `box`:
+
+          * Correction disabled, or nothing measured this frame -- `box` is
+            whatever the caller passed in, already true at `now` as far as
+            this stream can tell (P5: no lag known, no correction to make).
+          * `late_correction` SUCCEEDED -- `corrected` is deliberately
+            re-propagated to represent position AT `now` (`late_correction`'s
+            own docstring: "projects `box` forward by the SAME `lag_
+            seconds`"), so `now` is correct for it too.
+          * `late_correction` returned `None` -- `box` is still the RAW,
+            never-corrected detection, and that content was true at its own
+            capture instant, `now - self._frame_lag_seconds`, not `now`.
+            Booking it under `now` anyway is the exact defect `history.py`'s
+            `TimedObservation` docstring documents: this is precisely the
+            case that used to poison the ring during the dead zone before
+            any bracket existed to correct against.
+
+        A genuine no-op (returns `(box, now)`, P5) whenever there is nothing
+        to correct with: the deployment knob is off, this frame measured no
+        lag (`_frame_lag_seconds <= 0.0` -- every push-mode frame today, and
+        pull mode's own first frame before a skew estimate exists) -- so a
+        stream that never measures a lag, or has this disabled, is untouched
+        by construction on BOTH return values, which is P7's reversibility
+        proof for this mechanism without a second code path.
         """
         if not self._params.detection_lag_correction_enabled:
-            return box
+            return box, now
         if self._frame_lag_seconds <= 0.0:
-            return box
+            return box, now
         corrected = reupdate_module.late_correction(
             track,
             track.history,
@@ -639,7 +676,9 @@ class StreamTrackingSession:
             self._frame_lag_seconds,
             max_gap_millis=self._params.reupdate_max_gap_millis,
         )
-        return box if corrected is None else corrected
+        if corrected is None:
+            return box, now - self._frame_lag_seconds
+        return corrected, now
 
     # -- reconnect (TRACKING-V2-PLAN wave C5b, review finding B5) -----------
 
@@ -811,6 +850,13 @@ class StreamTrackingSession:
 
         observations: list[Observation] = []
         observation_descriptors: list[Optional[Descriptor]] = []
+        # 2026-08-14 repair -- `TrackBook.apply()`'s own `captured_at` map
+        # (its docstring), keyed the SAME way `recoveries` already is
+        # (`observation.key`). Populated for every matched candidate below,
+        # never for a ROI rescue or a brand-new birth (neither is a `_late_
+        # corrected_box` candidate -- see `track.py`'s `_born`/`_adopt` for
+        # why that is a stated scope boundary, not an oversight).
+        captured_at: "dict[object, float]" = {}
         for candidate_index, target_index in assignment.matches:
             target = targets[target_index]
             # TRACKING-V3-PLAN wave V6 -- `tracks_list[candidate_index]` is
@@ -820,16 +866,21 @@ class StreamTrackingSession:
             # correction needs to bracket against. A genuine no-op (returns
             # `target.box` unchanged) whenever this frame measured no lag or
             # the knob is off -- see `_late_corrected_box`'s own docstring.
+            candidate_key = candidates[candidate_index].key
+            corrected_box, box_captured_at = self._late_corrected_box(
+                tracks_list[candidate_index], target.box, now
+            )
             observations.append(
                 Observation(
-                    key=candidates[candidate_index].key,
-                    box=self._late_corrected_box(tracks_list[candidate_index], target.box, now),
+                    key=candidate_key,
+                    box=corrected_box,
                     label=target.label,
                     confidence=target.confidence,
                     det_index=target.det_index,
                 )
             )
             observation_descriptors.append(target.descriptor)
+            captured_at[candidate_key] = box_captured_at
 
         # TRACKING-V2-PLAN wave C5c: at most one bounded, gated second look
         # at the highest-priority CONFIRMED candidate the match above just
@@ -880,7 +931,9 @@ class StreamTrackingSession:
                 recoveries[key] = identity
                 recovery_by_index[target.det_index] = recovery
 
-        tracks = self._book.apply(observations, now, detector_ran=True, recoveries=recoveries)
+        tracks = self._book.apply(
+            observations, now, detector_ran=True, recoveries=recoveries, captured_at=captured_at
+        )
         for track, descriptor in zip(tracks, observation_descriptors):
             observe_descriptor(track, descriptor)
 
@@ -1173,6 +1226,13 @@ class StreamTrackingSession:
                     # for ambient association -- does not apply.
                     authoritative=True,
                 )
+                # 2026-08-14 repair -- `TrackBook.apply()`'s own `captured_at`
+                # map (its docstring). `None` (the default, meaning "every
+                # observation's own capture instant is `now`") unless the
+                # branch below actually resolves one for the locked
+                # observation -- an extra never gets an entry, same stated
+                # scope boundary as `_run_cost_associate`'s own map.
+                captured_at: "Optional[dict[object, float]]" = None
                 if self._followed is not None:
                     # TRACKING-V3-PLAN wave V6 -- `self._followed` is still
                     # the PREVIOUS frame's held `Track` here (reassigned only
@@ -1181,17 +1241,21 @@ class StreamTrackingSession:
                     # genuine no-op on a FRESH acquisition (`self._followed
                     # is None`, nothing to bracket against yet) or when this
                     # frame measured no lag.
-                    corrected_box = self._late_corrected_box(
+                    corrected_box, box_captured_at = self._late_corrected_box(
                         self._followed, locked_observation.box, now
                     )
                     if corrected_box is not locked_observation.box:
                         locked_observation = dataclasses.replace(locked_observation, box=corrected_box)
+                    captured_at = {locked_observation.key: box_captured_at}
                 claimed = {index}
                 extra_observations, extra_candidates = self._extras_verify_observations(
                     boxes, detections, frame, now, claimed
                 )
                 tracks = self._book.apply(
-                    [locked_observation, *extra_observations], now, detector_ran=True
+                    [locked_observation, *extra_observations],
+                    now,
+                    detector_ran=True,
+                    captured_at=captured_at,
                 )
                 locked_track = tracks[0]
                 self._followed = locked_track
