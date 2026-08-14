@@ -30,12 +30,14 @@ import java.time.Instant;
  * @param velocityX  normalized frame-widths per second
  * @param velocityY  normalized frame-heights per second
  * @param ageFrames  frames since this track was born
+ * @param reupdated  whether this track's gap was reconstructed by ORU on the latest observation
+ *                   booked (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md &sect;2)
  * @param firstSeen  when this id was first booked
  * @param lastSeen   the latest observation's capture instant
  */
 public record TrackResponse(long trackId, String label, double confidence, BoundingBoxResponse box, String state,
-                             String source, double velocityX, double velocityY, int ageFrames, Instant firstSeen,
-                             Instant lastSeen) {
+                             String source, double velocityX, double velocityY, int ageFrames, boolean reupdated,
+                             Instant firstSeen, Instant lastSeen) {
 
     /**
      * Maps a booked {@link TrackedObject} to its wire representation.
@@ -48,6 +50,7 @@ public record TrackResponse(long trackId, String label, double confidence, Bound
         TrackRef track = detection.track();
         return new TrackResponse(tracked.trackId(), detection.label(), detection.confidence(),
                 BoundingBoxResponse.from(detection.box()), track.state().name(), track.source().name(),
-                track.velocityX(), track.velocityY(), track.ageFrames(), tracked.firstSeen(), tracked.lastSeen());
+                track.velocityX(), track.velocityY(), track.ageFrames(), track.reupdated(), tracked.firstSeen(),
+                tracked.lastSeen());
     }
 }

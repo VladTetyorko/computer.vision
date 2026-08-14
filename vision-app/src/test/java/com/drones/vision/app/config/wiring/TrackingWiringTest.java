@@ -34,8 +34,17 @@ class TrackingWiringTest {
 
     private static VisionTrackingProperties properties(String mode, int followFps, int verifyEveryMillis,
                                                         int statsWindowSeconds, int trackRetentionSeconds) {
+        // capabilityLevel/reupdateMaxGapMillis at the properties record's own @DefaultValue (0/0) --
+        // every pre-existing call site through this overload stays byte-identical to before the two
+        // properties existed (invariant B2).
+        return properties(mode, followFps, verifyEveryMillis, statsWindowSeconds, trackRetentionSeconds, 0, 0);
+    }
+
+    private static VisionTrackingProperties properties(String mode, int followFps, int verifyEveryMillis,
+                                                        int statsWindowSeconds, int trackRetentionSeconds,
+                                                        int capabilityLevel, int reupdateMaxGapMillis) {
         return new VisionTrackingProperties(mode, followFps, verifyEveryMillis, statsWindowSeconds,
-                trackRetentionSeconds);
+                trackRetentionSeconds, capabilityLevel, reupdateMaxGapMillis);
     }
 
     /** The values {@code VisionTrackingProperties}' own {@code @DefaultValue}s bind to. */
@@ -75,6 +84,8 @@ class TrackingWiringTest {
         assertNull(seed.maxAgeFrames());
         assertNull(seed.minHits());
         assertNull(seed.lock(), "a seed never carries a lock -- no stream exists yet to lock onto");
+        assertEquals(0, seed.capabilityLevel(), "the default properties value (auto-probe) is still stated");
+        assertEquals(0, seed.reupdateMaxGapMillis(), "the default properties value (server default) is still stated");
     }
 
     @Test
@@ -90,6 +101,55 @@ class TrackingWiringTest {
         assertEquals(TrackingConfig.DEFAULT_REDETECT_IOU_PERCENT, folded.redetectIouPercent());
         assertEquals(TrackingConfig.DEFAULT_MAX_AGE_FRAMES, folded.maxAgeFrames());
         assertEquals(TrackingConfig.DEFAULT_MIN_HITS, folded.minHits());
+    }
+
+    // ---- docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2: capability-level / reupdate-max-gap-millis ----
+
+    @Test
+    void deploymentPropertiesSeedTheCapabilityLevelAndReupdateMaxGapMillisTheyOwn() {
+        TrackingConfigPatch seed =
+                TrackingWiring.streamStartTrackingSeed(properties("associate", 20, 1500, 30, 5, 3, 800));
+
+        assertEquals(3, seed.capabilityLevel(), "the deployment's requested ceiling is stated unconditionally");
+        assertEquals(800, seed.reupdateMaxGapMillis());
+    }
+
+    @Test
+    void theSeedFoldsTheCapabilityLevelAndReupdateMaxGapMillisOntoTheDomainDefaults() {
+        TrackingConfigPatch seed =
+                TrackingWiring.streamStartTrackingSeed(properties("associate", 20, 1500, 30, 5, 2, 500));
+
+        TrackingConfig folded = seed.foldOnto(TrackingConfig.off(), () -> 1L);
+
+        assertEquals(2, folded.capabilityLevel());
+        assertEquals(500, folded.reupdateMaxGapMillis());
+    }
+
+    @Test
+    void theDefaultCapabilityPropertiesFoldToByteIdenticalDomainDefaultsSoNothingChangesForAnUnconfiguredDeployment() {
+        // Invariant B2: 0/0 is the proto zero-value, byte-identical to not setting either wire field.
+        TrackingConfigPatch seed = TrackingWiring.streamStartTrackingSeed(defaults());
+
+        assertEquals(TrackingConfig.defaults(), seed.foldOnto(TrackingConfig.off(), () -> 1L),
+                "a deployment that configures nothing folds to exactly today's TrackingConfig.defaults()");
+    }
+
+    @Test
+    void anOutOfRangeCapabilityLevelIsRejectedByThePropertiesRecordItselfNamingTheProperty() {
+        IllegalArgumentException tooHigh = assertThrows(IllegalArgumentException.class,
+                () -> properties("OFF", 15, 2000, 30, 5, 6, 0));
+        assertTrue(tooHigh.getMessage().contains("vision.tracking.capability-level"),
+                "the failure names the property, not just the value");
+
+        assertThrows(IllegalArgumentException.class, () -> properties("OFF", 15, 2000, 30, 5, -1, 0));
+    }
+
+    @Test
+    void aNegativeReupdateMaxGapMillisIsRejectedByThePropertiesRecordItselfNamingTheProperty() {
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                () -> properties("OFF", 15, 2000, 30, 5, 0, -1));
+        assertTrue(thrown.getMessage().contains("vision.tracking.reupdate-max-gap-millis"),
+                "the failure names the property, not just the value");
     }
 
     @Test

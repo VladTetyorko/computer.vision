@@ -3,6 +3,7 @@ package com.drones.vision.app.config.wiring;
 import com.drones.vision.api.dto.CvTrackerResponse;
 import com.drones.vision.app.config.properties.VisionTrackingProperties;
 import com.drones.vision.perception.application.stream.TrackingConfigPatch;
+import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -62,6 +63,17 @@ public class TrackingWiring {
      * is its own state and changes only by {@code PATCH}. Restarting a stream is how a changed
      * default is picked up.
      *
+     * <p><b>{@code capabilityLevel}/{@code reupdateMaxGapMillis} are stated unconditionally, exactly
+     * like {@code mode}/{@code verifyEveryMillis}/{@code followFps}</b> — this deployment layer owns
+     * both (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md &sect;2), so a start seeds them the same
+     * way it seeds every other property it owns, never inline literals. At the properties record's
+     * own default of {@code 0}/{@code 0} this states exactly what {@link TrackingConfig#off()}/{@link
+     * TrackingConfig#defaults()} already carry, so a deployment that configures nothing folds to a
+     * byte-identical result (invariant B2). <b>{@code capabilityLevel} is a ceiling here too</b>
+     * (invariant B5) — this method states what the deployment is willing to afford, never what will
+     * actually be served; that answer only exists once cv-service reports {@code
+     * TrackingTelemetry#capability()} for a real frame.
+     *
      * @param properties the deployment's {@code vision.tracking.*} values
      * @return what the deployment states about tracking for newly started streams
      * @throws IllegalArgumentException if {@code vision.tracking.default-mode} is not a known mode —
@@ -69,7 +81,8 @@ public class TrackingWiring {
      */
     static TrackingConfigPatch streamStartTrackingSeed(VisionTrackingProperties properties) {
         return new TrackingConfigPatch(parseMode(properties.defaultMode()), null, properties.verifyEveryMillis(),
-                properties.followFps(), null, null, null, null);
+                properties.followFps(), null, null, null, properties.capabilityLevel(),
+                properties.reupdateMaxGapMillis(), null);
     }
 
     /**
