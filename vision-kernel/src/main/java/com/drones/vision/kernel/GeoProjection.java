@@ -1,11 +1,19 @@
 package com.drones.vision.kernel;
 
 /**
- * Pure geo-math (docs/plans/done/TACTICAL-MARKS-PLAN.md §1, "New piece #2") — no gimbal orientation or
- * camera-intrinsics data anywhere in the platform, so {@link #project} is an <b>honest estimate</b>
- * (assumed camera depression angle, flat-forward projection along a great circle), not a precise
- * fix. A mark created from it is stamped {@link MarkSource#DETECTION} and stays draggable/editable
- * so an operator can correct it.
+ * Pure geo-math (docs/plans/done/TACTICAL-MARKS-PLAN.md §1, "New piece #2") — {@link #project} is an
+ * <b>honest estimate</b> (flat-forward projection along a great circle from an assumed or measured
+ * camera depression angle), never a precise fix; no camera-intrinsics data exists anywhere in the
+ * platform, so a detection's position within the frame never moves the projected point. A mark
+ * created from it is stamped {@link MarkSource#DETECTION} and stays draggable/editable so an operator
+ * can correct it.
+ *
+ * <p>{@link #aimFrom} (docs/plans/active/GEO-POSE-PLAN.md §4.1, wave V1) resolves a {@link
+ * CameraAim} from whatever a {@link Telemetry} sample actually reports, preferring a measured gimbal
+ * orientation over the airframe heading and the platform's guessed depression default; {@link
+ * #project(GeoPosition, CameraAim)} projects from that resolved aim. A device that reports none of
+ * the new fields resolves an aim identical to today's assumptions (G6) — the 4-arg {@link #project}
+ * overload is unchanged and remains the single source of truth for the math either way.
  *
  * <p>Reuses {@link GeoPosition} for both input (drone pose) and output (estimated ground point) —
  * no second geo type is invented; a "ground point" is simply a {@code GeoPosition} whose
@@ -33,6 +41,111 @@ public final class GeoProjection {
     public static final double EARTH_RADIUS_METERS = 6_371_000.0;
 
     private GeoProjection() {
+    }
+
+    /**
+     * The resolved aim of a drone's camera, as produced by {@link #aimFrom} — the single place the
+     * precedence rules between a measured gimbal reading and the platform's guessed defaults live
+     * (docs/plans/active/GEO-POSE-PLAN.md §4.1, G5). Feeds {@link #project(GeoPosition, CameraAim)}.
+     *
+     * @param bearingDegrees    the direction the camera is pointed, degrees clockwise from true
+     *                          north; finite (any value — {@link #project} normalizes it modulo 360)
+     * @param depressionDegrees the camera's depression angle below horizontal, degrees, within
+     *                          {@code (0,90]}
+     * @param aglMeters         the height, in meters, {@link #project} should treat as the drone's
+     *                          height above the ground; never negative. When {@code measured} is
+     *                          {@code false} this may be an AMSL altitude standing in for AGL (see
+     *                          {@link #aimFrom}) rather than a true ground-height reading
+     * @param measured          {@code true} only when both {@code depressionDegrees} came from a
+     *                          real gimbal reading and a real AGL reading was available — {@code
+     *                          false} whenever any part of the aim was assumed rather than read
+     */
+    public record CameraAim(double bearingDegrees, double depressionDegrees, double aglMeters, boolean measured) {
+
+        public CameraAim {
+            if (Double.isNaN(bearingDegrees) || Double.isInfinite(bearingDegrees)) {
+                throw new IllegalArgumentException("CameraAim bearingDegrees must be finite: " + bearingDegrees);
+            }
+            if (Double.isNaN(depressionDegrees) || depressionDegrees <= 0.0 || depressionDegrees > 90.0) {
+                throw new IllegalArgumentException(
+                        "CameraAim depressionDegrees must be within (0,90]: " + depressionDegrees);
+            }
+            if (Double.isNaN(aglMeters) || Double.isInfinite(aglMeters) || aglMeters < 0.0) {
+                throw new IllegalArgumentException("CameraAim aglMeters must not be negative: " + aglMeters);
+            }
+        }
+    }
+
+    /**
+     * Resolves a {@link CameraAim} from whatever a telemetry sample actually reports, preferring a
+     * measured gimbal orientation over an airframe heading and a guessed depression angle
+     * (docs/plans/active/GEO-POSE-PLAN.md §4.1). This is the one place the precedence between
+     * "measured" and "assumed" inputs is decided; {@link #project(GeoPosition, CameraAim)} does not
+     * re-derive it.
+     *
+     * <p>Precedence, applied independently per output:
+     * <ul>
+     *   <li><b>{@code bearingDegrees}</b>: {@code telemetry.attitude().gimbalYawDegrees()} — already
+     *       earth-frame, so it is usable directly — if present, else {@code
+     *       telemetry.headingDegrees()} (the airframe heading), else this method throws: with
+     *       neither reading there is nothing to aim along.</li>
+     *   <li><b>{@code depressionDegrees}</b>: {@code -telemetry.attitude().gimbalPitchDegrees()} if
+     *       that lands within {@code (0,90]}, else {@code fallbackDepressionDegrees}. A gimbal
+     *       pitched level ({@code 0}) or upward (negated value {@code <=0}) cannot intersect the
+     *       ground ahead of the aircraft, so that reading is discarded in favor of the fallback
+     *       rather than fed into the math as-is.</li>
+     *   <li><b>{@code aglMeters}</b>: {@code telemetry.aglMeters()} if present, else {@code
+     *       telemetry.altitudeMeters()} — the pre-existing behavior, which deliberately carries
+     *       today's AMSL-vs-AGL error (docs/plans/active/GEO-POSE-PLAN.md G6/§6) forward as the
+     *       honest fallback rather than silently correcting it here.</li>
+     *   <li><b>{@code measured}</b>: {@code true} only when the depression angle came from a real
+     *       gimbal reading <em>and</em> {@code telemetry.aglMeters()} was present — the two inputs
+     *       that determine ground range and origin height. A bearing sourced from airframe heading
+     *       rather than gimbal yaw does not by itself make {@code measured} {@code false}: heading is
+     *       still a real sensor reading, just not the gimbal's.</li>
+     * </ul>
+     *
+     * @param telemetry                 the telemetry sample to resolve an aim from
+     * @param fallbackDepressionDegrees the depression angle to use when no usable gimbal pitch
+     *                                  reading is available; must be within {@code (0,90]} (see
+     *                                  {@link #DEFAULT_DEPRESSION_DEGREES} for the platform's
+     *                                  documented guess)
+     * @return the resolved aim
+     * @throws IllegalArgumentException if {@code telemetry} is {@code null}; if neither a gimbal yaw
+     *                                   nor a heading is available to bear along; if neither {@code
+     *                                   aglMeters} nor {@code altitudeMeters} is available to resolve
+     *                                   a ground height from; or if the resolved depression/AGL fail
+     *                                   {@link CameraAim}'s own range checks (e.g. an out-of-range
+     *                                   {@code fallbackDepressionDegrees}, or a negative altitude)
+     */
+    public static CameraAim aimFrom(Telemetry telemetry, double fallbackDepressionDegrees) {
+        if (telemetry == null) {
+            throw new IllegalArgumentException("GeoProjection.aimFrom telemetry must not be null");
+        }
+
+        Attitude attitude = telemetry.attitude();
+        Double gimbalYawDegrees = attitude == null ? null : attitude.gimbalYawDegrees();
+        Double bearingDegrees = gimbalYawDegrees != null ? gimbalYawDegrees : telemetry.headingDegrees();
+        if (bearingDegrees == null) {
+            throw new IllegalArgumentException(
+                    "GeoProjection.aimFrom needs a gimbal yaw or a heading to resolve a bearing from");
+        }
+
+        Double gimbalPitchDegrees = attitude == null ? null : attitude.gimbalPitchDegrees();
+        double gimbalDepressionDegrees = gimbalPitchDegrees == null ? Double.NaN : -gimbalPitchDegrees;
+        boolean depressionMeasured =
+                gimbalPitchDegrees != null && gimbalDepressionDegrees > 0.0 && gimbalDepressionDegrees <= 90.0;
+        double depressionDegrees = depressionMeasured ? gimbalDepressionDegrees : fallbackDepressionDegrees;
+
+        Double measuredAglMeters = telemetry.aglMeters();
+        boolean aglMeasured = measuredAglMeters != null;
+        Double resolvedAglMeters = aglMeasured ? measuredAglMeters : telemetry.altitudeMeters();
+        if (resolvedAglMeters == null) {
+            throw new IllegalArgumentException(
+                    "GeoProjection.aimFrom needs aglMeters or altitudeMeters to resolve a ground height from");
+        }
+
+        return new CameraAim(bearingDegrees, depressionDegrees, resolvedAglMeters, depressionMeasured && aglMeasured);
     }
 
     /**
@@ -91,6 +204,25 @@ public final class GeoProjection {
 
         double groundRangeMeters = altitudeMeters / Math.tan(Math.toRadians(depressionDegrees));
         return destinationPoint(drone, normalizeDegrees(headingDegrees), groundRangeMeters);
+    }
+
+    /**
+     * Convenience overload of {@link #project(GeoPosition, double, double, double)} that takes a
+     * resolved {@link CameraAim} — the shape {@link #aimFrom} produces — instead of separate
+     * heading/altitude/depression arguments. The 4-arg overload's signature and behavior are
+     * unchanged (docs/plans/active/GEO-POSE-PLAN.md G6); this simply unpacks {@code aim} and
+     * delegates, so the projection math has a single source of truth.
+     *
+     * @param drone the drone's current position
+     * @param aim   the resolved camera aim to project from
+     * @return the estimated ground point
+     * @throws IllegalArgumentException if {@code drone} or {@code aim} is {@code null}
+     */
+    public static GeoPosition project(GeoPosition drone, CameraAim aim) {
+        if (aim == null) {
+            throw new IllegalArgumentException("GeoProjection.project aim must not be null");
+        }
+        return project(drone, aim.bearingDegrees(), aim.aglMeters(), aim.depressionDegrees());
     }
 
     /**
