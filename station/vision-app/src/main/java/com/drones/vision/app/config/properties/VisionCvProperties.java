@@ -64,6 +64,9 @@ import java.time.Duration;
  * @param pull                   worker-pull config surface (docs/plans/active/MEDIA-SOT-PLAN.md §5.5);
  *                               defaulted as a whole when absent; only read when {@link #frameTransport()}
  *                               is {@code pull}
+ * @param reconnect              bounded reconnect-cadence config for the shared push/channel path
+ *                               (docs/plans/active/CV-RECONNECT-PLAN.md §3.3) — {@code
+ *                               CvChannelSupervisor}'s own knobs; defaulted as a whole when absent
  */
 @ConfigurationProperties(prefix = "vision.cv")
 public record VisionCvProperties(@DefaultValue("false") boolean enabled,
@@ -80,7 +83,8 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                   @DefaultValue("true") boolean plaintext,
                                   Upload upload,
                                   Registry registry,
-                                  Pull pull) {
+                                  Pull pull,
+                                  Reconnect reconnect) {
 
     static final String DEFAULT_ENDPOINT = "localhost:50051";
     static final String DEFAULT_DETECT_WIDTH = "640";
@@ -121,6 +125,10 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
             pull = new Pull(Pull.DEFAULT_RTSP_BASE_URI, Pull.DEFAULT_RECONNECT_INITIAL_BACKOFF,
                     Pull.DEFAULT_RECONNECT_MAX_BACKOFF);
         }
+        if (reconnect == null) {
+            reconnect = new Reconnect(true, Reconnect.DEFAULT_INITIAL_BACKOFF, Reconnect.DEFAULT_MAX_BACKOFF,
+                    Reconnect.DEFAULT_OUTAGE_LOG_INTERVAL);
+        }
     }
 
     /**
@@ -132,7 +140,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
     public VisionCvProperties(boolean enabled, String endpoint, int detectWidth, float jpegQuality) {
         this(enabled, endpoint, detectWidth, jpegQuality, DEFAULT_WIRE_FORMAT, DEFAULT_FRAME_TRANSPORT,
                 Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true, Duration.ofSeconds(5),
-                true, null, null, null);
+                true, null, null, null, null);
     }
 
     /**
@@ -216,5 +224,36 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
         static final URI DEFAULT_RTSP_BASE_URI = URI.create(DEFAULT_RTSP_BASE);
         static final Duration DEFAULT_RECONNECT_INITIAL_BACKOFF = Duration.ofMillis(500);
         static final Duration DEFAULT_RECONNECT_MAX_BACKOFF = Duration.ofSeconds(10);
+    }
+
+    /**
+     * Bounded reconnect-cadence config for the shared push/channel path (docs/plans/active/CV-RECONNECT-PLAN.md
+     * §2.1/§3.3) — {@code CvChannelSupervisor}'s own knobs, mapped onto {@code GrpcCvSettings}'
+     * {@code reconnectInitialBackoff}/{@code reconnectMaxBackoff}/{@code outageLogInterval} one-to-one
+     * (the same "this record maps onto that adapter settings object" shape {@link Upload}/{@link
+     * Registry}/{@link Pull} already have) — see {@code CvWiring#toGrpcCvSettings}. {@link #enabled()}
+     * is not one of those three: it is a {@code vision-app}-only wiring decision (whether {@code
+     * CvWiring#cvChannelSupervisor} exists at all and which {@code GrpcDetectionPort} constructor
+     * {@code CvWiring#detectionPort} uses), never read by {@code adapter-cv-grpc}.
+     *
+     * @param enabled           whether {@code CvWiring} wires a {@code CvChannelSupervisor} onto the
+     *                          shared channel and gates {@code GrpcDetectionPort} through it; default
+     *                          {@code true}. {@code false} is the escape hatch (docs/plans/active/CV-RECONNECT-PLAN.md
+     *                          §3.3/§5 item 3) restoring today's exact (pre-R2) behaviour: no gate, no
+     *                          forced reconnect, the channel's own escalating backoff only
+     * @param initialBackoff    how long the supervisor waits, while the channel is in {@code
+     *                          TRANSIENT_FAILURE}, before its first forced {@code
+     *                          resetConnectBackoff()} call; default 1s
+     * @param maxBackoff        cap the doubling forced-reconnect backoff never exceeds; default 10s
+     * @param outageLogInterval how often the supervisor logs an INFO heartbeat while an outage
+     *                          continues, instead of a WARN-with-stack-trace flood; default 60s
+     */
+    public record Reconnect(@DefaultValue("true") boolean enabled,
+                             @DefaultValue("1s") Duration initialBackoff,
+                             @DefaultValue("10s") Duration maxBackoff,
+                             @DefaultValue("60s") Duration outageLogInterval) {
+        static final Duration DEFAULT_INITIAL_BACKOFF = Duration.ofSeconds(1);
+        static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
+        static final Duration DEFAULT_OUTAGE_LOG_INTERVAL = Duration.ofSeconds(60);
     }
 }

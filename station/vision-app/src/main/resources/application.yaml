@@ -216,6 +216,12 @@ vision:
     # keepalive-timeout: 5s
     # keepalive-without-calls: true
     # channel-shutdown-timeout: 5s
+    # Whether the host/port channel skips TLS. Honoured as of docs/plans/active/CV-RECONNECT-PLAN.md
+    # wave R2 -- setting this to false now actually turns TLS on (previously CvWiring#cvGrpcChannel
+    # called .usePlaintext() unconditionally, so the property was a config lie: an operator setting
+    # plaintext: false believed they had TLS and silently didn't). Note the honest limit: false yields
+    # the JDK default trust chain, which will NOT validate a self-signed cv-service certificate --
+    # custom trust material is a separate concern, not built here.
     # plaintext: true
     # GrpcDatasetUploadPort's per-call deadline and zip-chunk framing size.
     # upload:
@@ -224,6 +230,32 @@ vision:
     # GrpcModelRegistryPort's per-call deadline (ListModels/PromoteModel).
     # registry:
     #   call-timeout: 10s
+    # Bounded reconnect for the shared cv-service channel (docs/plans/active/CV-RECONNECT-PLAN.md).
+    # A fail-fast gRPC call issued while the channel is in TRANSIENT_FAILURE returns the cached failure
+    # WITHOUT starting a new connect attempt -- only the channel's OWN reconnect backoff retries, and
+    # that backoff escalates towards ~120s. Left alone, this means the time between cv-service coming
+    # back up and detection resuming depends entirely on where in that escalation the restart happened
+    # to land -- anywhere from under a second to two minutes. CvChannelSupervisor closes that gap: while
+    # the channel is unreachable it forces a reconnect attempt on ITS OWN schedule instead, so recovery
+    # is bounded by max-backoff below rather than by gRPC's escalation. Worst case end to end is
+    # max-backoff (10s) for the channel to reopen plus one more detection-side probe cycle (also capped
+    # at 10s, StreamPipeline's own outage backoff) -- about 20s from cv-service restarting to detections
+    # resuming, versus unbounded (observed up to and beyond 2 minutes) before this existed.
+    # reconnect:
+    #   Master switch. false restores the exact pre-CV-RECONNECT behaviour: no gate, no forced
+    #   reconnect, GrpcDetectionPort's plain two-arg constructor -- the escape hatch if this loop is
+    #   ever suspected of misbehaving in a deployment.
+    #   enabled: true
+    #   How long the supervisor waits, the first time the channel enters TRANSIENT_FAILURE, before
+    #   forcing a reconnect attempt.
+    #   initial-backoff: 1s
+    #   Cap the doubling forced-reconnect wait never exceeds -- this is the number that bounds worst-case
+    #   recovery latency (see above).
+    #   max-backoff: 10s
+    #   How often an INFO heartbeat naming the outage duration is logged while it continues -- replaces
+    #   what would otherwise be a WARN-with-full-stack-trace flood (one per failed detection probe, every
+    #   probe identical and worthless) with one predictable line per interval.
+    #   outage-log-interval: 60s
     # How frames reach cv-service (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch B, §5.5, D5/D12, wave M7):
     # push | pull. push (default) is today's behaviour, byte-identical (D1): this JVM samples frames and sends
     # them to cv-service over the DetectStream RPC (the detect-width/jpeg-quality/wire-format knobs above). pull

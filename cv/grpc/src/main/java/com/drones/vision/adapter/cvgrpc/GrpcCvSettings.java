@@ -85,6 +85,21 @@ import java.util.Objects;
  *                                {@link #pullRtspBase()}. Must be positive
  * @param pullReconnectMaxBackoff cap the doubling reconnect backoff never exceeds; must be {@code >=}
  *                                {@link #pullReconnectInitialBackoff()}
+ * @param reconnectInitialBackoff how long {@link CvChannelSupervisor} waits, while the channel is in
+ *                                {@code TRANSIENT_FAILURE}, before its first forced {@code
+ *                                resetConnectBackoff()} call (docs/plans/active/CV-RECONNECT-PLAN.md
+ *                                &sect;2.1) — the <b>push/channel</b> path's own reconnect cadence,
+ *                                separate from {@link #pullReconnectInitialBackoff()} (the pull
+ *                                path's, applied by a different class entirely — see that field's own
+ *                                javadoc). Must be positive
+ * @param reconnectMaxBackoff     cap the doubling forced-reconnect backoff never exceeds. Unlike
+ *                                {@link #pullReconnectMaxBackoff()}, this field is <b>not</b> validated
+ *                                against {@link #reconnectInitialBackoff()} — only non-null/positive,
+ *                                same as every other plain {@code Duration} field here
+ * @param outageLogInterval       how often {@link CvChannelSupervisor} logs an INFO heartbeat
+ *                                ("still unreachable") while an outage continues, replacing what would
+ *                                otherwise be a WARN-with-stack-trace flood (one per failed probe)
+ *                                with one predictable line per interval; must be positive
  */
 public record GrpcCvSettings(
         Duration responseTimeout,
@@ -100,7 +115,10 @@ public record GrpcCvSettings(
         WireFormat wireFormat,
         URI pullRtspBase,
         Duration pullReconnectInitialBackoff,
-        Duration pullReconnectMaxBackoff) {
+        Duration pullReconnectMaxBackoff,
+        Duration reconnectInitialBackoff,
+        Duration reconnectMaxBackoff,
+        Duration outageLogInterval) {
 
     /** Default {@link #responseTimeout()} — see {@code GrpcDetectionPort}'s class javadoc, "hung service" case. */
     static final long RESPONSE_TIMEOUT_SECONDS = 2;
@@ -151,6 +169,15 @@ public record GrpcCvSettings(
     /** Default {@link #pullReconnectMaxBackoff()} — mirrors {@code PublishSettings.Resilience}'s default. */
     static final long PULL_RECONNECT_MAX_BACKOFF_SECONDS = 10;
 
+    /** Default {@link #reconnectInitialBackoff()} (docs/plans/active/CV-RECONNECT-PLAN.md &sect;3.2). */
+    static final long RECONNECT_INITIAL_BACKOFF_SECONDS = 1;
+
+    /** Default {@link #reconnectMaxBackoff()} (docs/plans/active/CV-RECONNECT-PLAN.md &sect;3.2). */
+    static final long RECONNECT_MAX_BACKOFF_SECONDS = 10;
+
+    /** Default {@link #outageLogInterval()} (docs/plans/active/CV-RECONNECT-PLAN.md &sect;3.2). */
+    static final long OUTAGE_LOG_INTERVAL_SECONDS = 60;
+
     public GrpcCvSettings {
         Objects.requireNonNull(responseTimeout, "responseTimeout must not be null");
         Objects.requireNonNull(keepAliveTime, "keepAliveTime must not be null");
@@ -183,6 +210,12 @@ public record GrpcCvSettings(
             throw new IllegalArgumentException("pullReconnectMaxBackoff must be >= pullReconnectInitialBackoff: "
                     + pullReconnectMaxBackoff + " < " + pullReconnectInitialBackoff);
         }
+        Objects.requireNonNull(reconnectInitialBackoff, "reconnectInitialBackoff must not be null");
+        Objects.requireNonNull(reconnectMaxBackoff, "reconnectMaxBackoff must not be null");
+        Objects.requireNonNull(outageLogInterval, "outageLogInterval must not be null");
+        requirePositive(reconnectInitialBackoff, "reconnectInitialBackoff");
+        requirePositive(reconnectMaxBackoff, "reconnectMaxBackoff");
+        requirePositive(outageLogInterval, "outageLogInterval");
     }
 
     private static void requirePositive(Duration duration, String name) {
@@ -207,34 +240,65 @@ public record GrpcCvSettings(
                 WIRE_FORMAT,
                 URI.create(PULL_RTSP_BASE),
                 Duration.ofMillis(PULL_RECONNECT_INITIAL_BACKOFF_MILLIS),
-                Duration.ofSeconds(PULL_RECONNECT_MAX_BACKOFF_SECONDS));
+                Duration.ofSeconds(PULL_RECONNECT_MAX_BACKOFF_SECONDS),
+                Duration.ofSeconds(RECONNECT_INITIAL_BACKOFF_SECONDS),
+                Duration.ofSeconds(RECONNECT_MAX_BACKOFF_SECONDS),
+                Duration.ofSeconds(OUTAGE_LOG_INTERVAL_SECONDS));
     }
 
     /** Copy of this settings object with just {@link #detectWidth()} replaced — a test/tuning convenience. */
     public GrpcCvSettings withDetectWidth(int newDetectWidth) {
         return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
                 channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, newDetectWidth, jpegQuality,
-                wireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff);
+                wireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff,
+                reconnectInitialBackoff, reconnectMaxBackoff, outageLogInterval);
     }
 
     /** Copy of this settings object with just {@link #wireFormat()} replaced — a test/tuning convenience. */
     public GrpcCvSettings withWireFormat(WireFormat newWireFormat) {
         return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
                 channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, jpegQuality,
-                newWireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff);
+                newWireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff,
+                reconnectInitialBackoff, reconnectMaxBackoff, outageLogInterval);
     }
 
     /** Copy of this settings object with just {@link #jpegQuality()} replaced — a test/tuning convenience. */
     public GrpcCvSettings withJpegQuality(float newJpegQuality) {
         return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
                 channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, newJpegQuality,
-                wireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff);
+                wireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff,
+                reconnectInitialBackoff, reconnectMaxBackoff, outageLogInterval);
     }
 
     /** Copy of this settings object with just {@link #pullRtspBase()} replaced — a test/tuning convenience. */
     public GrpcCvSettings withPullRtspBase(URI newPullRtspBase) {
         return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
                 channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, jpegQuality,
-                wireFormat, newPullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff);
+                wireFormat, newPullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff,
+                reconnectInitialBackoff, reconnectMaxBackoff, outageLogInterval);
+    }
+
+    /** Copy of this settings object with just {@link #reconnectInitialBackoff()} replaced — a test/tuning convenience. */
+    public GrpcCvSettings withReconnectInitialBackoff(Duration newReconnectInitialBackoff) {
+        return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, jpegQuality,
+                wireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff,
+                newReconnectInitialBackoff, reconnectMaxBackoff, outageLogInterval);
+    }
+
+    /** Copy of this settings object with just {@link #reconnectMaxBackoff()} replaced — a test/tuning convenience. */
+    public GrpcCvSettings withReconnectMaxBackoff(Duration newReconnectMaxBackoff) {
+        return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, jpegQuality,
+                wireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff,
+                reconnectInitialBackoff, newReconnectMaxBackoff, outageLogInterval);
+    }
+
+    /** Copy of this settings object with just {@link #outageLogInterval()} replaced — a test/tuning convenience. */
+    public GrpcCvSettings withOutageLogInterval(Duration newOutageLogInterval) {
+        return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, jpegQuality,
+                wireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff,
+                reconnectInitialBackoff, reconnectMaxBackoff, newOutageLogInterval);
     }
 }

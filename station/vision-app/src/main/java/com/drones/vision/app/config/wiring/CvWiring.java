@@ -1,5 +1,6 @@
 package com.drones.vision.app.config.wiring;
 
+import com.drones.vision.adapter.cvgrpc.CvChannelSupervisor;
 import com.drones.vision.adapter.cvgrpc.GrpcCvSettings;
 import com.drones.vision.adapter.cvgrpc.WireFormat;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
@@ -34,6 +35,12 @@ import java.util.concurrent.TimeUnit;
  * beans reuse {@link #toGrpcCvSettings} (datasetUploadPort) and {@link
  * VisionCvProperties.Registry#callTimeout()} (modelRegistryPort) — the same shared channel and
  * settings mapping this class builds.
+ *
+ * <p>Bounded reconnect (docs/plans/active/CV-RECONNECT-PLAN.md, wave R2): {@link #cvChannelSupervisor}
+ * watches {@link #cvGrpcChannel} and gates {@link #detectionPort} through it — see both beans' own
+ * javadoc for the conditional/lifecycle reasoning and the {@code vision.cv.reconnect.enabled=false}
+ * escape hatch. The same wave also fixed two knobs {@link #cvGrpcChannel} silently ignored (plaintext,
+ * sub-second keepalive) — see that bean's own javadoc.
  */
 @Configuration
 @EnableConfigurationProperties(VisionCvProperties.class)
@@ -57,16 +64,32 @@ public class CvWiring {
      * This bean — not either port — owns the channel's lifecycle ({@code destroyMethod =
      * "shutdown"}). {@link #detectionPort} disables {@code GrpcDetectionPort}'s own inferred {@code
      * close()} destroy call via an explicit empty {@code destroyMethod}.
+     *
+     * <h2>Two fixed knobs (docs/plans/active/CV-RECONNECT-PLAN.md §3.3a)</h2>
+     * <ul>
+     *   <li><b>{@code .usePlaintext()} is now conditional on {@link VisionCvProperties#plaintext()}</b>
+     *   instead of being called unconditionally — previously {@code vision.cv.plaintext=false} left the
+     *   connection unencrypted while the operator believed TLS was enabled. Default stays {@code true},
+     *   so the default path is byte-identical. <b>Honest limit</b>: {@code plaintext: false} yields the
+     *   JDK default trust chain and will <b>not</b> validate a self-signed cv-service certificate —
+     *   custom trust material is a separate concern, not built here.</li>
+     *   <li><b>Keepalive durations now use {@code .toMillis()}</b> instead of {@code .toSeconds()},
+     *   matching {@code GrpcDetectionPort#buildChannel} — the seconds form silently truncated any
+     *   sub-second value (e.g. {@code keepalive-time: 500ms} became {@code 0}).</li>
+     * </ul>
      */
     @Bean(destroyMethod = "shutdown")
     @ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false} "
             + "or '${vision.cv.frame-transport:push}' == 'pull'")
     public ManagedChannel cvGrpcChannel(VisionCvProperties cvProperties) {
         GrpcCvSettings settings = toGrpcCvSettings(cvProperties);
-        return ManagedChannelBuilder.forAddress(cvProperties.host(), cvProperties.port())
-                .usePlaintext()
-                .keepAliveTime(settings.keepAliveTime().toSeconds(), TimeUnit.SECONDS)
-                .keepAliveTimeout(settings.keepAliveTimeout().toSeconds(), TimeUnit.SECONDS)
+        ManagedChannelBuilder<?> builder = ManagedChannelBuilder.forAddress(cvProperties.host(), cvProperties.port());
+        if (settings.plaintext()) {
+            builder.usePlaintext();
+        }
+        return builder
+                .keepAliveTime(settings.keepAliveTime().toMillis(), TimeUnit.MILLISECONDS)
+                .keepAliveTimeout(settings.keepAliveTimeout().toMillis(), TimeUnit.MILLISECONDS)
                 .keepAliveWithoutCalls(settings.keepAliveWithoutCalls())
                 .build();
     }
@@ -74,17 +97,55 @@ public class CvWiring {
     /**
      * Maps every {@code GrpcCvSettings} field off {@link VisionCvProperties} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * wave F4, extended by docs/plans/active/MEDIA-SOT-PLAN.md wave M7 with the three {@code pull*}
-     * fields) — shared by {@link #cvGrpcChannel}/{@link #detectionPort}/{@link #pulledDetectionPort}
-     * here and {@code TrainingWiringConfiguration#datasetUploadPort}.
+     * fields and docs/plans/active/CV-RECONNECT-PLAN.md wave R2 with the three push/channel {@code
+     * reconnect*}/{@code outageLogInterval} fields) — shared by {@link #cvGrpcChannel}/{@link
+     * #detectionPort}/{@link #cvChannelSupervisor}/{@link #pulledDetectionPort} here and {@code
+     * TrainingWiringConfiguration#datasetUploadPort}.
      */
     static GrpcCvSettings toGrpcCvSettings(VisionCvProperties properties) {
         VisionCvProperties.Upload upload = properties.upload();
         VisionCvProperties.Pull pull = properties.pull();
+        VisionCvProperties.Reconnect reconnect = properties.reconnect();
         return new GrpcCvSettings(properties.responseTimeout(), properties.keepAliveTime(),
                 properties.keepAliveTimeout(), properties.keepAliveWithoutCalls(), properties.channelShutdownTimeout(),
                 properties.plaintext(), upload.timeout(), upload.chunkBytes(), properties.detectWidth(),
                 properties.jpegQuality(), WireFormat.parse(properties.wireFormat()), pull.rtspBase(),
-                pull.reconnectInitialBackoff(), pull.reconnectMaxBackoff());
+                pull.reconnectInitialBackoff(), pull.reconnectMaxBackoff(), reconnect.initialBackoff(),
+                reconnect.maxBackoff(), reconnect.outageLogInterval());
+    }
+
+    /**
+     * The single owner of "is the shared cv-service channel reachable, and if not, keep trying at a
+     * bounded cadence" (docs/plans/active/CV-RECONNECT-PLAN.md, wave R2) — watches {@link #cvGrpcChannel}
+     * and is handed to {@link #detectionPort} below, which gates {@code GrpcDetectionPort#detect}
+     * through it once a supervisor is present.
+     *
+     * <h2>Why {@code @ConditionalOnExpression}, extending {@link #cvGrpcChannel}'s own condition,
+     * and deliberately NOT {@code @ConditionalOnBean(ManagedChannel.class)}</h2>
+     * {@code @ConditionalOnBean} evaluates against bean *definitions* already processed at the point
+     * this configuration class is parsed — inside one {@code @Configuration} class, that makes it
+     * sensitive to declaration order between {@code @Bean} methods, a fragile property that can pass
+     * in a narrow test slice and silently fail to match in full production wiring (or vice versa)
+     * depending on classpath/bean-scanning order. Repeating the same property expression {@link
+     * #cvGrpcChannel} already uses, ANDed with {@code vision.cv.reconnect.enabled}, is order-independent
+     * and states the actual intent directly: "whenever the channel exists AND reconnect is turned on."
+     *
+     * <h2>Lifecycle</h2>
+     * {@code initMethod = "start"} arms the watch loop as soon as this bean is constructed;
+     * {@code destroyMethod = "close"} stops only this bean's own watch loop and {@code
+     * cv-channel-supervisor} scheduler thread — it <b>never</b> shuts the channel down (see {@link
+     * #cvGrpcChannel}'s own {@code destroyMethod = "shutdown"}, which stays the sole owner of that).
+     *
+     * <p>{@code vision.cv.reconnect.enabled=false} (the escape hatch, docs/plans/active/CV-RECONNECT-PLAN.md
+     * §3.3/§5 item 3) means this bean does not exist at all — {@link #detectionPort} then falls back to
+     * the two-arg {@code GrpcDetectionPort} constructor (no gate), reproducing today's exact behaviour.
+     */
+    @Bean(initMethod = "start", destroyMethod = "close")
+    @ConditionalOnExpression("(${vision.cv.enabled:false} or ${vision.training.enabled:false} "
+            + "or '${vision.cv.frame-transport:push}' == 'pull') and ${vision.cv.reconnect.enabled:true}")
+    public CvChannelSupervisor cvChannelSupervisor(VisionCvProperties cvProperties,
+                                                    ObjectProvider<ManagedChannel> cvGrpcChannel) {
+        return new CvChannelSupervisor(cvGrpcChannel.getObject(), toGrpcCvSettings(cvProperties));
     }
 
     /**
@@ -96,11 +157,26 @@ public class CvWiring {
      * <p><strong>{@code destroyMethod = ""}, deliberately</strong> — disables {@code @Bean}'s
      * default destroy-method inference (which would otherwise call {@code GrpcDetectionPort#close()}
      * at context shutdown, unconditionally shutting the <em>shared</em> channel down).
+     *
+     * <h2>Reconnect gate (docs/plans/active/CV-RECONNECT-PLAN.md, wave R2)</h2>
+     * When {@link #cvChannelSupervisor} is present (i.e. {@code vision.cv.reconnect.enabled=true}, the
+     * default), this uses {@code GrpcDetectionPort}'s three-arg constructor so {@code detect(...)}
+     * checks the supervisor's gate before doing any work. When it is absent — either {@code
+     * vision.cv.reconnect.enabled=false} or neither of {@link #cvGrpcChannel}'s own enabling properties
+     * matched (impossible while {@link VisionCvProperties#enabled()} is {@code true}, since that alone
+     * satisfies {@link #cvGrpcChannel}'s condition) — this falls back to the pre-R2 two-arg constructor,
+     * which has no gate and behaves byte-identically to before this wave.
      */
     @Bean(destroyMethod = "")
-    public DetectionPort detectionPort(VisionCvProperties cvProperties, ObjectProvider<ManagedChannel> cvGrpcChannel) {
+    public DetectionPort detectionPort(VisionCvProperties cvProperties, ObjectProvider<ManagedChannel> cvGrpcChannel,
+                                        ObjectProvider<CvChannelSupervisor> cvChannelSupervisor) {
         if (cvProperties.enabled()) {
-            return new GrpcDetectionPort(cvGrpcChannel.getObject(), toGrpcCvSettings(cvProperties));
+            GrpcCvSettings settings = toGrpcCvSettings(cvProperties);
+            CvChannelSupervisor supervisor = cvChannelSupervisor.getIfAvailable();
+            if (supervisor != null) {
+                return new GrpcDetectionPort(cvGrpcChannel.getObject(), settings, supervisor);
+            }
+            return new GrpcDetectionPort(cvGrpcChannel.getObject(), settings);
         }
         return new NoopDetectionPort();
     }

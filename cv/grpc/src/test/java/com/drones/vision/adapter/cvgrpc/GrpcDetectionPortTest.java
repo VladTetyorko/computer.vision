@@ -17,6 +17,7 @@ import com.drones.vision.proto.v1.ImageEncoding;
 import com.drones.vision.proto.v1.InferenceGrpc;
 import io.grpc.BindableService;
 import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.Status;
@@ -67,11 +68,19 @@ class GrpcDetectionPortTest {
 
     private final List<GrpcDetectionPort> ports = new ArrayList<>();
     private final List<Server> servers = new ArrayList<>();
+    private final List<CvChannelSupervisor> supervisors = new ArrayList<>();
+    private final List<ManagedChannel> rawChannels = new ArrayList<>();
 
     @AfterEach
     void tearDown() throws InterruptedException {
         for (GrpcDetectionPort port : ports) {
             port.close();
+        }
+        for (CvChannelSupervisor supervisor : supervisors) {
+            supervisor.close();
+        }
+        for (ManagedChannel channel : rawChannels) {
+            channel.shutdownNow();
         }
         for (Server server : servers) {
             server.shutdownNow();
@@ -81,6 +90,44 @@ class GrpcDetectionPortTest {
 
     private GrpcDetectionPort newPort(BindableService service) throws Exception {
         return newPort(service, GrpcCvSettings.defaults());
+    }
+
+    private GrpcDetectionPort newPort(BindableService service, GrpcCvSettings settings,
+                                       CvChannelSupervisor supervisor) throws Exception {
+        String name = InProcessServerBuilder.generateName();
+        Server server = InProcessServerBuilder.forName(name).addService(service).build().start();
+        servers.add(server);
+        ManagedChannel channel = InProcessChannelBuilder.forName(name).build();
+        GrpcDetectionPort port = new GrpcDetectionPort(channel, settings, supervisor);
+        ports.add(port);
+        return port;
+    }
+
+    /**
+     * A real {@link CvChannelSupervisor} against a dead TCP port, driven to a closed gate. Used to
+     * test {@link GrpcDetectionPort}'s gate-checking behaviour in isolation from the supervisor's own
+     * state-machine correctness (covered by {@code CvChannelSupervisorTest}) — the port under test is
+     * built against a completely different (perfectly healthy, in-process) channel, so any failure it
+     * surfaces can only be coming from the gate, not from its own transport.
+     */
+    private CvChannelSupervisor closedGateSupervisor() throws Exception {
+        int tcpPort = findFreeTcpPort();
+        ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", tcpPort).usePlaintext().build();
+        rawChannels.add(channel);
+        GrpcCvSettings settings = GrpcCvSettings.defaults()
+                .withReconnectInitialBackoff(Duration.ofMillis(100))
+                .withReconnectMaxBackoff(Duration.ofMillis(300))
+                .withOutageLogInterval(Duration.ofSeconds(30));
+        CvChannelSupervisor supervisor = new CvChannelSupervisor(channel, settings);
+        supervisors.add(supervisor);
+        supervisor.start();
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (supervisor.available() && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+        assertFalse(supervisor.available(), "test setup: supervisor gate should have closed by now");
+        return supervisor;
     }
 
     private GrpcDetectionPort newPort(BindableService service, int detectWidth, float jpegQuality) throws Exception {
@@ -700,6 +747,49 @@ class GrpcDetectionPortTest {
         DetectionResult recovered = port.detect(frame(streamId, 1, PixelFormat.BGR24), config)
                 .toCompletableFuture().get(5, TimeUnit.SECONDS);
         assertEquals(1L, recovered.frameSequence());
+    }
+
+    @Test
+    void detectWhileGateClosedFailsWithCvUnavailableExceptionCreatesNoSessionAndSkipsEncode() throws Exception {
+        // docs/plans/active/CV-RECONNECT-PLAN.md wave R1: with a CvChannelSupervisor present and its
+        // gate closed, detect() must fail fast BEFORE codec.encode() and BEFORE opening a session --
+        // never touching the (perfectly healthy) in-process transport this port is otherwise built on.
+        CvChannelSupervisor supervisor = closedGateSupervisor();
+        CapturingServicer servicer = new CapturingServicer();
+        GrpcDetectionPort port = newPort(servicer, GrpcCvSettings.defaults(), supervisor);
+        StreamId streamId = StreamId.random();
+
+        // Wide enough to trigger the downscale path, but with far too little data to fill
+        // width*height*3 bytes -- if codec.encode() ran at all, this would fail with
+        // BufferUnderflowException instead (see detectConversionFailureFails... below). Getting
+        // CvUnavailableException here instead proves the gate check ran first.
+        VideoFrame badFrame = new VideoFrame(streamId, 0, Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                1280, 720, PixelFormat.BGR24, ByteBuffer.wrap(new byte[]{1, 2, 3, 4}));
+
+        CompletionStage<DetectionResult> stage = port.detect(badFrame, PipelineConfig.defaults());
+        ExecutionException ex = assertThrows(ExecutionException.class,
+                () -> stage.toCompletableFuture().get(1, TimeUnit.SECONDS));
+        assertInstanceOf(CvUnavailableException.class, ex.getCause());
+        assertEquals(0, ex.getCause().getStackTrace().length, "CvUnavailableException must be stackless");
+        assertTrue(ex.getCause().getMessage().contains("unreachable"),
+                "message should describe the outage: " + ex.getCause().getMessage());
+
+        assertTrue(servicer.received.isEmpty(),
+                "no gRPC call should have been made on the port's own (healthy) transport while the gate is closed");
+    }
+
+    @Test
+    void twoArgConstructorHasNoGateAndBehavesExactlyLikeBefore() throws Exception {
+        // Regression guard for docs/plans/active/CV-RECONNECT-PLAN.md wave R1: the pre-existing
+        // two-arg constructor must keep today's exact behaviour -- no CvChannelSupervisor, no gate --
+        // so every call site and test that predates this wave is unaffected.
+        GrpcDetectionPort port = newPort(new EchoServicer());
+        StreamId streamId = StreamId.random();
+
+        DetectionResult result = port.detect(frame(streamId, 0, PixelFormat.JPEG), PipelineConfig.defaults())
+                .toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        assertEquals(streamId, result.streamId());
     }
 
     @Test

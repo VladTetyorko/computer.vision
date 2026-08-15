@@ -1,5 +1,6 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.cvgrpc.CvChannelSupervisor;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.api.controller.ModelRegistryController;
 import com.drones.vision.app.events.DetectionSessionCleanupEventPublisher;
@@ -72,11 +73,25 @@ class CvEnabledWiringTest {
     private ManagedChannel cvGrpcChannel;
 
     @Autowired
+    private CvChannelSupervisor cvChannelSupervisor;
+
+    @Autowired
     private ApplicationContext applicationContext;
 
     @Test
     void enabledConfigurationSelectsGrpcDetectionPort() {
         assertInstanceOf(GrpcDetectionPort.class, detectionPort);
+    }
+
+    /**
+     * docs/plans/active/CV-RECONNECT-PLAN.md wave R2: {@code vision.cv.reconnect.enabled} defaults to
+     * {@code true}, so enabling CV alone is enough for {@link CvWiring#cvChannelSupervisor} to exist,
+     * gating {@code detectionPort}'s three-arg {@code GrpcDetectionPort} constructor. See {@link
+     * CvReconnectDisabledWiringTest} for the {@code false} counterpart.
+     */
+    @Test
+    void enabledConfigurationBuildsTheCvChannelSupervisorByDefault() {
+        assertInstanceOf(CvChannelSupervisor.class, cvChannelSupervisor);
     }
 
     @Test
