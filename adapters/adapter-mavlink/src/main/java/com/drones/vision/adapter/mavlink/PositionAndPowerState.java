@@ -10,6 +10,13 @@ import io.dronefleet.mavlink.common.GlobalPositionInt;
  * MavlinkTelemetryDecoder}'s original 35-field flat state). See {@code MavlinkTelemetryDecoder}'s
  * own javadoc for the full unit-conversion table.
  *
+ * <p>docs/plans/active/GEO-POSE-PLAN.md wave V2 added {@code GLOBAL_POSITION_INT}'s own {@code
+ * relative_alt} (height above home, mm) → {@link com.drones.vision.kernel.Telemetry#aglMeters()}
+ * (÷ 1000, no sentinel — always sent) and {@code time_boot_ms} → {@link
+ * com.drones.vision.kernel.Telemetry#deviceBootMillis()} (already a non-negative {@code long} once
+ * dronefleet widens the wire {@code uint32_t}, so no range check is needed here) alongside this
+ * message's pre-existing {@code lat}/{@code lon}/{@code alt}/{@code hdg}/{@code vx,vy,vz} mappings.
+ *
  * <p>Package-private mutable struct, not a record: every field starts {@code null} ("not yet
  * known") and is merged in place as messages arrive, exactly like the flat-field version this
  * replaces. One instance per {@link MavlinkTelemetryDecoder}, touched only from that decoder's own
@@ -33,6 +40,8 @@ final class PositionAndPowerState {
     Double vyMps;
     Double vzMps;
     Double batteryVoltage;
+    Double aglMeters;
+    Long deviceBootMillis;
 
     void applyPosition(GlobalPositionInt position) {
         latitude = position.lat() / 1e7;
@@ -42,6 +51,8 @@ final class PositionAndPowerState {
         vxMps = position.vx() / 100.0;
         vyMps = position.vy() / 100.0;
         vzMps = position.vz() / 100.0;
+        aglMeters = position.relativeAlt() / 1000.0;
+        deviceBootMillis = position.timeBootMs();
     }
 
     void applyBatteryPercent(int batteryRemainingPercent) {
