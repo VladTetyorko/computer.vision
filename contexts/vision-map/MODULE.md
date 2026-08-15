@@ -15,7 +15,9 @@ directory move (`com/drones/vision/map/**`) rather than a repackage. Both layers
 ArchUnit-enforced one-way (`domain` never imports `application`).
 
 **Depends on:**
-- `vision-kernel` — every typed id, `GeoPosition`, `Ownership`, `GeoProjection` (mark geolocation math)
+- `vision-kernel` — every typed id, `GeoPosition`, `Ownership`, `GeoProjection` (mark geolocation math;
+  since docs/plans/active/GEO-POSE-PLAN.md wave V3, via `GeoProjection.aimFrom`/`CameraAim` rather than the
+  raw 4-arg `project`)
 - `vision-platform` — `AccessDeniedException` (every authorization refusal in this context throws it);
   `AuditTrailPort`/`Audit*` are declared but **not currently used** by this context (no service here
   writes an audit line — see Gotchas)
@@ -25,9 +27,8 @@ ArchUnit-enforced one-way (`domain` never imports `application`).
 
 **Used by:** `adapter-persistence` (JPA repositories for the four ports below), `vision-api`
 (`/api/map/**` REST surface), `vision-app` (wiring, devsupport in-memory repositories)
-**Build/test:** `./mvnw -B -pl contexts/vision-map test` — **223/223 green** as of the W1.7b extraction
-(unchanged test count from the pre-extraction `vision-domain`+`vision-application` combined map suite;
-a pure move, no behavior change)
+**Build/test:** `./mvnw -B -pl contexts/vision-map test` — **227/227 green** as of docs/plans/active/GEO-POSE-PLAN.md
+wave V3 (up from 223 at the W1.7b extraction: +4 in `DefaultMarkServiceTest`, no other file changed)
 
 ## Package shape
 
@@ -197,13 +198,27 @@ com.drones.vision.map.application.mark  — mark service (kept as its own subpac
     first (a `CLEARED` mark drops off). Layer-scoped, resolved from identity/group-membership via
     `MapAccessPolicy` — see that class's own entry for why this is the fix for the pilot-visibility
     trap, not a workaround for it.
-  - `Mark create(Viewer, MarkSpec)` / `Mark geolocate(Viewer, GeolocateSpec)` — both resolve the
-    target layer (`spec.layerId()` if given, else `LayerResolver#defaultLayerFor(v)`), require
-    `policy.canContribute` on it (checked **before** `geolocate` even reads telemetry), build the
-    `Mark` with `Verification.unverified()` and `ownership = new Ownership(v.userId(), LayerResolver.homeGroupOf(v))`;
+  - `Mark create(Viewer, MarkSpec)` / `GeolocationResult geolocate(Viewer, GeolocateSpec)` — both
+    resolve the target layer (`spec.layerId()` if given, else `LayerResolver#defaultLayerFor(v)`),
+    require `policy.canContribute` on it (checked **before** `geolocate` even reads telemetry), build
+    the `Mark` with `Verification.unverified()` and `ownership = new Ownership(v.userId(), LayerResolver.homeGroupOf(v))`;
     publish `CREATED`. `geolocate` reads `UsageTracker#latestTelemetry(AssetId)` and requires
     latitude, longitude, heading present plus altitude present and `>0` — any of the four missing/
-    invalid is the same `IllegalArgumentException("cannot geolocate: telemetry incomplete")`.
+    invalid is the same `IllegalArgumentException("cannot geolocate: telemetry incomplete")`; this
+    guard is unchanged since before docs/plans/active/GEO-POSE-PLAN.md wave V3 and, by construction, is what
+    guarantees `GeoProjection.aimFrom` (see below) never itself throws here.
+    - **Since wave V3**, the projected ground point comes from `GeoProjection.aimFrom(telemetry,
+      GeoProjection.DEFAULT_DEPRESSION_DEGREES)` + `GeoProjection.project(GeoPosition, CameraAim)`
+      rather than the raw `telemetry.headingDegrees()`/`telemetry.altitudeMeters()` pair fed straight
+      into the 4-arg `project` — `aimFrom` is the one place the gimbal-vs-airframe bearing and
+      AGL-vs-AMSL altitude precedence live, not re-derived in this service. `spec.depressionDegrees()`,
+      when non-null, replaces the resolved depression *after* `aimFrom` runs (it wins even over a real
+      gimbal reading — "override the measurement", not "fall back if there is no measurement" — so it
+      cannot be implemented by passing it in as `aimFrom`'s `fallbackDepressionDegrees` argument,
+      which a gimbal reading would still outrank). Applying the override also forces the returned
+      `CameraAim.measured()` to `false`, win-or-not: an operator-supplied constant is by definition not
+      a measurement. The return value's `measured` flag is *not* stored on `Mark` itself — see
+      `GeolocationResult`'s own entry for why.
   - `Mark patch(Viewer, MarkId, MarkPatch)` — `require(id)` (404), then `requireEditable`: the mark's
     own creator **only while its `Verification` is still `UNVERIFIED`**, or `policy.canManage` on its
     layer, unconditionally. Once a manager confirms/rejects a mark, its creator's standing edit right
@@ -229,8 +244,19 @@ com.drones.vision.map.application.mark  — mark service (kept as its own subpac
   `Mark`'s own label-non-blank/note-blank-normalizes-to-null invariants.
 - **`GeolocateSpec(assetId, layerId, kind, affiliation, label, note, depressionDegrees)`** —
   `MarkService#geolocate`'s command, a `DETECTION` mark projected from an asset's freshest telemetry;
-  carries no position of its own — `depressionDegrees` defaults to `GeoProjection.DEFAULT_DEPRESSION_DEGREES`
-  at the wire boundary when omitted, validated by `GeoProjection#project` itself.
+  carries no position of its own. **`depressionDegrees` is `Double`, genuinely nullable** (changed in
+  docs/plans/active/GEO-POSE-PLAN.md wave V3 from a primitive `double` that the wire DTO pre-defaulted to
+  `GeoProjection.DEFAULT_DEPRESSION_DEGREES`): `null` means "let the resolved pose decide" (a real
+  gimbal reading if the telemetry has one, else the 45° default); non-null is an operator override
+  that always wins, even over a real gimbal reading. Range-validated by `GeoProjection.CameraAim`'s
+  own compact ctor when present, not duplicated here.
+- **`GeolocationResult(mark, measured)`** — `MarkService#geolocate`'s return value (wave V3): the
+  created `Mark` plus whether its fix was measured (`CameraAim.measured()`) or assumed. A separate
+  wrapper rather than a field on `Mark` because `measured` describes how *this* fix was produced, not
+  a durable mark property, and persisting it would mean widening the domain record plus every adapter
+  that maps it (`adapter-persistence`'s `MarkEntity`/`MarkMapper`) — out of this wave's scope. It is
+  therefore surfaced only on the direct geolocate response, not on a later `list`/`patch` read of the
+  same mark; see `vision-api`'s `MarkResponse` for how it reaches the wire.
 - **`MarkPatch(kind, affiliation, label, note, position, status)`** — `MarkService#patch`'s
   partial-patch command; every component `Optional<T>` (not a bare nullable field — `Optional.empty()`
   unambiguously means "leave unchanged" without colliding with `note`, which can itself legitimately
@@ -272,6 +298,13 @@ com.drones.vision.map.application.mark  — mark service (kept as its own subpac
   parameter on `DefaultMapLayerService`/`DefaultDrawingService`/`DefaultMarkService`, all already at
   or near the 5-arg ceiling (`.claude/skills/java-clean-code/SKILL.md` §3) — bundling would likely be
   needed.
+- **`GeolocationResult.measured` does not survive a page reload** — it is computed fresh by
+  `DefaultMarkService#geolocate` and returned only on that call's direct response; it is not a `Mark`
+  field, so a later `list()`/`patch()` of the same mark carries no measured-vs-assumed signal at all
+  (`MarkResponse.from(Mark)`, used by every endpoint but geolocate, always sends `measured` absent).
+  Persisting it durably would require widening the `Mark` domain record and `adapter-persistence`'s
+  `MarkEntity`/`MarkMapper` — deliberately deferred past docs/plans/active/GEO-POSE-PLAN.md wave V3; flag it if a
+  later wave wants the cockpit to show "measured" after a refresh, not just at creation time.
 - **`MapLiveUpdatePort#publishMapEvent` scopes delivery per-connection by layer visibility** — every
   other context's live-update port (`FleetLiveUpdatePort`, `TelemetryLiveUpdatePort`,
   `DetectionLiveUpdatePort`, `EventLiveUpdatePort` in `vision-platform`) broadcasts unconditionally to
@@ -321,6 +354,25 @@ carries no group at all, so an FPV operator could never see — let alone correc
 own mark. This is the design history `MAP-REWORK-PLAN.md`'s Wave B/`MapAccessPolicy` fully supersedes
 (see Gotchas) — kept here for context, not as the current shape. 560/560 green after the revision (up
 from 535, same test count across both rounds — the revision replaced tests, not added to them).
+
+docs/plans/active/GEO-POSE-PLAN.md **wave V3 done** (`DefaultMarkService#geolocate` now uses the pose the
+device actually measured, not just a hand-picked heading/altitude pair): `geolocate` resolves a
+`GeoProjection.CameraAim` via `GeoProjection.aimFrom` instead of calling the 4-arg `GeoProjection#project`
+directly, fixing the bug docs/plans/active/GEO-POSE-PLAN.md §1 describes (AMSL altitude silently standing in for
+AGL, offsetting every mark downrange by the site's height above sea level). `GeolocateSpec.depressionDegrees`
+changed from primitive `double` to genuinely-nullable `Double` — `GeolocateMarkRequest` no longer
+pre-defaults it at the wire boundary, since doing so made an explicit 45° override and an omitted value
+indistinguishable, which would have discarded every real gimbal measurement (every existing cockpit
+caller sends no `depressionDegrees` at all). `MarkService#geolocate`'s return type changed from `Mark`
+to the new `GeolocationResult(mark, measured)` so the operator-facing measured-vs-assumed signal
+(`CameraAim.measured()`) can reach the API response; `vision-api`'s `MapMarksController`/`MarkResponse`
+updated to match (`MarkResponse` gained a nullable `measured` field, populated only on the geolocate
+response). The existing telemetry-completeness guard is unrelaxed and unchanged (G6): it already
+guarantees `aimFrom` never throws here, so the "cannot geolocate: telemetry incomplete" message a
+caller sees never regresses to a differently-worded kernel exception. Every pre-V3 `DefaultMarkServiceTest`
+assertion on the no-pose path is unchanged and green, proving no behavior change when a device reports
+none of the new `Telemetry` fields. **227/227 green** (see Build/test above). `vision-web` is not yet
+updated to read `measured` off the geolocate response — a follow-up, not part of this wave.
 
 **Cross-module note**: the map context's live channel (`"marks"` SSE topic) and `list()` are
 deliberately consistent — both deployment-wide-then-layer-scoped, never a mismatch between what a

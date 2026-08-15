@@ -2,6 +2,7 @@ package com.drones.vision.map.application.mark;
 
 import com.drones.vision.map.domain.model.Affiliation;
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.Attitude;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GeoProjection;
@@ -37,6 +38,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -106,6 +109,13 @@ class DefaultMarkServiceTest {
 
     private Telemetry telemetry(Double lat, Double lon, Double heading, Double altitude) {
         return new Telemetry(DeviceId.random(), Instant.now(), lat, lon, altitude, heading, 80.0, Map.of());
+    }
+
+    /** Like {@link #telemetry}, but also carrying the GEO-POSE-PLAN V1 pose fields. */
+    private Telemetry telemetryWithPose(Double lat, Double lon, Double heading, Double altitude, Double aglMeters,
+                                         Attitude attitude) {
+        return new Telemetry(DeviceId.random(), Instant.now(), lat, lon, altitude, heading, 80.0, Map.of(), null,
+                aglMeters, attitude, null);
     }
 
     // --- create ------------------------------------------------------------
@@ -198,7 +208,7 @@ class DefaultMarkServiceTest {
         GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
                 null, GeoProjection.DEFAULT_DEPRESSION_DEGREES);
 
-        Mark created = service.geolocate(pilotViewer(creator), spec);
+        Mark created = service.geolocate(pilotViewer(creator), spec).mark();
 
         GeoPosition expected = GeoProjection.project(new GeoPosition(50.45, 30.52, 100.0), 0.0, 100.0,
                 GeoProjection.DEFAULT_DEPRESSION_DEGREES);
@@ -270,6 +280,85 @@ class DefaultMarkServiceTest {
 
         assertThrows(IllegalArgumentException.class, () -> service.geolocate(pilotViewer(creator), spec));
         assertTrue(markRepository.findAll().isEmpty());
+    }
+
+    @Test
+    void geolocateOnIncompleteTelemetryReportsTheDomainMessageNotAKernelException() {
+        // headingDegrees missing: GeoProjection.aimFrom would throw its own IllegalArgumentException
+        // ("...needs a gimbal yaw or a heading...") if it were ever reached -- it must not be.
+        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(telemetry(50.45, 30.52, null, 100.0)));
+        GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
+                null, null);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> service.geolocate(pilotViewer(creator), spec));
+
+        assertEquals("cannot geolocate: telemetry incomplete", ex.getMessage(),
+                "must be DefaultMarkService's own guard message, never a kernel message leaking through");
+    }
+
+    @Test
+    void geolocateWithGimbalDepressionAndAglMeasuresAndProjectsDifferentlyThanBareTelemetry() {
+        // Gimbal pitched 30 degrees below horizontal (aircraft-pitch sign convention: negative = down).
+        Attitude gimbalDown = new Attitude(null, null, null, null, -30.0, null);
+        Telemetry withPose = telemetryWithPose(50.45, 30.52, 0.0, 280.0, 100.0, gimbalDown);
+        GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
+                null, null);
+
+        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(withPose));
+        GeolocationResult measuredResult = service.geolocate(pilotViewer(creator), spec);
+
+        GeoPosition expected = GeoProjection.project(new GeoPosition(50.45, 30.52, 280.0),
+                GeoProjection.aimFrom(withPose, GeoProjection.DEFAULT_DEPRESSION_DEGREES));
+        assertEquals(expected, measuredResult.mark().position());
+        assertTrue(measuredResult.measured());
+
+        // The same lat/lon/heading with no gimbal/AGL data projects the old, assumed point instead.
+        Telemetry bare = telemetry(50.45, 30.52, 0.0, 280.0);
+        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(bare));
+        GeolocationResult assumedResult = service.geolocate(pilotViewer(creator), spec);
+
+        assertFalse(assumedResult.measured());
+        assertNotEquals(expected, assumedResult.mark().position());
+    }
+
+    @Test
+    void geolocateExplicitDepressionOverrideWinsOverGimbalReadingAndIsNotMeasured() {
+        Attitude gimbalDown = new Attitude(null, null, null, null, -30.0, null);
+        Telemetry withPose = telemetryWithPose(50.45, 30.52, 0.0, 280.0, 100.0, gimbalDown);
+        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(withPose));
+        GeolocateSpec overridden = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE,
+                "Contact", null, 60.0);
+
+        GeolocationResult result = service.geolocate(pilotViewer(creator), overridden);
+
+        GeoPosition expectedFromOverride =
+                GeoProjection.project(new GeoPosition(50.45, 30.52, 280.0), 0.0, 100.0, 60.0);
+        GeoPosition wouldHaveComeFromGimbal =
+                GeoProjection.project(new GeoPosition(50.45, 30.52, 280.0), 0.0, 100.0, 30.0);
+        assertEquals(expectedFromOverride, result.mark().position());
+        assertNotEquals(wouldHaveComeFromGimbal, result.mark().position());
+        assertFalse(result.measured(), "an explicit override replaces the measurement, so it is not one");
+    }
+
+    @Test
+    void geolocateUsesAglNotAmslSoTheMarkNoLongerLandsFarDownrange() {
+        // Same lat/lon/heading; AMSL 280 m (site elevation above sea level) with a real AGL of 100 m.
+        Telemetry withAgl = telemetryWithPose(50.45, 30.52, 0.0, 280.0, 100.0, null);
+        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(withAgl));
+        GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
+                null, null);
+
+        GeolocationResult result = service.geolocate(pilotViewer(creator), spec);
+
+        // The pre-fix behavior treated AMSL as AGL: 280 m ground range at the default 45-degree
+        // depression, instead of the true 100 m -- the bug docs/plans/active/GEO-POSE-PLAN.md §1 describes.
+        GeoPosition drone = new GeoPosition(50.45, 30.52, 280.0);
+        GeoPosition preFixPoint = GeoProjection.project(drone, 0.0, 280.0, GeoProjection.DEFAULT_DEPRESSION_DEGREES);
+
+        double driftMeters = GeoProjection.bearingDistance(result.mark().position(), preFixPoint).distanceMeters();
+        assertTrue(driftMeters > 170.0 && driftMeters < 190.0,
+                "AGL 100m vs AMSL 280m at 45deg depression should differ by ~180m, was " + driftMeters);
     }
 
     // --- list: layer-scoped, ACTIVE only -----------------------------------

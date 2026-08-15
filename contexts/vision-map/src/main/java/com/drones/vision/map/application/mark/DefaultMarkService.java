@@ -38,9 +38,25 @@ import com.drones.vision.platform.AccessDeniedException;
  * {@link #geolocate} is the one place this class does more than CRUD: it reads {@code assetId}'s
  * freshest sample via {@link UsageTracker#latestTelemetry}, honestly validates it (latitude,
  * longitude and heading present; altitude present and positive), and only then builds the drone's
- * {@link GeoPosition} and calls {@link GeoProjection#project} — {@code GeoProjection} itself accepts
- * no nullable telemetry (docs/plans/done/TACTICAL-MARKS-PLAN.md's M1 handoff note), so this null-checking is
- * this class's job, not the pure geo-math's.
+ * {@link GeoPosition} and resolves a {@link GeoProjection.CameraAim} to project from. {@code
+ * GeoProjection} itself accepts no nullable telemetry (docs/plans/done/TACTICAL-MARKS-PLAN.md's M1 handoff
+ * note), so this null-checking is this class's job, not the pure geo-math's.
+ *
+ * <p>Since docs/plans/active/GEO-POSE-PLAN.md wave V3, the aim comes from {@link
+ * GeoProjection#aimFrom(com.drones.vision.kernel.Telemetry, double)} rather than a hand-picked
+ * {@code headingDegrees}/{@code altitudeMeters} pair — {@code aimFrom} is the single place the
+ * gimbal-vs-airframe and AGL-vs-AMSL precedence rules live, so this method does not re-derive them.
+ * {@code spec.depressionDegrees()}, when present, replaces the resolved depression outright (it
+ * "overrides the measurement" rather than merely acting as {@code aimFrom}'s fallback — see {@link
+ * GeolocateSpec#depressionDegrees()}), which is why it is applied <em>after</em> {@code aimFrom}
+ * rather than passed in as its {@code fallbackDepressionDegrees} argument.
+ *
+ * <p>The existing telemetry-completeness guard (latitude/longitude/heading present, altitude present
+ * and positive) is deliberately unrelaxed and unchanged (docs/plans/active/GEO-POSE-PLAN.md G6): it already
+ * guarantees {@code aimFrom} always has a bearing source ({@code headingDegrees}) and an altitude
+ * source ({@code altitudeMeters}) to fall back to, so {@code aimFrom} can never actually throw here —
+ * this class's own {@link #TELEMETRY_INCOMPLETE} message is what a caller sees for every incomplete
+ * case, never a kernel {@code IllegalArgumentException} with a different message.
  *
  * <h2>Threading</h2>
  * Holds no mutable state of its own — all shared state is reached through the injected
@@ -97,7 +113,7 @@ public final class DefaultMarkService implements MarkService {
     }
 
     @Override
-    public Mark geolocate(Viewer v, GeolocateSpec spec) {
+    public GeolocationResult geolocate(Viewer v, GeolocateSpec spec) {
         Objects.requireNonNull(v, "v must not be null");
         Objects.requireNonNull(spec, "spec must not be null");
 
@@ -111,13 +127,37 @@ public final class DefaultMarkService implements MarkService {
         }
 
         GeoPosition drone = new GeoPosition(telemetry.latitude(), telemetry.longitude(), telemetry.altitudeMeters());
-        GeoPosition ground = GeoProjection.project(drone, telemetry.headingDegrees(), telemetry.altitudeMeters(),
-                spec.depressionDegrees());
+        GeoProjection.CameraAim aim = resolveAim(telemetry, spec.depressionDegrees());
+        GeoPosition ground = GeoProjection.project(drone, aim);
 
         Mark mark = new Mark(MarkId.random(), layerId, ground, spec.kind(), spec.affiliation(), spec.label(),
                 spec.note(), ownershipFor(v), Instant.now(), MarkStatus.ACTIVE, MarkSource.DETECTION,
                 Verification.unverified());
-        return saveAndPublish(mark, MapEvent.Action.CREATED, layerId);
+        Mark saved = saveAndPublish(mark, MapEvent.Action.CREATED, layerId);
+        return new GeolocationResult(saved, aim.measured());
+    }
+
+    /**
+     * Resolves the {@link GeoProjection.CameraAim} to project {@code telemetry} from: {@link
+     * GeoProjection#aimFrom} decides the gimbal-vs-airframe bearing and AGL-vs-AMSL altitude
+     * precedence (docs/plans/active/GEO-POSE-PLAN.md §4.1), always falling back to {@link
+     * GeoProjection#DEFAULT_DEPRESSION_DEGREES} when no gimbal pitch reading is available. An
+     * explicit {@code depressionOverride} then replaces the resolved depression outright — it wins
+     * even over a real gimbal reading, which is why {@code measured} becomes {@code false} whenever
+     * it is applied: the depression is no longer a measurement, it is an operator's assumption.
+     *
+     * @param telemetry          the telemetry sample to resolve an aim from; already validated
+     *                           complete by the caller
+     * @param depressionOverride an operator-supplied depression override, or {@code null} to use the
+     *                           resolved value as-is
+     * @return the aim to project from
+     */
+    private GeoProjection.CameraAim resolveAim(Telemetry telemetry, Double depressionOverride) {
+        GeoProjection.CameraAim resolved = GeoProjection.aimFrom(telemetry, GeoProjection.DEFAULT_DEPRESSION_DEGREES);
+        if (depressionOverride == null) {
+            return resolved;
+        }
+        return new GeoProjection.CameraAim(resolved.bearingDegrees(), depressionOverride, resolved.aglMeters(), false);
     }
 
     /**

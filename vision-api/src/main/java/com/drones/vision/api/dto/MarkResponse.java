@@ -35,20 +35,42 @@ import java.time.Instant;
  * @param verification     {@code UNVERIFIED}, {@code CONFIRMED} or {@code REJECTED}
  * @param verifiedByUserId who reviewed it, absent while {@code UNVERIFIED}
  * @param verifiedAt       when it was reviewed, absent while {@code UNVERIFIED}
+ * @param measured         whether a {@code DETECTION} mark's fix used a real gimbal depression
+ *                          reading and a real AGL sample rather than the platform's 45°/AMSL
+ *                          assumptions (docs/plans/active/GEO-POSE-PLAN.md G5) — absent for every mark this
+ *                          isn't known for (a {@code MANUAL} mark, or any mark reached via {@link
+ *                          #from(Mark)} rather than the direct geolocate response); not an accuracy
+ *                          guarantee, and not persisted on the mark itself, so it does not survive a
+ *                          later {@code list}/{@code patch} round-trip of the same mark
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record MarkResponse(String markId, String layerId, double latitude, double longitude,
                             Double altitudeMeters, String kind, String affiliation, String label, String note,
                             String createdByUserId, String groupId, Instant createdAt, String status,
-                            String source, String verification, String verifiedByUserId, Instant verifiedAt) {
+                            String source, String verification, String verifiedByUserId, Instant verifiedAt,
+                            Boolean measured) {
 
     /**
-     * Maps a domain {@link Mark} to its wire representation.
+     * Maps a domain {@link Mark} to its wire representation, with no {@code measured} signal (every
+     * endpoint but the direct geolocate response — see {@link #from(Mark, Boolean)}).
      *
      * @param mark the mark to map
      * @return the response body for {@code mark}
      */
     public static MarkResponse from(Mark mark) {
+        return from(mark, null);
+    }
+
+    /**
+     * Maps a domain {@link Mark} to its wire representation, carrying the geolocate call's
+     * measured-vs-assumed signal (docs/plans/active/GEO-POSE-PLAN.md G5, wave V3).
+     *
+     * @param mark     the mark to map
+     * @param measured whether the fix that produced {@code mark} was measured, or {@code null} if
+     *                 not applicable/known
+     * @return the response body for {@code mark}
+     */
+    public static MarkResponse from(Mark mark, Boolean measured) {
         Verification verification = mark.verification();
         return new MarkResponse(
                 mark.id().value().toString(),
@@ -67,6 +89,7 @@ public record MarkResponse(String markId, String layerId, double latitude, doubl
                 mark.source().name(),
                 verification.state().name(),
                 verification.verifiedBy() == null ? null : verification.verifiedBy().value().toString(),
-                verification.verifiedAt());
+                verification.verifiedAt(),
+                measured);
     }
 }

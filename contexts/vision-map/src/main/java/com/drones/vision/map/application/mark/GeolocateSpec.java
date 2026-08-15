@@ -13,8 +13,8 @@ import com.drones.vision.map.application.LayerResolver;
  *
  * <p>{@link MarkService#geolocate} resolves {@code assetId}'s freshest telemetry itself (via {@code
  * UsageTracker#latestTelemetry}) and projects a ground point via {@code
- * com.drones.vision.kernel.GeoProjection#project} using {@link #depressionDegrees()} — this
- * spec carries no position, unlike {@link MarkSpec}.
+ * com.drones.vision.kernel.GeoProjection#aimFrom}/{@code GeoProjection#project(GeoPosition,
+ * GeoProjection.CameraAim)} — this spec carries no position, unlike {@link MarkSpec}.
  *
  * @param assetId            the asset whose pose to project from
  * @param layerId            the layer this mark lands on, or {@code null} to use the creator's
@@ -23,13 +23,20 @@ import com.drones.vision.map.application.LayerResolver;
  * @param affiliation        friend/enemy affiliation for symbology; must not be {@code null}
  * @param label               short human-readable label; must not be blank
  * @param note                optional free-text detail; blank normalizes to {@code null}
- * @param depressionDegrees  the assumed camera depression angle, degrees; defaulted at the wire
- *                            boundary to {@code GeoProjection.DEFAULT_DEPRESSION_DEGREES} when the
- *                            caller does not supply one — validated by {@code GeoProjection.project}
- *                            itself, not duplicated here
+ * @param depressionDegrees  an operator-supplied override for the camera depression angle, degrees,
+ *                            or {@code null} to let the resolved pose decide (docs/plans/active/GEO-POSE-PLAN.md
+ *                            §4.3/V3): a real gimbal depression reading wins when the telemetry has
+ *                            one, else {@code GeoProjection.DEFAULT_DEPRESSION_DEGREES}. A non-null
+ *                            value here always wins over a gimbal reading — it means "override the
+ *                            measurement", not "fall back if there is no measurement" — so it must
+ *                            stay a genuine {@code null} rather than a pre-defaulted constant, or a
+ *                            real gimbal fix would be silently discarded whenever a caller happens to
+ *                            send the same value as the default. Range-validated by {@code
+ *                            GeoProjection.CameraAim}'s own compact constructor when present, not
+ *                            duplicated here
  */
 public record GeolocateSpec(AssetId assetId, LayerId layerId, MarkKind kind, Affiliation affiliation, String label,
-                             String note, double depressionDegrees) {
+                             String note, Double depressionDegrees) {
 
     public GeolocateSpec {
         if (assetId == null) {
