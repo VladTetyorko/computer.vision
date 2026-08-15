@@ -683,6 +683,15 @@ class StreamTrackingSession:
             # measured quantity).
             max_track_count=self._params.reupdate_max_track_count,
             live_track_count=len(self._book.tracks),
+            # 2026-08-15 bracket-identity check
+            # (`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1) --
+            # same reused-not-duplicated reasoning as the density gate
+            # directly above: a bracket too implausible to trust for
+            # post-occlusion ORU is too implausible to trust here either,
+            # so this call site threads the SAME resolved deployment
+            # values `track.py`'s own `_observe` does.
+            max_shape_log_ratio=self._params.reupdate_max_shape_log_ratio,
+            max_motion_center_distance=self._params.reupdate_max_motion_center_distance,
         )
         if corrected is None:
             return box, now - self._frame_lag_seconds

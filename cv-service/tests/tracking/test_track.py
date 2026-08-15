@@ -102,6 +102,16 @@ def params(**overrides) -> TrackingParams:
         # density-gate section overrides it explicitly where the ceiling
         # itself matters.
         reupdate_max_track_count=0,
+        # 2026-08-15 bracket-identity check -- same "disabled by default
+        # here" shape as `reupdate_max_velocity_per_second`/`reupdate_max_
+        # track_count` directly above, and for the same reason: a live
+        # bound would turn some ORU-reconstruction test in this file into
+        # an unexpected `None` just because the fixture's box sizes or
+        # velocities happen to cross it. This file's own bracket-identity
+        # section overrides these explicitly where the bound itself
+        # matters.
+        reupdate_max_shape_log_ratio=0.0,
+        reupdate_max_motion_center_distance=0.0,
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -843,6 +853,94 @@ def test_a_disabled_density_gate_reproduces_the_reconstruction_exactly():
 
     assert reanchored.reupdated is True
     assert reanchored.velocity_x == pytest.approx(0.1)  # (0.5 - 0.0) / (5.0 - 0.0)
+
+
+def test_a_shape_change_falls_back_to_the_ordinary_measurement():
+    # The book-level proof of the 2026-08-15 bracket-identity check, Check A
+    # (`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1): a real
+    # bracket exists, the gap is well inside the ceiling and the implied
+    # velocity is perfectly plausible, but the box grew 5x across the gap --
+    # over the log-ratio bound given here -- so ORU falls back to the
+    # ordinary measured-and-blended path, the SAME outcome the other guards'
+    # own tests above prove for a too-long, too-fast or too-crowded bracket.
+    book = TrackBook(params(min_hits=1, max_age_frames=30, reupdate_max_shape_log_ratio=0.5))
+    book.apply(
+        [Observation(key="a", box=Box(0.0, 0.0, 0.1, 0.1), label="car", confidence=0.9,
+                     source=SOURCE_DETECTOR, authoritative=True)],
+        0.0,
+        detector_ran=True,
+    )
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    reanchored = book.apply(
+        [Observation(key="a", box=Box(0.0, 0.0, 0.5, 0.5), label="car", confidence=0.9,
+                     source=SOURCE_DETECTOR, authoritative=True)],
+        5.0,
+        detector_ran=True,
+    )[0]
+
+    assert reanchored.reupdated is False
+
+
+def test_a_disabled_shape_bound_reproduces_the_reconstruction_exactly():
+    # invariant P7 at the book level: the SAME abrupt shape change the test
+    # above refuses must still be reconstructed by ORU when the log-ratio
+    # bound is left at its disabled default (`0.0`, this file's own
+    # `params()` default) -- reproducing today's behaviour exactly.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply(
+        [Observation(key="a", box=Box(0.0, 0.0, 0.1, 0.1), label="car", confidence=0.9,
+                     source=SOURCE_DETECTOR, authoritative=True)],
+        0.0,
+        detector_ran=True,
+    )
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    reanchored = book.apply(
+        [Observation(key="a", box=Box(0.0, 0.0, 0.5, 0.5), label="car", confidence=0.9,
+                     source=SOURCE_DETECTOR, authoritative=True)],
+        5.0,
+        detector_ran=True,
+    )[0]
+
+    assert reanchored.reupdated is True
+
+
+def test_a_motion_forecast_mismatch_falls_back_to_the_ordinary_measurement():
+    # The book-level proof of the 2026-08-15 bracket-identity check, Check B:
+    # two real confirmations establish a pre-gap velocity of 0.1/s, the gap
+    # opens, and the re-anchor lands far from where that velocity would
+    # forecast -- over the size-scaled bound given here -- so ORU falls back
+    # to the ordinary measured-and-blended path.
+    book = TrackBook(params(min_hits=1, max_age_frames=30, reupdate_max_motion_center_distance=1.0))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    book.apply([seen("a", x=0.1, authoritative=True)], 1.0, detector_ran=True)  # measured velocity_x -> 0.1/s
+    for frame in range(2, 5):
+        book.apply([], float(frame), detector_ran=True)
+
+    # Forecast centre from t=1.0 (0.15) at 0.1/s over an 8s gap: 0.95. The
+    # real t2 lands at 0.55 -- 0.4 off against a ~0.283 (2x diagonal) slack.
+    reanchored = book.apply([seen("a", x=0.5, authoritative=True)], 9.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is False
+
+
+def test_a_disabled_motion_bound_reproduces_the_reconstruction_exactly():
+    # invariant P7 at the book level: the SAME forecast mismatch the test
+    # above refuses must still be reconstructed by ORU when the motion bound
+    # is left at its disabled default (`0.0`, this file's own `params()`
+    # default) -- reproducing today's behaviour exactly.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    book.apply([seen("a", x=0.1, authoritative=True)], 1.0, detector_ran=True)
+    for frame in range(2, 5):
+        book.apply([], float(frame), detector_ran=True)
+
+    reanchored = book.apply([seen("a", x=0.5, authoritative=True)], 9.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is True
 
 
 def test_reupdate_stats_reset_and_accumulate_across_one_apply_call():

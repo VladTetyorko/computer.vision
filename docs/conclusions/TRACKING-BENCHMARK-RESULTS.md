@@ -241,6 +241,82 @@ Raw sweep rows: `cv-service/benchmarks/results-density-sweep.csv`.
 
 ---
 
+## 4d. Bracket identity — the first thing that makes ORU pay, and why it still ships off
+
+The third attempt, and the first aimed at the cause: test whether the two bracketing observations are
+the same object at all. Two independent checks, each separately switchable so the sweep can attribute
+the result.
+
+- **A — shape consistency.** Refuse when `|ln(w₂/w₁)|` or `|ln(h₂/h₁)|` exceeds a bound. Log-ratio, so
+  growth and shrinkage are symmetric and one bound serves every target size.
+  `CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO`.
+- **B — motion plausibility.** Forward-predict the earlier observation to the later one's timestamp
+  using the track's **pre-gap** velocity, and refuse when the forecast lands more than N box-diagonals
+  away. A size-scaled centre distance rather than IoU: **IoU collapses to a hard 0 the moment two
+  boxes stop overlapping, which is the ordinary case after a multi-second gap on a fast target**, so
+  an IoU gate would refuse nearly every honest long-gap bracket.
+  `CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE`.
+
+### Swept independently, 21 real scene/detector pairs each
+
+| configuration | IDSW | vs ORU off | recovery | implausible |
+|---|---|---|---|---|
+| ORU off | **6075** | — | 56.7 % | 320 |
+| ORU on, velocity guard only | 6452 | +377 | 56.6 % | 372 |
+| **A — shape ≤ 0.40** | **5978** | **−97** | **57.4 %** | 343 |
+| A — shape ≤ 0.50 | 6089 | +14 | 57.2 % | 359 |
+| A — shape ≤ 0.70 | 6429 | +354 | 56.5 % | 355 |
+| B — motion ≤ 1.0 diag | 6509 | +434 | 56.2 % | 381 |
+| B — motion ≤ 2.0 diag | 6625 | +550 | 55.5 % | 366 |
+| B — motion ≤ 3.0 diag | 6526 | +451 | 56.0 % | 409 |
+
+**Check A works — it is the first ORU configuration in three attempts that beats not running ORU at
+all**, and it is the only change so far that raised *recovery* rather than leaving it flat.
+
+**Check B is harmful at every setting tested** — worse than no check. The tension its own design note
+predicted is the likely cause: the pre-gap velocity it forecasts from is exactly the estimate ORU
+exists because it distrusts, so it rejects honest brackets more often than dishonest ones. Kept as a
+knob, defaulted off, because that verdict is regime-bound — a sparse scene with coherent ego-motion
+is precisely where a pre-gap velocity *is* trustworthy.
+
+### Trust the band, not the digit
+
+The IDSW surface is jagged (0.40 → −97, 0.45 → +175, 0.50 → +14) and **one pathological pair,
+`MOT17-04-DPM`, swings between +64 and +284 by itself** and dominates every total. Excluding it, the
+picture is clean and the break is sharp:
+
+| bound | 0.3 | 0.40 | 0.45 | 0.50 | 0.55 | 0.60 | 0.70 |
+|---|---|---|---|---|---|---|---|
+| IDSW vs ORU-off, excl. `MOT17-04-DPM` | −126 | **−277** | −109 | −50 | +179 | +252 | +198 |
+
+**≤ 0.5 is consistently better than no ORU; ≥ 0.55 is consistently worse.** That band is the robust
+finding; the exact digit is not.
+
+### Why it ships disabled anyway
+
+Enabling `0.40` moves exactly one synthetic row: **`pan`/FOLLOW's `implaus_n` 0 → 8**. Nothing else in
+that row moves — coast ADE/FDE, MT/PT/ML, IDSW, lifetime all identical. So refusing the
+reconstruction there leaves *position* untouched and the *velocity* non-physical — precisely the
+defect shape O3 exists to catch and every other column is blind to.
+
+The trade, stated plainly:
+
+| | ON at 0.40 | OFF (shipped) |
+|---|---|---|
+| 21 real ASSOCIATE pairs | **−97 IDSW, +0.7 pp recovery** | +377 IDSW |
+| synthetic `pan`/FOLLOW | **8 non-physical velocities** | clean |
+
+**FOLLOW is the mode an operator holds a target with, and velocity is what geolocation consumes — and
+MOT17 ships no pixels, so FOLLOW cannot be measured on real footage at all.** Shipping ON would swap
+a *measured* harm in a regime that is not ours for an *unmeasurable* one in the mode that is. Off is
+the conservative side of that asymmetry, `0.40` is documented as the recommended setting for an
+ASSOCIATE-heavy deployment, and one env var flips it.
+
+**This is the third decision now waiting on aerial footage**, and the first one where the two
+available measurements actively disagree.
+
+---
+
 ## 5. O3 fired on first contact
 
 The velocity plausibility metric committed hours earlier scored **0 on all thirty synthetic rows**.
@@ -302,9 +378,10 @@ Stated so no one reads more into the tables than is there.
    is worth +377 IDSW on this data** — that default deserves a decision, but not from out-of-regime
    evidence: ORU's largest wins came from the one ego-motion-dominated scene here, which is the
    closest analogue to a drone we have.
-3. **The real ORU fix is a bracket-identity check**, not a tighter velocity bound: confirm the two
-   bracketing observations plausibly belong to the same object (IoU-with-prediction, or appearance at
-   L4+) before interpolating between them. That is a wave, not a patch.
+3. **~~The real ORU fix is a bracket-identity check~~ — built and swept (§4d). Shape consistency
+   works** (−97 IDSW, +0.7 pp recovery, the first net win in three attempts); motion-forecast
+   plausibility does not (+434 at best). It ships off because it conflicts with the one FOLLOW
+   measurement we have. **Resolving that needs aerial footage with pixels.**
 4. **Do not ship `cost` as the identity engine for FOLLOW-style work without fixing its velocity.**
    Even guarded, `cost` reports 346 implausible velocities where `bytetrack` reports none.
 5. **Decide deliberately whether V2/V3/V6 should reach `bytetrack`.** The L1 engine carries all the

@@ -7,6 +7,7 @@ no engines, no frames, no gRPC.
 from __future__ import annotations
 
 import logging
+import math
 import subprocess
 import sys
 import textwrap
@@ -27,6 +28,12 @@ from cv_service.tracking.track import Track
 
 def real(x: float, y: float, *, key: object = "k") -> Observation:
     return Observation(key=key, box=Box(x, y, 0.1, 0.1), label="car", confidence=0.9, source=SOURCE_DETECTOR)
+
+
+def sized(x: float, y: float, w: float, h: float, *, key: object = "k") -> Observation:
+    """Like `real()` above, but with an explicit box size -- the shape check
+    section below needs boxes that are not the fixed 0.1x0.1 `real()` gives."""
+    return Observation(key=key, box=Box(x, y, w, h), label="car", confidence=0.9, source=SOURCE_DETECTOR)
 
 
 def track(**overrides) -> Track:
@@ -690,6 +697,492 @@ def test_the_density_gate_and_velocity_guard_are_independent():
         # max_track_count left at its disabled default (0)
     )
     assert velocity_only is None
+
+
+# -- 2026-08-15 bracket-identity check: Check A, shape consistency -----------
+#
+# `docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1: neither guard above
+# ever tests whether the bracket's two observations ARE the same object.
+# Check A refuses a reconstruction whose box changed shape too abruptly
+# across the gap (`|ln(w2/w1)|` or `|ln(h2/h1)|` over `max_shape_log_ratio`).
+
+
+def test_none_when_the_shape_changed_too_abruptly():
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+
+    # width 0.1 -> 0.5 is a 5x growth; |ln(5)| ~= 1.609, over the 0.5 bound.
+    result = reupdate(
+        subject,
+        subject.history,
+        sized(0.0, 0.0, 0.5, 0.1),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_shape_log_ratio=0.5,
+    )
+
+    assert result is None
+
+
+def test_the_height_axis_is_checked_independently_of_width():
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+
+    # width unchanged; height 0.1 -> 0.5 alone must still refuse.
+    result = reupdate(
+        subject,
+        subject.history,
+        sized(0.0, 0.0, 0.1, 0.5),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_shape_log_ratio=0.5,
+    )
+
+    assert result is None
+
+
+def test_a_modest_shape_change_within_the_bound_is_not_refused():
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+
+    # |ln(0.11/0.1)| ~= 0.095, well under the 0.5 bound given here.
+    result = reupdate(
+        subject,
+        subject.history,
+        sized(0.0, 0.0, 0.11, 0.11),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_shape_log_ratio=0.5,
+    )
+
+    assert result is not None
+
+
+def test_a_shape_change_exactly_at_the_bound_is_not_refused():
+    # Same strictly-greater-than convention every other guard's own boundary
+    # test proves: a bracket landing exactly on the bound is not itself
+    # evidence of a wrong bracket.
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+    bound = math.log(2.0)  # exactly a 2x growth
+
+    result = reupdate(
+        subject,
+        subject.history,
+        sized(0.0, 0.0, 0.2, 0.1),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_shape_log_ratio=bound,
+    )
+
+    assert result is not None
+
+
+def test_a_refused_shape_reconstruction_leaves_no_partial_or_clamped_answer():
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        sized(0.0, 0.0, 5.0, 5.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_shape_log_ratio=0.5,
+    )
+
+    assert result is None
+
+
+def test_a_non_positive_shape_bound_is_a_genuine_off_switch():
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+
+    for bound in (0.0, -1.0):
+        result = reupdate(
+            subject,
+            subject.history,
+            sized(0.0, 0.0, 10.0, 10.0),  # absurd growth
+            now=1.0,
+            max_gap_millis=10_000,
+            max_shape_log_ratio=bound,
+        )
+        assert result is not None
+
+
+def test_the_default_shape_bound_is_disabled_reproducing_pre_check_behaviour():
+    # No `max_shape_log_ratio` argument at all must behave identically to an
+    # explicit non-positive bound (P7).
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+
+    result = reupdate(subject, subject.history, sized(0.0, 0.0, 10.0, 10.0), now=1.0, max_gap_millis=10_000)
+
+    assert result is not None
+
+
+def test_a_degenerate_box_does_not_crash_the_shape_check():
+    # A non-positive dimension makes that AXIS inconclusive, never a crash --
+    # `math.log` of a non-positive number is undefined, and this function's
+    # contract throughout is "never raise", not "validate the caller's box".
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.0, 0.1), 0.0)  # degenerate width at t1
+
+    result = reupdate(
+        subject,
+        subject.history,
+        sized(0.0, 0.0, 0.1, 0.1),  # height ratio 1.0 -- well within bound
+        now=1.0,
+        max_gap_millis=10_000,
+        max_shape_log_ratio=0.01,
+    )
+
+    assert result is not None
+
+
+def test_the_shape_guard_is_logged_once_per_process_never_per_frame(monkeypatch, caplog):
+    monkeypatch.setattr(reupdate_module, "_implausible_shape_logged", False)
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.reupdate"):
+        for width in (0.5, 0.6, 0.7):
+            result = reupdate(
+                subject,
+                subject.history,
+                sized(0.0, 0.0, width, 0.1),
+                now=1.0,
+                max_gap_millis=10_000,
+                max_shape_log_ratio=0.5,
+            )
+            assert result is None
+
+    assert sum("shape" in record.getMessage() for record in caplog.records) == 1
+
+
+def test_a_plausible_shape_never_logs_anything(monkeypatch, caplog):
+    monkeypatch.setattr(reupdate_module, "_implausible_shape_logged", False)
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.reupdate"):
+        result = reupdate(
+            subject,
+            subject.history,
+            sized(0.0, 0.0, 0.11, 0.11),
+            now=1.0,
+            max_gap_millis=10_000,
+            max_shape_log_ratio=0.5,
+        )
+
+    assert result is not None
+    assert caplog.records == []
+
+
+def test_late_correction_is_none_when_the_shape_changed_too_abruptly():
+    # `late_correction` does not re-derive the shape check -- it CALLS
+    # `reupdate()` -- so this confirms the check genuinely covers that path
+    # too, rather than assuming a shared call automatically inherits it.
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+
+    result = late_correction(
+        subject,
+        subject.history,
+        Box(0.0, 0.0, 0.5, 0.1),
+        now=1.0,
+        lag_seconds=0.5,
+        max_gap_millis=10_000,
+        max_shape_log_ratio=0.5,
+    )
+
+    assert result is None
+
+
+def test_late_correction_still_succeeds_when_the_shape_bound_is_disabled():
+    subject = track()
+    subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+
+    result = late_correction(
+        subject,
+        subject.history,
+        Box(0.0, 0.0, 0.5, 0.1),
+        now=1.0,
+        lag_seconds=0.5,
+        max_gap_millis=10_000,
+    )
+
+    assert result is not None
+
+
+# -- 2026-08-15 bracket-identity check: Check B, motion plausibility ---------
+#
+# Forward-predicts the bracket's earlier observation to the later one's own
+# timestamp using the TRACK's own PRE-GAP velocity (`track.velocity_x`/
+# `velocity_y` as they stand BEFORE this call's own reconstruction below
+# overwrites them), and refuses when that forecast lands more than
+# `max_motion_center_distance` box-diagonals from the real later
+# observation's centre.
+
+
+def test_none_when_the_motion_forecast_lands_far_from_the_real_observation():
+    subject = track(velocity_x=0.0, velocity_y=0.0)  # a stationary pre-gap estimate
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    # v=0 forecasts the centre stays at (0.05, 0.05); the real t2 lands at
+    # (0.95, 0.05) -- 0.9 away, against a ~0.1414 box-diagonal scale, well
+    # over the 2.0-diagonal bound given here.
+    result = reupdate(
+        subject,
+        subject.history,
+        real(0.9, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_motion_center_distance=2.0,
+    )
+
+    assert result is None
+
+
+def test_a_motion_forecast_that_matches_exactly_is_not_refused():
+    subject = track(velocity_x=0.1, velocity_y=0.0)
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    # v=0.1/s forecasts the centre moves from 0.05 to 0.15 over the 1s gap;
+    # the real t2 lands exactly there.
+    result = reupdate(
+        subject,
+        subject.history,
+        real(0.1, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_motion_center_distance=2.0,
+    )
+
+    assert result is not None
+
+
+def test_a_moderate_forecast_mismatch_within_the_bound_is_not_refused():
+    subject = track(velocity_x=0.1, velocity_y=0.0)
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    # Forecast centre: 0.15. Real t2 centre: 0.20 -- 0.05 off, well within
+    # 2.0 box-diagonals (~0.283) of slack, proving this is not a
+    # match-exactly-or-nothing test.
+    result = reupdate(
+        subject,
+        subject.history,
+        real(0.15, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_motion_center_distance=2.0,
+    )
+
+    assert result is not None
+
+
+def test_a_refused_motion_reconstruction_leaves_no_partial_or_clamped_answer():
+    subject = track(velocity_x=0.0, velocity_y=0.0)
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        real(0.9, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_motion_center_distance=2.0,
+    )
+
+    assert result is None
+
+
+def test_a_non_positive_motion_bound_is_a_genuine_off_switch():
+    subject = track(velocity_x=0.0, velocity_y=0.0)
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    for bound in (0.0, -1.0):
+        result = reupdate(
+            subject,
+            subject.history,
+            real(0.9, 0.0),
+            now=1.0,
+            max_gap_millis=10_000,
+            max_motion_center_distance=bound,
+        )
+        assert result is not None
+
+
+def test_the_default_motion_bound_is_disabled_reproducing_pre_check_behaviour():
+    subject = track(velocity_x=0.0, velocity_y=0.0)
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(subject, subject.history, real(0.9, 0.0), now=1.0, max_gap_millis=10_000)
+
+    assert result is not None
+
+
+def test_a_degenerate_box_does_not_crash_the_motion_check():
+    # A non-positive diagonal on BOTH boxes makes the scale inconclusive,
+    # never a division by zero.
+    subject = track(velocity_x=0.0, velocity_y=0.0)
+    subject.history.record(sized(0.0, 0.0, 0.0, 0.0), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        sized(0.9, 0.0, 0.0, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_motion_center_distance=0.01,  # would otherwise refuse
+    )
+
+    assert result is not None
+
+
+def test_the_motion_guard_is_logged_once_per_process_never_per_frame(monkeypatch, caplog):
+    monkeypatch.setattr(reupdate_module, "_implausible_motion_logged", False)
+    subject = track(velocity_x=0.0, velocity_y=0.0)
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.reupdate"):
+        for x in (0.9, 0.8, 0.7):
+            result = reupdate(
+                subject,
+                subject.history,
+                real(x, 0.0),
+                now=1.0,
+                max_gap_millis=10_000,
+                max_motion_center_distance=2.0,
+            )
+            assert result is None
+
+    assert sum("forecast" in record.getMessage() for record in caplog.records) == 1
+
+
+def test_a_plausible_motion_forecast_never_logs_anything(monkeypatch, caplog):
+    monkeypatch.setattr(reupdate_module, "_implausible_motion_logged", False)
+    subject = track(velocity_x=0.1, velocity_y=0.0)
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.reupdate"):
+        result = reupdate(
+            subject,
+            subject.history,
+            real(0.1, 0.0),
+            now=1.0,
+            max_gap_millis=10_000,
+            max_motion_center_distance=2.0,
+        )
+
+    assert result is not None
+    assert caplog.records == []
+
+
+def test_late_correction_is_none_when_the_motion_forecast_is_implausible():
+    # `late_correction` does not re-derive the motion check -- it CALLS
+    # `reupdate()` -- so this confirms the check genuinely covers that path
+    # too, rather than assuming a shared call automatically inherits it.
+    subject = track(velocity_x=0.0, velocity_y=0.0)
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = late_correction(
+        subject,
+        subject.history,
+        Box(0.9, 0.0, 0.1, 0.1),
+        now=1.0,
+        lag_seconds=0.5,
+        max_gap_millis=10_000,
+        max_motion_center_distance=2.0,
+    )
+
+    assert result is None
+
+
+def test_late_correction_still_succeeds_when_the_motion_bound_is_disabled():
+    subject = track(velocity_x=0.0, velocity_y=0.0)
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = late_correction(
+        subject,
+        subject.history,
+        Box(0.9, 0.0, 0.1, 0.1),
+        now=1.0,
+        lag_seconds=0.5,
+        max_gap_millis=10_000,
+    )
+
+    assert result is not None
+
+
+# -- 2026-08-15 bracket-identity check: A and B are independent off switches -
+
+
+def test_the_shape_and_motion_checks_are_independent():
+    # Acceptance #2 (P7): each of A/B is individually an off switch, and
+    # neither's presence or absence hides the other's. A bracket built to
+    # fail BOTH checks is refused with only A enabled, refused with only B
+    # enabled, and reconstructs when both are left at their disabled
+    # default -- all three proven in one place because they share the SAME
+    # bad bracket.
+    def fresh() -> Track:
+        subject = track(velocity_x=0.0, velocity_y=0.0)
+        subject.history.record(sized(0.0, 0.0, 0.1, 0.1), 0.0)
+        return subject
+
+    # Fails shape (5x growth, |ln(5)| ~= 1.609 > 0.5) AND motion (forecast
+    # centre 0.05 vs real centre ~1.15, far over a 2.0-diagonal bound).
+    bad = sized(0.9, 0.0, 0.5, 0.5)
+
+    subject_a = fresh()
+    shape_only = reupdate(
+        subject_a,
+        subject_a.history,
+        bad,
+        now=1.0,
+        max_gap_millis=10_000,
+        max_shape_log_ratio=0.5,
+        # max_motion_center_distance left at its disabled default
+    )
+    assert shape_only is None
+
+    subject_b = fresh()
+    motion_only = reupdate(
+        subject_b,
+        subject_b.history,
+        bad,
+        now=1.0,
+        max_gap_millis=10_000,
+        max_motion_center_distance=2.0,
+        # max_shape_log_ratio left at its disabled default
+    )
+    assert motion_only is None
+
+    subject_neither = fresh()
+    neither = reupdate(subject_neither, subject_neither.history, bad, now=1.0, max_gap_millis=10_000)
+    assert neither is not None
+
+
+def test_the_new_checks_do_not_interfere_with_the_existing_velocity_guard():
+    # A bracket that passes BOTH new checks (unchanged shape, and a
+    # pre-gap velocity that forecasts t2 exactly) can still be refused by
+    # the pre-existing, unrelated velocity guard -- the new checks are
+    # ADDED gates, not a replacement.
+    subject = track(velocity_x=10.0, velocity_y=0.0)  # pre-gap velocity already matches
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        real(10.0, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_velocity_per_second=5.0,  # the reconstructed 10.0/s trips this
+        max_shape_log_ratio=0.5,  # unchanged 0.1x0.1 -> passes
+        max_motion_center_distance=1.0,  # forecast matches exactly -> passes
+    )
+
+    assert result is None  # the untouched velocity guard alone refuses it
 
 
 # -- late_correction (TRACKING-V3-PLAN wave V6, §4.5) ------------------------

@@ -791,3 +791,119 @@ def test_garbage_track_count_env_var_falls_back_and_never_raises(monkeypatch):
     settings = Settings.from_env()
 
     assert settings.track_reupdate_max_track_count == Settings().track_reupdate_max_track_count
+
+
+# -- 2026-08-15 bracket-identity check: reupdate_max_shape_log_ratio ---------
+# (`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1). Deployment-only,
+# no wire field -- same "no per-request override to fall back FROM" shape as
+# `reupdate_max_velocity_per_second`/`reupdate_max_track_count` above; `<=0`
+# is a legitimate DISABLE value, same shape as both. Ships DISABLED by
+# default (`0.0`) -- same reason `reupdate_max_track_count` does: no sweep
+# against real footage has picked a value yet.
+
+
+def test_resolve_takes_reupdate_max_shape_log_ratio_straight_from_settings():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_shape_log_ratio=0.7)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_shape_log_ratio == 0.7
+
+
+def test_reupdate_max_shape_log_ratio_defaults_to_disabled():
+    assert Settings().track_reupdate_max_shape_log_ratio == 0.0
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), Settings())
+    assert resolved.reupdate_max_shape_log_ratio == 0.0
+
+
+def test_a_negative_deployment_shape_bound_is_a_legitimate_disabled_value():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_shape_log_ratio=-1.0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_shape_log_ratio == -1.0
+
+
+def test_settings_read_the_shape_bound_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO", "0.7")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_shape_log_ratio == 0.7
+
+
+def test_a_non_positive_shape_bound_env_var_disables_rather_than_falling_back(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO", "0")
+
+    assert Settings.from_env().track_reupdate_max_shape_log_ratio == 0.0
+
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO", "-1")
+
+    assert Settings.from_env().track_reupdate_max_shape_log_ratio == -1.0
+
+
+def test_garbage_shape_bound_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert (
+        settings.track_reupdate_max_shape_log_ratio
+        == Settings().track_reupdate_max_shape_log_ratio
+    )
+
+
+# -- 2026-08-15 bracket-identity check: reupdate_max_motion_center_distance --
+# Same shape as `reupdate_max_shape_log_ratio` directly above -- deployment-
+# only, no wire field, `<=0` disables, ships disabled by default.
+
+
+def test_resolve_takes_reupdate_max_motion_center_distance_straight_from_settings():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_motion_center_distance=2.0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_motion_center_distance == 2.0
+
+
+def test_reupdate_max_motion_center_distance_defaults_to_disabled():
+    assert Settings().track_reupdate_max_motion_center_distance == 0.0
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), Settings())
+    assert resolved.reupdate_max_motion_center_distance == 0.0
+
+
+def test_a_negative_deployment_motion_bound_is_a_legitimate_disabled_value():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_motion_center_distance=-1.0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_motion_center_distance == -1.0
+
+
+def test_settings_read_the_motion_bound_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE", "2.0")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_motion_center_distance == 2.0
+
+
+def test_a_non_positive_motion_bound_env_var_disables_rather_than_falling_back(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE", "0")
+
+    assert Settings.from_env().track_reupdate_max_motion_center_distance == 0.0
+
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE", "-1")
+
+    assert Settings.from_env().track_reupdate_max_motion_center_distance == -1.0
+
+
+def test_garbage_motion_bound_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert (
+        settings.track_reupdate_max_motion_center_distance
+        == Settings().track_reupdate_max_motion_center_distance
+    )

@@ -665,6 +665,13 @@ class TrackBook:
                     # own module docstring for why that signal is a proxy).
                     max_track_count=self._params.reupdate_max_track_count,
                     live_track_count=len(self._tracks),
+                    # 2026-08-15 bracket-identity check
+                    # (`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md`
+                    # §2.1) -- both `<=0`/disabled by default; each is
+                    # `reupdate.py`'s own concern, this call site only
+                    # threads the resolved deployment value through.
+                    max_shape_log_ratio=self._params.reupdate_max_shape_log_ratio,
+                    max_motion_center_distance=self._params.reupdate_max_motion_center_distance,
                 )
                 self._last_reupdate_millis += int(round((perf_counter() - started) * 1000.0))
             if reconstruction is not None:

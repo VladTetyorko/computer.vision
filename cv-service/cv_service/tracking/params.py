@@ -284,6 +284,52 @@ class TrackingParams:
     # unlike the velocity bound, no sweep against real footage has picked a
     # value for this one yet -- see that constant's own comment.
     reupdate_max_track_count: int
+    # 2026-08-15 bracket-identity check (`docs/conclusions/TRACKING-
+    # RECOVERY-RESEARCH.md` §2.1). Deployment-only, no wire field -- same
+    # "no per-request override to fall back FROM" shape `reupdate_max_
+    # velocity_per_second`/`reupdate_max_track_count` above already use.
+    # Both guards above test the bracket's TIMING and the SCENE's crowding;
+    # neither ever tests the bracket's own two observations against each
+    # other. `docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b/§4c
+    # measured that this leaves ORU net negative even with both guards
+    # active (+377 IDSW vs ORU off; no density-gate threshold swept across
+    # 6/8/10/12/15/20/30 tracks made ORU pay) -- these two fields back a
+    # THIRD and FOURTH gate, each looking at the bracket's own two boxes
+    # directly instead of a proxy signal around them.
+    #
+    # Check A -- shape consistency: `reupdate.py`'s own guard refuses a
+    # reconstruction when the bracket's two box dimensions differ by more
+    # than this many natural-log units on either axis (`|ln(w2/w1)|` or
+    # `|ln(h2/h1)|`) -- a log-ratio, not a raw ratio, so growth and
+    # shrinkage are symmetric and one bound serves both directions and
+    # every object size (scale-invariant by construction). `<=0` disables
+    # the check entirely, the SAME off-switch shape every ceiling above
+    # uses (invariant P7).
+    reupdate_max_shape_log_ratio: float
+    # Check B -- motion plausibility: `reupdate.py`'s own guard forward-
+    # predicts the bracket's earlier observation to the later one's own
+    # timestamp using the TRACK's own PRE-GAP velocity (the constant-
+    # velocity arithmetic `predict.py` implements, applied from the
+    # bracket rather than the track's current, possibly-drifted box), and
+    # refuses when that forecast lands more than this many BOX-DIAGONALS
+    # from the real later observation's centre -- a size-scaled centre
+    # distance, deliberately not IoU (`reupdate.py`'s own module docstring
+    # has the full reasoning: IoU degrades to a hard `0.0` the instant two
+    # boxes fail to overlap, the ORDINARY case after a multi-second gap on
+    # a fast or small target). `<=0` disables the check entirely, the SAME
+    # off-switch shape every ceiling above uses (invariant P7).
+    #
+    # Both fields default to `0.0` (DISABLED) in `config.py`'s `DEFAULT_
+    # TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO`/`DEFAULT_TRACK_REUPDATE_MAX_
+    # MOTION_CENTER_DISTANCE`, and BOTH ARE PROVISIONAL: unlike the
+    # velocity bound (derived from this platform's own documented
+    # worst-case motion), nobody has yet swept either bound against the
+    # real MOT17 matrix -- see each constant's own comment in `config.py`
+    # for why picking a number here from intuition would repeat the exact
+    # mistake the density gate's own default already avoids. Each is
+    # independently disable-able, so a fleet (or the sweep itself) can run
+    # A alone, B alone, both, or neither, and compare.
+    reupdate_max_motion_center_distance: float
 
     @property
     def active(self) -> bool:
@@ -481,4 +527,10 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
         # 2026-08-15 density gate -- straight from `Settings`, no wire field
         # (same shape as `reupdate_max_velocity_per_second` directly above).
         reupdate_max_track_count=settings.track_reupdate_max_track_count,
+        # 2026-08-15 bracket-identity check -- straight from `Settings`, no
+        # wire field (same shape as `reupdate_max_track_count` directly
+        # above). Each resolves independently -- neither falls back to or
+        # depends on the other's value.
+        reupdate_max_shape_log_ratio=settings.track_reupdate_max_shape_log_ratio,
+        reupdate_max_motion_center_distance=settings.track_reupdate_max_motion_center_distance,
     )

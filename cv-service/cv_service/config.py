@@ -442,6 +442,100 @@ DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND = 5.0
 # comment.
 DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT = 0
 
+# 2026-08-15 bracket-identity check (`docs/conclusions/TRACKING-RECOVERY-
+# RESEARCH.md` §2.1): the velocity guard above tests whether a bracket's
+# IMPLIED motion is physically possible, and the density gate tests whether
+# the SCENE is too crowded to trust -- neither ever tests the bracket's own
+# two observations against EACH OTHER for being plausibly the same object.
+# `docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b/§4c measured that
+# both existing guards, while each worth keeping on its own merits, leave
+# ORU net negative on real MOT17 footage (§4b: velocity guard alone, +377
+# IDSW vs ORU off; §4c: no density-gate threshold swept across
+# 6/8/10/12/15/20/30 tracks made ORU pay). This constant and the one below it
+# back a THIRD and FOURTH gate, both operating on the bracket's own two
+# boxes directly rather than on a proxy of the scene around them -- see
+# `cv_service.tracking.reupdate`'s own module docstring for the full
+# derivation of each, including the reasoning behind choosing a size-scaled
+# centre distance over IoU for the motion check.
+#
+# Check A -- shape consistency: refuses when `|ln(t2.width/t1.width)|` or
+# `|ln(t2.height/t1.height)|` exceeds this bound. A log-ratio, not a raw
+# ratio, so growth and shrinkage are symmetric around "no change" and one
+# number expresses both directions; scale-invariant, so the same bound
+# serves a target filling a hundredth of the frame and one filling a tenth.
+#
+# `<=0` disables the check entirely, the SAME `_parse_float_allow_nonpositive`
+# shape `DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND` above already uses.
+#
+# `0.40` (a target may grow ~1.5x or shrink to ~2/3 across a gap and still be
+# believed) is SWEPT, not chosen: seven bounds x 21 real MOT17 scene/detector
+# pairs, `docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4d. It is the first
+# ORU configuration that beats not running ORU at all -- -97 IDSW against the
+# ORU-off baseline where the velocity guard alone cost +377, with recovery up
+# 0.7pp.
+#
+# Read the sweep honestly before retuning this: the IDSW surface is JAGGED
+# (0.40 -> -97, 0.45 -> +175, 0.50 -> +14), and one pathological pair,
+# `MOT17-04-DPM` (21.3 dets/frame on the weakest detector), swings between
+# +64 and +284 by itself and dominates every total. What IS robust, with that
+# pair excluded, is the break between <=0.5 (consistently negative, i.e.
+# better than no ORU) and >=0.55 (consistently positive): -277/-109/-50
+# versus +179/+252/+198. So trust the BAND, not this exact digit, and expect
+# to re-derive it on aerial footage where our own target density lives.
+# DEFAULTED OFF DESPITE WINNING THE SWEEP -- the deciding evidence is a
+# CONFLICT, not the sweep alone. Enabling `0.40` moves exactly one synthetic
+# row: `pan`/FOLLOW's `implaus_n` 0 -> 8. Nothing else in that row moves --
+# coast ADE/FDE, MT/PT/ML, IDSW, lifetime are all identical -- so refusing
+# the reconstruction there leaves POSITION untouched and the VELOCITY
+# non-physical, which is precisely the shape of defect O3 exists to catch and
+# every other column is blind to.
+#
+# The trade, stated plainly: ON is worth -97 IDSW / +0.7pp recovery on 21
+# real ASSOCIATE pairs, and costs 8 non-physical velocities in the one place
+# FOLLOW is measurable at all. FOLLOW is the mode an operator holds a target
+# with, and velocity is what geolocation consumes -- and MOT17 ships no
+# pixels, so FOLLOW cannot be measured on real footage until aerial data
+# exists. Shipping ON would trade a MEASURED harm in a regime that is not
+# ours for an UNMEASURABLE one in the mode that is.
+#
+# So: off by default, `0.40` documented as the recommended setting for an
+# ASSOCIATE-heavy deployment, and the conflict recorded as an open finding
+# rather than resolved by preference.
+DEFAULT_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO = 0.0
+
+# Check B -- motion plausibility: forward-predicts the bracket's earlier
+# observation to the later one's own timestamp using the TRACK's own
+# PRE-GAP velocity (the same constant-velocity arithmetic `predict.py`
+# implements, applied from the bracket rather than the track's current,
+# possibly-drifted box), and refuses when that forecast lands more than this
+# many BOX-DIAGONALS (`math.hypot(width, height)`, averaged between the two
+# boxes) from the real later observation's centre. A size-scaled centre
+# distance, not IoU -- `cv_service.tracking.reupdate`'s own module docstring
+# has the full reasoning, briefly: IoU degrades to a hard `0.0` the instant
+# two boxes fail to overlap at all, which is the ORDINARY case after a
+# multi-second gap on a fast or small target, so a strict IoU gate would
+# refuse almost every honest long-gap bracket this check is supposed to let
+# through leniently.
+#
+# `<=0` disables the check entirely, the SAME shape every other ceiling in
+# this section already uses.
+#
+# Defaulted to `0.0` (DISABLED) because the sweep MEASURED IT HARMFUL, not
+# because nobody has looked: 1.0/2.0/3.0 box-diagonals scored +434/+550/+451
+# IDSW against the ORU-off baseline, every one of them WORSE than the +377 of
+# leaving this check off entirely (`TRACKING-BENCHMARK-RESULTS.md` §4d). The
+# tension `reupdate.py`'s docstring predicted is the likely reason -- the
+# pre-gap velocity this check forecasts from is exactly the estimate ORU
+# exists because it distrusts, so the forecast rejects honest brackets more
+# often than dishonest ones.
+#
+# Kept rather than deleted because that verdict is regime-bound: it was
+# measured on dense, largely static pedestrian footage, and a sparse scene
+# with strong coherent ego-motion -- a drone -- is precisely where a pre-gap
+# velocity is most trustworthy. Re-sweep it on aerial footage before
+# concluding anything general.
+DEFAULT_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE = 0.0
+
 # --- pull (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
 #
 # Back `cv_service.pull.{source,clock,loop}` -- the worker's own decode loop
@@ -868,6 +962,10 @@ class Settings:
     track_detection_lag_correction_enabled: bool = DEFAULT_TRACK_DETECTION_LAG_CORRECTION_ENABLED
     track_reupdate_max_velocity_per_second: float = DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND
     track_reupdate_max_track_count: int = DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT
+    track_reupdate_max_shape_log_ratio: float = DEFAULT_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO
+    track_reupdate_max_motion_center_distance: float = (
+        DEFAULT_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE
+    )
     pull_decoder: str = DEFAULT_PULL_DECODER
     pull_rtsp_transport: str = DEFAULT_PULL_RTSP_TRANSPORT
     pull_target_fps: float = DEFAULT_PULL_TARGET_FPS
@@ -1079,6 +1177,16 @@ class Settings:
                 os.environ.get("CV_TRACK_REUPDATE_MAX_TRACK_COUNT"),
                 DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT,
                 "CV_TRACK_REUPDATE_MAX_TRACK_COUNT",
+            ),
+            track_reupdate_max_shape_log_ratio=_parse_float_allow_nonpositive(
+                os.environ.get("CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO"),
+                DEFAULT_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO,
+                "CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO",
+            ),
+            track_reupdate_max_motion_center_distance=_parse_float_allow_nonpositive(
+                os.environ.get("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE"),
+                DEFAULT_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE,
+                "CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE",
             ),
             pull_decoder=_parse_string(os.environ.get("CV_PULL_DECODER"), DEFAULT_PULL_DECODER),
             pull_rtsp_transport=_parse_string(

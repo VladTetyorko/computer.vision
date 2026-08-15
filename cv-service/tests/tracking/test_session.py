@@ -2244,6 +2244,57 @@ def test_detection_lag_correction_density_gate_is_disabled_by_default():
     assert outcome.boxes[0].box.x == pytest.approx(0.2)  # corrected -- projected forward at 0.1/s
 
 
+def test_detection_lag_correction_respects_the_shape_check():
+    # Session-level proof of the 2026-08-15 bracket-identity check, Check A
+    # (`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1):
+    # `_late_corrected_box` calls `reupdate_module.late_correction`, so this
+    # is the session-level confirmation that Check A genuinely covers that
+    # call site too, not merely `track.py`'s post-occlusion one -- checked
+    # directly rather than assumed from the shared call.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(
+        registry, settings=dataclasses.replace(Settings(), track_reupdate_max_shape_log_ratio=0.5)
+    )
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0, w=0.1, h=0.1)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0, w=0.1, h=0.1)])
+    # The just-arrived box is 5x the bracket's own size (0.1 -> 0.5) -- over
+    # the 0.5 log-ratio bound given here.
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.15, y=0.0, w=0.5, h=0.5)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    assert outcome.boxes[0].box.x == pytest.approx(0.15)  # uncorrected -- shape changed too abruptly
+
+
+def test_detection_lag_correction_respects_the_motion_check():
+    # Session-level proof of Check B, the SAME shape the shape-check test
+    # directly above proves for Check A.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(
+        registry, settings=dataclasses.replace(Settings(), track_reupdate_max_motion_center_distance=1.0)
+    )
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0)])  # measured velocity_x -> 0.1/s
+    # captured_at = 1.5s; the t=1.0s bracket forecasts the centre to ~0.20
+    # over the 0.5s lag at 0.1/s -- the just-arrived box at x=0.9 lands far
+    # from that forecast, over the 1.0-diagonal bound given here.
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.9, y=0.0)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    assert outcome.boxes[0].box.x == pytest.approx(0.9)  # uncorrected -- forecast landed nowhere close
+
+
 # -- P3/P8: pure stdlib, available at capability level L1 --------------------
 #
 # TRACKING-V3-PLAN invariant P8, and this wave's own acceptance: "This wave

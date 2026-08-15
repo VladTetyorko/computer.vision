@@ -59,6 +59,9 @@ def params(mode: str, **overrides) -> TrackingParams:
         reupdate_max_velocity_per_second=0.0,
         # 2026-08-15 density gate -- inert here too, same reason.
         reupdate_max_track_count=0,
+        # 2026-08-15 bracket-identity check -- inert here too, same reason.
+        reupdate_max_shape_log_ratio=0.0,
+        reupdate_max_motion_center_distance=0.0,
     )
     base.update(overrides)
     return TrackingParams(**base)

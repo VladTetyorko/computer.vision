@@ -255,6 +255,163 @@ refused whether or not the book happens to be small. Logged once per
 process (`_warn_high_density_once`, the SAME `global`-flag idiom
 `_warn_implausible_velocity_once` above uses), never raised, never spammed
 per frame (invariant P5).
+
+## 2026-08-15 bracket-identity check: the velocity guard and the density gate
+test the BRACKET's timing and the SCENE's crowding -- neither ever tests
+whether the two observations ARE the same object
+
+`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1 names the defect both
+repairs above independently circled without closing: `reupdate()` rebuilds a
+gap from the two real observations that bracket it and has never once tested
+that those two observations are plausibly the SAME OBJECT. The velocity
+guard refuses an IMPOSSIBLE implied motion; the density gate refuses a
+CROWDED scene as a proxy for bracket ambiguity. Both are guards on the
+SYMPTOM a wrong bracket produces, not tests of the bracket itself, and
+`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` measured what that leaves on
+the table: the velocity guard alone recovered 93 IDSW (951 -> 346 implausible
+velocities, §4b) but left ORU **+377 IDSW** worse than not running it at all;
+sweeping the density gate across 6/8/10/12/15/20/30 live-track ceilings
+across all 21 MOT17 scene/detector pairs found **no threshold that made ORU
+pay** (§4c) -- the only setting reaching parity did so by disabling ORU in
+sixteen of twenty-one scenes, destroying its two largest wins (-51, -38)
+along with the losses. This is the first attempt at the CAUSE.
+
+Two independent sub-checks below, each its own gate with its own off switch
+-- the SAME `None`-returning, `<=0`-disables shape the two guards above
+already establish, ADDED alongside them rather than replacing either: a
+bracket must clear all four tests (gap timing, density, shape, motion) to be
+trusted, and failing any single one is sufficient to refuse.
+
+### Check A -- shape consistency
+
+The same physical object does not change apparent size abruptly across a
+gap. Compares `t1`'s box dimensions (`bracket.observation.box`, warped into
+the current frame by `history_transform` -- the SAME warped box the velocity
+reconstruction below already reads) against `t2`'s (`observation.box`, the
+fresh detection): refuses when `|ln(width₂/width₁)|` or
+`|ln(height₂/height₁)|` exceeds `max_shape_log_ratio`.
+
+The LOG-ratio, not a raw ratio or a percentage difference, because it is
+symmetric around "no change" by construction -- a box that halves (ratio
+0.5, log -0.693) and one that doubles (ratio 2.0, log +0.693) are equally
+abrupt a change, and a raw-ratio bound would need two different thresholds
+(one below 1, one above) to say so; the log-ratio needs one. Scale-invariant
+for the same reason a fraction beats a pixel count: a small target's box and
+a large target's box that both double in size produce the IDENTICAL
+log-ratio, so one bound serves every object size this platform ever tracks
+-- the same reasoning `max_velocity_per_second` being a FRACTION of frame
+width/height, not a pixel rate, already relies on. Costs two logarithms and
+two comparisons, the cheapest check in this module.
+
+A degenerate box (non-positive width or height, on either side) makes that
+ONE AXIS inconclusive rather than a crash -- `math.log` of a non-positive
+number is undefined, and this function's contract throughout is "never
+raise", not "validate the caller's box" (every real caller hands it an
+actual detector box; `Box.valid` is deliberately not consulted here, the
+same "not this function's job" reasoning the rest of this module already
+applies to its inputs).
+
+### Check B -- motion plausibility, and the tension worth naming rather than
+papering over
+
+Forward-predicts `t1`'s box to `t2`'s own timestamp using the TRACK's own
+PRE-GAP velocity -- `track.velocity_x`/`track.velocity_y` exactly as they
+stand the moment this function is called, BEFORE this same call's own
+reconstruction below overwrites them -- and asks whether that forecast lands
+anywhere near `t2`'s real position.
+
+**The tension.** ORU exists BECAUSE the pre-gap velocity is unreliable
+across a gap -- that is §4.2's entire premise ("delete the accumulated
+extrapolation error rather than inheriting it"): interpolating between two
+REAL observations instead of trusting the estimator's own drifted state is
+the whole point, precisely because the pre-gap estimate degrades the longer
+the gap runs (deceleration, a turn, or simply a few frames of stale noise).
+Validating the RECONSTRUCTION against a PREDICTION built from that very
+velocity is therefore in real tension with ORU's own reason to exist, and
+this docstring does not pretend otherwise. It is not, however, circular: the
+check never asks "does the reconstructed velocity match the pre-gap one"
+(THAT would be circular -- disagreeing is the entire point of ORU) -- it
+asks "is `t2` anywhere in the neighbourhood a rough constant-velocity
+forecast from `t1` would place it." A genuinely wrong bracket (two different
+objects) has no systematic reason to land near that forecast at all -- a
+stranger's detection bears no relationship to where the FIRST object was
+heading -- while a merely STALE pre-gap velocity is still real evidence of
+an approximate direction and magnitude, so a same-object `t2` after an
+ordinary turn or deceleration lands closer to a rough forecast than a
+different object usually does, even though it will rarely land exactly on
+one. This is why the gate has to be LENIENT, not strict: strict would refuse
+exactly the long, honest gaps ORU exists to reconstruct; lenient still
+refuses a forecast that is not even approximately right, which is what a
+wrong bracket actually produces.
+
+**Centre distance, not IoU -- and size-scaled, not a fixed frame-fraction --
+both deliberate, not a default.** `Box.iou` degrades to a hard `0.0` the
+instant two boxes fail to overlap AT ALL, which is the ordinary case after
+anything but the shortest gap on a fast or small target: `CV-RATE-BUDGET.md`
+§2 puts ego-motion at ~32 px/frame against ~4 px/frame of target motion on a
+yawing drone, so a multi-second gap's forecast and real box routinely do not
+touch even when the SAME object produced both. A strict IoU gate would
+refuse almost every long-gap bracket regardless of correctness -- exactly
+the strict-not-lenient mistake the paragraph above warns against. A
+size-scaled CENTRE distance degrades continuously instead of falling off a
+cliff at zero overlap: "how many box-diagonals away is the forecast" stays a
+graded, meaningful answer whether the boxes overlap or not, and scaling by
+the box's own diagonal (not a fixed frame-fraction) keeps one bound
+meaningful for a target filling a tenth of the frame and one filling a
+hundredth -- the same scale-invariance Check A's log-ratio already buys.
+
+Unlike the velocity guard's own per-axis check (`Detection.velocity_x`/`_y`
+are independently meaningful RATES, so each gets its own bound), this is a
+single COMBINED Euclidean distance: "is the real observation near the point
+a forecast predicts" is inherently a 2-D question, not two independent 1-D
+ones -- a forecast exactly right on X and wildly wrong on Y is exactly as
+implausible as the reverse, and a per-axis version of this test would need
+twice the plumbing to express the same thing this says in one comparison.
+
+`max_motion_center_distance` is that bound, expressed as a MULTIPLE of the
+reference box's own diagonal (`math.hypot(width, height)`, averaged between
+`t1`'s and `t2`'s boxes so neither one alone sets the scale): the
+straight-line distance between the forecast centre and `t2`'s real centre,
+divided by that diagonal, must not exceed it. A degenerate scale
+(non-positive diagonal on both boxes) is inconclusive, the same "never
+raise, never crash on a malformed input" contract Check A's own degenerate
+case documents.
+
+**Deliberately reuses `predict.py`'s own constant-velocity arithmetic
+(`x + v·t`), inlined rather than imported.** `late_correction()`'s own
+docstring already gives the reason this module has no cause to import
+`predict.py` "for six lines of x + v*t", and it applies here too. It is also
+the WRONG function to call even if imported: `predict.predict(track, now)`
+reads `track.box`/`track.last_seen` directly, which is the estimator's own
+possibly-drifted CURRENT state -- exactly what `t1` (the ring's real,
+un-drifted entry) exists to avoid trusting. This check forecasts FROM `t1`,
+never from `track.box`, so a hand-inlined `x + v·t` from `t1`'s own centre is
+the correct arithmetic even though it is textually the same formula
+`predict.py` implements for a different starting point.
+
+Both checks run BEFORE the bracket's own reconstructed velocity
+(`velocity_x`/`velocity_y` below, the interpolant itself) is computed --
+neither reads it. The order relative to each other and to the velocity/
+density guards does not change any outcome (all four are independent
+refusals on the SAME `None` contract); it only changes which warning a
+multiply-bad bracket logs first.
+
+**Defaults, and why neither is a guess.** Same discipline the density gate's
+own comment already sets: `cv_service.config.
+DEFAULT_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO` and `DEFAULT_TRACK_REUPDATE_
+MAX_MOTION_CENTER_DISTANCE` both ship at `0.0` -- DISABLED -- and are
+PROVISIONAL. Whatever value eventually ships is set by sweeping the real
+MOT17 matrix (A alone, B alone, A+B), never by intuition in this comment.
+Each is independently disable-able (`<=0`), so the sweep -- or an operator --
+can turn on A alone, B alone, or both, and compare. See `cv_service.
+tracking.params.TrackingParams.reupdate_max_shape_log_ratio`/`.reupdate_max_
+motion_center_distance` for the env knobs each resolves from.
+
+Logged once per process, each check its OWN flag (`_implausible_shape_
+logged`/`_implausible_motion_logged`) -- the SAME "log once, own flag per
+guard" idiom `_high_density_logged`/`_implausible_velocity_logged` already
+establish, so a stream that trips more than one guard reports EACH guard's
+first occurrence, not just whichever flipped first (invariant P5).
 """
 
 from __future__ import annotations
@@ -289,6 +446,14 @@ _implausible_velocity_logged = False
 # silently going unreported because the first already flipped a shared
 # flag.
 _high_density_logged = False
+
+# Log-once flags for the two 2026-08-15 bracket-identity checks below (Check
+# A/shape, Check B/motion) -- same idiom, same reasoning, and same "own flag
+# per guard" discipline `_high_density_logged` immediately above already
+# states: kept separate from each other AND from the two flags above so a
+# stream that trips several guards reports each one's first occurrence.
+_implausible_shape_logged = False
+_implausible_motion_logged = False
 
 # The shortest elapsed time this module will ever divide by to reconstruct a
 # velocity -- insurance against the SHAPE of the 2026-08-14 divergence
@@ -355,14 +520,18 @@ def reupdate(
     max_velocity_per_second: float = 0.0,
     max_track_count: int = 0,
     live_track_count: int = 0,
+    max_shape_log_ratio: float = 0.0,
+    max_motion_center_distance: float = 0.0,
 ) -> Optional[Reupdate]:
     """Rebuild the gap ending at `now` from the two real observations that
     bracket it, and return the corrected velocity -- or `None` when there is
     no bracketing pair, the gap is not positive, it exceeds `max_gap_millis`
     (too long to reconstruct honestly; `memory.py`'s dormant-gallery
     recovery is what serves that case instead, and it does not consult this
-    ring at all), the implied velocity is not plausible, or the scene is too
-    crowded to trust the bracket at all (see both guards below).
+    ring at all), the implied velocity is not plausible, the scene is too
+    crowded to trust the bracket at all, the box changed shape too abruptly
+    across the gap, or a forecast from the track's own pre-gap velocity lands
+    nowhere near the real observation (see all four guards below).
 
     `ring` is taken as an explicit parameter rather than read off `track`
     (even though every real caller passes `track.history`) so this stays
@@ -410,6 +579,20 @@ def reupdate(
     for why track count, not detections/frame (what §4b actually measured),
     is what reaches this function -- stated there as a PROXY, not assumed to
     be the same signal.
+
+    `max_shape_log_ratio`/`max_motion_center_distance` (2026-08-15 bracket-
+    identity check -- `docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1):
+    two further, independent gates, neither a proxy -- unlike the density
+    gate above, both look directly at the bracket itself rather than the
+    scene around it. Check A refuses when `t1`'s and `t2`'s box dimensions
+    differ by more than `max_shape_log_ratio` in log-space (either axis).
+    Check B forward-predicts `t1`'s box to `t2`'s timestamp using the
+    track's own PRE-GAP velocity and refuses when that forecast lands more
+    than `max_motion_center_distance` box-diagonals from `t2`'s real centre.
+    Both `<= 0` (the default) disable their own check independently
+    (invariant P7) -- the same off-switch shape every ceiling here uses.
+    See this module's own docstring for the full derivation of each,
+    including the tension Check B's own premise sits in with ORU's.
     """
     if max_gap_millis <= 0:
         return None
@@ -438,8 +621,41 @@ def reupdate(
     # docstring for the measurement that settled this against the two other
     # candidates.
     t1_box = track.history_transform.apply_box(bracket.observation.box)
+
+    # Check A -- shape consistency (2026-08-15 bracket-identity check). See
+    # this module's own docstring for the log-ratio's derivation and why a
+    # degenerate box makes one AXIS inconclusive rather than a crash.
+    if max_shape_log_ratio > 0.0 and _shape_changed_too_abruptly(
+        t1_box, observation.box, max_shape_log_ratio
+    ):
+        _warn_implausible_shape_once(t1_box, observation.box, max_shape_log_ratio)
+        return None
+
     t1_cx, t1_cy = t1_box.center
     t2_cx, t2_cy = observation.box.center
+
+    # Check B -- motion plausibility (2026-08-15 bracket-identity check).
+    # Forecasts `t1` forward to `t2`'s own timestamp using the TRACK's own
+    # PRE-GAP velocity -- `track.velocity_x`/`track.velocity_y` exactly as
+    # they stand right now, before the reconstruction below overwrites them.
+    # See this module's own docstring for the tension this deliberately does
+    # not paper over, and why a size-scaled centre distance, not IoU, is the
+    # honest test for a forecast that may not overlap `t2` at all after a
+    # long gap.
+    if max_motion_center_distance > 0.0 and _motion_forecast_implausible(
+        t1_cx,
+        t1_cy,
+        track.velocity_x,
+        track.velocity_y,
+        gap_seconds,
+        t2_cx,
+        t2_cy,
+        t1_box,
+        observation.box,
+        max_motion_center_distance,
+    ):
+        _warn_implausible_motion_once(max_motion_center_distance)
+        return None
 
     drift_before = _distance(track.box.center, (t2_cx, t2_cy))
     velocity_x = (t2_cx - t1_cx) / gap_seconds
@@ -466,6 +682,68 @@ def reupdate(
 
 def _distance(a: "tuple[float, float]", b: "tuple[float, float]") -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _shape_changed_too_abruptly(t1_box: Box, t2_box: Box, bound: float) -> bool:
+    """Check A -- `True` when either dimension's log-ratio between `t1_box`
+    and `t2_box` exceeds `bound`. See this module's docstring for why the
+    log-ratio, not a raw ratio, and why scale-invariant."""
+    return _axis_log_ratio_exceeds(
+        t1_box.width, t2_box.width, bound
+    ) or _axis_log_ratio_exceeds(t1_box.height, t2_box.height, bound)
+
+
+def _axis_log_ratio_exceeds(before: float, after: float, bound: float) -> bool:
+    """One dimension's own half of `_shape_changed_too_abruptly`.
+
+    A non-positive `before`/`after` makes this ONE AXIS inconclusive
+    (returns `False`, never refusing on its account) rather than raising --
+    `math.log` of a non-positive number is undefined, and this module's own
+    contract throughout is "never raise", not "validate the caller's box".
+    """
+    if before <= 0.0 or after <= 0.0:
+        return False
+    return abs(math.log(after / before)) > bound
+
+
+def _motion_forecast_implausible(
+    t1_cx: float,
+    t1_cy: float,
+    pre_gap_velocity_x: float,
+    pre_gap_velocity_y: float,
+    gap_seconds: float,
+    t2_cx: float,
+    t2_cy: float,
+    t1_box: Box,
+    t2_box: Box,
+    bound: float,
+) -> bool:
+    """Check B -- `True` when a constant-velocity forecast from `t1`, using
+    the TRACK's own PRE-GAP velocity, lands more than `bound` box-diagonals
+    from `t2`'s real centre.
+
+    The forecast itself is the SAME `x + v*t` arithmetic `predict.py`
+    implements, hand-inlined rather than imported for the same reason
+    `late_correction()`'s own docstring already gives for not importing
+    `predict.py` -- and, here, for a second reason too: `predict.predict()`
+    reads `track.box`/`track.last_seen` directly, the estimator's own
+    possibly-drifted CURRENT state, whereas this check must forecast FROM
+    `t1` (the ring's real, un-drifted entry), so calling the real function
+    would silently forecast from the wrong starting point even though its
+    name suggests otherwise.
+
+    A degenerate scale (non-positive diagonal on both boxes) makes this
+    inconclusive (returns `False`) rather than dividing by zero -- the same
+    "never raise, never crash on a malformed input" contract `_axis_log_
+    ratio_exceeds` above already applies to Check A.
+    """
+    predicted_cx = t1_cx + pre_gap_velocity_x * gap_seconds
+    predicted_cy = t1_cy + pre_gap_velocity_y * gap_seconds
+    scale = (math.hypot(t1_box.width, t1_box.height) + math.hypot(t2_box.width, t2_box.height)) / 2.0
+    if scale <= 0.0:
+        return False
+    distance = _distance((predicted_cx, predicted_cy), (t2_cx, t2_cy))
+    return (distance / scale) > bound
 
 
 def _warn_implausible_velocity_once(velocity_x: float, velocity_y: float, bound: float) -> None:
@@ -509,6 +787,48 @@ def _warn_high_density_once(live_track_count: int, bound: int) -> None:
     )
 
 
+def _warn_implausible_shape_once(t1_box: Box, t2_box: Box, bound: float) -> None:
+    """Log the one-time "ORU refused a reconstruction: implausible shape
+    change" note, if applicable (P5, same `global`-flag idiom every warn-once
+    function above already uses, its own flag so this guard's first
+    occurrence is reported even when another guard already logged once for a
+    different track)."""
+    global _implausible_shape_logged
+    if _implausible_shape_logged:
+        return
+    _implausible_shape_logged = True
+    LOGGER.warning(
+        "tracking: ORU refused a reconstruction with an implausible shape "
+        "change (width %.4f -> %.4f, height %.4f -> %.4f, bound=%.3f "
+        "log-ratio) -- the bracket is probably two different objects, not "
+        "one (this warning logs once per process)",
+        t1_box.width,
+        t2_box.width,
+        t1_box.height,
+        t2_box.height,
+        bound,
+    )
+
+
+def _warn_implausible_motion_once(bound: float) -> None:
+    """Log the one-time "ORU refused a reconstruction: implausible motion
+    forecast" note, if applicable (P5, same `global`-flag idiom every
+    warn-once function above already uses, its own flag for the same
+    "each guard reports its own first occurrence" reason)."""
+    global _implausible_motion_logged
+    if _implausible_motion_logged:
+        return
+    _implausible_motion_logged = True
+    LOGGER.warning(
+        "tracking: ORU refused a reconstruction -- the real observation "
+        "landed more than %.2f box-diagonal(s) from where the track's own "
+        "pre-gap velocity would have forecast it (the bracket is probably "
+        "two different objects, not one; this warning logs once per "
+        "process)",
+        bound,
+    )
+
+
 def late_correction(
     track: "Track",
     ring: "ObservationRing",
@@ -520,6 +840,8 @@ def late_correction(
     max_velocity_per_second: float = 0.0,
     max_track_count: int = 0,
     live_track_count: int = 0,
+    max_shape_log_ratio: float = 0.0,
+    max_motion_center_distance: float = 0.0,
 ) -> Optional[Box]:
     """`box` re-propagated to `now`, when this stream measured a positive
     `lag_seconds` for it (TRACKING-V3-PLAN §4.5, wave V6) -- `None` when
@@ -548,16 +870,23 @@ def late_correction(
     post-occlusion, and gets exactly the same refusal, not a second
     decision), or (2026-08-15 density gate) `live_track_count` exceeds
     `max_track_count` -- same reused-not-duplicated reasoning: a scene too
-    crowded to trust a bracket in is too crowded to trust one here either.
-    All three ceilings are the SAME ones that bound post-occlusion ORU
+    crowded to trust a bracket in is too crowded to trust one here either --
+    or (2026-08-15 bracket-identity check) the bracket fails Check A
+    (`stand_in`'s own box changed shape too abruptly against the ring's last
+    real entry) or Check B (a forecast from the track's own pre-gap velocity
+    lands nowhere near `stand_in`'s box) -- same reasoning again: a bracket
+    that is probably two different objects is exactly as wrong for a
+    per-detection correction as it is post-occlusion. All FIVE ceilings are
+    the SAME ones that bound post-occlusion ORU
     (`TrackingParams.reupdate_max_gap_millis` /
-    `reupdate_max_velocity_per_second` / `reupdate_max_track_count`) --
-    reused, not duplicated: a gap, a velocity or a density too implausible
-    to trust for one purpose is too implausible for the other, and `<= 0`
-    is therefore invariant P7's off switch for this correction too, with no
-    second knob needed just to disable any of them. Callers must treat
-    `None` as "keep the raw box" and never fabricate a correction from
-    nothing (**P5**).
+    `reupdate_max_velocity_per_second` / `reupdate_max_track_count` /
+    `reupdate_max_shape_log_ratio` / `reupdate_max_motion_center_distance`)
+    -- reused, not duplicated: a gap, a velocity, a density, a shape or a
+    motion forecast too implausible to trust for one purpose is too
+    implausible for the other, and `<= 0` is therefore invariant P7's off
+    switch for this correction too, with no second knob needed just to
+    disable any of them. Callers must treat `None` as "keep the raw box" and
+    never fabricate a correction from nothing (**P5**).
 
     **Known simplification, stated rather than hidden.** The bracket
     `reupdate()` reads is warped into `box`'s frame by `track.
@@ -589,6 +918,8 @@ def late_correction(
         max_velocity_per_second=max_velocity_per_second,
         max_track_count=max_track_count,
         live_track_count=live_track_count,
+        max_shape_log_ratio=max_shape_log_ratio,
+        max_motion_center_distance=max_motion_center_distance,
     )
     if reconstruction is None:
         return None
