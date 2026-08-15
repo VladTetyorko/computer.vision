@@ -662,3 +662,66 @@ def test_garbage_reupdate_gap_env_var_falls_back_and_never_raises(monkeypatch):
     settings = Settings.from_env()
 
     assert settings.track_reupdate_max_gap_millis == Settings().track_reupdate_max_gap_millis
+
+
+# -- 2026-08-14 repair, part 2: reupdate_max_velocity_per_second -------------
+# (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4/§8). Deployment-only,
+# no wire field -- same "no per-request override to fall back FROM" shape as
+# `follow_top_k`/`roi_enabled` above; `<=0` is a legitimate DISABLE value,
+# same shape as `reupdate_max_gap_millis` directly above, not
+# `roi_crop_factor`'s "non-positive is a misconfiguration" shape.
+
+
+def test_resolve_takes_reupdate_max_velocity_per_second_straight_from_settings():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_velocity_per_second=3.5)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_velocity_per_second == 3.5
+
+
+def test_reupdate_max_velocity_per_second_defaults_to_five():
+    # `cv_service.config.DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND`'s
+    # own derivation: >3x headroom over both the harness's own fastest
+    # synthetic pan (0.6/sec) and `CV-RATE-BUDGET.md` §2's most aggressive
+    # documented search yaw (1.5/sec).
+    assert Settings().track_reupdate_max_velocity_per_second == 5.0
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), Settings())
+    assert resolved.reupdate_max_velocity_per_second == 5.0
+
+
+def test_a_non_positive_deployment_velocity_bound_is_a_legitimate_disabled_value():
+    # Same shape as `reupdate_max_gap_millis`'s own non-positive test above:
+    # a non-positive DEPLOYMENT default is not replaced by anything -- it is
+    # the operator's own choice to run the plausibility guard off fleet-wide
+    # (`reupdate.py`'s own guard never fires once the bound is non-positive).
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_velocity_per_second=0.0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_velocity_per_second == 0.0
+
+
+def test_settings_read_the_repair_part_2_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND", "3.5")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_velocity_per_second == 3.5
+
+
+def test_a_non_positive_velocity_bound_env_var_disables_rather_than_falling_back(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND", "0")
+
+    assert Settings.from_env().track_reupdate_max_velocity_per_second == 0.0
+
+
+def test_garbage_velocity_bound_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert (
+        settings.track_reupdate_max_velocity_per_second
+        == Settings().track_reupdate_max_velocity_per_second
+    )

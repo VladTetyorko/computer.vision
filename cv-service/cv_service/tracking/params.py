@@ -248,6 +248,18 @@ class TrackingParams:
     # without also opting into per-detection back-correction, or the
     # reverse, rather than one knob answering two different questions.
     detection_lag_correction_enabled: bool
+    # 2026-08-14 repair, part 2 (`docs/conclusions/TRACKING-BENCHMARK-
+    # RESULTS.md` §4/§8). Deployment-only, no wire field -- same "no per-
+    # request override to fall back FROM" shape as `follow_top_k`/
+    # `roi_enabled` above. `reupdate.py`'s own guard reads this straight: a
+    # reconstruction whose implied `|velocity_x|`/`|velocity_y|` exceeds it
+    # (normalized frame-widths/heights per second, `Detection.velocity_x`/
+    # `_y`'s own units) is refused outright (`None`, never clamped) rather
+    # than trusted -- ORU made MOT17 identity switches WORSE in 15 of 21
+    # scene/detector pairs precisely because it had no such test. `<=0`
+    # disables the guard entirely, reproducing pre-repair behaviour exactly
+    # (invariant P7) -- same shape as `reupdate_max_gap_millis` above.
+    reupdate_max_velocity_per_second: float
 
     @property
     def active(self) -> bool:
@@ -439,4 +451,7 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
         # TRACKING-V3-PLAN wave V6 -- straight from `Settings`, no wire
         # field (same shape as `follow_top_k`/`roi_enabled` above).
         detection_lag_correction_enabled=settings.track_detection_lag_correction_enabled,
+        # 2026-08-14 repair, part 2 -- straight from `Settings`, no wire
+        # field (same shape as `detection_lag_correction_enabled` above).
+        reupdate_max_velocity_per_second=settings.track_reupdate_max_velocity_per_second,
     )

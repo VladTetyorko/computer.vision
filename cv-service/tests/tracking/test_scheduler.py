@@ -55,6 +55,8 @@ def params(mode: str, **overrides) -> TrackingParams:
         reupdate_max_gap_millis=10_000,
         # TRACKING-V3-PLAN wave V6 -- inert here too, same reason.
         detection_lag_correction_enabled=True,
+        # 2026-08-14 repair, part 2 -- inert here too, same reason.
+        reupdate_max_velocity_per_second=0.0,
     )
     base.update(overrides)
     return TrackingParams(**base)

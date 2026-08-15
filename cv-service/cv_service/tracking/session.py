@@ -675,6 +675,7 @@ class StreamTrackingSession:
             now,
             self._frame_lag_seconds,
             max_gap_millis=self._params.reupdate_max_gap_millis,
+            max_velocity_per_second=self._params.reupdate_max_velocity_per_second,
         )
         if corrected is None:
             return box, now - self._frame_lag_seconds

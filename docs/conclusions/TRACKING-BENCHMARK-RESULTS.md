@@ -1,6 +1,8 @@
 # Tracking on real footage — 91 compositions on MOT17
 
-**Run 2026-08-14** on `feat/tracking-v3`. Machine-readable rows: `cv-service/benchmarks/results.csv`.
+**Run 2026-08-14, re-run 2026-08-15** on `feat/tracking-v3`. Machine-readable rows:
+`cv-service/benchmarks/results.csv` (current, ORU velocity guard active) and
+`benchmarks/results-pre-oru-guard.csv` (the first run, kept so the guard's effect stays checkable).
 Tool: `cv-service/benchmarks/`. Dataset survey and shortlist reasoning: [TRACKING-BENCHMARKS.md](TRACKING-BENCHMARKS.md).
 
 This is the first measurement of this tracker against data we did not author.
@@ -16,6 +18,13 @@ survive contact with real data: **ORU made identity worse in 15 of 21 scenes**, 
 plausibility metric — silent on all thirty synthetic rows — **fired on 37 of 42 `cost` runs**, where
 peak reported velocity reached **12.9 frame-widths/second**. `bytetrack` produced none, peaking at
 **0.67**. The capability ladder itself verified perfectly end to end.
+
+**Update, after fixing the guard (§4b):** refusing implausible reconstructions removed **64 % of the
+non-physical velocities** and recovered **93 IDSW** — but ORU is **still net-negative on real crowded
+data (+377 IDSW)**. The velocity bound treated a symptom. The root cause — ORU never checks that its
+two bracketing observations are the same object — is untouched, and shows up as a clean split: in
+scenes at or above 10 detections/frame, ORU improved **0 of 7**; in sparse, ego-motion-dominated
+scenes it produces its only real wins.
 
 ---
 
@@ -141,6 +150,50 @@ the default ASSOCIATE engine at L3+ is untouched by waves V2, V3 and V6.
 
 ---
 
+## 4b. The guard, measured
+
+`reupdate()` now returns `None` when its own reconstruction implies a velocity beyond
+`CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND` (default **5.0** frame-widths/sec; `<= 0` disables,
+reproducing the pre-guard behaviour exactly). It refuses rather than clamps: an impossible velocity is
+evidence the bracket is wrong, and a wrong bracket has no salvageable answer.
+
+All 91 compositions re-run. **Control first: all 49 ORU-off rows are byte-identical**, and all thirty
+synthetic baseline rows are unchanged — the guard is inert everywhere ORU is not running.
+
+| ORU-on, `cost`, 21 pairs | before guard | after guard |
+|---|---|---|
+| implausible velocities | 951 | **346** (−64 %) |
+| IDSW | 6545 | **6452** (−93) |
+| scenes improved by the guard | — | 11 better, 6 worse, 4 unchanged |
+
+**But ORU still loses to not running ORU at all**, even guarded:
+
+| `cost`, all 21 pairs | ORU off | ORU on + guard |
+|---|---|---|
+| IDSW | **6075** | 6452 (**+377**) |
+| recovery | **56.7 %** | 56.6 % |
+| MT / ML | 450 / 502 | 450 / 502 |
+
+MT and ML are *identical* — ORU changes neither coverage nor outright loss. It only churns identity.
+
+### Where ORU pays, and where it never does
+
+| scene density | pairs | net IDSW | scenes improved |
+|---|---|---|---|
+| **≥ 10 dets/frame** | 7 | **+320** | **0 of 7** |
+| < 10 dets/frame | 14 | +57 | 5 of 14 |
+
+The dense half is unanimous — ORU has never once helped a crowded scene, and `MOT17-04-DPM` alone
+(21.3 dets/frame, weakest detector) accounts for **+233** of the total.
+
+The two largest wins are both `MOT17-13` (**−51** and **−38**), the camera mounted on a moving bus:
+sparse targets, strong coherent ego-motion. That is the regime ORU was designed for, and it is also
+the regime a drone flies in — few targets, constantly moving camera. The guard is worth keeping on
+its own merits (605 fewer non-physical velocities), but **ORU's remaining cost is a bracket-identity
+problem, and a velocity bound cannot see it.**
+
+---
+
 ## 5. O3 fired on first contact
 
 The velocity plausibility metric committed hours earlier scored **0 on all thirty synthetic rows**.
@@ -195,17 +248,21 @@ Stated so no one reads more into the tables than is there.
 
 ## 8. What I would change on the strength of this
 
-1. **Give ORU a plausibility guard** before trusting it anywhere. It should refuse to reconstruct
-   across a gap whose implied velocity is non-physical — the same bound O3 already measures. This is
-   small, and it converts ORU from a net loss on real crowded data to a conditional win.
-2. **Do not ship `cost` as the identity engine for FOLLOW-style work without fixing its velocity.**
-   12.9 frame-widths/sec is not a tuning issue; it is a broken estimate leaking into consumers.
-3. **Decide deliberately whether V2/V3/V6 should reach `bytetrack`.** Right now the L1 engine carries
-   all the sophistication and the L3 default carries none, which is the opposite of the intended
-   ladder.
-4. **Get aerial footage.** Everything here is a proxy.
-
----
+1. **~~Give ORU a plausibility guard~~ — done (§4b), and it was necessary but not sufficient.** Keep
+   it: 605 fewer non-physical velocities is worth having regardless. But it did not make ORU pay.
+2. **Gate ORU on scene density, or default it off.** It has improved 0 of 7 crowded scenes and its
+   only real wins are sparse + ego-motion — which is our deployment, so this is a defaults question,
+   not a delete question. The honest next experiment is aerial footage, where our density genuinely
+   lives.
+3. **The real ORU fix is a bracket-identity check**, not a tighter velocity bound: confirm the two
+   bracketing observations plausibly belong to the same object (IoU-with-prediction, or appearance at
+   L4+) before interpolating between them. That is a wave, not a patch.
+4. **Do not ship `cost` as the identity engine for FOLLOW-style work without fixing its velocity.**
+   Even guarded, `cost` reports 346 implausible velocities where `bytetrack` reports none.
+5. **Decide deliberately whether V2/V3/V6 should reach `bytetrack`.** The L1 engine carries all the
+   sophistication and the L3 default carries none, which is the opposite of the intended ladder.
+6. **Get aerial footage.** Everything here is a proxy, and §4b is the clearest example of why: the
+   recommendation flips depending on target density, and we have measured every density except ours.
 
 ## 9. Reproduce
 

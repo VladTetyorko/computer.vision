@@ -6,12 +6,14 @@ no engines, no frames, no gRPC.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 import textwrap
 
 import pytest
 
+import cv_service.tracking.reupdate as reupdate_module
 from cv_service.tracking.engines.base import (
     SOURCE_DETECTOR,
     SOURCE_TRACKER,
@@ -231,6 +233,220 @@ def test_the_most_recent_real_observation_is_used_not_an_older_one():
 
     assert result is not None
     assert result.velocity_x == pytest.approx(0.3)  # (1.0 - 0.4) / (6.0 - 4.0), not from t=0.0
+
+
+# -- 2026-08-14 repair, part 2: the plausibility guard -----------------------
+#
+# `docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4: ORU made MOT17 IDSW
+# worse in 15 of 21 scene/detector pairs because it had no test that the
+# bracket's two real observations are plausibly the same object. These tests
+# are that guard's own acceptance criteria: it fires on an absurd implied
+# velocity (#1), `<= 0` reproduces the pre-repair reconstruction exactly
+# (#2, invariant P7), and `late_correction` -- which calls `reupdate()` for
+# its own velocity rather than re-deriving it -- is genuinely covered too,
+# not merely assumed to be.
+
+
+def test_none_when_the_implied_velocity_exceeds_the_bound():
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    # (10.0 - 0.0) / 1.0 = 10.0/s, far over the 5.0/s bound given here.
+    result = reupdate(
+        subject,
+        subject.history,
+        real(10.0, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_velocity_per_second=5.0,
+    )
+
+    assert result is None
+
+
+def test_the_y_axis_is_checked_independently_of_x():
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        real(0.0, 10.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_velocity_per_second=5.0,
+    )
+
+    assert result is None
+
+
+def test_a_velocity_within_the_bound_is_not_refused():
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        real(4.9, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_velocity_per_second=5.0,
+    )
+
+    assert result is not None
+    assert result.velocity_x == pytest.approx(4.9)
+
+
+def test_a_velocity_exactly_at_the_bound_is_not_refused():
+    # The check is strictly-greater-than: a reconstruction that lands
+    # exactly on the bound is not itself evidence of a wrong bracket.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        real(5.0, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_velocity_per_second=5.0,
+    )
+
+    assert result is not None
+
+
+def test_a_refused_reconstruction_leaves_no_partial_or_clamped_answer():
+    # The fix refuses outright rather than clamping -- `result` must be
+    # `None`, never a `Reupdate` with the velocity capped at the bound.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        real(10.0, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_velocity_per_second=5.0,
+    )
+
+    assert result is None
+
+
+def test_a_non_positive_velocity_bound_is_a_genuine_off_switch():
+    # invariant P7, the SAME shape `max_gap_millis`'s own test above proves:
+    # `max_velocity_per_second <= 0` must reproduce the reconstruction
+    # exactly, however absurd the implied velocity.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    for bound in (0.0, -1.0):
+        result = reupdate(
+            subject,
+            subject.history,
+            real(10.0, 0.0),
+            now=1.0,
+            max_gap_millis=10_000,
+            max_velocity_per_second=bound,
+        )
+        assert result is not None
+        assert result.velocity_x == pytest.approx(10.0)
+
+
+def test_the_default_velocity_bound_is_disabled_reproducing_pre_repair_behaviour():
+    # No `max_velocity_per_second` argument at all -- every call site this
+    # module had before this repair -- must behave identically to an
+    # explicit non-positive bound, i.e. today's exact behaviour (P7).
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(subject, subject.history, real(10.0, 0.0), now=1.0, max_gap_millis=10_000)
+
+    assert result is not None
+    assert result.velocity_x == pytest.approx(10.0)
+
+
+def test_late_correction_is_none_when_the_reconstructed_velocity_is_implausible():
+    # `late_correction` does not re-derive velocity -- it CALLS `reupdate()`
+    # for it -- so this confirms the guard genuinely covers that path too,
+    # rather than assuming a shared call automatically inherits it.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    # captured_at = 1.0 - 0.5 = 0.5s; (10.0 - 0.0) / 0.5 = 20.0/s, over the
+    # 5.0/s bound given here.
+    result = late_correction(
+        subject,
+        subject.history,
+        Box(10.0, 0.0, 0.1, 0.1),
+        now=1.0,
+        lag_seconds=0.5,
+        max_gap_millis=10_000,
+        max_velocity_per_second=5.0,
+    )
+
+    assert result is None
+
+
+def test_late_correction_still_succeeds_when_the_bound_is_disabled():
+    # invariant P7 for `late_correction` specifically: the same absurd
+    # bracket that the guard refuses above must still be applied when the
+    # bound is left at its disabled default, exactly as before this repair.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = late_correction(
+        subject,
+        subject.history,
+        Box(10.0, 0.0, 0.1, 0.1),
+        now=1.0,
+        lag_seconds=0.5,
+        max_gap_millis=10_000,
+    )
+
+    assert result is not None
+
+
+def test_the_guard_is_logged_once_per_process_never_per_frame(monkeypatch, caplog):
+    # P5: a refused reconstruction is a degradation, never raised, and
+    # logged at most once -- not once per frame, however many times the
+    # same stream keeps producing an implausible bracket.
+    monkeypatch.setattr(reupdate_module, "_implausible_velocity_logged", False)
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.reupdate"):
+        for velocity_x in (10.0, 20.0, 30.0):
+            result = reupdate(
+                subject,
+                subject.history,
+                real(velocity_x, 0.0),
+                now=1.0,
+                max_gap_millis=10_000,
+                max_velocity_per_second=5.0,
+            )
+            assert result is None
+
+    assert sum("implausible" in record.getMessage() for record in caplog.records) == 1
+
+
+def test_a_plausible_reconstruction_never_logs_anything(monkeypatch, caplog):
+    monkeypatch.setattr(reupdate_module, "_implausible_velocity_logged", False)
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.reupdate"):
+        result = reupdate(
+            subject,
+            subject.history,
+            real(0.1, 0.0),
+            now=1.0,
+            max_gap_millis=10_000,
+            max_velocity_per_second=5.0,
+        )
+
+    assert result is not None
+    assert caplog.records == []
 
 
 # -- late_correction (TRACKING-V3-PLAN wave V6, §4.5) ------------------------

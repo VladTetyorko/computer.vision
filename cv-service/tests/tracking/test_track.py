@@ -85,6 +85,15 @@ def params(**overrides) -> TrackingParams:
         # entirely outside this module); included only because
         # `TrackingParams` requires it.
         detection_lag_correction_enabled=True,
+        # 2026-08-14 repair, part 2 -- the ORU plausibility guard's bound.
+        # `0.0` (disabled) by default here, same "opt in explicitly" shape
+        # `reupdate_max_gap_millis`'s own comment above describes for THAT
+        # field's non-default choice: unlike the gap ceiling, a disabled
+        # velocity guard is the SAFER default for this file's tests (it
+        # never turns a legitimate reconstruction this file already asserts
+        # on into an unexpected `None`), so this file's own ORU-plausibility
+        # tests override it explicitly where the bound itself matters.
+        reupdate_max_velocity_per_second=0.0,
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -723,6 +732,45 @@ def test_a_gap_older_than_the_ceiling_falls_back_to_the_ordinary_measurement():
     reanchored = book.apply([seen("a", x=0.5, authoritative=True)], 5.0, detector_ran=True)[0]
 
     assert reanchored.reupdated is False
+
+
+def test_an_implausible_reconstructed_velocity_falls_back_to_the_ordinary_measurement():
+    # The book-level proof of the 2026-08-14 repair, part 2 guard
+    # (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4): a real bracket
+    # exists and the gap is well inside the ceiling, but the implied
+    # velocity (15.0/s) is absurd against the 2.0/s bound given here -- the
+    # SAME "fall back to the ordinary measured-and-blended path" outcome
+    # `test_a_gap_older_than_the_ceiling_falls_back_to_the_ordinary_
+    # measurement` above proves for a too-long gap, now proven for a
+    # too-fast one: `reupdated` stays `False`, exactly as an un-reupdated
+    # track (acceptance #1).
+    book = TrackBook(
+        params(min_hits=1, max_age_frames=30, reupdate_max_velocity_per_second=2.0)
+    )
+    book.apply([seen("a", x=0.0, y=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    # (15.0 - 0.0) / (5.0 - 0.0) = 3.0/s, over the 2.0/s bound.
+    reanchored = book.apply([seen("a", x=15.0, y=0.0, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is False
+
+
+def test_a_disabled_velocity_bound_reproduces_the_reconstruction_exactly():
+    # invariant P7 at the book level: the SAME absurd bracket the test above
+    # refuses must still be reconstructed by ORU when the bound is left at
+    # its disabled default (`0.0`, this file's own `params()` default) --
+    # reproducing today's behaviour exactly.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, y=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    reanchored = book.apply([seen("a", x=15.0, y=0.0, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is True
+    assert reanchored.velocity_x == pytest.approx(3.0)  # (15.0 - 0.0) / (5.0 - 0.0)
 
 
 def test_reupdate_stats_reset_and_accumulate_across_one_apply_call():

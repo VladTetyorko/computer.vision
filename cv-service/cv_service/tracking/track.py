@@ -657,6 +657,7 @@ class TrackBook:
                     observation,
                     captured_at,
                     max_gap_millis=self._params.reupdate_max_gap_millis,
+                    max_velocity_per_second=self._params.reupdate_max_velocity_per_second,
                 )
                 self._last_reupdate_millis += int(round((perf_counter() - started) * 1000.0))
             if reconstruction is not None:

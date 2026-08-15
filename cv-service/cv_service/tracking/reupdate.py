@@ -142,10 +142,59 @@ floor on the denominator itself, since aligning the clocks removes this
 defect's specific MECHANISM without removing the general risk any two
 independently-supplied floats can be closer together than either caller
 intended.
+
+## 2026-08-14 repair, part 2: the bracket must be plausible, not merely timed
+
+Everything above tests whether the two real observations bracketing a gap
+are close enough in TIME to bridge. Nothing tested whether they are
+plausibly the SAME OBJECT -- and `docs/conclusions/TRACKING-BENCHMARK-
+RESULTS.md` §4 measured what that omission costs on real footage: across 21
+MOT17 scene/detector pairs, turning ORU on made IDSW WORSE in 15 of them
+(+470 net, worst case +277 on `MOT17-04-DPM`), and ORU's own implausible-
+velocity count rose in 19 of 21 (`MOT17-04-DPM` 157 -> 441, an order of
+magnitude). On the synthetic scenarios this module was built and measured
+against (`nonlinear`, `long_occlusion`, `latency`), the two bracketing
+observations are always the same object by construction, so this defect
+never showed there -- it took real crowds and a real weak detector (DPM) to
+surface it.
+
+The fix is a second, independent gate on the SAME velocity this function
+already computes: `max_velocity_per_second` (both `reupdate()` and
+`late_correction()`, since the latter calls the former for its velocity
+rather than re-deriving it). When the implied `|velocity_x|` or
+`|velocity_y|` exceeds it, the function refuses the reconstruction --
+returns `None`, the SAME "no honest answer" contract `max_gap_millis`
+already established, never a clamp and never a partial application. A
+bracket that implies an impossible velocity is not evidence of a fast
+object; a target crossing the whole frame more than five times a second is
+not a real object this platform's own worst-case documented motion (a 90
+deg/s search yaw, 1.5 frame-widths/sec -- `docs/conclusions/CV-RATE-
+BUDGET.md` §2) comes anywhere near -- it is evidence the bracket itself is
+built from two different objects, and there is no salvageable velocity to
+extract from a wrong bracket, only a less obviously wrong one. The bound's
+own value and derivation live in `cv_service.config.
+DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND` (invariant P4: this module
+takes the resolved number as a plain argument and has no constant of its
+own to keep in sync); `TrackingParams.reupdate_max_velocity_per_second` is
+how it reaches both callers (`track.py`'s `_observe`, `session.py`'s
+`_late_corrected_box`) via `params.resolve()`.
+
+A refused reconstruction is a degradation, not an error (invariant P5): it
+is logged once per process (`_warn_implausible_velocity_once`, the same
+`global`-flag "log once" idiom `cv_service.training.trainer._warn_cpu_once`
+already uses), never raised, and never spammed per frame -- a stream that
+keeps producing implausible brackets keeps silently falling back to the
+ordinary single-frame velocity measurement `track.py`'s `_observe` already
+uses whenever `reupdate()` returns `None` for any other reason, which is
+exactly what makes this change reversible: `max_velocity_per_second <= 0`
+(the default both functions take when a caller passes nothing) disables the
+guard outright, reproducing every byte of this module's pre-repair
+behaviour (invariant P7) -- proven in `tests/tracking/test_reupdate.py`.
 """
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
@@ -155,6 +204,18 @@ from cv_service.tracking.engines.base import Box, Observation
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from cv_service.tracking.history import ObservationRing
     from cv_service.tracking.track import Track
+
+LOGGER = logging.getLogger("cv_service.tracking.reupdate")
+
+# Log-once flag for the implausible-velocity guard below -- same module-
+# level "warn once, never per-frame" idiom `cv_service.training.trainer.
+# _warn_cpu_once`'s own `_cpu_warned` already uses for a degradation that is
+# a property of the DEPLOYMENT (this host has no CUDA / this bracket keeps
+# producing impossible velocities), not of any one call, so a per-`Track` or
+# per-session flag would either miss repeats on other tracks or need state
+# threaded in that this otherwise-pure function does not carry (P5: log once,
+# never raise, never spam per frame).
+_implausible_velocity_logged = False
 
 # The shortest elapsed time this module will ever divide by to reconstruct a
 # velocity -- insurance against the SHAPE of the 2026-08-14 divergence
@@ -218,13 +279,14 @@ def reupdate(
     now: float,
     *,
     max_gap_millis: int,
+    max_velocity_per_second: float = 0.0,
 ) -> Optional[Reupdate]:
     """Rebuild the gap ending at `now` from the two real observations that
     bracket it, and return the corrected velocity -- or `None` when there is
-    no bracketing pair, the gap is not positive, or it exceeds
-    `max_gap_millis` (too long to reconstruct honestly; `memory.py`'s
-    dormant-gallery recovery is what serves that case instead, and it does
-    not consult this ring at all).
+    no bracketing pair, the gap is not positive, it exceeds `max_gap_millis`
+    (too long to reconstruct honestly; `memory.py`'s dormant-gallery
+    recovery is what serves that case instead, and it does not consult this
+    ring at all), or the implied velocity is not plausible (see below).
 
     `ring` is taken as an explicit parameter rather than read off `track`
     (even though every real caller passes `track.history`) so this stays
@@ -236,6 +298,28 @@ def reupdate(
     state, the exact error this function exists to correct (TRACKING-V3-
     PLAN's own instruction, restated here because it is the invariant a
     future edit to this function must not quietly break).
+
+    `max_velocity_per_second` (2026-08-14 repair, part 2 --
+    `docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4/§8): the bracket
+    above only tests that the two real observations are close enough in
+    TIME to bridge; it never tests that they are plausibly the SAME OBJECT.
+    On synthetic scenarios they always are, and ORU wins; on MOT17 -- real
+    crowds, real weak detectors -- they frequently are not, and the
+    reconstruction produces a velocity that is physically impossible (peak
+    measured 12.9 normalized frame-widths/second under the `cost` engine),
+    which then propagates forward as a prediction and costs an identity.
+    Refusing outright (never clamping, never partially applying) is
+    deliberate: an implausible reconstruction is evidence the bracket
+    itself is wrong -- the two observations are probably two different
+    objects -- and a wrong bracket has no salvageable answer, only a less
+    obviously wrong one. `<= 0` (the default) disables this check entirely,
+    reproducing the pre-repair behaviour exactly (invariant P7) -- the same
+    "off switch" shape `max_gap_millis <= 0` already gives the bracket
+    check above. `cv_service/tracking/params.py`'s
+    `TrackingParams.reupdate_max_velocity_per_second` is the one place a
+    deployment default for this lives (invariant P4); this function takes
+    the resolved number as a plain argument and has no opinion on where it
+    came from, same division of labour `max_gap_millis` already has.
     """
     if max_gap_millis <= 0:
         return None
@@ -268,6 +352,15 @@ def reupdate(
     velocity_x = (t2_cx - t1_cx) / gap_seconds
     velocity_y = (t2_cy - t1_cy) / gap_seconds
 
+    # The plausibility guard -- see this function's own docstring on
+    # `max_velocity_per_second` for why refusing outright, not clamping, is
+    # the correct response to a bracket whose implied motion is impossible.
+    if max_velocity_per_second > 0.0 and (
+        abs(velocity_x) > max_velocity_per_second or abs(velocity_y) > max_velocity_per_second
+    ):
+        _warn_implausible_velocity_once(velocity_x, velocity_y, max_velocity_per_second)
+        return None
+
     return Reupdate(
         steps=max(1, track.misses),
         gap_millis=gap_millis,
@@ -282,6 +375,26 @@ def _distance(a: "tuple[float, float]", b: "tuple[float, float]") -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+def _warn_implausible_velocity_once(velocity_x: float, velocity_y: float, bound: float) -> None:
+    """Log the one-time "ORU refused a reconstruction" note, if applicable
+    (P5: a degradation is logged once, never raised, never spammed
+    per-frame -- same `global`-flag idiom `cv_service.training.trainer.
+    _warn_cpu_once` already uses for its own one-shot degradation log)."""
+    global _implausible_velocity_logged
+    if _implausible_velocity_logged:
+        return
+    _implausible_velocity_logged = True
+    LOGGER.warning(
+        "tracking: ORU refused a reconstruction with an implausible velocity "
+        "(x=%.3f, y=%.3f, bound=%.3f frame-widths/heights per second) -- the "
+        "bracket is probably two different objects, not one (this warning "
+        "logs once per process)",
+        velocity_x,
+        velocity_y,
+        bound,
+    )
+
+
 def late_correction(
     track: "Track",
     ring: "ObservationRing",
@@ -290,6 +403,7 @@ def late_correction(
     lag_seconds: float,
     *,
     max_gap_millis: int,
+    max_velocity_per_second: float = 0.0,
 ) -> Optional[Box]:
     """`box` re-propagated to `now`, when this stream measured a positive
     `lag_seconds` for it (TRACKING-V3-PLAN §4.5, wave V6) -- `None` when
@@ -308,16 +422,22 @@ def late_correction(
     `now`.
 
     `None` -- exactly `reupdate()`'s own contract, reused rather than
-    re-decided here -- when `lag_seconds` is not positive, or `ring` has no
+    re-decided here -- when `lag_seconds` is not positive, `ring` has no
     real observation before the capture instant (a brand-new track has
-    nothing to bracket against yet), or the resulting gap exceeds
-    `max_gap_millis`. That ceiling is the SAME one that bounds post-
-    occlusion ORU (`TrackingParams.reupdate_max_gap_millis`) -- reused, not
-    duplicated: a gap too old to reconstruct honestly for one purpose is too
-    old for the other, and `max_gap_millis <= 0` is therefore invariant P7's
-    off switch for this correction too, with no second knob needed just to
-    disable it. Callers must treat `None` as "keep the raw box" and never
-    fabricate a correction from nothing (**P5**).
+    nothing to bracket against yet), the resulting gap exceeds
+    `max_gap_millis`, or the reconstructed velocity fails `reupdate()`'s own
+    `max_velocity_per_second` plausibility guard (2026-08-14 repair, part 2
+    -- this function CALLS `reupdate()` for its velocity, so a bracket that
+    is probably two different objects is exactly as wrong here as it is
+    post-occlusion, and gets exactly the same refusal, not a second
+    decision). Both ceilings are the SAME ones that bound post-occlusion ORU
+    (`TrackingParams.reupdate_max_gap_millis` /
+    `reupdate_max_velocity_per_second`) -- reused, not duplicated: a gap or
+    a velocity too implausible to trust for one purpose is too implausible
+    for the other, and `<= 0` is therefore invariant P7's off switch for
+    this correction too, with no second knob needed just to disable it.
+    Callers must treat `None` as "keep the raw box" and never fabricate a
+    correction from nothing (**P5**).
 
     **Known simplification, stated rather than hidden.** The bracket
     `reupdate()` reads is warped into `box`'s frame by `track.
@@ -340,7 +460,14 @@ def late_correction(
     # stand-ins rather than plumbing the real detection's through for no
     # arithmetic reason.
     stand_in = Observation(key=track.key, box=box, label=track.label, confidence=track.confidence)
-    reconstruction = reupdate(track, ring, stand_in, captured_at, max_gap_millis=max_gap_millis)
+    reconstruction = reupdate(
+        track,
+        ring,
+        stand_in,
+        captured_at,
+        max_gap_millis=max_gap_millis,
+        max_velocity_per_second=max_velocity_per_second,
+    )
     if reconstruction is None:
         return None
     center_x, center_y = box.center

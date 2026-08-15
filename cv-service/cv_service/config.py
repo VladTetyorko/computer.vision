@@ -355,6 +355,46 @@ DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS = 15_000
 # offboard detector, not an opt-in.
 DEFAULT_TRACK_DETECTION_LAG_CORRECTION_ENABLED = True
 
+# 2026-08-14 repair, part 2 (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md`
+# §4/§8): `reupdate()`'s `max_gap_millis` ceiling above bounds HOW LONG a gap
+# it will bridge, but says nothing about WHETHER the two real observations
+# bracketing it are plausibly the same object -- on MOT17 they frequently are
+# not (a crowd, a weak detector), and the reconstruction still returns a
+# number, just a physically impossible one, that then propagates forward as
+# a prediction and costs an identity. Measured: ORU made IDSW worse in 15 of
+# 21 MOT17 scene/detector pairs (+470 net, worst case +277 on
+# `MOT17-04-DPM`), and its own implausible-velocity count rose in 19 of 21
+# (`MOT17-04-DPM` 157 -> 441). `reupdate.py`'s own guard refuses the
+# reconstruction outright when this bound is exceeded -- it does not clamp,
+# because a wrong bracket has no salvageable answer.
+#
+# Units are normalized frame-WIDTHS/HEIGHTS per second, the same units
+# `Detection.velocity_x`/`_y` already carry on the wire (each axis checked
+# independently, never combined into one Euclidean magnitude -- the same
+# reason `tools/trackeval/metrics.py`'s own `MAX_PLAUSIBLE_VELOCITY_PER_
+# SECOND` keeps its two axes separate). Derived the SAME way that constant
+# was, kept consistent with it BY HAND rather than by import -- this module
+# must not import from `tools/`:
+#   - `tools/trackeval/sequences.py`'s `TINY_FAST_CAMERA_VELOCITY` (0.06
+#     frame-widths/frame at `DEFAULT_FPS=10`) is 0.6 frame-widths/sec, the
+#     single fastest apparent motion any scenario in that harness produces
+#     -- already a deliberately extreme synthetic pan.
+#   - `docs/conclusions/CV-RATE-BUDGET.md` §2's own most aggressive
+#     documented case -- a 90 deg/s "aggressive" search yaw -- is 1.5
+#     frame-widths/sec of purely camera-induced apparent motion, faster than
+#     the harness's own synthetic worst case.
+# A target crossing the ENTIRE frame in under a fifth of a second (5.0/sec)
+# clears both by more than 3x, so neither a legitimate fast pan nor a fast
+# real target ever trips it, while the divergent reconstructions this bound
+# exists to refuse (peak measured 12.9/sec under the `cost` engine,
+# `TRACKING-BENCHMARK-RESULTS.md` §5) trip it with wide margin.
+#
+# `<=0` disables the guard entirely, reproducing `reupdate()`'s pre-repair
+# behaviour exactly (invariant P7) -- same `<=0`-is-a-legitimate-disabled-
+# value shape as `DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS` above:
+# `_parse_float_allow_nonpositive`, not `_parse_positive_float`.
+DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND = 5.0
+
 # --- pull (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
 #
 # Back `cv_service.pull.{source,clock,loop}` -- the worker's own decode loop
@@ -575,6 +615,28 @@ def _parse_int_allow_nonpositive(raw: Optional[str], default: int, var_name: str
         return default
 
 
+def _parse_float_allow_nonpositive(raw: Optional[str], default: float, var_name: str) -> float:
+    """Forgiving-parse for a float knob where `<=0` is a legitimate DISABLE
+    value, not a typo to guard against -- the float counterpart of
+    `_parse_int_allow_nonpositive` immediately above
+    (`CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND`: see
+    `DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND`'s own comment for why
+    ORU's plausibility guard needs a fleet-wide off switch the same shape as
+    `DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS`'s).
+
+    Unlike `_parse_positive_float`, a non-positive parsed value is accepted
+    as-is rather than replaced by `default`; only genuinely non-numeric
+    input falls back, same "never raise" contract every parser here shares.
+    """
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        LOGGER.warning("%s=%r is not a valid number; using default %s", var_name, raw, default)
+        return default
+
+
 def _parse_engine_id(raw: Optional[str], default: str) -> str:
     """Unset/blank -> `default`; anything else passes through stripped.
 
@@ -757,6 +819,7 @@ class Settings:
     track_capability_level: int = DEFAULT_TRACK_CAPABILITY_LEVEL
     track_reupdate_max_gap_millis: int = DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS
     track_detection_lag_correction_enabled: bool = DEFAULT_TRACK_DETECTION_LAG_CORRECTION_ENABLED
+    track_reupdate_max_velocity_per_second: float = DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND
     pull_decoder: str = DEFAULT_PULL_DECODER
     pull_rtsp_transport: str = DEFAULT_PULL_RTSP_TRANSPORT
     pull_target_fps: float = DEFAULT_PULL_TARGET_FPS
@@ -958,6 +1021,11 @@ class Settings:
                 os.environ.get("CV_TRACK_DETECTION_LAG_CORRECTION_ENABLED"),
                 DEFAULT_TRACK_DETECTION_LAG_CORRECTION_ENABLED,
                 "CV_TRACK_DETECTION_LAG_CORRECTION_ENABLED",
+            ),
+            track_reupdate_max_velocity_per_second=_parse_float_allow_nonpositive(
+                os.environ.get("CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND"),
+                DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND,
+                "CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND",
             ),
             pull_decoder=_parse_string(os.environ.get("CV_PULL_DECODER"), DEFAULT_PULL_DECODER),
             pull_rtsp_transport=_parse_string(
