@@ -194,6 +194,53 @@ problem, and a velocity bound cannot see it.**
 
 ---
 
+## 4c. Density gate — swept, and it does not save ORU
+
+§4b's split (0 of 7 crowded scenes improved) suggested gating ORU on scene density.
+`CV_TRACK_REUPDATE_MAX_TRACK_COUNT` refuses a reconstruction when more than N tracks are live.
+
+**The signal is a proxy.** `reupdate()` is a pure function of a `Track` and has no `TrackBook`
+reference, so detections-per-frame — what §4b actually measured — is not reachable without threading
+an argument through five `TrackBook.apply()` call sites, some of which (tracker-only FOLLOW frames)
+have no detector pass to count. Live track count is used instead. Measured range: median 5
+(`MOT17-09`) to 34 (`MOT17-04-SDP`).
+
+Swept across all 21 scene/detector pairs, `cost`, ORU on:
+
+| configuration | IDSW | vs ORU off | recovery | scenes beating ORU-off |
+|---|---|---|---|---|
+| **ORU off** | **6075** | — | 56.7 % | — |
+| ORU on, no gate | 6452 | +377 | 56.6 % | — |
+| gate ≤ 6 | 6064 | **−11** | 56.7 % | 3 / 21 |
+| gate ≤ 8 | 6143 | +68 | 56.6 % | 3 / 21 |
+| gate ≤ 10 | 6219 | +144 | 56.9 % | 4 / 21 |
+| gate ≤ 12 | 6259 | +184 | 56.3 % | 3 / 21 |
+| gate ≤ 15 | 6279 | +204 | 56.9 % | 4 / 21 |
+| gate ≤ 20 | 6213 | +138 | 56.8 % | 6 / 21 |
+| gate ≤ 30 | 6368 | +293 | 56.9 % | 5 / 21 |
+
+**No threshold makes ORU pay.** Every setting lands between "ORU off" and "ORU ungated", and the only
+one reaching parity does so by **switching ORU off almost everywhere**: at ≤ 6, sixteen of
+twenty-one scenes are byte-identical to ORU-off because the gate never lets a reconstruction through.
+The −11 is 0.2 % — noise.
+
+**And the gate discards the wins with the losses.** ORU's two largest ungated gains were
+`MOT17-13-FRCNN` (−51) and `MOT17-13-SDP` (−38) — the moving-bus scene, median 9 tracks. At ≤ 6 those
+become **+6 and 0**. The gate cannot separate them from `MOT17-04-DPM`'s +233, because both sit in
+the middle of the track-count range. Recovery is flat at 56.3–56.9 % across every configuration: ORU
+buys no recovery at any density either.
+
+**Conclusion: density is a poor proxy for bracket ambiguity, which is what actually breaks ORU.** Two
+observations can bracket different objects in an uncrowded frame and the same object in a busy one.
+The gate ships **disabled by default** — the sweep found no value worth enabling — and stays as a
+deployment knob. The real fix remains a same-object test on the bracket itself
+([TRACKING-RECOVERY-RESEARCH.md](TRACKING-RECOVERY-RESEARCH.md) §2.1), which is the one thing none of
+velocity-bounding, density-gating or threshold-tuning can substitute for.
+
+Raw sweep rows: `cv-service/benchmarks/results-density-sweep.csv`.
+
+---
+
 ## 5. O3 fired on first contact
 
 The velocity plausibility metric committed hours earlier scored **0 on all thirty synthetic rows**.
@@ -250,10 +297,11 @@ Stated so no one reads more into the tables than is there.
 
 1. **~~Give ORU a plausibility guard~~ — done (§4b), and it was necessary but not sufficient.** Keep
    it: 605 fewer non-physical velocities is worth having regardless. But it did not make ORU pay.
-2. **Gate ORU on scene density, or default it off.** It has improved 0 of 7 crowded scenes and its
-   only real wins are sparse + ego-motion — which is our deployment, so this is a defaults question,
-   not a delete question. The honest next experiment is aerial footage, where our density genuinely
-   lives.
+2. **~~Gate ORU on scene density~~ — built and swept (§4c); no threshold pays.** Density is a poor
+   proxy for bracket ambiguity. The knob ships disabled. **ORU remains on by default (15 s gap) and
+   is worth +377 IDSW on this data** — that default deserves a decision, but not from out-of-regime
+   evidence: ORU's largest wins came from the one ego-motion-dominated scene here, which is the
+   closest analogue to a drone we have.
 3. **The real ORU fix is a bracket-identity check**, not a tighter velocity bound: confirm the two
    bracketing observations plausibly belong to the same object (IoU-with-prediction, or appearance at
    L4+) before interpolating between them. That is a wave, not a patch.

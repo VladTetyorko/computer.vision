@@ -676,6 +676,13 @@ class StreamTrackingSession:
             self._frame_lag_seconds,
             max_gap_millis=self._params.reupdate_max_gap_millis,
             max_velocity_per_second=self._params.reupdate_max_velocity_per_second,
+            # 2026-08-15 density gate -- `self._book.tracks` is reachable
+            # here with no threading at all (unlike detections/frame, which
+            # this method has no way to reach -- see `reupdate.py`'s own
+            # module docstring for why that signal is a proxy, not the
+            # measured quantity).
+            max_track_count=self._params.reupdate_max_track_count,
+            live_track_count=len(self._book.tracks),
         )
         if corrected is None:
             return box, now - self._frame_lag_seconds

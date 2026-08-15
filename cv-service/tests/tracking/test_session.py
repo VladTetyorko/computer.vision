@@ -2187,6 +2187,63 @@ def test_detection_lag_correction_respects_the_shared_reupdate_ceiling():
     assert outcome.boxes[0].box.x == pytest.approx(0.15)  # uncorrected -- no honest bracket
 
 
+def test_detection_lag_correction_respects_the_density_gate():
+    # Same shape as the gap-ceiling test directly above, now for the
+    # 2026-08-15 density gate (`docs/conclusions/TRACKING-BENCHMARK-
+    # RESULTS.md` §4b): `_late_corrected_box` calls `reupdate_module.
+    # late_correction`, so this is the session-level proof that the density
+    # gate genuinely covers that call site too, not merely `track.py`'s
+    # post-occlusion one -- checked directly rather than assumed from the
+    # shared call.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(
+        registry, settings=dataclasses.replace(Settings(), track_reupdate_max_track_count=1)
+    )
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    # A second, non-overlapping detection every frame keeps a SECOND live
+    # track in the book throughout -- `self._book.tracks` holds 2 live
+    # tracks by the time the tracked car re-anchors, over the 1-track
+    # ceiling given here.
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0), det("car", x=0.6, y=0.6)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0), det("car", x=0.6, y=0.6)])
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.15, y=0.0), det("car", x=0.6, y=0.6)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    # `boxes_out` is ordered by the ORIGINAL detection index (`session.py`'s
+    # own `_run_cost_associate`), regardless of match order -- index 0 is
+    # the first `det(...)` given to `detect_returning` above.
+    assert outcome.boxes[0].box.x == pytest.approx(0.15)  # uncorrected -- book too crowded to trust
+
+
+def test_detection_lag_correction_density_gate_is_disabled_by_default():
+    # invariant P7: the SAME crowded scene the test above refuses must still
+    # be corrected when the density ceiling is left at its disabled default
+    # (`0`, `Settings()`'s own default) -- reproducing today's behaviour
+    # exactly.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0), det("car", x=0.6, y=0.6)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0), det("car", x=0.6, y=0.6)])
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.15, y=0.0), det("car", x=0.6, y=0.6)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    # (0.15 - 0.1) / 0.5 = 0.1/s from the t=1.0s bracket, projected forward
+    # the same 500ms lag: 0.15 + 0.1*0.5 = 0.2 -- same formula `test_late_
+    # detection_lag_correction_applies_to_follows_reanchor` above proves.
+    assert outcome.boxes[0].box.x == pytest.approx(0.2)  # corrected -- projected forward at 0.1/s
+
+
 # -- P3/P8: pure stdlib, available at capability level L1 --------------------
 #
 # TRACKING-V3-PLAN invariant P8, and this wave's own acceptance: "This wave

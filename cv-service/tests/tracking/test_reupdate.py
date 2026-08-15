@@ -449,6 +449,249 @@ def test_a_plausible_reconstruction_never_logs_anything(monkeypatch, caplog):
     assert caplog.records == []
 
 
+# -- 2026-08-15 density gate: crowding, not merely velocity ------------------
+#
+# `docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b: split by scene
+# density, ORU improved 0 of 7 crowded scenes (net +320 IDSW) against 5 of 14
+# sparse scenes (net +57). These tests are that gate's own acceptance
+# criteria: it fires on a bracket whose implied velocity is perfectly
+# plausible, purely because the book is crowded (#1), `<= 0` reproduces the
+# pre-gate reconstruction exactly however crowded the book (#2, invariant
+# P7), and `late_correction` -- which calls `reupdate()` for its own velocity
+# rather than re-deriving it -- is genuinely covered too, not merely assumed
+# to be.
+
+
+def test_none_when_live_track_count_exceeds_the_density_gate():
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    # A small, entirely plausible velocity (0.5/s) -- only density refuses
+    # this reconstruction; a bracket that would reconstruct fine at low
+    # density returns `None` once the book is above the threshold.
+    result = reupdate(
+        subject,
+        subject.history,
+        real(0.5, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_track_count=3,
+        live_track_count=4,
+    )
+
+    assert result is None
+
+
+def test_a_bracket_below_the_density_gate_is_not_refused():
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        real(0.5, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_track_count=3,
+        live_track_count=2,
+    )
+
+    assert result is not None
+    assert result.velocity_x == pytest.approx(0.5)
+
+
+def test_a_live_track_count_exactly_at_the_gate_is_not_refused():
+    # Same strictly-greater-than convention `max_velocity_per_second`'s own
+    # test proves: a book exactly at the ceiling is not itself evidence of
+    # an untrustworthy bracket.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        real(0.5, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_track_count=3,
+        live_track_count=3,
+    )
+
+    assert result is not None
+
+
+def test_a_refused_high_density_reconstruction_leaves_no_partial_or_clamped_answer():
+    # The gate refuses outright rather than clamping -- `result` must be
+    # `None`, never a `Reupdate` computed regardless of the book's size.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(
+        subject,
+        subject.history,
+        real(0.5, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_track_count=3,
+        live_track_count=10,
+    )
+
+    assert result is None
+
+
+def test_a_non_positive_track_count_ceiling_is_a_genuine_off_switch():
+    # invariant P7, the SAME shape `max_velocity_per_second`'s own test
+    # above proves: `max_track_count <= 0` must reproduce the reconstruction
+    # exactly, however crowded the book.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    for bound in (0, -1):
+        result = reupdate(
+            subject,
+            subject.history,
+            real(0.5, 0.0),
+            now=1.0,
+            max_gap_millis=10_000,
+            max_track_count=bound,
+            live_track_count=1_000,
+        )
+        assert result is not None
+        assert result.velocity_x == pytest.approx(0.5)
+
+
+def test_the_default_density_gate_is_disabled_reproducing_pre_gate_behaviour():
+    # No `max_track_count`/`live_track_count` argument at all -- every call
+    # site this module had before this gate -- must behave identically to an
+    # explicit non-positive bound, i.e. today's exact behaviour (P7,
+    # acceptance #2/#3: the default leaves everything byte-identical).
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = reupdate(subject, subject.history, real(0.5, 0.0), now=1.0, max_gap_millis=10_000)
+
+    assert result is not None
+    assert result.velocity_x == pytest.approx(0.5)
+
+
+def test_late_correction_is_none_when_live_track_count_exceeds_the_density_gate():
+    # `late_correction` does not re-derive velocity -- it CALLS `reupdate()`
+    # for it -- so this confirms the density gate genuinely covers that path
+    # too, rather than assuming a shared call automatically inherits it.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = late_correction(
+        subject,
+        subject.history,
+        Box(0.2, 0.0, 0.1, 0.1),
+        now=1.0,
+        lag_seconds=0.5,
+        max_gap_millis=10_000,
+        max_track_count=3,
+        live_track_count=4,
+    )
+
+    assert result is None
+
+
+def test_late_correction_still_succeeds_when_the_density_gate_is_disabled():
+    # invariant P7 for `late_correction` specifically: a crowded book that
+    # the gate would otherwise refuse must still be applied when the ceiling
+    # is left at its disabled default, exactly as before this gate.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    result = late_correction(
+        subject,
+        subject.history,
+        Box(0.2, 0.0, 0.1, 0.1),
+        now=1.0,
+        lag_seconds=0.5,
+        max_gap_millis=10_000,
+        live_track_count=1_000,
+    )
+
+    assert result is not None
+
+
+def test_the_density_gate_is_logged_once_per_process_never_per_frame(monkeypatch, caplog):
+    # P5: a gated-out reconstruction is a degradation, never raised, and
+    # logged at most once -- not once per frame, however many times the
+    # same stream keeps producing a too-crowded bracket.
+    monkeypatch.setattr(reupdate_module, "_high_density_logged", False)
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.reupdate"):
+        for live_track_count in (4, 5, 6):
+            result = reupdate(
+                subject,
+                subject.history,
+                real(0.5, 0.0),
+                now=1.0,
+                max_gap_millis=10_000,
+                max_track_count=3,
+                live_track_count=live_track_count,
+            )
+            assert result is None
+
+    assert sum("density gate" in record.getMessage() for record in caplog.records) == 1
+
+
+def test_a_sparse_book_never_logs_the_density_gate(monkeypatch, caplog):
+    monkeypatch.setattr(reupdate_module, "_high_density_logged", False)
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.reupdate"):
+        result = reupdate(
+            subject,
+            subject.history,
+            real(0.5, 0.0),
+            now=1.0,
+            max_gap_millis=10_000,
+            max_track_count=3,
+            live_track_count=1,
+        )
+
+    assert result is not None
+    assert caplog.records == []
+
+
+def test_the_density_gate_and_velocity_guard_are_independent():
+    # A book too crowded to trust AND an implausible velocity: the density
+    # gate must still refuse even though the velocity guard is disabled
+    # here, and vice versa -- neither guard's absence hides the other's
+    # presence.
+    subject = track()
+    subject.history.record(real(0.0, 0.0), 0.0)
+
+    density_only = reupdate(
+        subject,
+        subject.history,
+        real(10.0, 0.0),  # implausible if the velocity guard were active
+        now=1.0,
+        max_gap_millis=10_000,
+        max_track_count=3,
+        live_track_count=4,  # over the density ceiling
+        # max_velocity_per_second left at its disabled default (0.0)
+    )
+    assert density_only is None
+
+    velocity_only = reupdate(
+        subject,
+        subject.history,
+        real(10.0, 0.0),
+        now=1.0,
+        max_gap_millis=10_000,
+        max_velocity_per_second=5.0,
+        live_track_count=1,  # well under a ceiling that is disabled anyway
+        # max_track_count left at its disabled default (0)
+    )
+    assert velocity_only is None
+
+
 # -- late_correction (TRACKING-V3-PLAN wave V6, §4.5) ------------------------
 
 

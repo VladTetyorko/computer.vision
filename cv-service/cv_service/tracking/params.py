@@ -260,6 +260,30 @@ class TrackingParams:
     # disables the guard entirely, reproducing pre-repair behaviour exactly
     # (invariant P7) -- same shape as `reupdate_max_gap_millis` above.
     reupdate_max_velocity_per_second: float
+    # 2026-08-15 density gate (`docs/conclusions/TRACKING-BENCHMARK-
+    # RESULTS.md` §4b/§8). Deployment-only, no wire field -- same "no per-
+    # request override to fall back FROM" shape `detection_lag_correction_
+    # enabled`/`reupdate_max_velocity_per_second` above already use. §4b's
+    # own density split (0 of 7 crowded scenes improved, +320 net IDSW,
+    # against 5 of 14 sparse scenes improved, +57 net) is what motivates a
+    # SECOND, independent refusal on top of the velocity guard: a bracket
+    # can imply a plausible velocity and still be built from two different
+    # objects, and that gets more likely, not less, as the scene fills up.
+    # `reupdate.py`'s own guard reads this straight: when the number of
+    # LIVE TRACKS in the book at the moment of re-anchor exceeds it, the
+    # reconstruction is refused outright (`None`, never clamped) -- the
+    # SAME contract `reupdate_max_velocity_per_second` already established.
+    # Track count, not detections/frame (what §4b actually measured) --
+    # `reupdate.py`'s own module docstring records why that signal is not
+    # reachable at either real call site without threading a new argument
+    # through several `session.py` layers, and states plainly that a track
+    # count is a PROXY, not the measured quantity. `<=0` disables the gate
+    # entirely, reproducing today's exact behaviour (invariant P7) -- same
+    # shape as `reupdate_max_velocity_per_second` above. Defaulted to `0`
+    # (DISABLED) in `config.py`'s `DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT`:
+    # unlike the velocity bound, no sweep against real footage has picked a
+    # value for this one yet -- see that constant's own comment.
+    reupdate_max_track_count: int
 
     @property
     def active(self) -> bool:
@@ -454,4 +478,7 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
         # 2026-08-14 repair, part 2 -- straight from `Settings`, no wire
         # field (same shape as `detection_lag_correction_enabled` above).
         reupdate_max_velocity_per_second=settings.track_reupdate_max_velocity_per_second,
+        # 2026-08-15 density gate -- straight from `Settings`, no wire field
+        # (same shape as `reupdate_max_velocity_per_second` directly above).
+        reupdate_max_track_count=settings.track_reupdate_max_track_count,
     )

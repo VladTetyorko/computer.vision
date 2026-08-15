@@ -725,3 +725,69 @@ def test_garbage_velocity_bound_env_var_falls_back_and_never_raises(monkeypatch)
         settings.track_reupdate_max_velocity_per_second
         == Settings().track_reupdate_max_velocity_per_second
     )
+
+
+# -- 2026-08-15 density gate: reupdate_max_track_count -----------------------
+# (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b/§8). Deployment-only,
+# no wire field -- same "no per-request override to fall back FROM" shape as
+# `reupdate_max_velocity_per_second` above; `<=0` is a legitimate DISABLE
+# value, same shape as `reupdate_max_gap_millis`/`reupdate_max_velocity_per_
+# second`. Unlike the velocity bound, this ships DISABLED by default (`0`) --
+# no sweep against real footage has picked a threshold yet.
+
+
+def test_resolve_takes_reupdate_max_track_count_straight_from_settings():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_track_count=5)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_track_count == 5
+
+
+def test_reupdate_max_track_count_defaults_to_disabled():
+    # `cv_service.config.DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT` -- `0`,
+    # provisional, pending the sweep against `benchmarks/` (see that
+    # constant's own comment); unlike `reupdate_max_velocity_per_second`,
+    # deliberately NOT derived from a documented platform bound.
+    assert Settings().track_reupdate_max_track_count == 0
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), Settings())
+    assert resolved.reupdate_max_track_count == 0
+
+
+def test_a_negative_deployment_track_count_ceiling_is_a_legitimate_disabled_value():
+    # Same shape as `reupdate_max_velocity_per_second`'s own non-positive
+    # test above: a non-positive DEPLOYMENT default is not replaced by
+    # anything -- it is the operator's own choice to run the density gate
+    # off fleet-wide (`reupdate.py`'s own gate never fires once the ceiling
+    # is non-positive).
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_track_count=-1)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_track_count == -1
+
+
+def test_settings_read_the_density_gate_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_TRACK_COUNT", "8")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_track_count == 8
+
+
+def test_a_non_positive_track_count_env_var_disables_rather_than_falling_back(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_TRACK_COUNT", "0")
+
+    assert Settings.from_env().track_reupdate_max_track_count == 0
+
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_TRACK_COUNT", "-1")
+
+    assert Settings.from_env().track_reupdate_max_track_count == -1
+
+
+def test_garbage_track_count_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_TRACK_COUNT", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_track_count == Settings().track_reupdate_max_track_count

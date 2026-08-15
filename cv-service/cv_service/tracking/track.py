@@ -658,6 +658,13 @@ class TrackBook:
                     captured_at,
                     max_gap_millis=self._params.reupdate_max_gap_millis,
                     max_velocity_per_second=self._params.reupdate_max_velocity_per_second,
+                    # 2026-08-15 density gate -- `self._tracks` is this
+                    # `TrackBook`'s own live-track dict, reachable here with
+                    # no threading at all (unlike detections/frame, which
+                    # this method has no way to reach -- see `reupdate.py`'s
+                    # own module docstring for why that signal is a proxy).
+                    max_track_count=self._params.reupdate_max_track_count,
+                    live_track_count=len(self._tracks),
                 )
                 self._last_reupdate_millis += int(round((perf_counter() - started) * 1000.0))
             if reconstruction is not None:

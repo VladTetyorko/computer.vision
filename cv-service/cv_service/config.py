@@ -395,6 +395,53 @@ DEFAULT_TRACK_DETECTION_LAG_CORRECTION_ENABLED = True
 # `_parse_float_allow_nonpositive`, not `_parse_positive_float`.
 DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND = 5.0
 
+# 2026-08-15 density gate (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md`
+# §4b/§8 item 2): the velocity guard directly above tests whether a bracket's
+# IMPLIED motion is plausible; it has nothing to say about whether the
+# bracket was ever trustworthy to begin with. §4b's own re-run of all 21
+# MOT17 ORU pairs, split by scene density, is what exposes the gap that
+# leaves open: at >=10 detections/frame ORU improved **0 of 7** scenes (net
+# +320 IDSW); below that line it improved 5 of 14 (net +57). ORU has never
+# once helped a crowded scene -- crowding, not velocity, is what makes two
+# bracketing observations likely to be two different objects, and a velocity
+# bound cannot see density at all.
+#
+# `reupdate.py`'s guard gets a second, independent gate: refuse the
+# reconstruction outright (the SAME `None` contract, never a clamp) when the
+# scene is too crowded for the bracket to be trusted. **Measured "density"
+# vs. what this gate actually reads**: the benchmark above measures
+# detections/frame, but `reupdate()`/`late_correction()` are pure functions
+# that take a `Track` and an `ObservationRing` and nothing else -- no
+# reference to `TrackBook` or to the frame's raw detection list. Threading
+# the actual per-frame detection count down to them would mean a new
+# argument through every one of `TrackBook.apply()`'s callers, across both
+# ASSOCIATE engines and every FOLLOW branch in `session.py` (already
+# flagged oversized in its own module docstring) -- and some of those
+# callers (a tracker-only FOLLOW frame) have no detector pass to count in
+# the first place. The number of LIVE TRACKS in the book at the moment of
+# re-anchor is reachable at both real call sites with no threading at all
+# (`TrackBook._observe` already has `self._tracks`; `StreamTrackingSession.
+# _late_corrected_box` already has `self._book.tracks`), and it rises and
+# falls with scene crowding the same way detections/frame does. It is a
+# PROXY, stated plainly as one -- correlated with what was measured, not
+# identical to it.
+#
+# `<=0` disables the gate entirely, reproducing today's exact behaviour
+# (invariant P7) -- same `_parse_int_allow_nonpositive` shape as `DEFAULT_
+# TRACK_REUPDATE_MAX_GAP_MILLIS` above.
+#
+# Defaulted to `0` (DISABLED), deliberately -- unlike the velocity bound
+# above, which was derived from this platform's own documented worst-case
+# motion, nobody has yet swept a live-track ceiling against the real MOT17
+# matrix. §4b's table says the dense half is unanimous; it does not say
+# what count actually separates "trustworthy" from "not" on real footage.
+# Picking a number here from intuition would be exactly the un-evidenced
+# default this results doc argues against (§8 item 2: "gate ORU on scene
+# density... The honest next experiment..."). `CV_TRACK_REUPDATE_MAX_TRACK_
+# COUNT` swept across `benchmarks/` is what sets this value, not this
+# comment.
+DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT = 0
+
 # --- pull (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
 #
 # Back `cv_service.pull.{source,clock,loop}` -- the worker's own decode loop
@@ -820,6 +867,7 @@ class Settings:
     track_reupdate_max_gap_millis: int = DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS
     track_detection_lag_correction_enabled: bool = DEFAULT_TRACK_DETECTION_LAG_CORRECTION_ENABLED
     track_reupdate_max_velocity_per_second: float = DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND
+    track_reupdate_max_track_count: int = DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT
     pull_decoder: str = DEFAULT_PULL_DECODER
     pull_rtsp_transport: str = DEFAULT_PULL_RTSP_TRANSPORT
     pull_target_fps: float = DEFAULT_PULL_TARGET_FPS
@@ -1026,6 +1074,11 @@ class Settings:
                 os.environ.get("CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND"),
                 DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND,
                 "CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND",
+            ),
+            track_reupdate_max_track_count=_parse_int_allow_nonpositive(
+                os.environ.get("CV_TRACK_REUPDATE_MAX_TRACK_COUNT"),
+                DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT,
+                "CV_TRACK_REUPDATE_MAX_TRACK_COUNT",
             ),
             pull_decoder=_parse_string(os.environ.get("CV_PULL_DECODER"), DEFAULT_PULL_DECODER),
             pull_rtsp_transport=_parse_string(

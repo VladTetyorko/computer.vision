@@ -190,6 +190,71 @@ exactly what makes this change reversible: `max_velocity_per_second <= 0`
 (the default both functions take when a caller passes nothing) disables the
 guard outright, reproducing every byte of this module's pre-repair
 behaviour (invariant P7) -- proven in `tests/tracking/test_reupdate.py`.
+
+## 2026-08-15 density gate: a plausible velocity is not a trustworthy bracket
+
+`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b re-ran the velocity
+guard above across all 21 MOT17 ORU pairs and split the result by scene
+density: at 10 or more detections/frame, ORU improved **0 of 7** scenes
+(net **+320** IDSW); below that line it improved 5 of 14 (net +57). ORU has
+never once helped a crowded scene. The velocity guard tests whether a
+bracket's IMPLIED motion is physically possible; it has no opinion on
+whether the two observations it interpolates between were ever the SAME
+OBJECT to begin with, and bracket ambiguity rises with crowding by
+construction -- more live targets means more candidates a weak detector's
+next real observation could plausibly (if wrongly) continue.
+
+The fix is a SECOND, independent gate, refusing the same way the velocity
+guard does (`None`, never clamped, same call sites): when the scene is too
+crowded for the bracket to be trusted, do not attempt it.
+
+**What "crowded" reads, and why it is a proxy, not the measured
+quantity.** §4b measured density as detections/frame. `reupdate()`/
+`late_correction()` are pure functions of `track`, `ring` and a handful of
+plain values -- neither carries a reference to `TrackBook` or to the raw
+per-frame detection list, so neither can compute "detections this frame"
+from what it is handed. Getting that number here would mean threading a
+new argument through `TrackBook.apply()`'s callers in `session.py`: two
+different ASSOCIATE branches (`cost` and `bytetrack`) plus FOLLOW's verify
+and extras paths, a file whose own module docstring already records it
+overran its ~80-line budget. Worse, some of those callers have no such
+number to offer -- a tracker-only FOLLOW frame runs no detector pass at
+all, so "detections this frame" is not merely hard to reach there, it does
+not exist.
+
+The number of LIVE TRACKS in the book at the moment of re-anchor is
+reachable at BOTH real call sites with no threading at all: `track.py`'s
+`_observe` is itself a `TrackBook` method (`self._tracks`), and `session.
+py`'s `_late_corrected_box` already holds `self._book` for other reasons
+(`self._book.tracks`). It rises and falls with scene crowding the same
+direction detections/frame does -- more objects in view tends to mean both
+more detections AND more live tracks -- but it is not the same number (a
+missed detection shrinks one and not the other; a coasting/LOST track
+still counts toward the book's `self._tracks` for a while after the
+detector stops confirming it). Stated plainly: this is a PROXY for what
+§4b measured, chosen because it is the one signal actually in reach at
+both call sites, not because it is believed identical to detections/frame.
+
+Callers pass it in as `live_track_count`; the ceiling itself is
+`max_track_count` (`cv_service.config.DEFAULT_TRACK_REUPDATE_MAX_TRACK_
+COUNT`, invariant P4 -- this module takes the resolved number as a plain
+argument, same division of labour `max_velocity_per_second` already has).
+`max_track_count <= 0` disables the gate entirely, reproducing this
+module's pre-gate behaviour exactly (invariant P7) -- the SAME `<=0`-is-
+disabled shape every other ceiling in this module already uses. It ships
+DEFAULTED TO `0` (disabled): unlike the velocity bound, which was derived
+from this platform's own documented worst-case motion, nobody has yet
+swept a live-track ceiling against the real MOT17 matrix to know what
+count actually separates "trustworthy" from "not" -- see `config.py`'s own
+comment on the default constant for what sets it instead of a guess.
+
+Checked as its own step, independent of and in addition to the velocity
+guard -- a crowded frame is refused whether or not the implied velocity
+would have passed, and a sparse frame's implausible velocity is still
+refused whether or not the book happens to be small. Logged once per
+process (`_warn_high_density_once`, the SAME `global`-flag idiom
+`_warn_implausible_velocity_once` above uses), never raised, never spammed
+per frame (invariant P5).
 """
 
 from __future__ import annotations
@@ -216,6 +281,14 @@ LOGGER = logging.getLogger("cv_service.tracking.reupdate")
 # threaded in that this otherwise-pure function does not carry (P5: log once,
 # never raise, never spam per frame).
 _implausible_velocity_logged = False
+
+# Log-once flag for the density gate below (2026-08-15) -- same idiom and
+# same reasoning as `_implausible_velocity_logged` immediately above, kept
+# as its own separate flag (not reused) so a deployment that trips both
+# guards logs each once, rather than the second guard's first occurrence
+# silently going unreported because the first already flipped a shared
+# flag.
+_high_density_logged = False
 
 # The shortest elapsed time this module will ever divide by to reconstruct a
 # velocity -- insurance against the SHAPE of the 2026-08-14 divergence
@@ -280,13 +353,16 @@ def reupdate(
     *,
     max_gap_millis: int,
     max_velocity_per_second: float = 0.0,
+    max_track_count: int = 0,
+    live_track_count: int = 0,
 ) -> Optional[Reupdate]:
     """Rebuild the gap ending at `now` from the two real observations that
     bracket it, and return the corrected velocity -- or `None` when there is
     no bracketing pair, the gap is not positive, it exceeds `max_gap_millis`
     (too long to reconstruct honestly; `memory.py`'s dormant-gallery
     recovery is what serves that case instead, and it does not consult this
-    ring at all), or the implied velocity is not plausible (see below).
+    ring at all), the implied velocity is not plausible, or the scene is too
+    crowded to trust the bracket at all (see both guards below).
 
     `ring` is taken as an explicit parameter rather than read off `track`
     (even though every real caller passes `track.history`) so this stays
@@ -320,8 +396,25 @@ def reupdate(
     deployment default for this lives (invariant P4); this function takes
     the resolved number as a plain argument and has no opinion on where it
     came from, same division of labour `max_gap_millis` already has.
+
+    `max_track_count`/`live_track_count` (2026-08-15 density gate --
+    `docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b/§8): independent of
+    the velocity guard above, and checked before any bracket arithmetic runs
+    -- a bracket built in a crowded scene is refused whether or not its
+    implied velocity would have passed. `live_track_count` is the CALLER's
+    own count of live tracks in the book right now (this function has no
+    book reference to compute it from); `max_track_count` is the deployment
+    ceiling above which that count is too crowded to trust. `<= 0` (the
+    default) disables this gate entirely, the same off-switch shape every
+    other ceiling here uses (invariant P7). See this module's own docstring
+    for why track count, not detections/frame (what §4b actually measured),
+    is what reaches this function -- stated there as a PROXY, not assumed to
+    be the same signal.
     """
     if max_gap_millis <= 0:
+        return None
+    if max_track_count > 0 and live_track_count > max_track_count:
+        _warn_high_density_once(live_track_count, max_track_count)
         return None
     bracket = ring.before(now)
     if bracket is None:
@@ -395,6 +488,27 @@ def _warn_implausible_velocity_once(velocity_x: float, velocity_y: float, bound:
     )
 
 
+def _warn_high_density_once(live_track_count: int, bound: int) -> None:
+    """Log the one-time "ORU refused a reconstruction: too crowded" note, if
+    applicable (P5: a degradation is logged once, never raised, never
+    spammed per-frame -- same `global`-flag idiom `_warn_implausible_
+    velocity_once` above already uses, kept as its own flag/message so this
+    guard's first occurrence is reported even when the velocity guard
+    already logged once for a different track)."""
+    global _high_density_logged
+    if _high_density_logged:
+        return
+    _high_density_logged = True
+    LOGGER.warning(
+        "tracking: ORU refused a reconstruction -- the book held %d live "
+        "track(s), above the %d-track density gate (a crowded scene's "
+        "bracket is not trustworthy, docs/conclusions/TRACKING-BENCHMARK-"
+        "RESULTS.md §4b; this warning logs once per process)",
+        live_track_count,
+        bound,
+    )
+
+
 def late_correction(
     track: "Track",
     ring: "ObservationRing",
@@ -404,6 +518,8 @@ def late_correction(
     *,
     max_gap_millis: int,
     max_velocity_per_second: float = 0.0,
+    max_track_count: int = 0,
+    live_track_count: int = 0,
 ) -> Optional[Box]:
     """`box` re-propagated to `now`, when this stream measured a positive
     `lag_seconds` for it (TRACKING-V3-PLAN §4.5, wave V6) -- `None` when
@@ -425,19 +541,23 @@ def late_correction(
     re-decided here -- when `lag_seconds` is not positive, `ring` has no
     real observation before the capture instant (a brand-new track has
     nothing to bracket against yet), the resulting gap exceeds
-    `max_gap_millis`, or the reconstructed velocity fails `reupdate()`'s own
+    `max_gap_millis`, the reconstructed velocity fails `reupdate()`'s own
     `max_velocity_per_second` plausibility guard (2026-08-14 repair, part 2
     -- this function CALLS `reupdate()` for its velocity, so a bracket that
     is probably two different objects is exactly as wrong here as it is
     post-occlusion, and gets exactly the same refusal, not a second
-    decision). Both ceilings are the SAME ones that bound post-occlusion ORU
+    decision), or (2026-08-15 density gate) `live_track_count` exceeds
+    `max_track_count` -- same reused-not-duplicated reasoning: a scene too
+    crowded to trust a bracket in is too crowded to trust one here either.
+    All three ceilings are the SAME ones that bound post-occlusion ORU
     (`TrackingParams.reupdate_max_gap_millis` /
-    `reupdate_max_velocity_per_second`) -- reused, not duplicated: a gap or
-    a velocity too implausible to trust for one purpose is too implausible
-    for the other, and `<= 0` is therefore invariant P7's off switch for
-    this correction too, with no second knob needed just to disable it.
-    Callers must treat `None` as "keep the raw box" and never fabricate a
-    correction from nothing (**P5**).
+    `reupdate_max_velocity_per_second` / `reupdate_max_track_count`) --
+    reused, not duplicated: a gap, a velocity or a density too implausible
+    to trust for one purpose is too implausible for the other, and `<= 0`
+    is therefore invariant P7's off switch for this correction too, with no
+    second knob needed just to disable any of them. Callers must treat
+    `None` as "keep the raw box" and never fabricate a correction from
+    nothing (**P5**).
 
     **Known simplification, stated rather than hidden.** The bracket
     `reupdate()` reads is warped into `box`'s frame by `track.
@@ -467,6 +587,8 @@ def late_correction(
         captured_at,
         max_gap_millis=max_gap_millis,
         max_velocity_per_second=max_velocity_per_second,
+        max_track_count=max_track_count,
+        live_track_count=live_track_count,
     )
     if reconstruction is None:
         return None

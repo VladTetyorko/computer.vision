@@ -94,6 +94,14 @@ def params(**overrides) -> TrackingParams:
         # on into an unexpected `None`), so this file's own ORU-plausibility
         # tests override it explicitly where the bound itself matters.
         reupdate_max_velocity_per_second=0.0,
+        # 2026-08-15 density gate -- same "disabled by default here" shape
+        # as `reupdate_max_velocity_per_second` directly above, and for the
+        # same reason: a live ceiling would turn some ORU-reconstruction
+        # test in this file into an unexpected `None` just because the
+        # scenario happens to book more than N tracks. This file's own
+        # density-gate section overrides it explicitly where the ceiling
+        # itself matters.
+        reupdate_max_track_count=0,
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -771,6 +779,70 @@ def test_a_disabled_velocity_bound_reproduces_the_reconstruction_exactly():
 
     assert reanchored.reupdated is True
     assert reanchored.velocity_x == pytest.approx(3.0)  # (15.0 - 0.0) / (5.0 - 0.0)
+
+
+def test_a_crowded_book_falls_back_to_the_ordinary_measurement():
+    # The book-level proof of the 2026-08-15 density gate
+    # (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b): a real bracket
+    # exists, the gap is well inside the ceiling and the implied velocity is
+    # perfectly plausible (0.1/s), but the book itself holds more live
+    # tracks than the density ceiling given here allows -- the SAME "fall
+    # back to the ordinary measured-and-blended path" outcome the gap-
+    # ceiling and velocity-guard tests above prove, now proven for a
+    # too-crowded book rather than a too-long or too-fast bracket.
+    book = TrackBook(params(min_hits=1, max_age_frames=30, reupdate_max_track_count=2))
+    book.apply(
+        [
+            seen("a", x=0.0, y=0.0, authoritative=True),
+            seen("b", x=0.2, y=0.0, authoritative=True),
+            seen("c", x=0.4, y=0.0, authoritative=True),
+        ],
+        0.0,
+        detector_ran=True,
+    )
+    for frame in range(1, 4):
+        # "b"/"c" stay live and confirmed every frame (their own gap never
+        # opens); "a" alone accrues the misses this test reconstructs from.
+        book.apply(
+            [seen("b", x=0.2, y=0.0, authoritative=True), seen("c", x=0.4, y=0.0, authoritative=True)],
+            float(frame),
+            detector_ran=True,
+        )
+
+    # (0.5 - 0.0) / (5.0 - 0.0) = 0.1/s -- only the density gate refuses
+    # this reconstruction: the book holds 3 live tracks ("a", "b", "c") at
+    # the moment "a" re-anchors, over the 2-track ceiling given here.
+    reanchored = book.apply([seen("a", x=0.5, y=0.0, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is False
+
+
+def test_a_disabled_density_gate_reproduces_the_reconstruction_exactly():
+    # invariant P7 at the book level: the SAME crowded book the test above
+    # refuses must still be reconstructed by ORU when the density ceiling is
+    # left at its disabled default (`0`, this file's own `params()` default)
+    # -- reproducing today's behaviour exactly.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply(
+        [
+            seen("a", x=0.0, y=0.0, authoritative=True),
+            seen("b", x=0.2, y=0.0, authoritative=True),
+            seen("c", x=0.4, y=0.0, authoritative=True),
+        ],
+        0.0,
+        detector_ran=True,
+    )
+    for frame in range(1, 4):
+        book.apply(
+            [seen("b", x=0.2, y=0.0, authoritative=True), seen("c", x=0.4, y=0.0, authoritative=True)],
+            float(frame),
+            detector_ran=True,
+        )
+
+    reanchored = book.apply([seen("a", x=0.5, y=0.0, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is True
+    assert reanchored.velocity_x == pytest.approx(0.1)  # (0.5 - 0.0) / (5.0 - 0.0)
 
 
 def test_reupdate_stats_reset_and_accumulate_across_one_apply_call():

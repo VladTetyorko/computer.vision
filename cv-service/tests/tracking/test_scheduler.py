@@ -57,6 +57,8 @@ def params(mode: str, **overrides) -> TrackingParams:
         detection_lag_correction_enabled=True,
         # 2026-08-14 repair, part 2 -- inert here too, same reason.
         reupdate_max_velocity_per_second=0.0,
+        # 2026-08-15 density gate -- inert here too, same reason.
+        reupdate_max_track_count=0,
     )
     base.update(overrides)
     return TrackingParams(**base)
