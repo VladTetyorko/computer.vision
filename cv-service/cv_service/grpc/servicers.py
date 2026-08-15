@@ -177,6 +177,15 @@ def _tracking_request_from_wire(
         motion_engine_id=message.motion_engine_id,
         appearance_engine_id=message.appearance_engine_id,
         memory_ttl_millis=message.memory_ttl_millis,
+        # capability_level (field 11, TRACKING-V3-PLAN wave V1): the ONE
+        # extra line needed to make `capability_level_served`/`_reason`
+        # (below, `_tracked_response`) mean anything for a client that
+        # actually sets this -- `params.py`'s `resolve()` is what turns the
+        # `<=0` sentinel into a number, same as every field above it.
+        capability_level=message.capability_level,
+        # reupdate_max_gap_millis (field 14, TRACKING-V3-PLAN wave V3) --
+        # same shape as `memory_ttl_millis` above.
+        reupdate_max_gap_millis=message.reupdate_max_gap_millis,
     )
 
 
@@ -237,6 +246,12 @@ def _tracked_detection(box: "object") -> "cv_pb2.Detection":
         detection.velocity_x = track.velocity_x
         detection.velocity_y = track.velocity_y
         detection.track_age_frames = track.age_frames
+        # TRACKING-V3-PLAN wave V3 (field 14) -- read straight off `Track`,
+        # same as `velocity_x`/`state`/`age_frames` above; see `Track.
+        # reupdated`'s own docstring for why that is safe (a THIS-FRAME
+        # flag `_observe` resets on every call, and every path that reaches
+        # here already called `_observe` on this exact track this frame).
+        detection.reupdated = track.reupdated
     return detection
 
 
@@ -295,6 +310,23 @@ def _tracked_response(
         motion_millis=outcome.motion_millis,
         motion_engine_id=outcome.motion_engine_id,
         detector_roi=outcome.detector_roi,
+        # TRACKING-V3-PLAN wave V1 (fields 25/26) -- the capability ladder
+        # (§5): the level that ACTUALLY served this stream, and why, if it
+        # was capped below what was requested.
+        capability_level_served=outcome.capability_level_served,
+        capability_level_reason=outcome.capability_level_reason,
+        # TRACKING-V3-PLAN wave V3 (fields 22/23) -- ORU (§4.2): what it cost
+        # this frame, and how many tracks it backfilled. Both proto3 zero
+        # (`0`) on every frame that ran none, the same "0 = none ran"
+        # convention `motion_millis`/`tracker_millis` already use.
+        reupdate_millis=outcome.reupdate_millis,
+        reupdated_tracks=outcome.reupdated_tracks,
+        # TRACKING-V3-PLAN wave V6 (field 24) -- late-detection back-
+        # correction (§4.5): the measured capture -> association lag this
+        # frame's `session.process()` call was given (`_handle_request`'s
+        # `capture_skew_millis`, pull-only today), echoed straight through.
+        # `0` on every push-mode frame -- genuinely unknown, never fabricated.
+        detection_lag_millis=outcome.detection_lag_millis,
     )
 
 
@@ -882,7 +914,13 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     frame=frame,
                     snapshot=snapshot,
                 )
-                response = self._echo(request) if no_model else self._handle_request(request, session)
+                response = (
+                    self._echo(request)
+                    if no_model
+                    else self._handle_request(
+                        request, session, capture_skew_millis=diagnostics.capture_skew_millis
+                    )
+                )
                 # Pull-only diagnostics (§5.1 fields 16-21) -- zero in push
                 # mode; the complete, honest accounting of a decode-and-infer
                 # loop that now runs on another machine (D8).
@@ -973,7 +1011,19 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         self,
         request: "cv_pb2.FrameRequest",
         session: Optional[StreamTrackingSession] = None,
+        *,
+        capture_skew_millis: int = 0,
     ) -> "cv_pb2.DetectionResponse":
+        """`capture_skew_millis` (TRACKING-V3-PLAN wave V6, §4.5) is
+        `DetectPulled`'s own `PullDiagnostics.capture_skew_millis` -- already
+        computed, same-process, wall-clock-consistent (`pull/clock.py`'s
+        `CaptureClock`, entirely `time.time()`-based) -- threaded straight
+        into `session.process()`. `DetectStream` never passes one: `push`
+        mode's `request.timestamp_millis` is JVM-stamped, another machine's
+        clock, and reading it against this host's own wall clock without a
+        synchronized time base would risk a bogus correction rather than a
+        conservative "unknown" -- `0` (the default) stays exactly that.
+        """
         try:
             if session is not None and self._sync_tracking(session, request):
                 # Built ONCE and shared between `frame=` (the FOLLOW path's
@@ -1003,6 +1053,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     ),
                     frame=loader,
                     pose=_camera_pose_from_wire(request.camera_pose),
+                    detection_lag_millis=capture_skew_millis,
                 )
                 if outcome.boxes is None:
                     return self._echo(request)

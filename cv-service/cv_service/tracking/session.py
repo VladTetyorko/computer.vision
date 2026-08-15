@@ -81,6 +81,31 @@ pass cannot re-anchor, or whose engine fails between verify passes, is
 simply dropped (its engine released) rather than coasted/predicted/LOST --
 see `_extras_verify_observations`'s docstring for the full policy, and
 `_ExtraFollow` for the per-slot state this needs.
+
+**Late-detection back-correction (TRACKING-V3-PLAN wave V6, §4.5).**
+`process()` takes an optional `detection_lag_millis` -- the caller's own
+measurement of how stale this frame's detection is by the time it lands
+(pull mode's `capture_skew_millis` today; `0` when the caller has no way to
+know, which is every push-mode frame and this stream's first). When it is
+positive, `_late_corrected_box` (used by both `_run_cost_associate`'s
+matched candidates and `_follow_verify`'s re-anchor) binds the just-arrived
+box to its OWN capture instant and re-propagates it forward via `reupdate.
+late_correction` -- mechanically the SAME ORU interpolant §4.2 already
+ships, run per-detection instead of only after a miss. See `reupdate.py`'s
+own module docstring for why this reuses that function rather than a second
+interpolator, and `_late_corrected_box`'s for the full no-op contract.
+
+**2026-08-14 repair.** `_late_corrected_box` now returns a `(box, captured_
+at)` pair, not just `box` -- the SAME `box` it always returned, plus the
+instant ITS content is actually true, for `TrackBook.apply()`'s own
+`captured_at` parameter to carry down into `ObservationRing.record`
+(`history.py`). Booking every one of this method's boxes under `now`
+regardless -- including the RAW, never-corrected ones `late_correction`
+declined to touch -- was the defect: a mistimed ring entry poisons every
+later bracket built against it, which is why a PERSISTENT lag (this
+mechanism's own steady-state case, not an occasional gap) used to diverge
+rather than merely stay imprecise. See `history.py`'s `TimedObservation`
+docstring for the full account.
 """
 
 from __future__ import annotations
@@ -91,8 +116,10 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Callable, Optional, Sequence
 
+from cv_service.tracking import levels as levels_module
 from cv_service.tracking import lock as lock_module
 from cv_service.tracking import params as params_module
+from cv_service.tracking import reupdate as reupdate_module
 from cv_service.tracking.assign import Assignment, Candidate, CostAssociator, Target
 from cv_service.tracking.engines.base import (
     IDENTITY,
@@ -249,6 +276,28 @@ class FrameOutcome:
     # frame `roi_enabled` is off on (the deployment default) and every
     # frame it fired on but found nothing worth merging.
     detector_roi: bool = False
+    # TRACKING-V3-PLAN wave V1 -- the capability ladder (§5). `served` is
+    # always <= the resolved `TrackingParams.capability_level` (decision
+    # E12's ceiling arithmetic, `cv_service.tracking.levels.resolve`);
+    # `reason` is `""` exactly when nothing was actually capped, the same
+    # "empty string = no degradation" convention `motion_engine_id`'s own
+    # docstring establishes for that field.
+    capability_level_served: int = 0
+    capability_level_reason: str = ""
+    # TRACKING-V3-PLAN wave V3 -- ORU (§4.2), `DetectionResponse.reupdate_
+    # millis`/`.reupdated_tracks` (wire fields 22/23). Both `0` on every
+    # frame that never calls `TrackBook.apply()` at all (OFF, or no engine
+    # constructible) -- see `TrackBook.reset_reupdate_stats`'s own docstring
+    # for why that is guaranteed rather than merely usual.
+    reupdate_millis: int = 0
+    reupdated_tracks: int = 0
+    # TRACKING-V3-PLAN wave V6 -- `DetectionResponse.detection_lag_millis`
+    # (wire field 24), §4.5. Echoed straight from the `detection_lag_millis`
+    # `process()` was called with (clamped, never negative) -- independent
+    # of whether back-correction actually ran this frame: this is what
+    # makes the bias VISIBLE, never merely assumed corrected. `0` on a
+    # stream whose caller measures no lag (every push-mode frame today).
+    detection_lag_millis: int = 0
 
 
 class StreamTrackingSession:
@@ -313,6 +362,16 @@ class StreamTrackingSession:
         # from within `_run_cost_associate` (`_resolve_memory` below).
         self._memory: Optional[ObjectMemory] = None
         self._memory_resolved = False
+        # Capability level (TRACKING-V3-PLAN wave V1) -- resolved lazily,
+        # same build-once-until-config-changes shape as the motion/
+        # appearance engines above, but resolved BEFORE any of them: every
+        # engine roster call below is filtered by the served level, so this
+        # has to be current before `_resolve_engine`/`_resolve_motion_
+        # compensator`/`_resolve_appearance_extractor` run (see `process()`).
+        self._capability_resolved = False
+        self._capability_level_served = 0
+        self._capability_level_reason = ""
+        self._degraded_capability_reasons: "set[str]" = set()
         # ROI re-detection bookkeeping (TRACKING-V2-PLAN wave C5c) -- reset
         # at the top of every `process()` call, read once at the bottom to
         # build this frame's `FrameOutcome`. No build-once-lazily state to
@@ -320,6 +379,13 @@ class StreamTrackingSession:
         # but `self._params` and the book, both already current every frame.
         self._roi_ran = False
         self._roi_millis = 0
+        # TRACKING-V3-PLAN wave V6 -- same "reset every frame, read (or, for
+        # `_frame_lag_seconds`, consult) within the same call" shape as the
+        # ROI fields directly above. Initialized here only so a call into
+        # `_late_corrected_box` before this stream's first `process()` (not
+        # a real path today) reads `0.0`, never an `AttributeError`.
+        self._frame_detection_lag_millis = 0
+        self._frame_lag_seconds = 0.0
         # The last wire `TrackingConfig` message applied, held opaquely and
         # compared by equality (a protobuf `==`, no allocation) so the
         # restated-every-frame config costs one comparison per frame and
@@ -350,6 +416,14 @@ class StreamTrackingSession:
         self.applied_wire_config = wire_token
         self._scheduler.retune(self._params)
         self._book.retune(self._params)
+        if self._params.capability_level != previous.capability_level:
+            # TRACKING-V3-PLAN wave V1: the served level gates every engine
+            # roster below (`_create_engine`/`_resolve_motion_compensator`/
+            # `_resolve_appearance_extractor`), so a changed REQUESTED
+            # ceiling invalidates whatever was already built through the OLD
+            # one -- exactly like a mode/engine_id change (`_release_engine`
+            # below), just triggered by a different field.
+            self._release_capability()
         if (
             self._params.mode != previous.mode
             or self._params.engine_id != previous.engine_id
@@ -400,8 +474,24 @@ class StreamTrackingSession:
         detect: DetectFn,
         frame: FrameFn,
         pose: CameraPose = CameraPose(),
+        detection_lag_millis: int = 0,
     ) -> FrameOutcome:
-        """Run one frame through §3.1's sequence."""
+        """Run one frame through §3.1's sequence.
+
+        `detection_lag_millis` (TRACKING-V3-PLAN wave V6, §4.5) is the
+        CALLER's own measurement of how stale this frame's detection already
+        is by the time it lands -- `0` (the default) when there is nothing
+        to measure, which is every push-mode frame today and this stream's
+        very first. It drives `_late_corrected_box`, read by both
+        `_run_cost_associate` and `_follow_verify`; see the module docstring
+        for the mechanism.
+        """
+        # TRACKING-V3-PLAN wave V1: resolved FIRST, unconditionally -- every
+        # engine roster call below reads `self._capability_level_served`, so
+        # it has to be current before `_resolve_engine()` (next line) ever
+        # asks the registry for anything. Cheap after the first call: cached
+        # until `apply_config` sees the wire's requested ceiling change.
+        self._resolve_capability_level()
         engine = self._resolve_engine()
         # Resolved unconditionally, not only when `cost` is the serving
         # associator (TRACKING-V2-PLAN wave C4): `TrackBook._retire` must be
@@ -426,6 +516,20 @@ class StreamTrackingSession:
         # `FrameOutcome`/`inference_millis`.
         self._roi_ran = False
         self._roi_millis = 0
+        # TRACKING-V3-PLAN wave V3 -- reset every frame, BEFORE the mode
+        # dispatch below (which may or may not call `self._book.apply()` --
+        # see `TrackBook.reset_reupdate_stats`'s own docstring for why the
+        # reset cannot live inside `apply()` itself).
+        self._book.reset_reupdate_stats()
+        # TRACKING-V3-PLAN wave V6 -- this frame's measured capture ->
+        # association lag, read once and used by BOTH `_late_corrected_box`
+        # below and the `FrameOutcome` this call returns. Clamped here, not
+        # trusted from the caller: a negative reading can only be clock
+        # jitter (`CaptureClock.capture_time`'s own skew estimate can dip
+        # below zero -- `pull/clock.py`), never a genuine "detection from
+        # the future" to correct toward.
+        self._frame_detection_lag_millis = max(0, int(detection_lag_millis))
+        self._frame_lag_seconds = self._frame_detection_lag_millis / 1000.0
 
         detections: Optional[list] = None
         inference_millis = 0
@@ -499,7 +603,99 @@ class StreamTrackingSession:
             motion_millis=motion_millis,
             motion_engine_id=motion_engine_id,
             detector_roi=self._roi_ran,
+            capability_level_served=self._capability_level_served,
+            capability_level_reason=self._capability_level_reason,
+            # TRACKING-V3-PLAN wave V3 -- read AFTER the mode dispatch above,
+            # which is where `TrackBook.apply()` (the only thing that ever
+            # advances these) is called, at most once, per `apply()`'s own
+            # "ages every live track once per call" contract.
+            reupdate_millis=self._book.last_reupdate_millis,
+            reupdated_tracks=self._book.last_reupdated_tracks,
+            # TRACKING-V3-PLAN wave V6 -- echoed straight from this call's
+            # own `detection_lag_millis` argument, already clamped above.
+            detection_lag_millis=self._frame_detection_lag_millis,
         )
+
+    # -- late-detection back-correction (TRACKING-V3-PLAN wave V6, §4.5) ----
+
+    def _late_corrected_box(self, track: Track, box: Box, now: float) -> "tuple[Box, float]":
+        """`(box, now)`, or `reupdate.late_correction`'s re-propagated answer
+        paired with `now` too, when this frame carries a measured capture
+        lag worth correcting for -- `(box, now - self._frame_lag_seconds)`
+        for the one case in between: a lag WAS measured but there was
+        nothing honest to correct `box` with.
+
+        Mechanically ORU (`reupdate.py`) applied to EVERY confirmed
+        detection, not only after a miss: an offboard detector (§5.2, "L1
+        RELAY") describes the frame it ran on, not the frame that is current
+        by the time its answer lands, so booking `box` against `now` as-is
+        is the same systematic lag bias `reupdate()` already deletes after
+        an occlusion -- just arriving every frame instead of only some.
+
+        **The second return value, added in the 2026-08-14 repair.** Every
+        caller of this method immediately hands `box` to `TrackBook.apply()`
+        for booking into `track.history` (`ObservationRing`, `history.py`)
+        -- and that ring's own contract (`ObservationRing.record`'s own
+        docstring) is that its timestamp must be the instant `box`'s content
+        was actually true, never merely `now`. This method is the ONE place
+        in the session that knows the answer for each of the three cases a
+        caller cannot tell apart just by looking at `box`:
+
+          * Correction disabled, or nothing measured this frame -- `box` is
+            whatever the caller passed in, already true at `now` as far as
+            this stream can tell (P5: no lag known, no correction to make).
+          * `late_correction` SUCCEEDED -- `corrected` is deliberately
+            re-propagated to represent position AT `now` (`late_correction`'s
+            own docstring: "projects `box` forward by the SAME `lag_
+            seconds`"), so `now` is correct for it too.
+          * `late_correction` returned `None` -- `box` is still the RAW,
+            never-corrected detection, and that content was true at its own
+            capture instant, `now - self._frame_lag_seconds`, not `now`.
+            Booking it under `now` anyway is the exact defect `history.py`'s
+            `TimedObservation` docstring documents: this is precisely the
+            case that used to poison the ring during the dead zone before
+            any bracket existed to correct against.
+
+        A genuine no-op (returns `(box, now)`, P5) whenever there is nothing
+        to correct with: the deployment knob is off, this frame measured no
+        lag (`_frame_lag_seconds <= 0.0` -- every push-mode frame today, and
+        pull mode's own first frame before a skew estimate exists) -- so a
+        stream that never measures a lag, or has this disabled, is untouched
+        by construction on BOTH return values, which is P7's reversibility
+        proof for this mechanism without a second code path.
+        """
+        if not self._params.detection_lag_correction_enabled:
+            return box, now
+        if self._frame_lag_seconds <= 0.0:
+            return box, now
+        corrected = reupdate_module.late_correction(
+            track,
+            track.history,
+            box,
+            now,
+            self._frame_lag_seconds,
+            max_gap_millis=self._params.reupdate_max_gap_millis,
+            max_velocity_per_second=self._params.reupdate_max_velocity_per_second,
+            # 2026-08-15 density gate -- `self._book.tracks` is reachable
+            # here with no threading at all (unlike detections/frame, which
+            # this method has no way to reach -- see `reupdate.py`'s own
+            # module docstring for why that signal is a proxy, not the
+            # measured quantity).
+            max_track_count=self._params.reupdate_max_track_count,
+            live_track_count=len(self._book.tracks),
+            # 2026-08-15 bracket-identity check
+            # (`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1) --
+            # same reused-not-duplicated reasoning as the density gate
+            # directly above: a bracket too implausible to trust for
+            # post-occlusion ORU is too implausible to trust here either,
+            # so this call site threads the SAME resolved deployment
+            # values `track.py`'s own `_observe` does.
+            max_shape_log_ratio=self._params.reupdate_max_shape_log_ratio,
+            max_motion_center_distance=self._params.reupdate_max_motion_center_distance,
+        )
+        if corrected is None:
+            return box, now - self._frame_lag_seconds
+        return corrected, now
 
     # -- reconnect (TRACKING-V2-PLAN wave C5b, review finding B5) -----------
 
@@ -671,18 +867,37 @@ class StreamTrackingSession:
 
         observations: list[Observation] = []
         observation_descriptors: list[Optional[Descriptor]] = []
+        # 2026-08-14 repair -- `TrackBook.apply()`'s own `captured_at` map
+        # (its docstring), keyed the SAME way `recoveries` already is
+        # (`observation.key`). Populated for every matched candidate below,
+        # never for a ROI rescue or a brand-new birth (neither is a `_late_
+        # corrected_box` candidate -- see `track.py`'s `_born`/`_adopt` for
+        # why that is a stated scope boundary, not an oversight).
+        captured_at: "dict[object, float]" = {}
         for candidate_index, target_index in assignment.matches:
             target = targets[target_index]
+            # TRACKING-V3-PLAN wave V6 -- `tracks_list[candidate_index]` is
+            # the SAME `Track` `candidates[candidate_index]` was built from
+            # (this method's own comment on that list, above), so it is the
+            # one with the real `.history`/`.history_transform` a late
+            # correction needs to bracket against. A genuine no-op (returns
+            # `target.box` unchanged) whenever this frame measured no lag or
+            # the knob is off -- see `_late_corrected_box`'s own docstring.
+            candidate_key = candidates[candidate_index].key
+            corrected_box, box_captured_at = self._late_corrected_box(
+                tracks_list[candidate_index], target.box, now
+            )
             observations.append(
                 Observation(
-                    key=candidates[candidate_index].key,
-                    box=target.box,
+                    key=candidate_key,
+                    box=corrected_box,
                     label=target.label,
                     confidence=target.confidence,
                     det_index=target.det_index,
                 )
             )
             observation_descriptors.append(target.descriptor)
+            captured_at[candidate_key] = box_captured_at
 
         # TRACKING-V2-PLAN wave C5c: at most one bounded, gated second look
         # at the highest-priority CONFIRMED candidate the match above just
@@ -733,7 +948,9 @@ class StreamTrackingSession:
                 recoveries[key] = identity
                 recovery_by_index[target.det_index] = recovery
 
-        tracks = self._book.apply(observations, now, detector_ran=True, recoveries=recoveries)
+        tracks = self._book.apply(
+            observations, now, detector_ran=True, recoveries=recoveries, captured_at=captured_at
+        )
         for track, descriptor in zip(tracks, observation_descriptors):
             observe_descriptor(track, descriptor)
 
@@ -752,6 +969,14 @@ class StreamTrackingSession:
                 dormant_millis=(
                     recovery_by_index[index].dormant_millis if index in recovery_by_index else 0
                 ),
+                # TRACKING-V3-PLAN wave V6 -- `track.box` is exactly
+                # `observation.box` post-`_observe` (corrected by `_late_
+                # corrected_box` above, or the raw detection unchanged when
+                # nothing was), so passing it here is what makes a
+                # correction reach the WIRE, not just this track's own
+                # internal state. `None` (falls back to the raw detection,
+                # byte-identical either way) when `index` matched nothing.
+                box=(by_index[index].box if index in by_index else None),
             )
             for index, detection in enumerate(detections)
         ]
@@ -763,7 +988,7 @@ class StreamTrackingSession:
         # `tracks[rescue_index]` is unambiguously ITS `Track`, regardless of
         # how many recovery-loop observations came after it.
         if rescue_index is not None:
-            boxes_out.append(_box_for(rescue[2], tracks[rescue_index]))
+            boxes_out.append(_box_for(rescue[2], tracks[rescue_index], box=tracks[rescue_index].box))
         return boxes_out
 
     def _roi_rescue(
@@ -1018,12 +1243,36 @@ class StreamTrackingSession:
                     # for ambient association -- does not apply.
                     authoritative=True,
                 )
+                # 2026-08-14 repair -- `TrackBook.apply()`'s own `captured_at`
+                # map (its docstring). `None` (the default, meaning "every
+                # observation's own capture instant is `now`") unless the
+                # branch below actually resolves one for the locked
+                # observation -- an extra never gets an entry, same stated
+                # scope boundary as `_run_cost_associate`'s own map.
+                captured_at: "Optional[dict[object, float]]" = None
+                if self._followed is not None:
+                    # TRACKING-V3-PLAN wave V6 -- `self._followed` is still
+                    # the PREVIOUS frame's held `Track` here (reassigned only
+                    # below), so its `.history`/`.history_transform` are real
+                    # PRIOR evidence to bracket a late detection against. A
+                    # genuine no-op on a FRESH acquisition (`self._followed
+                    # is None`, nothing to bracket against yet) or when this
+                    # frame measured no lag.
+                    corrected_box, box_captured_at = self._late_corrected_box(
+                        self._followed, locked_observation.box, now
+                    )
+                    if corrected_box is not locked_observation.box:
+                        locked_observation = dataclasses.replace(locked_observation, box=corrected_box)
+                    captured_at = {locked_observation.key: box_captured_at}
                 claimed = {index}
                 extra_observations, extra_candidates = self._extras_verify_observations(
                     boxes, detections, frame, now, claimed
                 )
                 tracks = self._book.apply(
-                    [locked_observation, *extra_observations], now, detector_ran=True
+                    [locked_observation, *extra_observations],
+                    now,
+                    detector_ran=True,
+                    captured_at=captured_at,
                 )
                 locked_track = tracks[0]
                 self._followed = locked_track
@@ -1041,7 +1290,18 @@ class StreamTrackingSession:
                     }
                 )
                 return [
-                    _box_for(detection, tracks_by_index.get(position))
+                    _box_for(
+                        detection,
+                        tracks_by_index.get(position),
+                        # TRACKING-V3-PLAN wave V6 -- same reasoning as
+                        # `_run_cost_associate`'s own `boxes_out`: `track.box`
+                        # is `observation.box` post-`_observe`, corrected for
+                        # the LOCKED target when `_late_corrected_box` above
+                        # actually ran, and byte-identical to the raw
+                        # detection for every extra (never corrected, out of
+                        # this wave's scope) or unmatched position.
+                        box=(tracks_by_index[position].box if position in tracks_by_index else None),
+                    )
                     for position, detection in enumerate(detections)
                 ]
 
@@ -1139,8 +1399,15 @@ class StreamTrackingSession:
                     reverse=True,
                 )[:open_slots]
                 for detection_index in ranked:
+                    # TRACKING-V3-PLAN wave V1: an extra respects the SAME
+                    # served-level ceiling as the locked target's own
+                    # engine -- otherwise a level-1 stream could grow a
+                    # `cv2`-backed extra through this side door even though
+                    # `_create_engine` never allows one for the lock itself.
                     created = registry.follower(
-                        self._params.engine_id, max_age_frames=self._params.max_age_frames
+                        self._params.engine_id,
+                        max_age_frames=self._params.max_age_frames,
+                        **self._level_kwargs(registry),
                     )
                     if created is None:
                         continue
@@ -1382,15 +1649,55 @@ class StreamTrackingSession:
         since it was last read, so `predict()` here needs no transform of
         its own -- `self._followed.box` is already expressed in THIS
         frame's coordinates.
+
+        TRACKING-V3-PLAN wave V3: when that PREDICTED test fails, one more
+        attempt is made before giving up on this pass -- matching against
+        the LAST REAL observation this track ever received, carried into
+        THIS frame by the same accumulated ego-motion transform ORU itself
+        reads (`Track.history_transform`, `reupdate.py`'s own module
+        docstring), not the compounded, possibly-wrong-direction VELOCITY
+        `predict()` is still trusting. This is the prospective half of the
+        same evidence-vs-extrapolation swap ORU makes retrospectively at
+        the moment of a successful re-anchor: `nonlinear`'s object reverses
+        heading the instant it is hidden, so the constant-velocity
+        prediction runs the wrong way for the whole gap and can never
+        clear the re-anchor test on its own, while the last REAL box it
+        was ever seen in barely differs from where a reversed-but-still-
+        nearby object actually is.
+
+        Not gated on `track.misses > 0` -- deliberately, and unlike
+        `track.py`'s own ORU gate: `misses` only advances INSIDE `_observe`
+        (this frame's, not yet run when `_select_target` is called), so the
+        VERY FIRST verify pass after a real confirmation would otherwise
+        never get this fallback, which is exactly the attempt where the
+        drift is smallest and the fallback's odds are best. Gated instead
+        by `reupdate_max_gap_millis` -- the SAME ceiling that bounds what
+        ORU itself will reconstruct, deliberately: a gap too old to trust
+        for one is too old to trust for the other, and `memory.py`'s
+        dormant gallery is what serves it once genuinely LOST. A no-op, not
+        a widened gate, when the PRIMARY test already succeeded: this is a
+        SECOND candidate offered only on failure, never a looser threshold
+        applied to the first one, so it cannot make an existing correct
+        match worse.
         """
         held_box = predict(self._followed, now).box if self._followed is not None else None
-        return lock_module.select_target(
+        index = lock_module.select_target(
             boxes,
             held_box=held_box,
             target=self._lock.target,
             min_iou=self._params.redetect_iou_threshold,
             box_of_track=lambda track_id: self._box_of_track(track_id, now),
         )
+        if index < 0 and held_box is not None:
+            anchor = self._followed.history.latest()
+            if anchor is not None:
+                gap_millis = (now - anchor.timestamp) * 1000.0
+                if 0.0 < gap_millis <= self._params.reupdate_max_gap_millis:
+                    frozen_box = self._followed.history_transform.apply_box(anchor.observation.box)
+                    index = lock_module.best_iou_match(
+                        frozen_box, boxes, self._params.redetect_iou_threshold
+                    )
+        return index
 
     def _box_of_track(self, track_id: int, now: float) -> Optional[Box]:
         known = self._book.get(track_id)
@@ -1400,6 +1707,78 @@ class StreamTrackingSession:
         """A fresh `TrackBook` key per applied lock, so re-acquiring after a
         release yields a NEW id instead of resurrecting the previous one."""
         return f"follow:{self._lock.generation}"
+
+    # -- capability level (TRACKING-V3-PLAN wave V1, §5) ---------------------
+
+    def _resolve_capability_level(self) -> int:
+        """This stream's SERVED level, resolving (and probing the host)
+        once per config change.
+
+        `levels.probe()` reads live host state (importability + available
+        memory) rather than anything cached at process start (decision E12:
+        "what lets the workstation shed levels under load instead of
+        dropping streams"), but this method itself still caches the OUTCOME
+        until `apply_config` invalidates it (`_release_capability`) -- the
+        same "hot knob, re-resolved on config change" shape `_resolve_
+        motion_compensator`/`_resolve_appearance_extractor` already use, not
+        a per-frame re-probe, which `process()`'s own comment above this
+        call explains.
+
+        Every degradation is logged EXACTLY ONCE per distinct reason
+        (`_degraded_capability_reasons`, keyed by the reason string itself --
+        two different requested levels capped to the same served level by
+        the same host constraint share one log line, same dedup granularity
+        `_warn_unknown` already uses for engine ids) and NEVER raises
+        (invariant P5): `levels.resolve` is pure arithmetic with no failure
+        mode to propagate.
+        """
+        if self._capability_resolved:
+            return self._capability_level_served
+        self._capability_resolved = True
+        probed = levels_module.probe()
+        served, reason = levels_module.resolve(self._params.capability_level, probed)
+        self._capability_level_served = served
+        self._capability_level_reason = reason
+        if reason and reason not in self._degraded_capability_reasons:
+            self._degraded_capability_reasons.add(reason)
+            LOGGER.warning("tracking: capability level capped -- %s", reason)
+        return served
+
+    def _level_kwargs(self, registry: Any) -> "dict[str, int]":
+        """`{"level": served}` for the real `TrackerRegistry`, `{}` for
+        anything else offered through `registry_provider`.
+
+        `registry_provider` is a plain callable contract (`Callable[[],
+        Optional[TrackerRegistry]]`), not an enforced protocol -- tests
+        across this codebase substitute their own duck-typed stand-ins for
+        it, predating this wave, that implement `associator`/`follower`/
+        `compensator`/`appearance` WITHOUT a `level` parameter. Passing
+        `level=` unconditionally would break every one of them for a
+        capability distinction they were never written to care about.
+        `TrackerRegistry`'s own four accessors default `level=None` (no
+        ceiling), so omitting this kwarg entirely is exactly equivalent to
+        `level=None` for anything that DOES support it.
+        """
+        if isinstance(registry, TrackerRegistry):
+            return {"level": self._capability_level_served}
+        return {}
+
+    def _release_capability(self) -> None:
+        """Force the next active frame to re-probe/re-resolve the served
+        level, and drop every engine the OLD level's roster filter gated.
+
+        `_engine`/`_motion_engine`/`_appearance_engine` were each built
+        through `TrackerRegistry`'s level-filtered roster (`registry.py`'s
+        `_ASSOCIATOR_MIN_LEVEL` and siblings) using the level THEN in force
+        -- a changed requested ceiling can widen or narrow which engines are
+        even visible, so all three are invalidated exactly as a mode/
+        engine_id change already invalidates `_engine` (`_release_engine`'s
+        own docstring).
+        """
+        self._capability_resolved = False
+        self._release_engine()
+        self._release_motion_compensator()
+        self._release_appearance_extractor()
 
     # -- engines and degradation -------------------------------------------
 
@@ -1433,12 +1812,19 @@ class StreamTrackingSession:
         return self._engine
 
     def _create_engine(self, registry: TrackerRegistry) -> Optional[tuple[str, Any]]:
+        # TRACKING-V3-PLAN wave V1: the served level, already resolved by
+        # `process()` before `_resolve_engine()` (this method's only caller)
+        # ever runs -- see `_resolve_capability_level`'s own docstring. L1
+        # offers no follower at all, so a level-1 FOLLOW request returns
+        # `None` here and `_resolve_engine`'s existing `FOLLOW -> ASSOCIATE`
+        # ladder takes over with no new code needed for it.
+        level_kwargs = self._level_kwargs(registry)
         if self._params.mode == MODE_FOLLOW:
             return registry.follower(
-                self._params.engine_id, max_age_frames=self._params.max_age_frames
+                self._params.engine_id, max_age_frames=self._params.max_age_frames, **level_kwargs
             )
         return registry.associator(
-            self._params.engine_id, max_age_frames=self._params.max_age_frames
+            self._params.engine_id, max_age_frames=self._params.max_age_frames, **level_kwargs
         )
 
     def _degrade_to(self, mode: str, why: str) -> None:
@@ -1520,7 +1906,10 @@ class StreamTrackingSession:
         if registry is None:
             return None
 
-        created = registry.compensator(requested)
+        # TRACKING-V3-PLAN wave V1: the served level, already resolved by
+        # `process()` before this method's only two callers ever run.
+        level_kwargs = self._level_kwargs(registry)
+        created = registry.compensator(requested, **level_kwargs)
         if created is None:
             return None
         engine_id, engine = created
@@ -1533,8 +1922,14 @@ class StreamTrackingSession:
                     engine_id,
                     MOTION_ENGINE_FLOW,
                 )
-            created = registry.compensator(MOTION_ENGINE_FLOW)
-            if created is None:
+            created = registry.compensator(MOTION_ENGINE_FLOW, **level_kwargs)
+            if created is None or created[0] == MOTION_ENGINE_POSE:
+                # `flow` needs L2 (`registry._COMPENSATOR_MIN_LEVEL`); at L1
+                # the roster this level affords contains only `pose` -- the
+                # SAME engine that just failed its availability check --
+                # so re-offering it as a "fallback" would be a repeated
+                # failure dressed up as one, not a genuine second option.
+                # Uncompensated is the honest outcome (P5's "genuine no-op").
                 return None
             engine_id, engine = created
 
@@ -1573,7 +1968,10 @@ class StreamTrackingSession:
         registry = self._registry_provider()
         if registry is None:
             return None
-        created = registry.appearance(requested)
+        # TRACKING-V3-PLAN wave V1: the served level, already resolved by
+        # `process()` before this method's only caller (`_run_cost_
+        # associate`) ever runs.
+        created = registry.appearance(requested, **self._level_kwargs(registry))
         if created is None:
             return None
         self._appearance_engine_id, self._appearance_engine = created
@@ -1738,6 +2136,12 @@ class StreamTrackingSession:
         self._release_motion_compensator()
         self._release_appearance_extractor()
         self._release_memory()
+        # TRACKING-V3-PLAN wave V1: not a full `_release_capability()` --
+        # the engines it would drop are already handled by the three calls
+        # above -- just the cached served level itself, so the next active
+        # frame re-probes fresh rather than trusting a value from before
+        # this potentially-long OFF period.
+        self._capability_resolved = False
 
 
 def _box_for(
@@ -1746,11 +2150,27 @@ def _box_for(
     *,
     identity_confidence: float = 0.0,
     dormant_millis: int = 0,
+    box: Optional[Box] = None,
 ) -> TrackedBox:
+    """One box on the response -- `box`, if given, else `Box(detection.x, ...)`.
+
+    `box` (TRACKING-V3-PLAN wave V6) lets a caller that may have applied
+    late-detection back-correction (`_late_corrected_box`) show what was
+    actually BOOKED into the track rather than the raw, possibly-stale
+    detection -- `_run_cost_associate` and `_follow_verify` are the only
+    two callers that ever pass it (both build it from `track.box` AFTER
+    `TrackBook.apply()`, which is exactly `observation.box`, corrected or
+    not, by `_observe`'s own contract). Every other caller passes `None`
+    and reproduces this function's pre-wave-V6 behavior exactly, which
+    matters most for `_run_associate` (`bytetrack`): that engine's own
+    `Observation.box` is ITS post-Kalman estimate, deliberately never shown
+    here even absent this wave -- passing `track.box` there would be a
+    genuine, unrelated behaviour change this wave does not intend to make.
+    """
     return TrackedBox(
         label=detection.label,
         confidence=detection.confidence,
-        box=Box(detection.x, detection.y, detection.width, detection.height),
+        box=box if box is not None else Box(detection.x, detection.y, detection.width, detection.height),
         track=track,
         identity_confidence=identity_confidence,
         dormant_millis=dormant_millis,

@@ -24,11 +24,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from cv_service.tracking.engines.base import Box
 from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW
 from cv_service.tracking.session import FrameOutcome, TrackedBox
 
-from tools.trackeval.metrics import compute
+from tools.trackeval.metrics import MAX_PLAUSIBLE_VELOCITY_PER_SECOND, compute
 from tools.trackeval.replay import ReplayResult
 from tools.trackeval.sequences import GroundTruthObject
 
@@ -81,6 +83,10 @@ def _result(
     gt_ids: frozenset[int],
     fps: float = 10.0,
     mode: str = MODE_ASSOCIATE,
+    coast_track_ids: tuple[frozenset[int], ...] = (),
+    track_velocities: tuple[dict[int, tuple[float, float]], ...] = (),
+    width: int = 100,
+    height: int = 100,
 ) -> ReplayResult:
     return ReplayResult(
         scenario="unit",
@@ -90,7 +96,28 @@ def _result(
         outcomes=tuple(outcomes),
         ground_truth_by_frame=tuple(tuple(frame) for frame in gt_per_frame),
         scored_gt_ids=gt_ids,
+        coast_track_ids=coast_track_ids,
+        track_velocities=track_velocities,
+        width=width,
+        height=height,
     )
+
+
+def _tracked_at(track_id: int, box: Box) -> TrackedBox:
+    """A track's box at an EXPLICIT position -- unlike `_tracked`, not tied
+    to any gt's own box, for building drifted/coasting samples."""
+    return TrackedBox(label=_LABEL, confidence=0.9, box=box, track=_FakeTrack(track_id))
+
+
+def _outcome_with_boxes(
+    boxes: list[TrackedBox], *, detector_ran: bool = True, tracker_millis: int = 1
+) -> FrameOutcome:
+    return FrameOutcome(boxes=boxes, detector_ran=detector_ran, tracker_millis=tracker_millis, engine_id="unit-test")
+
+
+def _offset(gt_id: int, dx: float = 0.0, dy: float = 0.0) -> Box:
+    base = _BOX_FOR_GT[gt_id]
+    return Box(base.x + dx, base.y + dy, base.width, base.height)
 
 
 def test_perfect_tracking_has_no_switches_or_gaps_and_is_mostly_tracked() -> None:
@@ -279,3 +306,219 @@ def test_follow_mode_scores_only_the_locked_gt_id() -> None:
     assert metrics.gt_object_count == 1
     assert metrics.mostly_tracked == 1
     assert metrics.mostly_lost == 0
+
+
+# -- coast ADE/FDE (TRACKING-V3-PLAN wave V0) ---------------------------------
+
+
+def test_coast_metrics_are_none_without_coast_data() -> None:
+    """`coast_track_ids` defaulting to `()` (older/hand-built `ReplayResult`s
+    that predate this metric) must read as "nothing to report", not as
+    zero drift -- `None` is the same "concept does not apply" convention
+    `recovery_rate` already uses."""
+    gt = [[_gt(1)]] * 3
+    outcomes = [_outcome({1: 1}) for _ in range(3)]
+    metrics = compute(_result(gt, outcomes, gt_ids=frozenset({1})))
+
+    assert metrics.coast_sample_count == 0
+    assert metrics.coast_ade_norm is None
+    assert metrics.coast_fde_norm is None
+    assert metrics.coast_ade_px is None
+    assert metrics.coast_fde_px is None
+
+
+def test_coast_ade_is_the_mean_and_fde_is_the_final_sample() -> None:
+    """Three coasting frames with GROWING drift -- ADE averages all three,
+    FDE is only the last (worst) one, and the two must therefore differ."""
+    gt = [[_gt(1)]] * 3
+    outcomes = [
+        _outcome_with_boxes([_tracked_at(1, _offset(1, dx))], detector_ran=True) for dx in (0.005, 0.010, 0.015)
+    ]
+    coast_track_ids = (frozenset({1}), frozenset({1}), frozenset({1}))
+    metrics = compute(_result(gt, outcomes, gt_ids=frozenset({1}), coast_track_ids=coast_track_ids, width=100, height=50))
+
+    assert metrics.coast_sample_count == 3
+    assert metrics.coast_ade_norm == pytest.approx((0.005 + 0.010 + 0.015) / 3)
+    assert metrics.coast_fde_norm == pytest.approx(0.015)
+    # width=100 (dy=0 throughout) -- px distance is just dx * width.
+    assert metrics.coast_ade_px == pytest.approx((0.5 + 1.0 + 1.5) / 3)
+    assert metrics.coast_fde_px == pytest.approx(1.5)
+
+
+def test_coast_pixel_distance_uses_height_for_the_y_axis() -> None:
+    gt = [[_gt(1)]]
+    outcomes = [_outcome_with_boxes([_tracked_at(1, _offset(1, dy=0.02))])]
+    metrics = compute(
+        _result(
+            gt, outcomes, gt_ids=frozenset({1}), coast_track_ids=(frozenset({1}),), width=100, height=25
+        )
+    )
+    assert metrics.coast_ade_norm == pytest.approx(0.02)
+    assert metrics.coast_ade_px == pytest.approx(0.02 * 25)
+
+
+def test_coast_sample_continues_through_an_invisible_gap() -> None:
+    """The whole reason this walk does not reuse `matches_by_frame` as-is:
+    a coasting box's drift during a FULL OCCLUSION (the object invisible,
+    not merely unmatched) is exactly what `nonlinear`/`pan_occlusion` need
+    this metric to see, and an invisible gt object can never be IoU-matched
+    to anything."""
+    gt = [
+        [_gt(1, visible=True)],
+        [_gt(1, visible=True)],
+        [_gt(1, visible=False)],
+        [_gt(1, visible=False)],
+        [_gt(1, visible=False)],
+        [_gt(1, visible=True)],
+    ]
+    outcomes = [
+        _outcome_with_boxes([_tracked(1, 1)]),  # frame 0: confirmed, exact
+        _outcome_with_boxes([_tracked(1, 1)]),  # frame 1: confirmed, exact
+        _outcome_with_boxes([_tracked_at(1, _offset(1, 0.01))]),  # frame 2: coasting, hidden
+        _outcome_with_boxes([_tracked_at(1, _offset(1, 0.02))]),  # frame 3: coasting, hidden
+        _outcome_with_boxes([_tracked_at(1, _offset(1, 0.03))]),  # frame 4: coasting, hidden
+        _outcome_with_boxes([_tracked(1, 1)]),  # frame 5: re-anchored, exact
+    ]
+    coast_track_ids = (
+        frozenset(),
+        frozenset(),
+        frozenset({1}),
+        frozenset({1}),
+        frozenset({1}),
+        frozenset(),
+    )
+    metrics = compute(_result(gt, outcomes, gt_ids=frozenset({1}), coast_track_ids=coast_track_ids))
+
+    assert metrics.coast_sample_count == 3
+    assert metrics.coast_ade_norm == pytest.approx((0.01 + 0.02 + 0.03) / 3)
+    assert metrics.coast_fde_norm == pytest.approx(0.03)
+
+
+def test_coast_sample_stops_at_the_object_s_last_visible_frame() -> None:
+    """Mirrors `pan`'s own world-fixed landmarks, which leave the frame for
+    good and never return: a coasting box that keeps drifting AFTER the
+    object's own last visible frame is not a gap to recover from, and must
+    not be scored -- see `_coast_samples`'s own docstring."""
+    gt = [
+        [_gt(1, visible=True)],
+        [_gt(1, visible=False)],
+        [_gt(1, visible=False)],
+        [_gt(1, visible=False)],
+    ]
+    outcomes = [
+        _outcome_with_boxes([_tracked(1, 1)]),  # frame 0: the object's only visible frame
+        _outcome_with_boxes([_tracked_at(1, _offset(1, 0.05))]),
+        _outcome_with_boxes([_tracked_at(1, _offset(1, 0.10))]),
+        _outcome_with_boxes([_tracked_at(1, _offset(1, 0.15))]),
+    ]
+    coast_track_ids = (frozenset(), frozenset({1}), frozenset({1}), frozenset({1}))
+    metrics = compute(_result(gt, outcomes, gt_ids=frozenset({1}), coast_track_ids=coast_track_ids))
+
+    assert metrics.coast_sample_count == 0
+    assert metrics.coast_ade_norm is None
+
+
+def test_coast_run_ends_when_the_track_stops_emitting_a_box() -> None:
+    """Once a coasting identity stops appearing in `outcome.boxes` at all
+    (ASSOCIATE never coasts an unmatched candidate -- ends the run there,
+    rather than treating its last-known box as still current."""
+    gt = [[_gt(1)]] * 4
+    outcomes = [
+        _outcome_with_boxes([_tracked(1, 1)]),  # frame 0: confirmed
+        _outcome_with_boxes([_tracked_at(1, _offset(1, 0.01))]),  # frame 1: coasting
+        _outcome_with_boxes([]),  # frame 2: this identity stops emitting anything
+        _outcome_with_boxes([]),  # frame 3: still nothing
+    ]
+    coast_track_ids = (frozenset(), frozenset({1}), frozenset(), frozenset())
+    metrics = compute(_result(gt, outcomes, gt_ids=frozenset({1}), coast_track_ids=coast_track_ids))
+
+    assert metrics.coast_sample_count == 1
+    assert metrics.coast_ade_norm == pytest.approx(0.01)
+    assert metrics.coast_fde_norm == pytest.approx(0.01)
+
+
+# -- velocity plausibility (TRACKING-V3-PLAN §6b finding O3) ------------------
+
+
+def test_implausible_velocity_count_is_zero_without_velocity_data() -> None:
+    """`track_velocities` defaulting to `()` (older/hand-built `ReplayResult`s
+    that predate this metric, or a length mismatch) must read as "nothing to
+    report" -- zero, the same convention `coast_track_ids`'s own guard uses,
+    never an error."""
+    gt = [[_gt(1)]] * 3
+    outcomes = [_outcome({1: 1}) for _ in range(3)]
+    metrics = compute(_result(gt, outcomes, gt_ids=frozenset({1})))
+
+    assert metrics.implausible_velocity_count == 0
+
+
+def test_implausible_velocity_count_is_zero_when_every_report_is_within_bound() -> None:
+    gt = [[_gt(1)]] * 3
+    outcomes = [_outcome({1: 1}) for _ in range(3)]
+    track_velocities = ({1: (0.01, 0.0)}, {1: (0.02, -0.01)}, {1: (0.0, 0.0)})
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), track_velocities=track_velocities)
+    )
+
+    assert metrics.implausible_velocity_count == 0
+
+
+def test_implausible_velocity_count_fires_on_a_diverged_report() -> None:
+    """A constant, plausible velocity for two frames, then one frame whose
+    reported velocity has diverged far past `MAX_PLAUSIBLE_VELOCITY_PER_
+    SECOND` -- the exact shape TRACKING-V3-PLAN §6b finding O3 describes
+    (`latency`'s own real defect reconstructed a velocity of `1e14`-`1e32`,
+    `BASELINE.md`'s own writeup). A metric that has never been observed to
+    fire is not evidence -- this is that observation."""
+    gt = [[_gt(1)]] * 3
+    outcomes = [_outcome({1: 1}) for _ in range(3)]
+    track_velocities = (
+        {1: (0.01, 0.0)},
+        {1: (0.01, 0.0)},
+        {1: (1e16, 0.0)},  # the diverged report
+    )
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), track_velocities=track_velocities)
+    )
+
+    assert metrics.implausible_velocity_count == 1
+
+
+def test_implausible_velocity_count_checks_the_y_axis_too() -> None:
+    gt = [[_gt(1)]]
+    outcomes = [_outcome({1: 1})]
+    track_velocities = ({1: (0.0, 9.0)},)
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), track_velocities=track_velocities)
+    )
+
+    assert metrics.implausible_velocity_count == 1
+
+
+def test_implausible_velocity_count_is_strict_at_the_boundary() -> None:
+    """Exactly AT the bound does not count -- the bound is "beyond", not
+    "at or beyond"."""
+    gt = [[_gt(1)]]
+    outcomes = [_outcome({1: 1})]
+    track_velocities = ({1: (MAX_PLAUSIBLE_VELOCITY_PER_SECOND, 0.0)},)
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), track_velocities=track_velocities)
+    )
+
+    assert metrics.implausible_velocity_count == 0
+
+
+def test_implausible_velocity_count_sums_every_track_every_frame() -> None:
+    """Two implausible tracks on one frame plus one on another -- a plain
+    count of `(track, frame)` occurrences, not a per-frame flag."""
+    gt = [[_gt(1)], [_gt(1)]]
+    outcomes = [_outcome({1: 1}), _outcome({1: 1})]
+    track_velocities = (
+        {1: (100.0, 0.0), 2: (0.0, 200.0)},
+        {1: (300.0, 0.0)},
+    )
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), track_velocities=track_velocities)
+    )
+
+    assert metrics.implausible_velocity_count == 3

@@ -13,7 +13,7 @@ import java.util.function.LongSupplier;
  * the same null-means-unchanged idiom {@link PipelineConfigPatch} uses for the rest of the pipeline
  * config, applied one level down.
  *
- * <p>This type exists because tracking is <b>eight independent knobs, not one value</b>. The UI
+ * <p>This type exists because tracking is <b>ten independent knobs, not one value</b>. The UI
  * changes them one at a time ({@code {"tracking":{"engineId":"ncc"}}}, an independent verify-cadence
  * slider, an independent follow-fps slider, {@code {"tracking":{"lock":{"release":true}}}}), so a
  * fold that replaced the whole {@link TrackingConfig} made every patch silently reset the six knobs
@@ -50,24 +50,42 @@ import java.util.function.LongSupplier;
  * compact constructor when the fold produces one, so the rule lives in exactly one place and
  * surfaces at the REST edge as a 400 either way.
  *
- * @param mode               replacement mode, or {@code null} to keep the current one
- * @param engineId           replacement tracker engine id, or {@code null} to keep the current one;
- *                           {@code ""} is a real value meaning "the server's default for the mode"
- * @param verifyEveryMillis  replacement {@code FOLLOW} re-verify cadence, or {@code null}
- * @param followFps          replacement Java-side sampler rate for {@code FOLLOW}, or {@code null}
- * @param redetectIouPercent replacement re-anchor threshold percent, or {@code null}
- * @param maxAgeFrames       replacement unmatched-frame budget, or {@code null}
- * @param minHits            replacement hits-to-confirm budget, or {@code null}
- * @param lock               a new target lock, or {@code null} to keep the running one; see this
- *                           record's own javadoc for why absence is never a release
+ * @param mode                  replacement mode, or {@code null} to keep the current one
+ * @param engineId              replacement tracker engine id, or {@code null} to keep the current
+ *                              one; {@code ""} is a real value meaning "the server's default for
+ *                              the mode"
+ * @param verifyEveryMillis     replacement {@code FOLLOW} re-verify cadence, or {@code null}
+ * @param followFps             replacement Java-side sampler rate for {@code FOLLOW}, or {@code null}
+ * @param redetectIouPercent    replacement re-anchor threshold percent, or {@code null}
+ * @param maxAgeFrames          replacement unmatched-frame budget, or {@code null}
+ * @param minHits               replacement hits-to-confirm budget, or {@code null}
+ * @param capabilityLevel       replacement capability-ladder ceiling, or {@code null} to keep the
+ *                              current one (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2)
+ * @param reupdateMaxGapMillis  replacement ORU max-reconstructable-gap, or {@code null} to keep the
+ *                              current one
+ * @param lock                  a new target lock, or {@code null} to keep the running one; see this
+ *                              record's own javadoc for why absence is never a release
  */
 public record TrackingConfigPatch(TrackingMode mode, String engineId, Integer verifyEveryMillis, Integer followFps,
                                    Integer redetectIouPercent, Integer maxAgeFrames, Integer minHits,
-                                   TargetLock lock) {
+                                   Integer capabilityLevel, Integer reupdateMaxGapMillis, TargetLock lock) {
 
     /** A patch that changes nothing — the identity of {@link #foldOnto}. */
     public static final TrackingConfigPatch NOTHING =
-            new TrackingConfigPatch(null, null, null, null, null, null, null, null);
+            new TrackingConfigPatch(null, null, null, null, null, null, null, null, null, null);
+
+    /**
+     * Convenience constructor for callers that don't care about {@link #capabilityLevel()}/{@link
+     * #reupdateMaxGapMillis()} — defaults both to {@code null} ("leave unchanged"), the same
+     * null-means-unchanged idiom every other field here already uses. This was the canonical
+     * constructor before docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md added the two fields; every
+     * pre-existing 8-arg call site compiles <em>and behaves</em> unchanged.
+     */
+    public TrackingConfigPatch(TrackingMode mode, String engineId, Integer verifyEveryMillis, Integer followFps,
+                                Integer redetectIouPercent, Integer maxAgeFrames, Integer minHits, TargetLock lock) {
+        this(mode, engineId, verifyEveryMillis, followFps, redetectIouPercent, maxAgeFrames, minHits, null, null,
+                lock);
+    }
 
     /**
      * Folds this patch's present fields onto {@code current}, leaving every absent one exactly as
@@ -92,6 +110,8 @@ public record TrackingConfigPatch(TrackingMode mode, String engineId, Integer ve
                 redetectIouPercent == null ? current.redetectIouPercent() : redetectIouPercent,
                 maxAgeFrames == null ? current.maxAgeFrames() : maxAgeFrames,
                 minHits == null ? current.minHits() : minHits,
+                capabilityLevel == null ? current.capabilityLevel() : capabilityLevel,
+                reupdateMaxGapMillis == null ? current.reupdateMaxGapMillis() : reupdateMaxGapMillis,
                 lock == null ? current.lock()
                         : new TargetLock(lockSequence.getAsLong(), lock.trackId(), lock.pointX(), lock.pointY(),
                                 lock.release()));

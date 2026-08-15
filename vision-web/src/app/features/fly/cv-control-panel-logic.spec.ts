@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CvModel, CvTracker, DetectionResult, TrackStats } from '../../core/api/models';
+import type { CvModel, CvTracker, DetectionResult, FrameTracking, TrackingCapability, TrackStats } from '../../core/api/models';
 import type { PipelineSettings } from '../../core/settings/settings-store';
 import {
+  CAPABILITY_LEVEL_OPTIONS,
+  DETECTION_LAG_BUDGET_MILLIS,
   PEOPLE_VEHICLES_BUILDINGS_PRESET,
   addLabel,
   applyPreset,
+  buildCapabilityLevelPatch,
   buildFollowFpsPatch,
   buildFollowLockPatch,
   buildHotKnobPatch,
@@ -13,14 +16,21 @@ import {
   buildTrackingEnginePatch,
   buildTrackingModePatch,
   buildVerifyCadencePatch,
+  capabilityLevelHint,
+  capabilityLevelLabel,
+  capabilityLevelOption,
   chipCandidates,
   debounce,
   engineOptionsForMode,
   filterLabelsByQuery,
   findModel,
+  formatDetectionLag,
   formatFlowStrip,
   hasExactLabelMatch,
+  isCapabilityDowngraded,
+  isDetectionLagOverBudget,
   isLabelChecked,
+  latestFrameTracking,
   observedLabels,
   perfHint,
   reArmHint,
@@ -415,6 +425,145 @@ describe('cv-control-panel-logic', () => {
     it('a zero-second window never divides by zero', () => {
       expect(() => formatFlowStrip(stats({ windowSeconds: 0 }))).not.toThrow();
       expect(formatFlowStrip(stats({ windowSeconds: 0 }))).toContain('0/s');
+    });
+  });
+
+  // --- Capability ladder (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md, wave J4) -----------------
+
+  function capability(partial: Partial<TrackingCapability> = {}): TrackingCapability {
+    return { levelServed: 2, reason: '', ...partial };
+  }
+
+  function frameTracking(partial: Partial<FrameTracking> = {}): FrameTracking {
+    return {
+      detectorRan: true,
+      detectorReason: 'CADENCE',
+      trackerMillis: 0.4,
+      engineId: 'lk',
+      lockedTrackId: 3,
+      detectionLagMillis: 42,
+      reupdateMillis: 6,
+      reupdatedTracks: 2,
+      ...partial,
+    };
+  }
+
+  function resultWithTracking(tracking: FrameTracking | undefined, capturedAt = '2026-08-14T00:00:00Z'): DetectionResult {
+    return { ...detectionResult([]), capturedAt, tracking };
+  }
+
+  describe('CAPABILITY_LEVEL_OPTIONS / capabilityLevelOption / capabilityLevelLabel / capabilityLevelHint', () => {
+    it('offers exactly Auto (0) through L5, in ascending order', () => {
+      expect(CAPABILITY_LEVEL_OPTIONS.map((o) => o.value)).toEqual([0, 1, 2, 3, 4, 5]);
+    });
+
+    it('0 is labeled Auto — the default, and must read as a default, not a level', () => {
+      expect(capabilityLevelOption(0)?.label).toBe('Auto');
+    });
+
+    it('every option carries a non-blank cost/benefit hint', () => {
+      for (const option of CAPABILITY_LEVEL_OPTIONS) {
+        expect(option.hint.trim().length).toBeGreaterThan(0);
+      }
+    });
+
+    it('capabilityLevelLabel names a known level (shared by the picker and the served-level readout)', () => {
+      expect(capabilityLevelLabel(1)).toBe('L1 · Relay');
+      expect(capabilityLevelLabel(3)).toBe('L3 · Detect');
+      expect(capabilityLevelLabel(5)).toBe('L5 · Study');
+    });
+
+    it('capabilityLevelLabel falls back to a bare "Ln" for an unrecognized level, never blank', () => {
+      expect(capabilityLevelLabel(9)).toBe('L9');
+    });
+
+    it('capabilityLevelHint returns "" for an unrecognized level rather than throwing', () => {
+      expect(capabilityLevelHint(9)).toBe('');
+    });
+  });
+
+  describe('buildCapabilityLevelPatch', () => {
+    it('sends capabilityLevel alone, nested under tracking', () => {
+      expect(buildCapabilityLevelPatch(3)).toEqual({ tracking: { capabilityLevel: 3 } });
+    });
+
+    it('0 (Auto) is sent explicitly too — the proto zero-value, byte-identical to unset (B2)', () => {
+      expect(buildCapabilityLevelPatch(0)).toEqual({ tracking: { capabilityLevel: 0 } });
+    });
+  });
+
+  describe('isCapabilityDowngraded', () => {
+    it('is false when no capability was reported at all (absence is never a downgrade)', () => {
+      expect(isCapabilityDowngraded(undefined)).toBe(false);
+    });
+
+    it('is false when the served level matched the request — reason is empty', () => {
+      expect(isCapabilityDowngraded(capability({ levelServed: 4, reason: '' }))).toBe(false);
+    });
+
+    it('is true whenever the server names a reason, regardless of the levels involved', () => {
+      expect(isCapabilityDowngraded(capability({ levelServed: 2, reason: 'OpenVINO unavailable; degraded from requested L4 to L2' }))).toBe(true);
+    });
+
+    it('treats a whitespace-only reason as "no reason" too', () => {
+      expect(isCapabilityDowngraded(capability({ reason: '   ' }))).toBe(false);
+    });
+  });
+
+  describe('latestFrameTracking', () => {
+    it('is undefined for no results', () => {
+      expect(latestFrameTracking([])).toBeUndefined();
+    });
+
+    it('is undefined when the newest result carries no tracking object', () => {
+      expect(latestFrameTracking([resultWithTracking(undefined)])).toBeUndefined();
+    });
+
+    it('reads the newest result\'s tracking object when present', () => {
+      const tracking = frameTracking({ engineId: 'ncc' });
+      expect(latestFrameTracking([resultWithTracking(tracking)])).toEqual(tracking);
+    });
+
+    it('never falls back to an older, stale tracking object once the newest result has none — B5\'s honesty rule applied to staleness, not just to the request/outcome split', () => {
+      const stale = frameTracking({ engineId: 'lk' });
+      const results = [resultWithTracking(undefined, '2026-08-14T00:00:05Z'), resultWithTracking(stale, '2026-08-14T00:00:00Z')];
+      expect(latestFrameTracking(results)).toBeUndefined();
+    });
+  });
+
+  describe('isDetectionLagOverBudget / formatDetectionLag', () => {
+    it('DETECTION_LAG_BUDGET_MILLIS is the CV-RATE-BUDGET §1 Hold figure', () => {
+      expect(DETECTION_LAG_BUDGET_MILLIS).toBe(50);
+    });
+
+    it('is not over budget at exactly the budget', () => {
+      expect(isDetectionLagOverBudget(50)).toBe(false);
+    });
+
+    it('is over budget just past it', () => {
+      expect(isDetectionLagOverBudget(51)).toBe(true);
+    });
+
+    it('0 ("unknown" on the wire) is never flagged as over budget', () => {
+      expect(isDetectionLagOverBudget(0)).toBe(false);
+    });
+
+    it('a non-finite value is never flagged as over budget', () => {
+      expect(isDetectionLagOverBudget(Number.NaN)).toBe(false);
+    });
+
+    it('formats a genuine positive reading in whole milliseconds', () => {
+      expect(formatDetectionLag(42)).toBe('42 ms');
+      expect(formatDetectionLag(42.6)).toBe('43 ms');
+    });
+
+    it('formats 0 as an em dash — "unknown", never a fabricated "0 ms"', () => {
+      expect(formatDetectionLag(0)).toBe('—');
+    });
+
+    it('formats a negative or non-finite value as an em dash too', () => {
+      expect(formatDetectionLag(-1)).toBe('—');
+      expect(formatDetectionLag(Number.NaN)).toBe('—');
     });
   });
 });

@@ -537,3 +537,382 @@ def test_a_non_positive_roi_crop_factor_env_var_falls_back_to_default(monkeypatc
     settings = Settings.from_env()
 
     assert settings.track_roi_crop_factor == Settings().track_roi_crop_factor
+
+
+# -- wave V1 addition: the capability ladder's wire sentinel -----------------
+# (TRACKING-V3-PLAN §5). Same `<=0 = server default` shape `verify_every_
+# millis` uses above, with one deliberate difference exercised below: the
+# RESOLVED value may itself legitimately be `0` (auto-probe), which
+# `resolve()` never turns into a concrete level -- that is `session.py`'s job
+# (`cv_service.tracking.levels.resolve`, not this module).
+
+
+def test_capability_level_defaults_to_the_deployment_setting():
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), SETTINGS)
+
+    assert resolved.capability_level == SETTINGS.track_capability_level == 0
+
+
+def test_a_non_positive_capability_level_request_takes_the_deployment_default():
+    settings = dataclasses.replace(SETTINGS, track_capability_level=3)
+
+    for sentinel in (0, -1, -99):
+        resolved = params_module.resolve(
+            TrackingRequest(mode=MODE_ASSOCIATE, capability_level=sentinel), settings
+        )
+        assert resolved.capability_level == 3
+
+
+def test_a_positive_capability_level_request_wins_over_the_deployment_default():
+    settings = dataclasses.replace(SETTINGS, track_capability_level=4)
+
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_ASSOCIATE, capability_level=1), settings
+    )
+
+    assert resolved.capability_level == 1
+
+
+def test_the_deployment_default_may_itself_be_auto_probe():
+    # Unlike every other `<=0` sentinel in this module, `0` surviving all
+    # the way into `TrackingParams` is not a bug -- it is `levels.py`'s own
+    # "auto-probe" value, and `resolve()` deliberately never resolves it
+    # further (see this module's own docstring on `TrackingParams.
+    # capability_level`).
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_ASSOCIATE, capability_level=0),
+        dataclasses.replace(SETTINGS, track_capability_level=0),
+    )
+
+    assert resolved.capability_level == 0
+
+
+def test_settings_read_the_wave_v1_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_CAPABILITY_LEVEL", "2")
+
+    settings = Settings.from_env()
+
+    assert settings.track_capability_level == 2
+
+
+def test_garbage_wave_v1_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_CAPABILITY_LEVEL", "not-a-level")
+
+    settings = Settings.from_env()
+
+    assert settings.track_capability_level == Settings().track_capability_level
+
+
+# -- wave V3 addition: reupdate_max_gap_millis (proto field 14) --------------
+# (TRACKING-V3-PLAN §4.2). Same `<=0 = server default` request-level shape as
+# `memory_ttl_millis` above, and the SAME "the deployment default itself may
+# legitimately be non-positive" exception -- disabling ORU fleet-wide is a
+# deployment choice, not something a per-request sentinel can express.
+
+
+def test_a_non_positive_reupdate_gap_request_takes_the_deployment_default():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_gap_millis=9_000)
+
+    for sentinel in (0, -1, -99):
+        resolved = params_module.resolve(
+            TrackingRequest(mode=MODE_FOLLOW, reupdate_max_gap_millis=sentinel), settings
+        )
+        assert resolved.reupdate_max_gap_millis == 9_000
+
+
+def test_a_positive_reupdate_gap_request_wins_over_the_deployment_default():
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_FOLLOW, reupdate_max_gap_millis=5_000), SETTINGS
+    )
+
+    assert resolved.reupdate_max_gap_millis == 5_000
+
+
+def test_a_non_positive_deployment_reupdate_gap_is_a_legitimate_disabled_value():
+    # Unlike every other `<=0` sentinel in this module (except `memory_ttl_
+    # millis`), a non-positive DEPLOYMENT default is not replaced by
+    # anything -- it is the operator's own choice to run with ORU off
+    # fleet-wide (`reupdate.py`'s own `gap_millis > max_gap_millis` check
+    # rejects every gap once the ceiling is non-positive, since a gap is by
+    # definition positive).
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_gap_millis=0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_FOLLOW), settings)
+
+    assert resolved.reupdate_max_gap_millis == 0
+
+
+def test_settings_read_the_wave_v3_reupdate_gap_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_GAP_MILLIS", "20000")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_gap_millis == 20_000
+
+
+def test_a_negative_reupdate_gap_env_var_disables_rather_than_falling_back(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_GAP_MILLIS", "0")
+
+    assert Settings.from_env().track_reupdate_max_gap_millis == 0
+
+
+def test_garbage_reupdate_gap_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_GAP_MILLIS", "soon")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_gap_millis == Settings().track_reupdate_max_gap_millis
+
+
+# -- 2026-08-14 repair, part 2: reupdate_max_velocity_per_second -------------
+# (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4/§8). Deployment-only,
+# no wire field -- same "no per-request override to fall back FROM" shape as
+# `follow_top_k`/`roi_enabled` above; `<=0` is a legitimate DISABLE value,
+# same shape as `reupdate_max_gap_millis` directly above, not
+# `roi_crop_factor`'s "non-positive is a misconfiguration" shape.
+
+
+def test_resolve_takes_reupdate_max_velocity_per_second_straight_from_settings():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_velocity_per_second=3.5)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_velocity_per_second == 3.5
+
+
+def test_reupdate_max_velocity_per_second_defaults_to_five():
+    # `cv_service.config.DEFAULT_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND`'s
+    # own derivation: >3x headroom over both the harness's own fastest
+    # synthetic pan (0.6/sec) and `CV-RATE-BUDGET.md` §2's most aggressive
+    # documented search yaw (1.5/sec).
+    assert Settings().track_reupdate_max_velocity_per_second == 5.0
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), Settings())
+    assert resolved.reupdate_max_velocity_per_second == 5.0
+
+
+def test_a_non_positive_deployment_velocity_bound_is_a_legitimate_disabled_value():
+    # Same shape as `reupdate_max_gap_millis`'s own non-positive test above:
+    # a non-positive DEPLOYMENT default is not replaced by anything -- it is
+    # the operator's own choice to run the plausibility guard off fleet-wide
+    # (`reupdate.py`'s own guard never fires once the bound is non-positive).
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_velocity_per_second=0.0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_velocity_per_second == 0.0
+
+
+def test_settings_read_the_repair_part_2_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND", "3.5")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_velocity_per_second == 3.5
+
+
+def test_a_non_positive_velocity_bound_env_var_disables_rather_than_falling_back(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND", "0")
+
+    assert Settings.from_env().track_reupdate_max_velocity_per_second == 0.0
+
+
+def test_garbage_velocity_bound_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_VELOCITY_PER_SECOND", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert (
+        settings.track_reupdate_max_velocity_per_second
+        == Settings().track_reupdate_max_velocity_per_second
+    )
+
+
+# -- 2026-08-15 density gate: reupdate_max_track_count -----------------------
+# (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b/§8). Deployment-only,
+# no wire field -- same "no per-request override to fall back FROM" shape as
+# `reupdate_max_velocity_per_second` above; `<=0` is a legitimate DISABLE
+# value, same shape as `reupdate_max_gap_millis`/`reupdate_max_velocity_per_
+# second`. Unlike the velocity bound, this ships DISABLED by default (`0`) --
+# no sweep against real footage has picked a threshold yet.
+
+
+def test_resolve_takes_reupdate_max_track_count_straight_from_settings():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_track_count=5)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_track_count == 5
+
+
+def test_reupdate_max_track_count_defaults_to_disabled():
+    # `cv_service.config.DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT` -- `0`,
+    # provisional, pending the sweep against `benchmarks/` (see that
+    # constant's own comment); unlike `reupdate_max_velocity_per_second`,
+    # deliberately NOT derived from a documented platform bound.
+    assert Settings().track_reupdate_max_track_count == 0
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), Settings())
+    assert resolved.reupdate_max_track_count == 0
+
+
+def test_a_negative_deployment_track_count_ceiling_is_a_legitimate_disabled_value():
+    # Same shape as `reupdate_max_velocity_per_second`'s own non-positive
+    # test above: a non-positive DEPLOYMENT default is not replaced by
+    # anything -- it is the operator's own choice to run the density gate
+    # off fleet-wide (`reupdate.py`'s own gate never fires once the ceiling
+    # is non-positive).
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_track_count=-1)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_track_count == -1
+
+
+def test_settings_read_the_density_gate_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_TRACK_COUNT", "8")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_track_count == 8
+
+
+def test_a_non_positive_track_count_env_var_disables_rather_than_falling_back(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_TRACK_COUNT", "0")
+
+    assert Settings.from_env().track_reupdate_max_track_count == 0
+
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_TRACK_COUNT", "-1")
+
+    assert Settings.from_env().track_reupdate_max_track_count == -1
+
+
+def test_garbage_track_count_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_TRACK_COUNT", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_track_count == Settings().track_reupdate_max_track_count
+
+
+# -- 2026-08-15 bracket-identity check: reupdate_max_shape_log_ratio ---------
+# (`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1). Deployment-only,
+# no wire field -- same "no per-request override to fall back FROM" shape as
+# `reupdate_max_velocity_per_second`/`reupdate_max_track_count` above; `<=0`
+# is a legitimate DISABLE value, same shape as both. Ships DISABLED by
+# default (`0.0`) -- same reason `reupdate_max_track_count` does: no sweep
+# against real footage has picked a value yet.
+
+
+def test_resolve_takes_reupdate_max_shape_log_ratio_straight_from_settings():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_shape_log_ratio=0.7)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_shape_log_ratio == 0.7
+
+
+def test_reupdate_max_shape_log_ratio_defaults_to_the_swept_value():
+    """`0.40` is SWEPT, not chosen (`TRACKING-BENCHMARK-RESULTS.md` §4d) -- the
+    first ORU configuration that beats not running ORU at all, at -97 IDSW and
+    +0.7pp recovery across 21 real MOT17 pairs.
+
+    Pinned here because the value is a MEASUREMENT: changing it silently would
+    discard a sweep, and the accepted cost on the other side (`pan`/FOLLOW's
+    `implaus_n` 0 -> 8, recorded in `tools/trackeval/BASELINE.md`) means the
+    trade was made deliberately and should not drift by accident.
+    """
+    assert Settings().track_reupdate_max_shape_log_ratio == 0.40
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), Settings())
+    assert resolved.reupdate_max_shape_log_ratio == 0.40
+
+
+def test_a_negative_deployment_shape_bound_is_a_legitimate_disabled_value():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_shape_log_ratio=-1.0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_shape_log_ratio == -1.0
+
+
+def test_settings_read_the_shape_bound_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO", "0.7")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_shape_log_ratio == 0.7
+
+
+def test_a_non_positive_shape_bound_env_var_disables_rather_than_falling_back(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO", "0")
+
+    assert Settings.from_env().track_reupdate_max_shape_log_ratio == 0.0
+
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO", "-1")
+
+    assert Settings.from_env().track_reupdate_max_shape_log_ratio == -1.0
+
+
+def test_garbage_shape_bound_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert (
+        settings.track_reupdate_max_shape_log_ratio
+        == Settings().track_reupdate_max_shape_log_ratio
+    )
+
+
+# -- 2026-08-15 bracket-identity check: reupdate_max_motion_center_distance --
+# Same shape as `reupdate_max_shape_log_ratio` directly above -- deployment-
+# only, no wire field, `<=0` disables, ships disabled by default.
+
+
+def test_resolve_takes_reupdate_max_motion_center_distance_straight_from_settings():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_motion_center_distance=2.0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_motion_center_distance == 2.0
+
+
+def test_reupdate_max_motion_center_distance_defaults_to_disabled():
+    assert Settings().track_reupdate_max_motion_center_distance == 0.0
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), Settings())
+    assert resolved.reupdate_max_motion_center_distance == 0.0
+
+
+def test_a_negative_deployment_motion_bound_is_a_legitimate_disabled_value():
+    settings = dataclasses.replace(SETTINGS, track_reupdate_max_motion_center_distance=-1.0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.reupdate_max_motion_center_distance == -1.0
+
+
+def test_settings_read_the_motion_bound_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE", "2.0")
+
+    settings = Settings.from_env()
+
+    assert settings.track_reupdate_max_motion_center_distance == 2.0
+
+
+def test_a_non_positive_motion_bound_env_var_disables_rather_than_falling_back(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE", "0")
+
+    assert Settings.from_env().track_reupdate_max_motion_center_distance == 0.0
+
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE", "-1")
+
+    assert Settings.from_env().track_reupdate_max_motion_center_distance == -1.0
+
+
+def test_garbage_motion_bound_env_var_falls_back_and_never_raises(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert (
+        settings.track_reupdate_max_motion_center_distance
+        == Settings().track_reupdate_max_motion_center_distance
+    )

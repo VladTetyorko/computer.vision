@@ -17,6 +17,7 @@ from cv_service.tracking.engines.base import (
     Observation,
     Transform,
 )
+from cv_service.tracking.history import _DEFAULT_CAPACITY
 from cv_service.tracking.memory import MemoryParams, ObjectMemory
 from cv_service.tracking.params import MODE_ASSOCIATE, TrackingParams
 from cv_service.tracking.track import (
@@ -68,6 +69,49 @@ def params(**overrides) -> TrackingParams:
         roi_enabled=False,
         roi_crop_factor=4.0,
         roi_min_iou=0.2,
+        # TRACKING-V3-PLAN wave V1 -- also inert here: only `session.py`'s
+        # `_resolve_capability_level` reads it; included only because
+        # `TrackingParams` requires it. `0` = auto-probe, the sentinel's own
+        # legitimate resolved value (see that field's own docstring).
+        capability_level=0,
+        # TRACKING-V3-PLAN wave V3 -- ORU's gap ceiling. A generous default
+        # here (not `0`/disabled) so ORU tests below opt IN by building a
+        # real gap, rather than every test in this file having to remember
+        # to set it; `test_track.py`'s own ORU section overrides this
+        # explicitly where the exact ceiling matters.
+        reupdate_max_gap_millis=60_000,
+        # TRACKING-V3-PLAN wave V6 -- also inert here: `TrackBook`/`_observe`
+        # never read it (only `session.py`'s `_late_corrected_box` does,
+        # entirely outside this module); included only because
+        # `TrackingParams` requires it.
+        detection_lag_correction_enabled=True,
+        # 2026-08-14 repair, part 2 -- the ORU plausibility guard's bound.
+        # `0.0` (disabled) by default here, same "opt in explicitly" shape
+        # `reupdate_max_gap_millis`'s own comment above describes for THAT
+        # field's non-default choice: unlike the gap ceiling, a disabled
+        # velocity guard is the SAFER default for this file's tests (it
+        # never turns a legitimate reconstruction this file already asserts
+        # on into an unexpected `None`), so this file's own ORU-plausibility
+        # tests override it explicitly where the bound itself matters.
+        reupdate_max_velocity_per_second=0.0,
+        # 2026-08-15 density gate -- same "disabled by default here" shape
+        # as `reupdate_max_velocity_per_second` directly above, and for the
+        # same reason: a live ceiling would turn some ORU-reconstruction
+        # test in this file into an unexpected `None` just because the
+        # scenario happens to book more than N tracks. This file's own
+        # density-gate section overrides it explicitly where the ceiling
+        # itself matters.
+        reupdate_max_track_count=0,
+        # 2026-08-15 bracket-identity check -- same "disabled by default
+        # here" shape as `reupdate_max_velocity_per_second`/`reupdate_max_
+        # track_count` directly above, and for the same reason: a live
+        # bound would turn some ORU-reconstruction test in this file into
+        # an unexpected `None` just because the fixture's box sizes or
+        # velocities happen to cross it. This file's own bracket-identity
+        # section overrides these explicitly where the bound itself
+        # matters.
+        reupdate_max_shape_log_ratio=0.0,
+        reupdate_max_motion_center_distance=0.0,
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -509,3 +553,424 @@ def test_recoveries_are_ignored_for_a_key_that_is_already_a_live_track():
     )[0]
 
     assert still_born.track_id == born.track_id
+
+
+# -- observation history (TRACKING-V3-PLAN wave V2) --------------------------
+
+
+def test_a_birth_observation_is_recorded_into_history():
+    book = TrackBook(params(min_hits=1))
+
+    born = book.apply([seen("car")], 3.0, detector_ran=True)[0]
+
+    latest = born.history.latest()
+    assert latest is not None
+    assert latest.timestamp == pytest.approx(3.0)
+    assert latest.observation.box == born.box
+
+
+def test_every_detector_confirmation_grows_history():
+    book = TrackBook(params(min_hits=1))
+    book.apply([seen("car")], 0.0, detector_ran=True)
+
+    track = book.apply([seen("car", x=0.2)], 1.0, detector_ran=True)[0]
+
+    assert len(track.history) == 2
+
+
+def test_coasting_never_grows_history():
+    # The direct proof this wave's own acceptance criteria call for: a track
+    # coasted across many tracker-only frames records nothing new, because
+    # none of those observations are `SOURCE_DETECTOR`.
+    book = TrackBook(params(min_hits=1, max_age_frames=1000))
+    born = book.apply([seen("car", authoritative=True)], 0.0, detector_ran=True)[0]
+    assert len(born.history) == 1
+
+    for frame in range(1, 50):
+        book.apply([seen("car", source=SOURCE_TRACKER)], float(frame), detector_ran=False)
+
+    assert len(book.get(born.track_id).history) == 1
+
+
+def test_a_verify_pass_that_fails_to_re_anchor_does_not_grow_history():
+    # A `SOURCE_TRACKER` observation on a verify frame that ran but did not
+    # confirm the track (COASTING, `misses` advances) is still not evidence.
+    book = TrackBook(params(min_hits=1, max_age_frames=5))
+    born = book.apply([seen("car", authoritative=True)], 0.0, detector_ran=True)[0]
+
+    track = book.apply([seen("car", source=SOURCE_TRACKER)], 1.0, detector_ran=True)[0]
+
+    assert track.state == STATE_COASTING
+    assert len(track.history) == 1
+    assert track.history.latest().timestamp == pytest.approx(0.0)
+
+
+def test_history_is_bounded_even_across_many_confirmations():
+    book = TrackBook(params(min_hits=1))
+    for frame in range(_DEFAULT_CAPACITY + 20):
+        track = book.apply([seen("car")], float(frame), detector_ran=True)[0]
+
+    assert len(track.history) == _DEFAULT_CAPACITY
+    # ...and it kept the newest, not an arbitrary/oldest subset.
+    assert track.history.latest().timestamp == pytest.approx(float(_DEFAULT_CAPACITY + 19))
+
+
+def test_each_track_gets_its_own_history_ring_not_a_shared_one():
+    # Aliasing guard: a `default_factory` gives every `Track` a FRESH ring --
+    # if it were a shared mutable default, recording into one track's history
+    # would silently leak into every other track's.
+    book = TrackBook(params(min_hits=1))
+    a, b = book.apply([seen("a", x=0.1), seen("b", x=0.5)], 0.0, detector_ran=True)
+
+    assert a.history is not b.history
+    assert len(a.history) == 1
+    assert len(b.history) == 1
+
+
+def test_a_recovered_track_starts_with_only_the_recovery_observation():
+    # `RecoveredIdentity` carries no observation history of its own (`Object
+    # Memory` never kept one) -- a recovered track's ring starts fresh with
+    # this one entry, not backfilled from before the object went dormant.
+    book = TrackBook(params(min_hits=5))
+    recovery = RecoveredIdentity(track_id=42, first_seen=-10.0)
+
+    recovered = book.apply(
+        [seen("x")], 3.0, detector_ran=True, recoveries={"x": recovery}
+    )[0]
+
+    assert len(recovered.history) == 1
+    assert recovered.history.latest().timestamp == pytest.approx(3.0)
+
+
+# -- ORU (TRACKING-V3-PLAN wave V3) ------------------------------------------
+
+
+def test_history_transform_accumulates_across_warps_and_resets_on_a_real_observation():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a", x=0.1)], 0.0, detector_ran=True)[0]
+    step = Transform(c=0.01)
+
+    book.warp(step)
+    book.warp(step)
+    book.warp(step)
+    tracked = book.get(born.track_id)
+    # Three single-frame warps compose to one 0.03 translation -- the SAME
+    # accumulation invariant `warp()`'s own box/velocity tests already prove,
+    # extended to `history_transform`.
+    assert tracked.history_transform.apply_point(0.0, 0.0) == pytest.approx((0.03, 0.0))
+
+    # A genuinely NEW real observation resets it: the freshest ring entry was
+    # just captured in THIS frame, so there is no accumulated motion between
+    # it and "now" yet.
+    book.apply([seen("a", x=0.5)], 4.0, detector_ran=True)
+    assert book.get(born.track_id).history_transform.identity
+
+
+def test_history_transform_does_not_reset_on_a_coasted_touch():
+    # Only a REAL (`SOURCE_DETECTOR`) observation moves the ring's own
+    # "latest" -- a coasted/tracker touch must not silently zero out
+    # accumulated ego-motion that `reupdate()` still needs to warp the OLD
+    # bracket by.
+    book = TrackBook(params(min_hits=1, max_age_frames=5))
+    born = book.apply([seen("a", x=0.1, authoritative=True)], 0.0, detector_ran=True)[0]
+    book.warp(Transform(c=0.01))
+
+    book.apply([seen("a", x=0.11, source=SOURCE_TRACKER)], 1.0, detector_ran=True)
+
+    assert not book.get(born.track_id).history_transform.identity
+
+
+def test_a_track_born_or_adopted_starts_with_an_identity_transform():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a")], 0.0, detector_ran=True)[0]
+
+    assert born.history_transform.identity
+
+    recovery = RecoveredIdentity(track_id=99, first_seen=-5.0)
+    recovered = book.apply([seen("x")], 3.0, detector_ran=True, recoveries={"x": recovery})[0]
+    assert recovered.history_transform.identity
+
+
+def test_a_real_reanchor_after_a_gap_replaces_velocity_with_orus_reconstruction():
+    # The end-to-end proof, at the book level: a track re-anchors after
+    # several failed verify passes (misses > 0), and the velocity ORU
+    # reconstructs -- NOT the estimator's own (here, deliberately absurd)
+    # `track.box`-based measurement -- is what survives.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, y=0.0, authoritative=True)], 0.0, detector_ran=True)
+    # Several failed verify passes: a coasted (SOURCE_TRACKER, not booked as
+    # a miss unless detector_ran) touch, then explicit misses via untouched
+    # `apply()` calls (the SAME mechanism ASSOCIATE's own gap accrual uses).
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)  # nothing touches "a" -> misses += 1
+
+    reanchored = book.apply([seen("a", x=0.5, y=0.0, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is True
+    # (0.5 - 0.0) / (5.0 - 0.0) = 0.1, the TRUE average velocity over the
+    # real gap -- not a one-frame measurement against a stale/frozen box.
+    assert reanchored.velocity_x == pytest.approx(0.1)
+
+
+def test_reupdated_is_reset_every_frame_never_stale_from_a_prior_touch():
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+    reanchored = book.apply([seen("a", x=0.5, authoritative=True)], 5.0, detector_ran=True)[0]
+    assert reanchored.reupdated is True
+
+    # A normal, ungapped confirmation right afterward must NOT still report
+    # last frame's reupdate.
+    settled = book.apply([seen("a", x=0.51, authoritative=True)], 5.1, detector_ran=True)[0]
+    assert settled.reupdated is False
+
+
+def test_reupdate_never_fires_for_a_track_that_has_not_actually_gapped():
+    # `misses == 0` at the moment of confirmation (continuously matched,
+    # nothing to reconstruct) must take the ordinary measured-and-blended
+    # path, not ORU's -- ORU firing unconditionally would silently discard
+    # the EMA smoothing every other confirmation relies on.
+    book = TrackBook(params(min_hits=1))
+    book.apply([seen("a", x=0.0)], 0.0, detector_ran=True)
+
+    touched = book.apply([seen("a", x=0.1)], 1.0, detector_ran=True)[0]
+
+    assert touched.reupdated is False
+
+
+def test_a_gap_older_than_the_ceiling_falls_back_to_the_ordinary_measurement():
+    book = TrackBook(params(min_hits=1, max_age_frames=30, reupdate_max_gap_millis=2_000))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    # The gap (5s) exceeds the 2s ceiling -- ORU must not fire, even though
+    # `misses > 0`.
+    reanchored = book.apply([seen("a", x=0.5, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is False
+
+
+def test_an_implausible_reconstructed_velocity_falls_back_to_the_ordinary_measurement():
+    # The book-level proof of the 2026-08-14 repair, part 2 guard
+    # (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4): a real bracket
+    # exists and the gap is well inside the ceiling, but the implied
+    # velocity (15.0/s) is absurd against the 2.0/s bound given here -- the
+    # SAME "fall back to the ordinary measured-and-blended path" outcome
+    # `test_a_gap_older_than_the_ceiling_falls_back_to_the_ordinary_
+    # measurement` above proves for a too-long gap, now proven for a
+    # too-fast one: `reupdated` stays `False`, exactly as an un-reupdated
+    # track (acceptance #1).
+    book = TrackBook(
+        params(min_hits=1, max_age_frames=30, reupdate_max_velocity_per_second=2.0)
+    )
+    book.apply([seen("a", x=0.0, y=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    # (15.0 - 0.0) / (5.0 - 0.0) = 3.0/s, over the 2.0/s bound.
+    reanchored = book.apply([seen("a", x=15.0, y=0.0, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is False
+
+
+def test_a_disabled_velocity_bound_reproduces_the_reconstruction_exactly():
+    # invariant P7 at the book level: the SAME absurd bracket the test above
+    # refuses must still be reconstructed by ORU when the bound is left at
+    # its disabled default (`0.0`, this file's own `params()` default) --
+    # reproducing today's behaviour exactly.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, y=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    reanchored = book.apply([seen("a", x=15.0, y=0.0, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is True
+    assert reanchored.velocity_x == pytest.approx(3.0)  # (15.0 - 0.0) / (5.0 - 0.0)
+
+
+def test_a_crowded_book_falls_back_to_the_ordinary_measurement():
+    # The book-level proof of the 2026-08-15 density gate
+    # (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b): a real bracket
+    # exists, the gap is well inside the ceiling and the implied velocity is
+    # perfectly plausible (0.1/s), but the book itself holds more live
+    # tracks than the density ceiling given here allows -- the SAME "fall
+    # back to the ordinary measured-and-blended path" outcome the gap-
+    # ceiling and velocity-guard tests above prove, now proven for a
+    # too-crowded book rather than a too-long or too-fast bracket.
+    book = TrackBook(params(min_hits=1, max_age_frames=30, reupdate_max_track_count=2))
+    book.apply(
+        [
+            seen("a", x=0.0, y=0.0, authoritative=True),
+            seen("b", x=0.2, y=0.0, authoritative=True),
+            seen("c", x=0.4, y=0.0, authoritative=True),
+        ],
+        0.0,
+        detector_ran=True,
+    )
+    for frame in range(1, 4):
+        # "b"/"c" stay live and confirmed every frame (their own gap never
+        # opens); "a" alone accrues the misses this test reconstructs from.
+        book.apply(
+            [seen("b", x=0.2, y=0.0, authoritative=True), seen("c", x=0.4, y=0.0, authoritative=True)],
+            float(frame),
+            detector_ran=True,
+        )
+
+    # (0.5 - 0.0) / (5.0 - 0.0) = 0.1/s -- only the density gate refuses
+    # this reconstruction: the book holds 3 live tracks ("a", "b", "c") at
+    # the moment "a" re-anchors, over the 2-track ceiling given here.
+    reanchored = book.apply([seen("a", x=0.5, y=0.0, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is False
+
+
+def test_a_disabled_density_gate_reproduces_the_reconstruction_exactly():
+    # invariant P7 at the book level: the SAME crowded book the test above
+    # refuses must still be reconstructed by ORU when the density ceiling is
+    # left at its disabled default (`0`, this file's own `params()` default)
+    # -- reproducing today's behaviour exactly.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply(
+        [
+            seen("a", x=0.0, y=0.0, authoritative=True),
+            seen("b", x=0.2, y=0.0, authoritative=True),
+            seen("c", x=0.4, y=0.0, authoritative=True),
+        ],
+        0.0,
+        detector_ran=True,
+    )
+    for frame in range(1, 4):
+        book.apply(
+            [seen("b", x=0.2, y=0.0, authoritative=True), seen("c", x=0.4, y=0.0, authoritative=True)],
+            float(frame),
+            detector_ran=True,
+        )
+
+    reanchored = book.apply([seen("a", x=0.5, y=0.0, authoritative=True)], 5.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is True
+    assert reanchored.velocity_x == pytest.approx(0.1)  # (0.5 - 0.0) / (5.0 - 0.0)
+
+
+def test_a_shape_change_falls_back_to_the_ordinary_measurement():
+    # The book-level proof of the 2026-08-15 bracket-identity check, Check A
+    # (`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1): a real
+    # bracket exists, the gap is well inside the ceiling and the implied
+    # velocity is perfectly plausible, but the box grew 5x across the gap --
+    # over the log-ratio bound given here -- so ORU falls back to the
+    # ordinary measured-and-blended path, the SAME outcome the other guards'
+    # own tests above prove for a too-long, too-fast or too-crowded bracket.
+    book = TrackBook(params(min_hits=1, max_age_frames=30, reupdate_max_shape_log_ratio=0.5))
+    book.apply(
+        [Observation(key="a", box=Box(0.0, 0.0, 0.1, 0.1), label="car", confidence=0.9,
+                     source=SOURCE_DETECTOR, authoritative=True)],
+        0.0,
+        detector_ran=True,
+    )
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    reanchored = book.apply(
+        [Observation(key="a", box=Box(0.0, 0.0, 0.5, 0.5), label="car", confidence=0.9,
+                     source=SOURCE_DETECTOR, authoritative=True)],
+        5.0,
+        detector_ran=True,
+    )[0]
+
+    assert reanchored.reupdated is False
+
+
+def test_a_disabled_shape_bound_reproduces_the_reconstruction_exactly():
+    # invariant P7 at the book level: the SAME abrupt shape change the test
+    # above refuses must still be reconstructed by ORU when the log-ratio
+    # bound is left at its disabled default (`0.0`, this file's own
+    # `params()` default) -- reproducing today's behaviour exactly.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply(
+        [Observation(key="a", box=Box(0.0, 0.0, 0.1, 0.1), label="car", confidence=0.9,
+                     source=SOURCE_DETECTOR, authoritative=True)],
+        0.0,
+        detector_ran=True,
+    )
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    reanchored = book.apply(
+        [Observation(key="a", box=Box(0.0, 0.0, 0.5, 0.5), label="car", confidence=0.9,
+                     source=SOURCE_DETECTOR, authoritative=True)],
+        5.0,
+        detector_ran=True,
+    )[0]
+
+    assert reanchored.reupdated is True
+
+
+def test_a_motion_forecast_mismatch_falls_back_to_the_ordinary_measurement():
+    # The book-level proof of the 2026-08-15 bracket-identity check, Check B:
+    # two real confirmations establish a pre-gap velocity of 0.1/s, the gap
+    # opens, and the re-anchor lands far from where that velocity would
+    # forecast -- over the size-scaled bound given here -- so ORU falls back
+    # to the ordinary measured-and-blended path.
+    book = TrackBook(params(min_hits=1, max_age_frames=30, reupdate_max_motion_center_distance=1.0))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    book.apply([seen("a", x=0.1, authoritative=True)], 1.0, detector_ran=True)  # measured velocity_x -> 0.1/s
+    for frame in range(2, 5):
+        book.apply([], float(frame), detector_ran=True)
+
+    # Forecast centre from t=1.0 (0.15) at 0.1/s over an 8s gap: 0.95. The
+    # real t2 lands at 0.55 -- 0.4 off against a ~0.283 (2x diagonal) slack.
+    reanchored = book.apply([seen("a", x=0.5, authoritative=True)], 9.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is False
+
+
+def test_a_disabled_motion_bound_reproduces_the_reconstruction_exactly():
+    # invariant P7 at the book level: the SAME forecast mismatch the test
+    # above refuses must still be reconstructed by ORU when the motion bound
+    # is left at its disabled default (`0.0`, this file's own `params()`
+    # default) -- reproducing today's behaviour exactly.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    book.apply([seen("a", x=0.1, authoritative=True)], 1.0, detector_ran=True)
+    for frame in range(2, 5):
+        book.apply([], float(frame), detector_ran=True)
+
+    reanchored = book.apply([seen("a", x=0.5, authoritative=True)], 9.0, detector_ran=True)[0]
+
+    assert reanchored.reupdated is True
+
+
+def test_reupdate_stats_reset_and_accumulate_across_one_apply_call():
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    book.reset_reupdate_stats()
+    assert book.last_reupdate_millis == 0
+    assert book.last_reupdated_tracks == 0
+
+    book.apply([seen("a", x=0.5, authoritative=True)], 5.0, detector_ran=True)
+
+    assert book.last_reupdated_tracks == 1
+    assert book.last_reupdate_millis >= 0  # a real, if tiny, perf_counter measurement
+
+
+def test_reset_reupdate_stats_is_what_a_frame_with_no_apply_call_must_use():
+    # `session.py`'s own contract (`reset_reupdate_stats`'s docstring): a
+    # frame that never calls `apply()` at all must not report a STALE
+    # nonzero value from the last frame that did.
+    book = TrackBook(params(min_hits=1, max_age_frames=30))
+    book.apply([seen("a", x=0.0, authoritative=True)], 0.0, detector_ran=True)
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+    book.apply([seen("a", x=0.5, authoritative=True)], 5.0, detector_ran=True)
+    assert book.last_reupdated_tracks == 1  # sanity: a reupdate really happened
+
+    book.reset_reupdate_stats()
+
+    assert book.last_reupdate_millis == 0
+    assert book.last_reupdated_tracks == 0

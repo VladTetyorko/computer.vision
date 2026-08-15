@@ -789,6 +789,342 @@ def small_target(seed: int = DEFAULT_SEED) -> Sequence:
     )
 
 
+# -- scenario: nonlinear -----------------------------------------------------
+#
+# The scenario that isolates what breaks CONSTANT-VELOCITY extrapolation
+# itself, as opposed to `occlusion`'s "does anything extrapolate at all"
+# question. `occlusion`'s object holds its pre-gap heading throughout the
+# gap, so the constant-velocity assumption `predict.py` makes is exactly
+# right by construction there -- which is exactly why wave C4's dormant
+# gallery already resolves it perfectly (see this file's own `occlusion`,
+# and `BASELINE.md`). Here the object REVERSES heading the instant it is
+# hidden and never turns back, so the extrapolated box and the true
+# reappearance position end up on OPPOSITE sides of where it was last
+# confirmed -- precisely the failure TRACKING-V3-PLAN wave V3's ORU
+# (`reupdate.py`) exists to correct, by re-deriving the gap from the two REAL
+# observations that bracket it instead of trusting one stale pre-gap
+# velocity all the way through.
+
+NONLINEAR_FRAME_COUNT = 70
+NONLINEAR_LANE = 0.5
+NONLINEAR_START_X = 0.10
+# Deliberately WITHIN `DEFAULT_TRACK_MAX_AGE_FRAMES` (30, `cv_service/
+# config.py`) -- unlike `occlusion`, this scenario is not about whether a
+# LOST track can be remembered (wave C4 already answers that), it is about
+# whether the box a live, still-COASTING track predicts is anywhere near
+# right. A gap that pushed the track to LOST would route re-anchoring
+# through `memory.py`'s gallery instead of `predict.py`'s extrapolation --
+# the wrong mechanism for what this scenario isolates.
+NONLINEAR_GAP_START = 25
+NONLINEAR_GAP_FRAMES = 20
+NONLINEAR_SPEED = 0.004  # frame-widths/frame, same magnitude before and after the reversal
+NONLINEAR_BAR_MARGIN_FRACTION = 0.15
+
+
+def nonlinear(seed: int = DEFAULT_SEED) -> Sequence:
+    """One object travels right, then reverses to travel left at the SAME
+    speed the instant it is hidden -- so constant-velocity extrapolation from
+    the pre-gap heading points one way while the object is actually headed
+    the other, and the two diverge for the whole gap (REVIEW finding C1,
+    sharpened: not "does a prediction exist", but "is the model that
+    produces it still valid")."""
+    rng = Random(seed)
+    color = _OBJECT_COLORS[0]
+    gap_end = NONLINEAR_GAP_START + NONLINEAR_GAP_FRAMES  # exclusive
+    apex_x = NONLINEAR_START_X + NONLINEAR_SPEED * NONLINEAR_GAP_START
+
+    def x_at(index: int) -> float:
+        if index < NONLINEAR_GAP_START:
+            return NONLINEAR_START_X + NONLINEAR_SPEED * index
+        # One reversal, exactly at the moment visibility is lost -- both
+        # during the gap and after re-emerging, the object keeps heading the
+        # OPPOSITE way from before, never turning a third time.
+        return apex_x - NONLINEAR_SPEED * (index - NONLINEAR_GAP_START)
+
+    hidden_positions = [x_at(index) for index in range(NONLINEAR_GAP_START, gap_end)]
+    margin = OBJECT_WIDTH_FRACTION * NONLINEAR_BAR_MARGIN_FRACTION
+    bar_left = min(hidden_positions) - margin
+    bar_right = max(hidden_positions) + OBJECT_WIDTH_FRACTION + margin
+
+    def underlay(image: "np.ndarray") -> None:
+        _draw_bar(image, bar_left, bar_right, OCCLUSION_BAR_COLOR)
+
+    frames = []
+    for index in range(NONLINEAR_FRAME_COUNT):
+        hidden = NONLINEAR_GAP_START <= index < gap_end
+        jitter = rng.uniform(-POSITION_JITTER, POSITION_JITTER)
+        box = _lane_box(x_at(index), NONLINEAR_LANE, jitter)
+        objects = (GroundTruthObject(gt_id=1, label=OBJECT_LABEL, box=box, visible=not hidden),)
+        frames.append(_render_frame(index, objects, {1: color}, underlay=underlay))
+    return Sequence(
+        name="nonlinear",
+        fps=DEFAULT_FPS,
+        width=FRAME_WIDTH,
+        height=FRAME_HEIGHT,
+        frames=tuple(frames),
+        primary_gt_id=1,
+    )
+
+
+# -- scenario: tiny_fast -----------------------------------------------------
+#
+# Small targets, fast ego-motion -- `docs/conclusions/CV-RATE-BUDGET.md` §2's
+# own numbers: at 200 m a 15 m/s vehicle contributes ~4.2 px/frame of its OWN
+# motion while 30 deg/s of camera yaw contributes ~32 px/frame, a ratio
+# dominated by the CAMERA, not the vehicle. `pan` already proves ego-motion
+# compensation works at a modest, steady pan rate on normally-sized objects
+# (`BASELINE.md`: MT 4/4). This scenario asks the harder question `pan`
+# cannot: does that same compensation still leave enough of a TINY box's own
+# extent uncovered by whatever residual estimation error it does not correct
+# exactly? A box a "handful of pixels" wide has almost no IoU budget left to
+# spend on that residual, so the same few-pixel wobble that `pan`'s
+# `OBJECT_WIDTH_FRACTION`-sized landmarks absorb for free can cost this
+# scenario the whole match.
+#
+# Structurally this is `pan`'s own multi-landmark shape (several world-fixed
+# objects the camera sweeps past in turn), not a single object under an
+# oscillating pan -- an earlier version tried that and found LK's own
+# `_MIN_TRACKED_CORNERS` floor (`engines/lk.py`) simply cannot init on a box
+# this small regardless of how it moves, which tests "does the box exist at
+# all", not "does fast ego-motion break a tiny box's association". Multiple
+# landmarks also give ASSOCIATE something `nonlinear`/`pan_occlusion` structurally
+# cannot: with only one object, one candidate and one target are always
+# force-matched regardless of geometric quality (nothing else to prefer), so
+# a single-object scenario can never show an id switch under `cost` no matter
+# how bad the drift is. Three competing candidates can.
+
+TINY_FAST_FRAME_COUNT = 70
+# ~8 x 6 px on this harness's 320x240 canvas -- "a handful of pixels", and
+# measured (see the scenario block comment above) to be BELOW LK's own
+# minimum trackable size, which is deliberate: FOLLOW's total loss here is
+# as real a finding as ASSOCIATE's id switches, not a harness artifact.
+TINY_FAST_SIZE = 0.025
+TINY_FAST_LANE = 0.5
+# Steady, not oscillating (see the block comment) -- `pan`'s own camera
+# velocity (0.035, ~11 px/frame) doubled to ~19 px/frame, in CV-RATE-BUDGET's
+# own ballpark for a fast yaw. Measured while tuning this baseline: IDSW
+# stays 2 across the whole 0.055-0.07 neighbourhood of this value, so this is
+# a robust choice, not a knife-edge one (the same bar `crossing`'s own jitter
+# constant was held to).
+TINY_FAST_CAMERA_VELOCITY = 0.06
+_TINY_FAST_LANDMARKS: tuple[tuple[int, float], ...] = (
+    # (gt_id, start_world_x) -- world-STATIC, same convention as `pan`'s
+    # first three objects, spread so each is visible in turn as the camera
+    # sweeps rather than all three competing on-screen at once.
+    (1, 0.30),
+    (2, 0.85),
+    (3, 1.40),
+)
+
+
+def tiny_fast(seed: int = DEFAULT_SEED) -> Sequence:
+    """Three handful-of-pixels, world-static landmarks under a FAST, steady
+    pan -- isolates whether a tiny box's own extent survives whatever
+    residual error ego-motion compensation leaves uncorrected, and gives
+    ASSOCIATE competing candidates to confuse, which a single tiny object
+    structurally cannot."""
+    rng = Random(seed)
+    colors = {gt_id: _OBJECT_COLORS[(gt_id - 1) % len(_OBJECT_COLORS)] for gt_id, _world_x in _TINY_FAST_LANDMARKS}
+
+    frames = []
+    for index in range(TINY_FAST_FRAME_COUNT):
+        camera_left = TINY_FAST_CAMERA_VELOCITY * index
+        objects = []
+        for gt_id, start_world_x in _TINY_FAST_LANDMARKS:
+            x = start_world_x - camera_left
+            jitter = rng.uniform(-POSITION_JITTER, POSITION_JITTER)
+            box = Box(x, TINY_FAST_LANE - TINY_FAST_SIZE / 2.0 + jitter, TINY_FAST_SIZE, TINY_FAST_SIZE)
+            objects.append(GroundTruthObject(gt_id=gt_id, label=OBJECT_LABEL, box=box, visible=box.valid))
+
+        def underlay(image: "np.ndarray", camera_left=camera_left) -> None:
+            _draw_world_texture(image, camera_left)
+
+        frames.append(_render_frame(index, objects, colors, underlay=underlay))
+    return Sequence(
+        name="tiny_fast",
+        fps=DEFAULT_FPS,
+        width=FRAME_WIDTH,
+        height=FRAME_HEIGHT,
+        frames=tuple(frames),
+        primary_gt_id=1,
+    )
+
+
+# -- scenario: pan_occlusion -------------------------------------------------
+#
+# Ego-motion AND occlusion at the same time. Today `pan` and `occlusion` are
+# separate scenarios and each is survivable alone: `pan`'s object is never
+# hidden, so every frame's fresh detection corrects whatever the previous
+# frame's ego-motion warp got slightly wrong before the error can compound;
+# `occlusion`'s camera never moves, so the constant-velocity coast through
+# the gap has nothing but the object's own (unchanging) heading to get
+# wrong. Superposing them removes both safety nets at once: for the whole
+# occlusion window there is no fresh detection to correct a warp, AND the
+# warp itself is being applied every single one of those frames
+# (`TrackBook.warp()`, TRACKING-V2-PLAN wave C2) -- so whatever residual
+# per-frame compensation error exists gets a gap-length chance to compound
+# before anything checks it, rather than the one-frame chance `pan` alone
+# ever gives it.
+
+PAN_OCCLUSION_FRAME_COUNT = 90
+# A world-fixed target -- own_velocity 0, same convention as `pan`'s first
+# three landmarks -- so every bit of on-screen motion is the CAMERA's,
+# isolating the ego-motion/occlusion interaction from a third variable.
+PAN_OCCLUSION_TARGET_WORLD_X = 0.5
+PAN_OCCLUSION_LANE = 0.5
+PAN_OCCLUSION_CAMERA_VELOCITY = 0.02
+# Within `DEFAULT_TRACK_MAX_AGE_FRAMES` (30) for the same reason
+# `nonlinear`'s gap is -- this scenario is about whether a still-COASTING
+# track's ego-motion-warped prediction stays right, not about dormant-gallery
+# recovery after LOST.
+PAN_OCCLUSION_GAP_START = 30
+PAN_OCCLUSION_GAP_FRAMES = 25
+
+
+def pan_occlusion(seed: int = DEFAULT_SEED) -> Sequence:
+    """A world-static target, swept across frame by a continuous camera pan,
+    hidden behind an image-fixed bar for a genuine occlusion window in the
+    middle of that pan -- ego-motion compensation and gap-coasting stacked,
+    rather than exercised one at a time."""
+    rng = Random(seed)
+    color = _OBJECT_COLORS[0]
+    gap_end = PAN_OCCLUSION_GAP_START + PAN_OCCLUSION_GAP_FRAMES  # exclusive
+
+    def camera_left_at(index: int) -> float:
+        return PAN_OCCLUSION_CAMERA_VELOCITY * index
+
+    def x_at(index: int) -> float:
+        return PAN_OCCLUSION_TARGET_WORLD_X - camera_left_at(index)
+
+    hidden_positions = [x_at(index) for index in range(PAN_OCCLUSION_GAP_START, gap_end)]
+    bar_left = min(hidden_positions) - _BAR_MARGIN
+    bar_right = max(hidden_positions) + OBJECT_WIDTH_FRACTION + _BAR_MARGIN
+
+    frames = []
+    for index in range(PAN_OCCLUSION_FRAME_COUNT):
+        camera_left = camera_left_at(index)
+        hidden = PAN_OCCLUSION_GAP_START <= index < gap_end
+        jitter = rng.uniform(-POSITION_JITTER, POSITION_JITTER)
+        box = _lane_box(x_at(index), PAN_OCCLUSION_LANE, jitter)
+        objects = (GroundTruthObject(gt_id=1, label=OBJECT_LABEL, box=box, visible=not hidden),)
+
+        def underlay(image: "np.ndarray", camera_left=camera_left, hidden=hidden) -> None:
+            _draw_world_texture(image, camera_left)
+            if hidden:
+                _draw_bar(image, bar_left, bar_right, OCCLUSION_BAR_COLOR)
+
+        frames.append(_render_frame(index, objects, {1: color}, underlay=underlay))
+    return Sequence(
+        name="pan_occlusion",
+        fps=DEFAULT_FPS,
+        width=FRAME_WIDTH,
+        height=FRAME_HEIGHT,
+        frames=tuple(frames),
+        primary_gt_id=1,
+    )
+
+
+# -- scenario: latency -------------------------------------------------------
+#
+# Detector results delivered N frames late -- the detection landing on frame
+# `i` describes where the object was on frame `i - N`, not where it is now.
+# Wave V6's target (TRACKING-V3-PLAN §4.5), and the normal case for an
+# offboard detector (§5.2, "L1 RELAY"): the box travels a network hop and a
+# detector pass before it comes back, and applying it to "now" is a
+# systematic lag bias, not noise. Geometrically identical to a single
+# `linear` lane -- exactly like `dropout`, the failure mode lives entirely in
+# `replay.py`'s `DetectorNoiseConfig.latency_frames`, never in this ground
+# truth (see `__main__.py`'s `DEFAULT_NOISE_BY_SCENARIO`).
+
+LATENCY_FRAME_COUNT = 60
+LATENCY_LANE = 0.5
+LATENCY_TRAVEL_START = 0.05
+LATENCY_TRAVEL_END = 0.85
+
+
+def latency(seed: int = DEFAULT_SEED) -> Sequence:
+    """One object at constant velocity -- the ground truth a `linear` lane
+    would also produce. The lag is injected by the detector, not the scene;
+    see the module comment above."""
+    rng = Random(seed)
+    color = _OBJECT_COLORS[0]
+    velocity = (LATENCY_TRAVEL_END - LATENCY_TRAVEL_START) / (LATENCY_FRAME_COUNT - 1)
+
+    frames = []
+    for index in range(LATENCY_FRAME_COUNT):
+        x = LATENCY_TRAVEL_START + velocity * index
+        jitter = rng.uniform(-POSITION_JITTER, POSITION_JITTER)
+        box = _lane_box(x, LATENCY_LANE, jitter)
+        objects = (GroundTruthObject(gt_id=1, label=OBJECT_LABEL, box=box, visible=True),)
+        frames.append(_render_frame(index, objects, {1: color}))
+    return Sequence(
+        name="latency",
+        fps=DEFAULT_FPS,
+        width=FRAME_WIDTH,
+        height=FRAME_HEIGHT,
+        frames=tuple(frames),
+        primary_gt_id=1,
+    )
+
+
+# -- scenario: crossing_similar ----------------------------------------------
+#
+# `crossing`'s own failure mode (REVIEW finding B1), sharpened along the axis
+# `engines/histogram.py` (wave C3) was built to close: there, the two objects
+# have DIFFERENT colours, and a small amount of realistic detector jitter is
+# enough to swap their ids on pure geometry (`BASELINE.md`'s pre-C1 story) --
+# but appearance now tells them apart, and `crossing`'s current baseline is
+# clean. Here the two objects are the SAME colour, so the histogram distance
+# between them is near zero regardless of which is which: appearance
+# contributes nothing to the decision, same as before C3 existed. They also
+# both go invisible for a few frames centred on the crossing point -- both
+# COAST through the moment geometry is most ambiguous, rather than staying
+# continuously detector-confirmed across it the way `crossing` does.
+
+CROSSING_SIMILAR_FRAME_COUNT = 50
+CROSSING_SIMILAR_LANE = 0.5
+CROSSING_SIMILAR_GAP_FRAMES = 6
+
+
+def crossing_similar(seed: int = DEFAULT_SEED) -> Sequence:
+    """Two identically-coloured objects crossing paths, both hidden for a
+    brief window centred on the crossing point -- neither colour nor
+    geometry-at-the-moment-of-crossing is available to disambiguate them."""
+    rng = Random(seed)
+    colors = {1: _OBJECT_COLORS[0], 2: _OBJECT_COLORS[0]}  # SAME colour -- appearance is uninformative
+    left_start = CROSSING_TRAVEL_MARGIN
+    left_end = 1.0 - OBJECT_WIDTH_FRACTION - CROSSING_TRAVEL_MARGIN
+    midpoint = (CROSSING_SIMILAR_FRAME_COUNT - 1) / 2.0
+    gap_start = int(round(midpoint - CROSSING_SIMILAR_GAP_FRAMES / 2.0))
+    gap_end = gap_start + CROSSING_SIMILAR_GAP_FRAMES  # exclusive
+
+    frames = []
+    for index in range(CROSSING_SIMILAR_FRAME_COUNT):
+        t = index / (CROSSING_SIMILAR_FRAME_COUNT - 1)
+        x1 = left_start + (left_end - left_start) * t
+        x2 = left_end - (left_end - left_start) * t
+        jitter1 = rng.uniform(-POSITION_JITTER, POSITION_JITTER)
+        jitter2 = rng.uniform(-POSITION_JITTER, POSITION_JITTER)
+        hidden = gap_start <= index < gap_end
+        objects = (
+            GroundTruthObject(
+                gt_id=1, label=OBJECT_LABEL, box=_lane_box(x1, CROSSING_SIMILAR_LANE, jitter1), visible=not hidden
+            ),
+            GroundTruthObject(
+                gt_id=2, label=OBJECT_LABEL, box=_lane_box(x2, CROSSING_SIMILAR_LANE, jitter2), visible=not hidden
+            ),
+        )
+        frames.append(_render_frame(index, objects, colors))
+    return Sequence(
+        name="crossing_similar",
+        fps=DEFAULT_FPS,
+        width=FRAME_WIDTH,
+        height=FRAME_HEIGHT,
+        frames=tuple(frames),
+        primary_gt_id=1,
+    )
+
+
 SCENARIOS: dict[str, Callable[[int], Sequence]] = {
     "linear": linear,
     "occlusion": occlusion,
@@ -800,4 +1136,9 @@ SCENARIOS: dict[str, Callable[[int], Sequence]] = {
     "long_occlusion": long_occlusion,
     "crowd_recall": crowd_recall,
     "small_target": small_target,
+    "nonlinear": nonlinear,
+    "tiny_fast": tiny_fast,
+    "pan_occlusion": pan_occlusion,
+    "latency": latency,
+    "crossing_similar": crossing_similar,
 }

@@ -21,8 +21,20 @@ import com.drones.vision.perception.domain.model.TrackRef;
  * @param source     {@code DETECTOR}/{@code TRACKER} — which of the two loops produced this box on this frame
  * @param velocityX  normalized frame-widths per second
  * @param velocityY  normalized frame-heights per second
+ * @param reupdated  whether this track's gap was reconstructed by ORU on this frame
+ *                   (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md &sect;2)
  */
-public record DetectionTrackResponse(long id, String state, String source, double velocityX, double velocityY) {
+public record DetectionTrackResponse(long id, String state, String source, double velocityX, double velocityY,
+                                      boolean reupdated) {
+
+    /**
+     * Convenience constructor for callers before docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md added
+     * {@link #reupdated()} — defaults it to {@code false}, unchanged behavior. Every pre-existing
+     * 5-arg call site compiles and behaves unchanged.
+     */
+    public DetectionTrackResponse(long id, String state, String source, double velocityX, double velocityY) {
+        this(id, state, source, velocityX, velocityY, false);
+    }
 
     /**
      * Maps a domain {@link TrackRef} to its wire representation.
@@ -32,6 +44,6 @@ public record DetectionTrackResponse(long id, String state, String source, doubl
      */
     public static DetectionTrackResponse from(TrackRef track) {
         return new DetectionTrackResponse(track.trackId(), track.state().name(), track.source().name(),
-                track.velocityX(), track.velocityY());
+                track.velocityX(), track.velocityY(), track.reupdated());
     }
 }

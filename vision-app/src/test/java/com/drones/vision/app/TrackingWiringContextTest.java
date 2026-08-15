@@ -58,6 +58,17 @@ class TrackingWiringContextTest {
     }
 
     @Test
+    void defaultConfigurationLeavesCapabilityLevelAtAutoProbeAndReupdateMaxGapAtTheServerDefault() {
+        // docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2 / invariant B2: both properties bind to 0
+        // out of the box, the proto zero-value, byte-identical to a deployment that never heard of
+        // the capability ladder at all.
+        assertEquals(0, trackingProperties.capabilityLevel());
+        assertEquals(0, trackingProperties.reupdateMaxGapMillis());
+        assertEquals(TrackingConfig.defaults().capabilityLevel(), trackingProperties.capabilityLevel());
+        assertEquals(TrackingConfig.defaults().reupdateMaxGapMillis(), trackingProperties.reupdateMaxGapMillis());
+    }
+
+    @Test
     void theTrackerRosterBeanCarriesTheThreeBuiltInEngines() {
         assertEquals(3, cvTrackerRoster.size());
         assertEquals("bytetrack", cvTrackerRoster.get(0).id());

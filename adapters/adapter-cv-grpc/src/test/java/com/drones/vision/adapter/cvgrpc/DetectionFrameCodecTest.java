@@ -237,7 +237,9 @@ class DetectionFrameCodecTest {
     }
 
     @Test
-    void trackedDetectionMapsAllSixTrackRefFields() {
+    void trackedDetectionMapsAllSevenTrackRefFieldsIncludingReupdated() {
+        // docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2: Detection.reupdated (wire field 14) is the
+        // sixth-turned-seventh TrackRef field, mapped alongside the original six.
         com.drones.vision.proto.v1.Detection wireDetection = detectionBuilder()
                 .setTrackId(3)
                 .setTrackState(com.drones.vision.proto.v1.TrackState.TRACK_STATE_COASTING)
@@ -245,6 +247,7 @@ class DetectionFrameCodecTest {
                 .setVelocityX(0.05f)
                 .setVelocityY(-0.01f)
                 .setTrackAgeFrames(12)
+                .setReupdated(true)
                 .build();
         DetectionResponse response = responseBuilder().addDetections(wireDetection).build();
 
@@ -257,6 +260,23 @@ class DetectionFrameCodecTest {
         assertEquals(0.05, track.velocityX(), 1e-6);
         assertEquals(-0.01, track.velocityY(), 1e-6);
         assertEquals(12, track.ageFrames());
+        assertTrue(track.reupdated());
+    }
+
+    @Test
+    void reupdatedFalseByDefaultWhenNotStatedOnTheWire() {
+        // The pre-V3 shape: reupdated left untouched on the wire builder defaults to false, matching
+        // this codec's byte-identical-when-absent behavior for every other new V3 field.
+        com.drones.vision.proto.v1.Detection wireDetection = detectionBuilder()
+                .setTrackId(3)
+                .setTrackState(com.drones.vision.proto.v1.TrackState.TRACK_STATE_CONFIRMED)
+                .setSource(com.drones.vision.proto.v1.DetectionSource.DETECTION_SOURCE_DETECTOR)
+                .build();
+        DetectionResponse response = responseBuilder().addDetections(wireDetection).build();
+
+        TrackRef track = DetectionFrameCodec.decode(STREAM_ID, response).detections().get(0).track();
+
+        assertFalse(track.reupdated());
     }
 
     @Test
@@ -302,6 +322,93 @@ class DetectionFrameCodecTest {
         DetectionResponse response = responseBuilder().addDetections(wireDetection).build();
 
         assertThrows(IllegalArgumentException.class, () -> DetectionFrameCodec.decode(STREAM_ID, response));
+    }
+
+    // --- decode: V3 capability ladder + ORU (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2, wave J2) ---
+
+    @Test
+    void perFrameTelemetryRoundTripsTheFiveV3Fields() {
+        // reupdate_millis/reupdated_tracks/detection_lag_millis map onto TrackingTelemetry's
+        // reupdateLatency/reupdatedTracks/detectionLag; capability_level_served+capability_level_reason
+        // bundle onto TrackingTelemetry.capability() as one TrackingCapability, not two loose scalars.
+        DetectionResponse response = responseBuilder()
+                .setDetectorRan(true)
+                .setDetectorReason(com.drones.vision.proto.v1.DetectorReason.DETECTOR_REASON_CADENCE)
+                .setReupdateMillis(15)
+                .setReupdatedTracks(2)
+                .setDetectionLagMillis(30)
+                .setCapabilityLevelServed(3)
+                .setCapabilityLevelReason("thermal_throttle")
+                .build();
+
+        TrackingTelemetry tracking = DetectionFrameCodec.decode(STREAM_ID, response).tracking();
+
+        assertEquals(Duration.ofMillis(15), tracking.reupdateLatency());
+        assertEquals(2, tracking.reupdatedTracks());
+        assertEquals(Duration.ofMillis(30), tracking.detectionLag());
+        assertEquals(3, tracking.capability().levelServed());
+        assertEquals("thermal_throttle", tracking.capability().reason());
+    }
+
+    @Test
+    void allZeroResponseIncludingV3FieldsStillDecodesTrackingNull() {
+        // B3: absent must stay absent. Every V3 field explicitly stated at its proto zero-value (not
+        // merely left unset) still decodes tracking() == null -- this extends, rather than sits beside,
+        // the same all-zero-means-absent check toTrackingTelemetry already applies to the five
+        // pre-V3 fields. This is the shape a pre-V3 cv-service's response has.
+        DetectionResponse response = responseBuilder()
+                .setDetectorRan(false)
+                .setDetectorReason(com.drones.vision.proto.v1.DetectorReason.DETECTOR_REASON_UNSPECIFIED)
+                .setTrackerMillis(0)
+                .setTrackerEngineId("")
+                .setLockedTrackId(0)
+                .setReupdateMillis(0)
+                .setReupdatedTracks(0)
+                .setDetectionLagMillis(0)
+                .setCapabilityLevelServed(0)
+                .setCapabilityLevelReason("")
+                .build();
+
+        DetectionResult result = DetectionFrameCodec.decode(STREAM_ID, response);
+
+        assertNull(result.tracking());
+    }
+
+    @Test
+    void capabilityLevelServedZeroDecodesCapabilityNullEvenWhileTrackingIsActive() {
+        // capability_level_served == 0 is not a level, it is "this server never reported one" --
+        // TrackingCapability validates levelServed in [1,5], so constructing one from 0 would throw.
+        // Distinct from the all-zero B3 case above: detector_ran=true keeps tracking() itself non-null,
+        // isolating that only capability() collapses to null on a zero level.
+        DetectionResponse response = responseBuilder()
+                .setDetectorRan(true)
+                .setDetectorReason(com.drones.vision.proto.v1.DetectorReason.DETECTOR_REASON_ALWAYS)
+                .setCapabilityLevelServed(0)
+                .build();
+
+        TrackingTelemetry tracking = DetectionFrameCodec.decode(STREAM_ID, response).tracking();
+
+        assertNull(tracking.capability());
+    }
+
+    @Test
+    void servedLevelBelowWhateverWasRequestedSurvivesDecodeIntact() {
+        // B5: a downgrade is exactly the case this wave exists to make visible. decode() has no
+        // access to the request's ceiling (only DetectionResponse is in scope here) and must not
+        // clamp, raise, or otherwise second-guess whatever level the server reports served --
+        // a low served level (simulating a downgrade from a higher requested ceiling) must reach the
+        // domain exactly as reported.
+        DetectionResponse response = responseBuilder()
+                .setDetectorRan(true)
+                .setDetectorReason(com.drones.vision.proto.v1.DetectorReason.DETECTOR_REASON_ALWAYS)
+                .setCapabilityLevelServed(2)
+                .setCapabilityLevelReason("cpu_only_host")
+                .build();
+
+        TrackingTelemetry tracking = DetectionFrameCodec.decode(STREAM_ID, response).tracking();
+
+        assertEquals(2, tracking.capability().levelServed());
+        assertEquals("cpu_only_host", tracking.capability().reason());
     }
 
     @Test

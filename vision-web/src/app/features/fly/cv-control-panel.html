@@ -206,6 +206,21 @@
           }
         </p>
 
+        <!-- ---- Capability ceiling (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md, wave J4) — a
+             request, never the outcome (invariant B5); what actually ran is the read-only "Serving"
+             readout further down, fed by a completely different, server-reported fact. -->
+        <label class="label" for="tracking-capability-level">Capability ceiling</label>
+        <select
+          id="tracking-capability-level"
+          aria-label="Capability level ceiling"
+          (change)="onCapabilityLevel($any($event.target).value)"
+        >
+          @for (option of capabilityLevelOptions; track option.value) {
+            <option [value]="option.value" [selected]="option.value === capabilityLevel()">{{ option.label }}</option>
+          }
+        </select>
+        <p class="muted hint">{{ capabilityLevelHintText() }}</p>
+
         @if (trackingMode() !== 'OFF') {
           @if (engineOptions().length === 0) {
             <p class="muted hint">Engine list unavailable — using the server default for this mode.</p>
@@ -261,6 +276,44 @@
 
         @if (flowStripText(); as flow) {
           <p class="mono hint tracking-flow-strip">{{ flow }}</p>
+        }
+
+        <!-- ---- Served capability + detection lag (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
+             §4, wave J4) — the point of this wave: what the host actually served this frame, and
+             whether that fell short of the ceiling above. Hidden entirely while {@link frameTracking}
+             itself is absent (no tracking telemetry has arrived yet this session — same "nothing to
+             report" posture as the flow strip above); once a frame has arrived, `capability` being
+             absent within it is rendered explicitly (an old cv-service), never silently hidden and
+             never filled in with the ceiling picked above (B5). -->
+        @if (frameTracking()) {
+          <div class="capability-readout" [class.downgraded]="capabilityDowngraded()">
+            <div class="capability-readout-row">
+              <span class="capability-readout-label">Serving</span>
+              @if (servedCapability(); as capability) {
+                <span class="chip" [class.warn]="capabilityDowngraded()" [class.accent]="!capabilityDowngraded()">
+                  {{ capabilityLevelName(capability.levelServed) }}
+                </span>
+              } @else {
+                <span class="chip mono">no level reported</span>
+              }
+            </div>
+            @if (capabilityDowngraded()) {
+              <p class="notice warn capability-downgrade-reason">{{ servedCapability()?.reason }}</p>
+            }
+
+            <div class="capability-readout-row">
+              <span class="capability-readout-label">Detection lag</span>
+              <span class="mono capability-readout-value" [class.lag-over-budget]="detectionLagOverBudget()">
+                {{ detectionLagText() }}
+              </span>
+            </div>
+            @if (detectionLagOverBudget()) {
+              <p class="notice danger capability-downgrade-reason">
+                Over the Hold budget of {{ detectionLagBudgetMillis }} ms (CV-RATE-BUDGET §1) — staying
+                locked on gets harder above this.
+              </p>
+            }
+          </div>
         }
       }
     </section>

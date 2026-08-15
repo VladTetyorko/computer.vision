@@ -14,6 +14,7 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.TargetLock;
 import com.drones.vision.perception.domain.model.TrackRef;
 import com.drones.vision.perception.domain.model.TrackState;
+import com.drones.vision.perception.domain.model.TrackingCapability;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.perception.domain.model.TrackingTelemetry;
@@ -86,6 +87,22 @@ import java.util.List;
  * reporting all-default values, which never legitimately happens because a modern cv-service always
  * reports {@code detector_ran}/{@code detector_reason} on every response regardless of mode
  * (docs/plans/done/TRACKING-PLAN.md T1 wave).
+ *
+ * <h2>Capability ladder + ORU (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md &sect;2, wave J2)</h2>
+ * {@link #encode}/{@link #toWireTrackingConfig} additionally set {@code capability_level} (a
+ * <b>ceiling, not a demand</b> — cv-service serves {@code min(requested, affordable)}) and {@code
+ * reupdate_max_gap_millis}; both default to {@code 0}, the proto zero-value, so a deployment that
+ * sets neither is byte-identical to before this wave (invariant B2). {@link #decode} additionally
+ * maps {@code Detection.reupdated} onto {@link TrackRef#reupdated()} and the response's five V3
+ * fields ({@code reupdate_millis}/{@code reupdated_tracks}/{@code detection_lag_millis}/{@code
+ * capability_level_served}/{@code capability_level_reason}) onto {@link
+ * TrackingTelemetry#reupdateLatency()}/{@link TrackingTelemetry#reupdatedTracks()}/{@link
+ * TrackingTelemetry#detectionLag()}/{@link TrackingTelemetry#capability()} — extending, not
+ * duplicating, the same all-zero-means-absent check {@link #toTrackingTelemetry} already applies to
+ * the five pre-V3 fields (invariant B3). {@code capability_level_served == 0} is not a level, it is
+ * "this server never reported one": {@link TrackingCapability} validates {@code levelServed} in
+ * {@code [1,5]}, so {@link TrackingTelemetry#capability()} decodes {@code null} in that case rather
+ * than constructing one that would throw.
  *
  * <h2>Failure shape</h2>
  * {@link #encode} throws {@link IllegalArgumentException} for an unsupported {@link PixelFormat}
@@ -217,13 +234,21 @@ final class DetectionFrameCodec {
     }
 
     /**
-     * Maps the response's five per-frame tracking fields (docs/plans/done/TRACKING-PLAN.md &sect;4.A fields
-     * 8-12) onto a {@link TrackingTelemetry} — the docs/extracts/TRACKING-ORCHESTRATION.md &sect;5.2 gap fix
-     * this wave exists to close. Returns {@code null} (tracking off for this result, matching this
-     * class's pre-tracking behavior byte-for-byte) only when every one of the five fields is still
-     * at its proto zero-value — the shape an old, pre-tracking server's response has, since a modern
+     * Maps the response's per-frame tracking fields — the original five (docs/plans/done/TRACKING-PLAN.md
+     * &sect;4.A fields 8-12, the docs/extracts/TRACKING-ORCHESTRATION.md &sect;5.2 gap fix) plus the five V3
+     * fields added by docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md &sect;2 (fields 22-26: {@code
+     * reupdate_millis}/{@code reupdated_tracks}/{@code detection_lag_millis}/{@code
+     * capability_level_served}/{@code capability_level_reason}) — onto a {@link TrackingTelemetry}.
+     * Returns {@code null} (tracking off for this result, matching this class's pre-tracking behavior
+     * byte-for-byte, invariant B3) only when <b>every one of the ten</b> fields is still at its proto
+     * zero-value — the shape an old, pre-V3 (or pre-tracking) server's response has, since a modern
      * cv-service always reports {@code detector_ran}/{@code detector_reason} on every response
      * regardless of mode (see class javadoc).
+     *
+     * <p>{@code capability_level_served == 0} is not a level, it is "this server never reported one" —
+     * {@link TrackingCapability} validates {@code levelServed} in {@code [1,5]}, so a zero-served
+     * response decodes {@link TrackingTelemetry#capability()} to {@code null} rather than constructing
+     * one that would fail its own compact constructor.
      */
     private static TrackingTelemetry toTrackingTelemetry(DetectionResponse response) {
         boolean detectorRan = response.getDetectorRan();
@@ -231,8 +256,15 @@ final class DetectionFrameCodec {
         String engineId = response.getTrackerEngineId();
         long lockedTrackId = response.getLockedTrackId();
         com.drones.vision.proto.v1.DetectorReason wireReason = response.getDetectorReason();
+        long reupdateMillis = response.getReupdateMillis();
+        int reupdatedTracks = response.getReupdatedTracks();
+        long detectionLagMillis = response.getDetectionLagMillis();
+        int capabilityLevelServed = response.getCapabilityLevelServed();
+        String capabilityLevelReason = response.getCapabilityLevelReason();
         if (!detectorRan && trackerMillis == 0 && engineId.isEmpty() && lockedTrackId == 0
-                && wireReason == com.drones.vision.proto.v1.DetectorReason.DETECTOR_REASON_UNSPECIFIED) {
+                && wireReason == com.drones.vision.proto.v1.DetectorReason.DETECTOR_REASON_UNSPECIFIED
+                && reupdateMillis == 0 && reupdatedTracks == 0 && detectionLagMillis == 0
+                && capabilityLevelServed == 0 && capabilityLevelReason.isEmpty()) {
             return null;
         }
         // detector_reason is meaningful only when detector_ran is true (docs/plans/done/TRACKING-PLAN.md
@@ -240,7 +272,12 @@ final class DetectionFrameCodec {
         // something to guess at, and is left to fail via TrackingTelemetry's own compact-ctor
         // validation (caught per-response by DetectionStreamSession#onResponse).
         DetectorReason reason = detectorRan ? toDetectorReason(wireReason) : null;
-        return new TrackingTelemetry(detectorRan, reason, Duration.ofMillis(trackerMillis), engineId, lockedTrackId);
+        TrackingCapability capability = capabilityLevelServed == 0
+                ? null
+                : new TrackingCapability(capabilityLevelServed, capabilityLevelReason);
+        return new TrackingTelemetry(detectorRan, reason, Duration.ofMillis(trackerMillis), engineId, lockedTrackId,
+                Duration.ofMillis(detectionLagMillis), Duration.ofMillis(reupdateMillis), reupdatedTracks,
+                capability);
     }
 
     /**
@@ -270,7 +307,15 @@ final class DetectionFrameCodec {
      * PulledDetectionSession} reuses this exact mapping for {@code PullControl.tracking} — {@code
      * PullControl} carries the identical wire {@code TrackingConfig} message {@code FrameRequest}
      * does (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.1: "reused verbatim, including TargetLock/lock_seq
-     * semantics"), so this is the one place either builds one.
+     * semantics"), so this is the one place either builds one — both the push path ({@link #encode})
+     * and the pull path ({@code PulledDetectionSession#controlBuilder}) get {@code capability_level}/
+     * {@code reupdate_max_gap_millis} for free from this single method.
+     *
+     * <p>{@code capability_level}/{@code reupdate_max_gap_millis} (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
+     * &sect;2) map straight through: both default to {@code 0} on {@link TrackingConfig#off()}/{@link
+     * TrackingConfig#defaults()}, which is the proto zero-value and therefore byte-identical to never
+     * setting the field at all (invariant B2) — a deployment that configures neither behaves exactly
+     * as it did before this wave.
      */
     static com.drones.vision.proto.v1.TrackingConfig toWireTrackingConfig(TrackingConfig tracking) {
         com.drones.vision.proto.v1.TrackingConfig.Builder builder = com.drones.vision.proto.v1.TrackingConfig.newBuilder()
@@ -279,7 +324,9 @@ final class DetectionFrameCodec {
                 .setVerifyEveryMillis(tracking.verifyEveryMillis())
                 .setRedetectIouThreshold(tracking.redetectIouPercent() / 100f)
                 .setMaxAgeFrames(tracking.maxAgeFrames())
-                .setMinHits(tracking.minHits());
+                .setMinHits(tracking.minHits())
+                .setCapabilityLevel(tracking.capabilityLevel())
+                .setReupdateMaxGapMillis(tracking.reupdateMaxGapMillis());
         TargetLock lock = tracking.lock();
         if (lock != null) {
             builder.setLock(toWireTargetLock(lock));
@@ -346,7 +393,8 @@ final class DetectionFrameCodec {
     }
 
     /**
-     * Maps a wire {@code Detection}'s track fields (4-9) onto a {@link TrackRef}, or {@code null} if
+     * Maps a wire {@code Detection}'s track fields (4-9, plus {@code reupdated} field 14,
+     * docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md &sect;2) onto a {@link TrackRef}, or {@code null} if
      * untracked. {@code track_id == 0} is the wire's untracked sentinel and short-circuits everything
      * else — it never reaches {@link TrackRef}'s constructor as a guessed {@code trackId}, regardless
      * of what the other track fields say (docs/extracts/TRACKING-ORCHESTRATION.md §6 rule 2). An {@code
@@ -366,7 +414,7 @@ final class DetectionFrameCodec {
             return null;
         }
         return new TrackRef(wire.getTrackId(), state, source, wire.getVelocityX(), wire.getVelocityY(),
-                wire.getTrackAgeFrames());
+                wire.getTrackAgeFrames(), wire.getReupdated());
     }
 
     private static ImageEncoding toImageEncoding(PixelFormat format) {

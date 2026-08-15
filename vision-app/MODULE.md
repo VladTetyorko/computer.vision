@@ -191,7 +191,7 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 
 **Keys are named here in dotted form** (`vision.publish.enabled`) because that is Spring's canonical name — the form used by `@ConfigurationProperties(prefix=…)`, by `@SpringBootTest(properties=…)`, and by the `VISION_*` environment overrides `docker-compose.yml` sets. YAML nesting is a file-layout choice; it changes nothing about binding, relaxed binding, or precedence (env/CLI > this file > each record's `@DefaultValue`).
 
-`spring.application.name=vision` · `vision.publish.enabled=true` · `vision.publish.mediamtx.rtsp-base=rtsp://localhost:8554` · `vision.publish.mediamtx.hls-base=http://localhost:18888` (internal upstream mediamtx address; viewers never see it — see HLS proxy below; host-mode value, not mediamtx's own default 8888, for the collision-avoidance reason documented inline in `application.yaml`) · `vision.publish.mediamtx.whep-base=http://localhost:18889` (docs/plans/done/MVP2-PLAN.md L-a — mediamtx's WebRTC/WHEP egress; unlike `hls-base`, handed to viewers verbatim, so this must already be browser-reachable — see "WHEP viewing" below) · `vision.publish.view-base=/hls` (app-relative URL base actually handed to viewers) · `vision.discovery.enabled=true` · `vision.cv.enabled=false` (default — no cv-service required; see "CV inference wiring" below) · `vision.cv.endpoint=localhost:50051` (cv-service's `DetectStream` gRPC endpoint, only read when `vision.cv.enabled=true`) · `vision.cv.detect-width`/`vision.cv.jpeg-quality` (docs/plans/done/REMOTE-CV-PLAN.md P1 item 5, `GrpcDetectionPort`'s wire-tuning knobs — see "CV inference wiring" below; commented out in `application.yaml`, documenting their `640`/`0.8` defaults rather than setting them, only read when `vision.cv.enabled=true`) · `vision.persistence.enabled=false` (default — in-memory fleet + history repositories, no database required; see "Persistence wiring" below) · `vision.persistence.jdbc-url=jdbc:postgresql://localhost:5432/vision` / `vision.persistence.username=vision` / `vision.persistence.password=vision` (only read when `vision.persistence.enabled=true`) · `vision.live.enabled=true` (default — server-push `/api/live` SSE endpoint + all five live-update ports wired to the real registry; see "Server-push data plane" below) · `vision.simulation.resume-on-boot=true` (default — backend follow-up batch; whether `SimulationResumeRunner` calls `SimulationService#resumeAll()` once at boot; only takes effect when `vision.persistence.enabled=true` too; see "Simulated-feed resume-on-boot" below) · `vision.tracking.default-mode=ASSOCIATE` (wave T8 — was `OFF`; set `OFF` for the pre-tracking behavior) / `.follow-fps=15` / `.verify-every-millis=2000` / `.stats-window-seconds=30` / `.track-retention-seconds=5` (all defaults, all commented out in `application.yaml` — docs/plans/done/TRACKING-PLAN.md, docs/extracts/TRACKING-ORCHESTRATION.md §4.3; see "Tracking engine wiring" below for which of them seed a new stream and which configure the read models) · `vision.rc.watchdog-timeout-ms=300` (default, commented out in `application.yaml` — docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R4; `manualControlService`'s input-loss watchdog timeout; SITL-tune against measured glass-to-stick latency before relying on it, per the plan's own verification steps).
+`spring.application.name=vision` · `vision.publish.enabled=true` · `vision.publish.mediamtx.rtsp-base=rtsp://localhost:8554` · `vision.publish.mediamtx.hls-base=http://localhost:18888` (internal upstream mediamtx address; viewers never see it — see HLS proxy below; host-mode value, not mediamtx's own default 8888, for the collision-avoidance reason documented inline in `application.yaml`) · `vision.publish.mediamtx.whep-base=http://localhost:18889` (docs/plans/done/MVP2-PLAN.md L-a — mediamtx's WebRTC/WHEP egress; unlike `hls-base`, handed to viewers verbatim, so this must already be browser-reachable — see "WHEP viewing" below) · `vision.publish.view-base=/hls` (app-relative URL base actually handed to viewers) · `vision.discovery.enabled=true` · `vision.cv.enabled=false` (default — no cv-service required; see "CV inference wiring" below) · `vision.cv.endpoint=localhost:50051` (cv-service's `DetectStream` gRPC endpoint, only read when `vision.cv.enabled=true`) · `vision.cv.detect-width`/`vision.cv.jpeg-quality` (docs/plans/done/REMOTE-CV-PLAN.md P1 item 5, `GrpcDetectionPort`'s wire-tuning knobs — see "CV inference wiring" below; commented out in `application.yaml`, documenting their `640`/`0.8` defaults rather than setting them, only read when `vision.cv.enabled=true`) · `vision.persistence.enabled=false` (default — in-memory fleet + history repositories, no database required; see "Persistence wiring" below) · `vision.persistence.jdbc-url=jdbc:postgresql://localhost:5432/vision` / `vision.persistence.username=vision` / `vision.persistence.password=vision` (only read when `vision.persistence.enabled=true`) · `vision.live.enabled=true` (default — server-push `/api/live` SSE endpoint + all five live-update ports wired to the real registry; see "Server-push data plane" below) · `vision.simulation.resume-on-boot=true` (default — backend follow-up batch; whether `SimulationResumeRunner` calls `SimulationService#resumeAll()` once at boot; only takes effect when `vision.persistence.enabled=true` too; see "Simulated-feed resume-on-boot" below) · `vision.tracking.default-mode=ASSOCIATE` (wave T8 — was `OFF`; set `OFF` for the pre-tracking behavior) / `.follow-fps=15` / `.verify-every-millis=2000` / `.capability-level=0` (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2 wave J3 — auto-probe, a ceiling not a demand) / `.reupdate-max-gap-millis=0` (same wave — server default) / `.stats-window-seconds=30` / `.track-retention-seconds=5` (all defaults, all commented out in `application.yaml` — docs/plans/done/TRACKING-PLAN.md, docs/extracts/TRACKING-ORCHESTRATION.md §4.3; see "Tracking engine wiring" below for which of them seed a new stream and which configure the read models) · `vision.rc.watchdog-timeout-ms=300` (default, commented out in `application.yaml` — docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R4; `manualControlService`'s input-loss watchdog timeout; SITL-tune against measured glass-to-stick latency before relying on it, per the plan's own verification steps).
 
 **New in docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D** (all commented out, documenting rather than overriding every default — see "Package shape" above for the full record table): `vision.rtsp.*` (transport/timeouts/probesize/`transmit.*`), `vision.mjpeg.*` (read-timeout/buffer-capacity/`transmit.*`), `vision.v4l2.*` (buffer-capacity/close-join-timeout only — no `default-video-size`/`framerate`/`input-format`, see `VisionV4l2Properties`'s own javadoc for why), `vision.mavlink.*` (bind-host/silence-window/timeouts/`scan.*`/`transmit.*`), `vision.rc.override-hz`/`.min-override-hz`/`.max-override-hz`/`.release-frames` (extends the pre-existing `vision.rc.watchdog-timeout-ms`), `vision.overlay.*` (jpeg-quality/stroke/font/OSD tunables), `vision.cv.response-timeout`/`.keepalive-*`/`.channel-shutdown-timeout`/`.plaintext`/`.upload.*`/`.registry.call-timeout` (extends the pre-existing `vision.cv.enabled`/`.endpoint`/`.detect-width`/`.jpeg-quality`), `vision.discovery.mdns.*`/`.v4l2.*` (extends the pre-existing `vision.discovery.enabled`/`.mavlink-port`), `vision.simulation.video.*`/`.telemetry.*` (extends the pre-existing `vision.simulation.resume-on-boot`), `vision.publish.encoder.*`/`.resilience.*`/`.cadence.*`/`.replay.*` (extends the pre-existing `vision.publish.*`), and `vision.api.*` (Spring-bound counterpart of vision-api's own framework-free `VisionApiProperties`, wiring a real `SnapshotJpegEncoder` bean).
 
@@ -214,14 +214,17 @@ record-plus-`@DefaultValue` idiom as `VisionCvProperties`) and `TrackingWiring` 
 `@Configuration`, split by concern like `PersistenceWiringConfiguration`/`DiscoveryWiringConfiguration`
 — tracking is configured independently of whether the gRPC detection channel is even built).
 
-**Five keys, two disjoint jobs.** This distinction is the whole point of the plan's configuration
-layering, so it is spelled out rather than left to the reader:
+**Seven keys, two disjoint jobs** (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2/§4 wave J3 added
+the last two). This distinction is the whole point of the plan's configuration layering, so it is
+spelled out rather than left to the reader:
 
 | Key | Default | What it does |
 |---|---|---|
 | `vision.tracking.default-mode` | `ASSOCIATE` (wave T8; was `OFF`) | seeds **new** streams (`TrackingWiring#streamStartTrackingSeed` → `StreamPipelineSettings#trackingSeed` → `DefaultStreamService#start`, i.e. *every* start path). Set `OFF` for the pre-tracking behavior |
 | `vision.tracking.follow-fps` | `15` | same — the *Java*-side sampler's rate while `FOLLOW` is active (cv-service has no such knob and must never care how often it is fed) |
 | `vision.tracking.verify-every-millis` | `2000` | same — `FOLLOW`'s detector re-verify cadence |
+| `vision.tracking.capability-level` | `0` (auto-probe) | same — the capability-ladder ceiling (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2) requested for new streams, `[0,5]`. **A ceiling, not a demand** (invariant B5): cv-service serves `min(requested, affordable)` and reports what it actually served on `TrackingTelemetry#capability()`/`FrameTrackingResponse#capability()` — this key can only cap a strong host down, never make a weak one run a level it cannot afford |
+| `vision.tracking.reupdate-max-gap-millis` | `0` (server default) | same — the longest gap ORU (Observation-Centric Re-Update) may reconstruct for new streams, milliseconds; must not be negative |
 | `vision.tracking.stats-window-seconds` | `30` | configures the per-stream **read model** `TrackingStatsWindow`, via `ApplicationServiceWiring#streamPipelineSettings` → `StreamPipelineSettings#trackingStatsWindow` |
 | `vision.tracking.track-retention-seconds` | `5` | same, for `TrackBook#retention` |
 
@@ -231,10 +234,13 @@ deployment default is picked up, and that is deliberate — a config edit must n
 flight in progress. `vision-domain` keeps pure literals (`TrackingConfig.off()`/`.defaults()`), which
 is exactly why this layer lives here.
 
-**The three seed keys are mapped as a `TrackingConfigPatch`, not a whole `TrackingConfig`** — a
+**The five seed keys are mapped as a `TrackingConfigPatch`, not a whole `TrackingConfig`** — a
 deployment states only the knobs it owns, and the rest fall through to `vision-domain`'s literals
 when `DefaultStreamService` folds it at stream start. That is what keeps `redetectIouPercent`/
 `maxAgeFrames`/`minHits` single-owner (see the paragraph below) without this class restating them.
+`capability-level`/`reupdate-max-gap-millis` are stated **unconditionally** in the seed, exactly like
+`default-mode`/`verify-every-millis`/`follow-fps` — at their own `0`/`0` default this folds to
+byte-identical to `TrackingConfig.off()`/`.defaults()` (invariant B2, `TrackingWiringTest` pins it).
 
 **`track-retention-seconds` is not in the plan's own knob inventory** (docs/extracts/TRACKING-ORCHESTRATION.md
 §4.3 lists four keys). It exists because `StreamPipelineSettings`' canonical constructor requires
@@ -1681,4 +1687,69 @@ if it was already reported honestly elsewhere).
 - The `anchor` clock-mode drift measurement (M0's spike) was against a synthetic source with no
   independent oscillator — M9 must re-measure against a real H1 camera before the 100ms budget is
   treated as settled. Nothing in this wave touches that.
+
+## docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md wave J3 (deployment defaults for the capability
+ladder + ORU)
+
+`VisionTrackingProperties` gained `capabilityLevel`/`reupdateMaxGapMillis` (`vision.tracking.capability-level`
+`[0,5]` default `0` = auto-probe; `vision.tracking.reupdate-max-gap-millis` `>=0` default `0` = server
+default), validated in the compact constructor with a message naming the property, exactly like every
+other knob here. `TrackingWiring#streamStartTrackingSeed` now builds the 10-arg
+`TrackingConfigPatch` (J1's widened canonical constructor), stating both new fields
+**unconditionally** — same treatment as `default-mode`/`verify-every-millis`/`follow-fps` — since this
+deployment layer owns both (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2). Both default literals
+live only as `VisionTrackingProperties.DEFAULT_CAPABILITY_LEVEL`/`DEFAULT_REUPDATE_MAX_GAP_MILLIS`
+(invariant B4) and are documented, commented-out, in `application.yaml` alongside the other five
+tracking keys. See the "Tracking engine wiring" section above for the full seven-key table.
+
+**Invariant B2 (zero behavioural change at defaults) is structural, not incidental**: `0`/`0` is
+`TrackingConfig.off()`/`.defaults()`'s own literal for both fields, so a deployment that configures
+nothing folds to a byte-identical `TrackingConfig` whether or not this wave's two new properties
+exist — `TrackingWiringTest#theDefaultCapabilityPropertiesFoldToByteIdenticalDomainDefaultsSoNothingChangesForAnUnconfiguredDeployment`
+pins it directly. `TrackingWiringContextTest` additionally proves the two properties bind to `0`/`0`
+in a real Spring context.
+
+**Invariant B5 (a level is a ceiling)**: this wave's javadoc (`VisionTrackingProperties`,
+`TrackingWiring#streamStartTrackingSeed`) is explicit that `capabilityLevel` here is what the
+deployment is *willing to afford*, never what will be *served* — the served answer only exists once
+cv-service reports `TrackingTelemetry#capability()` for a real frame, surfaced by `vision-api`'s
+`FrameTrackingResponse#capability()` (see vision-api/MODULE.md's own wave J3 section).
+
+**Tests**: `TrackingWiringTest` +5 (`deploymentPropertiesSeedTheCapabilityLevelAndReupdateMaxGapMillisTheyOwn`,
+`theSeedFoldsTheCapabilityLevelAndReupdateMaxGapMillisOntoTheDomainDefaults`,
+`theDefaultCapabilityPropertiesFoldToByteIdenticalDomainDefaultsSoNothingChangesForAnUnconfiguredDeployment`,
+`anOutOfRangeCapabilityLevelIsRejectedByThePropertiesRecordItselfNamingTheProperty`,
+`aNegativeReupdateMaxGapMillisIsRejectedByThePropertiesRecordItselfNamingTheProperty`) plus one
+extended pre-existing assertion (`deploymentPropertiesSeedTheModeAndTheTwoCadencesTheyOwnAndNothingElse`
+now also asserts the two new fields default to `0`); `TrackingWiringContextTest` +1
+(`defaultConfigurationLeavesCapabilityLevelAtAutoProbeAndReupdateMaxGapAtTheServerDefault`). No
+pre-existing assertion was changed — every widened call site (`VisionTrackingProperties`'s own 5-arg
+test helper, kept as an overload delegating `0, 0`) is additive.
+
+**Build status — a pre-existing, unrelated blocker, not this wave's fault.** `./mvnw -B -pl
+adapters/adapter-persistence,vision-api,vision-app test -DskipWeb` currently fails to *compile*
+`vision-app` because the locally-installed `adapter-cv-grpc` artifact in `~/.m2` predates this
+session (references the retired flat `vision-domain`/`vision-application` modules and
+`com.drones.vision.domain.*` packages the domain-separation work removed) — `adapter-cv-grpc` is
+concurrently owned by wave J2 in this same delegation round and had uncommitted changes at the time
+this wave ran, so per the task's own instruction this wave did not install it or otherwise "reach
+into that module." Diagnosis, to rule out any contribution from this wave's own diff:
+- Refreshed (`mvn install -DskipTests`) the eight *other* adapters (`adapter-simulation`/`-rtsp`/
+  `-mjpeg`/`-mavlink`/`-v4l2`/`-publish-hls`/`-overlay`/`-discovery`), none of which had any pending
+  edit from any concurrent wave (`git status` confirmed) — this left `adapter-cv-grpc` as the
+  *only* remaining stale dependency, and every one of `vision-app`'s 17 compile errors traces to it
+  (`ManagedChannel`/`io.grpc` unresolved, `com.drones.vision.domain.port.out.*` class files missing)
+  — none touch a file this wave edited.
+- Hand-compiled (`javac`) this wave's two production files —
+  `config/properties/VisionTrackingProperties.java` and `config/wiring/TrackingWiring.java` — against
+  the real, currently-installed `vision-kernel`/`vision-platform`/`vision-perception`/`vision-api`
+  jars (i.e. against J1's actual widened `TrackingConfigPatch` 10-arg constructor, not a guess at its
+  shape): zero errors.
+- `vision-api`'s own suite (this wave's other half) ran clean end to end: see vision-api/MODULE.md.
+
+**Before/after, vision-app**: baseline **220/220** (last recorded green run, this file's own history
+above); this wave adds **6** tests (`TrackingWiringTest` +5, `TrackingWiringContextTest` +1) → **226**
+expected once `adapter-cv-grpc` is reinstalled by wave J2 or a maintainer. Re-run `./mvnw -B -pl
+adapters/adapter-persistence,vision-api,vision-app test -DskipWeb` after that lands; nothing further
+is expected to change on the `vision-app` side of this wave.
 - CV-SCALE §S2 demand gating and §S4 worker pooling remain open seams (§9 of the plan), not built here.

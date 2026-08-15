@@ -22,6 +22,7 @@ import com.drones.vision.perception.domain.model.TargetLock;
 import com.drones.vision.perception.domain.model.TrackRef;
 import com.drones.vision.perception.domain.model.TrackState;
 import com.drones.vision.perception.domain.model.TrackedObject;
+import com.drones.vision.perception.domain.model.TrackingCapability;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.perception.domain.model.TrackingTelemetry;
@@ -821,6 +822,31 @@ class StreamControllerTest {
         assertNull(captor.getValue().modelId());
     }
 
+    // ---- docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2: capabilityLevel/reupdateMaxGapMillis on PATCH ----
+
+    @Test
+    void updateConfigThreadsCapabilityLevelAndReupdateMaxGapMillisThroughToThePatch() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false, true));
+
+        String body = """
+                {"tracking":{"capabilityLevel":2,"reupdateMaxGapMillis":750}}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.trackingChanged").value(true));
+
+        ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
+        verify(streamService).updateConfig(eq(streamId), captor.capture());
+        TrackingConfigPatch tracking = captor.getValue().tracking();
+        assertEquals(2, tracking.capabilityLevel(), "a request states a CEILING -- what actually ran is a "
+                + "response fact, never mirrored back onto the request-mapping side (invariant B5)");
+        assertEquals(750, tracking.reupdateMaxGapMillis());
+        assertNull(tracking.mode(), "a capability-only patch states nothing about the mode");
+    }
+
     @Test
     void updateConfigWithoutATrackingObjectLeavesTheTrackingPatchNullAndReadsNoStats() throws Exception {
         StreamId streamId = StreamId.random();
@@ -985,7 +1011,7 @@ class StreamControllerTest {
         StreamId streamId = StreamId.random();
         Detection detection = new Detection("car", 0.82, new BoundingBox(0.31, 0.44, 0.09, 0.07),
                 new ModelRef("yolo26n.pt", "latest"),
-                new TrackRef(7L, TrackState.CONFIRMED, DetectionSource.TRACKER, 0.012, -0.001, 143));
+                new TrackRef(7L, TrackState.CONFIRMED, DetectionSource.TRACKER, 0.012, -0.001, 143, true));
         Instant firstSeen = Instant.parse("2026-08-11T10:22:31.104Z");
         Instant lastSeen = Instant.parse("2026-08-11T10:22:40.671Z");
         when(streamService.tracks(streamId))
@@ -1008,6 +1034,7 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.tracks[0].source").value("TRACKER"))
                 .andExpect(jsonPath("$.tracks[0].velocityX").value(0.012))
                 .andExpect(jsonPath("$.tracks[0].ageFrames").value(143))
+                .andExpect(jsonPath("$.tracks[0].reupdated").value(true))
                 .andExpect(jsonPath("$.tracks[0].firstSeen").value(firstSeen.toString()))
                 .andExpect(jsonPath("$.tracks[0].lastSeen").value(lastSeen.toString()))
                 .andExpect(jsonPath("$.stats.mode").value("FOLLOW"))
@@ -1142,11 +1169,69 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$[0].detections[0].track.velocityX").value(0.01))
                 .andExpect(jsonPath("$[0].detections[0].track.velocityY").value(-0.02))
                 .andExpect(jsonPath("$[0].detections[0].track.ageFrames").doesNotExist())
+                .andExpect(jsonPath("$[0].detections[0].track.reupdated").value(false))
                 .andExpect(jsonPath("$[0].tracking.detectorRan").value(true))
                 .andExpect(jsonPath("$[0].tracking.detectorReason").value("CADENCE"))
                 .andExpect(jsonPath("$[0].tracking.trackerMillis").value(0.4))
                 .andExpect(jsonPath("$[0].tracking.engineId").value("lk"))
-                .andExpect(jsonPath("$[0].tracking.lockedTrackId").value(3));
+                .andExpect(jsonPath("$[0].tracking.lockedTrackId").value(3))
+                // docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2 / invariant B3: a TrackingTelemetry
+                // built through the pre-V3 5-arg convenience constructor carries zero V3 facts, and
+                // `capability` -- built from a nullable domain field -- must be absent, not a fabricated
+                // zero-level object.
+                .andExpect(jsonPath("$[0].tracking.detectionLagMillis").value(0))
+                .andExpect(jsonPath("$[0].tracking.reupdateMillis").value(0))
+                .andExpect(jsonPath("$[0].tracking.reupdatedTracks").value(0))
+                .andExpect(jsonPath("$[0].tracking.capability").doesNotExist());
+    }
+
+    @Test
+    void detectionsCarryTheV3ReupdateAndCapabilityFactsWhenTheServerReportsThem() throws Exception {
+        // docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2 -- the six previously-unread response
+        // fields, now surfaced end to end: a track's own `reupdated` flag, the frame-level ORU
+        // cost/count and detection lag, and the served capability object.
+        StreamId streamId = StreamId.random();
+        Detection tracked = new Detection("person", 0.9, new BoundingBox(0.1, 0.2, 0.3, 0.4),
+                new ModelRef("yolo26n.pt", "latest"),
+                new TrackRef(3L, TrackState.COASTING, DetectionSource.TRACKER, 0.01, -0.02, 12, true));
+        DetectionResult result = new DetectionResult(streamId, 44, Instant.parse("2026-08-11T10:00:02Z"),
+                List.of(tracked), Duration.ofMillis(7),
+                new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 3L,
+                        Duration.ofMillis(42), Duration.ofMillis(6), 2, new TrackingCapability(2, "")));
+        when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of(result));
+
+        mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].detections[0].track.reupdated").value(true))
+                .andExpect(jsonPath("$[0].tracking.detectionLagMillis").value(42))
+                .andExpect(jsonPath("$[0].tracking.reupdateMillis").value(6))
+                .andExpect(jsonPath("$[0].tracking.reupdatedTracks").value(2))
+                .andExpect(jsonPath("$[0].tracking.capability.levelServed").value(2))
+                .andExpect(jsonPath("$[0].tracking.capability.reason").value(""));
+    }
+
+    @Test
+    void aServedCapabilityBelowWhatWasRequestedRendersTheServedValueNeverTheRequest() throws Exception {
+        // Invariant B5: a level is a ceiling. This response has no concept of "what was requested" at
+        // all -- FrameTrackingResponse.capability is built purely from TrackingTelemetry#capability(),
+        // so the served level a client renders can never be, nor be confused with, the ceiling a
+        // request stated. Here the (hypothetical) request asked for L4; the server could only afford
+        // L2, and that -- and only that -- is what reaches the wire.
+        StreamId streamId = StreamId.random();
+        DetectionResult result = new DetectionResult(streamId, 45, Instant.parse("2026-08-11T10:00:03Z"),
+                List.of(new Detection("person", 0.9, new BoundingBox(0.1, 0.2, 0.3, 0.4),
+                        new ModelRef("yolo26n.pt", "latest"),
+                        new TrackRef(3L, TrackState.CONFIRMED, DetectionSource.TRACKER))),
+                Duration.ZERO,
+                new TrackingTelemetry(false, null, Duration.ZERO, "", 0, Duration.ZERO, Duration.ZERO, 0,
+                        new TrackingCapability(2, "OpenVINO unavailable; degraded from requested L4 to L2")));
+        when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of(result));
+
+        mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].tracking.capability.levelServed").value(2))
+                .andExpect(jsonPath("$[0].tracking.capability.reason")
+                        .value("OpenVINO unavailable; degraded from requested L4 to L2"));
     }
 
     @Test

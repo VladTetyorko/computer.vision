@@ -29,6 +29,26 @@ long may the detector keep failing to re-find this" in both modes, and it is
 why "FOLLOW runs the detector at the configured cadence and no more" is true
 rather than approximately true.
 
+**`Track.history` (TRACKING-V3-PLAN wave V2, `history.py`)** is the evidence
+this module's state machine has always summarized but never kept: a bounded
+`ObservationRing` of the REAL observations behind `box`/`velocity_x/y`. Wave
+V2 only populated it (`_born`/`_adopt`/`_observe` each record into it
+unconditionally, letting the ring itself decide what survives). See
+`history.py`'s own module docstring for the full "why", including why
+`SOURCE_DETECTOR`, not merely "not predicted", is the bar for what counts as
+real.
+
+**`_observe` is the first reader (TRACKING-V3-PLAN wave V3, `reupdate.py`).**
+When a track re-anchors after at least one confirmed failure to re-find it
+(`misses > 0`), `reupdate()` rebuilds the gap from the ring's own last real
+entry and the fresh detection, and its answer REPLACES this module's
+ordinary single-frame velocity measurement outright -- see `_observe`'s own
+comments for why that measurement is exactly the defect ORU exists to
+correct, and `Track.history_transform`'s docstring for the companion
+coordinate-frame fix (`reupdate.py`'s module docstring, §4.1b) that keeps
+the ring's evidence expressed in the right frame when the camera moved
+during the gap.
+
 Pure stdlib.
 """
 
@@ -36,9 +56,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 
 from cv_service.tracking.engines.base import (
+    IDENTITY,
     SOURCE_DETECTOR,
     SOURCE_TRACKER,
     Box,
@@ -46,7 +68,9 @@ from cv_service.tracking.engines.base import (
     Observation,
     Transform,
 )
+from cv_service.tracking.history import ObservationRing
 from cv_service.tracking.params import TrackingParams
+from cv_service.tracking.reupdate import reupdate
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps this module's own
     # import graph decoupled from `memory.py` at runtime (both are pure
@@ -116,6 +140,40 @@ class Track:
     from its own extrapolation would. `None` until the first detector-sourced
     appearance evidence arrives, or forever on a stream with no appearance
     extractor active.
+
+    `history` (TRACKING-V3-PLAN wave V2, `history.py`) is this track's own
+    bounded ring of REAL observations -- the same evidence-vs-extrapolation
+    discipline `velocity_x`/`velocity_y` and `descriptor` already apply,
+    extended to an actual record rather than only a current state. Every
+    booking path below (`_born`, `_adopt`, `_observe`) records into it
+    unconditionally; the ring itself, not its callers, decides what counts
+    as real (`ObservationRing.record`'s own docstring). A fresh
+    `ObservationRing` per `Track` via `default_factory` -- never shared,
+    never aliased from one track onto another.
+
+    `history_transform` (TRACKING-V3-PLAN wave V3, §4.1b) is "the transform
+    from `history.latest()`'s own capture frame to wherever `box` is
+    expressed NOW" -- composed forward by `TrackBook.warp()` every frame
+    (same loop, same per-frame `Transform`, that already warps `box`/
+    `velocity_x/y`) and reset to `IDENTITY` by `_observe` exactly when the
+    ring admits a genuinely NEW entry. `reupdate.py`'s `reupdate()` is the
+    one reader: it warps a bracketing ring entry's box into the CURRENT
+    frame with this before interpolating, so a gap spanned by real camera
+    motion does not get reconstructed in the wrong coordinate system. See
+    `reupdate.py`'s own module docstring for the measurement that chose
+    this over the two other candidates the plan named.
+
+    `reupdated` (TRACKING-V3-PLAN wave V3) is a THIS-FRAME flag, not
+    persistent state -- `_observe` resets it to `False` on every call before
+    deciding whether ORU actually ran, mirroring `identity_confidence`/
+    `dormant_millis` on `session.py`'s `TrackedBox` (an event that happened
+    on this one frame, not a property of the identity). Reading it directly
+    off `Track` rather than moving it to `TrackedBox` is safe for the SAME
+    reason `velocity_x`/`state`/`age_frames` already are: every code path
+    that emits a `Detection` for a track called `_observe` on it THIS frame
+    (a matched ASSOCIATE detection, or FOLLOW's locked target/extras, which
+    `apply()` touches every single frame) -- an untouched ASSOCIATE track
+    emits no `Detection` at all, so a stale value here is never serialized.
     """
 
     track_id: int
@@ -134,6 +192,9 @@ class Track:
     hits: int = 0
     misses: int = 0
     descriptor: Optional[Descriptor] = None
+    history: ObservationRing = field(default_factory=ObservationRing)
+    history_transform: Transform = IDENTITY
+    reupdated: bool = False
     _confirmed: bool = field(default=False, repr=False)
 
 
@@ -170,9 +231,48 @@ class TrackBook:
         self._epoch = 0
         # TRACKING-V2-PLAN wave C4 -- see `set_memory`/`_retire` below.
         self._memory = memory
+        # TRACKING-V3-PLAN wave V3 -- this frame's ORU accounting
+        # (`DetectionResponse.reupdate_millis`/`reupdated_tracks`, wire
+        # fields 22/23). `reset_reupdate_stats`/`last_reupdate_millis`/
+        # `last_reupdated_tracks` below are the read/reset seam
+        # `session.py`'s `process()` uses -- see `reset_reupdate_stats`'s
+        # own docstring for why the reset has to happen OUTSIDE `apply()`.
+        self._last_reupdate_millis = 0
+        self._last_reupdated_tracks = 0
 
     def retune(self, params: TrackingParams) -> None:
         self._params = params
+
+    @property
+    def last_reupdate_millis(self) -> int:
+        """This frame's ORU cost, in milliseconds -- 0 if `reupdate()` was
+        never even attempted this frame. Read by `session.py` right after
+        the ONE `apply()` call a frame is ever allowed to make (`apply()`'s
+        own docstring); see `reset_reupdate_stats` for why a frame that
+        skips `apply()` entirely still reports 0 rather than a stale value."""
+        return self._last_reupdate_millis
+
+    @property
+    def last_reupdated_tracks(self) -> int:
+        """How many tracks this frame's `apply()` call backfilled via ORU."""
+        return self._last_reupdated_tracks
+
+    def reset_reupdate_stats(self) -> None:
+        """Zero this frame's ORU accounting.
+
+        Called by `session.py`'s `process()` BEFORE the mode dispatch, every
+        frame -- NOT inside `apply()` itself. `apply()` is only called from
+        SOME of `process()`'s branches (never from the `OFF`/no-engine one),
+        so resetting inside it would leave `last_reupdate_millis`/
+        `last_reupdated_tracks` holding whatever the LAST ACTIVE frame
+        measured on a frame that ran no tracking at all -- the same
+        "reset every frame, read once" shape `StreamTrackingSession`'s own
+        `_roi_ran`/`_roi_millis` already use, just living on this class
+        because `_observe` (the thing that actually measures the cost) is
+        this class's own private method.
+        """
+        self._last_reupdate_millis = 0
+        self._last_reupdated_tracks = 0
 
     def set_memory(self, memory: "Optional[ObjectMemory]") -> None:
         """Adopt (or drop) the dormant gallery `_retire` hands LOST tracks to.
@@ -273,6 +373,18 @@ class TrackBook:
         two positions, so any constant translation term cancels out of it
         by construction, and only rotation/scale changes how fast something
         reads in the now-current frame.
+
+        **Still does NOT touch `track.history` itself** (TRACKING-V3-PLAN
+        wave V2). A recorded `Observation.box` stays expressed in whatever
+        frame it was captured in, forever -- unlike `box`/`velocity_*`,
+        which this method keeps current every frame precisely so a READER
+        never has to reconstruct history. **What V3 adds instead**:
+        `track.history_transform` accumulates this SAME per-frame
+        `transform`, so a reader (`reupdate.py`) can warp a stored box into
+        the current frame ON DEMAND without this method ever touching the
+        ring entries themselves -- see `Track.history_transform`'s own
+        docstring and `reupdate.py`'s module docstring for the measurement
+        that chose this over re-warping the whole ring here.
         """
         if transform.identity:
             return
@@ -281,6 +393,7 @@ class TrackBook:
             vx, vy = track.velocity_x, track.velocity_y
             track.velocity_x = transform.a * vx + transform.b * vy
             track.velocity_y = transform.d * vx + transform.e * vy
+            track.history_transform = track.history_transform.compose(transform)
 
     def apply(
         self,
@@ -289,6 +402,7 @@ class TrackBook:
         *,
         detector_ran: bool,
         recoveries: "Optional[dict[object, RecoveredIdentity]]" = None,
+        captured_at: "Optional[dict[object, float]]" = None,
     ) -> list[Track]:
         """Book `observations` and age every track they did not touch.
 
@@ -303,22 +417,40 @@ class TrackBook:
         update to an existing live track is never affected by it. `None`/
         absent is the overwhelming common case and costs one dict lookup per
         new birth.
+
+        `captured_at` (2026-08-14 repair, TRACKING-V3-PLAN §4.1) maps an
+        observation's OWN `key` to the instant ITS content was actually
+        true, for `ObservationRing.record` alone (`history.py`'s own
+        `TimedObservation`/`record` docstrings carry the full "why"). `None`,
+        or a key this map does not carry, means exactly what it always has:
+        `now` IS this observation's own capture instant, correct for every
+        caller that has no lag to report (push mode, `bytetrack` ASSOCIATE,
+        FOLLOW's extras, a fresh birth, a dormant-gallery recovery) and
+        every call site written before this repair. Only `session.py`'s
+        `_late_corrected_box` -- the one place in this package that
+        resolves a per-detection capture instant different from arrival --
+        ever populates a real entry.
         """
         touched: set[object] = set()
         booked: list[Track] = []
         for observation in observations:
             book_key = self._namespaced(observation.key)
+            observed_at = captured_at.get(observation.key, now) if captured_at else now
             track = self._tracks.get(book_key)
             if track is None:
                 recovery = recoveries.get(observation.key) if recoveries else None
                 track = (
-                    self._adopt(observation, recovery, now)
+                    self._adopt(observation, recovery, now, captured_at=observed_at)
                     if recovery is not None
-                    else self._born(observation, now)
+                    else self._born(observation, now, captured_at=observed_at)
                 )
                 self._tracks[book_key] = track
             else:
-                self._observe(track, observation, now, detector_ran=detector_ran)
+                self._observe(
+                    track, observation, now, detector_ran=detector_ran, captured_at=observed_at
+                )
+                if track.reupdated:
+                    self._last_reupdated_tracks += 1
             touched.add(book_key)
             booked.append(track)
 
@@ -348,7 +480,7 @@ class TrackBook:
 
     # -- state machine ------------------------------------------------------
 
-    def _born(self, observation: Observation, now: float) -> Track:
+    def _born(self, observation: Observation, now: float, *, captured_at: float) -> Track:
         track = Track(
             track_id=self._next_id,
             key=observation.key,
@@ -372,9 +504,26 @@ class TrackBook:
         # what makes a track read `age_frames == 0` on its birth frame
         # ("frames since this track was born", TRACKING-PLAN §4.A).
         track.age_frames = -1
+        # TRACKING-V3-PLAN wave V2 -- the birth observation is real evidence
+        # too (see the docstring comment above: a track is only ever born
+        # from `SOURCE_DETECTOR`), so it belongs in the ring same as every
+        # later update. Unconditional: `ObservationRing.record` itself is
+        # what decides what counts as real, not this call site.
+        #
+        # `captured_at` (2026-08-14 repair): `apply()`'s own resolved value,
+        # `now` for every caller with no lag to report -- a brand-new birth
+        # (an unmatched target, a `bytetrack` key, a fresh FOLLOW lock) is
+        # never a `_late_corrected_box` candidate (that path only ever reads
+        # an EXISTING track's `.history`, `session.py`'s own module
+        # docstring), so this is `now` in every real call today. Stated
+        # rather than assumed: see `TrackBook.apply`'s own docstring for why
+        # that is a deliberate scope boundary, not an oversight.
+        track.history.record(observation, captured_at)
         return track
 
-    def _adopt(self, observation: Observation, recovery: RecoveredIdentity, now: float) -> Track:
+    def _adopt(
+        self, observation: Observation, recovery: RecoveredIdentity, now: float, *, captured_at: float
+    ) -> Track:
         """Book `observation` under a REMEMBERED identity instead of minting
         one (TRACKING-V2-PLAN wave C4).
 
@@ -433,40 +582,138 @@ class TrackBook:
         track.age_frames = -1
         if recovery.track_id >= self._next_id:
             self._next_id = recovery.track_id + 1
+        # TRACKING-V3-PLAN wave V2 -- same reasoning as `_born`'s own call:
+        # the observation that triggered this recovery is real evidence,
+        # even though the identity it is booked under is not new. Note what
+        # this deliberately does NOT do: `recovery` (from `ObjectMemory`)
+        # carries no observation history of its own -- a recovered track's
+        # ring starts fresh from this one entry, not backfilled with
+        # whatever evidence produced the ORIGINAL track before it went
+        # dormant. `ObjectMemory` was never asked to retain that (it keeps a
+        # box/velocity/descriptor snapshot, not a history), so there is
+        # nothing to restore even if this method wanted to.
+        #
+        # `captured_at` (2026-08-14 repair): same reasoning as `_born`'s own
+        # comment -- a recovery is a BRAND-NEW booking as far as this ring
+        # is concerned, never a `_late_corrected_box` candidate, so this is
+        # `now` in every real call today.
+        track.history.record(observation, captured_at)
         return track
 
     def _observe(
-        self, track: Track, observation: Observation, now: float, *, detector_ran: bool
+        self,
+        track: Track,
+        observation: Observation,
+        now: float,
+        *,
+        detector_ran: bool,
+        captured_at: float,
     ) -> None:
+        # TRACKING-V3-PLAN wave V3 -- reset FIRST, unconditionally, so a
+        # track this method does not reconstruct this frame never reports a
+        # PRIOR frame's reupdate as if it were this one's (`Track.
+        # reupdated`'s own docstring on why that would otherwise be safe to
+        # read directly off `Track` in the first place).
+        track.reupdated = False
         elapsed = now - track.last_seen
         if elapsed > 0.0 and not observation.predicted:
-            # Evidence only, and smoothed. Two defects sit behind these two
-            # conditions, both measured rather than supposed:
-            #
-            # Updating from a PREDICTED box makes the motion model
-            # self-confirming -- the velocity re-derived from an
-            # extrapolated box is exactly the velocity that produced it, so
-            # one bad estimate is preserved forever and no amount of
-            # coasting can correct it.
-            #
-            # Taking the instantaneous single-frame difference makes the
-            # estimate noise, not motion: at a realistic detector jitter a
-            # perfectly STATIC target measures a non-zero velocity, and
-            # extrapolating that across an occlusion walks its box off the
-            # object and fails the re-anchor that would have recovered it.
-            # The smoothing costs a little lag on a genuine acceleration,
-            # which is the right trade -- a coasting box is already an
-            # approximation, and a wrong direction is far worse than a late one.
-            old_cx, old_cy = track.box.center
-            new_cx, new_cy = observation.box.center
-            measured_x = (new_cx - old_cx) / elapsed
-            measured_y = (new_cy - old_cy) / elapsed
-            if track.hits <= 1:
-                track.velocity_x = measured_x
-                track.velocity_y = measured_y
+            reconstruction = None
+            if observation.source == SOURCE_DETECTOR and track.misses > 0:
+                # A REAL re-anchor (`SOURCE_DETECTOR`, per the ring's own
+                # admission test -- `z2` must be genuine evidence, the same
+                # bar `z1` is already held to) after at least one CONFIRMED
+                # failure to re-find this track since the last one (`misses
+                # > 0`, `track.py`'s own canonical "was there a gap" signal
+                # -- the same one `_settle` already uses for LOST). Gating
+                # on `misses`, not merely "was `elapsed` short", is what
+                # keeps this OFF for the steady, already-clean case: FOLLOW
+                # between verify passes where LK/NCC keeps succeeding every
+                # frame (`predicted=False`, `misses` stays 0) touches this
+                # branch too, on every one of those frames, and letting ORU
+                # override an EMA that is already tracking well there would
+                # trade continuous per-frame evidence for one coarse
+                # average -- a regression, not a fix, and not what any
+                # scenario in `BASELINE.md` needs.
+                started = perf_counter()
+                # `captured_at`, not `now` -- 2026-08-14 repair. `reupdate()`
+                # treats its own temporal argument as `observation`'s OWN
+                # capture instant (`z2` in its docstring's interpolant), and
+                # `captured_at` is precisely that (`apply()`'s own docstring:
+                # `now` whenever the caller has no lag to report, which is
+                # every call before this repair -- so this is a no-op change
+                # for every existing caller and only differs for a
+                # `_late_corrected_box` candidate). Passing `now` here
+                # unconditionally was a SECOND instance of the exact defect
+                # `TimedObservation`'s own docstring documents: a lagged,
+                # UNCORRECTED `observation` (late correction failed this
+                # frame -- no bracket yet, or past `max_gap_millis`) is true
+                # at `now - lag`, not `now`, and this is the one other call
+                # in this package that treats `observation` as being AT a
+                # caller-supplied instant rather than reading it off the
+                # observation itself.
+                reconstruction = reupdate(
+                    track,
+                    track.history,
+                    observation,
+                    captured_at,
+                    max_gap_millis=self._params.reupdate_max_gap_millis,
+                    max_velocity_per_second=self._params.reupdate_max_velocity_per_second,
+                    # 2026-08-15 density gate -- `self._tracks` is this
+                    # `TrackBook`'s own live-track dict, reachable here with
+                    # no threading at all (unlike detections/frame, which
+                    # this method has no way to reach -- see `reupdate.py`'s
+                    # own module docstring for why that signal is a proxy).
+                    max_track_count=self._params.reupdate_max_track_count,
+                    live_track_count=len(self._tracks),
+                    # 2026-08-15 bracket-identity check
+                    # (`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md`
+                    # §2.1) -- both `<=0`/disabled by default; each is
+                    # `reupdate.py`'s own concern, this call site only
+                    # threads the resolved deployment value through.
+                    max_shape_log_ratio=self._params.reupdate_max_shape_log_ratio,
+                    max_motion_center_distance=self._params.reupdate_max_motion_center_distance,
+                )
+                self._last_reupdate_millis += int(round((perf_counter() - started) * 1000.0))
+            if reconstruction is not None:
+                # ORU's own answer REPLACES the measurement below outright,
+                # rather than being blended with it: the whole point is that
+                # `track.box`/`track.velocity_*` going into this frame are
+                # the estimator's own accumulated drift, not a second
+                # opinion worth averaging in (TRACKING-V3-PLAN §4.2, "delete
+                # the accumulated extrapolation error rather than
+                # inheriting it").
+                track.velocity_x = reconstruction.velocity_x
+                track.velocity_y = reconstruction.velocity_y
+                track.reupdated = True
             else:
-                track.velocity_x = _blend(track.velocity_x, measured_x)
-                track.velocity_y = _blend(track.velocity_y, measured_y)
+                # Evidence only, and smoothed. Two defects sit behind these
+                # two conditions, both measured rather than supposed:
+                #
+                # Updating from a PREDICTED box makes the motion model
+                # self-confirming -- the velocity re-derived from an
+                # extrapolated box is exactly the velocity that produced it,
+                # so one bad estimate is preserved forever and no amount of
+                # coasting can correct it.
+                #
+                # Taking the instantaneous single-frame difference makes the
+                # estimate noise, not motion: at a realistic detector jitter
+                # a perfectly STATIC target measures a non-zero velocity,
+                # and extrapolating that across an occlusion walks its box
+                # off the object and fails the re-anchor that would have
+                # recovered it. The smoothing costs a little lag on a
+                # genuine acceleration, which is the right trade -- a
+                # coasting box is already an approximation, and a wrong
+                # direction is far worse than a late one.
+                old_cx, old_cy = track.box.center
+                new_cx, new_cy = observation.box.center
+                measured_x = (new_cx - old_cx) / elapsed
+                measured_y = (new_cy - old_cy) / elapsed
+                if track.hits <= 1:
+                    track.velocity_x = measured_x
+                    track.velocity_y = measured_y
+                else:
+                    track.velocity_x = _blend(track.velocity_x, measured_x)
+                    track.velocity_y = _blend(track.velocity_y, measured_y)
         track.box = observation.box
         track.label = observation.label
         track.confidence = observation.confidence
@@ -483,6 +730,25 @@ class TrackBook:
             # this frame is the tracker's own extrapolation (TRACKING-PLAN
             # §3.1, "IoU < threshold -> keep tracking, state COASTING").
             track.misses += 1
+        # TRACKING-V3-PLAN wave V2 -- unconditional, same as `_born`/`_adopt`
+        # above: `ObservationRing.record` is what decides whether THIS
+        # observation (coasted, tracker-produced, or a genuine detector
+        # confirmation) actually gets kept.
+        #
+        # TRACKING-V3-PLAN wave V3 addition: `before_latest`/`after_latest`
+        # detects whether THIS call is what the ring just admitted, using
+        # ONLY the ring's own public `latest()` (never re-deriving `history.
+        # py`'s admission predicate here, which is out of this wave's file
+        # scope) -- `TimedObservation` is stored BY REFERENCE (`history.py`'s
+        # own "store, don't copy"), so identity comparison is exact and
+        # free. `history_transform` resets to `IDENTITY` exactly when the
+        # ring's own notion of "latest real observation" just changed: that
+        # entry was captured on THIS frame, so there is (yet) no camera
+        # motion between it and now for `reupdate()`'s next read to correct.
+        before_latest = track.history.latest()
+        track.history.record(observation, captured_at)
+        if track.history.latest() is not before_latest:
+            track.history_transform = IDENTITY
 
     def _settle(self, track: Track, now: float) -> None:
         # Two ageing rules, deliberately kept both (TRACKING-V2-PLAN §6,

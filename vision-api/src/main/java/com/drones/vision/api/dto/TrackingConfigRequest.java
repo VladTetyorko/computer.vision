@@ -42,14 +42,25 @@ import java.util.stream.Collectors;
  *                           "the server's default for the mode"
  * @param verifyEveryMillis  {@code FOLLOW} detector re-verify cadence, milliseconds
  * @param followFps          the Java-side sampler's target rate while {@code FOLLOW} is active
- * @param redetectIouPercent re-anchor threshold, percent [0,100]
- * @param maxAgeFrames       unmatched frames before a track goes {@code LOST}
- * @param minHits            detector hits needed to confirm a new track
- * @param lock               which object {@code FOLLOW} should hold; absent leaves the running lock
- *                           untouched, and is rejected outright on a start request
+ * @param redetectIouPercent   re-anchor threshold, percent [0,100]
+ * @param maxAgeFrames         unmatched frames before a track goes {@code LOST}
+ * @param minHits              detector hits needed to confirm a new track
+ * @param capabilityLevel      the capability-ladder ceiling requested for this stream
+ *                             (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md &sect;2), [0,5]; {@code
+ *                             0} = auto-probe; absent leaves the running/seeded ceiling untouched.
+ *                             <b>A ceiling, not a demand</b> (invariant B5): cv-service serves {@code
+ *                             min(requested, affordable)}, never a refusal, and this field is never
+ *                             what the response should be read as — {@link
+ *                             FrameTrackingResponse#capability()} is the only source of truth for
+ *                             what actually ran
+ * @param reupdateMaxGapMillis the longest gap ORU may reconstruct, milliseconds; {@code 0} = server
+ *                             default; absent leaves the running/seeded value untouched
+ * @param lock                 which object {@code FOLLOW} should hold; absent leaves the running lock
+ *                             untouched, and is rejected outright on a start request
  */
 public record TrackingConfigRequest(String mode, String engineId, Integer verifyEveryMillis, Integer followFps,
                                      Integer redetectIouPercent, Integer maxAgeFrames, Integer minHits,
+                                     Integer capabilityLevel, Integer reupdateMaxGapMillis,
                                      TargetLockRequest lock) {
 
     /**
@@ -61,7 +72,8 @@ public record TrackingConfigRequest(String mode, String engineId, Integer verify
      */
     public TrackingConfigPatch toPatch() {
         return new TrackingConfigPatch(mode == null ? null : parseMode(mode), engineId, verifyEveryMillis, followFps,
-                redetectIouPercent, maxAgeFrames, minHits, lock == null ? null : lock.toTargetLock());
+                redetectIouPercent, maxAgeFrames, minHits, capabilityLevel, reupdateMaxGapMillis,
+                lock == null ? null : lock.toTargetLock());
     }
 
     /**

@@ -51,6 +51,33 @@ _DROPOUT_PROBABILITY = 0.35
 _CROSSING_NOISE_SEED = 0
 _CROSSING_POSITION_JITTER = 0.02
 _SMALL_TARGET_NOISE_SEED = 90210
+#
+# TRACKING-V3-PLAN wave V0 additions.
+#
+# `latency` needs no position jitter or dropout -- its own failure mode is
+# the systematic lag `latency_frames` injects (see `sequences.py`'s module
+# comment on this scenario). Measured while tuning this baseline: 8 frames
+# at this scenario's own speed (`LATENCY_TRAVEL_END`-`LATENCY_TRAVEL_START`
+# over `LATENCY_FRAME_COUNT`-1) is a ~0.11 position bias, comfortably larger
+# than half the object's own `OBJECT_WIDTH_FRACTION` -- enough to cost
+# coverage every single frame rather than only occasionally.
+_LATENCY_FRAMES = 8
+# `crossing_similar` needs the SAME small, realistic jitter `crossing`'s own
+# baseline does (`_CROSSING_POSITION_JITTER`) -- a perfect detector lets pure
+# geometry resolve even a symmetric crossing (see `crossing`'s own comment
+# above), and this scenario's whole point is that colour can no longer help
+# once geometry alone is ambiguous. A different seed so its own draw is
+# independent of `crossing`'s.
+_CROSSING_SIMILAR_NOISE_SEED = 1
+#
+# Instrument-repair (2026-08): `--lag-jitter-millis` re-runs `latency` with
+# `replay.DetectorNoiseConfig.detection_lag_jitter_millis` set, for the
+# companion reading `BASELINE.md`'s `latency` writeup discusses alongside
+# the exact/idealised default -- a fixed seed so that reading is itself
+# reproducible, independent of `SyntheticDetector`'s own `seed` (which
+# `latency`'s config never uses -- no dropout/position-jitter/false-positive
+# on this scenario).
+_LATENCY_JITTER_SEED = 20260814
 
 DEFAULT_NOISE_BY_SCENARIO: dict[str, replay_module.DetectorNoiseConfig] = {
     "dropout": replay_module.DetectorNoiseConfig(seed=_DROPOUT_NOISE_SEED, dropout_probability=_DROPOUT_PROBABILITY),
@@ -64,24 +91,41 @@ DEFAULT_NOISE_BY_SCENARIO: dict[str, replay_module.DetectorNoiseConfig] = {
         seed=_SMALL_TARGET_NOISE_SEED,
         reliable_size=SMALL_TARGET_RELIABLE_SIZE,
     ),
+    "latency": replay_module.DetectorNoiseConfig(latency_frames=_LATENCY_FRAMES),
+    "crossing_similar": replay_module.DetectorNoiseConfig(
+        seed=_CROSSING_SIMILAR_NOISE_SEED, position_jitter=_CROSSING_POSITION_JITTER
+    ),
 }
 
 
 def _noise_for(
-    scenario: str, *, confidence_floor: float = 0.0, detect_threshold: float = 0.0
+    scenario: str,
+    *,
+    confidence_floor: float = 0.0,
+    detect_threshold: float = 0.0,
+    lag_jitter_millis: float = 0.0,
 ) -> replay_module.DetectorNoiseConfig:
-    """This scenario's noise, with the two confidence-split knobs folded on.
+    """This scenario's noise, with the confidence-split knobs and the
+    `latency` lag-jitter knob folded on.
 
-    Both default to 0 (disabled), so a bare invocation reproduces `BASELINE.md`
-    exactly -- these exist to be A/B-ed explicitly, never to drift into the
-    default scoreboard.
+    All three default to 0 (disabled), so a bare invocation reproduces
+    `BASELINE.md` exactly -- these exist to be A/B-ed explicitly, never to
+    drift into the default scoreboard. `lag_jitter_millis` only has any
+    effect on a scenario whose own `DetectorNoiseConfig.latency_frames` is
+    already positive (`_detection_lag_millis_for`'s own guard) -- passing it
+    for any other scenario is a harmless no-op, not a second knob to gate.
     """
     base = DEFAULT_NOISE_BY_SCENARIO.get(scenario, replay_module.DetectorNoiseConfig())
-    if confidence_floor <= 0.0 and detect_threshold <= 0.0:
+    if confidence_floor <= 0.0 and detect_threshold <= 0.0 and lag_jitter_millis <= 0.0:
         return base
-    return dataclasses.replace(
-        base, confidence_floor=confidence_floor, detect_threshold=detect_threshold
-    )
+    replacements: dict[str, object] = {}
+    if confidence_floor > 0.0 or detect_threshold > 0.0:
+        replacements["confidence_floor"] = confidence_floor
+        replacements["detect_threshold"] = detect_threshold
+    if lag_jitter_millis > 0.0:
+        replacements["detection_lag_jitter_millis"] = lag_jitter_millis
+        replacements["lag_jitter_seed"] = _LATENCY_JITTER_SEED
+    return dataclasses.replace(base, **replacements)
 
 
 def _run_one(
@@ -92,6 +136,7 @@ def _run_one(
     seed: int,
     confidence_floor: float = 0.0,
     detect_threshold: float = 0.0,
+    lag_jitter_millis: float = 0.0,
 ) -> metrics_module.Metrics:
     sequence = SCENARIOS[scenario](seed)
     result = replay_module.run_replay(
@@ -99,7 +144,10 @@ def _run_one(
         mode=mode,
         engine_id=engine_id,
         detector_config=_noise_for(
-            scenario, confidence_floor=confidence_floor, detect_threshold=detect_threshold
+            scenario,
+            confidence_floor=confidence_floor,
+            detect_threshold=detect_threshold,
+            lag_jitter_millis=lag_jitter_millis,
         ),
     )
     return metrics_module.compute(result)
@@ -135,6 +183,20 @@ def _parse_args(argv: TypingSequence[str]) -> argparse.Namespace:
             "to land, 0.15 is CV_DETECT_FLOOR. 0 = emit everything."
         ),
     )
+    parser.add_argument(
+        "--lag-jitter-millis",
+        type=float,
+        default=0.0,
+        help=(
+            "spread (+/-, uniform) around latency's own exact injected "
+            "detection_lag_millis, modelling a real pull-mode capture_skew_millis "
+            "estimate's own measurement error instead of perfect lag knowledge. "
+            "0 (default) = exact/idealised. replay.DETECTION_LAG_JITTER_TYPICAL_MILLIS "
+            "(15.0) is the value sourced from pull/clock.py's own M0 measurement; see "
+            "BASELINE.md's latency writeup for the reading it produces. Only affects a "
+            "scenario whose own latency_frames is already positive (today, latency)."
+        ),
+    )
     args = parser.parse_args(argv)
     if not args.all and args.scenario is None:
         parser.error("either --scenario NAME or --all is required")
@@ -151,6 +213,7 @@ def main(argv: Optional[TypingSequence[str]] = None) -> None:
                 seed=args.seed,
                 confidence_floor=args.confidence_floor,
                 detect_threshold=args.detect_threshold,
+                lag_jitter_millis=args.lag_jitter_millis,
             )
             for scenario in sorted(SCENARIOS)
             for mode in (MODE_ASSOCIATE, MODE_FOLLOW)
@@ -164,6 +227,7 @@ def main(argv: Optional[TypingSequence[str]] = None) -> None:
                 seed=args.seed,
                 confidence_floor=args.confidence_floor,
                 detect_threshold=args.detect_threshold,
+                lag_jitter_millis=args.lag_jitter_millis,
             )
         ]
     print(metrics_module.render_table(rows))

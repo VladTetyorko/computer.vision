@@ -27,6 +27,28 @@ as-is -- it is a COST number, not an identity one, and real wall-clock noise
 on it is expected and already labelled that way everywhere else in this
 codebase.
 
+**`detection_lag_millis` is now wired too (instrument-repair, 2026-08).**
+`session.process()` has taken an optional `detection_lag_millis` since wave
+V6 (`cv_service/tracking/session.py` §"Late-detection back-correction"), but
+this driver never passed one -- the `latency` scenario shifted WHICH ground
+truth `SyntheticDetector` returned without ever telling the session it was
+stale, which made the scenario unwinnable by construction (a late,
+constant-velocity stream is mathematically indistinguishable from an
+on-time one starting further back; `L` is unidentifiable from
+(position, arrival-time) alone). `_detection_lag_millis_for` below closes
+that gap the same way pull mode does: production computes its lag from
+`CaptureClock.capture_time` (`cv_service/pull/clock.py`, `capture_skew_millis`
+= `now_wall - captured_at`), a same-process, same-clock estimate threaded
+into `session.process()` by `grpc/servicers.py`'s `_handle_request`. This
+harness knows the injected lag EXACTLY (it is the config that shifted the
+ground truth), so the default (`detection_lag_jitter_millis=0.0`) reports it
+exactly -- the IDEALISED case, perfect lag knowledge a real worker's
+estimate never quite has. `detection_lag_jitter_millis` > 0 adds the spread
+`pull/clock.py`'s own M0 measurement recorded around that estimate, for a
+companion reading that shows whether the correction degrades gracefully
+under the real signal's own noise rather than only a noiseless one. See
+`BASELINE.md` §2's `latency` writeup for both readings.
+
 Pure stdlib at module scope, deliberately: `cv_service.config`,
 `cv_service.tracking.{params,registry,session}` are all pure stdlib
 (`cv_service/tracking/__init__.py`'s own invariant), and `_SyntheticDetection`
@@ -48,7 +70,7 @@ from typing import Optional
 from typing import Sequence as TypingSequence
 
 from cv_service.config import Settings
-from cv_service.tracking.engines.base import Box
+from cv_service.tracking.engines.base import SOURCE_DETECTOR, Box
 from cv_service.tracking.params import MODE_FOLLOW, LockRequest, TrackingRequest
 from cv_service.tracking.registry import TrackerRegistry, build_default_registry
 from cv_service.tracking.session import FrameOutcome, StreamTrackingSession
@@ -60,6 +82,19 @@ MILLIS_PER_SECOND = 1000.0
 # strictly-increasing values (`lock.py`), and a replay never re-locks.
 _LOCK_SEQ = 1
 _WIRE_TOKEN = "trackeval"
+
+# Typical per-frame spread of a REAL `capture_skew_millis` estimate around
+# its true value, for `DetectorNoiseConfig.detection_lag_jitter_millis`.
+# Sourced from `cv_service/pull/clock.py`'s own module docstring: "M0
+# measured anchor ... at +/-15 ms typical spread over 10 minutes, worst
+# spike ~80 ms -- inside the plan's 100 ms/10-min gate". The worst spike
+# stayed under that gate's 100 ms re-anchor threshold
+# (`DEFAULT_REANCHOR_THRESHOLD_MILLIS`), so no re-anchor transient fires
+# within a measurement window this short (`latency`'s own 60 frames / 6 s at
+# 10 fps, against M0's 10-minute run) -- modelling the typical spread alone
+# is therefore the right level of realism here, not a simplification chosen
+# because it is convenient.
+DETECTION_LAG_JITTER_TYPICAL_MILLIS = 15.0
 
 
 @dataclass(frozen=True)
@@ -125,6 +160,47 @@ class DetectorNoiseConfig:
     # `CV_DETECT_FLOOR` does, and the operator's threshold applies to the
     # RESPONSE instead. A/B this to measure the change.
     detect_threshold: float = 0.0
+    # TRACKING-V3-PLAN wave V0, the `latency` scenario -- how many frames
+    # late the detector's answer arrives. 0 = instant (the pre-existing
+    # behaviour: the detector always describes the CURRENT frame). N > 0
+    # means a `detect()` call issued while processing frame `i` reports the
+    # ground truth as it was on frame `i - N`, modelling an offboard
+    # detector that takes real wall-clock time to return -- the normal case
+    # TRACKING-V3-PLAN §5.2 ("L1 RELAY") describes, not an edge case. This
+    # knob lives on the CONFIG, not on `SyntheticDetector`, because which
+    # frame's ground truth a call sees has to be decided by `run_replay`'s
+    # own frame-index loop (see `_ground_truth_for_detection`) -- doing it
+    # inside `SyntheticDetector.detect()` would tie the lag to CALL COUNT
+    # instead of FRAME INDEX, which silently breaks the moment a scenario
+    # also uses ROI re-detection (a second, conditional `detect()` call on
+    # the same frame).
+    #
+    # N > 0 ALSO makes `run_replay` pass this same lag to `session.process()`
+    # as `detection_lag_millis` (see `_detection_lag_millis_for`) -- mirroring
+    # how pull mode's worker obtains that signal for real
+    # (`cv_service/pull/clock.py`'s `capture_skew_millis`), rather than
+    # injecting a stale stream and leaving the session with no way to know
+    # it. See `detection_lag_jitter_millis` below for how exact that report is.
+    latency_frames: int = 0
+    # How much spread to add around `latency_frames`' own exact lag when
+    # reporting `detection_lag_millis` -- 0.0 (default) reports the exact
+    # value, the IDEALISED case: this harness knows precisely how many
+    # frames late the detector is (it is the config that shifted the ground
+    # truth), which a real pull-mode worker's `capture_skew_millis` estimate
+    # never quite does. > 0 draws a per-frame `uniform(-jitter, +jitter)`
+    # offset instead (via `lag_jitter_seed`'s own RNG, independent of
+    # `SyntheticDetector`'s), modelling that estimate's real measurement
+    # error. `DETECTION_LAG_JITTER_TYPICAL_MILLIS` below is the value
+    # sourced from `pull/clock.py`'s own M0 measurement, not tuned to make
+    # any scenario's numbers look better.
+    detection_lag_jitter_millis: float = 0.0
+    # Seeds the RNG `detection_lag_jitter_millis` draws from -- deliberately
+    # a SEPARATE stream from `SyntheticDetector`'s own `seed` (used for
+    # dropout/position-jitter/false-positive draws), so enabling lag jitter
+    # can never re-roll a scenario's existing detection draw sequence, the
+    # same reasoning `_miss_probability`'s "draw taken only when in play"
+    # comment gives for `reliable_size`.
+    lag_jitter_seed: int = 0
 
 
 # A false positive's box: small, and placed uniformly within this leading
@@ -260,7 +336,14 @@ class SyntheticDetector:
 
 @dataclass(frozen=True)
 class ReplayResult:
-    """Everything `metrics.py` needs, and nothing it has to recompute."""
+    """Everything `metrics.py` needs, and nothing it has to recompute.
+
+    `width`/`height` default to 0 and `coast_track_ids` to `()` so hand-built
+    `ReplayResult`s in `tests/trackeval/test_metrics.py` that predate
+    TRACKING-V3-PLAN wave V0 keep constructing without change -- `metrics.py`
+    treats a length mismatch between `coast_track_ids` and `outcomes` as "no
+    coast data available" rather than an error (see `metrics.compute`).
+    """
 
     scenario: str
     mode: str
@@ -269,6 +352,129 @@ class ReplayResult:
     outcomes: tuple[FrameOutcome, ...]
     ground_truth_by_frame: tuple[tuple[GroundTruthObject, ...], ...]
     scored_gt_ids: frozenset[int]
+    width: int = 0
+    height: int = 0
+    # TRACKING-V3-PLAN wave V0 -- `coast_track_ids[i]` is the set of emitted
+    # track ids on frame `i` whose box this frame came from the TRACKER, not
+    # a fresh `SOURCE_DETECTOR` observation (`metrics.py`'s coast ADE/FDE).
+    # Captured HERE, immediately after each `session.process()` call, rather
+    # than read back out of `FrameOutcome.boxes[i].track` later: `Track` is a
+    # mutable, per-stream-unique object (`track.py`'s own docstring -- "the
+    # book's own entry, updated in place once per frame") and `TrackedBox`
+    # holds a REFERENCE to it, not a snapshot. Every past frame's `TrackedBox`
+    # for a still-live track therefore aliases the SAME object the book keeps
+    # mutating -- reading `.source`/`.state` off it after the replay has
+    # finished would report this frame's status for EVERY frame that track
+    # ever appeared in, not each frame's own. `TrackedBox.box` has no such
+    # problem (`Box` is frozen, and `track.box = ...` REBINDS the attribute
+    # rather than mutating the old `Box` in place), which is exactly why
+    # every metric before this one could read `outcome.boxes[i].box` safely
+    # after the fact and this is the first one that could not just do the
+    # same for `.track`.
+    coast_track_ids: tuple[frozenset[int], ...] = ()
+    # TRACKING-V3-PLAN §6b finding O3 -- `track_velocities[i]` is
+    # `{track_id: (velocity_x, velocity_y)}` for every box `outcome.boxes[i]`
+    # emitted, captured the SAME way and for the SAME reason `coast_track_ids`
+    # is: `track.velocity_x`/`_y` lives on the identical mutable, aliased
+    # `Track` object `coast_track_ids`'s own docstring above describes, so
+    # reading it back out of `FrameOutcome.boxes[i].track` after the whole
+    # replay has finished would report only the LAST frame's velocity for
+    # every frame that track ever appeared in -- silently hiding the exact
+    # defect (a reconstructed velocity diverging to 1e14-1e32, `BASELINE.md`'s
+    # `latency` writeup) this field exists to let `metrics.py` see. Defaults
+    # to `()`, read by `metrics.py` as "no velocity data" (count 0), so
+    # hand-built `ReplayResult`s predating this field keep constructing
+    # unchanged.
+    track_velocities: tuple[dict[int, tuple[float, float]], ...] = ()
+
+
+def _ground_truth_for_detection(
+    sequence: Sequence, frame_index: int, latency_frames: int
+) -> "TypingSequence[GroundTruthObject]":
+    """What a detector running `latency_frames` behind would be reporting on,
+    while processing frame `frame_index` -- the ground truth from an OLDER
+    frame, not the current one (TRACKING-V3-PLAN wave V6's target, modelled
+    here for wave V0's harness; see `DetectorNoiseConfig.latency_frames`).
+
+    Before enough history exists (`frame_index < latency_frames`) a real late
+    detector would not have produced anything yet either -- returns no
+    detections at all rather than repeating frame 0, which would invent
+    evidence a real pipeline warming up does not have.
+    """
+    if latency_frames <= 0:
+        return sequence.frames[frame_index].ground_truth
+    source_index = frame_index - latency_frames
+    if source_index < 0:
+        return ()
+    return sequence.frames[source_index].ground_truth
+
+
+def _detection_lag_millis_for(
+    frame_index: int,
+    fps: float,
+    detector_config: DetectorNoiseConfig,
+    lag_rng: random.Random,
+) -> int:
+    """This frame's `detection_lag_millis` -- `session.process()`'s own
+    signal for late-detection back-correction (`cv_service/tracking/
+    session.py` §"Late-detection back-correction", wave V6), modelled the
+    way pull mode's worker actually obtains it: `CaptureClock.capture_time`
+    (`cv_service/pull/clock.py`) reports `now_wall - captured_at`, an
+    ESTIMATE of the same quantity `latency_frames` injects here, not a copy
+    of the config read back out.
+
+    `0` (unknown) whenever there is nothing to report: no latency injected
+    (`latency_frames <= 0`), or not enough history yet for
+    `_ground_truth_for_detection` to have produced a real detection to
+    correct (`frame_index < latency_frames` -- the SAME guard, because a lag
+    estimate for a detection that never happened is not a real signal
+    either).
+
+    Otherwise the exact injected lag (`latency_frames` frames, in millis at
+    this sequence's own fps), plus a `uniform(-jitter, +jitter)` offset when
+    `detection_lag_jitter_millis` is positive -- see that field's own
+    docstring for what 0 vs positive means and where the magnitude comes
+    from. The offset is drawn from `lag_jitter_seed`'s own RNG, so this is
+    deterministic given a seed but never perturbs `SyntheticDetector`'s
+    independent draw sequence.
+    """
+    latency_frames = detector_config.latency_frames
+    if latency_frames <= 0 or frame_index < latency_frames:
+        return 0
+    exact_millis = latency_frames * (MILLIS_PER_SECOND / fps)
+    jitter = detector_config.detection_lag_jitter_millis
+    if jitter <= 0.0:
+        return round(exact_millis)
+    return round(exact_millis + lag_rng.uniform(-jitter, jitter))
+
+
+def _coast_ids_this_frame(outcome: FrameOutcome) -> frozenset[int]:
+    """Emitted track ids on this ALREADY-RETURNED `FrameOutcome` whose most
+    recent touch was the tracker, not the detector -- see `ReplayResult.
+    coast_track_ids` for why this must be read right after `process()`
+    returns, not later."""
+    if outcome.boxes is None:
+        return frozenset()
+    return frozenset(
+        tracked.track.track_id
+        for tracked in outcome.boxes
+        if tracked.track is not None and tracked.track.source != SOURCE_DETECTOR
+    )
+
+
+def _track_velocities_this_frame(outcome: FrameOutcome) -> dict[int, tuple[float, float]]:
+    """`{emitted track_id: (velocity_x, velocity_y)}` on this
+    ALREADY-RETURNED `FrameOutcome` -- see `ReplayResult.track_velocities`
+    for why this must be read right after `process()` returns, not later
+    (the same `Track`-aliasing trap `_coast_ids_this_frame` above exists
+    to avoid)."""
+    if outcome.boxes is None:
+        return {}
+    return {
+        tracked.track.track_id: (tracked.track.velocity_x, tracked.track.velocity_y)
+        for tracked in outcome.boxes
+        if tracked.track is not None
+    }
 
 
 def run_replay(
@@ -306,21 +512,48 @@ def run_replay(
     )
 
     outcomes: list[FrameOutcome] = []
+    coast_track_ids: list[frozenset[int]] = []
+    track_velocities: list[dict[int, tuple[float, float]]] = []
+    # One stream for the WHOLE replay, not one per frame -- a fresh
+    # `Random()` every frame would make every draw independent of the ones
+    # around it, which is not what "spread around a slowly-drifting skew
+    # estimate" means; a single seeded stream at least keeps the sequence
+    # reproducible frame-to-frame, same discipline `SyntheticDetector.
+    # __init__` uses for its own RNG.
+    lag_rng = random.Random(detector_config.lag_jitter_seed)
     for frame in sequence.frames:
         now_millis = frame.index * (MILLIS_PER_SECOND / sequence.fps)
+        detection_lag_millis = _detection_lag_millis_for(frame.index, sequence.fps, detector_config, lag_rng)
 
         def detect(
-            roi: Optional[Box] = None, ground_truth=frame.ground_truth
+            roi: Optional[Box] = None, frame_index=frame.index
         ) -> "tuple[list[_SyntheticDetection], int]":
             # Optional-argument, so this harness works against a session that
             # asks for a crop and one that does not -- the production side of
-            # ROI re-detection lands separately.
+            # ROI re-detection lands separately. `frame_index`, not
+            # `frame.ground_truth` directly (as this used to read), so
+            # `detector_config.latency_frames` can redirect which frame's
+            # truth is reported -- see `_ground_truth_for_detection`.
+            ground_truth = _ground_truth_for_detection(sequence, frame_index, detector_config.latency_frames)
             return detector.detect(ground_truth, roi), 0
 
         def load_frame(image=frame.image):
             return image
 
-        outcomes.append(session.process(now_millis=now_millis, detect=detect, frame=load_frame))
+        outcome = session.process(
+            now_millis=now_millis,
+            detect=detect,
+            frame=load_frame,
+            detection_lag_millis=detection_lag_millis,
+        )
+        outcomes.append(outcome)
+        # Captured immediately, before the NEXT iteration's `process()` call
+        # mutates the same live `Track` objects -- see `ReplayResult.
+        # coast_track_ids`'s own docstring for why this cannot be done later.
+        coast_track_ids.append(_coast_ids_this_frame(outcome))
+        # Same reasoning, same frame, same reason it cannot wait -- see
+        # `ReplayResult.track_velocities`'s own docstring.
+        track_velocities.append(_track_velocities_this_frame(outcome))
 
     engine_id_served = next((outcome.engine_id for outcome in reversed(outcomes) if outcome.engine_id), "")
     scored_gt_ids = frozenset({sequence.primary_gt_id}) if mode == MODE_FOLLOW else sequence.gt_ids
@@ -333,6 +566,10 @@ def run_replay(
         outcomes=tuple(outcomes),
         ground_truth_by_frame=tuple(frame.ground_truth for frame in sequence.frames),
         scored_gt_ids=scored_gt_ids,
+        width=sequence.width,
+        height=sequence.height,
+        coast_track_ids=tuple(coast_track_ids),
+        track_velocities=tuple(track_velocities),
     )
 
 

@@ -12,6 +12,7 @@ import logging
 import pytest
 
 from cv_service.config import Settings
+from cv_service.tracking import levels
 from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW
 from cv_service.tracking.registry import (
     BUILTIN_APPEARANCES,
@@ -249,6 +250,7 @@ def test_the_seven_shipped_engines_are_advertised(engine_id):
         "cv_service.tracking.sessions",
         "cv_service.tracking.engines.base",
         "cv_service.tracking.predict",
+        "cv_service.tracking.levels",
     ],
 )
 def test_everything_but_the_engines_stays_pure_stdlib(module_name):
@@ -277,3 +279,135 @@ def test_no_tracking_module_imports_cv_pb2(module_name):
     module = importlib.import_module(module_name)
 
     assert "cv_pb2" not in vars(module)
+
+
+# -- wave V1: the capability ladder makes a roster level-aware ---------------
+# (TRACKING-V3-PLAN §5, decision E11). `level=None` (every test above this
+# point) means "no ceiling" -- unchanged, pre-V1 behavior. These tests are
+# the OTHER half: a `level=` argument filters the roster BEFORE the fallback
+# ladder or any factory ever runs.
+
+
+def counting_factory(engine_id: str):
+    """Like `factory()`, but records every call -- the mechanism this
+    section's purity tests lean on: a level-excluded engine's factory must
+    never be invoked at all, not merely have its RESULT discarded (that
+    distinction is what keeps a level-1 stream from ever executing
+    `import cv2` in the first place, invariant P8)."""
+    calls: list[int] = []
+
+    def create(**_kwargs):
+        calls.append(1)
+        return FakeEngine(engine_id)
+
+    create.calls = calls
+    return create
+
+
+def test_bytetrack_is_not_selectable_below_l3():
+    subject = registry()
+
+    engine_id, engine = subject.associator("bytetrack", max_age_frames=30, level=levels.LEVEL_L1)
+
+    assert engine_id == "cost"
+    engine_id, engine = subject.associator("bytetrack", max_age_frames=30, level=levels.LEVEL_L2)
+    assert engine_id == "cost"
+
+
+def test_bytetrack_becomes_selectable_from_l3_up():
+    subject = registry()
+
+    for level in (levels.LEVEL_L3, levels.LEVEL_L4, levels.LEVEL_L5):
+        engine_id, _engine = subject.associator("bytetrack", max_age_frames=30, level=level)
+        assert engine_id == "bytetrack"
+
+
+def test_cost_is_selectable_at_every_level():
+    subject = registry()
+
+    for level in (levels.LEVEL_L1, levels.LEVEL_L2, levels.LEVEL_L3, levels.LEVEL_L4, levels.LEVEL_L5):
+        engine_id, _engine = subject.associator("cost", max_age_frames=30, level=level)
+        assert engine_id == "cost"
+
+
+def test_a_level_ceiling_never_even_calls_the_excluded_factory():
+    bytetrack_factory = counting_factory("bytetrack")
+    subject = registry(associators={"bytetrack": bytetrack_factory, "cost": factory("cost")})
+
+    subject.associator("bytetrack", max_age_frames=30, level=levels.LEVEL_L1)
+
+    assert bytetrack_factory.calls == []
+
+
+def test_no_level_argument_means_no_ceiling_at_all():
+    subject = registry()
+
+    # `level=None` (the default -- every pre-V1 call site, and every fake
+    # registry in other test files this wave must not break) still returns
+    # `bytetrack` even though its own min-level is L3 -- unfiltered is
+    # unfiltered.
+    engine_id, _engine = subject.associator("bytetrack", max_age_frames=30)
+
+    assert engine_id == "bytetrack"
+
+
+def test_l1_offers_no_follower_at_all():
+    subject = registry()
+
+    assert subject.follower("lk", max_age_frames=30, level=levels.LEVEL_L1) is None
+    assert subject.follower("ncc", max_age_frames=30, level=levels.LEVEL_L1) is None
+
+
+def test_followers_become_selectable_from_l2_up():
+    subject = registry()
+
+    engine_id, _engine = subject.follower("lk", max_age_frames=30, level=levels.LEVEL_L2)
+
+    assert engine_id == "lk"
+
+
+def test_pose_is_selectable_at_l1_flow_is_not():
+    subject = registry()
+
+    engine_id, _engine = subject.compensator(MOTION_ENGINE_POSE, level=levels.LEVEL_L1)
+    assert engine_id == MOTION_ENGINE_POSE
+
+    # `flow` needs L2 -- at L1 the only affordable compensator is `pose`,
+    # so asking for `flow` explicitly still falls back to `pose`, not `None`.
+    engine_id, _engine = subject.compensator(MOTION_ENGINE_FLOW, level=levels.LEVEL_L1)
+    assert engine_id == MOTION_ENGINE_POSE
+
+
+def test_flow_becomes_selectable_from_l2_up():
+    subject = registry()
+
+    engine_id, _engine = subject.compensator(MOTION_ENGINE_FLOW, level=levels.LEVEL_L2)
+
+    assert engine_id == MOTION_ENGINE_FLOW
+
+
+def test_l1_offers_no_appearance_extractor():
+    subject = registry()
+
+    assert subject.appearance(APPEARANCE_ENGINE_HISTOGRAM, level=levels.LEVEL_L1) is None
+
+
+def test_appearance_becomes_selectable_from_l2_up():
+    subject = registry()
+
+    engine_id, _engine = subject.appearance(APPEARANCE_ENGINE_HISTOGRAM, level=levels.LEVEL_L2)
+
+    assert engine_id == APPEARANCE_ENGINE_HISTOGRAM
+
+
+def test_a_level_ceiling_is_applied_even_when_the_engine_is_technically_constructible():
+    # The whole point of a CEILING (decision E12/invariant P9): a host that
+    # COULD build `bytetrack` (nothing here raises) must still not get it
+    # when capped to L1 -- the level is a contract, not "whatever this box
+    # can do".
+    subject = registry()
+    assert "bytetrack" in subject.roster()
+
+    engine_id, _engine = subject.associator("bytetrack", max_age_frames=30, level=levels.LEVEL_L1)
+
+    assert engine_id != "bytetrack"

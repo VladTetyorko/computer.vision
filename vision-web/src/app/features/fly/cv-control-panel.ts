@@ -8,10 +8,13 @@ import type { DetectionResult, StreamTracksResponse, TrackingMode, UpdateStreamC
 import type { BoxesMode } from '../../shared/player/player';
 import { resolveBurnedIn } from '../../shared/player/detection-overlay-logic';
 import {
+  CAPABILITY_LEVEL_OPTIONS,
   DEFAULT_FOLLOW_FPS,
   DEFAULT_VERIFY_EVERY_MILLIS,
+  DETECTION_LAG_BUDGET_MILLIS,
   addLabel,
   applyPreset,
+  buildCapabilityLevelPatch,
   buildFollowFpsPatch,
   buildHotKnobPatch,
   buildModelChangePatch,
@@ -19,14 +22,20 @@ import {
   buildTrackingEnginePatch,
   buildTrackingModePatch,
   buildVerifyCadencePatch,
+  capabilityLevelHint,
+  capabilityLevelLabel,
   chipCandidates,
   debounce,
   engineOptionsForMode,
   filterLabelsByQuery,
   findModel,
+  formatDetectionLag,
   formatFlowStrip,
   hasExactLabelMatch,
+  isCapabilityDowngraded,
+  isDetectionLagOverBudget,
   isLabelChecked,
+  latestFrameTracking,
   observedLabels,
   perfHint,
   reArmHint,
@@ -197,6 +206,59 @@ export class CvControlPanel {
   protected readonly verifyEveryMillis = signal(DEFAULT_VERIFY_EVERY_MILLIS);
   /** `FOLLOW`-only: the Java-side sampler rate feeding the tracker — local draft, no readback. */
   protected readonly followFps = signal(DEFAULT_FOLLOW_FPS);
+
+  // --- Capability ladder (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md, wave J4) -----------------------
+  // The ceiling the operator picks (`capabilityLevel`, below) and what the host actually *served*
+  // (`servedCapability`, further down) are deliberately two different signals fed from two different
+  // places — invariant B5, "never render the requested level as though it were the outcome". Like
+  // `verifyEveryMillis`/`followFps` above, the ceiling has **no server readback**: the wire carries no
+  // "requested level" field to sync from (only `levelServed`+`reason` — see `TrackingCapability`'s own
+  // doc comment), so this stays a local draft, seeded to `0` (Auto) and never corrected from a poll.
+
+  /** The operator's last-clicked capability ceiling — `0` = Auto (the default, and the only value
+   *  that must stay the default per this wave's own brief). See this section's own doc comment for
+   *  why this has no readback, unlike {@link trackingMode}/{@link trackingEngineId} above. */
+  protected readonly capabilityLevel = signal(0);
+  protected readonly capabilityLevelOptions = CAPABILITY_LEVEL_OPTIONS;
+  protected readonly capabilityLevelHintText = computed(() => capabilityLevelHint(this.capabilityLevel()));
+
+  /** The most recent frame carrying tracking telemetry (`FrameTracking`, the nested `"tracking"`
+   *  object on a detection result) — `undefined` while tracking has produced nothing yet this
+   *  session. This is where `capability`/`detectionLagMillis` actually live on the wire; **not** the
+   *  `GET .../tracks` poll {@link tracksResponse} reads (that response has no such fields). */
+  protected readonly frameTracking = computed(() => latestFrameTracking(this.detectionResults()));
+
+  /** The capability facts for the most recent frame, or `undefined` — absent while `frameTracking()`
+   *  itself is absent (tracking off / nothing yet), **and** absent whenever a frame exists but
+   *  reports no level at all (a pre-V3 cv-service — invariant B3). `cv-control-panel.html` renders
+   *  this exact distinction: no `frameTracking()` hides the whole capability readout (nothing to
+   *  report yet, same posture as the flow strip); a present `frameTracking()` with no `capability`
+   *  shows an explicit "no level reported" reading instead of silently hiding or, worse, echoing
+   *  {@link capabilityLevel}'s own local ceiling into this slot (B5). */
+  protected readonly servedCapability = computed(() => this.frameTracking()?.capability);
+
+  /** Whether {@link servedCapability} should render as a downgrade rather than a quiet reading — see
+   *  `isCapabilityDowngraded`'s own doc comment for why this reads the server's own `reason` field
+   *  and never a local comparison against {@link capabilityLevel}. */
+  protected readonly capabilityDowngraded = computed(() => isCapabilityDowngraded(this.servedCapability()));
+
+  /** `docs/conclusions/CV-RATE-BUDGET.md` §1's *Hold* budget, re-exported for the template's own
+   *  "< Xms" copy — kept as one constant, never restated as a literal in the template. */
+  protected readonly detectionLagBudgetMillis = DETECTION_LAG_BUDGET_MILLIS;
+  protected readonly detectionLagText = computed(() => formatDetectionLag(this.frameTracking()?.detectionLagMillis ?? 0));
+  protected readonly detectionLagOverBudget = computed(() =>
+    isDetectionLagOverBudget(this.frameTracking()?.detectionLagMillis ?? 0),
+  );
+
+  protected capabilityLevelName(level: number): string {
+    return capabilityLevelLabel(level);
+  }
+
+  protected onCapabilityLevel(value: string): void {
+    const level = Number(value);
+    this.capabilityLevel.set(level);
+    this.patchTracking(buildCapabilityLevelPatch(level));
+  }
 
   /** The most recent `GET .../tracks` poll, or `null` before the first poll settles, while the
    * drawer is closed, while no stream is running, or on any transport failure (including this

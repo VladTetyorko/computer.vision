@@ -285,6 +285,12 @@ export type DetectorReason =
  * `track_id == 0` sentinel never reaches here as `id: 0` (mirrors `LayerGrant`/every other
  * absent-not-zero rule in this file). `ageFrames` deliberately doesn't ride here — it's
  * `StreamTrack`'s own book-keeping, not something a box needs six times a second (§4.G's own note).
+ *
+ * `reupdated` (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2, wave J4) is `TrackRef#reupdated()`
+ * verbatim — this track's gap was just reconstructed by ORU (observation-centric re-update) on this
+ * frame, from the two real observations bracketing it, rather than carried forward from drifted
+ * extrapolation. Always present once `track` exists (a straight boolean, no absent-means-unknown
+ * case) — `false` for the overwhelming majority of frames, where no gap needed reconstructing.
  */
 export interface DetectionTrack {
   readonly id: number;
@@ -292,6 +298,34 @@ export interface DetectionTrack {
   readonly source: DetectionSource;
   readonly velocityX: number;
   readonly velocityY: number;
+  readonly reupdated: boolean;
+}
+
+/**
+ * Mirrors the nested `"capability"` object on `FrameTracking` (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
+ * §2, wave J4) — what capability level the host actually served for this frame, and why, whenever
+ * that differs from what was asked. **The whole object is absent** when the server reported no level
+ * at all — a pre-V3 cv-service — and that is the *only* "no level" case a reader here needs to
+ * handle; there is no zeroed/placeholder shape to fall back to (invariant B3).
+ *
+ * `levelServed` is `1`-`5`, never `0` — the wire's own `0` sentinel ("nothing reported") is exactly
+ * what makes this whole object absent instead of present-with-a-zero, mirroring every other
+ * absent-not-zero rule in this file. `reason` is never absent/`null`: `''` means `levelServed`
+ * matched what the running stream actually asked for at the time this frame was produced; any other
+ * string names why it was capped (e.g. `"OpenVINO unavailable; degraded from requested L4 to L2"`).
+ *
+ * **Invariant B5 — a level is a ceiling, never a demand.** `levelServed` is what happened, and this
+ * type carries no field for what was requested — a reader who wants "asked for L4, got L2" must
+ * combine this with the operator's own local ceiling pick (`cv-control-panel.ts#capabilityLevel`,
+ * which has no server readback — see that signal's own doc comment), and must never render that
+ * local pick into this slot as though the server had reported it.
+ * `cv-control-panel-logic.ts#isCapabilityDowngraded` reads `reason`, not a locally-recomputed
+ * comparison, to decide whether to render this as a downgrade — the server is the one that actually
+ * knows what request produced this frame, this app's own local ceiling pick might already be stale.
+ */
+export interface TrackingCapability {
+  readonly levelServed: number;
+  readonly reason: string;
 }
 
 /**
@@ -300,6 +334,15 @@ export interface DetectionTrack {
  * `DetectionResult` (docs/extracts/TRACKING-ORCHESTRATION.md §5.2's own gap fix: `DetectionResult` had
  * nowhere to carry `detectorRan` before `TrackingTelemetry` existed). Absent entirely while tracking
  * is off for this stream, or on an old server — never a batch of zeroed-out fields.
+ *
+ * `detectionLagMillis`/`reupdateMillis`/`reupdatedTracks`/`capability` (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
+ * §2, wave J4) are the capability-ladder + ORU facts. `detectionLagMillis` is the measured
+ * capture→association lag — `0` means "unknown", never a claim of zero lag (the domain's own
+ * `Duration.ZERO` sentinel, `cv-control-panel-logic.ts#formatDetectionLag` renders it `—`);
+ * `docs/conclusions/CV-RATE-BUDGET.md` §1 budgets this at **< 50 ms** for the *Hold* job — see
+ * `DETECTION_LAG_BUDGET_MILLIS`. `reupdateMillis`/`reupdatedTracks` are this frame's ORU cost/count,
+ * both `0` when ORU didn't run this frame. `capability` is absent on a pre-V3 server — see
+ * {@link TrackingCapability}'s own doc comment for the full B5 reasoning.
  */
 export interface FrameTracking {
   readonly detectorRan: boolean;
@@ -307,6 +350,10 @@ export interface FrameTracking {
   readonly trackerMillis: number;
   readonly engineId: string;
   readonly lockedTrackId: number;
+  readonly detectionLagMillis: number;
+  readonly reupdateMillis: number;
+  readonly reupdatedTracks: number;
+  readonly capability?: TrackingCapability;
 }
 
 /**
@@ -330,6 +377,16 @@ export interface TargetLockRequest {
  * `UpdateStreamConfigRequest` itself already follows: an absent field leaves that knob exactly as it
  * is. `redetectIouPercent` is an `int` percent (0-100), not a fraction — matches the domain's own
  * `TrackingConfig` (§4.B); converted to the proto's `float` fraction server-side, never here.
+ *
+ * `capabilityLevel`/`reupdateMaxGapMillis` (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2, wave J4) —
+ * ordinary patch fields, same "absent = unchanged" rule as every other field here. `capabilityLevel`
+ * is **a ceiling, not a demand** (plan decision E12): `0` = auto-probe (the default,
+ * `cv-control-panel.ts#capabilityLevel`'s own initial value), `1`-`5` caps what this stream may use;
+ * the host may still serve less than the ceiling if it cannot afford it — see `TrackingCapability`'s
+ * own doc comment for how the *outcome* is read back, on a completely different response.
+ * `reupdateMaxGapMillis` is typed here for wire completeness (the JSON contract this DTO mirrors
+ * includes it) but has no control in this panel yet — `0`/absent keeps the server default, and
+ * nothing in this app ever sends a non-zero value.
  */
 export interface TrackingConfigRequest {
   readonly mode?: TrackingMode;
@@ -339,6 +396,8 @@ export interface TrackingConfigRequest {
   readonly redetectIouPercent?: number;
   readonly maxAgeFrames?: number;
   readonly minHits?: number;
+  readonly capabilityLevel?: number;
+  readonly reupdateMaxGapMillis?: number;
   readonly lock?: TargetLockRequest;
 }
 
@@ -377,6 +436,10 @@ export interface TrackStats {
  * a dead type — see that record's own Java doc comment), ordered by `trackId` ascending server-side.
  * The exact backend DTO class name isn't pinned yet (T6 lands after this wave, docs/plans/done/TRACKING-PLAN.md
  * §7) — this mirrors the *JSON shape* §4.E froze, not a specific Java type name.
+ *
+ * `reupdated` (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2, wave J4) — same field, same meaning
+ * as {@link DetectionTrack}'s own `reupdated`, mirrored here because `TrackResponse` carries it flat
+ * rather than nested (this interface *is* the track resource, not a per-box annotation of one).
  */
 export interface StreamTrack {
   readonly trackId: number;
@@ -388,6 +451,7 @@ export interface StreamTrack {
   readonly velocityX: number;
   readonly velocityY: number;
   readonly ageFrames: number;
+  readonly reupdated: boolean;
   readonly firstSeen: string;
   readonly lastSeen: string;
 }

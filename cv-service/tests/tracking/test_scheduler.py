@@ -49,6 +49,19 @@ def params(mode: str, **overrides) -> TrackingParams:
         roi_enabled=False,
         roi_crop_factor=4.0,
         roi_min_iou=0.2,
+        # TRACKING-V3-PLAN wave V1 -- inert here too, same reason.
+        capability_level=0,
+        # TRACKING-V3-PLAN wave V3 -- inert here too, same reason.
+        reupdate_max_gap_millis=10_000,
+        # TRACKING-V3-PLAN wave V6 -- inert here too, same reason.
+        detection_lag_correction_enabled=True,
+        # 2026-08-14 repair, part 2 -- inert here too, same reason.
+        reupdate_max_velocity_per_second=0.0,
+        # 2026-08-15 density gate -- inert here too, same reason.
+        reupdate_max_track_count=0,
+        # 2026-08-15 bracket-identity check -- inert here too, same reason.
+        reupdate_max_shape_log_ratio=0.0,
+        reupdate_max_motion_center_distance=0.0,
     )
     base.update(overrides)
     return TrackingParams(**base)

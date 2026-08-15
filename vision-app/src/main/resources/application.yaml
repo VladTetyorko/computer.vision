@@ -287,6 +287,15 @@ vision:
   #   stats-window-seconds: 30
   #   How long a track that stops arriving stays in the track book before expiring.
   #   track-retention-seconds: 5
+  #   The capability-ladder ceiling (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2) requested for
+  #   every newly started stream, 0-5. 0 means auto-probe: cv-service picks the highest level its own
+  #   host affords. A level is a CEILING, not a demand -- cv-service serves min(requested, affordable)
+  #   and reports what it actually served; this can only cap a strong host down, never make a weak one
+  #   run a level it cannot afford.
+  #   capability-level: 0
+  #   The longest gap ORU (Observation-Centric Re-Update) may reconstruct for every newly started
+  #   stream, in milliseconds. 0 means cv-service's own server-side default.
+  #   reupdate-max-gap-millis: 0
 
   # --- adapter-discovery: device discovery (see docs/plans/done/DISCOVERY-PLAN.md Task D4) ---
   discovery:

@@ -39,6 +39,8 @@ rewrite the citations in the same commit.
 | [LAYERING-REFACTOR-PLAN.md](plans/active/LAYERING-REFACTOR-PLAN.md) | conventions in force and widely cited; **the class decompositions (matrix K3) are not done** |
 | [DRONE-INFRA-PLAN.md](plans/active/DRONE-INFRA-PLAN.md) | I-a/b/e/g shipped; **edge kits (I-d) and command TX stage 3 remain, stage 3 gated** |
 | [RC-CONTROL-PLAN.md](plans/active/RC-CONTROL-PLAN.md) | Phase 0 + Phase 1 shipped; **Phase 2 (real airframe) gated on explicit user go** |
+| [TRACKING-V2-PLAN.md](plans/active/TRACKING-V2-PLAN.md) | waves C0–C5 all delivered 2026-08-12 (0 id-switches, 100% recovery on ten synthetic scenarios); `CameraPose` is now populated by Java too, so telemetry ego-motion compensation is live |
+| [TRACKING-V3-PLAN.md](plans/active/TRACKING-V3-PLAN.md) | one pipeline at five capability levels (ARMv6 relay → workstation, §5, costs measured); observation-centric identity (ORU/OCM), confidence-adaptive motion, late-detection back-correction, level-gated appearance tier; **waves V0–V8 unbuilt — V0 hardens the harness first, because V2's scoreboard is saturated** |
 
 ## conclusions/ — decisions and investigations
 

@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import subprocess
+import sys
+import textwrap
 
 import pytest
 
@@ -115,28 +118,28 @@ class FakeRegistry:
         self.compensator_calls = 0
         self.appearance_calls = 0
 
-    def associator(self, engine_id, *, max_age_frames):
+    def associator(self, engine_id, *, max_age_frames, level=None):
         self.associator_calls += 1
         if self._associator is None:
             return None
         engine = self._associator() if callable(self._associator) else self._associator
         return engine.engine_id, engine
 
-    def follower(self, engine_id, *, max_age_frames):
+    def follower(self, engine_id, *, max_age_frames, level=None):
         self.follower_calls += 1
         if self._follower is None:
             return None
         engine = self._follower() if callable(self._follower) else self._follower
         return engine.engine_id, engine
 
-    def compensator(self, engine_id):
+    def compensator(self, engine_id, *, level=None):
         self.compensator_calls += 1
         if self._compensator is None:
             return None
         engine = self._compensator() if callable(self._compensator) else self._compensator
         return engine.engine_id, engine
 
-    def appearance(self, engine_id):
+    def appearance(self, engine_id, *, level=None):
         self.appearance_calls += 1
         if self._appearance is None:
             return None
@@ -201,13 +204,13 @@ class PoseOrFlowRegistry:
         self.flow = FakeMotionCompensator(MOTION_ENGINE_FLOW)
         self.requested_ids = []
 
-    def associator(self, engine_id, *, max_age_frames):
+    def associator(self, engine_id, *, max_age_frames, level=None):
         return None
 
-    def follower(self, engine_id, *, max_age_frames):
+    def follower(self, engine_id, *, max_age_frames, level=None):
         return "fake-follow", FakeFollower()
 
-    def compensator(self, engine_id):
+    def compensator(self, engine_id, *, level=None):
         self.requested_ids.append(engine_id)
         if engine_id == MOTION_ENGINE_POSE:
             return self.pose.engine_id, self.pose
@@ -215,7 +218,7 @@ class PoseOrFlowRegistry:
             return self.flow.engine_id, self.flow
         return None
 
-    def appearance(self, engine_id):
+    def appearance(self, engine_id, *, level=None):
         return None
 
 
@@ -907,10 +910,17 @@ def test_a_positive_request_ttl_overrides_the_deployment_default():
 
 
 def follow_session(
-    follower=None, *, verify_every_millis=2000, lock_seq=1, compensator=None, motion_engine_id="", **lock_kwargs
+    follower=None,
+    *,
+    verify_every_millis=2000,
+    lock_seq=1,
+    compensator=None,
+    motion_engine_id="",
+    settings=None,
+    **lock_kwargs,
 ):
     engine = follower or FakeFollower()
-    subject = session(FakeRegistry(follower=engine, compensator=compensator))
+    subject = session(FakeRegistry(follower=engine, compensator=compensator), settings=settings)
     subject.apply_config(
         TrackingRequest(
             mode=MODE_FOLLOW,
@@ -921,6 +931,92 @@ def follow_session(
         )
     )
     return subject, engine
+
+
+# -- _select_target's ORU-informed fallback (TRACKING-V3-PLAN wave V3) ------
+#
+# `nonlinear`'s own re-anchor never clears the PRIMARY (constant-velocity)
+# test within the harness's clip length -- the object reverses heading the
+# instant it is hidden, so the prediction runs the wrong way for the whole
+# gap. These tests isolate the fallback `_select_target` gained to answer
+# that: a SECOND candidate, sourced from the SAME `ObservationRing`/
+# `history_transform` machinery `reupdate.py` reads, offered only when the
+# primary test has already failed.
+
+
+def test_select_target_falls_back_to_the_last_real_observation_when_the_prediction_has_drifted():
+    subject, engine = follow_session()
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    followed = subject._followed
+    # An absurd, confidently-wrong velocity -- the constant-velocity
+    # PRIMARY prediction will land nowhere near a fresh detection sitting
+    # where the track was actually last seen.
+    followed.velocity_x = 5.0
+    followed.velocity_y = 0.0
+
+    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
+
+    assert index == 0
+
+
+def test_select_target_never_uses_the_fallback_when_the_primary_test_already_succeeds():
+    subject, engine = follow_session()
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    # Velocity stays at its real, tiny (near-zero) measured value -- the
+    # primary prediction should already land close to the same spot.
+
+    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.1)
+
+    assert index == 0  # unchanged behaviour; the fallback is never consulted
+
+
+def test_select_target_fallback_respects_the_reupdate_ceiling():
+    subject, engine = follow_session()
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    subject.apply_config(TrackingRequest(mode=MODE_FOLLOW, reupdate_max_gap_millis=100))
+    followed = subject._followed
+    followed.velocity_x = 5.0
+
+    # The gap (200ms) exceeds the 100ms ceiling this stream was just given --
+    # the fallback must not fire even though the primary test still fails.
+    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
+
+    assert index == -1
+
+
+def test_select_target_fallback_is_a_genuine_no_op_when_oru_is_disabled():
+    # invariant P7: the SAME `reupdate_max_gap_millis` knob that switches
+    # `reupdate.py`'s own correction off must switch this fallback off too --
+    # a non-positive ceiling can never satisfy `0.0 < gap_millis <= ceiling`.
+    # Disabling ORU is a DEPLOYMENT choice (`Settings.track_reupdate_max_gap_
+    # millis <= 0`, the same "the deployment default itself may legitimately
+    # be non-positive" shape `memory_ttl_millis` already uses) -- a per-
+    # request `<=0` is merely the wire's own "use the server default"
+    # sentinel, not an off switch, so this test goes through `Settings`,
+    # not `TrackingRequest`.
+    subject, engine = follow_session(
+        settings=dataclasses.replace(Settings(), track_reupdate_max_gap_millis=0)
+    )
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    followed = subject._followed
+    followed.velocity_x = 5.0
+
+    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
+
+    assert index == -1
+
+
+def test_select_target_fallback_is_never_reached_with_nothing_held():
+    subject, engine = follow_session()
+    # Never locked onto anything yet -- `self._followed` is None, so `held_
+    # box` is None and the fallback (which reads `self._followed.history`)
+    # must be guarded off, not merely coincidentally unreachable: an
+    # unguarded read here would raise `AttributeError` on `None.history`,
+    # not return quietly.
+
+    index = subject._select_target([], now=0.0)
+
+    assert index == -1
 
 
 def test_follow_without_a_lock_keeps_re_acquiring():
@@ -1009,7 +1105,36 @@ def test_an_unhappy_tracker_never_collapses_the_duty_cycle_into_every_frame():
     # Regression: raising trigger (b)/(d) again on the verify frame that had
     # ALREADY been brought forward by it made the detector run on every
     # single frame for as long as the tracker stayed unhappy.
-    subject, engine = follow_session(verify_every_millis=2000)
+    #
+    # `verify_every_millis=5000` (TRACKING-V3-PLAN wave V3), not this test's
+    # original 2000: at 2000, `effective_max_age_millis` (`params.py`,
+    # `3 * verify_every_millis` floor) is 6000ms, which this test's own
+    # 150-frame/~9933ms window at 15 fps outlives -- the wall clock declares
+    # the LOCKED target LOST around frame 90, unbinds it, and the very next
+    # frame's NO_LOCK reacquisition genuinely re-anchors onto "bus" (it is
+    # the only detection on offer). That is a SEPARATE scenario from the one
+    # this test names -- a fresh, genuine re-anchor onto a target the
+    # engine's OWN `update()` then unconditionally fails to hold -- and ORU
+    # (wave V3) answers it correctly where the pre-V3 code did not: the
+    # pre-V3 velocity measurement used the held box's STALE, un-warped
+    # position divided by a ONE-FRAME `elapsed` (`track.last_seen` had
+    # advanced every stalled frame while the box itself had not moved),
+    # producing a spurious multi-unit/sec spike that flung the very next
+    # prediction off-frame and coincidentally made the FOLLOWING re-anchor
+    # attempt fail -- which is what let `_tracker_stalled` re-latch and this
+    # assertion pass, by accident rather than by design. ORU derives the
+    # correct near-zero velocity for a target that has not actually moved,
+    # so the re-anchor keeps succeeding instead, and `_tracker_stalled`
+    # (which resets unconditionally on ANY successful re-anchor, a pre-
+    # existing, out-of-scope design point) never gets the chance to latch a
+    # second time -- a real, narrow interaction with a `FakeFollower` that
+    # is permanently and unconditionally broken, not a regression this
+    # wave's own acceptance criteria (`docs/plans/active/TRACKING-V3-PLAN.md`
+    # §6) name. 5000ms keeps `effective_max_age_millis` (15000ms) well
+    # outside this test's own window, so the ORIGINAL regression -- the
+    # SAME trigger firing twice for one already-brought-forward pass --
+    # stays exactly what this test measures.
+    subject, engine = follow_session(verify_every_millis=5000)
     run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
     engine.update_returns = "invalid"
 
@@ -1828,3 +1953,418 @@ def test_the_session_holds_no_reference_to_an_inference_gate():
     subject = session(FakeRegistry(associator=FakeAssociator()))
 
     assert not any("gate" in name for name in vars(subject))
+
+
+# -- late-detection back-correction (TRACKING-V3-PLAN wave V6, §4.5) --------
+#
+# `process()`'s own `detection_lag_millis` is what a REAL caller (pull
+# mode's `capture_skew_millis`, `grpc/servicers.py`) uses to tell the
+# session "this frame's detection already describes a moment
+# `detection_lag_millis` in the past" -- these tests supply it directly,
+# the same way `tools/trackeval`'s harness never can: its own `replay.py`
+# calls `process()` with no such signal (a synthetic detector answers
+# instantly, and the injected `latency` scenario lag lives entirely inside
+# WHICH ground truth `detect()` is handed, never on the wire this parameter
+# reads), which is why this wave's headline scenario cannot move there.
+
+
+def test_late_detection_lag_correction_projects_a_stale_cost_match_forward():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    # Two REAL, on-time observations establish a measurable 0.1-unit/s rate
+    # in the ring (`ObservationRing`) -- t=0.0 -> x=0.0, t=1.0 -> x=0.1.
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0)])
+
+    # Frame 3 lands "now" at t=2.0s, but reports a detection whose OWN
+    # capture instant was t=1.5s (500ms late) -- x=0.15, the true position
+    # AT t=1.5s given the established rate.
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.15, y=0.0)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    box = outcome.boxes[0].box
+    # Reconstructed velocity from the REAL t=1.0->1.5 bracket is (0.15-
+    # 0.10... warped centers)/(0.5s) = 0.1/s -- the SAME rate, re-derived
+    # from evidence, not read off `track.velocity_x`. Projected forward the
+    # SAME 500ms from the raw box lands at x=0.20 -- exactly where a
+    # constant-0.1/s object actually is at t=2.0s, not the raw 0.15 the
+    # detector reported.
+    assert box.x == pytest.approx(0.20)
+    assert box.y == pytest.approx(0.0)
+    assert outcome.detection_lag_millis == 500
+
+
+def test_uncorrected_raw_box_is_what_late_correction_replaces():
+    # The control for the test above: identical setup, no `detection_lag_
+    # millis` -- the raw, stale 0.15 is booked verbatim, same as before this
+    # wave existed.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0)])
+    outcome = run(subject, now_millis=2000.0, detections=[det("car", x=0.15, y=0.0)])
+
+    assert outcome.boxes[0].box.x == pytest.approx(0.15)
+    assert outcome.detection_lag_millis == 0
+
+
+def test_persistent_constant_lag_reconstructs_a_bounded_convergent_velocity():
+    """2026-08-14 regression -- "a test that would have caught this
+    originally" (a constant-velocity target under a constant, PERSISTENT
+    measured lag, fed every frame for many frames), at the level the
+    defect actually lived at (`session.py` -> `track.py` -> `history.py`/
+    `reupdate.py`), independent of `tools/trackeval`'s own scenario
+    machinery. `tests/trackeval/test_replay.py::test_per_frame_lag_
+    correction_converges_instead_of_diverging_past_the_dead_zone` is this
+    same guard's harness-level counterpart, checking the WIRE box instead
+    of `track.velocity_x` directly.
+
+    Before the fix, `ObservationRing.record()` (`history.py`) timestamped
+    every entry with the frame it was PROCESSED at rather than the instant
+    its content was actually true -- harmless for a ONE-SHOT correction
+    (`nonlinear`/`pan_occlusion`'s post-occlusion ORU), but `late_
+    correction` runs every matched-detection frame under a persistent lag
+    (§4.5's own steady-state case), so a mistimed bracket's wrong output
+    got written straight back into the ring and poisoned the next one --
+    traced directly (this task's own reproduction) to `track.velocity_x`
+    reaching `1e14`-`1e16` within a handful of frames.
+    """
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    lag_millis = 300.0
+    step_millis = 100.0
+    velocity = 0.10  # frame-widths per second, matching this test's own bound below
+    origin_x = 0.10
+    frame_count = 24  # long enough to run well past the dead zone and stay there
+
+    velocities: "list[float]" = []
+    for frame_index in range(frame_count):
+        now_millis = frame_index * step_millis
+        true_x_at_capture = origin_x + velocity * ((now_millis - lag_millis) / 1000.0)
+        x = max(0.0, min(0.9, true_x_at_capture))
+        outcome = subject.process(
+            now_millis=now_millis,
+            detect=detect_returning(det("car", x=x, y=0.4)),
+            frame=lambda: FRAME,
+            detection_lag_millis=int(lag_millis),
+        )
+        track = outcome.boxes[0].track if outcome.boxes else None
+        if track is not None:
+            velocities.append(track.velocity_x)
+
+    assert len(velocities) == frame_count
+
+    # `sane_factor`: generous enough to never false-fail on ordinary
+    # reconstruction noise (a floor-rejected bracket falling back to one
+    # RAW reading for a single frame, observed directly against this exact
+    # scenario to peak under 2x the true rate) while remaining separated
+    # from the historical failure -- `1e14`-`1e16`, i.e. roughly
+    # 10**15 / 0.10 ~= 10**16 times the true rate -- by fourteen orders of
+    # magnitude, so there is no plausible reconstruction noise this bound
+    # could be confused with a regression of the original defect.
+    sane_factor = 5.0
+    bound = sane_factor * velocity
+    for measured in velocities:
+        assert -bound <= measured <= bound, (
+            f"track.velocity_x={measured!r} left a sane neighbourhood of the true rate "
+            f"({velocity!r}/s, bound +/-{bound!r}) -- this is what the pre-fix divergence looked "
+            "like on its way to 1e14+, not merely reconstruction noise"
+        )
+
+    # Convergence, not only boundedness: well past the dead zone, the
+    # reconstruction should track the true rate closely, not merely stay
+    # inside the generous `sane_factor` band above.
+    settled = velocities[-5:]
+    assert sum(settled) / len(settled) == pytest.approx(velocity, abs=0.03)
+
+
+def test_late_detection_lag_correction_applies_to_follows_reanchor():
+    subject, engine = follow_session(verify_every_millis=100)
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    run(subject, now_millis=100.0, detections=[det("car", x=0.11, y=0.1)])
+
+    # Cadence elapsed again at t=200ms; the detection reports x=0.115, the
+    # true position at its own t=150ms capture instant (0.1/s rate).
+    outcome = subject.process(
+        now_millis=200.0,
+        detect=detect_returning(det("car", x=0.115, y=0.1)),
+        frame=lambda: FRAME,
+        detection_lag_millis=50,
+    )
+
+    box = outcome.boxes[0].box
+    assert box.x == pytest.approx(0.12)  # projected another 50ms at 0.1/s
+    assert box.y == pytest.approx(0.1)
+
+
+def test_detection_lag_correction_is_never_attempted_on_a_fresh_acquisition():
+    # No prior track exists yet -- nothing for `late_correction` to bracket
+    # against, so the very first lock is booked at its raw, reported box
+    # regardless of the (honestly meaningless, at birth) lag supplied.
+    subject, engine = follow_session()
+
+    outcome = subject.process(
+        now_millis=0.0,
+        detect=detect_returning(det("car", x=0.15, y=0.15)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    assert outcome.boxes[0].box.x == pytest.approx(0.15)
+
+
+def test_a_negative_measured_lag_is_clamped_to_zero_never_fabricated():
+    subject = session(FakeRegistry(associator=cost_engine))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    outcome = subject.process(
+        now_millis=0.0,
+        detect=detect_returning(det("car", x=0.1, y=0.1)),
+        frame=lambda: FRAME,
+        detection_lag_millis=-50,
+    )
+
+    assert outcome.detection_lag_millis == 0
+
+
+# -- invariant P7: the dedicated knob is a genuine off switch ----------------
+
+
+def test_detection_lag_correction_disabled_by_its_own_knob_is_a_genuine_no_op():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(
+        registry, settings=dataclasses.replace(Settings(), track_detection_lag_correction_enabled=False)
+    )
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0)])
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.15, y=0.0)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    # The box is untouched -- the correction never ran -- but the MEASURED
+    # lag is still reported: the knob gates the CORRECTION, not the honest
+    # reporting of what was measured (§4.5's "visible instead of assumed").
+    assert outcome.boxes[0].box.x == pytest.approx(0.15)
+    assert outcome.detection_lag_millis == 500
+
+
+def test_detection_lag_correction_respects_the_shared_reupdate_ceiling():
+    # The SAME `reupdate_max_gap_millis` ceiling ORU's own post-occlusion
+    # path uses (invariant P7: one off switch, not a second knob) -- a gap
+    # too old to trust for one purpose is too old for the other.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(
+        registry, settings=dataclasses.replace(Settings(), track_reupdate_max_gap_millis=100)
+    )
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0)])
+    # captured_at = 2.0 - 0.5 = 1.5s; the bracket is at t=1.0s, a 500ms gap
+    # -- over the 100ms ceiling this stream was just given.
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.15, y=0.0)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    assert outcome.boxes[0].box.x == pytest.approx(0.15)  # uncorrected -- no honest bracket
+
+
+def test_detection_lag_correction_respects_the_density_gate():
+    # Same shape as the gap-ceiling test directly above, now for the
+    # 2026-08-15 density gate (`docs/conclusions/TRACKING-BENCHMARK-
+    # RESULTS.md` §4b): `_late_corrected_box` calls `reupdate_module.
+    # late_correction`, so this is the session-level proof that the density
+    # gate genuinely covers that call site too, not merely `track.py`'s
+    # post-occlusion one -- checked directly rather than assumed from the
+    # shared call.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(
+        registry, settings=dataclasses.replace(Settings(), track_reupdate_max_track_count=1)
+    )
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    # A second, non-overlapping detection every frame keeps a SECOND live
+    # track in the book throughout -- `self._book.tracks` holds 2 live
+    # tracks by the time the tracked car re-anchors, over the 1-track
+    # ceiling given here.
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0), det("car", x=0.6, y=0.6)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0), det("car", x=0.6, y=0.6)])
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.15, y=0.0), det("car", x=0.6, y=0.6)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    # `boxes_out` is ordered by the ORIGINAL detection index (`session.py`'s
+    # own `_run_cost_associate`), regardless of match order -- index 0 is
+    # the first `det(...)` given to `detect_returning` above.
+    assert outcome.boxes[0].box.x == pytest.approx(0.15)  # uncorrected -- book too crowded to trust
+
+
+def test_detection_lag_correction_density_gate_is_disabled_by_default():
+    # invariant P7: the SAME crowded scene the test above refuses must still
+    # be corrected when the density ceiling is left at its disabled default
+    # (`0`, `Settings()`'s own default) -- reproducing today's behaviour
+    # exactly.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0), det("car", x=0.6, y=0.6)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0), det("car", x=0.6, y=0.6)])
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.15, y=0.0), det("car", x=0.6, y=0.6)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    # (0.15 - 0.1) / 0.5 = 0.1/s from the t=1.0s bracket, projected forward
+    # the same 500ms lag: 0.15 + 0.1*0.5 = 0.2 -- same formula `test_late_
+    # detection_lag_correction_applies_to_follows_reanchor` above proves.
+    assert outcome.boxes[0].box.x == pytest.approx(0.2)  # corrected -- projected forward at 0.1/s
+
+
+def test_detection_lag_correction_respects_the_shape_check():
+    # Session-level proof of the 2026-08-15 bracket-identity check, Check A
+    # (`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1):
+    # `_late_corrected_box` calls `reupdate_module.late_correction`, so this
+    # is the session-level confirmation that Check A genuinely covers that
+    # call site too, not merely `track.py`'s post-occlusion one -- checked
+    # directly rather than assumed from the shared call.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(
+        registry, settings=dataclasses.replace(Settings(), track_reupdate_max_shape_log_ratio=0.5)
+    )
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0, w=0.1, h=0.1)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0, w=0.1, h=0.1)])
+    # The just-arrived box is 5x the bracket's own size (0.1 -> 0.5) -- over
+    # the 0.5 log-ratio bound given here.
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.15, y=0.0, w=0.5, h=0.5)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    assert outcome.boxes[0].box.x == pytest.approx(0.15)  # uncorrected -- shape changed too abruptly
+
+
+def test_detection_lag_correction_respects_the_motion_check():
+    # Session-level proof of Check B, the SAME shape the shape-check test
+    # directly above proves for Check A.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(
+        registry, settings=dataclasses.replace(Settings(), track_reupdate_max_motion_center_distance=1.0)
+    )
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det("car", x=0.0, y=0.0)])
+    run(subject, now_millis=1000.0, detections=[det("car", x=0.1, y=0.0)])  # measured velocity_x -> 0.1/s
+    # captured_at = 1.5s; the t=1.0s bracket forecasts the centre to ~0.20
+    # over the 0.5s lag at 0.1/s -- the just-arrived box at x=0.9 lands far
+    # from that forecast, over the 1.0-diagonal bound given here.
+    outcome = subject.process(
+        now_millis=2000.0,
+        detect=detect_returning(det("car", x=0.9, y=0.0)),
+        frame=lambda: FRAME,
+        detection_lag_millis=500,
+    )
+
+    assert outcome.boxes[0].box.x == pytest.approx(0.9)  # uncorrected -- forecast landed nowhere close
+
+
+# -- P3/P8: pure stdlib, available at capability level L1 --------------------
+#
+# TRACKING-V3-PLAN invariant P8, and this wave's own acceptance: "This wave
+# in particular must run on the ARMv6 companion -- it is the wave that
+# exists FOR that deployment." Same "clean subprocess" method `test_levels.
+# py`'s own P8 section uses and explains -- an in-process check would pass
+# trivially since `tests/conftest.py` already imports `numpy` for its own
+# fixtures by the time any test function here runs.
+
+_L1_DETECTION_LAG_CORRECTION_SCRIPT = textwrap.dedent(
+    """
+    import sys
+
+    from cv_service.config import Settings
+    from cv_service.tracking import levels
+    from cv_service.tracking.params import MODE_ASSOCIATE, TrackingRequest
+    from cv_service.tracking.registry import build_default_registry
+    from cv_service.tracking.session import StreamTrackingSession
+
+
+    class Det:
+        def __init__(self, label, confidence, x, y, width, height):
+            self.label, self.confidence = label, confidence
+            self.x, self.y, self.width, self.height = x, y, width, height
+
+
+    def frame():
+        raise AssertionError("L1 must never decode a frame")
+
+
+    settings = Settings(track_roi_enabled=False)
+    registry = build_default_registry(settings, probe=False)
+    session = StreamTrackingSession(settings=settings, registry_provider=lambda: registry)
+    session.apply_config(
+        TrackingRequest(mode=MODE_ASSOCIATE, capability_level=levels.LEVEL_L1, min_hits=1)
+    )
+
+    # Two on-time frames build a real bracket, then a third arrives 500ms
+    # late -- the exact per-detection back-correction path (§4.5), run
+    # entirely at L1.
+    steps = [(0.0, 0.0, 0), (1000.0, 0.1, 0), (2000.0, 0.15, 500)]
+    outcome = None
+    for now_millis, x, lag in steps:
+        def detect(roi=None, x=x):
+            return [Det("car", 0.9, x, 0.1, 0.1, 0.1)], 0
+        outcome = session.process(
+            now_millis=now_millis, detect=detect, frame=frame, detection_lag_millis=lag,
+        )
+        assert outcome.boxes is not None
+
+    assert outcome.capability_level_served == levels.LEVEL_L1, outcome.capability_level_served
+    assert outcome.detection_lag_millis == 500, outcome.detection_lag_millis
+    # The correction genuinely ran: the reported box is projected PAST the
+    # raw 0.15 the detector sent, not equal to it.
+    assert outcome.boxes[0].box.x > 0.15, outcome.boxes[0].box.x
+
+    leaked = sorted({"cv2", "numpy", "ultralytics", "torch", "lap"} & set(sys.modules))
+    assert not leaked, "L1 imported: %r" % (leaked,)
+    print("P8_OK")
+    """
+)
+
+
+def test_late_detection_lag_correction_imports_no_cv_stack_at_l1():
+    result = subprocess.run(
+        [sys.executable, "-c", _L1_DETECTION_LAG_CORRECTION_SCRIPT],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert "P8_OK" in result.stdout

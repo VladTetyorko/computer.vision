@@ -15,15 +15,16 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * and it has two disjoint jobs:
  *
  * <ul>
- *   <li>{@link #defaultMode()}/{@link #followFps()}/{@link #verifyEveryMillis()} <b>seed new streams
- *       only</b>. {@code TrackingWiring#streamStartTrackingSeed} turns them into the {@code
- *       TrackingConfigPatch} that rides {@code StreamPipelineSettings} into {@code
- *       DefaultStreamService}, which folds it at every stream start — device, asset, simulation and
- *       demo fleet alike, so the default cannot depend on which button was pressed. <b>They never
- *       reach into a running stream</b> — a running stream's tracking configuration is its own
- *       state, changed only by {@code PATCH /api/streams/{id}/config}; restarting the stream is how
- *       a changed deployment default is picked up, and that is the honest behavior rather than a
- *       config edit silently re-steering a flight in progress.</li>
+ *   <li>{@link #defaultMode()}/{@link #followFps()}/{@link #verifyEveryMillis()}/{@link
+ *       #capabilityLevel()}/{@link #reupdateMaxGapMillis()} <b>seed new streams only</b>. {@code
+ *       TrackingWiring#streamStartTrackingSeed} turns them into the {@code TrackingConfigPatch} that
+ *       rides {@code StreamPipelineSettings} into {@code DefaultStreamService}, which folds it at
+ *       every stream start — device, asset, simulation and demo fleet alike, so the default cannot
+ *       depend on which button was pressed. <b>They never reach into a running stream</b> — a
+ *       running stream's tracking configuration is its own state, changed only by {@code PATCH
+ *       /api/streams/{id}/config}; restarting the stream is how a changed deployment default is
+ *       picked up, and that is the honest behavior rather than a config edit silently re-steering a
+ *       flight in progress.</li>
  *   <li>{@link #statsWindowSeconds()}/{@link #trackRetentionSeconds()} configure the per-stream
  *       <b>read models</b> ({@code TrackingStatsWindow}/{@code TrackBook}, vision-application) via
  *       {@code StreamPipelineSettings}, so they apply to every stream this instance starts from then
@@ -68,6 +69,17 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *                              exposed because {@code StreamPipelineSettings}' canonical constructor
  *                              needs both durations stated, and a knob with a documented default
  *                              beats a magic literal duplicated in wiring
+ * @param capabilityLevel      the capability-ladder ceiling (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
+ *                              &sect;2) requested for every newly started stream; within [0,5];
+ *                              default {@value #DEFAULT_CAPABILITY_LEVEL} = auto-probe. <b>A
+ *                              ceiling, not a demand</b> (invariant B5) — cv-service serves {@code
+ *                              min(requested, affordable)} and reports what it actually served on
+ *                              {@code TrackingTelemetry#capability()}; this property can never make a
+ *                              weak host run a level it cannot afford, only cap a strong one down
+ * @param reupdateMaxGapMillis the longest gap ORU (Observation-Centric Re-Update) may reconstruct
+ *                              for every newly started stream, in milliseconds; must not be
+ *                              negative; default {@value #DEFAULT_REUPDATE_MAX_GAP_MILLIS} =
+ *                              cv-service's own server-side default
  */
 @ConfigurationProperties(prefix = "vision.tracking")
 public record VisionTrackingProperties(@DefaultValue(VisionTrackingProperties.DEFAULT_MODE) String defaultMode,
@@ -77,13 +89,19 @@ public record VisionTrackingProperties(@DefaultValue(VisionTrackingProperties.DE
                                         @DefaultValue(VisionTrackingProperties.DEFAULT_STATS_WINDOW_SECONDS)
                                         int statsWindowSeconds,
                                         @DefaultValue(VisionTrackingProperties.DEFAULT_TRACK_RETENTION_SECONDS)
-                                        int trackRetentionSeconds) {
+                                        int trackRetentionSeconds,
+                                        @DefaultValue(VisionTrackingProperties.DEFAULT_CAPABILITY_LEVEL)
+                                        int capabilityLevel,
+                                        @DefaultValue(VisionTrackingProperties.DEFAULT_REUPDATE_MAX_GAP_MILLIS)
+                                        int reupdateMaxGapMillis) {
 
     static final String DEFAULT_MODE = "ASSOCIATE";
     static final String DEFAULT_FOLLOW_FPS = "15";
     static final String DEFAULT_VERIFY_EVERY_MILLIS = "2000";
     static final String DEFAULT_STATS_WINDOW_SECONDS = "30";
     static final String DEFAULT_TRACK_RETENTION_SECONDS = "5";
+    static final String DEFAULT_CAPABILITY_LEVEL = "0";
+    static final String DEFAULT_REUPDATE_MAX_GAP_MILLIS = "0";
 
     @ConstructorBinding
     public VisionTrackingProperties {
@@ -104,6 +122,14 @@ public record VisionTrackingProperties(@DefaultValue(VisionTrackingProperties.DE
         if (trackRetentionSeconds <= 0) {
             throw new IllegalArgumentException(
                     "vision.tracking.track-retention-seconds must be positive, was " + trackRetentionSeconds);
+        }
+        if (capabilityLevel < 0 || capabilityLevel > 5) {
+            throw new IllegalArgumentException(
+                    "vision.tracking.capability-level must be within [0,5], was " + capabilityLevel);
+        }
+        if (reupdateMaxGapMillis < 0) {
+            throw new IllegalArgumentException(
+                    "vision.tracking.reupdate-max-gap-millis must not be negative, was " + reupdateMaxGapMillis);
         }
     }
 }

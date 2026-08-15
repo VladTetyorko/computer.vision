@@ -614,12 +614,13 @@ class GrpcDetectionPortTest {
         // docs/plans/done/TRACKING-PLAN.md §4.A/§4.B, T4: PipelineConfig.tracking() -> FrameRequest.tracking,
         // including the TargetLock and the redetectIouPercent (int, [0,100]) -> redetect_iou_threshold
         // (float ratio) unit conversion. Asserted against what the server actually received, not
-        // just that encode() ran without throwing.
+        // just that encode() ran without throwing. Extended by docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
+        // §2, wave J2: capabilityLevel/reupdateMaxGapMillis, the two settable V3 request fields.
         CapturingServicer servicer = new CapturingServicer();
         GrpcDetectionPort port = newPort(servicer);
         StreamId streamId = StreamId.random();
         TargetLock lock = new TargetLock(3, 7L, null, null, false);
-        TrackingConfig tracking = new TrackingConfig(TrackingMode.FOLLOW, "lk", 1500, 20, 45, 25, 4, lock);
+        TrackingConfig tracking = new TrackingConfig(TrackingMode.FOLLOW, "lk", 1500, 20, 45, 25, 4, 3, 800, lock);
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true,
                 java.util.Set.of(), EventRuleConfig.defaults(), true, true, tracking);
 
@@ -634,6 +635,8 @@ class GrpcDetectionPortTest {
         assertEquals(0.45f, wireTracking.getRedetectIouThreshold(), 1e-6f);
         assertEquals(25, wireTracking.getMaxAgeFrames());
         assertEquals(4, wireTracking.getMinHits());
+        assertEquals(3, wireTracking.getCapabilityLevel());
+        assertEquals(800, wireTracking.getReupdateMaxGapMillis());
         assertTrue(wireTracking.hasLock());
         com.drones.vision.proto.v1.TargetLock wireLock = wireTracking.getLock();
         assertEquals(3L, wireLock.getLockSeq());
@@ -641,6 +644,23 @@ class GrpcDetectionPortTest {
         assertFalse(wireLock.getRelease());
         // followFps is Java-side sampler rate only, never a cv-service knob (TRACKING-ORCHESTRATION
         // §4.3) -- there is no wire field for it at all, so nothing to assert here.
+    }
+
+    @Test
+    void capabilityLevelAndReupdateMaxGapDefaultToZeroWhenUnconfigured() throws Exception {
+        // B2: capabilityLevel=0/reupdateMaxGapMillis=0 (TrackingConfig.defaults()'s own defaults) send
+        // the proto zero-value, byte-identical to not setting either field -- a deployment that
+        // configures neither behaves exactly as it did before this wave.
+        CapturingServicer servicer = new CapturingServicer();
+        GrpcDetectionPort port = newPort(servicer);
+        StreamId streamId = StreamId.random();
+
+        port.detect(frame(streamId, 0, PixelFormat.BGR24), PipelineConfig.defaults())
+                .toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        com.drones.vision.proto.v1.TrackingConfig wireTracking = servicer.received.get(0L).getTracking();
+        assertEquals(0, wireTracking.getCapabilityLevel());
+        assertEquals(0, wireTracking.getReupdateMaxGapMillis());
     }
 
     @Test

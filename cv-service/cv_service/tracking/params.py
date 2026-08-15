@@ -121,6 +121,27 @@ class TrackingRequest:
     # DEPLOYMENT decision (`CV_TRACK_MEMORY_TTL_MILLIS<=0`, a legitimate
     # resolved value, not a sentinel -- see `resolve()` below).
     memory_ttl_millis: int = 0
+    # TRACKING-V3-PLAN wave V1 -- proto field 11. `<=0 = server default`
+    # (`CV_TRACK_CAPABILITY_LEVEL`), the SAME sentinel shape as `verify_
+    # every_millis`/`max_age_frames` above. Unlike those, the resolved
+    # value this module hands to `TrackingParams` may ITSELF still be `0`
+    # (the deployment default's own natural meaning, "auto-probe") --
+    # `resolve()` below never turns this into a concrete level number, the
+    # same "not fully resolved here" division of labour `motion_engine_id`'s
+    # own docstring draws: deciding what a resolved value actually SERVES
+    # needs live host state (`cv_service.tracking.levels.probe()`) this
+    # module does not have, so that is `session.py`'s job.
+    capability_level: int = 0
+    # TRACKING-V3-PLAN wave V3 -- proto field 14. `<=0 = server default`
+    # (`CV_TRACK_REUPDATE_MAX_GAP_MILLIS`), the SAME sentinel shape as
+    # `verify_every_millis`/`max_age_frames` above. Unlike those, but
+    # exactly like `memory_ttl_millis` above, the DEPLOYMENT default itself
+    # may legitimately be `<=0` -- see that field's own comment and
+    # `config.py`'s `DEFAULT_TRACK_REUPDATE_MAX_GAP_MILLIS`: a gap ORU can
+    # never reconstruct (a non-positive ceiling, against every real gap
+    # being positive) is how ORU is switched off fleet-wide, which invariant
+    # P7 (reversibility) needs a way to do.
+    reupdate_max_gap_millis: int = 0
 
 
 @dataclass(frozen=True)
@@ -197,6 +218,118 @@ class TrackingParams:
     roi_enabled: bool
     roi_crop_factor: float
     roi_min_iou: float
+    # TRACKING-V3-PLAN wave V1 addition (§5). The REQUESTED ceiling, `<=0`
+    # sentinel already resolved against the deployment default -- but,
+    # deliberately unlike every int field above, `0` remains a legitimate
+    # RESOLVED value here (auto-probe), not merely "unset". `session.py`'s
+    # `_resolve_capability_level` is the only place this becomes an actual
+    # served level (`cv_service.tracking.levels.resolve`), exactly the
+    # "resolve the sentinel here, decide what serves it there" split
+    # `motion_engine_id`/`appearance_engine_id` already establish.
+    capability_level: int
+    # TRACKING-V3-PLAN wave V3 addition. Fully resolved (unlike `capability_
+    # level` above, `0` is never a legitimate value here once resolved) --
+    # `track.py`'s `_observe` reads this straight, no further translation.
+    # `<=0` (a resolved value, not merely a sentinel this field could still
+    # carry) means ORU never fires for this stream: `reupdate.py`'s own
+    # `gap_millis > max_gap_millis` check rejects every gap once the ceiling
+    # is non-positive, since a gap is by definition positive.
+    reupdate_max_gap_millis: int
+    # TRACKING-V3-PLAN wave V6 addition (§4.5). Deployment-only, no wire
+    # field -- same "no per-request override to fall back FROM" shape as
+    # `follow_top_k`/`roi_enabled` above. Whether `session.py` applies
+    # late-detection back-correction AT ALL when a caller measures a
+    # positive `detection_lag_millis` for this frame (today, only
+    # `DetectPulled`'s own capture-skew estimate). `reupdate_max_gap_millis`
+    # above already bounds HOW FAR any one correction may reconstruct
+    # (reused, not duplicated -- both share the same "too old to trust"
+    # ceiling); this is the INDEPENDENT switch invariant P7 needs for the
+    # correction MECHANISM itself, so a fleet can run post-occlusion ORU
+    # without also opting into per-detection back-correction, or the
+    # reverse, rather than one knob answering two different questions.
+    detection_lag_correction_enabled: bool
+    # 2026-08-14 repair, part 2 (`docs/conclusions/TRACKING-BENCHMARK-
+    # RESULTS.md` §4/§8). Deployment-only, no wire field -- same "no per-
+    # request override to fall back FROM" shape as `follow_top_k`/
+    # `roi_enabled` above. `reupdate.py`'s own guard reads this straight: a
+    # reconstruction whose implied `|velocity_x|`/`|velocity_y|` exceeds it
+    # (normalized frame-widths/heights per second, `Detection.velocity_x`/
+    # `_y`'s own units) is refused outright (`None`, never clamped) rather
+    # than trusted -- ORU made MOT17 identity switches WORSE in 15 of 21
+    # scene/detector pairs precisely because it had no such test. `<=0`
+    # disables the guard entirely, reproducing pre-repair behaviour exactly
+    # (invariant P7) -- same shape as `reupdate_max_gap_millis` above.
+    reupdate_max_velocity_per_second: float
+    # 2026-08-15 density gate (`docs/conclusions/TRACKING-BENCHMARK-
+    # RESULTS.md` §4b/§8). Deployment-only, no wire field -- same "no per-
+    # request override to fall back FROM" shape `detection_lag_correction_
+    # enabled`/`reupdate_max_velocity_per_second` above already use. §4b's
+    # own density split (0 of 7 crowded scenes improved, +320 net IDSW,
+    # against 5 of 14 sparse scenes improved, +57 net) is what motivates a
+    # SECOND, independent refusal on top of the velocity guard: a bracket
+    # can imply a plausible velocity and still be built from two different
+    # objects, and that gets more likely, not less, as the scene fills up.
+    # `reupdate.py`'s own guard reads this straight: when the number of
+    # LIVE TRACKS in the book at the moment of re-anchor exceeds it, the
+    # reconstruction is refused outright (`None`, never clamped) -- the
+    # SAME contract `reupdate_max_velocity_per_second` already established.
+    # Track count, not detections/frame (what §4b actually measured) --
+    # `reupdate.py`'s own module docstring records why that signal is not
+    # reachable at either real call site without threading a new argument
+    # through several `session.py` layers, and states plainly that a track
+    # count is a PROXY, not the measured quantity. `<=0` disables the gate
+    # entirely, reproducing today's exact behaviour (invariant P7) -- same
+    # shape as `reupdate_max_velocity_per_second` above. Defaulted to `0`
+    # (DISABLED) in `config.py`'s `DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT`:
+    # unlike the velocity bound, no sweep against real footage has picked a
+    # value for this one yet -- see that constant's own comment.
+    reupdate_max_track_count: int
+    # 2026-08-15 bracket-identity check (`docs/conclusions/TRACKING-
+    # RECOVERY-RESEARCH.md` §2.1). Deployment-only, no wire field -- same
+    # "no per-request override to fall back FROM" shape `reupdate_max_
+    # velocity_per_second`/`reupdate_max_track_count` above already use.
+    # Both guards above test the bracket's TIMING and the SCENE's crowding;
+    # neither ever tests the bracket's own two observations against each
+    # other. `docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b/§4c
+    # measured that this leaves ORU net negative even with both guards
+    # active (+377 IDSW vs ORU off; no density-gate threshold swept across
+    # 6/8/10/12/15/20/30 tracks made ORU pay) -- these two fields back a
+    # THIRD and FOURTH gate, each looking at the bracket's own two boxes
+    # directly instead of a proxy signal around them.
+    #
+    # Check A -- shape consistency: `reupdate.py`'s own guard refuses a
+    # reconstruction when the bracket's two box dimensions differ by more
+    # than this many natural-log units on either axis (`|ln(w2/w1)|` or
+    # `|ln(h2/h1)|`) -- a log-ratio, not a raw ratio, so growth and
+    # shrinkage are symmetric and one bound serves both directions and
+    # every object size (scale-invariant by construction). `<=0` disables
+    # the check entirely, the SAME off-switch shape every ceiling above
+    # uses (invariant P7).
+    reupdate_max_shape_log_ratio: float
+    # Check B -- motion plausibility: `reupdate.py`'s own guard forward-
+    # predicts the bracket's earlier observation to the later one's own
+    # timestamp using the TRACK's own PRE-GAP velocity (the constant-
+    # velocity arithmetic `predict.py` implements, applied from the
+    # bracket rather than the track's current, possibly-drifted box), and
+    # refuses when that forecast lands more than this many BOX-DIAGONALS
+    # from the real later observation's centre -- a size-scaled centre
+    # distance, deliberately not IoU (`reupdate.py`'s own module docstring
+    # has the full reasoning: IoU degrades to a hard `0.0` the instant two
+    # boxes fail to overlap, the ORDINARY case after a multi-second gap on
+    # a fast or small target). `<=0` disables the check entirely, the SAME
+    # off-switch shape every ceiling above uses (invariant P7).
+    #
+    # Both fields default to `0.0` (DISABLED) in `config.py`'s `DEFAULT_
+    # TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO`/`DEFAULT_TRACK_REUPDATE_MAX_
+    # MOTION_CENTER_DISTANCE`, and BOTH ARE PROVISIONAL: unlike the
+    # velocity bound (derived from this platform's own documented
+    # worst-case motion), nobody has yet swept either bound against the
+    # real MOT17 matrix -- see each constant's own comment in `config.py`
+    # for why picking a number here from intuition would repeat the exact
+    # mistake the density gate's own default already avoids. Each is
+    # independently disable-able, so a fleet (or the sweep itself) can run
+    # A alone, B alone, both, or neither, and compare.
+    reupdate_max_motion_center_distance: float
 
     @property
     def active(self) -> bool:
@@ -365,4 +498,39 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
         roi_enabled=settings.track_roi_enabled,
         roi_crop_factor=settings.track_roi_crop_factor,
         roi_min_iou=settings.track_roi_min_iou,
+        # TRACKING-V3-PLAN wave V1 -- `<=0` (including the deployment
+        # default itself defaulting to `0`) falls back to `Settings`,
+        # exactly the `verify_every_millis` shape; `0` surviving into
+        # `TrackingParams` is intentional (see that field's own docstring).
+        capability_level=(
+            request.capability_level
+            if request.capability_level > 0
+            else settings.track_capability_level
+        ),
+        # TRACKING-V3-PLAN wave V3 -- `<=0` falls back to `Settings`, exactly
+        # the `memory_ttl_millis` shape: the DEPLOYMENT value itself may be
+        # `<=0` too (see `TrackingParams.reupdate_max_gap_millis`'s own
+        # docstring), and that is a legitimate "ORU off fleet-wide" choice
+        # this call passes through unchanged, never replaced by a second
+        # fallback.
+        reupdate_max_gap_millis=(
+            request.reupdate_max_gap_millis
+            if request.reupdate_max_gap_millis > 0
+            else settings.track_reupdate_max_gap_millis
+        ),
+        # TRACKING-V3-PLAN wave V6 -- straight from `Settings`, no wire
+        # field (same shape as `follow_top_k`/`roi_enabled` above).
+        detection_lag_correction_enabled=settings.track_detection_lag_correction_enabled,
+        # 2026-08-14 repair, part 2 -- straight from `Settings`, no wire
+        # field (same shape as `detection_lag_correction_enabled` above).
+        reupdate_max_velocity_per_second=settings.track_reupdate_max_velocity_per_second,
+        # 2026-08-15 density gate -- straight from `Settings`, no wire field
+        # (same shape as `reupdate_max_velocity_per_second` directly above).
+        reupdate_max_track_count=settings.track_reupdate_max_track_count,
+        # 2026-08-15 bracket-identity check -- straight from `Settings`, no
+        # wire field (same shape as `reupdate_max_track_count` directly
+        # above). Each resolves independently -- neither falls back to or
+        # depends on the other's value.
+        reupdate_max_shape_log_ratio=settings.track_reupdate_max_shape_log_ratio,
+        reupdate_max_motion_center_distance=settings.track_reupdate_max_motion_center_distance,
     )

@@ -299,7 +299,7 @@ describe('formatDetectionLabel', () => {
 
   it('prefixes the track id once a detection carries one', () => {
     const tracked = fullDetection({
-      track: { id: 7, state: 'CONFIRMED', source: 'TRACKER', velocityX: 0, velocityY: 0 },
+      track: { id: 7, state: 'CONFIRMED', source: 'TRACKER', velocityX: 0, velocityY: 0, reupdated: false },
     });
     expect(formatDetectionLabel(tracked)).toBe('#7 car 82%');
   });
@@ -334,7 +334,7 @@ describe('trackTrails', () => {
       detections: points.map(({ trackId, cx, cy }) =>
         fullDetection({
           box: { x: cx - 0.05, y: cy - 0.05, width: 0.1, height: 0.1 },
-          track: { id: trackId, state: 'CONFIRMED', source: 'TRACKER', velocityX: 0, velocityY: 0 },
+          track: { id: trackId, state: 'CONFIRMED', source: 'TRACKER', velocityX: 0, velocityY: 0, reupdated: false },
         }),
       ),
     });
