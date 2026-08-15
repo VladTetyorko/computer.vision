@@ -1,5 +1,12 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.CompId;
+import com.drones.mavlink.SysId;
+import com.drones.mavlink.codec.FrameReader;
+import com.drones.mavlink.codec.FrameWriter;
+import com.drones.mavlink.transport.ByteChunk;
+import com.drones.mavlink.transport.UdpTargetLink;
+
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -7,8 +14,6 @@ import com.drones.vision.flight.domain.model.RcChannels;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.flight.domain.port.ManualControlLink;
 
-import io.dronefleet.mavlink.MavlinkConnection;
-import io.dronefleet.mavlink.MavlinkMessage;
 import io.dronefleet.mavlink.common.RcChannelsOverride;
 import io.dronefleet.mavlink.minimal.Heartbeat;
 import io.dronefleet.mavlink.minimal.MavAutopilot;
@@ -21,7 +26,6 @@ import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
 import java.net.DatagramSocket;
-import java.net.InetAddress;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
@@ -43,7 +47,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R3: {@link MavlinkManualControlSender} exercised over real
  * loopback UDP against a {@link FakeVehicle} test double, the same style {@link
  * MavlinkFlightCommanderTest} uses for {@link MavlinkFlightCommander} — heartbeats continuously so
- * {@link MavlinkSocketHub} claims it, then continuously drains every {@code RC_CHANNELS_OVERRIDE}
+ * {@link MavlinkGateway} claims it, then continuously drains every {@code RC_CHANNELS_OVERRIDE}
  * (#70) frame the sender under test transmits into a queue the test can assert against.
  *
  * <p>Tests use the package-private test-seam constructor to inject a fast tick period (well under
@@ -160,8 +164,11 @@ class MavlinkManualControlSenderTest {
 
             // The sender must use the hub's own shared socket, never a socket of its own: every
             // frame the vehicle receives must originate from the exact port MavlinkTelemetrySource
-            // itself is bound to for this device's stream.
-            assertEquals(telemetrySource.socket(bindKey).getLocalPort(), received.sourcePort());
+            // itself is bound to for this device's stream. docs/plans/active/MAVLINK-CORE-PLAN.md
+            // W4 deleted the raw socket()/CommandTarget passthroughs this assertion used to read
+            // -- MavlinkGateway's UdpListenLink always binds to the exact port given (never an
+            // OS-assigned ephemeral one), so the already-known "port" local is the identical value.
+            assertEquals(port, received.sourcePort());
 
             sender.release(link);
             assertFalse(link.active());
@@ -320,7 +327,7 @@ class MavlinkManualControlSenderTest {
                                         Duration timeout) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeout.toMillis();
         while (System.currentTimeMillis() < deadline) {
-            MavlinkSocketHub.CommandTarget target = source.commandTarget(bindKey, deviceId);
+            MavlinkGateway.CommandTarget target = source.commandTarget(bindKey, deviceId);
             if (target != null && target.sourceAddress() != null) {
                 return;
             }
@@ -342,28 +349,33 @@ class MavlinkManualControlSenderTest {
     /**
      * A minimal fake aircraft: heartbeats continuously (~5Hz, like a real feed transmitter or SITL
      * instance -- see {@link MavlinkFlightCommanderTest}'s own {@code FakeVehicle} for why a
-     * one-shot heartbeat is not enough) so {@link MavlinkSocketHub} claims and labels it, and
+     * one-shot heartbeat is not enough) so {@link MavlinkGateway} claims and labels it, and
      * concurrently drains every {@code RC_CHANNELS_OVERRIDE} frame it receives into a queue the
-     * test can assert against, one {@link MavlinkConnection} shared by both directions exactly as
-     * the sibling fake vehicle does.
+     * test can assert against.
+     *
+     * <p>docs/plans/active/MAVLINK-CORE-PLAN.md W4: migrated off the deleted {@code
+     * MavlinkUdpInputStream}/{@code MavlinkUdpOutputStream} test doubles onto {@code
+     * mavlink-core}'s own bidirectional {@link UdpTargetLink} plus {@link FrameWriter}/{@link
+     * FrameReader} -- the source port a received frame arrived from is now read off {@link
+     * com.drones.mavlink.codec.MavFrame#source()} instead of a bespoke {@code
+     * lastSourceAddress()} accessor. Every assertion this class's callers make is unchanged.
      */
     private static final class FakeVehicle implements AutoCloseable {
         private static final long HEARTBEAT_PERIOD_MILLIS = 200L;
 
-        private final DatagramSocket socket;
-        private final MavlinkUdpInputStream input;
-        private final MavlinkConnection connection;
+        private final UdpTargetLink link;
+        private final FrameWriter writer;
+        private final FrameReader reader;
         private final int sysid;
         private final AtomicBoolean stopped = new AtomicBoolean(false);
         private final Thread heartbeatThread;
         private final Thread readerThread;
         private final BlockingQueue<ReceivedOverride> overrides = new LinkedBlockingQueue<>();
 
-        private FakeVehicle(DatagramSocket socket, MavlinkUdpInputStream input, MavlinkConnection connection,
-                             int sysid, MavAutopilot autopilot, MavType mavType) {
-            this.socket = socket;
-            this.input = input;
-            this.connection = connection;
+        private FakeVehicle(UdpTargetLink link, FrameWriter writer, int sysid, MavAutopilot autopilot, MavType mavType) {
+            this.link = link;
+            this.writer = writer;
+            this.reader = new FrameReader(link);
             this.sysid = sysid;
             this.heartbeatThread = new Thread(() -> heartbeatLoop(autopilot, mavType), "fake-vehicle-heartbeat-" + sysid);
             this.heartbeatThread.setDaemon(true);
@@ -372,11 +384,10 @@ class MavlinkManualControlSenderTest {
         }
 
         static FakeVehicle start(int gatewayPort, int sysid, MavAutopilot autopilot, MavType mavType) throws IOException {
-            DatagramSocket socket = new DatagramSocket(0);
-            MavlinkUdpInputStream input = new MavlinkUdpInputStream(socket);
-            MavlinkConnection connection = MavlinkConnection.create(input,
-                    new MavlinkUdpOutputStream(socket, InetAddress.getByName("127.0.0.1"), gatewayPort));
-            FakeVehicle vehicle = new FakeVehicle(socket, input, connection, sysid, autopilot, mavType);
+            UdpTargetLink link = new UdpTargetLink("127.0.0.1", gatewayPort);
+            FrameWriter writer = new FrameWriter(new SysId(sysid), new CompId(1));
+            writer.addLink(link);
+            FakeVehicle vehicle = new FakeVehicle(link, writer, sysid, autopilot, mavType);
             vehicle.heartbeatThread.start();
             vehicle.readerThread.start();
             return vehicle;
@@ -393,13 +404,13 @@ class MavlinkManualControlSenderTest {
                             .systemStatus(MavState.MAV_STATE_ACTIVE)
                             .mavlinkVersion(3)
                             .build();
-                    connection.send2(sysid, 1, heartbeat);
+                    writer.broadcast(heartbeat, link.id());
                     Thread.sleep(HEARTBEAT_PERIOD_MILLIS);
-                } catch (IOException e) {
-                    return; // socket closing (or closed) -- stop quietly, see close()
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return;
+                } catch (RuntimeException e) {
+                    return; // link closing (or closed) -- stop quietly, see close()
                 }
             }
         }
@@ -408,13 +419,17 @@ class MavlinkManualControlSenderTest {
         private void readerLoop() {
             while (!stopped.get()) {
                 try {
-                    MavlinkMessage<?> message = connection.next();
-                    if (message.getPayload() instanceof RcChannelsOverride override) {
-                        int sourcePort = input.lastSourceAddress() == null ? -1 : input.lastSourceAddress().getPort();
-                        overrides.offer(new ReceivedOverride(override, sourcePort));
+                    ByteChunk chunk = link.poll(Duration.ofMillis(200));
+                    if (chunk == null) {
+                        continue;
                     }
+                    reader.offer(chunk, frame -> {
+                        if (frame.is(RcChannelsOverride.class)) {
+                            overrides.offer(new ReceivedOverride(frame.as(RcChannelsOverride.class), frame.source().port()));
+                        }
+                    });
                 } catch (IOException e) {
-                    return; // socket closing -- stop quietly, see close()
+                    return; // link closing -- stop quietly, see close()
                 }
             }
         }
@@ -448,7 +463,7 @@ class MavlinkManualControlSenderTest {
         @Override
         public void close() {
             stopped.set(true);
-            socket.close();
+            link.close();
             try {
                 heartbeatThread.join(Duration.ofSeconds(2).toMillis());
                 readerThread.join(Duration.ofSeconds(2).toMillis());

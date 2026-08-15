@@ -13,13 +13,11 @@ import java.util.Objects;
  * variables — the one place in the repo that bypassed Spring config entirely. Every default below
  * is byte-identical to the literal or env-var default it replaces.
  *
- * <p>This is an E-phase (internal restructuring) type: it introduces the shape and defaults only.
- * Wiring {@code vision-app}'s own {@code @ConfigurationProperties} record to construct one of these
- * from {@code vision.mavlink.*}/{@code vision.rc.*} and threading it into {@link
- * MavlinkSocketHub}/{@link MavlinkTelemetrySource}/{@link MavlinkFeedTransmitter}/{@link
- * MavlinkHeartbeatScanner}'s constructors is a later wave (F2) — only {@link
- * MavlinkManualControlSender} consumes {@link Rc} today, since deleting its env-var reads was this
- * wave's one hard requirement (docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2's {@code vision.rc} row).
+ * <p>{@code vision-app}'s own {@code @ConfigurationProperties} record constructs one of these from
+ * {@code vision.mavlink.*}/{@code vision.rc.*} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F2)
+ * and threads it into {@link MavlinkTelemetrySource}/{@link MavlinkFeedTransmitter}/{@link
+ * MavlinkHeartbeatScanner}'s constructors, and (docs/plans/active/MAVLINK-CORE-PLAN.md W4) into
+ * every {@link MavlinkGateway} {@link MavlinkTelemetrySource} creates.
  *
  * <p><b>Public, not package-private (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F2):</b> {@code vision-app}
  * (a different module/package) must be able to construct one of these — mapped from {@code

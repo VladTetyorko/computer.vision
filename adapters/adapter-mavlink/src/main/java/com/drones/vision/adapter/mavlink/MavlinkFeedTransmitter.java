@@ -1,15 +1,16 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.CompId;
+import com.drones.mavlink.SysId;
+import com.drones.mavlink.codec.FrameWriter;
+import com.drones.mavlink.transport.LinkId;
+import com.drones.mavlink.transport.UdpTargetLink;
+
 import com.drones.vision.perception.domain.model.FeedId;
 import com.drones.vision.perception.domain.model.FeedSpec;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.perception.domain.port.FeedTransmitterPort;
 
-import io.dronefleet.mavlink.MavlinkConnection;
-
-import java.io.InputStream;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
 import java.net.URI;
 import java.util.Map;
 import java.util.Objects;
@@ -26,6 +27,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * docs/main/CYCLES-PLAN.md} §0): zero-hardware rehearsal for {@link MavlinkTelemetrySource} (or any
  * real MAVLink ground station), and the same wire path {@code sim_vehicle.py} SITL would
  * otherwise be needed for.
+ *
+ * <p>docs/plans/active/MAVLINK-CORE-PLAN.md W4: {@code FeedRuntime}'s ephemeral send socket is now a
+ * {@code libs/mavlink-core} {@link UdpTargetLink} + {@link FrameWriter} instead of a hand-rolled
+ * {@code DatagramSocket}/{@code MavlinkConnection} pair — this is one of the two "fresh
+ * MavlinkConnection per send" call sites the plan named for removal (§4); every message builder
+ * ({@link SimulatedVehicleMessages}) and every option's parsing/default is otherwise unchanged.
  *
  * <h2>{@link FeedSpec#source()} is a destination, not a file</h2>
  * Unlike {@code adapter-rtsp}/{@code adapter-mjpeg}'s transmitters (which read a local video
@@ -63,22 +70,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>{@code positionRateHz} — {@code GLOBAL_POSITION_INT} send rate, default {@value
  *       #DEFAULT_POSITION_RATE_HZ}; a non-positive or unparseable value falls back to the
  *       default.</li>
- *   <li>{@code failsafeBatteryPercent} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a) — battery percent below
- *       which {@code HEARTBEAT} switches to the failsafe {@code custom_mode}/{@code
- *       system_status} described above, default {@value #DEFAULT_FAILSAFE_BATTERY_PERCENT};
- *       missing/unparseable falls back to the default (lenient, like {@code
- *       batteryDrainPerSecond} — unlike {@code speedMps}/{@code positionRateHz}, a non-positive
- *       value is accepted as-is, since {@code 0} is a meaningful "never" setting).</li>
- *   <li>{@code sysid} (docs/plans/active/DRONE-INFRA-PLAN.md I-a) — the MAVLink system id every message from
- *       this feed is sent as, default {@value #DEFAULT_MAV_SYSTEM_ID} (every real firmware's own
- *       out-of-the-box default). Lenient: missing/blank/unparseable/out of the valid 1-255 range
- *       falls back to the default — exists so a test (or a real multi-vehicle rehearsal) can run
- *       two feeds with distinct system ids at one destination, matching how a real fleet gateway
- *       (see {@link MavlinkTelemetrySource}/{@link MavlinkSocketHub}) demultiplexes them.</li>
+ *   <li>{@code failsafeBatteryPercent} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a, default {@value
+ *       #DEFAULT_FAILSAFE_BATTERY_PERCENT} — battery percent below which {@code HEARTBEAT}
+ *       switches to the failsafe custom_mode/system_status described above; lenient like {@code
+ *       batteryDrainPerSecond}, i.e. a non-positive value is accepted as-is, {@code 0} meaning
+ *       "never"); the other numeric options: non-positive/unparseable → default (same lenient
+ *       idiom as every other adapter, except {@code route} itself).</li>
+ *   <li>{@code sysid} (docs/plans/active/DRONE-INFRA-PLAN.md I-a, default {@value #DEFAULT_MAV_SYSTEM_ID} — the
+ *       MAVLink system id every message from this feed carries; lenient, missing/blank/
+ *       unparseable/out of 1-255 → default). Exists so a test (or a real multi-vehicle rehearsal)
+ *       can run two or more feeds with distinct system ids at one destination, matching how a real
+ *       fleet gateway ({@link MavlinkTelemetrySource}/{@link MavlinkGateway}) demultiplexes real
+ *       multi-vehicle traffic.</li>
  * </ul>
  *
  * <p>Each {@link #start(FeedId, FeedSpec)} call spins up one dedicated platform thread ({@code
- * mavlink-feed-<id>}) that owns its own ephemeral {@link DatagramSocket} and pushes {@code
+ * mavlink-feed-<id>}) that owns its own ephemeral send link and pushes {@code
  * HEARTBEAT}/{@code SYS_STATUS}/{@code GPS_RAW_INT} once a second and {@code
  * GLOBAL_POSITION_INT} at {@code positionRateHz}, as system id {@code sysid} (default {@value
  * #DEFAULT_MAV_SYSTEM_ID}) / component id {@value #MAV_COMPONENT_ID}. An unrecoverable transmit
@@ -235,7 +242,7 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
     }
 
     /**
-     * Per-feed runtime: a dedicated socket + transmit thread pacing
+     * Per-feed runtime: a dedicated {@link UdpTargetLink} + {@link FrameWriter} pacing
      * HEARTBEAT/SYS_STATUS/GPS_RAW_INT (1&nbsp;Hz) and GLOBAL_POSITION_INT (positionRateHz).
      */
     private static final class FeedRuntime {
@@ -254,7 +261,7 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
         private final AtomicBoolean stopRequested = new AtomicBoolean(false);
         private final AtomicBoolean closed = new AtomicBoolean(false);
         private volatile Thread transmitThread;
-        private volatile DatagramSocket socket;
+        private volatile UdpTargetLink link;
 
         FeedRuntime(FeedId feedId, String targetHost, int targetPort, MavlinkRoute route, double speedMps,
                     double batteryDrainPercentPerSecond, double positionRateHz, double failsafeBatteryPercent,
@@ -280,13 +287,13 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
         }
 
         private void runTransmitLoop() {
-            DatagramSocket sock = null;
+            UdpTargetLink txLink = null;
             try {
-                sock = new DatagramSocket();
-                socket = sock;
-                InetAddress address = InetAddress.getByName(targetHost);
-                MavlinkConnection connection = MavlinkConnection.create(
-                        InputStream.nullInputStream(), new MavlinkUdpOutputStream(sock, address, targetPort));
+                txLink = new UdpTargetLink(targetHost, targetPort);
+                link = txLink;
+                LinkId linkId = txLink.id();
+                FrameWriter writer = new FrameWriter(new SysId(sysid), new CompId(MAV_COMPONENT_ID));
+                writer.addLink(txLink);
 
                 long startNanos = System.nanoTime();
                 long heartbeatPeriodNanos = TimeUnit.MILLISECONDS.toNanos(heartbeatPeriodMillis);
@@ -306,10 +313,9 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
                         int batteryPercent = (int) Math.round(
                                 Math.max(0.0, 100.0 - batteryDrainPercentPerSecond * elapsedSeconds));
                         boolean failsafeTriggered = batteryPercent < failsafeBatteryPercent;
-                        connection.send2(sysid, MAV_COMPONENT_ID, SimulatedVehicleMessages.heartbeat(failsafeTriggered));
-                        connection.send2(sysid, MAV_COMPONENT_ID, SimulatedVehicleMessages.sysStatus(batteryPercent));
-                        connection.send2(sysid, MAV_COMPONENT_ID,
-                                SimulatedVehicleMessages.gpsRawInt(route.positionAt(distanceMeters)));
+                        writer.broadcast(SimulatedVehicleMessages.heartbeat(failsafeTriggered), linkId);
+                        writer.broadcast(SimulatedVehicleMessages.sysStatus(batteryPercent), linkId);
+                        writer.broadcast(SimulatedVehicleMessages.gpsRawInt(route.positionAt(distanceMeters)), linkId);
                         nextHeartbeatNanos += heartbeatPeriodNanos;
                     }
                     if (now >= nextPositionNanos) {
@@ -318,8 +324,8 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
                         distanceMeters += speedMps * tickSeconds;
                         MavlinkRoute.Position position = route.positionAt(distanceMeters);
                         long elapsedMillis = (now - startNanos) / 1_000_000L;
-                        connection.send2(sysid, MAV_COMPONENT_ID,
-                                SimulatedVehicleMessages.globalPositionInt(position, elapsedMillis, speedMps));
+                        writer.broadcast(
+                                SimulatedVehicleMessages.globalPositionInt(position, elapsedMillis, speedMps), linkId);
                         nextPositionNanos += positionPeriodNanos;
                     }
                     sleepMillis(tickMillis);
@@ -331,14 +337,14 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
                     LOG.log(System.Logger.Level.WARNING, "Feed " + feedId.value() + " stopped due to an error", e);
                 }
             } finally {
-                closeQuietly(sock);
+                closeQuietly(txLink);
             }
         }
 
         void close() {
             if (closed.compareAndSet(false, true)) {
                 stopRequested.set(true);
-                closeQuietly(socket); // unblocks nothing here (TX never blocks on receive), released promptly regardless
+                closeQuietly(link); // unblocks nothing here (TX never blocks on receive), released promptly regardless
                 Thread thread = transmitThread;
                 if (thread != null && thread != Thread.currentThread()) {
                     thread.interrupt();
@@ -359,9 +365,9 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
             }
         }
 
-        private static void closeQuietly(DatagramSocket socket) {
-            if (socket != null && !socket.isClosed()) {
-                socket.close();
+        private static void closeQuietly(UdpTargetLink link) {
+            if (link != null) {
+                link.close();
             }
         }
     }

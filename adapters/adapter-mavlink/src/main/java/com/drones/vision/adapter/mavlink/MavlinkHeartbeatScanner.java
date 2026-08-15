@@ -1,20 +1,19 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.codec.FrameReader;
+import com.drones.mavlink.codec.MavFrame;
+import com.drones.mavlink.transport.ByteChunk;
+import com.drones.mavlink.transport.UdpListenLink;
+
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 
-import io.dronefleet.mavlink.MavlinkConnection;
-import io.dronefleet.mavlink.MavlinkMessage;
 import io.dronefleet.mavlink.minimal.Heartbeat;
 
 import java.io.IOException;
-import java.io.OutputStream;
-import java.net.DatagramSocket;
-import java.net.InetSocketAddress;
-import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -27,17 +26,19 @@ import java.util.Set;
 /**
  * {@link DeviceDiscoveryPort} implementation for plug-and-fly MAVLink heartbeat discovery
  * (docs/plans/active/DRONE-INFRA-PLAN.md I-b): every distinct MAVLink system id heard on the well-known GCS
- * port becomes a {@link DiscoveredDevice} — no manual sysid typing, no manual {@code udp://} URI
- * entry, matching the "operator will not hand-edit sysids" field reality I-b was written for.
+ * port becomes a {@link DiscoveredDevice}, no manual sysid typing, no manual {@code udp://} URI
+ * entry. docs/plans/active/MAVLINK-CORE-PLAN.md W4 rewired the self-bind path onto {@code
+ * mavlink-core}'s {@link UdpListenLink}/{@link FrameReader} in place of a raw {@code
+ * DatagramSocket}; naming, categorization, and every {@code details} key are byte-identical.
  *
  * <h2>Why this lives in {@code adapter-mavlink}, not {@code adapter-discovery}</h2>
  * Adapters never depend on each other (ArchUnit-enforced) — a scanner in {@code adapter-discovery}
- * could not see {@link MavlinkSocketHub} at all, and would have no choice but to bind its own
- * socket on every scan. That fails outright the moment a real MAVLink telemetry {@code Device} is
- * already open on the same port (the common case once I-a's gateway is running one aircraft), and
- * even when nothing is open yet, a separate socket can never see what the gateway itself has
- * already claimed. Living in this module lets the scanner reach {@link MavlinkTelemetrySource}
- * directly and share its already-bound socket instead.
+ * could not see {@link MavlinkGateway} at all, and would have no choice but to bind its own socket
+ * on every scan. That fails outright the moment a real MAVLink telemetry {@code Device} is already
+ * open on the same port (the common case once I-a's gateway is running one aircraft), and even
+ * when nothing is open yet, a separate socket can never see what the gateway itself has already
+ * claimed. Living in this module lets the scanner reach {@link MavlinkTelemetrySource} directly
+ * and share its already-bound socket instead.
  *
  * <h2>Two paths, chosen per scan</h2>
  * <ul>
@@ -50,12 +51,11 @@ import java.util.Set;
  *       never invites creating a duplicate asset for an aircraft that already has one; an
  *       <b>unclaimed</b> one is reported plain, ready to register.</li>
  *   <li><b>No active hub</b> — nothing has this port open. This scanner binds it itself for the
- *       scan's duration, reusing the same {@link MavlinkConnection}/{@link MavlinkUdpInputStream}
- *       machinery {@link MavlinkSocketHub} uses, reads whatever heartbeats arrive, and releases
- *       the socket before returning. A bind failure (the port is held by something that is
- *       <em>not</em> this app's own gateway — e.g. a stray process) is reported as one WARN log
- *       and an empty result, never an exception: discovery must never break the scan-all flow
- *       over one mechanism's bind conflict.</li>
+ *       scan's duration with a plain {@link UdpListenLink}, reads whatever heartbeats arrive
+ *       through a {@link FrameReader}, and releases the link before returning. A bind failure (the
+ *       port is held by something that is <em>not</em> this app's own gateway — e.g. a stray
+ *       process) is reported as one WARN log and an empty result, never an exception: discovery
+ *       must never break the scan-all flow over one mechanism's bind conflict.</li>
  * </ul>
  *
  * <p>Both paths use the fixed wildcard bind host ({@value MavlinkTelemetrySource#DEFAULT_BIND_HOST})
@@ -91,7 +91,7 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
 
     // MAV_TYPE raw values this scanner cares about for naming/categorization -- duplicated from the
     // upstream MAVLink common.xml enum rather than reused from FlightModes (whose own MAV_TYPE_*
-    // constants are private to that class, and exist there only to pick a mode-name table, not to
+    // constants are private to that class, and exist there only to pick a mode table, not to
     // label a vehicle kind).
     private static final int MAV_TYPE_FIXED_WING = 1;
     private static final int MAV_TYPE_QUADROTOR = 2;
@@ -158,8 +158,8 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
     }
 
     /**
-     * Borrows an already-running hub's socket: no bind of its own, just repeated reads of the
-     * claimed/unclaimed registries {@link MavlinkSocketHub} already maintains, spread across the
+     * Borrows an already-running gateway's socket: no bind of its own, just repeated reads of the
+     * claimed/unclaimed registries {@link MavlinkGateway} already maintains, spread across the
      * timeout window so a vehicle whose first {@code HEARTBEAT} (and therefore firmware/mavType
      * label) arrives partway through the scan is still picked up.
      */
@@ -168,13 +168,13 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
         long intervalMillis = Math.max(activeHubMinPollIntervalMillis, timeoutMillis / activeHubPollCount);
         long deadlineNanos = System.nanoTime() + timeoutMillis * 1_000_000L;
 
-        Map<Integer, MavlinkSocketHub.ClaimedVehicle> claimed = new LinkedHashMap<>();
-        Map<Integer, MavlinkSocketHub.UnclaimedVehicle> unclaimed = new LinkedHashMap<>();
+        Map<Integer, MavlinkGateway.ClaimedVehicle> claimed = new LinkedHashMap<>();
+        Map<Integer, MavlinkGateway.UnclaimedVehicle> unclaimed = new LinkedHashMap<>();
         while (true) {
-            for (MavlinkSocketHub.ClaimedVehicle vehicle : telemetrySource.claimedVehicles(bindKey)) {
+            for (MavlinkGateway.ClaimedVehicle vehicle : telemetrySource.claimedVehicles(bindKey)) {
                 claimed.put(vehicle.sysid(), vehicle);
             }
-            for (MavlinkSocketHub.UnclaimedVehicle vehicle : telemetrySource.unclaimedVehicles(bindKey)) {
+            for (MavlinkGateway.UnclaimedVehicle vehicle : telemetrySource.unclaimedVehicles(bindKey)) {
                 unclaimed.put(vehicle.sysid(), vehicle);
             }
             long remainingNanos = deadlineNanos - System.nanoTime();
@@ -186,32 +186,27 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
         unclaimed.keySet().removeAll(claimed.keySet()); // a claimed vehicle is never also reported unclaimed
 
         List<DiscoveredDevice> devices = new ArrayList<>();
-        for (MavlinkSocketHub.ClaimedVehicle vehicle : claimed.values()) {
+        for (MavlinkGateway.ClaimedVehicle vehicle : claimed.values()) {
             devices.add(toDiscoveredDevice(vehicle.sysid(), vehicle.firmware(), vehicle.mavType(), vehicle.deviceId()));
         }
-        for (MavlinkSocketHub.UnclaimedVehicle vehicle : unclaimed.values()) {
+        for (MavlinkGateway.UnclaimedVehicle vehicle : unclaimed.values()) {
             devices.add(toDiscoveredDevice(vehicle.sysid(), vehicle.firmware(), vehicle.mavType(), null));
         }
         return List.copyOf(devices);
     }
 
     /**
-     * Nothing has this port open: binds it for the scan's duration, reusing {@link
-     * MavlinkConnection}/{@link MavlinkUdpInputStream} exactly like {@link MavlinkSocketHub}'s own
-     * read loop, and releases the socket before returning. A bind failure (port held by something
-     * other than this app's own gateway) is swallowed to an empty result plus one WARN log — never
-     * thrown, so one mechanism's bind conflict can never break the parallel scan-all flow.
+     * Nothing has this port open: binds it for the scan's duration with a plain {@link
+     * UdpListenLink} + {@link FrameReader}, releasing the link before returning. A bind failure
+     * (port held by something other than this app's own gateway) is swallowed to an empty result
+     * plus one WARN log — never thrown, so one mechanism's bind conflict can never break the
+     * parallel scan-all flow.
      */
     private List<DiscoveredDevice> scanBySelfBinding(Duration timeout) {
         long timeoutMillis = Math.max(0L, timeout.toMillis());
-        DatagramSocket socket;
+        UdpListenLink link;
         try {
-            socket = new DatagramSocket(null);
-            socket.setReuseAddress(true);
-            socket.bind(new InetSocketAddress(MavlinkTelemetrySource.DEFAULT_BIND_HOST, port));
-            int readTimeoutMillis = (int) Math.max(selfBindMinReadTimeoutMillis,
-                    Math.min(selfBindMaxReadTimeoutMillis, Math.max(1L, timeoutMillis)));
-            socket.setSoTimeout(readTimeoutMillis);
+            link = new UdpListenLink(MavlinkTelemetrySource.DEFAULT_BIND_HOST, port);
         } catch (IOException e) {
             LOG.log(System.Logger.Level.WARNING, () -> "MAVLink heartbeat scan could not bind udp://"
                     + MavlinkTelemetrySource.DEFAULT_BIND_HOST + ":" + port
@@ -219,21 +214,24 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
             return List.of();
         }
         try {
-            MavlinkConnection connection =
-                    MavlinkConnection.create(new MavlinkUdpInputStream(socket), OutputStream.nullOutputStream());
+            FrameReader reader = new FrameReader(link);
+            long readTimeoutMillis = Math.max(selfBindMinReadTimeoutMillis,
+                    Math.min(selfBindMaxReadTimeoutMillis, Math.max(1L, timeoutMillis)));
+            Duration pollTimeout = Duration.ofMillis(readTimeoutMillis);
 
             long deadlineNanos = System.nanoTime() + timeoutMillis * 1_000_000L;
             Map<Integer, Sighting> sightings = new LinkedHashMap<>();
             while (System.nanoTime() < deadlineNanos) {
+                ByteChunk chunk;
                 try {
-                    MavlinkMessage<?> message = connection.next();
-                    recordSighting(sightings, message);
-                } catch (SocketTimeoutException e) {
-                    // Nothing arrived in this slice -- the loop above re-checks the deadline; the
-                    // blocking receive() itself is what avoids a busy-spin here, not this catch.
+                    chunk = link.poll(pollTimeout);
                 } catch (IOException e) {
                     break; // a genuine socket failure -- stop scanning, report whatever was heard so far
                 }
+                if (chunk == null) {
+                    continue; // nothing arrived in this slice -- the loop re-checks the deadline, no busy-spin
+                }
+                reader.offer(chunk, frame -> recordSighting(sightings, frame));
             }
             List<DiscoveredDevice> devices = new ArrayList<>();
             for (Sighting sighting : sightings.values()) {
@@ -241,14 +239,15 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
             }
             return List.copyOf(devices);
         } finally {
-            socket.close();
+            link.close();
         }
     }
 
-    private static void recordSighting(Map<Integer, Sighting> sightings, MavlinkMessage<?> message) {
-        int sysid = message.getOriginSystemId();
+    private static void recordSighting(Map<Integer, Sighting> sightings, MavFrame frame) {
+        int sysid = frame.header().system().value();
         Sighting sighting = sightings.computeIfAbsent(sysid, Sighting::new);
-        if (message.getPayload() instanceof Heartbeat heartbeat) {
+        if (frame.is(Heartbeat.class)) {
+            Heartbeat heartbeat = frame.as(Heartbeat.class);
             sighting.firmware = MavlinkTelemetryDecoder.firmwareLabel(heartbeat.autopilot().value());
             sighting.mavType = heartbeat.type().value();
         }

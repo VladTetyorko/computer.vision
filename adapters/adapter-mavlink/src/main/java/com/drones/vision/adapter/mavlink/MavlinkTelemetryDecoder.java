@@ -38,20 +38,21 @@ import java.util.Map;
  * This class itself owns only the per-system lock (below) and message-type dispatch to whichever
  * holder owns that message — see each holder's own javadoc for its exact field list.
  *
- * <h2>System-id stickiness (now enforced one level up, by {@link MavlinkSocketHub})</h2>
+ * <h2>System-id stickiness (now enforced one level up, by {@link MavlinkGateway})</h2>
  * A single UDP port can carry more than one MAVLink system's traffic (e.g. a telemetry radio
  * relaying two vehicles, or stray traffic sharing the port). This decoder still locks onto the
  * <b>first</b> {@link MavlinkMessage#getOriginSystemId()} it observes — of any message type,
  * including {@code HEARTBEAT} — and silently ignores every subsequent message from a different
  * system for the remainder of this decoder's lifetime; that invariant is exercised directly by
  * this class's own unit tests and remains true for any caller that feeds one decoder instance
- * mixed-system traffic. As of docs/plans/active/DRONE-INFRA-PLAN.md I-a, {@link MavlinkTelemetrySource} is no
- * longer such a caller: {@link MavlinkSocketHub} demultiplexes by sysid <b>before</b> a message
- * ever reaches a decoder, and hands each claiming device a <b>fresh</b> decoder on every claim or
- * re-election, so in practice a decoder here only ever sees one system's messages for its whole
- * lifetime, and this class's own lock never actually rejects anything at the system level — see
- * {@link MavlinkSocketHub}'s javadoc for the claim/re-election rules that replaced the old
- * "first sysid wins, no re-adoption" single-device gotcha.
+ * mixed-system traffic. As of docs/plans/active/DRONE-INFRA-PLAN.md I-a (and unchanged in shape by
+ * docs/plans/active/MAVLINK-CORE-PLAN.md W4), {@link MavlinkTelemetrySource} is no longer such a
+ * caller: {@link MavlinkGateway} demultiplexes by sysid <b>before</b> a message ever reaches a
+ * decoder (via {@link VehicleClaimPolicy}), and hands each claiming device a <b>fresh</b> decoder
+ * on every claim or re-election, so in practice a decoder here only ever sees one system's
+ * messages for its whole lifetime, and this class's own lock never actually rejects anything at
+ * the system level — see {@link MavlinkGateway}'s javadoc for the claim/re-election rules that
+ * replaced the old "first sysid wins, no re-adoption" single-device gotcha.
  *
  * <h2>Message → field mapping</h2>
  * <ul>
@@ -116,27 +117,31 @@ import java.util.Map;
  * silently ignored: this decoder only maps what {@link Telemetry}/{@code FlightState} actually
  * have fields for.
  *
- * <h2>ardupilotmega dialect selection (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e)</h2>
+ * <h2>ardupilotmega dialect selection (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e; re-plumbed by
+ * docs/plans/active/MAVLINK-CORE-PLAN.md W4)</h2>
  * {@code WIND}/{@code EKF_STATUS_REPORT}/{@code RANGEFINDER} live in the {@code ardupilotmega}
- * dialect, not {@code common} — but no wiring change was needed anywhere in this module to decode
- * them. {@code io.dronefleet.mavlink.MavlinkConnection.Builder}'s constructor (used by every
- * {@code MavlinkConnection.create(...)} call in this module, since none of them call {@code
- * .dialect(...)}/{@code .defaultDialect(...)} to override it) registers {@code
- * MAV_AUTOPILOT_ARDUPILOTMEGA} (and {@code MAV_AUTOPILOT_PX4}) against {@code
- * ArdupilotmegaDialect} out of the box, alongside every other {@code MavAutopilot} value against
- * {@code CommonDialect}. {@code MavlinkConnection#next()} resolves the per-system dialect the
- * moment it decodes that system's first {@code HEARTBEAT} (caching it in a {@code
- * systemDialects} map keyed by system id, for the life of that one {@code MavlinkConnection}
- * instance) and uses it for every subsequent message from that system — so a real ArduPilot
- * vehicle's own unsolicited {@code HEARTBEAT} stream (autopilot {@code ARDUPILOTMEGA}, sent at
- * ~1&nbsp;Hz by every firmware, already relied on for {@code FlightState.firmware}/{@code
- * FlightState.mode}) is what silently unlocks these three messages on the one long-lived {@code
- * MavlinkConnection} each of {@link MavlinkSocketHub}'s read loop and {@link
- * MavlinkHeartbeatScanner}'s self-bind path keeps open for as long as they run. No dialect
- * override, no new dependency, no version bump — see this module's {@code MODULE.md} for the
- * confirmed mechanism and the one gotcha it implies for isolated single-message tests (a fresh
- * {@code MavlinkConnection} with no prior {@code HEARTBEAT} for that system id falls back to
- * {@code CommonDialect} and cannot resolve an ardupilotmega-only message id).
+ * dialect, not {@code common}. Before W4, this module read every message off one long-lived {@code
+ * io.dronefleet.mavlink.MavlinkConnection} per socket ({@code MavlinkSocketHub}'s read loop, or
+ * {@code MavlinkHeartbeatScanner}'s self-bind path) — that single connection's own {@code
+ * systemDialects} cache, keyed purely by <em>sysid</em>, meant one ArduPilot vehicle's first
+ * {@code HEARTBEAT} unlocked these three messages for the rest of that connection's life,
+ * <em>regardless of which physical UDP source sent them</em>.
+ *
+ * <p>As of W4, {@link MavlinkGateway}/{@code MavlinkHeartbeatScanner} read through {@code
+ * mavlink-core}'s {@code FrameReader}, which keeps one resync buffer <em>per source address</em>
+ * and primes each buffer's own fresh {@code MavlinkConnection} with whatever dialect that
+ * <em>same buffer</em> last resolved (see that module's {@code ResyncBuffer} Gotchas) — a
+ * per-buffer approximation of the old per-sysid cache, not a replacement for it. In every
+ * production and test scenario where one physical sender speaks for one sysid (every real
+ * ArduPilot vehicle, {@code MavlinkFeedTransmitter}, every fake vehicle in this module's own test
+ * suite), this is unobservable: the buffer that heard the {@code HEARTBEAT} is the same buffer
+ * that later sends {@code WIND}/etc. <b>It is observable, and a real regression, the moment a
+ * second physical source claims the same sysid without ever sending its own {@code HEARTBEAT}</b>
+ * (e.g. a raw test datagram sent from a separate socket) — that source's own resync buffer has no
+ * primed dialect and falls back to {@code CommonDialect}, silently unable to decode an
+ * ardupilotmega-only message id. See this module's {@code MODULE.md} Gotchas for the concrete
+ * test this broke and why it is a {@code libs/mavlink-core} L2 limitation, not something this
+ * adapter can work around.
  *
  * <h2>{@code FlightState} materialization</h2>
  * Every emitted {@link Telemetry} carries the decoder's current merged {@code FlightState} — but
@@ -168,14 +173,25 @@ final class MavlinkTelemetryDecoder {
      *         message types this decoder maps (see class javadoc)
      */
     Telemetry accept(MavlinkMessage<?> message) {
-        int originSystemId = message.getOriginSystemId();
+        return accept(message.getOriginSystemId(), message.getPayload());
+    }
+
+    /**
+     * docs/plans/active/MAVLINK-CORE-PLAN.md W4: {@link MavlinkGateway} delivers frames as {@code
+     * (sysid, payload)} pairs (a {@code com.drones.mavlink.codec.MavFrame} already carries the
+     * origin sysid in its header, separately from the raw library payload object) rather than a
+     * dronefleet {@link MavlinkMessage} wrapper -- this overload is the actual decode logic; {@link
+     * #accept(MavlinkMessage)} is now a one-line adapter onto it so every pre-existing golden-bytes
+     * test (which still builds real {@link MavlinkMessage}s via {@code MavlinkConnection}) keeps
+     * working unchanged. Same system-id lock-in / message-mapping / return-null rules as before.
+     */
+    Telemetry accept(int originSystemId, Object payload) {
         if (systemId == null) {
             systemId = originSystemId;
         } else if (systemId != originSystemId) {
             return null; // a second system sharing this port: ignored, see class javadoc
         }
 
-        Object payload = message.getPayload();
         if (payload instanceof GlobalPositionInt position) {
             positionAndPower.applyPosition(position);
         } else if (payload instanceof SysStatus sysStatus) {
@@ -211,7 +227,7 @@ final class MavlinkTelemetryDecoder {
         return toTelemetry();
     }
 
-    /** Package-private (not {@code private}): reused by {@link MavlinkSocketHub}/{@link VehicleClaimRegistry} to label unclaimed/claimed vehicles. */
+    /** Package-private (not {@code private}): reused by {@link MavlinkHeartbeatScanner}/{@link VehicleClaimPolicy} to label unclaimed/claimed vehicles. */
     static String firmwareLabel(int autopilot) {
         return FlightStatusState.firmwareLabel(autopilot);
     }
