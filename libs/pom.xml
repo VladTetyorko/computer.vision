@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.drones</groupId>
+        <artifactId>vision</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>libs</artifactId>
+    <packaging>pom</packaging>
+    <name>libs</name>
+    <description>
+        Aggregator for standalone, reusable protocol libraries. A module here depends on NO other module in
+        this repository — that is what makes it consumable by another project — and is framework-free.
+        Everything else may depend on it. See docs/plans/active/MAVLINK-CORE-PLAN.md §3.1.
+    </description>
+
+    <modules>
+        <module>mavlink-core</module>
+    </modules>
+
+</project>

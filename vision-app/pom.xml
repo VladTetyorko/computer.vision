@@ -70,6 +70,19 @@
             <groupId>com.drones</groupId>
             <artifactId>adapter-mavlink</artifactId>
         </dependency>
+        <!--
+          Test-scoped only, and deliberately so: vision-app has no runtime need for mavlink-core
+          (adapter-mavlink will depend on it directly from wave W4 onward), but ArchitectureTest must
+          be able to import `com.drones.mavlink..` to enforce that the library never depends back on
+          `com.drones.vision..` — the guard that keeps it reusable. Importing those classes off disk
+          instead would make the rule skip silently whenever the module happened not to be built,
+          and a rule that skips is not a rule. See docs/plans/active/MAVLINK-CORE-PLAN.md §3.1.
+        -->
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>mavlink-core</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>com.drones</groupId>
             <artifactId>adapter-v4l2</artifactId>
