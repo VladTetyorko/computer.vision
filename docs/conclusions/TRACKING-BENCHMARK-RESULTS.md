@@ -292,28 +292,47 @@ picture is clean and the break is sharp:
 **≤ 0.5 is consistently better than no ORU; ≥ 0.55 is consistently worse.** That band is the robust
 finding; the exact digit is not.
 
-### Why it ships disabled anyway
+### Shipped ON at 0.40 — by decision, with the cost recorded
 
 Enabling `0.40` moves exactly one synthetic row: **`pan`/FOLLOW's `implaus_n` 0 → 8**. Nothing else in
-that row moves — coast ADE/FDE, MT/PT/ML, IDSW, lifetime all identical. So refusing the
-reconstruction there leaves *position* untouched and the *velocity* non-physical — precisely the
-defect shape O3 exists to catch and every other column is blind to.
+that row moves — coast ADE/FDE, MT/PT/ML, IDSW, lifetime all identical. So it leaves *position*
+untouched and the *velocity* non-physical on eight coasted frames — precisely the defect shape O3
+exists to catch and every other column is blind to.
 
 The trade, stated plainly:
 
-| | ON at 0.40 | OFF (shipped) |
+| | 21 real ASSOCIATE pairs | synthetic `pan`/FOLLOW |
 |---|---|---|
-| 21 real ASSOCIATE pairs | **−97 IDSW, +0.7 pp recovery** | +377 IDSW |
-| synthetic `pan`/FOLLOW | **8 non-physical velocities** | clean |
+| **shape 0.40 (shipped)** | **−97 IDSW, +0.7 pp recovery** | 8 non-physical velocities |
+| off | +377 IDSW | clean |
 
-**FOLLOW is the mode an operator holds a target with, and velocity is what geolocation consumes — and
-MOT17 ships no pixels, so FOLLOW cannot be measured on real footage at all.** Shipping ON would swap
-a *measured* harm in a regime that is not ours for an *unmeasurable* one in the mode that is. Off is
-the conservative side of that asymmetry, `0.40` is documented as the recommended setting for an
-ASSOCIATE-heavy deployment, and one env var flips it.
+**The decision was to enable it**: the ASSOCIATE evidence is 21 real scene/detector pairs, the cost is
+one synthetic row where position is unaffected, and `CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO=0` reverts
+in one env var. `tools/trackeval/BASELINE.md` records the moved row as a deliberate behaviour change
+with its reason, and plan finding **O5** tracks resolving it.
 
-**This is the third decision now waiting on aerial footage**, and the first one where the two
-available measurements actively disagree.
+**What remains genuinely unknown**: FOLLOW is the mode an operator holds a target with, velocity is
+what geolocation consumes, and **MOT17 ships no pixels — so FOLLOW cannot be measured on real footage
+at all**. That single synthetic row is the entire evidence base on that side.
+
+### Verification of the shipped configuration
+
+Full matrix re-run with the new default. Three controls that must not move, and did not:
+
+| control | why it must not move | rows moved |
+|---|---|---|
+| `cost`, ORU off | the check lives inside ORU | **0 / 21** |
+| `bytetrack`, ORU on | bytetrack bypasses the book entirely | **0 / 21** |
+| `bytetrack`, ORU off | — | **0 / 21** |
+
+| `cost`, 21 pairs | IDSW | vs ORU off | recovery | implausible |
+|---|---|---|---|---|
+| ORU off | 6075 | — | 56.7 % | 320 |
+| previous default (velocity guard) | 6452 | +377 | 56.6 % | 372 |
+| **shipped now (+ shape 0.40)** | **5978** | **−97** | **57.4 %** | 343 |
+
+**16 of 21 scenes improved against the previous default; net −474 IDSW.**
+
 
 ---
 

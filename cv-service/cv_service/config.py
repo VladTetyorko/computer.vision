@@ -482,26 +482,31 @@ DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT = 0
 # better than no ORU) and >=0.55 (consistently positive): -277/-109/-50
 # versus +179/+252/+198. So trust the BAND, not this exact digit, and expect
 # to re-derive it on aerial footage where our own target density lives.
-# DEFAULTED OFF DESPITE WINNING THE SWEEP -- the deciding evidence is a
-# CONFLICT, not the sweep alone. Enabling `0.40` moves exactly one synthetic
-# row: `pan`/FOLLOW's `implaus_n` 0 -> 8. Nothing else in that row moves --
-# coast ADE/FDE, MT/PT/ML, IDSW, lifetime are all identical -- so refusing
-# the reconstruction there leaves POSITION untouched and the VELOCITY
-# non-physical, which is precisely the shape of defect O3 exists to catch and
-# every other column is blind to.
+# ENABLED AT `0.40` BY EXPLICIT DECISION (2026-08-15), with a known cost.
 #
-# The trade, stated plainly: ON is worth -97 IDSW / +0.7pp recovery on 21
-# real ASSOCIATE pairs, and costs 8 non-physical velocities in the one place
-# FOLLOW is measurable at all. FOLLOW is the mode an operator holds a target
-# with, and velocity is what geolocation consumes -- and MOT17 ships no
-# pixels, so FOLLOW cannot be measured on real footage until aerial data
-# exists. Shipping ON would trade a MEASURED harm in a regime that is not
-# ours for an UNMEASURABLE one in the mode that is.
+# The sweep earns it: seven bounds x 21 real MOT17 scene/detector pairs
+# (`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4d) make this the first
+# ORU configuration in three attempts that beats not running ORU at all --
+# -97 IDSW against the ORU-off baseline where the velocity guard alone cost
+# +377, and the only change so far to move RECOVERY (+0.7pp) rather than
+# leave it flat.
 #
-# So: off by default, `0.40` documented as the recommended setting for an
-# ASSOCIATE-heavy deployment, and the conflict recorded as an open finding
-# rather than resolved by preference.
-DEFAULT_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO = 0.0
+# The cost, recorded rather than buried: enabling it moves one synthetic row,
+# `pan`/FOLLOW's `implaus_n` 0 -> 8. Position is untouched there -- coast
+# ADE/FDE, MT/PT/ML, IDSW and lifetime are all identical -- so what degrades
+# is the reported VELOCITY, which is the one defect shape every other column
+# is blind to and O3 exists to catch. FOLLOW cannot be measured on real
+# footage until aerial data with pixels exists, so that row is the only
+# evidence there is on that side. `CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO=0`
+# reverts, and O5 (`TRACKING-V3-PLAN.md` §6b) tracks resolving it.
+#
+# Trust the BAND, not this digit, if you retune: the IDSW surface is jagged
+# (0.40 -> -97, 0.45 -> +175, 0.50 -> +14) and one pathological pair,
+# `MOT17-04-DPM` (21.3 dets/frame, weakest detector), swings between +64 and
+# +284 by itself and dominates every total. With that pair excluded the break
+# is sharp and monotonic: <=0.5 consistently beats no ORU (-277/-109/-50),
+# >=0.55 consistently loses (+179/+252/+198).
+DEFAULT_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO = 0.40
 
 # Check B -- motion plausibility: forward-predicts the bracket's earlier
 # observation to the later one's own timestamp using the TRACK's own

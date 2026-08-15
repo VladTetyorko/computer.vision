@@ -810,10 +810,19 @@ def test_resolve_takes_reupdate_max_shape_log_ratio_straight_from_settings():
     assert resolved.reupdate_max_shape_log_ratio == 0.7
 
 
-def test_reupdate_max_shape_log_ratio_defaults_to_disabled():
-    assert Settings().track_reupdate_max_shape_log_ratio == 0.0
+def test_reupdate_max_shape_log_ratio_defaults_to_the_swept_value():
+    """`0.40` is SWEPT, not chosen (`TRACKING-BENCHMARK-RESULTS.md` §4d) -- the
+    first ORU configuration that beats not running ORU at all, at -97 IDSW and
+    +0.7pp recovery across 21 real MOT17 pairs.
+
+    Pinned here because the value is a MEASUREMENT: changing it silently would
+    discard a sweep, and the accepted cost on the other side (`pan`/FOLLOW's
+    `implaus_n` 0 -> 8, recorded in `tools/trackeval/BASELINE.md`) means the
+    trade was made deliberately and should not drift by accident.
+    """
+    assert Settings().track_reupdate_max_shape_log_ratio == 0.40
     resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), Settings())
-    assert resolved.reupdate_max_shape_log_ratio == 0.0
+    assert resolved.reupdate_max_shape_log_ratio == 0.40
 
 
 def test_a_negative_deployment_shape_bound_is_a_legitimate_disabled_value():

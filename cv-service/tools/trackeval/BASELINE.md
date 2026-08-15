@@ -46,6 +46,18 @@ every pre-existing column in the table below is unchanged (verified: the fresh r
 regenerated it from reproduces all twenty-two prior columns exactly, `trk_ms_*` aside per this
 file's own noise convention below).
 
+**2026-08-15 -- ORU's bracket shape check enabled by default.** `CV_TRACK_REUPDATE_MAX_SHAPE_
+LOG_RATIO` now defaults to `0.40` instead of `0` (`cv_service/config.py`, swept in
+`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4d: -97 IDSW and +0.7pp recovery across 21 real
+MOT17 pairs, the first ORU configuration that beats not running ORU at all). **One row below moves as
+a direct, accepted consequence: `pan`/FOLLOW `implaus_n` 0 -> 8.** Everything else in that row --
+IDSW, FM, MT/PT/ML, lifetime, coast ADE/FDE -- is byte-identical, so what changed is the reported
+VELOCITY on eight coasted frames, not the tracked position. This is a DELIBERATE behaviour change
+recorded here, not drift: the table is re-recorded because the tracker genuinely changed, which is
+the one case this file's own guard exists to allow. Reverting is `CV_TRACK_REUPDATE_MAX_SHAPE_LOG_
+RATIO=0`, and finding O5 (`TRACKING-V3-PLAN.md` §6b) tracks resolving the FOLLOW-side cost once
+aerial footage makes FOLLOW measurable on real video at all.
+
 Reproduce with (see `cv-service/MODULE.md` for the full `PYTHONPATH` explanation):
 
 ```bash
@@ -84,7 +96,7 @@ nonlinear        | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 1  | 
 occlusion        | TRACKING_MODE_ASSOCIATE | cost   | 110    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 70.0      | 70.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
 occlusion        | TRACKING_MODE_FOLLOW    | lk     | 110    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 110.0     | 110.0    | 0.55  | ~0.6       | ~1         | 106     | 0.008 | 0.009 | 1.9     | 2.1     | 0        
 pan              | TRACKING_MODE_ASSOCIATE | cost   | 70     | 4  | 0    | 0  | 4  | 0  | 0  | 0    | 0     | n/a    | 24.8      | 26.0     | 10.00 | ~0.3       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-pan              | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 70.0      | 70.0     | 0.86  | ~0.3       | ~1         | 13      | 0.011 | 0.040 | 3.3     | 12.8    | 0        
+pan              | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 70.0      | 70.0     | 0.86  | ~0.3       | ~1         | 13      | 0.011 | 0.040 | 3.3     | 12.8    | 8        
 pan_occlusion    | TRACKING_MODE_ASSOCIATE | cost   | 90     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 65.0      | 65.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
 pan_occlusion    | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 87.0      | 87.0     | 0.78  | ~0.3       | ~1         | 84      | 0.260 | 0.328 | 83.3    | 104.8   | 0        
 pan_step         | TRACKING_MODE_ASSOCIATE | cost   | 90     | 2  | 0    | 2  | 2  | 0  | 0  | 2    | 2     | 100%   | 60.0      | 60.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
