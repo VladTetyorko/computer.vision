@@ -1,42 +1,38 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.CompId;
+import com.drones.mavlink.PeerId;
+import com.drones.mavlink.SysId;
+import com.drones.mavlink.service.CommandService;
+
 import com.drones.vision.flight.domain.model.CommandResult;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.flight.domain.model.FlightCapability;
 import com.drones.vision.flight.domain.port.FlightCommandPort;
 
-import io.dronefleet.mavlink.MavlinkConnection;
-import io.dronefleet.mavlink.common.CommandAck;
-import io.dronefleet.mavlink.common.CommandLong;
 import io.dronefleet.mavlink.common.MavCmd;
 import io.dronefleet.mavlink.common.MavResult;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.net.DatagramSocket;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * {@link FlightCommandPort} implementation sending guarded MAVLink 2 UDP commands to an aircraft
  * this platform is already ingesting telemetry from (docs/plans/active/DRONE-INFRA-PLAN.md I-e). Stage 1 opened
- * the RX-only doctrine for exactly one command, return-to-home; Stage 2 adds the two next
- * capability-gated command classes — arbitrary mode select ({@code MAV_CMD_DO_SET_MODE}) and
- * arm/disarm ({@code MAV_CMD_COMPONENT_ARM_DISARM}) — plus a {@link #capabilities(Device)} snapshot.
- * There is still no fully generic command surface (arbitrary opcodes, mission/fence upload) — those
- * are later stages (see {@link FlightCommandPort}'s own javadoc).
+ * the RX-only doctrine for exactly one command, return-to-home; Stage 2 added arbitrary mode select
+ * ({@code MAV_CMD_DO_SET_MODE}) and arm/disarm ({@code MAV_CMD_COMPONENT_ARM_DISARM}), plus a
+ * {@link #capabilities(Device)} snapshot. docs/plans/active/MAVLINK-CORE-PLAN.md W4 rewired the actual
+ * send/await machinery onto {@code mavlink-core}'s {@link CommandService} — every resolve/reject
+ * rule and every wire-level byte below is preserved exactly; only <i>how</i> a command physically
+ * gets sent and awaited changed.
  *
  * <h2>Resolving a vehicle to command</h2>
  * A device names a {@link MavlinkTelemetrySource} bind address ({@code udp://host:port}, plus an
  * optional pinned {@code sysid} option) — the exact same address its telemetry ingest uses. This
- * class shares {@code telemetrySource}'s own {@link MavlinkSocketHub} registry rather than
- * tracking anything of its own: {@link #supports(Device)} delegates straight to {@link
+ * class shares {@code telemetrySource}'s own {@link MavlinkGateway} registry rather than tracking
+ * anything of its own: {@link #supports(Device)} delegates straight to {@link
  * MavlinkTelemetrySource#supports(Device)} so the two can never disagree, and every command
  * resolves the device's <b>current claim</b> — sysid, firmware/mavType, and last-seen UDP source
  * address — via {@link MavlinkTelemetrySource#commandTarget}.
@@ -57,33 +53,30 @@ import java.util.concurrent.TimeoutException;
  * though Betaflight's own table happens to contain an RTL-named mode. A vehicle whose firmware is
  * unknown (no {@code HEARTBEAT} yet) or unrecognized (e.g. PX4 — out of scope) is rejected the same
  * way. INAV reports as commandable and its commands are honestly attempted: if the INAV RX ignores
- * them the call simply returns {@link CommandResult#NO_ACK}, exactly the Stage-1 RTL limitation,
- * documented rather than hidden.
+ * them the call simply returns {@link CommandResult#NO_ACK}, documented rather than hidden.
  *
- * <h2>Sending and awaiting acknowledgement</h2>
- * Every command is a {@code COMMAND_LONG} sent from this platform's own {@code sysid}/{@code compid}
- * ({@value #COMMANDER_SYSTEM_ID}/{@value #COMMANDER_COMPONENT_ID}) to the vehicle's autopilot
- * component ({@value #TARGET_COMPONENT_AUTOPILOT}), reusing {@code telemetrySource}'s own shared
- * {@link MavlinkSocketHub#socket()} rather than opening a second socket. The hub's read loop is the
- * only reader of that socket, so this class registers a one-shot waiter via {@link
- * MavlinkSocketHub#awaitAck} <em>before</em> sending, then blocks up to {@value #ACK_TIMEOUT_MILLIS}ms
- * for the matching {@code COMMAND_ACK}: {@code MAV_RESULT_ACCEPTED} → {@link CommandResult#ACCEPTED};
- * any other result → {@link IllegalStateException} naming it; no ack within the timeout → {@link
- * CommandResult#NO_ACK} (UDP is lossy in both directions; the command may still have landed).
+ * <h2>Sending and awaiting acknowledgement — now via {@link CommandService}</h2>
+ * Every command is a {@code COMMAND_LONG} sent from this platform's ground-station identity
+ * ({@code mavlink-core}'s {@code MavlinkNode.groundStation()}, sysid 255 / compid 190 — the same
+ * convention this class always used) to the vehicle's autopilot component ({@value
+ * #TARGET_COMPONENT_AUTOPILOT}). A fresh, stateless {@link CommandService} is built per call from
+ * the resolved device's gateway ({@link MavlinkGateway#sink()}/{@link MavlinkGateway#correlator()})
+ * with <b>zero retries</b> — deliberately, to preserve this class's pre-existing single-shot wire
+ * behaviour exactly (one {@code COMMAND_LONG}, {@code confirmation=0}, one wait up to the
+ * configured ack timeout, {@link CommandResult#NO_ACK} on silence). {@code MAV_RESULT_ACCEPTED} →
+ * {@link CommandResult#ACCEPTED}; any other terminal result → {@link IllegalStateException} naming
+ * it; no ack within the timeout → {@link CommandResult#NO_ACK} (UDP is lossy in both directions;
+ * the command may still have landed).
  *
  * <p>Plain class with no framework dependency — instantiated directly by {@code vision-app}'s
  * wiring configuration, given the same {@link MavlinkTelemetrySource} instance used for real
- * telemetry ingest (same pattern as {@link MavlinkHeartbeatScanner}), so it resolves claims
+ * telemetry ingest (same pattern as {@code MavlinkHeartbeatScanner}), so it resolves claims
  * against the gateway actually running, not a second one of its own.
  */
 public final class MavlinkFlightCommander implements FlightCommandPort {
 
     private static final System.Logger LOG = System.getLogger(MavlinkFlightCommander.class.getName());
 
-    /** {@code MAV_CMD_DO_SET_MODE}'s wire id (common dialect) — set system mode. */
-    private static final int MAV_CMD_DO_SET_MODE = 176;
-    /** {@code MAV_CMD_COMPONENT_ARM_DISARM}'s wire id (common dialect) — arm/disarm motors. */
-    private static final int MAV_CMD_COMPONENT_ARM_DISARM = 400;
     /** {@code MavModeFlag.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED}'s wire value — COMMAND_LONG param1 convention for DO_SET_MODE. */
     private static final float MODE_FLAG_CUSTOM_MODE_ENABLED = 1.0f;
     /** ARM_DISARM param1: 1 = arm, 0 = disarm. */
@@ -93,14 +86,19 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     private static final float ARM_DISARM_FORCE = 21196.0f;
     private static final float ARM_DISARM_NO_FORCE = 0.0f;
 
+    /**
+     * Zero -- {@link CommandService}'s own retry mechanism (silent resend with {@code confirmation}
+     * incremented) is deliberately not used here: this class's pre-existing, SITL-proven wire
+     * behaviour sends exactly one {@code COMMAND_LONG} and reports {@link CommandResult#NO_ACK} on
+     * silence, and W4's job is to preserve that byte-for-byte, not to adopt a new retry policy as a
+     * side effect of the library swap.
+     */
+    private static final int NO_RETRIES = 0;
+
     /** Default duration to wait for a {@code COMMAND_ACK} before reporting {@link CommandResult#NO_ACK}. */
     static final long ACK_TIMEOUT_MILLIS = 2_000L;
 
-    /** MAVLink's conventional ground-control-station system id. */
-    static final int COMMANDER_SYSTEM_ID = 255;
-    /** {@code MAV_COMP_ID_MISSIONPLANNER} — "a component that can generate/supply a flight plan (GCS or developer API)". */
-    static final int COMMANDER_COMPONENT_ID = 190;
-    /** {@code MAV_COMP_ID_AUTOPILOT1} — the conventional command target component. */
+    /** {@code MAV_COMP_ID_AUTOPILOT1} — the conventional command target component, and the component id this module's own claim policy assumes every vehicle's telemetry/acks come from (see {@link VehicleClaimPolicy}). */
     static final int TARGET_COMPONENT_AUTOPILOT = 1;
 
     private static final String FIRMWARE_ARDUPILOT = "ardupilot";
@@ -109,7 +107,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     private static final String RTL_MODE_NAME = "RTL";
 
     private final MavlinkTelemetrySource telemetrySource;
-    private final long ackTimeoutMillis;
+    private final Duration ackTimeout;
 
     public MavlinkFlightCommander(MavlinkTelemetrySource telemetrySource) {
         this(telemetrySource, Duration.ofMillis(ACK_TIMEOUT_MILLIS));
@@ -123,7 +121,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
      */
     public MavlinkFlightCommander(MavlinkTelemetrySource telemetrySource, Duration ackTimeout) {
         this.telemetrySource = Objects.requireNonNull(telemetrySource, "telemetrySource must not be null");
-        this.ackTimeoutMillis = Objects.requireNonNull(ackTimeout, "ackTimeout must not be null").toMillis();
+        this.ackTimeout = Objects.requireNonNull(ackTimeout, "ackTimeout must not be null");
     }
 
     @Override
@@ -136,15 +134,9 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
         Objects.requireNonNull(modeName, "modeName must not be null");
         ResolvedTarget resolved = resolveReachableTarget(device);
         int customMode = resolveCustomMode(resolved.target(), modeName);
-        CommandLong command = CommandLong.builder()
-                .targetSystem(resolved.target().sysid())
-                .targetComponent(TARGET_COMPONENT_AUTOPILOT)
-                .command(MavCmd.MAV_CMD_DO_SET_MODE)
-                .confirmation(0)
-                .param1(MODE_FLAG_CUSTOM_MODE_ENABLED)
-                .param2((float) customMode)
-                .build();
-        return send(resolved, MAV_CMD_DO_SET_MODE, command, "set-mode " + modeName);
+        return send(resolved, MavCmd.MAV_CMD_DO_SET_MODE,
+                MODE_FLAG_CUSTOM_MODE_ENABLED, (float) customMode, 0f, 0f, 0f, 0f, 0f,
+                "set-mode " + modeName);
     }
 
     @Override
@@ -167,15 +159,9 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     private CommandResult armOrDisarm(Device device, float armParam, boolean force, String verb) {
         ResolvedTarget resolved = resolveReachableTarget(device);
         requireCommandableFirmware(resolved.target());
-        CommandLong command = CommandLong.builder()
-                .targetSystem(resolved.target().sysid())
-                .targetComponent(TARGET_COMPONENT_AUTOPILOT)
-                .command(MavCmd.MAV_CMD_COMPONENT_ARM_DISARM)
-                .confirmation(0)
-                .param1(armParam)
-                .param2(force ? ARM_DISARM_FORCE : ARM_DISARM_NO_FORCE)
-                .build();
-        return send(resolved, MAV_CMD_COMPONENT_ARM_DISARM, command, force ? verb + " (forced)" : verb);
+        return send(resolved, MavCmd.MAV_CMD_COMPONENT_ARM_DISARM,
+                armParam, force ? ARM_DISARM_FORCE : ARM_DISARM_NO_FORCE, 0f, 0f, 0f, 0f, 0f,
+                force ? verb + " (forced)" : verb);
     }
 
     @Override
@@ -184,7 +170,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
             return FlightCapability.notCommandable();
         }
         String bindKey = telemetrySource.bindKeyFor(device);
-        MavlinkSocketHub.CommandTarget target = telemetrySource.commandTarget(bindKey, device.id());
+        MavlinkGateway.CommandTarget target = telemetrySource.commandTarget(bindKey, device.id());
         // No claim, never heard, or no firmware/ArduPilot family observed yet -> not commandable.
         // Betaflight ("generic") and any non-ArduPilot firmware fall through to notCommandable here
         // too; INAV masquerades as "ardupilot" and is (honestly, best-effort) reported commandable.
@@ -202,7 +188,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
             throw new IllegalArgumentException("MavlinkFlightCommander does not support device: " + device);
         }
         String bindKey = telemetrySource.bindKeyFor(device);
-        MavlinkSocketHub.CommandTarget target = telemetrySource.commandTarget(bindKey, device.id());
+        MavlinkGateway.CommandTarget target = telemetrySource.commandTarget(bindKey, device.id());
         if (target == null || target.sourceAddress() == null) {
             throw new IllegalArgumentException("No MAVLink vehicle has ever been heard for device " + device.id()
                     + " -- you cannot command what you cannot hear (Stage 1 reachability rule); make sure its "
@@ -212,7 +198,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     }
 
     /** @throws IllegalArgumentException per this class's own "Which firmwares are commandable" javadoc */
-    private static void requireCommandableFirmware(MavlinkSocketHub.CommandTarget target) {
+    private static void requireCommandableFirmware(MavlinkGateway.CommandTarget target) {
         String firmware = target.firmware();
         if (firmware == null) {
             throw new IllegalArgumentException("MAVLink sysid " + target.sysid()
@@ -230,7 +216,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     }
 
     /** @throws IllegalArgumentException if the firmware is not commandable, or {@code modeName} is unknown for it */
-    private static int resolveCustomMode(MavlinkSocketHub.CommandTarget target, String modeName) {
+    private static int resolveCustomMode(MavlinkGateway.CommandTarget target, String modeName) {
         requireCommandableFirmware(target);
         Integer customMode = FlightModes.customModeFor(FlightModes.AUTOPILOT_ARDUPILOTMEGA, target.mavType(), modeName);
         if (customMode == null) {
@@ -240,47 +226,47 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
         return customMode;
     }
 
-    private CommandResult send(ResolvedTarget resolved, int commandId, CommandLong command, String description) {
+    private CommandResult send(ResolvedTarget resolved, MavCmd command,
+                                float param1, float param2, float param3, float param4,
+                                float param5, float param6, float param7, String description) {
         String bindKey = resolved.bindKey();
-        MavlinkSocketHub.CommandTarget target = resolved.target();
-        DatagramSocket socket = telemetrySource.socket(bindKey);
-        if (socket == null) {
+        MavlinkGateway.CommandTarget target = resolved.target();
+        MavlinkGateway gateway = telemetrySource.gateway(bindKey);
+        if (gateway == null) {
             throw new IllegalArgumentException("MAVLink gateway for device's stream is no longer open");
         }
-        int sysid = target.sysid();
-        CompletableFuture<CommandAck> ackFuture = telemetrySource.awaitAck(bindKey, sysid, commandId);
-        try {
-            MavlinkConnection connection = MavlinkConnection.create(InputStream.nullInputStream(),
-                    new MavlinkUdpOutputStream(socket, target.sourceAddress().getAddress(), target.sourceAddress().getPort()));
-            connection.send2(COMMANDER_SYSTEM_ID, COMMANDER_COMPONENT_ID, command);
-            LOG.log(System.Logger.Level.INFO,
-                    () -> "Sent " + description + " to MAVLink sysid " + sysid + " at " + target.sourceAddress());
+        PeerId peerId = new PeerId(new SysId(target.sysid()), new CompId(TARGET_COMPONENT_AUTOPILOT));
+        CommandService commandService = new CommandService(gateway.sink(), gateway.correlator(), ackTimeout, NO_RETRIES);
 
-            CommandAck ack = ackFuture.get(ackTimeoutMillis, TimeUnit.MILLISECONDS);
-            MavResult result = ack.result().entry();
-            if (result == MavResult.MAV_RESULT_ACCEPTED) {
-                return CommandResult.ACCEPTED;
-            }
-            String resultName = result != null ? result.name() : ("unrecognized result " + ack.result().value());
-            LOG.log(System.Logger.Level.WARNING, "MAVLink sysid " + sysid + " refused " + description + ": " + resultName);
-            throw new IllegalStateException("Vehicle sysid " + sysid + " refused " + description + ": " + resultName);
-        } catch (TimeoutException e) {
-            LOG.log(System.Logger.Level.WARNING, "No COMMAND_ACK from MAVLink sysid " + sysid
-                    + " for " + description + " within " + ackTimeoutMillis + "ms");
-            return CommandResult.NO_ACK;
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to send " + description + " command to MAVLink sysid " + sysid, e);
+        LOG.log(System.Logger.Level.INFO,
+                () -> "Sending " + description + " to MAVLink sysid " + target.sysid() + " at " + target.sourceAddress());
+
+        CommandService.CommandOutcome outcome;
+        try {
+            outcome = commandService.sendLong(peerId, command, param1, param2, param3, param4, param5, param6, param7).get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while awaiting " + description + " acknowledgement", e);
         } catch (ExecutionException e) {
-            throw new IllegalStateException("Failed while awaiting " + description + " acknowledgement", e.getCause());
-        } finally {
-            telemetrySource.cancelAckWait(bindKey, sysid, commandId);
+            throw new IllegalStateException(
+                    "Failed to send " + description + " to MAVLink sysid " + target.sysid(), e.getCause());
         }
+
+        if (outcome.status() == CommandService.CommandOutcome.Status.ACCEPTED) {
+            return CommandResult.ACCEPTED;
+        }
+        if (outcome.status() == CommandService.CommandOutcome.Status.NO_ACK) {
+            LOG.log(System.Logger.Level.WARNING, "No COMMAND_ACK from MAVLink sysid " + target.sysid()
+                    + " for " + description + " within " + ackTimeout.toMillis() + "ms");
+            return CommandResult.NO_ACK;
+        }
+        MavResult result = outcome.mavResult();
+        String resultName = result != null ? result.name() : ("unrecognized result " + outcome.resultCode());
+        LOG.log(System.Logger.Level.WARNING, "MAVLink sysid " + target.sysid() + " refused " + description + ": " + resultName);
+        throw new IllegalStateException("Vehicle sysid " + target.sysid() + " refused " + description + ": " + resultName);
     }
 
     /** A device's resolved, reachable command target plus the bind key its gateway is under. */
-    private record ResolvedTarget(String bindKey, MavlinkSocketHub.CommandTarget target) {
+    private record ResolvedTarget(String bindKey, MavlinkGateway.CommandTarget target) {
     }
 }

@@ -1,21 +1,23 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.codec.FrameReader;
+import com.drones.mavlink.codec.MavFrame;
+import com.drones.mavlink.transport.ByteChunk;
+import com.drones.mavlink.transport.UdpListenLink;
+
 import com.drones.vision.perception.domain.model.FeedId;
 import com.drones.vision.perception.domain.model.FeedSpec;
 import com.drones.vision.kernel.StreamDescriptor;
 
-import io.dronefleet.mavlink.MavlinkConnection;
-import io.dronefleet.mavlink.MavlinkMessage;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.io.OutputStream;
 import java.net.DatagramSocket;
-import java.net.InetSocketAddress;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -179,19 +181,32 @@ class MavlinkFeedTransmitterTest {
         }
     }
 
-    /** Binds a raw receiver socket on {@code port}, starts the feed, and decodes its first message. */
+    /**
+     * Binds a raw receiver link on {@code port} with {@code mavlink-core}'s own {@link
+     * UdpListenLink}/{@link FrameReader}, starts the feed, and decodes its first message.
+     * docs/plans/active/MAVLINK-CORE-PLAN.md W4: migrated off the deleted {@code
+     * MavlinkUdpInputStream} test double onto the equivalent core primitives -- same assertion,
+     * same wire-level check, only the receiving scaffolding changed.
+     */
     private static int firstOriginSystemId(int port, FeedSpec spec, MavlinkFeedTransmitter transmitter, FeedId feedId)
             throws Exception {
-        try (DatagramSocket receiveSocket = new DatagramSocket(null)) {
-            receiveSocket.setReuseAddress(true);
-            receiveSocket.bind(new InetSocketAddress("127.0.0.1", port));
-
+        try (UdpListenLink receiveLink = new UdpListenLink("127.0.0.1", port)) {
             transmitter.start(feedId, spec);
 
-            MavlinkConnection connection = MavlinkConnection.create(
-                    new MavlinkUdpInputStream(receiveSocket), OutputStream.nullOutputStream());
-            MavlinkMessage<?> message = connection.next();
-            return message.getOriginSystemId();
+            FrameReader reader = new FrameReader(receiveLink);
+            AtomicReference<MavFrame> firstFrame = new AtomicReference<>();
+            long deadlineNanos = System.nanoTime() + Duration.ofSeconds(8).toNanos();
+            while (firstFrame.get() == null && System.nanoTime() < deadlineNanos) {
+                ByteChunk chunk = receiveLink.poll(Duration.ofSeconds(1));
+                if (chunk == null) {
+                    continue;
+                }
+                reader.offer(chunk, frame -> firstFrame.compareAndSet(null, frame));
+            }
+            if (firstFrame.get() == null) {
+                throw new AssertionError("expected a MAVLink message from the feed within 8s");
+            }
+            return firstFrame.get().header().system().value();
         }
     }
 

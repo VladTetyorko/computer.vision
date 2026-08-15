@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * docs/plans/active/DRONE-INFRA-PLAN.md I-a: multi-vehicle single-port ingest through {@link MavlinkSocketHub},
+ * docs/plans/active/DRONE-INFRA-PLAN.md I-a: multi-vehicle single-port ingest through {@link MavlinkGateway},
  * exercised end to end over real loopback UDP sockets — several {@link MavlinkFeedTransmitter}
  * feeds at distinct system ids, all pushed at ONE port, ingested by {@link MavlinkTelemetrySource}
  * devices that pin, don't pin, or never open at all.
@@ -115,7 +115,7 @@ class MavlinkFleetGatewayIntegrationTest {
 
             collector.awaitAtLeastPositionSamples(3, Duration.ofSeconds(20));
 
-            MavlinkSocketHub.UnclaimedVehicle strayVehicle = awaitUnclaimedWithFirmware(source, bindKey, 32, Duration.ofSeconds(20));
+            MavlinkGateway.UnclaimedVehicle strayVehicle = awaitUnclaimedWithFirmware(source, bindKey, 32, Duration.ofSeconds(20));
             assertEquals("ardupilot", strayVehicle.firmware());
             assertEquals(2, strayVehicle.mavType(), "MAV_TYPE_QUADROTOR"); // MavlinkFeedTransmitter always sends QUADROTOR
             assertTrue(source.unclaimedVehicles(bindKey).stream().noneMatch(v -> v.sysid() == 31),
@@ -215,11 +215,11 @@ class MavlinkFleetGatewayIntegrationTest {
         return (int) Math.floor(latitude / 10.0);
     }
 
-    private static MavlinkSocketHub.UnclaimedVehicle awaitUnclaimedWithFirmware(
+    private static MavlinkGateway.UnclaimedVehicle awaitUnclaimedWithFirmware(
             MavlinkTelemetrySource source, String bindKey, int sysid, Duration timeout) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeout.toMillis();
         while (System.currentTimeMillis() < deadline) {
-            for (MavlinkSocketHub.UnclaimedVehicle vehicle : source.unclaimedVehicles(bindKey)) {
+            for (MavlinkGateway.UnclaimedVehicle vehicle : source.unclaimedVehicles(bindKey)) {
                 if (vehicle.sysid() == sysid && vehicle.firmware() != null) {
                     return vehicle;
                 }

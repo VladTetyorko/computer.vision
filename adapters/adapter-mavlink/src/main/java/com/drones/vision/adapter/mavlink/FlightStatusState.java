@@ -62,7 +62,7 @@ final class FlightStatusState {
         failsafe = heartbeat.systemStatus().entry() == MavState.MAV_STATE_CRITICAL;
     }
 
-    /** Package-private (not {@code private}): reused by {@link MavlinkTelemetryDecoder#firmwareLabel} and {@link VehicleClaimRegistry}. */
+    /** Package-private (not {@code private}): reused by {@link MavlinkTelemetryDecoder#firmwareLabel} and {@link VehicleClaimPolicy}. */
     static String firmwareLabel(int autopilot) {
         if (autopilot == FlightModes.AUTOPILOT_ARDUPILOTMEGA) {
             return "ardupilot";

@@ -1,5 +1,10 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.CompId;
+import com.drones.mavlink.SysId;
+import com.drones.mavlink.codec.FrameWriter;
+import com.drones.mavlink.transport.UdpTargetLink;
+
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -8,13 +13,11 @@ import com.drones.vision.perception.domain.model.FeedSpec;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.Telemetry;
 
-import io.dronefleet.mavlink.MavlinkConnection;
 import io.dronefleet.mavlink.ardupilotmega.Wind;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.io.InputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -297,14 +300,19 @@ class MavlinkRoundTripIntegrationTest {
         }
     }
 
-    /** Sends one raw {@code WIND} (ardupilotmega dialect) datagram directly to {@code port}, bypassing {@link MavlinkFeedTransmitter} entirely. */
+    /**
+     * Sends one raw {@code WIND} (ardupilotmega dialect) datagram directly to {@code port},
+     * bypassing {@link MavlinkFeedTransmitter} entirely. docs/plans/active/MAVLINK-CORE-PLAN.md
+     * W4: migrated off the deleted {@code MavlinkUdpOutputStream} test double onto {@code
+     * mavlink-core}'s own {@link UdpTargetLink}/{@link FrameWriter} -- same wire content (a real
+     * {@code WIND} message, same sysid/compid), only the sending scaffolding changed.
+     */
     private static void sendRawWindDatagram(int port, int sysid) throws Exception {
-        try (DatagramSocket socket = new DatagramSocket()) {
-            InetAddress loopback = InetAddress.getByName("127.0.0.1");
-            MavlinkConnection connection = MavlinkConnection.create(
-                    InputStream.nullInputStream(), new MavlinkUdpOutputStream(socket, loopback, port));
+        try (UdpTargetLink link = new UdpTargetLink("127.0.0.1", port)) {
+            FrameWriter writer = new FrameWriter(new SysId(sysid), new CompId(MavlinkFeedTransmitter.MAV_COMPONENT_ID));
+            writer.addLink(link);
             Wind wind = Wind.builder().direction(275.5f).speed(6.2f).speedZ(0f).build();
-            connection.send2(sysid, MavlinkFeedTransmitter.MAV_COMPONENT_ID, wind);
+            writer.broadcast(wind, link.id());
         }
     }
 

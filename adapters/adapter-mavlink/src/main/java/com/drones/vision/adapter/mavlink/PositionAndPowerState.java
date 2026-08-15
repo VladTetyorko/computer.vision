@@ -13,7 +13,8 @@ import io.dronefleet.mavlink.common.GlobalPositionInt;
  * <p>Package-private mutable struct, not a record: every field starts {@code null} ("not yet
  * known") and is merged in place as messages arrive, exactly like the flat-field version this
  * replaces. One instance per {@link MavlinkTelemetryDecoder}, touched only from that decoder's own
- * caller thread (the owning {@code MavlinkSocketHub}'s single read thread) — no locking of its own.
+ * caller thread (the owning {@code MavlinkGateway}'s single dispatcher-callback thread) — no
+ * locking of its own.
  * Fields are package-private with no accessors: {@link MavlinkTelemetryDecoder} is this type's only
  * collaborator.
  */

@@ -43,6 +43,7 @@
     </properties>
 
     <modules>
+        <module>libs</module>
         <module>vision-kernel</module>
         <module>vision-platform</module>
         <module>contexts</module>
@@ -55,6 +56,13 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- Standalone reusable libraries (depend on no other module here) -->
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>mavlink-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
             <!-- Internal modules -->
             <dependency>
                 <groupId>com.drones</groupId>

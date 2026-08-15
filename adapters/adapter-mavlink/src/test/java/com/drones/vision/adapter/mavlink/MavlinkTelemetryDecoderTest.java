@@ -546,10 +546,12 @@ class MavlinkTelemetryDecoderTest {
      * only in the ardupilotmega dialect (unlike {@code VIBRATION}/{@code MISSION_CURRENT}, which are
      * plain {@code common} dialect and decode fine via {@link #encodeThenDecode} alone) needs this
      * priming to be resolvable at all on a brand-new connection. Production never needs this dance:
-     * {@link MavlinkSocketHub}/{@link MavlinkHeartbeatScanner} keep one long-lived {@code
-     * MavlinkConnection} open for as long as they run, and a real ArduPilot vehicle's own ~1Hz
-     * unsolicited {@code HEARTBEAT} stream teaches it the dialect once, for good -- see {@link
-     * MavlinkTelemetryDecoder}'s class javadoc and this module's {@code MODULE.md}.
+     * a real ArduPilot vehicle's own ~1Hz unsolicited {@code HEARTBEAT} stream teaches the
+     * receiving side the dialect once. docs/plans/active/MAVLINK-CORE-PLAN.md W4 moved that
+     * receiving side onto {@link MavlinkGateway}/{@code mavlink-core}'s own per-source dialect
+     * priming (see that library's {@code ResyncBuffer} Gotchas) rather than one long-lived {@code
+     * MavlinkConnection} per socket -- see {@link MavlinkTelemetryDecoder}'s class javadoc and
+     * this module's {@code MODULE.md} for the mechanism and its one known limitation.
      */
     private static MavlinkMessage<?> encodeThenDecodeAsArdupilotmega(int systemId, Object payload)
             throws IOException {

@@ -7,15 +7,13 @@ import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 
-import io.dronefleet.mavlink.common.CommandAck;
-
-import java.net.DatagramSocket;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
@@ -28,6 +26,11 @@ import java.util.concurrent.SubmissionPublisher;
  * {@link StreamDescriptor#protocol()} {@code "mavlink"} with a {@code udp://host:port} {@link
  * StreamDescriptor#uri()}.
  *
+ * <p>docs/plans/active/MAVLINK-CORE-PLAN.md W4: rebuilt onto {@code libs/mavlink-core} — the socket/
+ * read-thread/dispatch machinery this class used to reach through a hand-rolled {@code
+ * MavlinkSocketHub} now lives in {@code mavlink-core}'s L1-L3, wrapped per bind address by {@link
+ * MavlinkGateway}. This class's own public contract, and every field mapping, is unchanged.
+ *
  * <h2>{@code udp://host:port} means <b>listen</b>, not connect</h2>
  * A telemetry radio or SITL instance <b>pushes</b> datagrams to this app; this adapter never
  * dials out. {@code host} is the local bind address (blank/absent falls back to the wildcard
@@ -35,13 +38,13 @@ import java.util.concurrent.SubmissionPublisher;
  * sender's own address is irrelevant and never validated — any datagram arriving on the bound
  * port is read, which is exactly how multiple vehicles end up sharing one port.
  *
- * <h2>One socket, many vehicles ({@link MavlinkSocketHub})</h2>
+ * <h2>One socket, many vehicles ({@link MavlinkGateway})</h2>
  * Every {@link #open(Device)} call for the same bind address ({@code host:port}) shares one
- * {@link MavlinkSocketHub} — one {@code DatagramSocket}, one read thread, reference-counted
- * across every device registered against it; the socket closes once the last device sharing it
- * calls {@link #close(DeviceId)}. The hub demultiplexes incoming traffic by MAVLink system id
- * (see its own javadoc for why source-address demux was descoped) and routes each device only
- * the messages from the vehicle it claims:
+ * {@link MavlinkGateway} — one bound UDP link, one {@code mavlink-core} session,
+ * reference-counted across every device registered against it; the gateway closes once the last
+ * device sharing it calls {@link #close(DeviceId)}. The gateway demultiplexes incoming traffic by
+ * MAVLink system id (see its own javadoc for why source-address demux was descoped) and routes
+ * each device only the messages from the vehicle it claims:
  * <ul>
  *   <li>{@code StreamDescriptor.options[}{@value #OPTION_SYSID}{@code ]} — a positive integer
  *       1–255 <b>pins</b> this device to exactly that system id; missing/blank/malformed/
@@ -49,20 +52,24 @@ import java.util.concurrent.SubmissionPublisher;
  *       this module).</li>
  *   <li>An unpinned device claims the first system id heard on the socket that nothing else
  *       already claims, and may re-elect to a different (still-unclaimed) system id after its
- *       claimed vehicle has been silent for 30s — see {@link MavlinkSocketHub} for the exact
- *       claim/re-election rules.</li>
+ *       claimed vehicle has been silent for 30s — see {@link MavlinkGateway}/{@link
+ *       VehicleClaimPolicy} for the exact claim/re-election rules.</li>
  * </ul>
  * Vehicles heard but claimed by nobody are not silently dropped — see {@link
- * MavlinkSocketHub#unclaimedVehicles()} (docs/plans/active/DRONE-INFRA-PLAN.md I-b consumes this next).
+ * MavlinkGateway#unclaimedVehicles()} (consumed by {@code MavlinkHeartbeatScanner}).
+ *
+ * <h2>Bind failures are now synchronous</h2>
+ * {@code mavlink-core}'s {@code UdpListenLink} binds in its own constructor, so a bind conflict
+ * (the requested {@code host:port} is already held by something other than this adapter's own
+ * gateway) now surfaces synchronously as an {@link UncheckedIOException} from {@link
+ * #open(Device)} itself, rather than asynchronously via the returned publisher's {@code onError}
+ * as the pre-W4 hub's own lazily-binding background thread did. This is a deliberate, more honest
+ * behavior change — see this module's {@code MODULE.md} Gotchas.
  *
  * <h2>Robustness</h2>
- * Unparseable/garbage datagrams are never fatal — {@code MavlinkConnection#next()} itself scans
- * for the next valid frame-start marker and silently drops anything that fails to parse or fails
- * CRC (see {@link MavlinkUdpInputStream}'s javadoc for the full reasoning), so this adapter adds
- * no extra try/catch around individual reads for that case. The only exception path that reaches
- * a device's own publisher is a genuine {@link java.io.IOException} from the shared socket
- * itself — almost always the hub's own close unblocking the read thread, which is treated as a
- * graceful shutdown, not an error.
+ * Unparseable/garbage datagrams are never fatal — {@code mavlink-core}'s {@code FrameReader}
+ * silently resyncs past anything that fails to parse or fails CRC, so this adapter adds no extra
+ * try/catch around individual reads for that case.
  *
  * <p>Plain class with no framework dependency — instantiated directly by {@code vision-app}'s
  * wiring configuration.
@@ -80,7 +87,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
 
     private final String defaultBindHost;
     private final MavlinkSettings settings;
-    private final Map<String, MavlinkSocketHub> hubs = new ConcurrentHashMap<>();
+    private final Map<String, MavlinkGateway> gateways = new ConcurrentHashMap<>();
     private final Map<DeviceId, DeviceRuntime> runtimes = new ConcurrentHashMap<>();
 
     public MavlinkTelemetrySource() {
@@ -90,8 +97,8 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     /**
      * @param settings this module's {@code vision.mavlink.*} tunables (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      *                 wave F2) — supplies the local bind-host fallback, the unpinned re-election
-     *                 silence window, the shared hub's close-join timeout, and the bounded
-     *                 unclaimed-vehicle registry cap, all threaded into each {@link MavlinkSocketHub}
+     *                 silence window, the shared gateway's close-join timeout, and the bounded
+     *                 unclaimed-vehicle registry cap, all threaded into each {@link MavlinkGateway}
      *                 this instance creates.
      */
     public MavlinkTelemetrySource(MavlinkSettings settings) {
@@ -131,12 +138,10 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
 
         SubmissionPublisher<Telemetry> publisher = new SubmissionPublisher<>();
         VehicleRegistration[] registrationHolder = new VehicleRegistration[1];
-        hubs.compute(bindKey, (key, existing) -> {
-            MavlinkSocketHub hub = existing == null || existing.isClosed()
-                    ? new MavlinkSocketHub(host, port, settings)
-                    : existing;
-            registrationHolder[0] = hub.register(device.id(), pinnedSysid, publisher);
-            return hub;
+        gateways.compute(bindKey, (key, existing) -> {
+            MavlinkGateway gateway = existing == null || existing.isClosed() ? newGateway(host, port) : existing;
+            registrationHolder[0] = gateway.register(device.id(), pinnedSysid, publisher);
+            return gateway;
         });
 
         DeviceRuntime runtime = new DeviceRuntime(bindKey, registrationHolder[0]);
@@ -157,41 +162,41 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
 
     /**
      * Vehicles heard on the given bind address ({@code host:port}, see {@link #bindKey}) that no
-     * currently-open device claims — delegates to {@link MavlinkSocketHub#unclaimedVehicles()};
-     * empty when nothing has ever been opened on that address. Package-private: docs/
-     * DRONE-INFRA-PLAN.md I-b is the intended future consumer, once it exists.
+     * currently-open device claims — delegates to {@link MavlinkGateway#unclaimedVehicles()};
+     * empty when nothing has ever been opened on that address. Package-private: {@code
+     * MavlinkHeartbeatScanner} is the intended consumer.
      */
-    List<MavlinkSocketHub.UnclaimedVehicle> unclaimedVehicles(String bindKey) {
-        MavlinkSocketHub hub = hubs.get(bindKey);
-        return hub == null ? List.of() : hub.unclaimedVehicles();
+    List<MavlinkGateway.UnclaimedVehicle> unclaimedVehicles(String bindKey) {
+        MavlinkGateway gateway = gateways.get(bindKey);
+        return gateway == null ? List.of() : gateway.unclaimedVehicles();
     }
 
     /**
-     * Whether a hub for this bind address is currently active (i.e. some device has it open right
-     * now). docs/plans/active/DRONE-INFRA-PLAN.md I-b: lets {@code MavlinkHeartbeatScanner} borrow an already-
-     * running hub's socket instead of trying (and failing) to bind a port the gateway already owns.
+     * Whether a gateway for this bind address is currently active (i.e. some device has it open
+     * right now). Lets {@code MavlinkHeartbeatScanner} borrow an already-running gateway's socket
+     * instead of trying (and failing) to bind a port this adapter already owns.
      */
     boolean hasActiveHub(String bindKey) {
-        MavlinkSocketHub hub = hubs.get(bindKey);
-        return hub != null && !hub.isClosed();
+        MavlinkGateway gateway = gateways.get(bindKey);
+        return gateway != null && !gateway.isClosed();
     }
 
     /**
      * Vehicles currently claimed by an open device on the given bind address — delegates to {@link
-     * MavlinkSocketHub#claimedVehicles()}; empty when nothing is open on that address. Package-
-     * private, same "future consumer" shape as {@link #unclaimedVehicles}: docs/plans/active/DRONE-INFRA-PLAN.md
-     * I-b (`MavlinkHeartbeatScanner`) is the consumer.
+     * MavlinkGateway#claimedVehicles()}; empty when nothing is open on that address. Package-
+     * private, same "future consumer" shape as {@link #unclaimedVehicles}: {@code
+     * MavlinkHeartbeatScanner} is the consumer.
      */
-    List<MavlinkSocketHub.ClaimedVehicle> claimedVehicles(String bindKey) {
-        MavlinkSocketHub hub = hubs.get(bindKey);
-        return hub == null ? List.of() : hub.claimedVehicles();
+    List<MavlinkGateway.ClaimedVehicle> claimedVehicles(String bindKey) {
+        MavlinkGateway gateway = gateways.get(bindKey);
+        return gateway == null ? List.of() : gateway.claimedVehicles();
     }
 
     /**
      * The bind key ({@code host:port}) a supported device's {@code udp://host:port} stream
      * resolves to — the same key {@link #open}/{@link #close} use internally to find/create a
-     * {@link MavlinkSocketHub}. docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1: lets {@code
-     * MavlinkFlightCommander} address the same hub this device's telemetry uses, without
+     * {@link MavlinkGateway}. Lets {@code MavlinkFlightCommander}/{@code
+     * MavlinkManualControlSender} address the same gateway this device's telemetry uses, without
      * duplicating the host-defaulting logic. Callers must have already confirmed {@link
      * #supports(Device)} — this assumes a non-null URI with a port, exactly like {@link #open}.
      */
@@ -201,55 +206,43 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     }
 
     /**
-     * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1: {@code deviceId}'s current command-TX coordinates on
-     * the hub for {@code bindKey}, or {@code null} if no hub is active for that address or the
-     * device holds no claim on it right now — delegates to {@link MavlinkSocketHub#commandTarget}.
+     * {@code deviceId}'s current command-TX coordinates on the gateway for {@code bindKey}, or
+     * {@code null} if no gateway is active for that address or the device holds no claim on it
+     * right now — delegates to {@link MavlinkGateway#commandTarget}.
      */
-    MavlinkSocketHub.CommandTarget commandTarget(String bindKey, DeviceId deviceId) {
-        MavlinkSocketHub hub = hubs.get(bindKey);
-        return hub == null ? null : hub.commandTarget(deviceId);
+    MavlinkGateway.CommandTarget commandTarget(String bindKey, DeviceId deviceId) {
+        MavlinkGateway gateway = gateways.get(bindKey);
+        return gateway == null ? null : gateway.commandTarget(deviceId);
     }
 
     /**
-     * The shared socket for {@code bindKey}'s hub, so a command sender can push a reply through
-     * the same socket that receives that hub's traffic instead of opening a second one
-     * (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1). {@code null} if no active hub.
+     * The gateway backing {@code bindKey}, so a TX port class ({@code MavlinkFlightCommander},
+     * {@code MavlinkManualControlSender}) can reach its {@code FrameSink}/{@code Correlator}/
+     * {@code PeerDirectory} directly and build a {@code mavlink-core} service on top of them —
+     * docs/plans/active/MAVLINK-CORE-PLAN.md W4 replaces the five separate transport/correlation
+     * pass-throughs this class used to offer ({@code socket}, {@code awaitAck}, {@code
+     * cancelAckWait}) with this one real collaborator. {@code null} if no gateway is active for
+     * that address.
      */
-    DatagramSocket socket(String bindKey) {
-        MavlinkSocketHub hub = hubs.get(bindKey);
-        return hub == null ? null : hub.socket();
+    MavlinkGateway gateway(String bindKey) {
+        return gateways.get(bindKey);
     }
 
-    /**
-     * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1: registers interest in the next {@code COMMAND_ACK}
-     * matching {@code sysid}/{@code commandId} on {@code bindKey}'s hub — delegates to {@link
-     * MavlinkSocketHub#awaitAck}. Returns an already-failed future (never {@code null}) if no hub
-     * is active for that address, so callers can treat both cases uniformly.
-     */
-    CompletableFuture<CommandAck> awaitAck(String bindKey, int sysid, int commandId) {
-        MavlinkSocketHub hub = hubs.get(bindKey);
-        if (hub == null) {
-            return CompletableFuture.failedFuture(
-                    new IllegalStateException("No active MAVLink gateway for " + bindKey));
-        }
-        return hub.awaitAck(sysid, commandId);
-    }
-
-    /** docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1: releases a waiter registered via {@link #awaitAck}, idempotent. */
-    void cancelAckWait(String bindKey, int sysid, int commandId) {
-        MavlinkSocketHub hub = hubs.get(bindKey);
-        if (hub != null) {
-            hub.cancelAckWait(sysid, commandId);
+    private MavlinkGateway newGateway(String host, int port) {
+        try {
+            return new MavlinkGateway(host, port, settings);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to bind MAVLink gateway on udp://" + host + ":" + port, e);
         }
     }
 
     private void closeRuntime(DeviceRuntime runtime) {
-        hubs.compute(runtime.bindKey(), (key, hub) -> {
-            if (hub == null) {
+        gateways.compute(runtime.bindKey(), (key, gateway) -> {
+            if (gateway == null) {
                 return null;
             }
-            boolean hubNowEmpty = hub.unregister(runtime.registration());
-            return hubNowEmpty ? null : hub;
+            boolean gatewayNowEmpty = gateway.unregister(runtime.registration());
+            return gatewayNowEmpty ? null : gateway;
         });
     }
 
@@ -258,7 +251,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         return host == null || host.isBlank() ? defaultBindHost : host;
     }
 
-    /** The key {@link MavlinkSocketHub}s are shared under: one hub per distinct bind address. */
+    /** The key {@link MavlinkGateway}s are shared under: one gateway per distinct bind address. */
     static String bindKey(String host, int port) {
         return host + ":" + port;
     }
@@ -277,7 +270,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         }
     }
 
-    /** This device's share of a {@link MavlinkSocketHub}: which hub, and its registration within it. */
+    /** This device's share of a {@link MavlinkGateway}: which gateway, and its registration within it. */
     private record DeviceRuntime(String bindKey, VehicleRegistration registration) {
     }
 }

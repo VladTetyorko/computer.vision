@@ -1,5 +1,12 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.CompId;
+import com.drones.mavlink.SysId;
+import com.drones.mavlink.codec.FrameReader;
+import com.drones.mavlink.codec.FrameWriter;
+import com.drones.mavlink.transport.ByteChunk;
+import com.drones.mavlink.transport.UdpTargetLink;
+
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.flight.domain.model.CommandResult;
 import com.drones.vision.warehouse.domain.model.Device;
@@ -7,8 +14,6 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.flight.domain.model.FlightCapability;
 import com.drones.vision.kernel.StreamDescriptor;
 
-import io.dronefleet.mavlink.MavlinkConnection;
-import io.dronefleet.mavlink.MavlinkMessage;
 import io.dronefleet.mavlink.common.CommandAck;
 import io.dronefleet.mavlink.common.CommandLong;
 import io.dronefleet.mavlink.common.MavCmd;
@@ -24,8 +29,6 @@ import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
 import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
@@ -45,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 /**
  * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1: {@link MavlinkFlightCommander} exercised over real
  * loopback UDP against a {@link FakeVehicle} test double that speaks just enough MAVLink to stand
- * in for a real ArduPilot/Betaflight aircraft — heartbeats first (so {@link MavlinkSocketHub}
+ * in for a real ArduPilot/Betaflight aircraft — heartbeats first (so {@link MavlinkGateway}
  * claims and labels it, exactly like a real vehicle), then either decodes and answers the
  * {@code COMMAND_LONG} the commander sends, or deliberately doesn't.
  */
@@ -660,7 +663,7 @@ class MavlinkFlightCommanderTest {
                                                   String expectedFirmware, Duration timeout) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeout.toMillis();
         while (System.currentTimeMillis() < deadline) {
-            MavlinkSocketHub.CommandTarget target = source.commandTarget(bindKey, deviceId);
+            MavlinkGateway.CommandTarget target = source.commandTarget(bindKey, deviceId);
             if (target != null && expectedFirmware.equals(target.firmware())) {
                 return;
             }
@@ -678,36 +681,45 @@ class MavlinkFlightCommanderTest {
 
     /**
      * A minimal fake aircraft: heartbeats continuously (~5Hz, like a real feed transmitter or
-     * SITL instance) from the moment it starts, so {@link MavlinkSocketHub} claims and labels it
+     * SITL instance) from the moment it starts, so {@link MavlinkGateway} claims and labels it
      * exactly like a real vehicle regardless of exactly when the gateway's socket happens to bind
      * relative to this test double starting — a single, one-shot heartbeat would race that bind
      * and could be lost on plain UDP with nothing to retry it. Can then either decode the {@code
      * COMMAND_LONG} a {@link MavlinkFlightCommander} sends back, or ignore it, per test scenario.
+     *
+     * <p>docs/plans/active/MAVLINK-CORE-PLAN.md W4: migrated off the deleted {@code
+     * MavlinkUdpInputStream}/{@code MavlinkUdpOutputStream} test doubles onto {@code
+     * mavlink-core}'s own {@link UdpTargetLink} (bidirectional — this fake vehicle both sends
+     * heartbeats/acks and receives the commander's {@code COMMAND_LONG}s on the one ephemeral
+     * local port it opens) plus {@link FrameWriter}/{@link FrameReader}. Every assertion this
+     * class's callers make is unchanged; {@link FrameWriter#broadcast} is already internally
+     * synchronized per link, so the old explicit {@code writeLock} guarding concurrent
+     * heartbeat/ack sends is no longer needed.
      */
     private static final class FakeVehicle implements AutoCloseable {
         private static final long HEARTBEAT_PERIOD_MILLIS = 200L;
 
-        private final DatagramSocket socket;
-        private final MavlinkConnection connection;
+        private final UdpTargetLink link;
+        private final FrameWriter writer;
+        private final FrameReader reader;
         private final int sysid;
-        private final Object writeLock = new Object();
         private final AtomicBoolean stopped = new AtomicBoolean(false);
         private final Thread heartbeatThread;
 
-        private FakeVehicle(DatagramSocket socket, MavlinkConnection connection, int sysid,
-                             MavAutopilot autopilot, MavType mavType) {
-            this.socket = socket;
-            this.connection = connection;
+        private FakeVehicle(UdpTargetLink link, FrameWriter writer, int sysid, MavAutopilot autopilot, MavType mavType) {
+            this.link = link;
+            this.writer = writer;
+            this.reader = new FrameReader(link);
             this.sysid = sysid;
             this.heartbeatThread = new Thread(() -> heartbeatLoop(autopilot, mavType), "fake-vehicle-heartbeat-" + sysid);
             this.heartbeatThread.setDaemon(true);
         }
 
         static FakeVehicle start(int gatewayPort, int sysid, MavAutopilot autopilot, MavType mavType) throws IOException {
-            DatagramSocket socket = new DatagramSocket(0);
-            MavlinkConnection connection = MavlinkConnection.create(new MavlinkUdpInputStream(socket),
-                    new MavlinkUdpOutputStream(socket, InetAddress.getByName("127.0.0.1"), gatewayPort));
-            FakeVehicle vehicle = new FakeVehicle(socket, connection, sysid, autopilot, mavType);
+            UdpTargetLink link = new UdpTargetLink("127.0.0.1", gatewayPort);
+            FrameWriter writer = new FrameWriter(new SysId(sysid), new CompId(1));
+            writer.addLink(link);
+            FakeVehicle vehicle = new FakeVehicle(link, writer, sysid, autopilot, mavType);
             vehicle.heartbeatThread.start();
             return vehicle;
         }
@@ -717,16 +729,16 @@ class MavlinkFlightCommanderTest {
                 try {
                     sendHeartbeat(autopilot, mavType);
                     Thread.sleep(HEARTBEAT_PERIOD_MILLIS);
-                } catch (IOException e) {
-                    return; // socket closing (or closed) -- stop quietly, see close()
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return;
+                } catch (RuntimeException e) {
+                    return; // link closing (or closed) -- stop quietly, see close()
                 }
             }
         }
 
-        private void sendHeartbeat(MavAutopilot autopilot, MavType mavType) throws IOException {
+        private void sendHeartbeat(MavAutopilot autopilot, MavType mavType) {
             Heartbeat heartbeat = Heartbeat.builder()
                     .type(mavType)
                     .autopilot(autopilot)
@@ -735,52 +747,51 @@ class MavlinkFlightCommanderTest {
                     .systemStatus(MavState.MAV_STATE_ACTIVE)
                     .mavlinkVersion(3)
                     .build();
-            synchronized (writeLock) {
-                connection.send2(sysid, 1, heartbeat);
-            }
+            writer.broadcast(heartbeat, link.id());
         }
 
         /** Blocks (bounded by {@code timeout}) until a {@code COMMAND_LONG} arrives, skipping anything else. */
         CommandLong awaitCommandLong(Duration timeout) throws IOException {
             long deadlineNanos = System.nanoTime() + timeout.toNanos();
-            while (true) {
+            AtomicReference<CommandLong> found = new AtomicReference<>();
+            while (found.get() == null) {
                 long remainingMillis = (deadlineNanos - System.nanoTime()) / 1_000_000L;
                 if (remainingMillis <= 0) {
                     break;
                 }
-                socket.setSoTimeout((int) Math.min(remainingMillis, Integer.MAX_VALUE));
-                try {
-                    MavlinkMessage<?> message = connection.next();
-                    if (message.getPayload() instanceof CommandLong commandLong) {
-                        return commandLong;
-                    }
-                } catch (SocketTimeoutException e) {
-                    break;
+                ByteChunk chunk = link.poll(Duration.ofMillis(remainingMillis));
+                if (chunk == null) {
+                    continue;
                 }
+                reader.offer(chunk, frame -> {
+                    if (frame.is(CommandLong.class)) {
+                        found.compareAndSet(null, frame.as(CommandLong.class));
+                    }
+                });
             }
-            throw new AssertionError("expected a COMMAND_LONG within " + timeout);
+            if (found.get() == null) {
+                throw new AssertionError("expected a COMMAND_LONG within " + timeout);
+            }
+            return found.get();
         }
 
-        /** Guarded by {@link #writeLock} against the concurrently-running heartbeat thread's own writes. */
-        void replyAck(MavResult result) throws IOException {
+        void replyAck(MavResult result) {
             replyAck(MavCmd.MAV_CMD_DO_SET_MODE, result);
         }
 
         /** Acknowledges a specific command (DO_SET_MODE vs COMPONENT_ARM_DISARM). */
-        void replyAck(MavCmd command, MavResult result) throws IOException {
+        void replyAck(MavCmd command, MavResult result) {
             CommandAck ack = CommandAck.builder()
                     .command(command)
                     .result(result)
                     .build();
-            synchronized (writeLock) {
-                connection.send2(sysid, 1, ack);
-            }
+            writer.broadcast(ack, link.id());
         }
 
         @Override
         public void close() {
             stopped.set(true);
-            socket.close();
+            link.close();
             try {
                 heartbeatThread.join(Duration.ofSeconds(2).toMillis());
             } catch (InterruptedException e) {
