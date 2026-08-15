@@ -10,17 +10,17 @@
 # Java build output — but the root Dockerfile copies the fat jar OUT of it, so that
 # one path is re-included. Order matters: the later rule wins.
 **/target
-!vision-app/target/vision-app-*.jar
+!station/vision-app/target/vision-app-*.jar
 
 # Frontend: the jar already contains the built SPA (frontend-maven-plugin), so no
 # image ever needs the sources or the toolchain.
 **/node_modules
-vision-web/dist
-vision-web/.angular
+station/vision-web/dist
+station/vision-web/.angular
 
 # Python: the cv-service image builds its own environment with pip, and downloads
 # its own yolo11n weights. A host venv in the context is pure freight.
-cv-service/.venv
+cv/cv-service/.venv
 **/__pycache__
 **/*.egg-info
 **/.pytest_cache
@@ -28,10 +28,10 @@ cv-service/.venv
 
 # CV working data: training runs, datasets, and throwaway spikes/demos are developer
 # artifacts, never image content.
-cv-service/runs
-cv-service/datasets
-cv-service/spikes
-cv-service/demo
+cv/cv-service/runs
+cv/cv-service/datasets
+cv/cv-service/spikes
+cv/cv-service/demo
 
 # Repo furniture no Dockerfile copies.
 .git

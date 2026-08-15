@@ -34,7 +34,7 @@ jobs:
         run: pip install grpcio-tools protobuf
 
       - name: Generate protobuf/gRPC stubs
-        run: bash cv-service/scripts/gen_proto.sh
+        run: bash cv/cv-service/scripts/gen_proto.sh
 
       - name: Compile-check cv_service sources
-        run: python -m compileall cv-service/cv_service
+        run: python -m compileall cv/cv-service/cv_service

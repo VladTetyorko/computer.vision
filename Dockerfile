@@ -11,15 +11,15 @@
 #   docker build -t vision-app .
 #   docker run --rm -p 8080:8080 vision-app
 #
-# Context is the repo root because the jar lives under vision-app/target/,
-# one level below where a Dockerfile scoped to just vision-app/ could reach.
+# Context is the repo root because the jar lives under station/vision-app/target/,
+# one level below where a Dockerfile scoped to just station/vision-app/ could reach.
 FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
 # Wildcard match: the pom pins the version (0.0.1-SNAPSHOT today) but this
 # avoids having to edit this file on every version bump.
-COPY vision-app/target/vision-app-*.jar app.jar
+COPY station/vision-app/target/vision-app-*.jar app.jar
 
 EXPOSE 8080
 

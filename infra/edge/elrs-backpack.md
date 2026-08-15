@@ -81,4 +81,4 @@ below 333Hz Full for this use case.
   throughput numbers.
 - `docs/plans/active/DRONE-INFRA-PLAN.md` I-d (recipe scope/costing) and `docs/plans/done/FC-INTEGRATIONS-PLAN.md`
   (this platform's MAVLink decode set, firmware detection).
-- `adapters/adapter-mavlink/MODULE.md` (this platform's listen-not-connect ingest model).
+- `drone-link/mavlink/MODULE.md` (this platform's listen-not-connect ingest model).

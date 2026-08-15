@@ -43,20 +43,20 @@ free it, or use a USB-serial adapter (`/dev/ttyUSB0`) instead and skip the confi
    (`docker-compose.yml`'s `mediamtx` service, port `8554` RTSP in / `18888` HLS out /
    `18889` WHEP out); wire up an `rtsp`-protocol device pointed at
    `rtsp://<mediamtx-host>:8554/feed-<name>` the same way any RTSP source is registered
-   (`adapters/adapter-rtsp/MODULE.md`) to bring it into the asset/stream model.
+   (`video-input/rtsp/MODULE.md`) to bring it into the asset/stream model.
 
 ## Config files provided here
 
 - `mavlink-router/main.conf` — `[UartEndpoint fc]` (serial ↔ flight controller) +
   `[UdpEndpoint platform]` (`Mode = Normal`, i.e. mavlink-router actively pushes to the
   platform — matches this platform's listen-not-connect ingest model, see
-  `adapters/adapter-mavlink/MODULE.md`). Syntax verified against mavlink-router's own
+  `drone-link/mavlink/MODULE.md`). Syntax verified against mavlink-router's own
   `examples/config.sample` and ArduPilot's published companion-computer reference config.
 - `systemd/mavlink-router.service` — runs the above config as a service (skip if your OS
   image's `mavlink-router` package already ships an equivalent unit).
 - `systemd/vision-rtsp-push.service` — `ffmpeg` pushing the companion's camera to mediamtx's
   RTSP ingest, encoding profile mirrored from this platform's own publisher
-  (`adapters/adapter-publish-hls/MODULE.md`: veryfast preset, `tune=zerolatency`, 1s GOP to
+  (`video-output/publish-hls/MODULE.md`: veryfast preset, `tune=zerolatency`, 1s GOP to
   match mediamtx's pinned 1s HLS segment duration), bitrate capped for LTE-class uplinks.
 
 ## Bandwidth guidance (LTE/WiFi)
@@ -89,6 +89,6 @@ full rate.
   real-world companion-computer config shape this file follows.
 - `docker-compose.yml` (this repo) — mediamtx's `8554:8554` RTSP port mapping, `MTX_HLS*`
   pinned settings.
-- `adapters/adapter-publish-hls/MODULE.md` — this platform's own RTSP→mediamtx encoding
+- `video-output/publish-hls/MODULE.md` — this platform's own RTSP→mediamtx encoding
   profile, mirrored here for the companion-side push.
 - `docs/plans/active/DRONE-INFRA-PLAN.md` I-d (recipe scope/costing).

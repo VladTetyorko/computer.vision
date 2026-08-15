@@ -5,7 +5,7 @@ description: Create or refresh MODULE.md context files for the vision project's 
 
 # Module context docs (MODULE.md)
 
-Every Maven module (and `cv-service/`) carries a `MODULE.md` at its root: a compact, current snapshot of what the module exposes, so that agents and humans get full working context WITHOUT re-reading sources.
+Every Maven module (and `cv/cv-service/`) carries a `MODULE.md` at its root: a compact, current snapshot of what the module exposes, so that agents and humans get full working context WITHOUT re-reading sources.
 
 ## Rules
 

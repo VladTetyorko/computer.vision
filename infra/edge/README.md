@@ -4,7 +4,7 @@ Three costed, tested recipes for getting a real aircraft's MAVLink telemetry (an
 recipe, video) onto this platform. Every recipe converges on the same wire contract the
 platform already listens on: **MAVLink 2 over UDP, pushed to `udp://<platform-host>:14550`**
 (the platform binds/listens, the link hardware always pushes — see
-`adapters/adapter-mavlink/MODULE.md`, "udp://host:port means listen, not connect"). Register the
+`drone-link/mavlink/MODULE.md`, "udp://host:port means listen, not connect"). Register the
 resulting feed the same way regardless of which recipe produced it: `POST /api/devices` with
 `protocol: "mavlink"`, `uri: "udp://0.0.0.0:14550"`, `capabilities: ["TELEMETRY"]` (or use the
 onboarding wizard's discovery flow once `docs/plans/active/DRONE-INFRA-PLAN.md` I-b lands).

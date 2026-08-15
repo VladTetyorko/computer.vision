@@ -107,8 +107,8 @@ for i in $(seq 1 60); do
 done
 
 say "starting cv-service (host venv)"
-[ -x cv-service/.venv/bin/python ] || die "cv-service/.venv is missing — run: cd cv-service && python3 -m venv .venv && .venv/bin/pip install -e '.[cv]'"
-( cd cv-service && nohup .venv/bin/python -m cv_service.grpc.server >"$LOGS/cv-service.log" 2>&1 & echo $! >"$LOGS/cv-service.pid" )
+[ -x cv/cv-service/.venv/bin/python ] || die "cv/cv-service/.venv is missing — run: cd cv/cv-service && python3 -m venv .venv && .venv/bin/pip install -e '.[cv]'"
+( cd cv/cv-service && nohup .venv/bin/python -m cv_service.grpc.server >"$LOGS/cv-service.log" 2>&1 & echo $! >"$LOGS/cv-service.pid" )
 
 say "waiting for cv-service on :50051 (loads + warms the model first, ~30-60s)"
 await 50051 120 "cv-service"
@@ -116,21 +116,21 @@ await 50051 120 "cv-service"
 # The jar carries the built Angular SPA, so it is stale the moment any tracked source
 # is newer than it. find -newer asks that directly; sorting `ls -t` over `git ls-files`
 # does not (xargs batches, so it sorts per batch and lies for a repo this size).
-JAR=$(ls -t vision-app/target/vision-app-*.jar 2>/dev/null | head -1 || true)
+JAR=$(ls -t station/vision-app/target/vision-app-*.jar 2>/dev/null | head -1 || true)
 if [ -z "$JAR" ]; then
   say "no jar yet — building (a few minutes, includes the Angular SPA)"
   ./mvnw -B package -DskipTests || die "maven build failed"
-  JAR=$(ls -t vision-app/target/vision-app-*.jar | head -1)
+  JAR=$(ls -t station/vision-app/target/vision-app-*.jar | head -1)
 else
   STALE=$(find . -newer "$JAR" -type f \
             \( -name '*.java' -o -name '*.ts' -o -name '*.html' -o -name '*.css' \
                -o -name '*.yaml' -o -name '*.properties' -o -name 'pom.xml' \) \
             -not -path './.git/*' -not -path '*/target/*' -not -path '*/node_modules/*' \
-            -not -path './cv-service/*' -print -quit 2>/dev/null || true)
+            -not -path './cv/cv-service/*' -print -quit 2>/dev/null || true)
   if [ -n "$STALE" ]; then
     say "jar is older than $STALE — rebuilding (a few minutes, includes the Angular SPA)"
     ./mvnw -B package -DskipTests || die "maven build failed"
-    JAR=$(ls -t vision-app/target/vision-app-*.jar | head -1)
+    JAR=$(ls -t station/vision-app/target/vision-app-*.jar | head -1)
   else
     say "reusing $JAR (no source newer than it)"
   fi

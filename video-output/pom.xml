@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.drones</groupId>
+        <artifactId>vision</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>video-output</artifactId>
+    <packaging>pom</packaging>
+    <name>video-output</name>
+    <description>Aggregator for the egress adapters — how pixels get out (mediamtx publishing, overlay burn-in).</description>
+
+    <modules>
+        <module>publish-hls</module>
+        <module>overlay</module>
+    </modules>
+
+</project>

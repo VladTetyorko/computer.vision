@@ -58,10 +58,10 @@ The CV service is **replaceable**: the core only sees a `DetectionPort`. Later a
 
 ```
 vision/                                  (parent pom, dependency management)
-├── vision-kernel/                       Shared kernel: ids + pure value objects. Depends on nothing
-│                                        but java.base. Universal — every bounded context may use it.
-├── vision-platform/                     Cross-cutting seams every context writes to: events, audit
-│                                        trail, visibility scope. Depends only on vision-kernel.
+├── core/                                Shared foundation. Every other module may depend on it.
+│   ├── vision-kernel/                   ids + pure value objects. Depends on nothing but java.base.
+│   └── vision-platform/                 Cross-cutting seams: events, audit trail, visibility scope.
+│                                        Depends only on vision-kernel.
 ├── contexts/                             One Maven module per bounded context. Each holds BOTH its domain
 │   │                                     layer (`<ctx>.domain.model` / `.port`, NO framework deps) and its
 │   │                                     application layer (`<ctx>.application.*` services) — the package
@@ -87,36 +87,56 @@ vision/                                  (parent pom, dependency management)
 │   └── vision-simulation/                Synthetic flight-plan/telemetry simulation orchestration.
 │                                         + warehouse, perception
 │
-├── adapters/
-│   ├── adapter-rtsp/                    RTSP/RTP ingest (IP cams, some drones) — JavaCV/FFmpeg
-│   ├── adapter-mjpeg/                   HTTP-MJPEG ingest (ESP32-CAM) + ESP32 control API client
-│   ├── adapter-usb/                     UVC/V4L2 capture (webcams, analog FPV via capture dongle)
-│   ├── adapter-webrtc/                  WebRTC ingest + egress (robots, browsers)
-│   ├── adapter-udp-raw/                 Raw H.264/H.265 over UDP/RTP (DIY drone links)
-│   ├── adapter-mavlink/                 MAVLink telemetry (GPS, attitude, battery) → TelemetrySourcePort
-│   ├── adapter-onvif/                   ONVIF discovery + PTZ control
-│   ├── adapter-cv-grpc/                 gRPC client → Python CV service (implements DetectionPort,
-│   │                                    ModelRegistryPort). Owns the .proto contract.
-│   ├── adapter-overlay/                 Frame annotation: boxes, labels, confidence, OSD telemetry
-│   │                                    (Java2D/JavaCV) — implements OverlayPort
-│   ├── adapter-publish-hls/             HLS/LL-HLS egress for browser viewing
-│   ├── adapter-recording/               Segmented MP4 recording, retention policy
-│   ├── adapter-persistence/             JPA/Postgres: devices, detections, events
-│   └── adapter-notify/                  Webhook / MQTT / Telegram alert publishers
+│                                        Below: driven adapters, grouped by RESPONSIBILITY, not by
+│                                        pattern (docs/plans/active/MODULE-LAYOUT-PROPOSAL.md). The
+│                                        artifactId of each is unchanged and shown in [brackets];
+│                                        "(planned)" entries are design intent, not code that exists.
+├── video-input/                         How pixels get in
+│   ├── rtsp/                            RTSP/RTP ingest (IP cams, some drones) — JavaCV/FFmpeg [adapter-rtsp]
+│   ├── mjpeg/                           HTTP-MJPEG ingest (ESP32-CAM) + ESP32 control API client [adapter-mjpeg]
+│   ├── v4l2/                            UVC/V4L2 capture (webcams, analog FPV via dongle) [adapter-v4l2]
+│   ├── (planned) webrtc/                WebRTC ingest + egress (robots, browsers)
+│   └── (planned) udp-raw/               Raw H.264/H.265 over UDP/RTP (DIY drone links)
 │
-├── vision-api/                          Driving adapters: REST + WebSocket (control plane,
-│   │                                    live detection feed, device management)
-│   └── openapi.yaml                     Contract-first REST spec
+├── video-output/                        How pixels get out
+│   ├── publish-hls/                     H.264 RTSP push → mediamtx, HLS/LL-HLS viewing [adapter-publish-hls]
+│   ├── overlay/                         Frame annotation: boxes, labels, confidence, OSD telemetry
+│   │                                    (Java2D/JavaCV) — implements OverlayPort [adapter-overlay]
+│   └── (planned) recording/             Segmented MP4 recording, retention policy
 │
-├── vision-app/                          Spring Boot assembly: wiring, config, profiles.
-│                                        The ONLY module that knows about all adapters.
+├── drone-link/                          How we talk to aircraft: commands out, telemetry/acks/RC in.
+│   ├── mavlink-core/                    Reusable, framework-free MAVLink library — transport → codec →
+│   │                                    session → service. Zero project dependencies by design.
+│   ├── mavlink/                         MAVLink telemetry (GPS, attitude, battery) → TelemetrySourcePort,
+│   │                                    plus RC override TX [adapter-mavlink]
+│   └── (planned) crsf/, field-gateway/  Other radio links (docs/plans/active/FLEET-MIGRATION-PLAN.md)
 │
-└── cv-service/                          Python (not a Maven module; own repo dir)
-    ├── proto/                           Symlink/copy of shared .proto
-    ├── inference/                       gRPC server, YOLO (ultralytics), batching
-    ├── training/                        Dataset ingest, augmentation, fine-tune jobs
-    ├── registry/                        Model versions, metrics, promotion (staging→prod)
-    └── Dockerfile                       CUDA + CPU variants
+├── cv/                                  How frames become detections
+│   ├── vision-proto/                    Java codegen from the shared proto/vision/v1/cv.proto contract
+│   ├── grpc/                            gRPC client → Python CV service (implements DetectionPort,
+│   │                                    ModelRegistryPort) [adapter-cv-grpc]
+│   └── cv-service/                      Python (NOT a Maven module; own repo dir)
+│       ├── inference/                   gRPC server, YOLO (ultralytics), batching
+│       ├── training/                    Dataset ingest, augmentation, fine-tune jobs
+│       ├── registry/                    Model versions, metrics, promotion (staging→prod)
+│       └── Dockerfile                   CPU / OpenVINO variants
+│
+├── device-discovery/                    How devices get found
+│   └── onvif-mdns-v4l2/                 ONVIF + mDNS + V4L2 scanners (PTZ control planned) [adapter-discovery]
+│
+├── storage/                             How state survives a restart
+│   └── persistence/                     JPA/Postgres: devices, detections, events [adapter-persistence]
+│
+├── simulation-sources/                  How the world gets faked
+│   └── sim/                             Synthetic video + telemetry sources [adapter-simulation]
+│
+└── station/                             How an operator reaches it — the delivery shell
+    ├── vision-api/                      Driving adapters: REST + SSE (control plane, live detection
+    │   │                                feed, device management)
+    │   └── openapi.yaml                 Contract-first REST spec
+    ├── vision-app/                      Spring Boot assembly: wiring, config, profiles.
+    │                                    The ONLY module that knows about all adapters.
+    └── vision-web/                      Angular SPA, built into the app jar (META-INF/resources)
 ```
 
 **There is no inbound-port package.** Driven (`*Port`) interfaces earn their keep — each has several real implementations (rtsp/sim/mjpeg sources, mediamtx/no-op publishers, in-memory→JPA repositories) and adapters are genuinely swapped behind them. Driving interfaces did not: one interface per operation meant one file, one import and one constructor parameter each to describe a single service doing several things, which pushed controllers past ten dependencies. They are collapsed into **one service interface + one implementation per area**, living beside each other in `vision-application`. See `.claude/skills/java-clean-code/SKILL.md` for the rule and its checklist.

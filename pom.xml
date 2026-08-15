@@ -42,16 +42,20 @@
         <dronefleet-mavlink.version>1.1.11</dronefleet-mavlink.version>
     </properties>
 
+    <!-- Responsibility groups, not layer names: each folder answers *what is this for*
+         (docs/plans/active/MODULE-LAYOUT-PROPOSAL.md). Reactor order is derived from the
+         dependency graph by Maven; the order here only reflects how the tree reads. -->
     <modules>
-        <module>libs</module>
-        <module>vision-kernel</module>
-        <module>vision-platform</module>
+        <module>core</module>
         <module>contexts</module>
-        <module>vision-proto</module>
-        <module>adapters</module>
-        <module>vision-api</module>
-        <module>vision-web</module>
-        <module>vision-app</module>
+        <module>video-input</module>
+        <module>video-output</module>
+        <module>drone-link</module>
+        <module>cv</module>
+        <module>device-discovery</module>
+        <module>storage</module>
+        <module>simulation-sources</module>
+        <module>station</module>
     </modules>
 
     <dependencyManagement>
