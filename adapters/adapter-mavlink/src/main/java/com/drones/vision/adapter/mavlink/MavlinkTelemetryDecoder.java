@@ -7,10 +7,13 @@ import io.dronefleet.mavlink.MavlinkMessage;
 import io.dronefleet.mavlink.ardupilotmega.EkfStatusReport;
 import io.dronefleet.mavlink.ardupilotmega.Rangefinder;
 import io.dronefleet.mavlink.ardupilotmega.Wind;
+import io.dronefleet.mavlink.common.Attitude;
 import io.dronefleet.mavlink.common.BatteryStatus;
+import io.dronefleet.mavlink.common.GimbalDeviceAttitudeStatus;
 import io.dronefleet.mavlink.common.GlobalPositionInt;
 import io.dronefleet.mavlink.common.GpsRawInt;
 import io.dronefleet.mavlink.common.MissionCurrent;
+import io.dronefleet.mavlink.common.MountOrientation;
 import io.dronefleet.mavlink.common.RcChannels;
 import io.dronefleet.mavlink.common.RcChannelsRaw;
 import io.dronefleet.mavlink.common.Statustext;
@@ -29,14 +32,17 @@ import java.util.Map;
  * {@link com.drones.vision.flight.domain.port.TelemetrySourcePort#open} call, never shared across
  * two runtimes, since it accumulates the latest known value of each field across messages.
  *
- * <h2>Three state groups (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2)</h2>
- * The merged fields split across three package-private mutable holders, by which domain concept
+ * <h2>Four state groups (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2; docs/plans/active/GEO-POSE-PLAN.md wave V2)</h2>
+ * The merged fields split across four package-private mutable holders, by which domain concept
  * they feed: {@link PositionAndPowerState} (position/velocity/battery — {@link
- * Telemetry}'s own named fields plus their {@code extra}-only siblings), {@link FlightStatusState}
- * (everything that materializes {@link com.drones.vision.kernel.FlightState}), and {@link
- * ArdupilotExtras} (every other {@code extra}-only key, mostly ardupilotmega-dialect messages).
- * This class itself owns only the per-system lock (below) and message-type dispatch to whichever
- * holder owns that message — see each holder's own javadoc for its exact field list.
+ * Telemetry}'s own named fields plus their {@code extra}-only siblings, and, since wave V2, {@link
+ * Telemetry#aglMeters()}/{@link Telemetry#deviceBootMillis()}), {@link FlightStatusState}
+ * (everything that materializes {@link com.drones.vision.kernel.FlightState}), {@link
+ * ArdupilotExtras} (every other {@code extra}-only key, mostly ardupilotmega-dialect messages), and
+ * {@link AttitudeState} (aircraft attitude and gimbal orientation, materializing {@link
+ * com.drones.vision.kernel.Attitude}). This class itself owns only the per-system lock (below) and
+ * message-type dispatch to whichever holder owns that message — see each holder's own javadoc for
+ * its exact field list.
  *
  * <h2>System-id stickiness (now enforced one level up, by {@link MavlinkGateway})</h2>
  * A single UDP port can carry more than one MAVLink system's traffic (e.g. a telemetry radio
@@ -68,10 +74,31 @@ import java.util.Map;
  *       Telemetry#latitude()}/{@link Telemetry#longitude()} (÷ 1e7); {@code alt} (mm, AMSL) →
  *       {@link Telemetry#altitudeMeters()} (÷ 1000 — the AMSL reading, not {@code relativeAlt}, to
  *       match {@link Telemetry#altitudeMeters()}'s "absolute" semantics used elsewhere in this
- *       codebase, e.g. {@code GeoPosition}); {@code hdg} (centidegrees, {@code 65535} = unknown) →
- *       {@link Telemetry#headingDegrees()} (÷ 100, or {@code null} when unknown); {@code
- *       vx}/{@code vy}/{@code vz} (cm/s, NED) → {@code extra} keys {@code vxMps}/{@code
- *       vyMps}/{@code vzMps} (÷ 100) — {@link Telemetry} has no named velocity fields.</li>
+ *       codebase, e.g. {@code GeoPosition}); {@code relative_alt} (mm, height above home) → {@link
+ *       Telemetry#aglMeters()} (÷ 1000, docs/plans/active/GEO-POSE-PLAN.md wave V2 — the AGL figure
+ *       {@code altitudeMeters} does <b>not</b> carry); {@code time_boot_ms} → {@link
+ *       Telemetry#deviceBootMillis()} (wave V2, no conversion); {@code hdg} (centidegrees, {@code
+ *       65535} = unknown) → {@link Telemetry#headingDegrees()} (÷ 100, or {@code null} when
+ *       unknown); {@code vx}/{@code vy}/{@code vz} (cm/s, NED) → {@code extra} keys {@code
+ *       vxMps}/{@code vyMps}/{@code vzMps} (÷ 100) — {@link Telemetry} has no named velocity
+ *       fields.</li>
+ *   <li>{@code ATTITUDE} (#30, wave V2) — {@code roll}/{@code pitch}/{@code yaw} (radians, aircraft
+ *       body frame) → {@link com.drones.vision.kernel.Attitude#rollDegrees()}/{@link
+ *       com.drones.vision.kernel.Attitude#pitchDegrees()}/{@link
+ *       com.drones.vision.kernel.Attitude#yawDegrees()} ({@code Math.toDegrees}); {@code
+ *       rollspeed}/{@code pitchspeed}/{@code yawspeed} have no home in {@link Telemetry} and are
+ *       dropped.</li>
+ *   <li>{@code GIMBAL_DEVICE_ATTITUDE_STATUS} (#285, wave V2, <b>preferred</b> gimbal source) —
+ *       {@code q} (quaternion, {@code w x y z}) → gimbal roll/pitch/yaw via {@link
+ *       QuaternionEuler#fromQuaternion}; yaw is resolved to earth-frame per {@code flags}/{@code
+ *       delta_yaw} or left {@code null} if it cannot be — see {@link AttitudeState}'s own javadoc
+ *       for the exact rule. Once any #285 has arrived, a later {@code MOUNT_ORIENTATION} never
+ *       overwrites its gimbal fields again for this decoder's lifetime (G4).</li>
+ *   <li>{@code MOUNT_ORIENTATION} (#265, wave V2, deprecated <b>fallback</b>, used only until #285
+ *       has arrived at least once) — {@code roll}/{@code pitch} (degrees, global/earth frame) map
+ *       directly; {@code yaw_absolute} (degrees, earth-frame extension field) → gimbal yaw, or
+ *       {@code null} if it is {@code NaN}. The plain {@code yaw} field (vehicle-relative) is
+ *       deliberately never used for gimbal yaw — see {@link AttitudeState}'s javadoc.</li>
  *   <li>{@code GPS_RAW_INT} — {@code fix_type} → {@code gpsFixType} (already the
  *       0..8 ordinal {@link com.drones.vision.kernel.FlightState} expects); {@code satellites_visible} ({@code 255} =
  *       unknown) → {@code satellites}; {@code eph} (HDOP × 100, {@code 65535} =
@@ -161,6 +188,7 @@ final class MavlinkTelemetryDecoder {
     private final PositionAndPowerState positionAndPower = new PositionAndPowerState();
     private final FlightStatusState flightStatus = new FlightStatusState();
     private final ArdupilotExtras extras = new ArdupilotExtras();
+    private final AttitudeState attitude = new AttitudeState();
 
     MavlinkTelemetryDecoder(DeviceId deviceId) {
         this.deviceId = deviceId;
@@ -221,6 +249,12 @@ final class MavlinkTelemetryDecoder {
             extras.applyMissionCurrent(missionCurrent);
         } else if (payload instanceof Rangefinder rangefinder) {
             extras.applyRangefinder(rangefinder);
+        } else if (payload instanceof Attitude attitudeMessage) {
+            attitude.applyAttitude(attitudeMessage);
+        } else if (payload instanceof GimbalDeviceAttitudeStatus gimbalDeviceAttitudeStatus) {
+            attitude.applyGimbalDeviceAttitudeStatus(gimbalDeviceAttitudeStatus);
+        } else if (payload instanceof MountOrientation mountOrientation) {
+            attitude.applyMountOrientation(mountOrientation);
         } else {
             return null;
         }
@@ -284,6 +318,7 @@ final class MavlinkTelemetryDecoder {
         }
         return new Telemetry(deviceId, Instant.now(), positionAndPower.latitude, positionAndPower.longitude,
                 positionAndPower.altitudeMeters, positionAndPower.headingDegrees, positionAndPower.batteryPercent,
-                extra, flightStatus.toFlightStateOrNull());
+                extra, flightStatus.toFlightStateOrNull(), positionAndPower.aglMeters, attitude.toAttitudeOrNull(),
+                positionAndPower.deviceBootMillis);
     }
 }

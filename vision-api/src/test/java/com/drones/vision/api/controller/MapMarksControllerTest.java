@@ -4,6 +4,7 @@ import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.map.application.MapAccessPolicy.Viewer;
 import com.drones.vision.map.application.mark.GeolocateSpec;
+import com.drones.vision.map.application.mark.GeolocationResult;
 import com.drones.vision.map.application.mark.MarkPatch;
 import com.drones.vision.map.application.mark.MarkService;
 import com.drones.vision.map.application.mark.MarkSpec;
@@ -11,7 +12,6 @@ import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.map.domain.model.Affiliation;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;
-import com.drones.vision.kernel.GeoProjection;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.map.domain.model.LayerId;
 import com.drones.vision.map.domain.model.Mark;
@@ -245,16 +245,18 @@ class MapMarksControllerTest {
     // ---- POST /api/map/marks/geolocate ----
 
     @Test
-    void geolocateReturns201AndDefaultsKindAffiliationLabelAndDepression() throws Exception {
+    void geolocateReturns201AndDefaultsKindAffiliationLabelButNotDepression() throws Exception {
         AssetId assetId = AssetId.random();
-        when(marks.geolocate(any(), any())).thenReturn(
+        when(marks.geolocate(any(), any())).thenReturn(new GeolocationResult(
                 mark(MarkId.random(), LayerId.random(), MarkKind.TARGET, Affiliation.HOSTILE, MarkStatus.ACTIVE,
-                        Verification.unverified()));
+                        Verification.unverified()),
+                true));
 
         mockMvc.perform(post("/api/map/marks/geolocate")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"assetId\":\"" + assetId.value() + "\"}"))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.measured").value(true));
 
         ArgumentCaptor<GeolocateSpec> spec = ArgumentCaptor.forClass(GeolocateSpec.class);
         verify(marks).geolocate(any(), spec.capture());
@@ -263,24 +265,29 @@ class MapMarksControllerTest {
         assertEquals(Affiliation.HOSTILE, spec.getValue().affiliation(),
                 "a geolocated contact defaults HOSTILE -- what the old MarkKind.TARGET implied");
         assertEquals("Contact", spec.getValue().label());
-        assertEquals(GeoProjection.DEFAULT_DEPRESSION_DEGREES, spec.getValue().depressionDegrees());
+        org.junit.jupiter.api.Assertions.assertNull(spec.getValue().depressionDegrees(),
+                "an absent depressionDegrees must stay null, not silently become the 45deg default -- "
+                        + "otherwise every real gimbal measurement would be discarded as a false override "
+                        + "(docs/plans/active/GEO-POSE-PLAN.md V3)");
         org.junit.jupiter.api.Assertions.assertNull(spec.getValue().layerId());
     }
 
     @Test
-    void geolocateHonoursAnExplicitLayerAffiliationAndLabel() throws Exception {
+    void geolocateHonoursAnExplicitLayerAffiliationLabelAndDepressionOverride() throws Exception {
         AssetId assetId = AssetId.random();
         LayerId layerId = LayerId.random();
-        when(marks.geolocate(any(), any())).thenReturn(
+        when(marks.geolocate(any(), any())).thenReturn(new GeolocationResult(
                 mark(MarkId.random(), layerId, MarkKind.HAZARD, Affiliation.UNKNOWN, MarkStatus.ACTIVE,
-                        Verification.unverified()));
+                        Verification.unverified()),
+                false));
 
         mockMvc.perform(post("/api/map/marks/geolocate")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"assetId\":\"" + assetId.value() + "\",\"layerId\":\"" + layerId.value()
                                 + "\",\"kind\":\"HAZARD\",\"affiliation\":\"UNKNOWN\",\"label\":\"Wire\","
                                 + "\"depressionDegrees\":30.0}"))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.measured").value(false));
 
         ArgumentCaptor<GeolocateSpec> spec = ArgumentCaptor.forClass(GeolocateSpec.class);
         verify(marks).geolocate(any(), spec.capture());
@@ -289,6 +296,21 @@ class MapMarksControllerTest {
         assertEquals(Affiliation.UNKNOWN, spec.getValue().affiliation());
         assertEquals("Wire", spec.getValue().label());
         assertEquals(30.0, spec.getValue().depressionDegrees());
+    }
+
+    @Test
+    void geolocateOmitsMeasuredFromTheWireWhenTheServiceDoesNotReportIt() throws Exception {
+        // MarkResponse.from(Mark) (no measured argument) is what every other endpoint uses; asserting
+        // the field is entirely absent here -- not merely null -- pins @JsonInclude(NON_NULL) so a
+        // MANUAL mark's response never grows a stray "measured": null the way a careless refactor could
+        // introduce.
+        when(marks.list(any())).thenReturn(List.of(
+                mark(MarkId.random(), LayerId.random(), MarkKind.TARGET, Affiliation.HOSTILE, MarkStatus.ACTIVE,
+                        Verification.unverified())));
+
+        mockMvc.perform(get("/api/map/marks"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].measured").doesNotExist());
     }
 
     @Test

@@ -12,6 +12,9 @@ import io.dronefleet.mavlink.ardupilotmega.Rangefinder;
 import io.dronefleet.mavlink.ardupilotmega.Wind;
 import io.dronefleet.mavlink.common.Attitude;
 import io.dronefleet.mavlink.common.BatteryStatus;
+import io.dronefleet.mavlink.common.GimbalDeviceAttitudeStatus;
+import io.dronefleet.mavlink.common.GimbalDeviceErrorFlags;
+import io.dronefleet.mavlink.common.GimbalDeviceFlags;
 import io.dronefleet.mavlink.common.GlobalPositionInt;
 import io.dronefleet.mavlink.common.GpsFixType;
 import io.dronefleet.mavlink.common.GpsRawInt;
@@ -25,10 +28,12 @@ import io.dronefleet.mavlink.common.MavSysStatusSensor;
 import io.dronefleet.mavlink.common.MavSysStatusSensorExtended;
 import io.dronefleet.mavlink.common.MissionCurrent;
 import io.dronefleet.mavlink.common.MissionState;
+import io.dronefleet.mavlink.common.MountOrientation;
 import io.dronefleet.mavlink.common.RcChannels;
 import io.dronefleet.mavlink.common.RcChannelsRaw;
 import io.dronefleet.mavlink.common.Statustext;
 import io.dronefleet.mavlink.common.SysStatus;
+import io.dronefleet.mavlink.common.SystemTime;
 import io.dronefleet.mavlink.common.VfrHud;
 import io.dronefleet.mavlink.common.Vibration;
 import io.dronefleet.mavlink.minimal.Heartbeat;
@@ -90,6 +95,26 @@ class MavlinkTelemetryDecoderTest {
         assertEquals(-2.5, sample.extra().get("vyMps"), 1e-9);
         assertEquals(0.1, sample.extra().get("vzMps"), 1e-9);
         assertEquals(DEVICE_ID, sample.deviceId());
+        // docs/plans/active/GEO-POSE-PLAN.md wave V2: relative_alt/time_boot_ms, decoded alongside
+        // this message's pre-existing fields.
+        assertEquals(100.0, sample.aglMeters(), 1e-9, "relativeAlt(100000) mm -> 100.0 m AGL");
+        assertEquals(1000L, sample.deviceBootMillis());
+    }
+
+    @Test
+    void relativeAltCarriesItsOwnSignSeparatelyFromAmslAltitude() throws IOException {
+        // A vehicle flying below its home/launch point (valley terrain) reports a negative
+        // relative_alt -- Telemetry.aglMeters has no non-negative constraint (unlike
+        // GeoProjection.CameraAim, which is a later wave's concern), so this must decode faithfully.
+        GlobalPositionInt payload = GlobalPositionInt.builder()
+                .timeBootMs(0L).lat(0).lon(0).alt(50000).relativeAlt(-2500).vx(0).vy(0).vz(0).hdg(0)
+                .build();
+
+        Telemetry sample = decode(1, payload);
+
+        assertNotNull(sample);
+        assertEquals(50.0, sample.altitudeMeters(), 1e-9, "AMSL altitude must stay positive/unaffected (G1)");
+        assertEquals(-2.5, sample.aglMeters(), 1e-9);
     }
 
     @Test
@@ -156,11 +181,13 @@ class MavlinkTelemetryDecoderTest {
 
     @Test
     void ignoresUnrecognizedMessageTypes() throws IOException {
+        // ATTITUDE used to be the example here, but docs/plans/active/GEO-POSE-PLAN.md wave V2 made
+        // it a recognized message (see mapsAttitudeRollPitchYawFromRadiansToDegrees below) -- SYSTEM_TIME
+        // is a plain common-dialect message this decoder still has no field for, so it keeps
+        // exercising the same "genuinely unmapped message type" path.
         MavlinkTelemetryDecoder decoder = new MavlinkTelemetryDecoder(DEVICE_ID);
 
-        Attitude unrecognized = Attitude.builder()
-                .timeBootMs(0L).roll(0f).pitch(0f).yaw(0f).rollspeed(0f).pitchspeed(0f).yawspeed(0f)
-                .build();
+        SystemTime unrecognized = SystemTime.builder().timeUnixUsec(BigInteger.ZERO).timeBootMs(0L).build();
 
         assertNull(decoder.accept(encodeThenDecode(1, unrecognized)));
     }
@@ -465,6 +492,240 @@ class MavlinkTelemetryDecoderTest {
 
         assertNotNull(sample);
         assertEquals(4.25, sample.extra().get("rangefinderDistanceM"), 1e-6);
+    }
+
+    // --- docs/plans/active/GEO-POSE-PLAN.md wave V2: ATTITUDE / GIMBAL_DEVICE_ATTITUDE_STATUS / MOUNT_ORIENTATION ---
+
+    @Test
+    void mapsAttitudeRollPitchYawFromRadiansToDegrees() throws IOException {
+        Attitude payload = Attitude.builder()
+                .timeBootMs(0L)
+                .roll((float) Math.toRadians(30.0))
+                .pitch((float) Math.toRadians(-20.0))
+                .yaw((float) Math.toRadians(170.0))
+                .rollspeed(0f).pitchspeed(0f).yawspeed(0f)
+                .build();
+
+        Telemetry sample = decode(1, payload);
+
+        assertNotNull(sample);
+        assertEquals(30.0, sample.attitude().rollDegrees(), 1e-3);
+        assertEquals(-20.0, sample.attitude().pitchDegrees(), 1e-3);
+        assertEquals(170.0, sample.attitude().yawDegrees(), 1e-3);
+        assertNull(sample.attitude().gimbalYawDegrees(), "ATTITUDE alone reports no gimbal orientation");
+    }
+
+    @Test
+    void attitudeStaysNullUntilAnyAttitudeOrGimbalMessageArrives() throws IOException {
+        Telemetry sample = decode(1, GlobalPositionInt.builder()
+                .timeBootMs(0L).lat(0).lon(0).alt(0).relativeAlt(0).vx(0).vy(0).vz(0).hdg(0).build());
+
+        assertNotNull(sample);
+        assertNull(sample.attitude(), "a position-only sample carries no attitude/gimbal reading");
+    }
+
+    @Test
+    void attitudeWithNonFiniteComponentsDropsOnlyThoseComponentsRatherThanThrowing() throws IOException {
+        // com.drones.vision.kernel.Attitude's compact ctor throws on a NaN/infinite component -- a
+        // malformed/broken sender must never be able to crash decoding over this.
+        Attitude payload = Attitude.builder()
+                .timeBootMs(0L)
+                .roll(Float.NaN)
+                .pitch((float) Math.toRadians(10.0))
+                .yaw(Float.POSITIVE_INFINITY)
+                .rollspeed(0f).pitchspeed(0f).yawspeed(0f)
+                .build();
+
+        Telemetry sample = decode(1, payload);
+
+        assertNotNull(sample);
+        assertNull(sample.attitude().rollDegrees(), "a NaN wire value must never reach Attitude's finite-only validation");
+        assertEquals(10.0, sample.attitude().pitchDegrees(), 1e-3);
+        assertNull(sample.attitude().yawDegrees(), "an infinite wire value is equally guarded");
+    }
+
+    @Test
+    void mapsGimbalDeviceAttitudeStatusQuaternionForRollAndPitchRegardlessOfYawFrame() throws IOException {
+        // roll=30, pitch=20, yaw=40 (earth-frame, so yaw is used as-is too) -- the same combined
+        // rotation QuaternionEulerTest hand-verifies in isolation.
+        GimbalDeviceAttitudeStatus payload = gimbalDeviceAttitudeStatus(
+                quaternion(30.0, 20.0, 40.0), Float.NaN, GimbalDeviceFlags.GIMBAL_DEVICE_FLAGS_YAW_IN_EARTH_FRAME);
+
+        Telemetry sample = decode(1, payload);
+
+        assertNotNull(sample);
+        assertEquals(30.0, sample.attitude().gimbalRollDegrees(), 1e-3);
+        assertEquals(20.0, sample.attitude().gimbalPitchDegrees(), 1e-3);
+        assertEquals(40.0, sample.attitude().gimbalYawDegrees(), 1e-3);
+    }
+
+    @Test
+    void earthFrameFlagUsesTheDecodedYawDirectly() throws IOException {
+        GimbalDeviceAttitudeStatus payload = gimbalDeviceAttitudeStatus(
+                quaternion(0.0, 0.0, 60.0), Float.NaN, GimbalDeviceFlags.GIMBAL_DEVICE_FLAGS_YAW_IN_EARTH_FRAME);
+
+        Telemetry sample = decode(1, payload);
+
+        assertEquals(60.0, sample.attitude().gimbalYawDegrees(), 1e-3);
+    }
+
+    @Test
+    void vehicleFrameFlagWithFiniteDeltaYawConvertsToEarthFrame() throws IOException {
+        GimbalDeviceAttitudeStatus payload = gimbalDeviceAttitudeStatus(quaternion(0.0, 0.0, 50.0),
+                (float) Math.toRadians(10.0), GimbalDeviceFlags.GIMBAL_DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME);
+
+        Telemetry sample = decode(1, payload);
+
+        assertEquals(60.0, sample.attitude().gimbalYawDegrees(), 1e-3,
+                "earth yaw = vehicle-frame yaw (50) + delta_yaw (10)");
+    }
+
+    @Test
+    void vehicleFrameFlagWithNaNDeltaYawLeavesGimbalYawNullButKeepsRollPitch() throws IOException {
+        GimbalDeviceAttitudeStatus payload = gimbalDeviceAttitudeStatus(
+                quaternion(0.0, 0.0, 50.0), Float.NaN, GimbalDeviceFlags.GIMBAL_DEVICE_FLAGS_YAW_IN_VEHICLE_FRAME);
+
+        Telemetry sample = decode(1, payload);
+
+        assertNull(sample.attitude().gimbalYawDegrees(),
+                "vehicle-frame yaw with no delta_yaw correction must never be reported as earth-frame");
+        assertEquals(0.0, sample.attitude().gimbalRollDegrees(), 1e-3);
+        assertEquals(0.0, sample.attitude().gimbalPitchDegrees(), 1e-3);
+    }
+
+    @Test
+    void neitherFrameFlagWithYawLockSetIsTreatedAsEarthFrameAndIgnoresDeltaYaw() throws IOException {
+        GimbalDeviceAttitudeStatus payload = gimbalDeviceAttitudeStatus(quaternion(0.0, 0.0, 70.0),
+                (float) Math.toRadians(999.0) /* must be ignored */, GimbalDeviceFlags.GIMBAL_DEVICE_FLAGS_YAW_LOCK);
+
+        Telemetry sample = decode(1, payload);
+
+        assertEquals(70.0, sample.attitude().gimbalYawDegrees(), 1e-3,
+                "YAW_LOCK backwards-compatibility path: earth-frame directly, delta_yaw not added");
+    }
+
+    @Test
+    void neitherFrameFlagNorYawLockLeavesGimbalYawNullEvenWithDeltaYawPopulated() throws IOException {
+        GimbalDeviceAttitudeStatus payload = gimbalDeviceAttitudeStatus(
+                quaternion(0.0, 0.0, 80.0), (float) Math.toRadians(5.0) /* must be ignored */);
+
+        Telemetry sample = decode(1, payload);
+
+        assertNull(sample.attitude().gimbalYawDegrees(),
+                "backwards-compatibility path with neither flag nor YAW_LOCK: vehicle-frame with no sanctioned conversion");
+    }
+
+    @Test
+    void mapsMountOrientationRollPitchAndYawAbsoluteNeverThePlainVehicleRelativeYaw() throws IOException {
+        MountOrientation payload = MountOrientation.builder()
+                .timeBootMs(0L).roll(12.5f).pitch(-7.5f).yaw(999.0f) /* vehicle-relative: must never surface */
+                .yawAbsolute(45.0f)
+                .build();
+
+        Telemetry sample = decode(1, payload);
+
+        assertNotNull(sample);
+        assertEquals(12.5, sample.attitude().gimbalRollDegrees(), 1e-6);
+        assertEquals(-7.5, sample.attitude().gimbalPitchDegrees(), 1e-6);
+        assertEquals(45.0, sample.attitude().gimbalYawDegrees(), 1e-6);
+    }
+
+    @Test
+    void mountOrientationLeavesGimbalYawNullWhenYawAbsoluteIsNaN() throws IOException {
+        MountOrientation payload = MountOrientation.builder()
+                .timeBootMs(0L).roll(1.0f).pitch(2.0f).yaw(3.0f)
+                .yawAbsolute(Float.NaN)
+                .build();
+
+        Telemetry sample = decode(1, payload);
+
+        assertNotNull(sample);
+        assertEquals(1.0, sample.attitude().gimbalRollDegrees(), 1e-6);
+        assertEquals(2.0, sample.attitude().gimbalPitchDegrees(), 1e-6);
+        assertNull(sample.attitude().gimbalYawDegrees(),
+                "an old sender that never implemented yaw_absolute must not fall back to the vehicle-relative yaw field");
+    }
+
+    @Test
+    void mountOrientationWithNaNRollDropsOnlyThatComponent() throws IOException {
+        MountOrientation payload = MountOrientation.builder()
+                .timeBootMs(0L).roll(Float.NaN).pitch(3.0f).yaw(0f).yawAbsolute(20.0f)
+                .build();
+
+        Telemetry sample = decode(1, payload);
+
+        assertNotNull(sample);
+        assertNull(sample.attitude().gimbalRollDegrees());
+        assertEquals(3.0, sample.attitude().gimbalPitchDegrees(), 1e-6);
+        assertEquals(20.0, sample.attitude().gimbalYawDegrees(), 1e-6);
+    }
+
+    @Test
+    void onceGimbalDeviceAttitudeStatusArrivesALaterMountOrientationNeverOverwritesIt() throws IOException {
+        MavlinkTelemetryDecoder decoder = new MavlinkTelemetryDecoder(DEVICE_ID);
+
+        decoder.accept(encodeThenDecode(1, gimbalDeviceAttitudeStatus(
+                quaternion(0.0, 0.0, 15.0), Float.NaN, GimbalDeviceFlags.GIMBAL_DEVICE_FLAGS_YAW_IN_EARTH_FRAME)));
+
+        Telemetry afterMountOrientation = decoder.accept(encodeThenDecode(1, MountOrientation.builder()
+                .timeBootMs(0L).roll(99f).pitch(99f).yaw(99f).yawAbsolute(99f).build()));
+
+        assertNotNull(afterMountOrientation);
+        assertEquals(0.0, afterMountOrientation.attitude().gimbalRollDegrees(), 1e-3,
+                "#265 must never overwrite gimbal fields once #285 has arrived (G4)");
+        assertEquals(0.0, afterMountOrientation.attitude().gimbalPitchDegrees(), 1e-3);
+        assertEquals(15.0, afterMountOrientation.attitude().gimbalYawDegrees(), 1e-3);
+    }
+
+    @Test
+    void mountOrientationBeforeAnyGimbalDeviceAttitudeStatusIsReplacedNormallyOnceOneArrives() throws IOException {
+        MavlinkTelemetryDecoder decoder = new MavlinkTelemetryDecoder(DEVICE_ID);
+
+        Telemetry afterMountOrientation = decoder.accept(encodeThenDecode(1, MountOrientation.builder()
+                .timeBootMs(0L).roll(5f).pitch(6f).yaw(999f).yawAbsolute(7f).build()));
+        assertEquals(5.0, afterMountOrientation.attitude().gimbalRollDegrees(), 1e-6);
+        assertEquals(7.0, afterMountOrientation.attitude().gimbalYawDegrees(), 1e-6);
+
+        Telemetry afterGimbalDeviceAttitudeStatus = decoder.accept(encodeThenDecode(1, gimbalDeviceAttitudeStatus(
+                quaternion(0.0, 0.0, 88.0), Float.NaN, GimbalDeviceFlags.GIMBAL_DEVICE_FLAGS_YAW_IN_EARTH_FRAME)));
+
+        assertNotNull(afterGimbalDeviceAttitudeStatus);
+        assertEquals(0.0, afterGimbalDeviceAttitudeStatus.attitude().gimbalRollDegrees(), 1e-3,
+                "#285 arriving after #265 must replace it normally -- only the reverse order is blocked");
+        assertEquals(88.0, afterGimbalDeviceAttitudeStatus.attitude().gimbalYawDegrees(), 1e-3);
+    }
+
+    private static GimbalDeviceAttitudeStatus gimbalDeviceAttitudeStatus(List<Float> q, float deltaYawRadians,
+                                                                          GimbalDeviceFlags... flags) {
+        return GimbalDeviceAttitudeStatus.builder()
+                .targetSystem(1).targetComponent(1).timeBootMs(0L)
+                .flags(flags)
+                .q(q)
+                .angularVelocityX(Float.NaN).angularVelocityY(Float.NaN).angularVelocityZ(Float.NaN)
+                .failureFlags(EnumValue.<GimbalDeviceErrorFlags>create(0))
+                .deltaYaw(deltaYawRadians)
+                .deltaYawVelocity(Float.NaN)
+                .build();
+    }
+
+    /** Builds the {@code w,x,y,z} quaternion for the given roll/pitch/yaw (degrees) via the standard
+     *  ZYX forward formula -- the same construction {@code QuaternionEulerTest} hand-verifies. */
+    private static List<Float> quaternion(double rollDegrees, double pitchDegrees, double yawDegrees) {
+        double r = Math.toRadians(rollDegrees) / 2.0;
+        double p = Math.toRadians(pitchDegrees) / 2.0;
+        double y = Math.toRadians(yawDegrees) / 2.0;
+        double cr = Math.cos(r);
+        double sr = Math.sin(r);
+        double cp = Math.cos(p);
+        double sp = Math.sin(p);
+        double cy = Math.cos(y);
+        double sy = Math.sin(y);
+
+        float w = (float) (cr * cp * cy + sr * sp * sy);
+        float x = (float) (sr * cp * cy - cr * sp * sy);
+        float qy = (float) (cr * sp * cy + sr * cp * sy);
+        float qz = (float) (cr * cp * sy - sr * sp * cy);
+        return List.of(w, x, qy, qz);
     }
 
     @Test

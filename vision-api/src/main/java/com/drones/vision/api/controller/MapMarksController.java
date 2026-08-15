@@ -9,6 +9,7 @@ import com.drones.vision.api.dto.VerifyMarkRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.map.application.MapAccessPolicy.Viewer;
+import com.drones.vision.map.application.mark.GeolocationResult;
 import com.drones.vision.map.application.mark.MarkService;
 import com.drones.vision.map.domain.model.MarkId;
 import org.springframework.http.HttpStatus;
@@ -85,13 +86,19 @@ public class MapMarksController {
     /**
      * Drops a mark projected from an asset's freshest telemetry (the cockpit "mark target" action).
      *
+     * <p>The response's {@code measured} field (docs/plans/active/GEO-POSE-PLAN.md G5, wave V3) tells the
+     * caller whether the fix used a real gimbal depression reading and a real AGL sample, or fell
+     * back to the platform's 45°/AMSL assumptions — an operator-facing signal, not an accuracy
+     * guarantee; the mark stays editable either way.
+     *
      * @param request which asset to project from, plus the mark's descriptive fields
-     * @return the created mark
+     * @return the created mark, with {@code measured} set
      */
     @PostMapping("/geolocate")
     @ResponseStatus(HttpStatus.CREATED)
     public MarkResponse geolocate(@RequestBody GeolocateMarkRequest request) {
-        return MarkResponse.from(marks.geolocate(viewer(), request.toSpec()));
+        GeolocationResult result = marks.geolocate(viewer(), request.toSpec());
+        return MarkResponse.from(result.mark(), result.measured());
     }
 
     /**

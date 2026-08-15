@@ -14,16 +14,14 @@ raw library type: `MavlinkTelemetryDecoder`'s message-type dispatch, `FlightMode
 `MavCmd`/`MavResult`, `SimulatedVehicleMessages`'s builders, `MavlinkHeartbeatScanner`'s `Heartbeat`) ·
 **Used by:** vision-app
 
-**Build/test:** `./mvnw -B -pl adapters/adapter-mavlink test` — 135 tests across 12 classes.
-**134/135 green.** One test fails deterministically for a reason rooted in `libs/mavlink-core` itself,
-not this adapter — see the "ardupilotmega dialect is now per-source, not per-sysid" Gotcha below;
-confirmed identical (same single failure, 0 flakes elsewhere, 0 skipped) across four consecutive full
-`-pl adapters/adapter-mavlink test` runs. The two SITL-gated tests ran un-skipped and passed
-(`vision-sitl:4.7.0` present on this machine): `MavlinkSitlSmokeIntegrationTest` 1/1 in ~1.2s,
-`MavlinkSitlReturnHomeIntegrationTest` 2/2 in ~31s. Timing-sensitive cases in
+**Build/test:** `./mvnw -B -pl adapters/adapter-mavlink test` — 155 tests across 13 classes.
+**155/155 green**, confirmed across three consecutive full `-pl adapters/adapter-mavlink test` runs
+(docs/plans/active/GEO-POSE-PLAN.md wave V2). The two SITL-gated tests ran un-skipped and passed
+every run (`vision-sitl:4.7.0` present on this machine): `MavlinkSitlSmokeIntegrationTest` 1/1 in
+~1.2s, `MavlinkSitlReturnHomeIntegrationTest` 2/2 in ~31s. Timing-sensitive cases in
 `MavlinkRoundTripIntegrationTest`/`MavlinkFleetGatewayIntegrationTest`/`MavlinkHeartbeatScannerTest`
 poll to their own timeout and can flake under a `-Dtest=` filtered run in a loaded sandbox — always
-verify via the full module build.
+verify via the full module build. **Note:** W4 documented one test (`MavlinkRoundTripIntegrationTest.anArdupilotmegaWindMessageSurvivesTheRealUdpPathIntoATelemetrySample`) as a deterministic failure. **It was fixed in `libs/mavlink-core` at the end of W4** — dialect is now learned per MAVLink *system id*, shared across every resync buffer on a link, rather than per source address. The test has passed on every run since. See the corrected Gotchas entry below.
 
 ## Levels
 
@@ -105,14 +103,27 @@ grep) — every socket/session/service concern goes through `libs/mavlink-core`.
   defaults/message content (`SimulatedVehicleMessages` untouched). `FeedRuntime`'s ephemeral send
   socket is now a `com.drones.mavlink.transport.UdpTargetLink` + `com.drones.mavlink.codec.FrameWriter`
   instead of a hand-rolled `DatagramSocket`/`MavlinkConnection` pair. Constructors unchanged.
-- `final class MavlinkTelemetryDecoder` (package-private) — unchanged mapping/state-holder split
-  (`PositionAndPowerState`/`FlightStatusState`/`ArdupilotExtras`) and unchanged public behaviour.
-  `Telemetry accept(MavlinkMessage<?>)` is now a one-line adapter onto the new
-  `Telemetry accept(int originSystemId, Object payload)` overload — `MavlinkGateway` calls the
-  latter directly (a `com.drones.mavlink.codec.MavFrame` carries sysid and raw payload separately,
-  not a dronefleet `MavlinkMessage` wrapper); every existing golden-bytes test keeps calling the
-  original overload, unchanged. `static String firmwareLabel(int autopilot)` unchanged.
-- `final class FlightModes`, `final class MavlinkRoute` (package-private) — untouched by W4.
+- `final class MavlinkTelemetryDecoder` (package-private) — state-holder split, now four-way as of
+  docs/plans/active/GEO-POSE-PLAN.md wave V2 (`PositionAndPowerState`/`FlightStatusState`/
+  `ArdupilotExtras`/`AttitudeState`); `accept`'s own dispatch/return-null/system-lock contract is
+  unchanged. `Telemetry accept(MavlinkMessage<?>)` is a one-line adapter onto
+  `Telemetry accept(int originSystemId, Object payload)` — `MavlinkGateway` calls the latter
+  directly (a `com.drones.mavlink.codec.MavFrame` carries sysid and raw payload separately, not a
+  dronefleet `MavlinkMessage` wrapper); every existing golden-bytes test keeps calling the original
+  overload, unchanged. `static String firmwareLabel(int autopilot)` unchanged.
+- `final class AttitudeState` (package-private, **new**, wave V2) — the fourth state-holder:
+  aircraft attitude (`ATTITUDE` #30) and gimbal orientation (`GIMBAL_DEVICE_ATTITUDE_STATUS` #285
+  preferred, `MOUNT_ORIENTATION` #265 deprecated fallback), materializing
+  `com.drones.vision.kernel.Attitude`. Latches "#285 seen" permanently once true; from then on
+  `applyMountOrientation` is a no-op for the decoder's remaining lifetime (G4). See Gotchas for the
+  yaw-frame resolution rules.
+- `final class QuaternionEuler` (package-private, **new**, wave V2) — `static Euler
+  fromQuaternion(double w, double x, double y, double z)`, the standard ZYX (aerospace Tait-Bryan)
+  quaternion→Euler decomposition; nested `record Euler(double rollDegrees, double pitchDegrees,
+  double yawDegrees)`. No MAVLink/dronefleet types in its signature — pure math, independently unit
+  tested (`QuaternionEulerTest`) against hand-computed values built via the inverse (Euler→quaternion)
+  formula. See Gotchas for the convention and gimbal-lock behavior.
+- `final class FlightModes`, `final class MavlinkRoute` (package-private) — untouched by W4/V2.
 
 ## Message → field mapping
 
@@ -120,8 +131,14 @@ grep) — every socket/session/service concern goes through `libs/mavlink-core`.
 |---|---|---|---|
 | `GLOBAL_POSITION_INT` | `lat`/`lon` | `Telemetry.latitude`/`longitude` | ÷ 1e7 |
 | | `alt` (mm, AMSL) | `Telemetry.altitudeMeters` | ÷ 1000 (AMSL, not `relativeAlt`) |
+| | `relative_alt` (mm, height above home) | `Telemetry.aglMeters` | ÷ 1000; no sentinel, always sent (wave V2) |
+| | `time_boot_ms` | `Telemetry.deviceBootMillis` | none (wave V2) |
 | | `hdg` (cdeg, `65535`=unknown) | `Telemetry.headingDegrees` | ÷ 100, or `null` |
 | | `vx`/`vy`/`vz` (cm/s, NED) | `extra["vxMps"/"vyMps"/"vzMps"]` | ÷ 100 |
+| `ATTITUDE` (#30, common) | `roll`/`pitch`/`yaw` (rad) | `Attitude.rollDegrees`/`pitchDegrees`/`yawDegrees` | `Math.toDegrees` (wave V2) |
+| `GIMBAL_DEVICE_ATTITUDE_STATUS` (#285, common, **preferred**) | `q` (quaternion, w x y z) | `Attitude.gimbalRollDegrees`/`gimbalPitchDegrees`/`gimbalYawDegrees` | `QuaternionEuler.fromQuaternion`; yaw resolved earth-frame via `flags`/`delta_yaw`, or `null` — see Gotchas (wave V2) |
+| `MOUNT_ORIENTATION` (#265, common, deprecated **fallback**, only until #285 has arrived once) | `roll`/`pitch` (deg, global frame) | `Attitude.gimbalRollDegrees`/`gimbalPitchDegrees` | none |
+| | `yaw_absolute` (deg, earth-frame extension field) | `Attitude.gimbalYawDegrees` | none, or `null` if `NaN`; plain `yaw` (vehicle-relative) is never used — see Gotchas (wave V2) |
 | `SYS_STATUS` / `BATTERY_STATUS` | `batteryRemaining` (%, `-1`=unknown) | `Telemetry.batteryPercent` | none; last-message-wins |
 | `SYS_STATUS` | `voltage_battery` (mV, `65535`=unknown) | `extra["batteryVoltage"]` | ÷ 1000, key omitted when unknown |
 | `VFR_HUD` | `groundspeed` (m/s) | `extra["groundspeedMps"]` | none |
@@ -203,43 +220,18 @@ row above through `STATUSTEXT` has fired at least once for the decoder's lifetim
   for a real pre-W4 flaw — concatenating datagrams from different senders into one byte stream) and
   primes each buffer's own fresh `MavlinkConnection` with whatever dialect *that same buffer* last
   resolved — a documented, deliberate per-buffer approximation of the old per-sysid cache (see
-  `mavlink-core`'s own `ResyncBuffer` Gotchas). This is unobservable whenever one physical sender
-  speaks for one sysid (every real vehicle, `MavlinkFeedTransmitter`, every fake vehicle in this
-  module's test suite) — but it is a real regression the moment a *second* source claims the same
-  sysid without ever sending its own `HEARTBEAT`, exactly what
-  `MavlinkRoundTripIntegrationTest.anArdupilotmegaWindMessageSurvivesTheRealUdpPathIntoATelemetrySample`
-  does (a raw `WIND` datagram sent from a separate ephemeral socket, deliberately, to prove the
-  dialect mechanism holds over the real socket/thread path). That source's own resync buffer has no
-  primed dialect and falls back to `CommonDialect`, which has no id for `WIND` — the datagram is
-  silently, harmlessly dropped (matching this module's own "malformed/unresolvable is never fatal"
-  discipline), and the test's expected sample never arrives. **This is a confirmed, deterministic
-  failure across four consecutive full-module runs, not a flake**, and it cannot be fixed from this
-  adapter without either weakening the test's own assertion (which W4's acceptance rule forbids) or
-  changing `libs/mavlink-core`'s L2 dialect caching to be per-sysid (via `PeerDirectory`, as that
-  module's own Gotchas already flag as the eventual, not-yet-built, correct design) — out of this
-  wave's frozen-library scope. Left as the one known-failing test; reported, not routed around.
-- **`MAV_STATE_CRITICAL`'s wire value is compared by enum identity, never a hardcoded ordinal**
-  (`MavState.MAV_STATE_CRITICAL`, not `.value() == 6`) — `MavlinkTelemetryDecoder` unchanged by W4.
-- **`base_mode` is read via `.value()` (raw bitmask int), never `.entry()`** — a genuine bitmask
-  (`armed + custom-mode-enabled` matches no single `MavModeFlag` constant, so `.entry()` resolves
-  `null` for it). Unchanged by W4.
-- **`FlightModes` stays in the adapter, deliberately** — firmware-mode-name knowledge (ArduPilot
-  copter/plane/rover + Betaflight tables) is project policy, not protocol. `libs/mavlink-core`'s own
-  `DefaultCommandGateway` (L4½, unused by this adapter) resolves `RTL` via the spec's dedicated
-  `MAV_CMD_NAV_RETURN_TO_LAUNCH` instead — this adapter's `returnToHome` deliberately still uses
-  `DO_SET_MODE` with a resolved custom mode, matching its pre-existing, SITL-proven wire behaviour;
-  switching to the core gateway's `RTL` kind was explicitly ruled out for this wave (see the plan's
-  design section).
-- **`CommandService` is built with zero retries, on purpose.** `libs/mavlink-core`'s own retry
-  mechanism (silent resend with `confirmation` incremented) would add wire traffic this adapter's
-  tests never exercised before and was not asked to preserve; `MavlinkFlightCommander` always passes
-  `retries=0`, reproducing the exact pre-W4 single-shot-then-`NO_ACK` behaviour.
-- **`DefaultTxScheduler` is owned per `MavlinkManualControlSender` instance, not per gateway or per
-  link** — one shared 2-thread pool serves every engaged link from one sender (matches
-  `vision-app`'s singleton-bean wiring), per plan §4's DRY target.
-- **A discovered/scanned vehicle's naming, `suggestedCategory`, `suggestedStream`, and `details` map
-  are byte-identical to pre-W4** — `MavlinkHeartbeatScanner`'s self-bind rewrite only touched how
-  bytes are read off the wire (`UdpListenLink`/`FrameReader`), never what's derived from them.
+  `mavlink-core`'s own `ResyncBuffer` Gotchas) — **fixed at the end of W4, entry kept for history.**
+  W1 keyed the learned dialect per resync buffer, i.e. per *source address*. An ArduPilot vehicle's own
+  `HEARTBEAT` therefore unlocked ardupilotmega-only messages (`WIND`, `EKF_STATUS_REPORT`,
+  `RANGEFINDER`) for that one address only, so the same vehicle relayed through a second address — a
+  companion computer, a router, or a plain NAT rebind — silently fell back to `CommonDialect` and
+  stopped decoding them. `MavlinkRoundTripIntegrationTest.anArdupilotmegaWindMessageSurvivesTheRealUdpPathIntoATelemetrySample` sends a raw `WIND` datagram from a separate ephemeral socket precisely to
+  prove the dialect mechanism holds over the real socket/thread path, so it caught this exactly as
+  designed. The fix is in `mavlink-core`'s `ResyncBuffer#dialectForPendingFrame`: dialect is a property
+  of the **vehicle**, not of the address its datagrams arrive from — the same `(sysid, compid)`-not-
+  transport-address identity rule the rest of that module follows — and is now held in one map shared
+  across every buffer on the link. Guarded by `DialectIsLearnedPerSystemNotPerSourceTest` in
+  `mavlink-core`, which was verified to fail without the fix.
 
 ## Test scaffolding changed in W4 (docs/plans/active/MAVLINK-CORE-PLAN.md §6.1 rule 3)
 
@@ -273,9 +265,27 @@ own fakes talk to the wire changed, because the classes they used to build on we
 docs/plans/active/MAVLINK-CORE-PLAN.md **W4 done**: rewired onto `libs/mavlink-core`. Deleted outright:
 `MavlinkSocketHub`, `CommandAckRegistry`, `MavlinkUdpInputStream`, `MavlinkUdpOutputStream`.
 `VehicleClaimRegistry` → `VehicleClaimPolicy`. New: `MavlinkGateway`. Five port classes' public
-constructors unchanged (D8). 134/135 tests green — see the dialect Gotcha above for the one known,
-reported, not-routed-around failure. `vision-app`'s wiring config, ArchUnit rules, and every other
-adapter are untouched (out of this wave's file scope).
+constructors unchanged (D8). `vision-app`'s wiring config, ArchUnit rules, and every other adapter
+are untouched (out of that wave's file scope).
 
-Try it with real ArduPilot SITL (unchanged by W4): register a `mavlink` telemetry device with
-`uri = udp://0.0.0.0:14550` and `sim_vehicle.py -v ArduCopter --out=udp:127.0.0.1:14550`.
+docs/plans/active/GEO-POSE-PLAN.md **wave V2 done**: this adapter now decodes the pose measurements
+`GeoProjection.aimFrom` (vision-kernel wave V1) needs — `GLOBAL_POSITION_INT.relative_alt`/
+`time_boot_ms`, `ATTITUDE` (#30), `GIMBAL_DEVICE_ATTITUDE_STATUS` (#285, preferred) and
+`MOUNT_ORIENTATION` (#265, deprecated fallback) — landing on `Telemetry.aglMeters`/`attitude`/
+`deviceBootMillis`. New: `AttitudeState` (fourth decoder state-holder), `QuaternionEuler` (standalone
+quaternion→Euler math, independently unit-tested). `MavlinkTelemetryDecoderTest.ignoresUnrecognizedMessageTypes`
+now uses `SYSTEM_TIME` instead of `ATTITUDE` as its example of a genuinely unmapped message, since
+`ATTITUDE` is recognized as of this wave. 155/155 tests green (135 pre-existing + 20 new: 15 decoder
+tests, two of them purely defensive NaN/infinite-wire-value coverage since `Attitude`'s compact ctor
+throws on a non-finite component, + 5 `QuaternionEulerTest` cases), confirmed across three consecutive
+full-module runs; SITL tests ran un-skipped and passed every run. Out of scope, deliberately:
+`RANGEFINDER`→`aglMeters` (G2 — see Gotchas), DEM/terrain intersection, camera intrinsics, and
+`contexts/vision-map`/`vision-api`/`vision-web` (wave V3's job — this module does not consume
+`CameraAim`/`aimFrom` itself).
+
+Try it with real ArduPilot SITL (unchanged by W4/V2): register a `mavlink` telemetry device with
+`uri = udp://0.0.0.0:14550` and `sim_vehicle.py -v ArduCopter --out=udp:127.0.0.1:14550`. ArduCopter's
+SITL streams `ATTITUDE` and `GLOBAL_POSITION_INT` (with a non-zero `relative_alt`) by default; it does
+not run a simulated gimbal, so `GIMBAL_DEVICE_ATTITUDE_STATUS`/`MOUNT_ORIENTATION` were validated via
+golden-bytes tests only, not against a live SITL gimbal — flagged as untested against a real sender in
+the report for this wave.

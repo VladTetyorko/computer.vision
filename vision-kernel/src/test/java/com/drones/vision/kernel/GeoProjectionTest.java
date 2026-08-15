@@ -2,6 +2,9 @@ package com.drones.vision.kernel;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -13,6 +16,12 @@ class GeoProjectionTest {
     private static final double DELTA = 1e-6;
     // Loose enough for great-circle vs. simple-trig sanity checks over small ranges (meters).
     private static final double METERS_DELTA = 0.5;
+
+    private static Telemetry telemetry(Double altitudeMeters, Double headingDegrees, Double aglMeters,
+                                        Attitude attitude) {
+        return new Telemetry(DeviceId.random(), Instant.now(), 50.0, 30.0, altitudeMeters, headingDegrees,
+                null, Map.of(), null, aglMeters, attitude, null);
+    }
 
     // --- project(): nadir ------------------------------------------------------------
 
@@ -361,5 +370,275 @@ class GeoProjectionTest {
         GeoPosition from = new GeoPosition(0.0, 0.0, null);
 
         assertThrows(IllegalArgumentException.class, () -> GeoProjection.bearingDistance(from, null));
+    }
+
+    // --- aimFrom(): bearing precedence ------------------------------------------------------
+
+    @Test
+    void aimFromPrefersGimbalYawOverHeadingForBearing() {
+        Attitude attitude = new Attitude(null, null, null, null, null, 77.0);
+        Telemetry telemetry = telemetry(100.0, 10.0, null, attitude);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(77.0, aim.bearingDegrees(), DELTA, "gimbal yaw wins over airframe heading");
+    }
+
+    @Test
+    void aimFromFallsBackToHeadingWhenNoGimbalYaw() {
+        Telemetry telemetry = telemetry(100.0, 10.0, null, null);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(10.0, aim.bearingDegrees(), DELTA);
+    }
+
+    @Test
+    void aimFromFallsBackToHeadingWhenAttitudeHasNoGimbalYaw() {
+        Attitude attitude = new Attitude(1.0, 2.0, 3.0, null, null, null);
+        Telemetry telemetry = telemetry(100.0, 10.0, null, attitude);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(10.0, aim.bearingDegrees(), DELTA);
+    }
+
+    @Test
+    void aimFromThrowsWhenNeitherGimbalYawNorHeadingIsAvailable() {
+        Telemetry telemetry = telemetry(100.0, null, null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> GeoProjection.aimFrom(telemetry, 45.0));
+    }
+
+    // --- aimFrom(): depression precedence ---------------------------------------------------
+
+    @Test
+    void aimFromUsesNegatedGimbalPitchWhenItLandsWithinRange() {
+        Attitude attitude = new Attitude(null, null, null, null, -30.0, 90.0);
+        Telemetry telemetry = telemetry(100.0, 10.0, null, attitude);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(30.0, aim.depressionDegrees(), DELTA);
+    }
+
+    @Test
+    void aimFromAcceptsGimbalPitchStraightDownAsNadir() {
+        Attitude attitude = new Attitude(null, null, null, null, -90.0, 90.0);
+        Telemetry telemetry = telemetry(100.0, 10.0, null, attitude);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(90.0, aim.depressionDegrees(), DELTA);
+    }
+
+    @Test
+    void aimFromFallsBackWhenGimbalPitchIsLevel() {
+        Attitude attitude = new Attitude(null, null, null, null, 0.0, 90.0);
+        Telemetry telemetry = telemetry(100.0, 10.0, null, attitude);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(45.0, aim.depressionDegrees(), DELTA, "level gimbal cannot intersect the ground ahead");
+    }
+
+    @Test
+    void aimFromFallsBackWhenGimbalPitchPointsUpward() {
+        Attitude attitude = new Attitude(null, null, null, null, 15.0, 90.0);
+        Telemetry telemetry = telemetry(100.0, 10.0, null, attitude);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(45.0, aim.depressionDegrees(), DELTA, "upward-pointed gimbal cannot intersect the ground ahead");
+    }
+
+    @Test
+    void aimFromFallsBackWhenAttitudeHasNoGimbalPitch() {
+        Attitude attitude = new Attitude(null, null, null, null, null, 90.0);
+        Telemetry telemetry = telemetry(100.0, 10.0, null, attitude);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(45.0, aim.depressionDegrees(), DELTA);
+    }
+
+    @Test
+    void aimFromFallsBackWhenAttitudeIsAbsent() {
+        Telemetry telemetry = telemetry(100.0, 10.0, null, null);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(45.0, aim.depressionDegrees(), DELTA);
+    }
+
+    // --- aimFrom(): AGL precedence ----------------------------------------------------------
+
+    @Test
+    void aimFromPrefersAglMetersOverAltitudeMeters() {
+        Telemetry telemetry = telemetry(180.0, 10.0, 60.0, null);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(60.0, aim.aglMeters(), DELTA);
+    }
+
+    @Test
+    void aimFromFallsBackToAltitudeMetersWhenAglIsAbsent() {
+        Telemetry telemetry = telemetry(180.0, 10.0, null, null);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(180.0, aim.aglMeters(), DELTA, "AMSL fallback carries today's site-elevation error, by design");
+    }
+
+    @Test
+    void aimFromThrowsWhenNeitherAglNorAltitudeIsAvailable() {
+        Telemetry telemetry = telemetry(null, 10.0, null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> GeoProjection.aimFrom(telemetry, 45.0));
+    }
+
+    // --- aimFrom(): measured flag -------------------------------------------------------------
+
+    @Test
+    void aimFromReportsMeasuredTrueOnlyWhenBothDepressionAndAglAreReal() {
+        Attitude attitude = new Attitude(null, null, null, null, -30.0, 77.0);
+        Telemetry telemetry = telemetry(180.0, 10.0, 60.0, attitude);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertTrue(aim.measured());
+    }
+
+    @Test
+    void aimFromReportsMeasuredFalseWhenDepressionIsMeasuredButAglIsMissing() {
+        Attitude attitude = new Attitude(null, null, null, null, -30.0, 77.0);
+        Telemetry telemetry = telemetry(180.0, 10.0, null, attitude);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertFalse(aim.measured(), "AGL fell back to AMSL altitude, so the aim is not fully measured");
+    }
+
+    @Test
+    void aimFromReportsMeasuredFalseWhenAglIsPresentButDepressionFellBack() {
+        Telemetry telemetry = telemetry(180.0, 10.0, 60.0, null);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertFalse(aim.measured(), "depression fell back to the guessed default, so the aim is not fully measured");
+    }
+
+    @Test
+    void aimFromReportsMeasuredFalseWhenBothFellBack() {
+        Telemetry telemetry = telemetry(180.0, 10.0, null, null);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertFalse(aim.measured());
+    }
+
+    @Test
+    void aimFromReportsMeasuredFalseWhenBearingIsFromHeadingButRestIsMeasured() {
+        // Bearing sourced from airframe heading (no gimbal yaw) does not by itself downgrade
+        // "measured" — but here the gimbal pitch is also absent, so depression fell back too.
+        Attitude attitude = new Attitude(null, null, null, null, null, null);
+        Telemetry telemetry = telemetry(180.0, 10.0, 60.0, attitude);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(telemetry, 45.0);
+
+        assertEquals(10.0, aim.bearingDegrees());
+        assertFalse(aim.measured(), "no gimbal pitch reading means depression fell back, regardless of AGL");
+    }
+
+    // --- aimFrom(): validation -----------------------------------------------------------------
+
+    @Test
+    void aimFromRejectsNullTelemetry() {
+        assertThrows(IllegalArgumentException.class, () -> GeoProjection.aimFrom(null, 45.0));
+    }
+
+    // --- CameraAim: validation ------------------------------------------------------------------
+
+    @Test
+    void cameraAimRejectsNonFiniteBearing() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new GeoProjection.CameraAim(Double.NaN, 45.0, 100.0, false));
+        assertThrows(IllegalArgumentException.class,
+                () -> new GeoProjection.CameraAim(Double.POSITIVE_INFINITY, 45.0, 100.0, false));
+    }
+
+    @Test
+    void cameraAimRejectsOutOfRangeDepression() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new GeoProjection.CameraAim(0.0, 0.0, 100.0, false));
+        assertThrows(IllegalArgumentException.class,
+                () -> new GeoProjection.CameraAim(0.0, 90.1, 100.0, false));
+        assertThrows(IllegalArgumentException.class,
+                () -> new GeoProjection.CameraAim(0.0, -10.0, 100.0, false));
+    }
+
+    @Test
+    void cameraAimRejectsNegativeAgl() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new GeoProjection.CameraAim(0.0, 45.0, -1.0, false));
+    }
+
+    @Test
+    void cameraAimAcceptsDepressionExactlyNinety() {
+        GeoProjection.CameraAim aim = new GeoProjection.CameraAim(0.0, 90.0, 100.0, true);
+
+        assertEquals(90.0, aim.depressionDegrees());
+    }
+
+    // --- project(GeoPosition, CameraAim): delegation and equivalence ---------------------------
+
+    @Test
+    void projectWithCameraAimMatchesTheFourArgOverload() {
+        GeoPosition drone = new GeoPosition(50.0, 30.0, 100.0);
+        GeoProjection.CameraAim aim = new GeoProjection.CameraAim(35.0, 40.0, 120.0, true);
+
+        GeoPosition viaAim = GeoProjection.project(drone, aim);
+        GeoPosition viaFourArg = GeoProjection.project(drone, aim.bearingDegrees(), aim.aglMeters(),
+                aim.depressionDegrees());
+
+        assertEquals(viaFourArg.latitude(), viaAim.latitude(), DELTA);
+        assertEquals(viaFourArg.longitude(), viaAim.longitude(), DELTA);
+    }
+
+    @Test
+    void projectWithCameraAimRejectsNullDrone() {
+        GeoProjection.CameraAim aim = new GeoProjection.CameraAim(0.0, 45.0, 100.0, false);
+
+        assertThrows(IllegalArgumentException.class, () -> GeoProjection.project(null, aim));
+    }
+
+    @Test
+    void projectWithCameraAimRejectsNullAim() {
+        GeoPosition drone = new GeoPosition(50.0, 30.0, 100.0);
+
+        assertThrows(IllegalArgumentException.class, () -> GeoProjection.project(drone, (GeoProjection.CameraAim) null));
+    }
+
+    // --- G6: the AMSL fallback path reproduces today's exact numbers --------------------------
+
+    @Test
+    void aimFromOnBareTelemetryReproducesTodaysGoldenValueExactly() {
+        // Same scenario as goldenValueDueNorthFortyFiveDegreeDepression above, but resolved through
+        // aimFrom() from a Telemetry sample that reports none of the new fields (no attitude, no
+        // agl) — proving the new code path is behaviorally identical to the pre-V1 call for a
+        // device that reports nothing new (G6).
+        GeoPosition drone = new GeoPosition(10.0, 20.0, 100.0);
+        double expectedLat = 10.0 + Math.toDegrees(100.0 / GeoProjection.EARTH_RADIUS_METERS);
+        Telemetry bareTelemetry = telemetry(100.0, 0.0, null, null);
+
+        GeoProjection.CameraAim aim = GeoProjection.aimFrom(bareTelemetry, 45.0);
+        GeoPosition ground = GeoProjection.project(drone, aim);
+
+        assertFalse(aim.measured());
+        assertEquals(100.0, aim.aglMeters(), DELTA, "falls back to altitudeMeters, carrying the AMSL error");
+        assertEquals(45.0, aim.depressionDegrees(), DELTA);
+        assertEquals(expectedLat, ground.latitude(), 1e-9);
+        assertEquals(20.0, ground.longitude(), 1e-9);
     }
 }

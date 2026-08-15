@@ -313,9 +313,12 @@ L4**, and it works only if the boundary is made of *values* rather than live obj
 right costs nothing now and is expensive to retrofit, so it is pinned here even though no broker code is in
 scope.
 
-> **Note:** `DOMAIN-SEPARATION-PLAN.md` D3 pins **NATS JetStream**; this task specifies **Kafka**. The two
-> plans currently disagree and that needs resolving separately. It does not change anything below — the
-> seam is deliberately broker-agnostic, and both brokers impose the same five constraints.
+> **Resolved 2026-08-15: the broker is NATS JetStream** — operator decision, consistent with
+> `DOMAIN-SEPARATION-PLAN.md` D3 and `FLEET-MIGRATION-PLAN.md` MD1. An earlier draft of this section
+> specified Kafka; that is withdrawn. Nothing below changed as a result, which was the point of making the
+> seam broker-agnostic: both brokers impose the same five constraints. `mavlink-core` still depends on
+> neither, and the infrastructure + `adapters/adapter-nats/**` are owned by FLEET-MIGRATION **T2.a**, not
+> by this plan.
 
 A new package `com.drones.mavlink.api` (L4½) holds the boundary records. It is the **only** package a
 broker adapter imports.

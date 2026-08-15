@@ -94,9 +94,17 @@ public interface MarkService {
      * Drops a {@code DETECTION} mark, projected from an asset's freshest telemetry (the cockpit
      * "geolocate" action), {@code UNVERIFIED} by default.
      *
+     * <p>Since docs/plans/active/GEO-POSE-PLAN.md wave V3, the projection resolves a {@code
+     * GeoProjection.CameraAim} from the telemetry (preferring a measured gimbal depression and a real
+     * AGL sample over the platform's 45°/AMSL assumptions) rather than reading raw heading/altitude
+     * fields directly — see {@link DefaultMarkService} for the precedence. {@link
+     * GeolocateSpec#depressionDegrees()}, when present, overrides whatever the resolver would have
+     * used.
+     *
      * @param v    who is geolocating it
      * @param spec which asset to project from, and the mark's descriptive fields
-     * @return the created mark, {@link MarkStatus#ACTIVE}
+     * @return the created mark ({@link MarkStatus#ACTIVE}) plus whether the fix was measured or
+     *         assumed — see {@link GeolocationResult}
      * @throws java.util.NoSuchElementException if {@code spec.layerId()} is given and unknown
      * @throws com.drones.vision.platform.AccessDeniedException              if {@code v} does not {@link
      *                                             MapAccessPolicy#canContribute} to the resolved layer
@@ -106,7 +114,7 @@ public interface MarkService {
      *                                             positive — an honest "cannot geolocate: telemetry
      *                                             incomplete" (→ 400)
      */
-    Mark geolocate(Viewer v, GeolocateSpec spec);
+    GeolocationResult geolocate(Viewer v, GeolocateSpec spec);
 
     /**
      * Applies a partial edit — annotation and/or a lifecycle transition. See the class javadoc's

@@ -66,4 +66,57 @@ class TelemetryTest {
 
         assertEquals(flightState, telemetry.flightState());
     }
+
+    @Test
+    void nineArgConstructorDefaultsAglAttitudeAndDeviceBootMillisToNull() {
+        Telemetry telemetry = new Telemetry(DeviceId.random(), Instant.now(), null, null, null, null, null, Map.of(),
+                FlightState.empty());
+
+        assertNull(telemetry.aglMeters());
+        assertNull(telemetry.attitude());
+        assertNull(telemetry.deviceBootMillis());
+    }
+
+    @Test
+    void eightArgConstructorDefaultsAglAttitudeAndDeviceBootMillisToNullToo() {
+        Telemetry telemetry = new Telemetry(DeviceId.random(), Instant.now(), null, null, null, null, null, Map.of());
+
+        assertNull(telemetry.aglMeters());
+        assertNull(telemetry.attitude());
+        assertNull(telemetry.deviceBootMillis());
+    }
+
+    @Test
+    void twelveArgConstructorAcceptsAglAttitudeAndDeviceBootMillis() {
+        Attitude attitude = new Attitude(1.0, 2.0, 3.0, null, -30.0, 90.0);
+
+        Telemetry telemetry = new Telemetry(DeviceId.random(), Instant.now(), null, null, 180.0, null, null, Map.of(),
+                null, 42.5, attitude, 12_345L);
+
+        assertEquals(42.5, telemetry.aglMeters());
+        assertEquals(attitude, telemetry.attitude());
+        assertEquals(12_345L, telemetry.deviceBootMillis());
+        assertEquals(180.0, telemetry.altitudeMeters(), "altitudeMeters stays AMSL, independent of aglMeters");
+    }
+
+    @Test
+    void rejectsNonFiniteAglMeters() {
+        Instant now = Instant.now();
+        DeviceId id = DeviceId.random();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> new Telemetry(id, now, null, null, null, null, null, Map.of(), null, Double.NaN, null, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Telemetry(id, now, null, null, null, null, null, Map.of(), null,
+                        Double.POSITIVE_INFINITY, null, null));
+    }
+
+    @Test
+    void rejectsNegativeDeviceBootMillis() {
+        Instant now = Instant.now();
+        DeviceId id = DeviceId.random();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> new Telemetry(id, now, null, null, null, null, null, Map.of(), null, null, null, -1L));
+    }
 }
