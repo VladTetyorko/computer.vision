@@ -71,9 +71,12 @@
             <artifactId>adapter-mavlink</artifactId>
         </dependency>
         <!--
-          Test-scoped only, and deliberately so: vision-app has no runtime need for mavlink-core
-          (adapter-mavlink will depend on it directly from wave W4 onward), but ArchitectureTest must
-          be able to import `com.drones.mavlink..` to enforce that the library never depends back on
+          Declared explicitly, and it must stay compile-scoped. adapter-mavlink already brings
+          mavlink-core transitively, but a direct declaration here wins Maven's nearest-wins race:
+          scoping it to `test` stripped the library off the *runtime* classpath entirely, and the
+          app booted only to die on NoClassDefFoundError: com/drones/mavlink/session/TxScheduler.
+          The declaration is kept rather than dropped so ArchitectureTest can import
+          `com.drones.mavlink..` and enforce that the library never depends back on
           `com.drones.vision..` — the guard that keeps it reusable. Importing those classes off disk
           instead would make the rule skip silently whenever the module happened not to be built,
           and a rule that skips is not a rule. See docs/plans/active/MAVLINK-CORE-PLAN.md §3.1.
@@ -81,7 +84,6 @@
         <dependency>
             <groupId>com.drones</groupId>
             <artifactId>mavlink-core</artifactId>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.drones</groupId>
