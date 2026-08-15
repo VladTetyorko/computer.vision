@@ -120,5 +120,5 @@ everywhere except structural labels (§8).
    `.surface-dark`.
 2. Every table/panel you touched conforms to §5/§6; selection per §4.
 3. Screenshot the touched surface in **both themes** (and inside `.surface-dark` if applicable).
-4. `npm run test:ci` + `npx tsc --noEmit` green; `vision-web/MODULE.md` updated if the surface
+4. `npm run test:ci` + `npx tsc --noEmit` green; `station/vision-web/MODULE.md` updated if the surface
    or conventions changed.

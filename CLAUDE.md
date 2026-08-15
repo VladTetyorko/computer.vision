@@ -14,8 +14,8 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 
 | Module | Path | Purpose |
 |---|---|---|
-| vision-kernel | `vision-kernel/` | Shared kernel: ids + pure value objects, no third-party deps, depends on nothing |
-| vision-platform | `vision-platform/` | Cross-cutting seams every context writes to (events, audit trail, visibility scope); depends only on vision-kernel |
+| vision-kernel | `core/vision-kernel/` | Shared kernel: ids + pure value objects, no third-party deps, depends on nothing |
+| vision-platform | `core/vision-platform/` | Cross-cutting seams every context writes to (events, audit trail, visibility scope); depends only on vision-kernel |
 | vision-warehouse | `contexts/vision-warehouse/` | Asset/device inventory, categories, discovery, fleet summaries, usage records. The pure leaf — no other context |
 | vision-identity | `contexts/vision-identity/` | Users, auth, assignment, visibility-scope resolution |
 | vision-flight | `contexts/vision-flight/` | Flight sessions (AssetUsage), telemetry, geofencing, manual control |
@@ -24,25 +24,25 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 | vision-events | `contexts/vision-events/` | Replay capture, usage timeline — a downstream sink, reads every context, nothing reads it back |
 | vision-learning | `contexts/vision-learning/` | CV training datasets, labeling, model promotion |
 | vision-simulation | `contexts/vision-simulation/` | Synthetic flight-plan/telemetry simulation orchestration |
-| vision-proto | `vision-proto/` | gRPC codegen from `proto/vision/v1/cv.proto` |
-| adapter-simulation | `adapters/adapter-simulation/` | Synthetic video + telemetry sources (`sim`) |
-| adapter-rtsp | `adapters/adapter-rtsp/` | RTSP/FFmpeg ingest |
-| adapter-mjpeg | `adapters/adapter-mjpeg/` | MJPEG HTTP ingest + TX simulator |
-| adapter-mavlink | `adapters/adapter-mavlink/` | MAVLink 2 UDP telemetry ingest + TX flight-plan simulator |
-| adapter-v4l2 | `adapters/adapter-v4l2/` | USB/V4L2 local camera ingest (RX only) |
-| adapter-publish-hls | `adapters/adapter-publish-hls/` | H.264 RTSP push → mediamtx (HLS viewing) |
-| adapter-discovery | `adapters/adapter-discovery/` | ONVIF / mDNS / V4L2 scanners |
-| adapter-cv-grpc | `adapters/adapter-cv-grpc/` | DetectionPort via gRPC to cv-service |
-| adapter-overlay | `adapters/adapter-overlay/` | Detection/OSD overlay burn-in (Java2D) |
-| adapter-persistence | `adapters/adapter-persistence/` | JPA/Postgres repositories (opt-in via `vision.persistence.enabled`) |
-| vision-api | `vision-api/` | REST + static web console (driving adapter) |
-| vision-app | `vision-app/` | Spring Boot assembly, wiring, devsupport, ArchUnit |
-| vision-web | `vision-web/` | Angular 21 SPA (built into the jar via frontend-maven-plugin; `-DskipWeb` to skip) |
-| cv-service | `cv-service/` | Python gRPC CV service (echo stub; YOLO in Phase 2) |
+| vision-proto | `cv/vision-proto/` | gRPC codegen from `proto/vision/v1/cv.proto` |
+| adapter-simulation | `simulation-sources/sim/` | Synthetic video + telemetry sources (`sim`) |
+| adapter-rtsp | `video-input/rtsp/` | RTSP/FFmpeg ingest |
+| adapter-mjpeg | `video-input/mjpeg/` | MJPEG HTTP ingest + TX simulator |
+| adapter-mavlink | `drone-link/mavlink/` | MAVLink 2 UDP telemetry ingest + TX flight-plan simulator |
+| adapter-v4l2 | `video-input/v4l2/` | USB/V4L2 local camera ingest (RX only) |
+| adapter-publish-hls | `video-output/publish-hls/` | H.264 RTSP push → mediamtx (HLS viewing) |
+| adapter-discovery | `device-discovery/onvif-mdns-v4l2/` | ONVIF / mDNS / V4L2 scanners |
+| adapter-cv-grpc | `cv/grpc/` | DetectionPort via gRPC to cv-service |
+| adapter-overlay | `video-output/overlay/` | Detection/OSD overlay burn-in (Java2D) |
+| adapter-persistence | `storage/persistence/` | JPA/Postgres repositories (opt-in via `vision.persistence.enabled`) |
+| vision-api | `station/vision-api/` | REST + static web console (driving adapter) |
+| vision-app | `station/vision-app/` | Spring Boot assembly, wiring, devsupport, ArchUnit |
+| vision-web | `station/vision-web/` | Angular 21 SPA (built into the jar via frontend-maven-plugin; `-DskipWeb` to skip) |
+| cv-service | `cv/cv-service/` | Python gRPC CV service (echo stub; YOLO in Phase 2) |
 
 ## Cross-cutting facts
 
-- **Dependency rule (ArchUnit-enforced):** kernel ← platform ← contexts (warehouse is the pure leaf; identity/flight/perception/map/events/learning/simulation form the measured DAG over it, see `docs/plans/active/DOMAIN-SEPARATION-W1.md` §16) ← adapters ← app; adapters never depend on each other; Spring only in vision-app/vision-api/adapters (never a context module).
+- **Dependency rule (ArchUnit-enforced):** kernel ← platform ← contexts (warehouse is the pure leaf; identity/flight/perception/map/events/learning/simulation form the measured DAG over it, see `docs/plans/active/DOMAIN-SEPARATION-W1.md` §16) ← adapters ← app; adapters never depend on each other; Spring only in vision-app, vision-api and the adapters (never a context module).
 - **Ids:** entity ids wrap `java.util.UUID` (`X.random()`, `X.of(String)` → IllegalArgumentException on bad input). `CategoryId` is a kebab-case slug. `DeviceType` enum no longer exists — categories are data.
 - **Asset model:** users interact with `Asset` (owned, categorized, 1..n devices, attributes map); `Device` is low-level plumbing; `AssetUsage` records sessions + telemetry.
 - **Validation idiom:** domain records validate in compact constructors with manual `if (…) throw new IllegalArgumentException(…)`; application layer uses `Objects.requireNonNull`.

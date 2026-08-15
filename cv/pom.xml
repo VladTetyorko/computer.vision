@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.drones</groupId>
+        <artifactId>vision</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>cv</artifactId>
+    <packaging>pom</packaging>
+    <name>cv</name>
+    <description>Aggregator for the perception pipeline's far end: the shared gRPC contract codegen and the client adapter. NOTE: cv/cv-service is a Python service, deliberately NOT a Maven module.</description>
+
+    <modules>
+        <module>vision-proto</module>
+        <module>grpc</module>
+    </modules>
+
+</project>

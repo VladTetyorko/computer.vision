@@ -1,0 +1,81 @@
+# vision-kernel
+
+Shared kernel: ids and pure value objects that every bounded context may depend on. Split out of
+`vision-domain` in **W1.7a** (docs/plans/active/DOMAIN-SEPARATION-W1.md §16) as the first of the
+wave's two universal modules — a pure `git mv` of `com.drones.vision.kernel`, no package rename, no
+import changes anywhere in the repo.
+
+**Depends on:** nothing but `java.base` (no third-party/framework imports anywhere in this module)
+**Used by:** `vision-platform`, `vision-domain`, `vision-application`, every adapter, `vision-app`, `vision-api` — transitively, everything
+**Build/test:** `./mvnw -B -pl core/vision-kernel test`
+
+## The rule
+
+The kernel is deliberately tiny and stays that way: **pure values, no ports, no aggregates.** It is
+the one package every one of the eight bounded contexts (warehouse, identity, perception, flight,
+map, learning, events, simulation) may import, so the dependency only stays safe because it flows one
+way — a kernel type that reached back into a context (an id-lookup port, a reference to another
+context's aggregate) would smuggle that context's coupling into all eight others at once, since
+everyone already depends on the kernel. Enforced by `vision-app`'s `ContextArchitectureTest`
+(`kernelDependsOnNothingButItselfAndTheJdk`) at the bytecode level; this module's own POM makes the
+same rule structural — it has no internal dependency to declare.
+
+## API surface
+
+- `record AssetId(UUID value)` — `static random()`, `static of(String)`
+- `record Attitude(Double rollDegrees, Double pitchDegrees, Double yawDegrees, Double gimbalRollDegrees, Double gimbalPitchDegrees, Double gimbalYawDegrees)` — aircraft attitude and, independently, gimbal orientation; all six fields individually nullable (fixed camera ⇒ no gimbal; no IMU ⇒ no aircraft attitude); degrees throughout (wire is radians/quaternion — conversion is the decoder's job, not this type's); compact ctor throws `IllegalArgumentException` if any non-null value is NaN/infinite; gimbal angles are earth-frame absolute, not airframe-relative; `gimbalPitchDegrees` follows aircraft-pitch sign convention (positive up, negative down); `boolean hasGimbal()`/`hasAircraftAttitude()` convenience predicates (any-of-three-non-null)
+- `record BearingDistance(double bearingDegrees, double distanceMeters)` — the output of `GeoProjection.bearingDistance`: initial bearing degrees [0,360) clockwise from true north, plus great-circle distance in meters (never negative); validated in its own compact ctor
+- `record BoundingBox(double x, double y, double width, double height)` — each component in [0,1]
+- `enum Capability` — VIDEO, TELEMETRY, PTZ, AUDIO
+- `record CategoryId(String slug)` — must match `[a-z0-9]+(-[a-z0-9]+)*`; no random-id factories (reference-data key, not a generated id)
+- `record DeviceId(UUID value)` — `static random()`, `static of(String)`
+- `record FlightState(String firmware, String mode, Boolean armed, Boolean failsafe, Integer gpsFixType, Integer satellites, Double hdop, Integer rssiPercent, List<String> armingBlockers)` — flight-controller-reported state decoded from ArduPilot/INAV/Betaflight/PX4 telemetry; every field except `armingBlockers` individually nullable (a decoder merges this incrementally as different MAVLink messages arrive); `firmware` is `"ardupilot"`/`"generic"`/`"px4"`/`null`; `gpsFixType` (MAVLink `GPS_FIX_TYPE` ordinal) ∈[0,8] if present; `rssiPercent` ∈[0,100] if present; `satellites`/`hdop` ≥0 if present; `armingBlockers` non-null, defensively copied via `List.copyOf`; `static empty()` = all null + empty list
+- `record GeoPosition(double latitude, double longitude, Double altitudeMeters)` — lat [-90,90], lon [-180,180], altitude nullable
+- `final class GeoProjection` — pure, stateless geo-math; private ctor, static methods only (no interface — one implementation, no substitution point). `EARTH_RADIUS_METERS = 6_371_000.0` (IUGG mean radius); `DEFAULT_DEPRESSION_DEGREES = 45.0` (documented guess — the fallback when no gimbal telemetry is available). `static GeoPosition project(GeoPosition drone, double headingDegrees, double altitudeMeters, double depressionDegrees)` — estimates the ground point a drone's camera is looking at; **unchanged signature and behavior** (docs/plans/active/GEO-POSE-PLAN.md G6); `depressionDegrees==90` (nadir) or `altitudeMeters==0` short-circuits to the drone's own ground position; `headingDegrees` normalized mod 360; throws `IllegalArgumentException` for `drone==null`, negative/non-finite `altitudeMeters`, `depressionDegrees` outside `(0,90]`, or non-finite `headingDegrees`; returned `altitudeMeters` always `null` (no terrain model). `static GeoPosition project(GeoPosition drone, CameraAim aim)` — convenience overload unpacking a resolved `CameraAim` into the 4-arg call; throws `IllegalArgumentException` if `drone` or `aim` is `null`. `record CameraAim(double bearingDegrees, double depressionDegrees, double aglMeters, boolean measured)` (nested) — the resolved aim `aimFrom` produces; compact ctor validates `bearingDegrees` finite, `depressionDegrees` within `(0,90]`, `aglMeters` non-negative, each throwing `IllegalArgumentException`. `static CameraAim aimFrom(Telemetry telemetry, double fallbackDepressionDegrees)` (docs/plans/active/GEO-POSE-PLAN.md §4.1, wave V1) — resolves an aim from whatever a telemetry sample actually reports: `bearingDegrees` from `attitude.gimbalYawDegrees()` (earth-frame) else `telemetry.headingDegrees()` else throws (nothing to aim along); `depressionDegrees` from `-attitude.gimbalPitchDegrees()` if that lands in `(0,90]` (a level or upward-pointed gimbal cannot intersect the ground ahead) else `fallbackDepressionDegrees`; `aglMeters` from `telemetry.aglMeters()` else `telemetry.altitudeMeters()` (the honest AMSL fallback — deliberately still carries today's site-elevation error, not corrected here) else throws (nothing to project from); `measured` is `true` only when depression came from a real gimbal reading **and** `aglMeters` was present — throws `IllegalArgumentException` if `telemetry` is `null` or if either the bearing or the AGL precedence chain bottoms out with nothing available. `static BearingDistance bearingDistance(GeoPosition from, GeoPosition to)` — haversine distance + initial great-circle bearing; throws `IllegalArgumentException` on either argument `null`. All methods clamp/wrap internal trig results so no valid input can produce `NaN` or an out-of-range result
+- `record GroupId(UUID value)` — `static random()`, `static of(String)`
+- `enum LifecycleState` — ACTIVE, DEACTIVATED, **DELETED (soft)**. Nothing is ever destroyed: a deleted asset/device is hidden from listings and refuses to stream, but its record, usages and telemetry survive and the removal is reversible. Transitions: ACTIVE⇄DEACTIVATED; ACTIVE|DEACTIVATED→DELETED; DELETED→DEACTIVATED (restore — never straight back to ACTIVE)
+- `record Ownership(UserId ownerId, GroupId groupId)`
+- `record StreamDescriptor(String protocol, URI uri, Map<String,String> options)` — **protocol must be lower-case** (ctor throws otherwise); a protocol+URI+options value object produced by warehouse and consumed by perception, with no behavior of its own — the textbook shared-kernel shape
+- `record StreamId(UUID value)` — `static random()`, `static of(String)`
+- `record Telemetry(DeviceId deviceId, Instant at, Double latitude, Double longitude, Double altitudeMeters, Double headingDegrees, Double batteryPercent, Map<String,Double> extra, FlightState flightState, Double aglMeters, Attitude attitude, Long deviceBootMillis)` — a telemetry sample from a device: position, attitude, battery state, flight-controller-reported state; all `Double`/`Attitude`/`Long` fields nullable. **`altitudeMeters` is AMSL** (above mean sea level — `GeoPosition` and every other consumer already read it that way; docs/plans/active/GEO-POSE-PLAN.md G1); `aglMeters` is the separate height-above-ground field a projection actually wants. `deviceBootMillis` is the device's own free-running boot clock, not wall-clock time and not comparable across devices — carried for a future wave to align a frame to a pose, nothing consumes it yet. Two convenience ctors preserve every pre-existing call site: the 9-arg ctor (the full arity before wave V1) defaults `aglMeters`/`attitude`/`deviceBootMillis` to `null`; the 8-arg ctor additionally defaults `flightState=null`. Compact ctor validates `aglMeters` finite if present and `deviceBootMillis` non-negative if present, each throwing `IllegalArgumentException`. Read by five contexts: flight, perception's OSD, warehouse's stats, events' replay, map
+- `record UsageId(UUID value)` — `static random()`, `static of(String)`
+- `record UserId(UUID value)` — `static random()`, `static of(String)`
+
+## Conventions
+
+- **Validation:** every record validates in its compact constructor with manual `if (…) throw new IllegalArgumentException(…)` per field (no Bean Validation, no `Objects.requireNonNull` — that idiom is application-layer only).
+- **Defensive copies:** every `List`/`Set`/`Map` component is reassigned in the compact ctor via `List.copyOf`/`Map.copyOf` (`FlightState.armingBlockers`, `StreamDescriptor.options`, `Telemetry.extra`).
+- **UUID id pattern:** `AssetId`/`DeviceId`/`GroupId`/`StreamId`/`UsageId`/`UserId` all wrap `UUID` with the same pair of factories — `random()` (`UUID.randomUUID()`) and `of(String)` (`UUID.fromString`, rethrows as `IllegalArgumentException`). `CategoryId` is the exception: a validated kebab-case `String` slug, not a UUID — categories are reference data with human-authored keys, not generated ids.
+
+## Gotchas
+
+- `StreamDescriptor.protocol` must already be lower-case; the compact ctor throws `IllegalArgumentException` if it isn't — callers cannot rely on normalization happening for them.
+- `CategoryId.slug` must match `[a-z0-9]+(-[a-z0-9]+)*` (lower-case-kebab), enforced here rather than left to callers, because slugs double as stable, human-readable reference-data keys.
+- `GeofenceZone.contains` (flight context, not this module) is a planar approximation over `GeoPosition` — see `contexts/vision-flight/MODULE.md`'s Gotchas for why that is safe at geofence scale but not near poles/antimeridian.
+- `GeoProjection.aimFrom` **throws** rather than silently defaulting when it truly has nothing to work with: no gimbal yaw *and* no heading (nothing to bear along), or no `aglMeters` *and* no `altitudeMeters` (nothing to project from). Neither case is spelled out explicitly in GEO-POSE-PLAN.md's precedence table (it only names the two-step fallback chain, not the "both absent" terminal case) — throwing was chosen over an unchecked `NullPointerException` from unboxing a `null` `Double`, for the same "domain validates loudly" discipline every other kernel type follows. Flag this if V2/V3 expected a silent no-projection result instead of an exception in that corner case.
+- `Telemetry.deviceBootMillis` non-negative validation is this module's own addition, not something GEO-POSE-PLAN.md's spec text asked for explicitly (it only specified the `aglMeters`-finite check) — added because every other counter-like kernel field (`FlightState.satellites`/`hdop`/`rssiPercent`) already gets a range check, and MAVLink's `time_boot_ms` is an unsigned wire field that can never legitimately be negative. Loosen it if a real decoder ever needs to represent "unknown" as negative rather than `null`.
+- `CameraAim.measured` is decided purely by the depression and AGL provenance, per GEO-POSE-PLAN.md's precedence table — a bearing sourced from airframe heading instead of gimbal yaw does **not** by itself make `measured` `false`. This reads slightly asymmetric (bearing has its own, unmentioned "quality" axis that the flag ignores) but matches the spec's literal wording; flagged for V2/V3 in case a UI wants to also surface "bearing was airframe heading, not gimbal yaw" separately.
+
+## Status
+
+GEO-POSE-PLAN wave V1 (docs/plans/active/GEO-POSE-PLAN.md, 2026-08-15) added `Attitude` (new type),
+appended `aglMeters`/`attitude`/`deviceBootMillis` to `Telemetry`, and added the nested
+`GeoProjection.CameraAim` record plus `GeoProjection.aimFrom`/`GeoProjection.project(GeoPosition,
+CameraAim)` — the domain-side half of giving the "Mark target" projection real gimbal/AGL
+measurements instead of the fixed 45°-depression, AMSL-as-AGL guess. The existing 4-arg
+`GeoProjection.project` signature is unchanged (G6) and every one of the 46 pre-existing `new
+Telemetry(...)` call sites across 21 files still compiles unchanged, verified by building
+`vision-kernel` plus every dependent context/adapter module that constructs `Telemetry`
+(`./mvnw -B -pl core/vision-kernel,contexts/vision-warehouse,contexts/vision-flight,contexts/vision-perception,contexts/vision-map,contexts/vision-events,drone-link/mavlink,simulation-sources/sim,storage/persistence
+-am test`, green). Decoding the new fields off the wire (MAVLink `relative_alt`, `ATTITUDE`,
+`GIMBAL_DEVICE_ATTITUDE_STATUS`/`MOUNT_ORIENTATION`) is wave V2's job in `adapter-mavlink`, not this
+module's — `aimFrom` today only ever sees `null` for `aglMeters`/`attitude` from any real decoder
+until V2 lands, so it exercises only its AMSL-fallback branch in production, exactly reproducing the
+pre-V1 `project(...)` numbers (`GeoProjectionTest.aimFromOnBareTelemetryReproducesTodaysGoldenValueExactly`
+asserts this against the same golden value the existing `goldenValueDueNorthFortyFiveDegreeDepression`
+test already covers).
+
+Previously stable since W1.6c (docs/plans/active/DOMAIN-SEPARATION-W1.md §15), which last changed the
+type set by moving `Telemetry`/`FlightState` in from `flight`. W1.7a (this module's creation) moved
+the package's *jar*, not its contents — same 17 types, same behavior, zero import changes anywhere in
+the repo (verified: `./mvnw -B -DskipWeb test` green across the reactor after the split).

@@ -39,7 +39,7 @@ POST /api/devices
 **Today's limit, read before running N>1 expecting N assets**: one device listening on a
 given `udp://host:port` locks onto the first MAVLink sysid it hears on that socket and
 silently drops every other sysid arriving on the same port
-(`adapters/adapter-mavlink/MODULE.md`, "Multiple systems on one port: first system id seen
+(`drone-link/mavlink/MODULE.md`, "Multiple systems on one port: first system id seen
 wins, no re-election"). `./up.sh 5` genuinely produces 5 distinct sysids on the wire (verified
 below) — but *today*, registering one device against `udp://0.0.0.0:14550` only ever shows you
 sysid 1. The multi-vehicle single-port gateway (`docs/plans/active/DRONE-INFRA-PLAN.md` I-a, "MAVLink fleet
@@ -148,4 +148,4 @@ own footprint does.
   `entrypoint.sh`.
 - `docs/plans/active/DRONE-INFRA-PLAN.md` I-c (this phase's spec) and I-a (the multi-vehicle gateway this
   fleet is designed to hand off to).
-- `adapters/adapter-mavlink/MODULE.md` — the platform-side ingest model this fleet targets.
+- `drone-link/mavlink/MODULE.md` — the platform-side ingest model this fleet targets.

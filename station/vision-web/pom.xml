@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.drones</groupId>
+        <artifactId>vision</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>vision-web</artifactId>
+    <name>vision-web</name>
+    <description>
+        Angular SPA (driving adapter). Contains no Java: the production bundle is emitted into
+        META-INF/resources so Spring Boot serves it straight off the classpath, keeping the whole
+        product one artifact. See docs/plans/done/WEB-PLAN.md.
+    </description>
+
+    <properties>
+        <!-- -DskipWeb=true skips Node provisioning and the Angular build entirely, for fast
+             backend-only cycles. CI always runs the full path. -->
+        <skipWeb>false</skipWeb>
+        <skipTests>false</skipTests>
+        <!-- npm-test's execution-level <skip> replaces (not ORs with) the plugin-level
+             ${skipWeb} skip, so it needs its own property that is true under EITHER flag;
+             the skip-web-tests profile below flips it when -DskipWeb=true. -->
+        <skipWebTests>${skipTests}</skipWebTests>
+        <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
+        <node.version>v22.20.0</node.version>
+        <npm.version>11.9.0</npm.version>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>${frontend-maven-plugin.version}</version>
+                <configuration>
+                    <nodeVersion>${node.version}</nodeVersion>
+                    <npmVersion>${npm.version}</npmVersion>
+                    <installDirectory>${project.build.directory}</installDirectory>
+                    <skip>${skipWeb}</skip>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>install-node-and-npm</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>install-node-and-npm</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>npm-install</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>ci --no-audit --no-fund</arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-test</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>run test:ci</arguments>
+                            <skip>${skipWebTests}</skip>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-build</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>run build -- --configuration production</arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-frontend-bundle</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <skip>${skipWeb}</skip>
+                            <outputDirectory>${project.build.outputDirectory}/META-INF/resources</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/dist</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>skip-web-tests</id>
+            <activation>
+                <property>
+                    <name>skipWeb</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <properties>
+                <skipWebTests>true</skipWebTests>
+            </properties>
+        </profile>
+    </profiles>
+
+</project>

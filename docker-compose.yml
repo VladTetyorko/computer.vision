@@ -3,7 +3,7 @@
 #
 # Usage (see README.md "Demo" for the full walkthrough):
 #   cp .env.example .env          # first time only
-#   ./mvnw -B package -DskipTests # builds vision-app/target/vision-app-*.jar (see ./Dockerfile)
+#   ./mvnw -B package -DskipTests # builds station/vision-app/target/vision-app-*.jar (see ./Dockerfile)
 #   docker compose up -d
 #   scripts/demo.sh ~/Videos/your-clip.mp4
 #
@@ -205,7 +205,7 @@ services:
       # this stack until VISION_WEBRTC_HOST names an address that machine
       # can reach. HLS (the existing viewUrl) has no such limitation and
       # remains the cross-host-reliable fallback; see adapter-publish-hls/
-      # MODULE.md and vision-app/MODULE.md ("WHEP viewing" section) for the
+      # MODULE.md and station/vision-app/MODULE.md ("WHEP viewing" section) for the
       # full WHEP-in-Docker writeup.
       MTX_WEBRTCADDITIONALHOSTS: "${VISION_WEBRTC_HOST:-127.0.0.1}"
       # docs/plans/done/MVP2-PLAN.md V-a (glass-to-glass latency): mediamtx's own default
@@ -330,7 +330,7 @@ services:
     # Context is the repo root: the Dockerfile copies /proto (shared contract) in addition to /cv-service.
     build:
       context: .
-      dockerfile: cv-service/Dockerfile
+      dockerfile: cv/cv-service/Dockerfile
     restart: unless-stopped
     ports:
       - "50051:50051"
@@ -342,7 +342,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 6
-      # Model load + Ultralytics' first-predict warmup (cv-service/MODULE.md
+      # Model load + Ultralytics' first-predict warmup (cv/cv-service/MODULE.md
       # "First-request latency") happen at process start, before the gRPC
       # server is serving -- generous enough for that even on a slow machine.
       start_period: 45s
@@ -417,7 +417,7 @@ services:
       # stays off on purpose -- ~26 unrelated @SpringBootTest classes plus
       # AuthDisabledSecurityTest rely on that default, so only this
       # compose-level override flips it, never the compiled default (see
-      # vision-app/MODULE.md's "Auth / session security" section). On first
+      # station/vision-app/MODULE.md's "Auth / session security" section). On first
       # boot AuthSeedRunner seeds three DEV-ONLY accounts, password equal to
       # username -- admin/admin (ADMIN), manager/manager (MANAGER),
       # pilot/pilot (PILOT), see AuthSeedRunner's own javadoc warning. Anyone

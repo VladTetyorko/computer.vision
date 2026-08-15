@@ -143,4 +143,4 @@ being real (see the dependency table in docs/plans/active/DOMAIN-SEPARATION-W1.m
 
 **docs/main/CYCLES-PLAN.md §8 (CW-a)** added `AssetService#assignDevice`/`#unassignDevice` — device↔asset reassignment; `DeviceService`/`AssetService` update/setState/delete already existed before this.
 
-Fully implemented otherwise: category/device/discovery CRUD, fleet summary aggregation, per-asset stats, the replay-library list. Nothing in this context is a stub — every port listed above has at least one real implementation in `adapters/adapter-persistence` or `vision-app`'s devsupport.
+Fully implemented otherwise: category/device/discovery CRUD, fleet summary aggregation, per-asset stats, the replay-library list. Nothing in this context is a stub — every port listed above has at least one real implementation in `storage/persistence` or `vision-app`'s devsupport.

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.drones</groupId>
+        <artifactId>vision</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>video-input</artifactId>
+    <packaging>pom</packaging>
+    <name>video-input</name>
+    <description>Aggregator for the ingest adapters — how pixels get in (RTSP, V4L2, MJPEG). Artifact ids keep their adapter- prefix; the folder carries the group.</description>
+
+    <modules>
+        <module>rtsp</module>
+        <module>v4l2</module>
+        <module>mjpeg</module>
+    </modules>
+
+</project>

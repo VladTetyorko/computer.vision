@@ -1,7 +1,7 @@
-# MODULE-LAYOUT — responsibility-grouped module tree (proposal, not yet executed)
+# MODULE-LAYOUT — responsibility-grouped module tree (EXECUTED)
 
-**Status:** APPROVED 2026-08-15 — executing on branch `chore/module-layout`. The W4 gate is
-lifted: MAVLINK-CORE merged to master (`7e80746`), root `pom.xml` is free.
+**Status:** DONE 2026-08-15 — executed on branch `chore/module-layout` (one commit; see §7).
+The W4 gate was lifted first: MAVLINK-CORE merged to master (`7e80746`), root `pom.xml` free.
 **Date:** 2026-08-15.
 **Driver:** navigation. Today all driven adapters sit flat under `adapters/`, so finding "everything
 that touches video input" means knowing the protocol names. The tree should answer *what is this
@@ -186,3 +186,71 @@ touching context internals. Each of those is its own decision with its own cost.
 | Risk: stale IDE/module caches | reimport; zero code risk |
 | Risk: forgotten path reference | full-reactor verify + grep for `adapters/` catches it |
 | Phase 2 (optional) artifactId renames, e.g. `adapter-rtsp` → `video-input-rtsp` | separate branch; touches every dependent pom + ArchUnit + compose; do only if the mixed naming (old ids in new folders) proves annoying in practice |
+
+## 7. Execution log
+
+**Executed 2026-08-15 on branch `chore/module-layout`, one commit.** §2's tree is now the repo's
+actual tree. Every module moved with `git mv`, so history follows (`git log --follow`, and the diff
+against `master` is ~1390 renames + 27 edited files); **no artifactId, package, or ArchUnit rule
+changed** — this was a folder move, and zero Java/TypeScript source files were edited.
+
+### What moved
+
+`adapters/` and `libs/` are gone as folders — their aggregator poms were deleted and replaced by one
+aggregator per responsibility group (`core`, `video-input`, `video-output`, `drone-link`, `cv`,
+`device-discovery`, `storage`, `simulation-sources`, `station`), each with the group folder's own
+name as its artifactId. `contexts/` was not touched. The parent scheme is unchanged from what
+`adapters/pom.xml` used: **every** child pom still declares the root `vision` pom as its `<parent>`;
+group poms only list `<modules>`. `cv/cv-service` is in the `cv/` folder but deliberately absent from
+`cv/pom.xml` — it is a Python service, not a Maven module.
+
+### Pom edits
+
+- Root `<modules>`: the old flat list → the ten group folders.
+- `<relativePath>`: `../pom.xml` → `../../pom.xml` for the six modules whose depth changed
+  (kernel, platform, vision-proto, vision-api, vision-app, vision-web). Modules already at depth 2
+  (every old `adapters/*`, `libs/mavlink-core`) needed no edit.
+- `cv/vision-proto`: `protoSourceRoot` `${project.basedir}/../proto` → `../../proto`.
+
+### Swept references (scripted, two regex passes + a short list of hand-checked cases)
+
+Build/packaging: `Dockerfile` (jar COPY path), `cv/cv-service/Dockerfile` (`COPY cv/cv-service/`,
+in-image layout deliberately unchanged), `.dockerignore`, `.gitignore`, `docker-compose.yml`
+(cv-service build `dockerfile:`), `.github/workflows/ci.yml`, `scripts/local-up.sh`,
+`.run/2 cv-service.run.xml` (working directory), `mediamtx.yml`, `.env.example`.
+Docs: `CLAUDE.md` module index, `ARCHITECTURE.md` §2 (tree redrawn by group), `README.md`,
+every `MODULE.md`/`API.md` cross-link, `infra/**/*.md`, `cv/cv-service/{README,DEPLOY-GPU,MODULE}.md`
+and `tools/trackeval/*.md`, `.claude/agents/*` + `.claude/skills/*` scope lines.
+Every `mvnw -pl <path>` command in those files was remapped token by token — `-pl` takes a path, so a
+stale one silently fails.
+
+One functional fix beyond a path rewrite: `cv/cv-service/scripts/gen_proto.sh` resolved `proto/` as
+`${CV_SERVICE_DIR}/..`, which the extra folder level broke. It now walks **up** until it finds
+`proto/vision/v1/cv.proto`, so the same script works in this repo (`cv/cv-service`), inside the image
+(`/app/cv-service`, whose Dockerfile flattens the copy) and on an rsync'd inference box
+(`~/vision/cv-service`) — no fixed `..` count anywhere.
+
+### Deliberately not swept
+
+- **Java/TS/Python source.** A handful of javadoc/comment lines cite `vision-app/MODULE.md`-style
+  paths (and `ArchitectureTest`'s javadoc says `libs/mavlink-core`). They are prose, not code: no
+  test, plugin, or runtime path resolution depends on them. Left for whoever next edits those files.
+- **`docs/plans/**` bodies.** Historical plans record what was true when they were written; only this
+  file's own §7 was added. Anyone reading an old plan should map `adapters/adapter-x` → its new group
+  via §2's table.
+
+### Verify
+
+`./mvnw -B verify` from the repo root, full reactor, no `-DskipWeb` — **BUILD SUCCESS**, 36/36
+modules, 5 m 42 s warm, on 2026-08-15. Docker was present, so the gated integration tests really ran
+(mediamtx round trips in `video-input/rtsp` + `video-output/publish-hls`, Testcontainers postgres in
+`storage/persistence`) rather than skipping. `station/vision-web` built the Angular SPA into the jar
+from its new home, and `cv/vision-proto` regenerated from repo-root `proto/` at its new depth — the
+two things a folder move is most likely to break silently. `ArchitectureTest` passed untouched, which
+is the evidence for naming rule 4: the dependency law lives in packages, not in directories.
+
+### Aftermath for a working copy
+
+`.idea/` module files and any Python venv under `cv/cv-service/.venv` still point at the old absolute
+paths — reimport the Maven project, and recreate the venv (`python3 -m venv .venv` + `pip install -e
+'.[cv]'`) if `cv-service` fails to start with a bad interpreter path.

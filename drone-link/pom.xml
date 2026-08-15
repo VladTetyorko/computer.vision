@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.drones</groupId>
+        <artifactId>vision</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>drone-link</artifactId>
+    <packaging>pom</packaging>
+    <name>drone-link</name>
+    <description>Aggregator for everything that talks to an aircraft: one module per radio/telemetry protocol (commands out, telemetry/acks/RC in), plus the framework-free protocol libraries they build on.</description>
+
+    <modules>
+        <module>mavlink-core</module>
+        <module>mavlink</module>
+    </modules>
+
+</project>
