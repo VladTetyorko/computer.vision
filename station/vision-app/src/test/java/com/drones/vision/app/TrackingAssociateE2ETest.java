@@ -115,6 +115,26 @@ class TrackingAssociateE2ETest {
     static void cvProperties(DynamicPropertyRegistry registry) {
         registry.add("vision.cv.enabled", () -> "true");
         registry.add("vision.cv.endpoint", () -> "localhost:" + server.getPort());
+        // docs/plans/active/CV-DEMAND-PLAN.md §3.7: this test proves tracking identity survives the
+        // whole chain, not that a viewer/poller kept demand alive throughout -- the 3-ASSOCIATE-frame
+        // wait below never opens the SSE detections:<assetId> topic or polls GET .../detections (only
+        // GET .../tracks, which is not a demand signal), so the real demand-poll task would otherwise
+        // race it. Disabling the gate is the documented escape hatch for exactly this.
+        registry.add("vision.cv.demand.enabled", () -> "false");
+    }
+
+    /**
+     * {@link PipelineConfig#defaults()} with {@code detectionEnabled} true} instead of its own
+     * default {@code false} (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1) -- this test starts its
+     * stream directly through {@link AssetStreamService}, bypassing the controller-level {@code
+     * vision.cv.detection-default-enabled} deployment default entirely, so detection has to be
+     * switched on explicitly here for the servicer to ever see a frame at all.
+     */
+    private static PipelineConfig detectionEnabledDefaults() {
+        PipelineConfig defaults = PipelineConfig.defaults();
+        return new PipelineConfig(defaults.model(), defaults.confidenceThreshold(), defaults.inferenceFps(),
+                defaults.maxInFlightInferences(), defaults.overlayTelemetry(), defaults.labelFilter(),
+                defaults.eventRule(), defaults.overlayBurnIn(), true, defaults.tracking());
     }
 
     @Autowired
@@ -144,7 +164,7 @@ class TrackingAssociateE2ETest {
                         new CategoryId("drone"), Map.of(), List.of(videoDevice)),
                 DevPrincipal.OWNERSHIP, DevPrincipal.USER_ID);
 
-        StreamId streamId = assetStreamService.startStream(asset.id(), null, PipelineConfig.defaults());
+        StreamId streamId = assetStreamService.startStream(asset.id(), null, detectionEnabledDefaults());
         try {
             assertTrue(servicer.threeTrackedFrames.await(AWAIT_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
                     "expected >=3 frames stating TRACKING_MODE_ASSOCIATE within " + AWAIT_TIMEOUT

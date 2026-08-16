@@ -212,7 +212,7 @@ Response DTOs (`@JsonInclude(NON_NULL)` unless noted — see Conventions), each 
 
 **Detections** (docs/plans/done/MVP1-PLAN.md §C8 bullet 3, body of `GET /api/streams/{streamId}/detections`, and the `detections` SSE topic's payload): `BoundingBoxResponse(x, y, width, height)` (no `NON_NULL`; mirrors `kernel.BoundingBox`, each component normalized [0,1]) · `DetectionResponse(label, confidence, box:BoundingBoxResponse, modelId, modelVersion, track?:DetectionTrackResponse)` · `DetectionResultResponse(streamId, frameSequence, capturedAt, inferenceMillis, detections:List<DetectionResponse>, tracking?:FrameTrackingResponse)`. **The last two gained `@JsonInclude(NON_NULL)` for exactly one field each** (docs/plans/done/TRACKING-PLAN.md §4.G, wave T6) — every other field is still always present, and an untracked payload is therefore **byte-identical to the pre-tracking wire**, which is the whole reason the track facts are one nested object rather than five flat siblings (docs/extracts/TRACKING-ORCHESTRATION.md §6 rule 1). Both keep their pre-T6 canonical constructor as an N-1-arg convenience ctor, so every existing call site compiles unchanged.
 
-**Tracking wire shapes** (docs/plans/done/TRACKING-PLAN.md §4.D/§4.E/§4.F/§4.G, wave T6; V3 fields added docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2, wave J3): `DetectionTrackResponse(id, state, source, velocityX, velocityY, reupdated)` — the nested `"track"` object, deliberately **without** `ageFrames` (book-keeping the tracks endpoint carries, not something a box needs 6×/s); `reupdated` (wave J3, a 5-arg convenience ctor defaults it `false`) is `TrackRef#reupdated()` verbatim — this track's gap was reconstructed by ORU on this frame · `FrameTrackingResponse(detectorRan, detectorReason?, trackerMillis, engineId, lockedTrackId, detectionLagMillis, reupdateMillis, reupdatedTracks, capability?:TrackingCapabilityResponse)` (`@JsonInclude(NON_NULL)`) — the nested `"tracking"` object; **`detectorReason` is present iff `detectorRan`**, and `trackerMillis` is a *fractional* millisecond (nanos/1e6 — `Duration#toMillis()` would report every 0.4 ms tracker pass as `0`, which is precisely the number this feature exists to show); the four wave-J3 fields are a straight `TrackingTelemetry` mapping (a 5-arg convenience ctor defaults them to `0`/`0`/`0`/absent, the pre-V3 shape) — `detectionLagMillis`/`reupdateMillis` are whole milliseconds (the wire itself carries them as proto `int64`, no sub-millisecond precision to lose), and **`capability` is present only when `TrackingTelemetry#capability()` is non-null** (invariant B3) · `TrackingCapabilityResponse(levelServed, reason)` — the nested `"capability"` object, a straight `TrackingCapability` mapping; **`levelServed` is what the server actually served, never what a request asked for** (invariant B5 — see `TrackingConfigRequest#capabilityLevel` below, which this type has no relationship to at the Java level: `FrameTrackingResponse.from` builds `capability` purely from `TrackingTelemetry`, so there is no request value in scope to confuse it with) · `TrackResponse(trackId, label, confidence, box, state, source, velocityX, velocityY, ageFrames, reupdated, firstSeen, lastSeen)` from `perception.domain.model.TrackedObject` — flat, not nested, because *this is* the track resource; `reupdated` (wave J3) added between `ageFrames` and `firstSeen`, matching `TrackRef`'s own field order · `TrackStatsResponse(mode, engineId, windowSeconds, detectorPasses, trackerFrames, dutyRatio, trackerMillisP50, trackerMillisP95, lastDetectorReason, byState:Map<String,Integer>)` from `application.pipeline.TrackingStats` (`window.toSeconds()` → `windowSeconds`; `byState` is a `LinkedHashMap` copy so every state appears, zero included, in lifecycle order; **no `lockedTrackId` here** — §4.E hoists it) · `StreamTracksResponse(streamId, lockedTrackId, tracks, stats?, latency?, rate?)` (`@JsonInclude(NON_NULL)` for all three optionals; a 5-arg convenience ctor defaults `rate` to absent) · `PipelineLatencyResponse(windowSeconds, samples, roundTripMillisP50, roundTripMillisP95, roundTripMillisMax, updateIntervalMillisP50, effectiveFps, worstBoxAgeMillis)` from `application.pipeline.PipelineLatency` (docs/conclusions/CV-RATE-BUDGET.md §3) — **present independently of `stats`**, gated only on the window having sampled anything: a stream with tracking off reports latency and no stats, which is the combination this endpoint most needs to serve, since a lagging overlay is exactly the complaint likely to be raised against it. `roundTripMillis*` is what the pipeline adds (encode, both hops, inference, decode); `updateIntervalMillisP50` is how long until the next box, set by the sample rate; `worstBoxAgeMillis` sums the two and is the number to quote for "how far behind is the overlay?" · `DetectionRateResponse(windowSeconds, sourceFps, targetFps, demandFps, submittedFps, submitted, droppedInFlight, droppedOutage, missedDeadlines, dropRatio, transport, decodeMillisP50)` from `application.pipeline.DetectionRate` (docs/plans/active/CV-RATE-CONTROL-PLAN.md §1; `transport`/`decodeMillisP50` added docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§7, wave M5) — the `"rate"` object, **beside** `latency` rather than inside it: `effectiveFps` reports the rate boxes arrive at but cannot say *why* it fell short, and a starving source and a saturated detector look identical from it while having opposite fixes. Compare `targetFps` with `submittedFps`; when they differ exactly one counter is non-zero and names the loss — `missedDeadlines` (source slower than the target; `sourceFps` will confirm), `droppedInFlight` (detector saturated), `droppedOutage` (cv-service down). `demandFps` is what the tracked target's motion asked for before any ceiling applied, so `demandFps > targetFps` is the one comparison separating "raise the ceiling" from "shrink the round trip". Gated on a **served deadline** (`due() > 0`), not a completed detection, so a stream whose samples are *all* being dropped still reports why. **`transport`** (`"push"`|`"pull"`) is which loop counted these figures, and doubles as the reader's cue for which definition the sibling `latency.roundTripMillis*` is using (§7: pull mode redefines it as `receivedAt - capturedAt`, box age at arrival, since there is no Java→Python round trip to measure) — `PipelineLatencyResponse` itself gained no field of its own for this. **`decodeMillisP50`** is the worker's median local decode cost, `0` in push mode · `CvTrackerResponse(id, displayName, modes:List<String>, needsAssets, costHint)` + `CvTrackersResponse(trackers)` (no `NON_NULL`, mirroring `CvModelResponse`/`CvModelsResponse` exactly). Request side: `TrackingConfigRequest(mode?, engineId?, verifyEveryMillis?, followFps?, redetectIouPercent?, maxAgeFrames?, minHits?, capabilityLevel?, reupdateMaxGapMillis?, lock?:TargetLockRequest)` with `toPatch()`/`toStartPatch()` — both map **one-for-one onto `application.stream.TrackingConfigPatch`**, an absent JSON field becoming a `null` the application layer reads as "leave this knob unchanged"; the latter additionally **rejects a `lock`** (it names a track that cannot exist before the stream produces one). `capabilityLevel`/`reupdateMaxGapMillis` (wave J3, docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2) are ordinary nullable patch fields at this edge like every other knob here — **a request state a *ceiling*** (invariant B5); this DTO has no field for, and must never be read as, what was actually served — that is `FrameTrackingResponse#capability()`'s job, on a later, different response. **Nothing is merged at this edge**: the running configuration is the application layer's state, and the deployment seed is applied there too — see the follow-up section at the end of this file. `TargetLockRequest(trackId?, pointX?, pointY?, release?)` with `toTargetLock()` leaves `lockSeq` at `0` and lets `perception.domain.model.TargetLock`'s own compact ctor be the single arbiter of the one-of-three rule (→400). `UpdateStreamConfigRequest` gained `tracking` (→ `toPatch()`), `UpdateStreamConfigResponse` gained `trackingChanged`, and both `StartStreamRequest`/`StartAssetStreamRequest` gained `tracking`, exposed to the controllers as a separate `trackingPatch()` beside the plain `mergeOntoDefaults()`.
+**Tracking wire shapes** (docs/plans/done/TRACKING-PLAN.md §4.D/§4.E/§4.F/§4.G, wave T6; V3 fields added docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2, wave J3): `DetectionTrackResponse(id, state, source, velocityX, velocityY, reupdated)` — the nested `"track"` object, deliberately **without** `ageFrames` (book-keeping the tracks endpoint carries, not something a box needs 6×/s); `reupdated` (wave J3, a 5-arg convenience ctor defaults it `false`) is `TrackRef#reupdated()` verbatim — this track's gap was reconstructed by ORU on this frame · `FrameTrackingResponse(detectorRan, detectorReason?, trackerMillis, engineId, lockedTrackId, detectionLagMillis, reupdateMillis, reupdatedTracks, capability?:TrackingCapabilityResponse)` (`@JsonInclude(NON_NULL)`) — the nested `"tracking"` object; **`detectorReason` is present iff `detectorRan`**, and `trackerMillis` is a *fractional* millisecond (nanos/1e6 — `Duration#toMillis()` would report every 0.4 ms tracker pass as `0`, which is precisely the number this feature exists to show); the four wave-J3 fields are a straight `TrackingTelemetry` mapping (a 5-arg convenience ctor defaults them to `0`/`0`/`0`/absent, the pre-V3 shape) — `detectionLagMillis`/`reupdateMillis` are whole milliseconds (the wire itself carries them as proto `int64`, no sub-millisecond precision to lose), and **`capability` is present only when `TrackingTelemetry#capability()` is non-null** (invariant B3) · `TrackingCapabilityResponse(levelServed, reason)` — the nested `"capability"` object, a straight `TrackingCapability` mapping; **`levelServed` is what the server actually served, never what a request asked for** (invariant B5 — see `TrackingConfigRequest#capabilityLevel` below, which this type has no relationship to at the Java level: `FrameTrackingResponse.from` builds `capability` purely from `TrackingTelemetry`, so there is no request value in scope to confuse it with) · `TrackResponse(trackId, label, confidence, box, state, source, velocityX, velocityY, ageFrames, reupdated, firstSeen, lastSeen)` from `perception.domain.model.TrackedObject` — flat, not nested, because *this is* the track resource; `reupdated` (wave J3) added between `ageFrames` and `firstSeen`, matching `TrackRef`'s own field order · `TrackStatsResponse(mode, engineId, windowSeconds, detectorPasses, trackerFrames, dutyRatio, trackerMillisP50, trackerMillisP95, lastDetectorReason, byState:Map<String,Integer>)` from `application.pipeline.TrackingStats` (`window.toSeconds()` → `windowSeconds`; `byState` is a `LinkedHashMap` copy so every state appears, zero included, in lifecycle order; **no `lockedTrackId` here** — §4.E hoists it) · `StreamTracksResponse(streamId, lockedTrackId, tracks, stats?, latency?, rate?, detectionState?)` (`@JsonInclude(NON_NULL)` for all four optionals; N-1-arg convenience ctors default `rate`/`detectionState` to absent, most recently `detectionState` — docs/plans/active/CV-DEMAND-PLAN.md §3.6, wave D2 — reporting which of the two independent detection gates (operator intent vs. system-derived demand) currently explains a stream's boxes-or-no-boxes state; absent for an unknown/not-running stream, same as `stats`) · `PipelineLatencyResponse(windowSeconds, samples, roundTripMillisP50, roundTripMillisP95, roundTripMillisMax, updateIntervalMillisP50, effectiveFps, worstBoxAgeMillis)` from `application.pipeline.PipelineLatency` (docs/conclusions/CV-RATE-BUDGET.md §3) — **present independently of `stats`**, gated only on the window having sampled anything: a stream with tracking off reports latency and no stats, which is the combination this endpoint most needs to serve, since a lagging overlay is exactly the complaint likely to be raised against it. `roundTripMillis*` is what the pipeline adds (encode, both hops, inference, decode); `updateIntervalMillisP50` is how long until the next box, set by the sample rate; `worstBoxAgeMillis` sums the two and is the number to quote for "how far behind is the overlay?" · `DetectionRateResponse(windowSeconds, sourceFps, targetFps, demandFps, submittedFps, submitted, droppedInFlight, droppedOutage, missedDeadlines, dropRatio, transport, decodeMillisP50)` from `application.pipeline.DetectionRate` (docs/plans/active/CV-RATE-CONTROL-PLAN.md §1; `transport`/`decodeMillisP50` added docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§7, wave M5) — the `"rate"` object, **beside** `latency` rather than inside it: `effectiveFps` reports the rate boxes arrive at but cannot say *why* it fell short, and a starving source and a saturated detector look identical from it while having opposite fixes. Compare `targetFps` with `submittedFps`; when they differ exactly one counter is non-zero and names the loss — `missedDeadlines` (source slower than the target; `sourceFps` will confirm), `droppedInFlight` (detector saturated), `droppedOutage` (cv-service down). `demandFps` is what the tracked target's motion asked for before any ceiling applied, so `demandFps > targetFps` is the one comparison separating "raise the ceiling" from "shrink the round trip". Gated on a **served deadline** (`due() > 0`), not a completed detection, so a stream whose samples are *all* being dropped still reports why. **`transport`** (`"push"`|`"pull"`) is which loop counted these figures, and doubles as the reader's cue for which definition the sibling `latency.roundTripMillis*` is using (§7: pull mode redefines it as `receivedAt - capturedAt`, box age at arrival, since there is no Java→Python round trip to measure) — `PipelineLatencyResponse` itself gained no field of its own for this. **`decodeMillisP50`** is the worker's median local decode cost, `0` in push mode · `CvTrackerResponse(id, displayName, modes:List<String>, needsAssets, costHint)` + `CvTrackersResponse(trackers)` (no `NON_NULL`, mirroring `CvModelResponse`/`CvModelsResponse` exactly). Request side: `TrackingConfigRequest(mode?, engineId?, verifyEveryMillis?, followFps?, redetectIouPercent?, maxAgeFrames?, minHits?, capabilityLevel?, reupdateMaxGapMillis?, lock?:TargetLockRequest)` with `toPatch()`/`toStartPatch()` — both map **one-for-one onto `application.stream.TrackingConfigPatch`**, an absent JSON field becoming a `null` the application layer reads as "leave this knob unchanged"; the latter additionally **rejects a `lock`** (it names a track that cannot exist before the stream produces one). `capabilityLevel`/`reupdateMaxGapMillis` (wave J3, docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2) are ordinary nullable patch fields at this edge like every other knob here — **a request state a *ceiling*** (invariant B5); this DTO has no field for, and must never be read as, what was actually served — that is `FrameTrackingResponse#capability()`'s job, on a later, different response. **Nothing is merged at this edge**: the running configuration is the application layer's state, and the deployment seed is applied there too — see the follow-up section at the end of this file. `TargetLockRequest(trackId?, pointX?, pointY?, release?)` with `toTargetLock()` leaves `lockSeq` at `0` and lets `perception.domain.model.TargetLock`'s own compact ctor be the single arbiter of the one-of-three rule (→400). `UpdateStreamConfigRequest` gained `tracking` (→ `toPatch()`), `UpdateStreamConfigResponse` gained `trackingChanged`, and both `StartStreamRequest`/`StartAssetStreamRequest` gained `tracking`, exposed to the controllers as a separate `trackingPatch()` beside the plain `mergeOntoDefaults()`.
 
 **Replay library** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/extracts/design/10-replay.md's frozen wire
 contract, body of `GET /api/usages`), `@JsonInclude(NON_NULL)` (`endedAt`/`durationSeconds` genuinely
@@ -1185,3 +1185,132 @@ additive assertions on already-passing tests plus three new test methods.
 documented in station/vision-app/MODULE.md's own wave J3 section, including why that module's `mvn test` could
 not be run to completion in this task (a pre-existing, unrelated stale `adapter-cv-grpc` local-repo
 artifact — concurrent wave J2's module, not touched here).
+
+## docs/plans/active/CV-DEMAND-PLAN.md wave D2 done (system-derived detection demand — the REST + wiring half)
+
+D1 (`contexts/vision-perception`, out of scope, not touched here) added the `DetectionDemandPort`
+seam and flipped `PipelineConfig.defaults().detectionEnabled()` from `true` to `false` (D1's own
+javadoc, §1); D3 (`station/vision-web`, out of scope, not touched here) is the frontend half. This
+wave is the two REST-adjacent modules that had to wire the two halves together: an implementation of
+the port, the DTO/endpoint changes that let it observe real demand, and the deployment default that
+decides what a brand-new stream's detection starts at.
+
+**New `com.drones.vision.api.live.LiveAndPollDetectionDemand implements DetectionDemandPort`** — the
+one fact `DefaultStreamService`'s demand-poll task wants, collapsed from the two driving protocols the
+frontend actually uses:
+
+- **SSE half** — `assetId != null && watchingDetections.test(assetId)`, where `watchingDetections`
+  is a `Predicate<AssetId>`, not `LiveUpdateRegistry` itself. Same seam idiom
+  `ApplicationServiceWiring#usageTracker` already uses for `GeofenceMonitor::evaluate` — this class
+  needs exactly one capability off the registry (`LiveUpdateRegistry#watchingDetections(AssetId)`,
+  new method, see below), so it takes that capability as a narrow functional parameter instead of the
+  whole concrete `final` class. Keeps the port trivially testable with a plain lambda, including a
+  throwing one, without constructing or mocking `LiveUpdateRegistry` at all — this repo has no inline
+  Mockito mock-maker configured, so mocking a `final` class was never an option here.
+- **Poll half** — `touched(StreamId)` stamps a `ConcurrentHashMap<StreamId, Instant>` entry;
+  `detectionWanted` prunes expired entries (TTL = `VisionCvProperties.Demand#pollTtl()`, default 10s)
+  on every read rather than on a separate scheduled sweep, so the map never needs its own background
+  thread. `StreamController#detections` calls `touched(id)` on every `GET
+  /api/streams/{streamId}/detections` — a Wall/Live page polling that endpoint counts as demand
+  exactly like an open SSE `detections:<assetId>` subscription does.
+- **An internal failure fails OPEN — it answers "wanted", never "not wanted."** `detectionWanted`
+  honours the port's never-throw contract with a swallowing `catch`, and the *direction* of that
+  swallow is load-bearing enough to have its own test
+  (`aThrowingPredicateFailsOpenSoOneBrokenLookupNeverGatesDetectionOffEverywhere`). "We could not
+  determine whether anyone is watching" is not the confident negative "nobody is watching":
+  answering `false` would gate detection off for **every** stream at once and — since the gate is
+  precisely what `DetectionState` reports — surface as `IDLE_NO_VIEWERS` to an operator sitting
+  right there watching. A wrong answer that costs CPU is recoverable and visible; a wrong answer
+  that silently stops detection and then explains itself with a falsehood is neither. Points the
+  same way as every other failure decision in this feature (an absent port gates nothing;
+  `StreamPipeline`'s own demand flag initialises `true`). Shipped `false`; corrected during review.
+- **Never throws**, per `DetectionDemandPort`'s own contract: `detectionWanted` swallows any
+  `RuntimeException` from `watchingDetections` (or a `null` `assetId`) and reports "not watched"
+  rather than propagating — a periodically-scheduled caller (`DefaultStreamService`'s demand-poll
+  task) must never have one failing evaluation take down every later one.
+
+**New `com.drones.vision.api.support.StreamDetectionSupport`** (record, `defaultConfig:
+PipelineConfig`, `demand: LiveAndPollDetectionDemand` nullable) — bundles `StreamController`'s two new
+detection-demand collaborators behind one constructor parameter. `StreamController` was already at
+four constructor arguments; neither the deployment-default `PipelineConfig` read (once per `start`)
+nor the poll-touch delegation (once per `detections` read) is substantial enough alone to justify a
+fifth slot or splitting the controller — so both ride in one named, purpose-built bundle instead of an
+unlabeled extra field. `touched(StreamId)` is a no-op when `demand()` is `null` (`vision.cv.demand.enabled
+=false`, the port bean absent entirely). Plain class, not a `@Component` — assembled by `vision-app`'s
+`CvWiring#streamDetectionSupport`, mirroring `SnapshotJpegEncoder`'s own precedent for a
+framework-free support class this module holds but only `vision-app` knows how to build.
+
+**New `com.drones.vision.api.support.StreamViewerLinks`** (`@Component`) — the narrow
+`viewUrl`/`whepUrl`/`burnedIn` read `AssetStreamController` needs off `StreamPublisherPort`/
+`StreamService`, split out so that controller could add a `PipelineConfig defaultConfig` fifth
+parameter without exceeding `.claude/skills/java-clean-code/SKILL.md` §3's five-constructor-parameter
+ceiling — trading two parameters for one frees exactly the slot the new default needed.
+**`AssetStreamController`'s constructor is now `(AssetService, AssetStreamService, CurrentUser,
+StreamViewerLinks, PipelineConfig)`** — this corrects the "5 collaborators: `AssetService`,
+`AssetStreamService`, `CurrentUser`, `StreamPublisherPort`, `StreamService`" shape documented in the
+W1.6e section above, which this wave's own change made stale; that section is left as-is (it is an
+accurate record of the shape as of W1.6e) rather than rewritten, per this file's own append-only
+convention. `StreamController` keeps its own `StreamService`/`StreamPublisherPort` collaborators
+directly — it uses them for far more than these three reads, so wrapping there would be a swap, not a
+reduction. **This was a plan gap, not a spec item**: §3.8 of the frozen plan only named
+`StartStreamRequest`/`StartAssetStreamRequest`/`DemoFleet` as the merge-onto-defaults call sites,
+missing that `AssetStreamController` (added by the later, independent W1.6e split) is a fourth stream-start
+path with the identical need — found and fixed as part of this wave, not deferred.
+
+**`StreamTracksResponse` gained `detectionState`** — see the "Tracking wire shapes" paragraph above
+for the exact record shape; `StreamController#tracks` populates it from `StreamService#detectionState
+(StreamId)`, absent for an unknown/not-running stream, same absence idiom as `stats`.
+
+**`StartStreamRequest#mergeOntoDefaults()` (no-arg) became `mergeOnto(PipelineConfig defaults)`** (an
+instance method taking the deployment's default config as a parameter, replacing an internal call to
+the domain's static `PipelineConfig.defaults()`) — the mechanism that lets `vision.cv.detection
+-default-enabled` (`CvWiring#streamDefaultConfig`, `vision-app`) actually reach a started stream.
+`StartAssetStreamRequest#mergeOnto(PipelineConfig)` still just delegates to `StartStreamRequest`'s
+implementation, one more parameter along for the ride, same as every prior addition to this pair. Four
+call sites merge onto a deployment default now, not the domain default directly: `StreamController
+#start` (`streamDetectionSupport.defaultConfig()`), `AssetStreamController#startStream` (its own
+`PipelineConfig defaultConfig` parameter), `DemoFleet` (`api.demo`, its own `PipelineConfig
+defaultConfig` constructor parameter, 5 collaborators total), and `StartAssetStreamRequest`'s own
+delegation. Every one of these four beans/parameters is fed the **same** `CvWiring#streamDefaultConfig`
+bean from `vision-app`, so `vision.cv.detection-default-enabled` reaches every non-simulation stream
+start path identically — the same "one deployment default, every start path agrees" property
+`docs/extracts/TRACKING-ORCHESTRATION.md` §4.1 already established for the tracking seed.
+
+**`LiveUpdateRegistry` gained `boolean watchingDetections(AssetId)`** (public, package `api.live`) —
+`true` iff at least one open connection is subscribed to that asset's `detections:<assetId>` topic;
+the one capability `LiveAndPollDetectionDemand`'s SSE half needs, resolved once by `vision-app`'s
+`CvWiring#detectionDemandPort` into the `Predicate<AssetId>` seam described above.
+
+**Tests** — `LiveAndPollDetectionDemandTest` (new, 8 methods, pure unit, no Spring context): the SSE
+half true/false, a `null` assetId skipping the SSE half entirely, the poll half counting as demand on
+its own, cross-stream isolation (`touched` on one stream never demands another), a poll just inside
+the TTL still counting, a poll exactly at the TTL boundary having expired, and a throwing predicate
+being swallowed rather than propagated (the injectable-clock test constructor moves time without
+sleeping for the two TTL-boundary cases). `LiveUpdateRegistryTest` +2: `watchingDetections` false with
+no subscriber, true once a connection subscribes to that asset's `detections` topic — both pure unit
+tests, no `MockMvc`/real HTTP needed, since `SseEmitter`/`ResponseBodyEmitter` buffers early `send()`
+calls before `initialize()` rather than throwing, so calling `LiveUpdateRegistry#connect(...)` directly
+is safe in a plain test. `StreamControllerTest` +3: `tracksReportsWhichDetectionGateExplainsTheCurrentState`
+(`detectionState` present when the service reports one), `tracksOmitsDetectionStateForAnUnknownOrStoppedStream`
+(absent otherwise), `detectionsTouchesTheDemandPortSoAPollingReaderCountsAsDemand` (a real
+`LiveAndPollDetectionDemand` wired through `StreamDetectionSupport` in the test, asserting
+`detectionWanted` flips `false`→`true` after calling the endpoint once). One pre-existing
+`StreamControllerTest` assertion was **corrected, not weakened**: `startWithoutDetectionEnabledKeepsTheDefaultTrue`
+hardcoded `assertTrue(captor.getValue().detectionEnabled())`, an assumption D1's already-landed
+`PipelineConfig.defaults()` flip (`true`→`false`) silently broke — D1's own scoped build never
+re-verified this module's dependent tests. Renamed to
+`startWithoutDetectionEnabledKeepsWhateverStreamDetectionSupportsDefaultConfigSays` and changed to
+compare against `PipelineConfig.defaults().detectionEnabled()` dynamically: this controller never
+hardcodes that value itself, it only merges onto whatever `StreamDetectionSupport` hands it, so the
+test now pins that *delegation*, not a specific literal that belongs to a different module.
+`AssetStreamControllerTest`/`DemoFleetTest` were updated in place (constructor shape / mock wiring for
+the new `PipelineConfig`/`StreamViewerLinks` collaborators) with no new test methods — same "one
+shared-logic test suffices" judgment call this module already makes for `overlayBurnIn`/`model`/etc.
+
+**Before/after**: **562 → 575** (+13: 3 `StreamControllerTest`, 2 `LiveUpdateRegistryTest`, 8 new
+`LiveAndPollDetectionDemandTest`). `./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test
+-DskipWeb` confirmed green — `vision-api: Tests run: 575, Failures: 0, Errors: 0, Skipped: 0`.
+
+**Not touched, per scope**: `contexts/vision-perception` (D1) and `station/vision-web` (D3) — this
+wave's diff is contained entirely to `station/vision-api/**` and `station/vision-app/**`, confirmed via
+`git status` before finishing.

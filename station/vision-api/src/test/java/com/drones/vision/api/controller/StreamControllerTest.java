@@ -13,6 +13,7 @@ import com.drones.vision.kernel.BoundingBox;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
@@ -51,7 +52,9 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
+import com.drones.vision.api.live.LiveAndPollDetectionDemand;
 import com.drones.vision.api.support.SnapshotJpegEncoder;
+import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.api.support.VisionApiProperties;
 
 import static org.hamcrest.Matchers.hasSize;
@@ -79,6 +82,13 @@ class StreamControllerTest {
     private StreamService streamService;
     private StreamPublisherPort streamPublisherPort;
     private DetectionRepositoryPort detectionRepositoryPort;
+    /**
+     * A real instance (not a mock -- {@code LiveAndPollDetectionDemand} is {@code final} and this
+     * repo carries no inline Mockito mock-maker), constructed with a never-watching SSE predicate so
+     * only the poll half (docs/plans/active/CV-DEMAND-PLAN.md §3.5) is exercised via {@link
+     * #detectionDemand}'s own {@code detectionWanted}/{@code touched} reads in tests below.
+     */
+    private LiveAndPollDetectionDemand detectionDemand;
     private MockMvc mockMvc;
 
     private final DeviceId deviceId = DeviceId.random();
@@ -88,10 +98,13 @@ class StreamControllerTest {
         streamService = mock(StreamService.class);
         streamPublisherPort = mock(StreamPublisherPort.class);
         detectionRepositoryPort = mock(DetectionRepositoryPort.class);
+        detectionDemand = new LiveAndPollDetectionDemand(assetId -> false, Duration.ofSeconds(10));
+        StreamDetectionSupport streamDetectionSupport =
+                new StreamDetectionSupport(PipelineConfig.defaults(), detectionDemand);
 
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new StreamController(streamService, streamPublisherPort, detectionRepositoryPort,
-                        new SnapshotJpegEncoder(VisionApiProperties.defaults())))
+                        new SnapshotJpegEncoder(VisionApiProperties.defaults()), streamDetectionSupport))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -409,7 +422,13 @@ class StreamControllerTest {
     }
 
     @Test
-    void startWithoutDetectionEnabledKeepsTheDefaultTrue() throws Exception {
+    void startWithoutDetectionEnabledKeepsWhateverStreamDetectionSupportsDefaultConfigSays() throws Exception {
+        // docs/plans/active/CV-DEMAND-PLAN.md §1/§3.8 (wave D1, already landed): PipelineConfig.defaults()'s
+        // own detectionEnabled flipped to false -- a new stream is video-only until an operator or a
+        // vision.cv.detection-default-enabled=true deployment override turns it on. This controller
+        // never hardcodes that value itself; it merges purely onto whatever StreamDetectionSupport
+        // hands it (setUp() below wires PipelineConfig.defaults() verbatim), so this test pins "an
+        // absent field falls through to the supplied default", not a literal true/false.
         StreamId streamId = StreamId.random();
         when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
@@ -419,7 +438,7 @@ class StreamControllerTest {
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
         verify(streamService).start(eq(deviceId), captor.capture(), any());
-        assertTrue(captor.getValue().detectionEnabled());
+        assertEquals(PipelineConfig.defaults().detectionEnabled(), captor.getValue().detectionEnabled());
     }
 
     @Test
@@ -626,6 +645,20 @@ class StreamControllerTest {
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
+    void detectionsTouchesTheDemandPortSoAPollingReaderCountsAsDemand() throws Exception {
+        // docs/plans/active/CV-DEMAND-PLAN.md §3.5's poll half: a Wall/Live page hitting this endpoint
+        // has no asset id to subscribe to over SSE, so the read itself has to register the demand.
+        StreamId streamId = StreamId.random();
+        when(detectionRepositoryPort.query(any())).thenReturn(List.of());
+        assertFalse(detectionDemand.detectionWanted(streamId, null), "not demanded before the first read");
+
+        mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
+                .andExpect(status().isOk());
+
+        assertTrue(detectionDemand.detectionWanted(streamId, null), "reading detections counts as demand");
     }
 
     // ---- docs/plans/done/CV-CONTROL-PLAN.md §3: PATCH /api/streams/{streamId}/config ----
@@ -1099,6 +1132,29 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.rate.droppedOutage").value(0))
                 .andExpect(jsonPath("$.rate.missedDeadlines").value(3))
                 .andExpect(jsonPath("$.rate.dropRatio").value(0.25));
+    }
+
+    @Test
+    void tracksReportsWhichDetectionGateExplainsTheCurrentState() throws Exception {
+        // docs/plans/active/CV-DEMAND-PLAN.md §3.6: "no boxes" has three causes an operator must be
+        // able to tell apart, and this is how the wire distinguishes them.
+        StreamId streamId = StreamId.random();
+        when(streamService.tracks(streamId)).thenReturn(List.of());
+        when(streamService.detectionState(streamId)).thenReturn(Optional.of(DetectionState.IDLE_NO_VIEWERS));
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.detectionState").value("IDLE_NO_VIEWERS"));
+    }
+
+    @Test
+    void tracksOmitsDetectionStateForAnUnknownOrStoppedStream() throws Exception {
+        when(streamService.tracks(any())).thenReturn(List.of());
+        when(streamService.detectionState(any())).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", StreamId.random().value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.detectionState").doesNotExist());
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.support.StreamViewerLinks;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.warehouse.domain.model.Asset;
@@ -11,6 +12,7 @@ import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
@@ -65,10 +67,14 @@ class AssetStreamControllerTest {
         assetStreamService = mock(AssetStreamService.class);
         streamPublisherPort = mock(StreamPublisherPort.class);
         streamService = mock(StreamService.class);
+        // StreamViewerLinks is a plain final class wrapping these two ports (docs/plans/active/CV-DEMAND-PLAN.md
+        // §3.8) -- a real instance backed by the mocked ports, matching this codebase's established
+        // pattern of not mocking final support classes.
+        StreamViewerLinks streamViewerLinks = new StreamViewerLinks(streamPublisherPort, streamService);
 
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new AssetStreamController(assetService, assetStreamService, currentUser,
-                        streamPublisherPort, streamService))
+                        streamViewerLinks, PipelineConfig.defaults()))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }

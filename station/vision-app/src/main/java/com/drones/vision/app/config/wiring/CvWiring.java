@@ -5,13 +5,19 @@ import com.drones.vision.adapter.cvgrpc.WireFormat;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.cvgrpc.GrpcPulledDetectionPort;
 import com.drones.vision.api.dto.CvModelResponse;
+import com.drones.vision.api.live.LiveAndPollDetectionDemand;
+import com.drones.vision.api.live.LiveUpdateRegistry;
+import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -19,6 +25,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 /**
  * Wires the CV inference gRPC connection to cv-service — the CV slice of what used to be one
@@ -141,5 +148,66 @@ public class CvWiring {
                 new CvModelResponse("orion12l.pt", "Military vehicles", "specialized", false, List.of()),
                 new CvModelResponse("yoloe-26s-seg-pf.pt", "Everything (incl. buildings, slower)", "open-vocab",
                         true, List.of()));
+    }
+
+    /**
+     * The system-derived half of the two-gate detection demand model (docs/plans/active/CV-DEMAND-PLAN.md
+     * &sect;2-3.5) — present only when {@link VisionCvProperties.Demand#enabled()} is {@code true}
+     * (the default). {@code false} means this bean is never created at all, so {@code
+     * ApplicationServiceWiring#streamService}'s {@code ObjectProvider<DetectionDemandPort>} resolves
+     * to nothing and {@code DefaultStreamService} never schedules its demand-poll task — every
+     * stream stays fail-open on demand, exactly as before this plan existed.
+     *
+     * <p>Returns the <b>concrete</b> type, not {@link com.drones.vision.perception.domain.port.DetectionDemandPort}:
+     * {@link #streamDetectionSupport} needs the concrete class to reach {@link
+     * LiveAndPollDetectionDemand#touched}, and {@code ApplicationServiceWiring#streamService}'s
+     * {@code ObjectProvider<DetectionDemandPort>} still resolves this same singleton by
+     * assignability — there is only ever one bean of this type, so unlike the five {@code
+     * LiveUpdateRegistry} selector beans in {@code ApplicationServiceWiring} (see that class's own
+     * javadoc), no {@code @Qualifier} is needed on either consumer.
+     *
+     * <p>{@code watchingDetections} is a {@link Predicate}, resolved once here from {@link
+     * LiveUpdateRegistry#watchingDetections(AssetId)} — {@code null} when {@code
+     * VisionLiveProperties#enabled()} is {@code false} too (the SSE registry bean itself is
+     * conditionally absent), in which case this deployment's demand can only ever come from the
+     * poll half.
+     */
+    @Bean
+    @ConditionalOnExpression("${vision.cv.demand.enabled:true}")
+    public LiveAndPollDetectionDemand detectionDemandPort(VisionCvProperties cvProperties,
+            @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> liveUpdateRegistry) {
+        LiveUpdateRegistry registry = liveUpdateRegistry.getIfAvailable();
+        Predicate<AssetId> watchingDetections = registry == null ? assetId -> false : registry::watchingDetections;
+        return new LiveAndPollDetectionDemand(watchingDetections, cvProperties.demand().pollTtl());
+    }
+
+    /**
+     * The deployment's default {@link PipelineConfig} for a newly started stream
+     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.7/&sect;3.8) — {@link PipelineConfig#defaults()}
+     * with {@code detectionEnabled} replaced by {@link VisionCvProperties#detectionDefaultEnabled()}
+     * (default {@code false}). {@code StreamController}/{@code AssetStreamController}/{@code
+     * DemoFleet} merge request overrides onto this instead of calling the static factory directly,
+     * so this one property key reaches every start path.
+     */
+    @Bean
+    public PipelineConfig streamDefaultConfig(VisionCvProperties cvProperties) {
+        PipelineConfig defaults = PipelineConfig.defaults();
+        return new PipelineConfig(defaults.model(), defaults.confidenceThreshold(), defaults.inferenceFps(),
+                defaults.maxInFlightInferences(), defaults.overlayTelemetry(), defaults.labelFilter(),
+                defaults.eventRule(), defaults.overlayBurnIn(), cvProperties.detectionDefaultEnabled(),
+                defaults.tracking());
+    }
+
+    /**
+     * Bundles {@link #streamDefaultConfig} and {@link #detectionDemandPort}'s poll-touch seam behind
+     * one bean for {@code StreamController} (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.8) — see
+     * {@link StreamDetectionSupport}'s own javadoc for why. {@code detectionDemandPort} resolves to
+     * {@code null} exactly when {@link #detectionDemandPort} itself was not created (demand gate
+     * disabled), which {@link StreamDetectionSupport} already treats as "nothing to touch."
+     */
+    @Bean
+    public StreamDetectionSupport streamDetectionSupport(PipelineConfig streamDefaultConfig,
+            ObjectProvider<LiveAndPollDetectionDemand> detectionDemandPort) {
+        return new StreamDetectionSupport(streamDefaultConfig, detectionDemandPort.getIfAvailable());
     }
 }

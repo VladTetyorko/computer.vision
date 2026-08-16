@@ -11,12 +11,14 @@ import com.drones.vision.api.dto.TrackResponse;
 import com.drones.vision.api.dto.TrackStatsResponse;
 import com.drones.vision.api.dto.UpdateStreamConfigRequest;
 import com.drones.vision.api.dto.UpdateStreamConfigResponse;
+import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.perception.application.stream.UpdateOutcome;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.VideoFrame;
@@ -85,10 +87,18 @@ public class StreamController {
      * this field's previous self-constructed {@code VisionApiProperties.defaults()} stopgap.
      */
     private final SnapshotJpegEncoder snapshotJpegEncoder;
+    /**
+     * Bundles the deployment's default {@link PipelineConfig} and the detection-demand poll-touch
+     * seam (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.5/&sect;3.8) behind one parameter — see
+     * {@link StreamDetectionSupport}'s own javadoc for why these two single-method reads are bundled
+     * rather than each taking its own constructor slot.
+     */
+    private final StreamDetectionSupport streamDetectionSupport;
 
     public StreamController(StreamService streamService, StreamPublisherPort streamPublisherPort,
                              DetectionRepositoryPort detectionRepositoryPort,
-                             SnapshotJpegEncoder snapshotJpegEncoder) {
+                             SnapshotJpegEncoder snapshotJpegEncoder,
+                             StreamDetectionSupport streamDetectionSupport) {
         this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
         this.streamPublisherPort =
                 Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
@@ -96,13 +106,17 @@ public class StreamController {
                 Objects.requireNonNull(detectionRepositoryPort, "detectionRepositoryPort must not be null");
         this.snapshotJpegEncoder =
                 Objects.requireNonNull(snapshotJpegEncoder, "snapshotJpegEncoder must not be null");
+        this.streamDetectionSupport =
+                Objects.requireNonNull(streamDetectionSupport, "streamDetectionSupport must not be null");
     }
 
     /**
      * Starts a stream pipeline for the given device. The optional request
-     * body's fields, if present, override the corresponding defaults from
-     * {@link PipelineConfig#defaults()}; everything else comes from the
-     * defaults.
+     * body's fields, if present, override the corresponding values from
+     * {@link StreamDetectionSupport#defaultConfig()} — the deployment's own default, which starts
+     * equal to {@link PipelineConfig#defaults()} except for {@code detectionEnabled}
+     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.7/&sect;3.8, {@code
+     * vision.cv.detection-default-enabled}); everything else comes from that same default.
      *
      * <p>What the body says about {@code tracking} travels as its own patch rather than baked into
      * the config: the deployment's tracking seed ({@code vision.tracking.*}) is applied inside {@link
@@ -119,8 +133,8 @@ public class StreamController {
     public StartStreamResponse start(@PathVariable String deviceId,
                                       @RequestBody(required = false) StartStreamRequest request) {
         StartStreamRequest body = request == null ? StartStreamRequest.EMPTY : request;
-        StreamId streamId =
-                streamService.start(DeviceId.of(deviceId), body.mergeOntoDefaults(), body.trackingPatch());
+        StreamId streamId = streamService.start(DeviceId.of(deviceId),
+                body.mergeOnto(streamDetectionSupport.defaultConfig()), body.trackingPatch());
         StartStreamResponse response = new StartStreamResponse(streamId.value().toString(), viewUrl(streamId),
                 whepUrl(streamId), streamService.burnedIn(streamId));
         LOG.log(System.Logger.Level.INFO, () -> "Started stream " + response.streamId() + " for device " + deviceId
@@ -219,7 +233,9 @@ public class StreamController {
      * object at all, rather than a half-populated strip of zeros.
      *
      * @param streamId the stream to inspect, as a canonical UUID string
-     * @return the stream's tracks, its held target, and the window's counters when there are any
+     * @return the stream's tracks, its held target, the window's counters when there are any, and
+     *         which detection gate currently explains its boxes-or-no-boxes state (docs/plans/active/CV-DEMAND-PLAN.md
+     *         &sect;3.6)
      */
     @GetMapping("/api/streams/{streamId}/tracks")
     public StreamTracksResponse tracks(@PathVariable String streamId) {
@@ -243,8 +259,9 @@ public class StreamController {
                 .filter(rate -> rate.due() > 0L)
                 .map(DetectionRateResponse::from)
                 .orElse(null);
+        DetectionState detectionState = streamService.detectionState(id).orElse(null);
         return new StreamTracksResponse(id.value().toString(), stats == null ? 0L : stats.lockedTrackId(), tracks,
-                statsResponse, latencyResponse, rateResponse);
+                statsResponse, latencyResponse, rateResponse, detectionState);
     }
 
     /**
@@ -268,7 +285,12 @@ public class StreamController {
     public List<DetectionResultResponse> detections(
             @PathVariable String streamId,
             @RequestParam(defaultValue = "" + DEFAULT_DETECTIONS_LIMIT) int limit) {
-        DetectionQuery query = new DetectionQuery(StreamId.of(streamId), null, null, null, limit);
+        StreamId id = StreamId.of(streamId);
+        // This read is itself detection demand (docs/plans/active/CV-DEMAND-PLAN.md §3.5, the
+        // poll half): a Wall/Live page polling this endpoint keeps the stream detecting, exactly
+        // like an open SSE `detections:<assetId>` subscription does.
+        streamDetectionSupport.touched(id);
+        DetectionQuery query = new DetectionQuery(id, null, null, null, limit);
         return detectionRepositoryPort.query(query).stream()
                 .sorted(Comparator.comparing(DetectionResult::capturedAt).reversed())
                 .map(DetectionResultResponse::from)

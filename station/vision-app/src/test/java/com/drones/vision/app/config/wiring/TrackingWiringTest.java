@@ -2,6 +2,7 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.api.dto.CvTrackerResponse;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
+import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.config.properties.VisionTrackingProperties;
 import com.drones.vision.perception.application.pipeline.StreamPipelineSettings;
 import com.drones.vision.perception.application.stream.TrackingConfigPatch;
@@ -50,6 +51,12 @@ class TrackingWiringTest {
     /** The values {@code VisionTrackingProperties}' own {@code @DefaultValue}s bind to. */
     private static VisionTrackingProperties defaults() {
         return properties("ASSOCIATE", 15, 2000, 30, 5);
+    }
+
+    /** {@code VisionCvProperties}' own {@code @DefaultValue}s — irrelevant to every test below,
+     * which exercises {@code streamPipelineSettings}' tracking-window mapping, not its demand one. */
+    private static VisionCvProperties cvProperties() {
+        return new VisionCvProperties(false, "localhost:50051", 640, 0.8f);
     }
 
     @Test
@@ -173,7 +180,7 @@ class TrackingWiringTest {
     void statsWindowAndTrackRetentionBindIntoStreamPipelineSettings() {
         StreamPipelineSettings settings = ApplicationServiceWiring.streamPipelineSettings(
                 new VisionApplicationProperties(200L, null, null, null, null, null, null, null),
-                properties("OFF", 15, 2000, 45, 9));
+                properties("OFF", 15, 2000, 45, 9), cvProperties());
 
         assertEquals(Duration.ofSeconds(45), settings.trackingStatsWindow());
         assertEquals(Duration.ofSeconds(9), settings.trackRetention());
@@ -182,7 +189,8 @@ class TrackingWiringTest {
     @Test
     void theDefaultWindowsAreByteIdenticalToTheSettingsRecordsOwnDefaults() {
         StreamPipelineSettings mapped = ApplicationServiceWiring.streamPipelineSettings(
-                new VisionApplicationProperties(200L, null, null, null, null, null, null, null), defaults());
+                new VisionApplicationProperties(200L, null, null, null, null, null, null, null), defaults(),
+                cvProperties());
 
         assertEquals(StreamPipelineSettings.defaults().trackingStatsWindow(), mapped.trackingStatsWindow());
         assertEquals(StreamPipelineSettings.defaults().trackRetention(), mapped.trackRetention());
@@ -195,7 +203,7 @@ class TrackingWiringTest {
         // goes through, instead of only the two REST endpoints that used to be injected with it.
         StreamPipelineSettings mapped = ApplicationServiceWiring.streamPipelineSettings(
                 new VisionApplicationProperties(200L, null, null, null, null, null, null, null),
-                properties("FOLLOW", 20, 1500, 30, 5));
+                properties("FOLLOW", 20, 1500, 30, 5), cvProperties());
 
         assertEquals(TrackingMode.FOLLOW, mapped.trackingSeed().mode());
         assertEquals(1500, mapped.trackingSeed().verifyEveryMillis());
@@ -205,7 +213,8 @@ class TrackingWiringTest {
     @Test
     void theDefaultSeedAgreesWithTheDomainDefaultSoAStartThatSaysNothingGetsExactlyIt() {
         StreamPipelineSettings mapped = ApplicationServiceWiring.streamPipelineSettings(
-                new VisionApplicationProperties(200L, null, null, null, null, null, null, null), defaults());
+                new VisionApplicationProperties(200L, null, null, null, null, null, null, null), defaults(),
+                cvProperties());
 
         // The two layers must not drift: a start request that states nothing gets the domain default
         // back unchanged, rather than a deployment layer quietly re-deciding it.

@@ -64,6 +64,13 @@ import java.time.Duration;
  * @param pull                   worker-pull config surface (docs/plans/active/MEDIA-SOT-PLAN.md §5.5);
  *                               defaulted as a whole when absent; only read when {@link #frameTransport()}
  *                               is {@code pull}
+ * @param detectionDefaultEnabled what a <b>new</b> stream's {@code PipelineConfig#detectionEnabled}
+ *                               starts at (docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8) — a
+ *                               deployment default that beats {@code PipelineConfig.defaults()} but
+ *                               loses to an explicit per-request override; default {@code false}
+ * @param demand                 the system-derived detection-demand gate's own tunables
+ *                               (docs/plans/active/CV-DEMAND-PLAN.md §2-3.7); defaulted as a whole
+ *                               when absent
  */
 @ConfigurationProperties(prefix = "vision.cv")
 public record VisionCvProperties(@DefaultValue("false") boolean enabled,
@@ -80,7 +87,9 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                   @DefaultValue("true") boolean plaintext,
                                   Upload upload,
                                   Registry registry,
-                                  Pull pull) {
+                                  Pull pull,
+                                  @DefaultValue("false") boolean detectionDefaultEnabled,
+                                  Demand demand) {
 
     static final String DEFAULT_ENDPOINT = "localhost:50051";
     static final String DEFAULT_DETECT_WIDTH = "640";
@@ -121,6 +130,28 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
             pull = new Pull(Pull.DEFAULT_RTSP_BASE_URI, Pull.DEFAULT_RECONNECT_INITIAL_BACKOFF,
                     Pull.DEFAULT_RECONNECT_MAX_BACKOFF);
         }
+        if (demand == null) {
+            demand = new Demand(Demand.DEFAULT_ENABLED, Demand.DEFAULT_POLL_INTERVAL, Demand.DEFAULT_GRACE,
+                    Demand.DEFAULT_POLL_TTL);
+        }
+    }
+
+    /**
+     * The canonical constructor before docs/plans/active/CV-DEMAND-PLAN.md wave D2 added {@code
+     * detectionDefaultEnabled}/{@code demand}, kept as a convenience constructor defaulting both —
+     * the first to {@code false} (the plan's own pinned default), the second to {@link
+     * Demand#DEFAULT_ENABLED}/{@link Demand#DEFAULT_POLL_INTERVAL}/{@link Demand#DEFAULT_GRACE}/
+     * {@link Demand#DEFAULT_POLL_TTL} — so every pre-existing call site compiles unchanged. Same
+     * "N-1-arg convenience ctor" idiom as every other addition to this record.
+     */
+    public VisionCvProperties(boolean enabled, String endpoint, int detectWidth, float jpegQuality,
+                               String wireFormat, String frameTransport, Duration responseTimeout,
+                               Duration keepAliveTime, Duration keepAliveTimeout, boolean keepAliveWithoutCalls,
+                               Duration channelShutdownTimeout, boolean plaintext, Upload upload, Registry registry,
+                               Pull pull) {
+        this(enabled, endpoint, detectWidth, jpegQuality, wireFormat, frameTransport, responseTimeout,
+                keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls, channelShutdownTimeout, plaintext, upload,
+                registry, pull, false, null);
     }
 
     /**
@@ -216,5 +247,36 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
         static final URI DEFAULT_RTSP_BASE_URI = URI.create(DEFAULT_RTSP_BASE);
         static final Duration DEFAULT_RECONNECT_INITIAL_BACKOFF = Duration.ofMillis(500);
         static final Duration DEFAULT_RECONNECT_MAX_BACKOFF = Duration.ofSeconds(10);
+    }
+
+    /**
+     * The system-derived detection-demand gate's own tunables (docs/plans/active/CV-DEMAND-PLAN.md
+     * §2-3.7) — mapped by {@code CvWiring#detectionDemandPort} onto a {@code
+     * LiveAndPollDetectionDemand} bean, and by {@code ApplicationServiceWiring#streamPipelineSettings}
+     * onto {@code StreamPipelineSettings#detectionDemandPollInterval}/{@code #detectionDemandGrace}.
+     *
+     * @param enabled      whether the demand gate is wired at all. {@code false} means {@code
+     *                     CvWiring} never builds the {@code DetectionDemandPort} bean, so {@code
+     *                     DefaultStreamService}'s demand-poll task is never scheduled and every
+     *                     stream's {@code detectionDemand} stays fail-open {@code true} forever —
+     *                     today's un-gated behavior, and the escape hatch for a deployment that
+     *                     needs unattended detection to keep running with nobody watching. Default
+     *                     {@code true}
+     * @param pollInterval how often {@code DefaultStreamService}'s demand-poll task re-evaluates
+     *                     every running stream's demand; default 2s
+     * @param grace        how long a stream keeps detecting after its last observed demand, so
+     *                     navigating between pages does not thrash the detector on and off; default
+     *                     30s
+     * @param pollTtl      how long one {@code GET /api/streams/{id}/detections} poll counts as
+     *                     demand; default 10s
+     */
+    public record Demand(@DefaultValue("true") boolean enabled,
+                          @DefaultValue("2s") Duration pollInterval,
+                          @DefaultValue("30s") Duration grace,
+                          @DefaultValue("10s") Duration pollTtl) {
+        static final boolean DEFAULT_ENABLED = true;
+        static final Duration DEFAULT_POLL_INTERVAL = Duration.ofSeconds(2);
+        static final Duration DEFAULT_GRACE = Duration.ofSeconds(30);
+        static final Duration DEFAULT_POLL_TTL = Duration.ofSeconds(10);
     }
 }

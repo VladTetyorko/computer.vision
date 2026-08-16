@@ -87,6 +87,27 @@ class CvDetectionE2ETest {
     static void cvProperties(DynamicPropertyRegistry registry) {
         registry.add("vision.cv.enabled", () -> "true");
         registry.add("vision.cv.endpoint", () -> "localhost:" + server.getPort());
+        // docs/plans/active/CV-DEMAND-PLAN.md §3.7: this test proves frames reach the gRPC pipe at
+        // all, not that a viewer/poller kept demand alive for the whole run -- nothing here ever
+        // opens the SSE detections:<assetId> topic or polls GET .../detections, so the real
+        // demand-poll task would otherwise flip detection off ~2s in (StreamPipelineSettings'
+        // default poll interval) with nothing left to turn it back on. Disabling the gate is the
+        // documented escape hatch for exactly this: unattended detection stays fail-open true.
+        registry.add("vision.cv.demand.enabled", () -> "false");
+    }
+
+    /**
+     * {@link PipelineConfig#defaults()} with {@code detectionEnabled} true} instead of its own
+     * default {@code false} (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1) -- this test exists to
+     * prove the gRPC pipe carries sampled frames, which needs detection actually switched on for the
+     * stream it starts directly through {@link AssetStreamService}, bypassing the controller-level
+     * {@code vision.cv.detection-default-enabled} deployment default entirely.
+     */
+    private static PipelineConfig detectionEnabledDefaults() {
+        PipelineConfig defaults = PipelineConfig.defaults();
+        return new PipelineConfig(defaults.model(), defaults.confidenceThreshold(), defaults.inferenceFps(),
+                defaults.maxInFlightInferences(), defaults.overlayTelemetry(), defaults.labelFilter(),
+                defaults.eventRule(), defaults.overlayBurnIn(), true, defaults.tracking());
     }
 
     @Autowired
@@ -108,7 +129,7 @@ class CvDetectionE2ETest {
                         new CategoryId("drone"), Map.of(), List.of(videoDevice)),
                 DevPrincipal.OWNERSHIP, DevPrincipal.USER_ID);
 
-        StreamId streamId = assetStreamService.startStream(asset.id(), null, PipelineConfig.defaults());
+        StreamId streamId = assetStreamService.startStream(asset.id(), null, detectionEnabledDefaults());
         try {
             boolean receivedFrame = recordingStreamPublisher.awaitFirstFrame(10, TimeUnit.SECONDS);
             assertTrue(receivedFrame, "expected at least one frame to reach StreamPublisherPort within 10s");

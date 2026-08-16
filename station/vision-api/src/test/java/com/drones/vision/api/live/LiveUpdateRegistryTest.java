@@ -436,6 +436,29 @@ class LiveUpdateRegistryTest {
                 () -> registry.updateTopics("no-such-connection", com.drones.vision.api.dto.UpdateLiveTopicsRequest.EMPTY));
     }
 
+    @Test
+    void watchingDetectionsIsFalseWhenNoConnectionIsSubscribed() {
+        LiveUpdateRegistry registry = registry();
+
+        assertEquals(false, registry.watchingDetections(AssetId.random()));
+    }
+
+    @Test
+    void watchingDetectionsIsTrueOnceAConnectionSubscribesToThatAssetsDetectionsTopic() {
+        // docs/plans/active/CV-DEMAND-PLAN.md §3.5's SSE half: a cockpit open on this asset
+        // subscribes to `detections:<assetId>` at connect time, and that alone is "someone is
+        // watching" -- no envelope needs to actually flow.
+        AssetId assetId = AssetId.random();
+        AssetId otherAssetId = AssetId.random();
+        when(assetService.assets()).thenReturn(List.of());
+        LiveUpdateRegistry registry = registry();
+
+        registry.connect("detections:" + assetId.value(), null, layerId -> true);
+
+        assertEquals(true, registry.watchingDetections(assetId));
+        assertEquals(false, registry.watchingDetections(otherAssetId), "only the subscribed asset counts");
+    }
+
     /**
      * Runs every submitted/scheduled task synchronously, on the calling thread, the moment it's
      * submitted — makes {@link LiveUpdateRegistry#publishFleetChanged()}/{@link
