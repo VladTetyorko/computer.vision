@@ -427,6 +427,30 @@ services:
       VISION_AUTH_ENABLED: "true"
     ports:
       - "8080:8080"
+    healthcheck:
+      # docs/plans/active/SYSTEM-STATUS-PLAN.md §4.4: liveness probe against the actuator health
+      # endpoint added there (management.endpoints.web.exposure.include: health, application.yaml) --
+      # only `health` is ever exposed, permitted in SecurityConfig regardless of
+      # VISION_AUTH_ENABLED. No curl/wget in this image (eclipse-temurin:21-jre, unlike cv-service's
+      # own Python image, ships neither) -- bash's own /dev/tcp pseudo-device is enough for a plain
+      # HTTP/1.1 GET and IS present (bash is Debian/Ubuntu "Essential: yes", unlike curl/wget).
+      # CMD (not CMD-SHELL) with an explicit `bash -c` argv, not the joined-string form, so this
+      # doesn't depend on /bin/sh (dash on Debian/Ubuntu) understanding /dev/tcp -- it doesn't.
+      # `grep -qw UP` (word-bounded, not `"status":"UP"`) avoids embedding a literal `"` in this
+      # already twice-quoted (YAML, then bash) string; Spring Boot's default {"status":"UP"} health
+      # body has no other bare UP token to false-positive against.
+      test:
+        - "CMD"
+        - "bash"
+        - "-c"
+        - "exec 3<>/dev/tcp/127.0.0.1/8080; echo -e 'GET /actuator/health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -qw UP <&3"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      # Spring context startup (Flyway migration + JVM warmup) can take a few seconds on a cold
+      # container -- generous enough for that even on a slow machine, same rationale as cv-service's
+      # own start_period just above.
+      start_period: 30s
     volumes:
       # scripts/demo.sh's clip arguments must be paths the vision-app *process*
       # can read. In compose mode that's this container's filesystem, not the

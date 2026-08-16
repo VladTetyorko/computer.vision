@@ -1,9 +1,13 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.CompId;
+import com.drones.mavlink.PeerId;
+import com.drones.mavlink.SysId;
 import com.drones.mavlink.codec.FrameSink;
 import com.drones.mavlink.codec.MavFrame;
 import com.drones.mavlink.config.MavlinkCoreSettings;
 import com.drones.mavlink.session.Correlator;
+import com.drones.mavlink.session.LinkHealth;
 import com.drones.mavlink.session.MavlinkNode;
 import com.drones.mavlink.session.MavlinkSession;
 import com.drones.mavlink.session.MessageFilter;
@@ -164,6 +168,21 @@ final class MavlinkGateway {
     /** Vehicles currently claimed by an open device on this gateway's socket (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */
     List<ClaimedVehicle> claimedVehicles() {
         return claimPolicy.claimedVehicles();
+    }
+
+    /**
+     * {@link LinkHealth.Health} for every currently-claimed vehicle on this gateway's socket —
+     * {@code mavlink-link}'s {@code SubsystemStatusPort} plumbing (docs/plans/active/
+     * SYSTEM-STATUS-PLAN.md §4.2, this session's {@link MavlinkSession#health()} first production
+     * caller; every prior call site was test-only). Same {@code (sysid, TARGET_COMPONENT_AUTOPILOT)}
+     * identity {@link #commandTarget} and {@link VehicleClaimPolicy#commandTarget} already use.
+     */
+    List<LinkHealth.Health> claimedVehicleHealth() {
+        LinkHealth health = session.health();
+        return claimedVehicles().stream()
+                .map(vehicle -> health.of(
+                        new PeerId(new SysId(vehicle.sysid()), new CompId(MavlinkFlightCommander.TARGET_COMPONENT_AUTOPILOT))))
+                .toList();
     }
 
     /**

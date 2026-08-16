@@ -22,6 +22,17 @@ spring:
   application:
     name: vision
 
+# Liveness probe (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.4) -- ONLY `health` is exposed over
+# HTTP. Deliberately not metrics/env/beans/configprops: this is a container healthcheck endpoint
+# (docker-compose.yml's vision-app service) and the /debug page's Health card, not an operator
+# metrics surface -- env/beans especially could leak configuration an operator has no reason to see
+# over HTTP. Permitted in SecurityConfig regardless of vision.auth.enabled (see that class).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
 vision:
 
   # --- adapter-persistence: fleet persistence (see docs/plans/done/MVP2-PLAN.md P-a) ---

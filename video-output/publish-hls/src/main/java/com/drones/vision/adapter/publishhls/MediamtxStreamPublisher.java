@@ -12,6 +12,7 @@ import org.bytedeco.javacv.Frame;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -280,6 +281,28 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
         long durationSeconds = Math.round(duration.toMillis() / 1000.0);
         return Optional.of(URI.create(
                 MediamtxPlaybackUrls.getUrl(playbackViewBase, id.value().toString(), start, durationSeconds)));
+    }
+
+    /**
+     * Snapshot of this publisher's currently-tracked streams — {@code video-publish}'s {@code
+     * SubsystemStatusPort} plumbing (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2), read by {@code
+     * PublishStatusProvider} (same package). {@code total} is every stream between {@link
+     * #streamStarted} and {@link #streamEnded}; {@code inOutage} names each one currently
+     * mid-{@link PublishBackoff} outage (dropping frames, backing off reconnects) rather than
+     * actually pushing to mediamtx — the plan calls for naming the affected stream(s), not just a
+     * count.
+     */
+    public record PublishSnapshot(int total, List<StreamId> inOutage) {
+    }
+
+    /** See {@link PublishSnapshot}. */
+    public PublishSnapshot streamsInOutage() {
+        int total = streams.size();
+        List<StreamId> inOutage = streams.entrySet().stream()
+                .filter(entry -> entry.getValue().backoff.inOutage())
+                .map(Map.Entry::getKey)
+                .toList();
+        return new PublishSnapshot(total, inOutage);
     }
 
     // -- publish machinery --------------------------------------------------

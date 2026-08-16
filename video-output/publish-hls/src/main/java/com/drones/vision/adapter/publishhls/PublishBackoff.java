@@ -61,4 +61,14 @@ final class PublishBackoff {
         nextRetryAtEpochMs = 0L;
         return wasDown;
     }
+
+    /**
+     * Whether this stream is currently mid-outage — {@code video-publish}'s {@code
+     * SubsystemStatusPort} plumbing (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2) reads this per
+     * stream via {@link MediamtxStreamPublisher#streamsInOutage()} rather than duplicating the
+     * outage flag.
+     */
+    boolean inOutage() {
+        return outage;
+    }
 }
