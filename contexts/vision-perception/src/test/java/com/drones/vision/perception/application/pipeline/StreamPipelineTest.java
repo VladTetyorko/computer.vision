@@ -8,6 +8,7 @@ import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionSource;
+import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.platform.Event;
@@ -89,13 +90,18 @@ class StreamPipelineTest {
         eventPublisher = mock(EventPublisherPort.class);
     }
 
+    // docs/plans/active/CV-DEMAND-PLAN.md §1 flipped PipelineConfig.DEFAULT_DETECTION_ENABLED to false; every
+    // test in this file exercises the detection machinery itself, so both helpers state
+    // detectionEnabled=true explicitly rather than relying on a default this suite never meant to
+    // depend on.
     private static PipelineConfig config(int inferenceFps, int maxInFlight) {
-        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, maxInFlight, true, Set.of());
+        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, maxInFlight, true, Set.of(),
+                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
     }
 
     private static PipelineConfig config(int inferenceFps, int maxInFlight, boolean overlayBurnIn) {
         return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, maxInFlight, true, Set.of(),
-                EventRuleConfig.defaults(), overlayBurnIn);
+                EventRuleConfig.defaults(), overlayBurnIn, true);
     }
 
     private VideoFrame frame(long sequence) {
@@ -1042,9 +1048,11 @@ class StreamPipelineTest {
         when(overlayPort.render(any())).thenReturn(frame(99));
         Supplier<Telemetry> telemetrySupplier = this::telemetrySample;
 
-        // overlayTelemetry=false via the 6-arg PipelineConfig ctor -- detections still drive
-        // rendering (non-empty), but the OSD gate itself must stay shut.
-        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, false, Set.of());
+        // overlayTelemetry=false, detectionEnabled=true explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped
+        // the convenience-ctor default) -- detections still drive rendering (non-empty), but the OSD
+        // gate itself must stay shut.
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, false, Set.of(),
+                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
         pipeline(publisher, config, overlayPort, telemetrySupplier).start();
 
         ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
@@ -1281,8 +1289,11 @@ class StreamPipelineTest {
         pipeline.onNext(frame(0));
         assertEquals(firstResult.detections(), pipeline.latestDetections());
 
-        // Same model id ("yolo"): a hot-knob-only patch must never behave like a re-arm.
-        PipelineConfig hotter = new PipelineConfig(new ModelRef("yolo", "latest"), 0.75, 1000, 5, true, Set.of());
+        // Same model id ("yolo"): a hot-knob-only patch must never behave like a re-arm. detectionEnabled
+        // stated explicitly (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default) since
+        // this test's whole point is that detection keeps running across the swap.
+        PipelineConfig hotter = new PipelineConfig(new ModelRef("yolo", "latest"), 0.75, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
         pipeline.updateConfig(hotter);
 
         assertEquals(firstResult.detections(), pipeline.latestDetections(),
@@ -1334,6 +1345,118 @@ class StreamPipelineTest {
         pipeline.onNext(frame(2));
 
         verify(detectionPort, times(1)).detect(any(), any());
+    }
+
+    // --- docs/plans/active/CV-DEMAND-PLAN.md §1, §3.2: detection demand -- the second, independent gate ---
+
+    @Test
+    void detectionDemandDefaultsToTrueAndReflectsUpdates() {
+        StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()), config(30, 2));
+
+        assertTrue(pipeline.detectionDemand(),
+                "fail-open: a pipeline with no DetectionDemandPort ever wired must stay demanded");
+
+        pipeline.updateDetectionDemand(false);
+        assertFalse(pipeline.detectionDemand());
+
+        pipeline.updateDetectionDemand(true);
+        assertTrue(pipeline.detectionDemand());
+    }
+
+    /**
+     * The gate truth table: {@code effective = detectionEnabled && detectionDemand}. {@code
+     * enabled=true, demand=true} (the default combination -- {@link #config} defaults
+     * {@code detectionEnabled=true} and {@link StreamPipeline#detectionDemand()} initializes {@code
+     * true}) is already exercised by every other detection test in this file; the three cells below
+     * complete the table.
+     */
+    @Test
+    void detectionRunsWhenBothDetectionEnabledAndDetectionDemandAreTrue() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0)));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        pipeline(publisher, config(30, 2)).start();
+
+        verify(detectionPort).detect(any(), any());
+    }
+
+    @Test
+    void detectionDemandFalseSkipsDetectEntirelyEvenWhenDetectionEnabledIsTrue() {
+        // The mirror of detectionEnabledFalseSkipsDetectEntirelyWhileVideoKeepsPublishing above:
+        // detectionEnabled=true alone is not enough once nobody is consuming the output.
+        List<VideoFrame> frames = List.of(frame(0), frame(1), frame(2));
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        StreamPipeline pipeline = pipeline(publisher, config(30, 2));
+        pipeline.updateDetectionDemand(false);
+
+        pipeline.start();
+
+        verify(detectionPort, never()).detect(any(), any());
+        for (VideoFrame f : frames) {
+            verify(streamPublisherPort).publish(streamId, f);
+        }
+        assertEquals(Optional.of(frames.get(frames.size() - 1)), pipeline.latestFrame(),
+                "video must keep flowing while detection is merely undemanded");
+    }
+
+    @Test
+    void detectionStaysOffWhenBothDetectionEnabledAndDetectionDemandAreFalse() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0), frame(1)));
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of(),
+                EventRuleConfig.defaults(), true, false);
+        StreamPipeline pipeline = pipeline(publisher, detectionOff);
+        pipeline.updateDetectionDemand(false);
+
+        pipeline.start();
+
+        verify(detectionPort, never()).detect(any(), any());
+    }
+
+    @Test
+    void detectionResumesOnTheNextSampledFrameAfterDemandReturns() {
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+        pipeline.updateDetectionDemand(false);
+
+        pipeline.onNext(frame(0));
+        verify(detectionPort, never()).detect(any(), any());
+
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(1)));
+        pipeline.updateDetectionDemand(true);
+        pipeline.onNext(frame(1));
+
+        verify(detectionPort, times(1)).detect(any(), any());
+    }
+
+    // --- docs/plans/active/CV-DEMAND-PLAN.md §3.6: DetectionState -- the gate made legible ---
+
+    @Test
+    void detectionStateIsRunningWhenBothDetectionEnabledAndDetectionDemandAreTrue() {
+        StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()), config(30, 2));
+
+        assertEquals(DetectionState.RUNNING, pipeline.detectionState());
+    }
+
+    @Test
+    void detectionStateIsIdleNoViewersWhenEnabledButDemandIsFalse() {
+        StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()), config(30, 2));
+        pipeline.updateDetectionDemand(false);
+
+        assertEquals(DetectionState.IDLE_NO_VIEWERS, pipeline.detectionState());
+    }
+
+    @Test
+    void detectionStateIsOffWhenDetectionEnabledIsFalseRegardlessOfDemandAndTakesPrecedenceOverIdleNoViewers() {
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of(),
+                EventRuleConfig.defaults(), true, false);
+        StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()), detectionOff);
+
+        assertEquals(DetectionState.OFF, pipeline.detectionState(),
+                "detectionEnabled=false with demand still at its fail-open true default");
+
+        pipeline.updateDetectionDemand(false);
+        assertEquals(DetectionState.OFF, pipeline.detectionState(),
+                "OFF beats IDLE_NO_VIEWERS -- the operator's own choice is the more specific truth, "
+                        + "so disabling detection must never also read as 'nobody is watching'");
     }
 
     @Test
@@ -1411,7 +1534,11 @@ class StreamPipelineTest {
         pipeline.onNext(frame(0));
         assertFalse(pipeline.latestDetections().isEmpty());
 
-        PipelineConfig newModel = new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, true, Set.of());
+        // detectionEnabled stated explicitly (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor
+        // default) since this test's whole point is that the next sampled frame still detects, on
+        // the new model.
+        PipelineConfig newModel = new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
         pipeline.updateConfig(newModel);
 
         assertTrue(pipeline.latestDetections().isEmpty(),

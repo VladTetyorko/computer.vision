@@ -1,6 +1,7 @@
 package com.drones.vision.perception.application.stream;
 
 import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamId;
@@ -200,6 +201,20 @@ public interface StreamService {
      *         #trackingStats(StreamId)}
      */
     Optional<DetectionRate> detectionRate(StreamId streamId);
+
+    /**
+     * Which of the two independent detection gates currently explains a running stream's
+     * boxes-or-no-boxes state (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.6) — exactly {@link
+     * StreamPipeline#detectionState()}. See {@link DetectionState}'s own javadoc: this reports
+     * gating, never health — a stalled detector still reads {@link DetectionState#RUNNING}, which
+     * is what {@link #detectionRate(StreamId)}/outage events are for.
+     *
+     * @param streamId the stream to inspect
+     * @return the gating state, or {@link Optional#empty()} if {@code streamId} is unknown or not
+     *         running on this instance — empty rather than a guessed state, for the same reason as
+     *         {@link #trackingStats(StreamId)}
+     */
+    Optional<DetectionState> detectionState(StreamId streamId);
 
     /**
      * Live-updates a running stream's detection config (docs/plans/done/CV-CONTROL-PLAN.md &sect;5,

@@ -30,7 +30,9 @@ class PipelineConfigTest {
         assertTrue(defaults.labelFilter().isEmpty(), "empty labelFilter means all labels");
         assertEquals(EventRuleConfig.defaults(), defaults.eventRule());
         assertTrue(defaults.overlayBurnIn(), "overlay burn-in defaults on, unchanged behavior");
-        assertTrue(defaults.detectionEnabled(), "detection defaults on, unchanged behavior");
+        // docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1: the flip. A new stream is video-only until an
+        // operator turns detection on for it, so many concurrent streams stay affordable by default.
+        assertFalse(defaults.detectionEnabled(), "detection defaults off as of CV-DEMAND-PLAN wave D1");
         // docs/plans/done/TRACKING-PLAN.md §5.G, wave T8: this is the flip. PipelineConfig.defaults() shipped
         // TrackingConfig.off() through waves T2-T7 so every pre-tracking test stayed green while the
         // chain was built; T8 turns it on, and this assertion is the line that says so. A new stream
@@ -46,7 +48,8 @@ class PipelineConfigTest {
 
         assertEquals(EventRuleConfig.defaults(), config.eventRule());
         assertTrue(config.overlayBurnIn());
-        assertTrue(config.detectionEnabled(), "old 6-arg ctor chain still defaults detectionEnabled=true");
+        assertFalse(config.detectionEnabled(),
+                "old 6-arg ctor chain now defaults detectionEnabled=false (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1)");
         assertEquals(TrackingConfig.off(), config.tracking(), "old 6-arg ctor chain still defaults tracking=off");
     }
 
@@ -58,7 +61,8 @@ class PipelineConfigTest {
 
         assertEquals(customRule, config.eventRule());
         assertTrue(config.overlayBurnIn());
-        assertTrue(config.detectionEnabled(), "old 7-arg ctor chain still defaults detectionEnabled=true");
+        assertFalse(config.detectionEnabled(),
+                "old 7-arg ctor chain now defaults detectionEnabled=false (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1)");
         assertEquals(TrackingConfig.off(), config.tracking(), "old 7-arg ctor chain still defaults tracking=off");
     }
 
@@ -71,8 +75,9 @@ class PipelineConfigTest {
 
         assertEquals(customRule, config.eventRule());
         assertFalse(config.overlayBurnIn());
-        assertTrue(config.detectionEnabled(),
-                "old 8-arg canonical ctor (pre-Wave-B) still defaults detectionEnabled=true");
+        assertFalse(config.detectionEnabled(),
+                "old 8-arg canonical ctor (pre-Wave-B) now defaults detectionEnabled=false "
+                        + "(docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1)");
         assertEquals(TrackingConfig.off(), config.tracking(), "old 8-arg ctor chain still defaults tracking=off");
     }
 

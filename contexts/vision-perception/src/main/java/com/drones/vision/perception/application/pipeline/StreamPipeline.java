@@ -5,6 +5,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventType;
@@ -224,6 +225,21 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * {@link #updateConfig}'s own javadoc for the model-id re-arm case.
      */
     private volatile PipelineConfig config;
+
+    /**
+     * Detection <b>demand</b> (docs/plans/active/CV-DEMAND-PLAN.md &sect;1, &sect;3.2) — the system-derived
+     * "someone is actually consuming the output" gate, independent of {@link #config}'s {@link
+     * PipelineConfig#detectionEnabled()} operator-intent gate. {@code volatile}, the same live-swap
+     * shape as {@link #config} itself: {@link #updateDetectionDemand} writes it from {@code
+     * DefaultStreamService}'s demand-poll scheduler thread, {@link #maybeDetect} reads it on the
+     * video thread, and a write is visible to the very next frame with no lock and no restart.
+     * Initializes to {@code true} — fail-open, so a pipeline whose {@code DefaultStreamService} was
+     * never given a {@code DetectionDemandPort} never has this field written at all, and {@link
+     * #maybeDetect} gates on {@link PipelineConfig#detectionEnabled()} alone, exactly as before this
+     * gate existed.
+     */
+    private volatile boolean detectionDemand = true;
+
     private final Flow.Publisher<VideoFrame> source;
     private final DetectionPort detectionPort;
     private final StreamPublisherPort streamPublisherPort;
@@ -690,6 +706,49 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
+     * Live-swaps this pipeline's detection-demand gate (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.2) — the
+     * same no-lock, visible-on-the-next-frame shape as {@link #updateConfig}, and mirroring its
+     * argument's own name: {@code demanded}, not {@code enabled}, since this is a fact about
+     * consumers, never an operator's own choice. Called only from {@code
+     * DefaultStreamService}'s demand-poll task, never the video path.
+     *
+     * @param demanded whether something is currently consuming this stream's detections
+     */
+    public void updateDetectionDemand(boolean demanded) {
+        this.detectionDemand = demanded;
+    }
+
+    /**
+     * @return whether detection is currently demanded (docs/plans/active/CV-DEMAND-PLAN.md &sect;1) — a
+     *         volatile read, {@code true} until/unless {@link #updateDetectionDemand} ever says
+     *         otherwise, so a pipeline whose {@code DefaultStreamService} has no {@code
+     *         DetectionDemandPort} wired never observes this as {@code false}
+     */
+    public boolean detectionDemand() {
+        return detectionDemand;
+    }
+
+    /**
+     * Which of the two independent detection gates (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.6)
+     * currently explains this stream's boxes-or-no-boxes state — {@link DetectionState#OFF} takes
+     * precedence over {@link DetectionState#IDLE_NO_VIEWERS} when both hold, since the operator's own
+     * choice is the more specific truth: an operator who disabled detection does not need to also be
+     * told nobody is watching. See {@link DetectionState}'s own javadoc for why this reports gating,
+     * never health — a stalled {@code DetectionPort} still reads {@link DetectionState#RUNNING}.
+     *
+     * @return {@link DetectionState#OFF} when {@link PipelineConfig#detectionEnabled()} is {@code
+     *         false}; {@link DetectionState#IDLE_NO_VIEWERS} when enabled but {@link
+     *         #detectionDemand()} is currently {@code false}; {@link DetectionState#RUNNING} when
+     *         both gates are open
+     */
+    public DetectionState detectionState() {
+        if (!config.detectionEnabled()) {
+            return DetectionState.OFF;
+        }
+        return detectionDemand ? DetectionState.RUNNING : DetectionState.IDLE_NO_VIEWERS;
+    }
+
+    /**
      * @return the most recently completed detection result's detections, or
      *         an empty list if no inference has completed yet. Updated for
      *         every completed inference, including empty results, so callers
@@ -1067,11 +1126,17 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Gated first — before the outage/in-flight logic below — on {@link
-     * PipelineConfig#detectionEnabled()} (docs/plans/done/CV-CONTROL-PLAN.md &sect;1, &sect;A): {@code false}
-     * returns immediately, so a disabled stream spends zero CPU on inference <i>and</i> stops
-     * probing during an outage too — nothing below this check ever runs. Re-enabling resumes on the
-     * next sampled frame, exactly where the (frozen, untouched) outage/backoff state left off.
+     * Gated first — before the outage/in-flight logic below — on <b>both</b> {@link
+     * PipelineConfig#detectionEnabled()} (docs/plans/done/CV-CONTROL-PLAN.md &sect;1, &sect;A, the operator's
+     * own per-stream choice) <b>and</b> {@link #detectionDemand()} (docs/plans/active/CV-DEMAND-PLAN.md &sect;1,
+     * &sect;3.2, the system-derived "someone is actually watching" fact): {@code effective =
+     * detectionEnabled &amp;&amp; detectionDemand}, and either being {@code false} returns
+     * immediately, so a disabled or undemanded stream spends zero CPU on inference <i>and</i> stops
+     * probing during an outage too — nothing below this check ever runs. The two gates are
+     * deliberately independent conjuncts rather than one merged flag — see {@code
+     * DetectionDemandPort}'s own javadoc for why collapsing them would be wrong. Either one flipping
+     * back resumes detection on the next sampled frame, exactly where the (frozen, untouched)
+     * outage/backoff state left off.
      *
      * <p>Also gated on {@link #pullDetection} being absent (docs/plans/active/MEDIA-SOT-PLAN.md wave M5): in
      * pull mode the worker runs its own (ported) deadline sampler and decides when to detect, so this
@@ -1081,7 +1146,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * caller, so the check below always falls through exactly as it did before this capability existed.
      */
     private void maybeDetect(VideoFrame frame, long now) {
-        if (!config.detectionEnabled() || pullDetection != null) {
+        if (!config.detectionEnabled() || !detectionDemand || pullDetection != null) {
             return;
         }
         switch (outageDecision()) {

@@ -37,7 +37,10 @@ import java.util.Set;
  * detection costs zero CPU — while video keeps flowing at full rate,
  * untouched. Re-enabling resumes detection on the next sampled frame. The
  * skip itself is enforced by the application layer's {@code StreamPipeline}
- * (Wave C); this record only carries the flag.
+ * (Wave C); this record only carries the flag. Since docs/plans/active/CV-DEMAND-PLAN.md &sect;1
+ * (wave D1) this is one of <em>two</em> independent gates {@code StreamPipeline} ANDs together —
+ * see {@code DetectionDemandPort} for the other, system-derived half — and {@link
+ * #DEFAULT_DETECTION_ENABLED} flipped to {@code false}: a stream is opt-in, not opt-out.
  *
  * <p>{@code tracking} (docs/plans/done/TRACKING-PLAN.md §4.B) is this stream's {@link TrackingConfig} —
  * mode, engine, duty-cycle cadences, and an optional {@link TargetLock}. {@link #defaults()}
@@ -68,8 +71,17 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
     /** Default for {@link #overlayBurnIn()} on every N-1-arg convenience constructor — unchanged behavior. */
     public static final boolean DEFAULT_OVERLAY_BURN_IN = true;
 
-    /** Default for {@link #detectionEnabled()} on every N-1-arg convenience constructor — unchanged behavior. */
-    public static final boolean DEFAULT_DETECTION_ENABLED = true;
+    /**
+     * Default for {@link #detectionEnabled()} on every N-1-arg convenience constructor, and what
+     * {@link #defaults()} itself starts a new stream at — {@code false}
+     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;1, wave D1, which flipped this constant from its
+     * original {@code true}). Detection is opt-in per stream now, not opt-out: a deployment running
+     * many concurrent streams can leave every one of them video-only, at effectively zero CV cost,
+     * until an operator turns detection on for the ones they actually want to look at. A deployment
+     * that wants the old always-on behavior back can restore it deployment-wide via {@code
+     * vision.cv.detection-default-enabled=true} (wave D2) without touching this constant.
+     */
+    public static final boolean DEFAULT_DETECTION_ENABLED = false;
 
     public PipelineConfig {
         if (model == null) {
@@ -164,7 +176,16 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * threshold, 10 FPS inference sampling, at most 2 in-flight inference
      * calls, telemetry overlay on, no label filtering (all labels kept),
      * {@link EventRuleConfig#defaults()}, overlay burn-in on, detection
-     * enabled, and tracking {@link TrackingConfig#defaults() ASSOCIATE}.
+     * <strong>disabled</strong>, and tracking {@link TrackingConfig#defaults() ASSOCIATE}.
+     *
+     * <p><strong>Detection defaults to {@code false}</strong> (docs/plans/active/CV-DEMAND-PLAN.md &sect;1,
+     * wave D1 — the plan's own flip of {@link #DEFAULT_DETECTION_ENABLED}): a new stream is
+     * video-only, at zero CV cost, until an operator deliberately turns detection on for it. This is
+     * what makes running many concurrent streams affordable — a stream nobody has switched on never
+     * calls {@code detect()} at all, regardless of how many others are also idle-but-running.
+     * Turning detection on is a deliberate act, exactly like tracking below: per stream via {@code
+     * PATCH /api/streams/{id}/config}, or per deployment via {@code
+     * vision.cv.detection-default-enabled=true} (wave D2) to restore the pre-D1 always-on default.
      *
      * <p><strong>Tracking defaults to {@link TrackingConfig#defaults()} ({@code ASSOCIATE}), not
      * {@link TrackingConfig#off()}</strong> — docs/plans/done/TRACKING-PLAN.md §5.G, the one behavior change

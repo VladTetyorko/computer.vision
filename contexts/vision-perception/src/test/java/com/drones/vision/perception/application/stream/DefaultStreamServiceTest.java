@@ -6,6 +6,7 @@ import com.drones.vision.kernel.Capability;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.platform.Event;
@@ -21,6 +22,7 @@ import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.port.DetectionDemandPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
@@ -85,6 +87,20 @@ class DefaultStreamServiceTest {
     private EventPublisherPort eventPublisher;
     private StreamService service;
     private Device device;
+
+    /**
+     * {@link PipelineConfig#defaults()} with detection explicitly turned on
+     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;1, wave D1 flipped {@link
+     * PipelineConfig#DEFAULT_DETECTION_ENABLED} to {@code false}) — for the tests below whose actual
+     * intent is that detection runs on the started stream, as distinct from the many other tests in
+     * this file that only care a stream started at all and never touch {@code detectionPort}.
+     */
+    private static PipelineConfig detectingDefaults() {
+        PipelineConfig base = PipelineConfig.defaults();
+        return new PipelineConfig(base.model(), base.confidenceThreshold(), base.inferenceFps(),
+                base.maxInFlightInferences(), base.overlayTelemetry(), base.labelFilter(), base.eventRule(),
+                base.overlayBurnIn(), true, base.tracking());
+    }
 
     private static Flow.Publisher<VideoFrame> noOpPublisher() {
         return subscriber -> subscriber.onSubscribe(new Flow.Subscription() {
@@ -396,7 +412,7 @@ class DefaultStreamServiceTest {
                 Duration.ZERO);
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
 
-        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+        StreamId streamId = service.start(device.id(), detectingDefaults());
 
         assertEquals(List.of(detection), service.latestDetections(streamId));
     }
@@ -438,7 +454,7 @@ class DefaultStreamServiceTest {
         DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO);
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
 
-        withLiveUpdates.start(device.id(), PipelineConfig.defaults());
+        withLiveUpdates.start(device.id(), detectingDefaults());
 
         verify(liveUpdatePublisherPort).publishDetections(assetId, result);
     }
@@ -481,7 +497,7 @@ class DefaultStreamServiceTest {
         DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO);
         when(detectionPort.detect(any(), any(), any())).thenReturn(CompletableFuture.completedFuture(result));
 
-        service.start(device.id(), PipelineConfig.defaults());
+        service.start(device.id(), detectingDefaults());
 
         ArgumentCaptor<CameraAttitude> captor = ArgumentCaptor.forClass(CameraAttitude.class);
         verify(detectionPort).detect(any(), any(), captor.capture());
@@ -697,7 +713,10 @@ class DefaultStreamServiceTest {
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
         when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
-        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of());
+        // detectionEnabled explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
+        // this test's whole point is that detection keeps running across the hot-knob swap.
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
         StreamId streamId = service.start(device.id(), started);
 
         UpdateOutcome outcome = service.updateConfig(streamId, new PipelineConfigPatch(0.75, null, null, null, null));
@@ -726,7 +745,10 @@ class DefaultStreamServiceTest {
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
         when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
-        PipelineConfig started = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 1000, 5, true, Set.of());
+        // detectionEnabled explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
+        // this test's whole point is that the next sampled frame still detects, on the new model.
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
         StreamId streamId = service.start(device.id(), started);
 
         UpdateOutcome outcome =
@@ -747,7 +769,10 @@ class DefaultStreamServiceTest {
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
         when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
-        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "v1"), 0.4, 1000, 3, true, Set.of("person"));
+        // detectionEnabled explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
+        // this test's whole point is that detection keeps running with the merged config.
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "v1"), 0.4, 1000, 3, true, Set.of("person"),
+                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
         StreamId streamId = service.start(device.id(), started);
 
         service.updateConfig(streamId, new PipelineConfigPatch(null, null, Set.of("car"), null, null));
@@ -1021,7 +1046,7 @@ class DefaultStreamServiceTest {
         when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
 
-        StreamId streamId = seeded.start(device.id(), PipelineConfig.defaults());
+        StreamId streamId = seeded.start(device.id(), detectingDefaults());
 
         TrackingConfig applied = runningTracking(publisher, streamId, 0);
         assertEquals(TrackingMode.ASSOCIATE, applied.mode(), "the deployment default reaches every start path");
@@ -1040,7 +1065,7 @@ class DefaultStreamServiceTest {
         when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
 
-        StreamId streamId = seeded.start(device.id(), PipelineConfig.defaults(),
+        StreamId streamId = seeded.start(device.id(), detectingDefaults(),
                 new TrackingConfigPatch(TrackingMode.FOLLOW, "lk", null, null, null, null, null, null));
 
         TrackingConfig applied = runningTracking(publisher, streamId, 0);
@@ -1074,5 +1099,130 @@ class DefaultStreamServiceTest {
         service.stop(streamId);
         assertEquals(List.of(), service.tracks(streamId));
         assertEquals(Optional.empty(), service.trackingStats(streamId));
+    }
+
+    // --- docs/plans/active/CV-DEMAND-PLAN.md §2, §3.3-3.4: detection-demand grace period and scheduler resilience ---
+
+    /** {@link StreamPipelineSettings#defaults()} with its two demand tunables replaced. */
+    private static StreamPipelineSettings settingsWithDetectionDemand(Duration pollInterval, Duration grace) {
+        StreamPipelineSettings base = StreamPipelineSettings.defaults();
+        return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(),
+                base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
+                base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
+                base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
+                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(),
+                base.cameraHfovDegrees(), base.adaptiveRate(), pollInterval, grace);
+    }
+
+    @Test
+    void demandGraceKeepsDetectingForAWhileAfterTheLastRealDemandThenStopsOnceItExpires() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
+        when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
+                emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
+        DetectionDemandPort demandPort = mock(DetectionDemandPort.class);
+        Duration grace = Duration.ofSeconds(5);
+        // A one-minute poll interval keeps the background scheduler from ever ticking on its own
+        // during this test -- every evaluation below is driven explicitly through
+        // evaluateDetectionDemand's package-private Instant seam, never by waiting out a real cadence.
+        StreamPipelineSettings settings = settingsWithDetectionDemand(Duration.ofMinutes(1), grace);
+        DefaultStreamService demandService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null,
+                settings, null, demandPort);
+        // inferenceFps=100 (10ms sample interval) plus the 15ms real sleeps below reliably clear the
+        // pipeline's own real-nanoTime sample deadline between pushes -- unrelated to (and much
+        // shorter than) the synthetic Instants driving the grace computation itself below, which
+        // never waits on real time at all.
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 100, 5, true, Set.of(),
+                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
+        StreamId streamId = demandService.start(device.id(), started);
+        Instant t0 = Instant.now();
+
+        when(demandPort.detectionWanted(streamId, null)).thenReturn(true);
+        demandService.evaluateDetectionDemand(streamId, t0);
+        publisher.push(frameOn(streamId, 0));
+        verify(detectionPort, times(1)).detect(any(), any());
+
+        // No longer wanted, but still inside the grace window -- must keep detecting.
+        when(demandPort.detectionWanted(streamId, null)).thenReturn(false);
+        demandService.evaluateDetectionDemand(streamId, t0.plus(grace).minusMillis(1));
+        assertDoesNotThrow(() -> Thread.sleep(15));
+        publisher.push(frameOn(streamId, 1));
+        verify(detectionPort, times(2)).detect(any(), any());
+
+        // Grace has just expired -- must stop.
+        demandService.evaluateDetectionDemand(streamId, t0.plus(grace).plusMillis(1));
+        assertDoesNotThrow(() -> Thread.sleep(15));
+        publisher.push(frameOn(streamId, 2));
+        verify(detectionPort, times(2)).detect(any(), any());
+    }
+
+    @Test
+    void aThrowingDetectionDemandPortNeverStopsLaterScheduledEvaluations() {
+        // scheduleAtFixedRate silently cancels every future run the moment its task throws uncaught --
+        // pollDetectionDemand's per-stream catch(Throwable) is what stands between "one bad
+        // DetectionDemandPort implementation" and detection-demand evaluation silently stopping for
+        // the rest of the process.
+        DetectionDemandPort throwingPort = mock(DetectionDemandPort.class);
+        when(throwingPort.detectionWanted(any(), any())).thenThrow(new RuntimeException("boom"));
+        // A tiny (20ms) real poll interval, same convention as
+        // explicitStopDuringBackoffCancelsThePendingRetryAndNoFurtherOpenEverHappens's tiny backoff --
+        // proves several ticks happen within a couple of seconds rather than waiting out the real 2s
+        // production default.
+        StreamPipelineSettings settings = settingsWithDetectionDemand(Duration.ofMillis(20),
+                StreamPipelineSettings.defaults().detectionDemandGrace());
+        DefaultStreamService demandService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null,
+                settings, null, throwingPort);
+
+        demandService.start(device.id(), PipelineConfig.defaults());
+
+        verify(throwingPort, timeout(2000).atLeast(3)).detectionWanted(any(), any());
+    }
+
+    @Test
+    void aFreshlyStartedStreamWithNoObservedDemandIsGatedOffByTheFirstEvaluationNotAfterAFullGracePeriod() {
+        // Pins the coordinator follow-up fix: RunningStream#lastDemandAt is seeded to Instant.EPOCH,
+        // not Instant.now(), because demand must be observed, never assumed. Before that fix, this
+        // exact sequence -- start, then evaluate once with no demand ever having been wanted -- would
+        // have found itself trivially "within grace" of a demand it never actually observed (lastDemandAt
+        // stamped to the moment the stream started), and stayed RUNNING for a full 30s grace period it
+        // never earned.
+        DetectionDemandPort demandPort = mock(DetectionDemandPort.class);
+        when(demandPort.detectionWanted(any(), any())).thenReturn(false);
+        // A one-minute poll interval keeps the background scheduler from ever ticking on its own --
+        // this test drives evaluateDetectionDemand explicitly, through its package-private Instant seam.
+        StreamPipelineSettings settings = settingsWithDetectionDemand(Duration.ofMinutes(1), Duration.ofSeconds(30));
+        DefaultStreamService demandService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null,
+                settings, null, demandPort);
+        StreamId streamId = demandService.start(device.id(), detectingDefaults());
+
+        // Before any evaluation at all: StreamPipeline#detectionDemand's own fail-open true default
+        // still reads RUNNING -- the narrow, accepted startup window, bounded by
+        // detectionDemandPollInterval (2s default) rather than a full detectionDemandGrace (30s).
+        assertEquals(Optional.of(DetectionState.RUNNING), demandService.detectionState(streamId));
+
+        // The very first evaluation ever, immediately after start, with demand never observed.
+        demandService.evaluateDetectionDemand(streamId, Instant.now());
+
+        assertEquals(Optional.of(DetectionState.IDLE_NO_VIEWERS), demandService.detectionState(streamId),
+                "must gate off at once, not stay RUNNING for a grace period nothing ever earned");
+    }
+
+    // --- docs/plans/active/CV-DEMAND-PLAN.md §3.6: DetectionState -- forgiving read, delegation ---
+
+    @Test
+    void detectionStateIsEmptyForAnUnknownOrStoppedStreamAndPresentWhileRunning() {
+        StreamId unknown = StreamId.random();
+        assertEquals(Optional.empty(), service.detectionState(unknown));
+
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+        assertEquals(Optional.of(DetectionState.OFF), service.detectionState(streamId),
+                "PipelineConfig.defaults() ships detectionEnabled=false as of CV-DEMAND-PLAN wave D1");
+
+        service.stop(streamId);
+        assertEquals(Optional.empty(), service.detectionState(streamId));
     }
 }

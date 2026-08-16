@@ -80,6 +80,16 @@ import com.drones.vision.perception.application.stream.TrackingConfigPatch;
  *                                        its association budget (docs/plans/active/CV-RATE-CONTROL-PLAN.md
  *                                        wave R2); never {@code null}, use {@link
  *                                        AdaptiveRateSettings#disabled()} to pin the rate
+ * @param detectionDemandPollInterval    how often {@code DefaultStreamService}'s demand-poll task
+ *                                        re-evaluates every running stream's {@code
+ *                                        DetectionDemandPort} (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3,
+ *                                        &sect;3.4); must be positive. Irrelevant, and the task never even
+ *                                        scheduled, when no port is wired
+ * @param detectionDemandGrace           how long a stream keeps detecting after its last observed
+ *                                        demand before {@link StreamPipeline#updateDetectionDemand}
+ *                                        is told {@code false} (docs/plans/active/CV-DEMAND-PLAN.md &sect;2,
+ *                                        &sect;3.3) — the window that keeps navigating between pages from
+ *                                        thrashing the detector on and off; must be positive
  */
 public record StreamPipelineSettings(
         int assumedSourceFps,
@@ -97,10 +107,18 @@ public record StreamPipelineSettings(
         Duration trackRetention,
         TrackingConfigPatch trackingSeed,
         double cameraHfovDegrees,
-        AdaptiveRateSettings adaptiveRate) {
+        AdaptiveRateSettings adaptiveRate,
+        Duration detectionDemandPollInterval,
+        Duration detectionDemandGrace) {
 
     /** @see #trackRetention() */
     private static final Duration DEFAULT_TRACK_RETENTION = Duration.ofSeconds(5);
+
+    /** @see #detectionDemandPollInterval() */
+    private static final Duration DEFAULT_DETECTION_DEMAND_POLL_INTERVAL = Duration.ofSeconds(2);
+
+    /** @see #detectionDemandGrace() */
+    private static final Duration DEFAULT_DETECTION_DEMAND_GRACE = Duration.ofSeconds(30);
 
     /**
      * {@code 0} = the deployment has not described its camera's optics, which disables pose-based
@@ -186,6 +204,28 @@ public record StreamPipelineSettings(
                 trackRetention, trackingSeed, DEFAULT_CAMERA_HFOV_DEGREES);
     }
 
+    /**
+     * The canonical constructor before docs/plans/active/CV-DEMAND-PLAN.md wave D1 added the two demand
+     * tunables, kept as a convenience constructor defaulting both to {@link
+     * #DEFAULT_DETECTION_DEMAND_POLL_INTERVAL}/{@link #DEFAULT_DETECTION_DEMAND_GRACE} — the values
+     * the plan itself pins (2s/30s) — so every pre-existing call site, including {@code
+     * DefaultStreamService}'s own {@code withSourceReopenBackoff} test seam, compiles unchanged.
+     * Same "N-1-arg convenience ctor" idiom as every other addition to this record.
+     */
+    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
+                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
+                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
+                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
+                                   double extrapolationMatchGate, Duration trackingStatsWindow,
+                                   Duration trackRetention, TrackingConfigPatch trackingSeed,
+                                   double cameraHfovDegrees, AdaptiveRateSettings adaptiveRate) {
+        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
+                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
+                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
+                trackRetention, trackingSeed, cameraHfovDegrees, adaptiveRate,
+                DEFAULT_DETECTION_DEMAND_POLL_INTERVAL, DEFAULT_DETECTION_DEMAND_GRACE);
+    }
+
     public StreamPipelineSettings {
         if (assumedSourceFps <= 0) {
             throw new IllegalArgumentException("assumedSourceFps must be positive, was " + assumedSourceFps);
@@ -235,6 +275,15 @@ public record StreamPipelineSettings(
         if (adaptiveRate == null) {
             throw new IllegalArgumentException(
                     "adaptiveRate must not be null; use AdaptiveRateSettings.disabled()");
+        }
+        if (detectionDemandPollInterval == null || detectionDemandPollInterval.isZero()
+                || detectionDemandPollInterval.isNegative()) {
+            throw new IllegalArgumentException(
+                    "detectionDemandPollInterval must be positive, was " + detectionDemandPollInterval);
+        }
+        if (detectionDemandGrace == null || detectionDemandGrace.isZero() || detectionDemandGrace.isNegative()) {
+            throw new IllegalArgumentException(
+                    "detectionDemandGrace must be positive, was " + detectionDemandGrace);
         }
     }
 
