@@ -291,7 +291,7 @@ export class LiveFacade {
   }
 
   back(): Promise<boolean> {
-    return this.router.navigate(['/devices']);
+    return this.router.navigate(['/assets']);
   }
 
   onConfidence(value: string): void {

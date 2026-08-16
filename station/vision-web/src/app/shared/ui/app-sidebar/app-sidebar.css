@@ -322,6 +322,17 @@
   margin-left: auto;
 }
 
+/* The live-transport dot+text (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1, `app-sidebar.ts`'s own doc
+   comment) — same `gap: var(--space-4)` a `.chip` uses for its own dot+label pairing, but no pill
+   background/border: this reads as quiet ambient text, not a chip (frontend-style §5). */
+.live-transport {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
 .theme-toggle {
   flex: none;
   display: inline-flex;
@@ -467,7 +478,8 @@
   .sidebar.collapsed .brand-name,
   .sidebar.collapsed .group-label-text,
   .sidebar.collapsed .nav-row-text,
-  .sidebar.collapsed .disclosure summary > span {
+  .sidebar.collapsed .disclosure summary > span,
+  .sidebar.collapsed .live-transport-text {
     display: none;
   }
 
@@ -572,7 +584,8 @@
   .brand-name,
   .group-label-text,
   .nav-row-text,
-  .disclosure summary > span {
+  .disclosure summary > span,
+  .live-transport-text {
     display: none;
   }
 

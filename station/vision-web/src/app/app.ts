@@ -5,9 +5,11 @@ import { filter, map } from 'rxjs';
 import { AuthStore } from './core/auth/auth-store';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
+import { LiveStore } from './core/live/live-store';
 import { SidebarStore } from './core/shell/sidebar-store';
 import { ThemeStore } from './core/shell/theme-store';
 import { AppSidebar } from './shared/ui/app-sidebar/app-sidebar';
+import { Notice } from './shared/ui/notice';
 import { ToastHost } from './shared/ui/toast-host';
 import { UndoToast } from './shared/ui/undo-toast';
 
@@ -53,7 +55,7 @@ import { UndoToast } from './shared/ui/undo-toast';
  */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, AppSidebar, ToastHost, UndoToast],
+  imports: [RouterOutlet, AppSidebar, Notice, ToastHost, UndoToast],
   templateUrl: './app.html',
   styleUrl: './app.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -61,6 +63,7 @@ import { UndoToast } from './shared/ui/undo-toast';
 export class App {
   protected readonly auth = inject(AuthStore);
   private readonly fleet = inject(FleetStore);
+  private readonly liveStore = inject(LiveStore);
   private readonly sidebar = inject(SidebarStore);
   // Injected for its constructor side effect only (applies the persisted `data-theme` attribute to
   // `<html>`, docs/plans/done/VISUAL-REFRESH-PLAN.md F3) — never read again after that, same "eager singleton
@@ -72,6 +75,23 @@ export class App {
   private readonly router = inject(Router);
 
   protected readonly offline = computed(() => this.fleet.reachable() === false);
+
+  /**
+   * The one silent-degradation case docs/plans/active/SYSTEM-STATUS-PLAN.md §1/§3.1 names: the SSE `/api/live`
+   * connection is `closed` (its own 60s retry loop, `core/live/live-store.ts#SSE_RETRY_INTERVAL_MS`,
+   * exhausted at least once) while the backend's REST API is still perfectly `reachable()` — every
+   * "live" surface in the app has already silently fallen back to its own 5s poll
+   * (`core/fleet/fleet-store.ts#POLL_INTERVAL_MS`, `features/command/command-facade.ts`'s identical
+   * `SUMMARY_POLL_INTERVAL_MS`) with nothing on screen saying so before this wave. Deliberately
+   * **not** just `connectionState() === 'closed'` alone: `reachable() === false` already renders the
+   * much louder `offline` banner below (a `closed` SSE connection is the expected, uninteresting
+   * consequence of the backend being down at all, not a second, separate problem worth its own
+   * banner) — this notice is for the *specific* case where the backend is fine but only the live
+   * transport isn't, which is the one combination an operator has no other way to notice.
+   */
+  protected readonly liveDegraded = computed(
+    () => this.liveStore.connectionState() === 'closed' && this.fleet.reachable() === true,
+  );
 
   constructor() {
     // Warms the Leaflet chunk on idle (docs/main/CYCLES-PLAN.md §9, CU-b item 2) — after render so it

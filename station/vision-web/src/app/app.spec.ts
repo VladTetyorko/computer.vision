@@ -28,8 +28,8 @@ function fakeEventsStore() {
   return { activate: () => {}, release: () => {}, events: () => [] as unknown[] };
 }
 
-function fakeLiveStore() {
-  return { liveEvents: () => [] as unknown[] };
+function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
+  return { liveEvents: () => [] as unknown[], connectionState: () => connectionState };
 }
 
 function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
@@ -42,7 +42,13 @@ function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
 @Component({ selector: 'vision-test-stub-page', template: '' })
 class StubPage {}
 
-function render(options: { topRole?: 'ADMIN' | 'MANAGER' | 'PILOT'; reachable?: boolean } = {}) {
+function render(
+  options: {
+    topRole?: 'ADMIN' | 'MANAGER' | 'PILOT';
+    reachable?: boolean;
+    connectionState?: 'connecting' | 'open' | 'closed';
+  } = {},
+) {
   TestBed.configureTestingModule({
     providers: [
       provideRouter([
@@ -53,7 +59,7 @@ function render(options: { topRole?: 'ADMIN' | 'MANAGER' | 'PILOT'; reachable?: 
       { provide: LeafletWarmup, useValue: { schedule: () => {} } },
       { provide: AuthStore, useValue: fakeAuthStore(options.topRole) },
       { provide: EventsStore, useValue: fakeEventsStore() },
-      { provide: LiveStore, useValue: fakeLiveStore() },
+      { provide: LiveStore, useValue: fakeLiveStore(options.connectionState) },
       { provide: VisionApi, useValue: {} },
     ],
   });
@@ -119,6 +125,29 @@ describe('App shell', () => {
     TestBed.resetTestingModule();
     const offline = render({ topRole: 'PILOT', reachable: false });
     expect((offline.nativeElement as HTMLElement).querySelector('.offline-banner')).not.toBeNull();
+  });
+
+  it('shows the live-degraded notice only for the specific silent-degradation case: SSE closed + backend reachable (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1)', () => {
+    const degraded = render({ topRole: 'PILOT', reachable: true, connectionState: 'closed' });
+    const notice = (degraded.nativeElement as HTMLElement).querySelector('vision-notice');
+    expect(notice).not.toBeNull();
+    expect(notice?.textContent).toContain('Live updates disconnected');
+    expect(notice?.textContent).toContain('5-second refresh');
+    expect(notice?.textContent).toContain('Retrying every 60 s');
+
+    TestBed.resetTestingModule();
+    // Reachable but still connecting (not yet closed) — not the degraded case.
+    const connecting = render({ topRole: 'PILOT', reachable: true, connectionState: 'connecting' });
+    expect((connecting.nativeElement as HTMLElement).querySelector('vision-notice')).toBeNull();
+
+    TestBed.resetTestingModule();
+    // Backend unreachable — the louder offline banner covers this, not the live-degraded notice
+    // (they are mutually exclusive; a closed SSE connection is an expected consequence of the
+    // backend being down at all, not a second, separate problem).
+    const offline = render({ topRole: 'PILOT', reachable: false, connectionState: 'closed' });
+    const offlineRoot = offline.nativeElement as HTMLElement;
+    expect(offlineRoot.querySelector('.offline-banner')).not.toBeNull();
+    expect(offlineRoot.querySelector('vision-notice')).toBeNull();
   });
 
   it('preserves the toast host and undo toast', () => {

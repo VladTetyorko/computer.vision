@@ -80,12 +80,28 @@ describe('NAV_MODES', () => {
       }
     });
 
-    it('every grouped entry is also managerOnly — a group is always role-scoped', () => {
+    /**
+     * A group is always role-scoped, with exactly one named, documented exception: `System status`
+     * (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1) sits in `diagnostics` but is deliberately not
+     * `managerOnly` — an operator whose CV pipeline just died needs to see why, not be told to find a
+     * manager. This carve-out must stay narrow (one specific entry, not a loosened rule) — any *other*
+     * grouped entry gaining `managerOnly: false` should still fail this test.
+     */
+    it('every grouped entry is also managerOnly, except the documented "System status" carve-out', () => {
+      const rollupExceptions = new Set(['System status']);
       for (const entry of manage.entries) {
-        if (entry.group !== undefined) {
+        if (entry.group !== undefined && !rollupExceptions.has(entry.name)) {
           expect(entry.managerOnly, `${entry.name} has a group but isn't managerOnly`).toBe(true);
         }
       }
+    });
+
+    it('"System status" is the one documented non-managerOnly diagnostics entry', () => {
+      const entry = manage.entries.find((e) => e.name === 'System status')!;
+      expect(entry, 'System status').toBeDefined();
+      expect(entry.group).toBe('diagnostics');
+      expect(entry.managerOnly).toBeFalsy();
+      expect(entry.to).toBe('/manage/system');
     });
 
     it('Assets and Add source are ungrouped and ungated — every role reaches them', () => {

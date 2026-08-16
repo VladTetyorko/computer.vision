@@ -41,6 +41,7 @@ export type AttentionReasonKind =
   | 'telemetry-stale'
   | 'battery-low'
   | 'gps-degraded'
+  | 'pipeline-error'
   | 'open-events';
 export type AttentionSeverity = 'critical' | 'warning';
 
@@ -70,17 +71,22 @@ export interface AttentionReason {
  * failsafe can itself be *caused* by one, but the failsafe state is the more actionable fact).
  * Battery-critical and telemetry-stale share the next two ranks deliberately, both above
  * battery-low: a dead battery mid-flight and a lost telemetry link mid-flight are the same kind of
- * "this drone may not come back" risk. `gps-degraded` ranks below battery-low but above open-events
- * — a degraded fix matters, but a battery running low is the more universally urgent of the two.
- * Open detection events rank lowest — informational, not a safety condition.
+ * "this drone may not come back" risk. `gps-degraded` ranks below battery-low but above
+ * `pipeline-error` — a degraded fix matters, but a battery running low is the more universally
+ * urgent of the two. `pipeline-error` (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4) ranks below every
+ * flight-safety reason above it — a broken detection pipeline is a perception-quality problem, not a
+ * "this drone may not come back" one — but above open-events, since a stream that stopped seeing
+ * *anything* is a more actionable fact than an already-open, already-triaged detection event. Open
+ * detection events rank lowest — informational, not a safety condition.
  */
 export const REASON_RANK: Readonly<Record<AttentionReasonKind, number>> = {
-  'geofence-breach': 7,
-  failsafe: 6,
-  'battery-critical': 5,
-  'telemetry-stale': 4,
-  'battery-low': 3,
-  'gps-degraded': 2,
+  'geofence-breach': 8,
+  failsafe: 7,
+  'battery-critical': 6,
+  'telemetry-stale': 5,
+  'battery-low': 4,
+  'gps-degraded': 3,
+  'pipeline-error': 2,
   'open-events': 1,
 };
 
@@ -192,20 +198,43 @@ function geofenceBreachReason(breaches: readonly GeofenceBreach[] | undefined): 
 }
 
 /**
+ * `pipelineErrorDetail` is, like `gpsFixType`/`geofenceBreaches`, not carried by `AssetAttention`
+ * itself — it's the asset's own entry (keyed by `asset.streamId`) in
+ * `core/system-events/system-events-logic.ts#activePipelineErrorMessagesByStreamId`, itself derived
+ * from the generic `LiveEvent` feed. `undefined` means "no *active* pipeline error known for this
+ * stream right now" — either none ever happened, or one happened and has since decayed/cleared (see
+ * that function's own doc comment for the full decay rule) — never "definitely healthy".
+ *
+ * No trailing period is appended after `detail` — unlike every other reason's text, `detail` is
+ * `LiveEvent.message` verbatim, an arbitrary Java exception message
+ * (`StreamPipeline#describeFailure`, `contexts/vision-perception`) this app does not control the
+ * punctuation of; appending one blindly risks a double period on messages that already end with one.
+ */
+function pipelineErrorReason(detail: string | undefined): AttentionReason | undefined {
+  if (!detail) {
+    return undefined;
+  }
+  return { kind: 'pipeline-error', severity: 'warning', text: `Detection pipeline error — ${detail}` };
+}
+
+/**
  * Every reason `asset` triggers, most severe first. An asset with none of these returns an empty
  * array — "all quiet" for that asset.
  *
- * `gpsFixType` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d, optional) and `geofenceBreaches`
- * (docs/plans/done/OPS-CORE-PLAN.md §G-c, optional) are the two reason inputs not carried by `AssetAttention`
- * itself — see `gpsDegradedReason`'s/`geofenceBreachReason`'s own doc comments for where a caller
- * sources each. A caller with neither in hand (e.g. `features/reports/reports-logic.ts`'s read-only
- * dashboard, which has no live map marker or geofence feed to draw from) simply omits both — those
- * two reason kinds never fire for it, honestly "not evaluated" rather than "not present".
+ * `gpsFixType` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d, optional), `geofenceBreaches`
+ * (docs/plans/done/OPS-CORE-PLAN.md §G-c, optional), and `pipelineErrorDetail`
+ * (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4, optional) are the three reason inputs not carried by
+ * `AssetAttention` itself — see `gpsDegradedReason`'s/`geofenceBreachReason`'s/`pipelineErrorReason`'s
+ * own doc comments for where a caller sources each. A caller with none in hand (e.g.
+ * `features/reports/reports-logic.ts`'s read-only dashboard, which has no live map marker or
+ * geofence/pipeline feed to draw from) simply omits all three — those reason kinds never fire for
+ * it, honestly "not evaluated" rather than "not present".
  */
 export function attentionReasons(
   asset: AssetAttention,
   gpsFixType?: number,
   geofenceBreaches?: readonly GeofenceBreach[],
+  pipelineErrorDetail?: string,
 ): readonly AttentionReason[] {
   const reasons = [
     geofenceBreachReason(geofenceBreaches),
@@ -213,6 +242,7 @@ export function attentionReasons(
     batteryReason(asset.batteryPercent),
     telemetryReason(asset),
     gpsDegradedReason(gpsFixType),
+    pipelineErrorReason(pipelineErrorDetail),
     openEventsReason(asset.openEventCount),
   ].filter((reason): reason is AttentionReason => reason !== undefined);
   return [...reasons].sort((a, b) => REASON_RANK[b.kind] - REASON_RANK[a.kind]);

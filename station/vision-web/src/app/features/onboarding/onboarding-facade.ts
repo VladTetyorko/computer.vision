@@ -32,10 +32,10 @@ const STEP_LABELS: Record<WizardStep, string> = {
 };
 
 const CONNECT_METHOD_LABELS: Record<ConnectMethod, string> = {
-  register: 'Register manually',
-  discover: 'Discover on network',
-  simulate: 'Simulate',
-  listen: 'Listen for drones',
+  register: 'Enter a stream address',
+  discover: 'Find cameras on my network',
+  simulate: 'Use a test source',
+  listen: 'Find nearby drones',
   drone: 'Add a real drone',
 };
 

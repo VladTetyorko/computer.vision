@@ -1,6 +1,6 @@
 <div class="page page--form onboarding-page">
   <vision-page-bar title="Add a source" icon="plus">
-    <a pageBarActions class="btn secondary" routerLink="/devices">Cancel</a>
+    <a pageBarActions class="btn secondary" routerLink="/assets">Cancel</a>
   </vision-page-bar>
 
   <ol class="stepper" aria-label="Onboarding steps">
@@ -676,10 +676,10 @@
           <p class="disabled-reason">
             @switch (facade.store.connectMethod()) {
               @case ('discover') {
-                Pick "Use" on a discovered candidate, or switch to Register manually.
+                Pick "Use" on a discovered candidate, or switch to entering a stream address instead.
               }
               @case ('listen') {
-                Pick "Use" on a heard vehicle, or switch to Register manually.
+                Pick "Use" on a heard vehicle, or switch to entering a stream address instead.
               }
               @case ('drone') {
                 Finish the picker and configuration steps above, then listen for the vehicle.

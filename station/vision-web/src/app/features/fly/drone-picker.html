@@ -28,10 +28,9 @@
     <div class="card empty">
       <h3>No drones registered yet</h3>
       <p>
-        Add a source from the Devices tab — the synthetic test drone flies a route with no
-        hardware at all.
+        Add a source — the synthetic test drone flies a route with no hardware at all.
       </p>
-      <a class="btn" routerLink="/devices" [queryParams]="{ addSource: 1 }">Add source</a>
+      <a class="btn" routerLink="/add-source">Add source</a>
     </div>
   } @else {
     <div class="picker-grid">

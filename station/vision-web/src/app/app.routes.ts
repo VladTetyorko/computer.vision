@@ -21,6 +21,7 @@ import { ALERTS_ROUTES } from './features/alerts/alerts.routes';
 import { ROSTER_ROUTES } from './features/roster/roster.routes';
 import { CATEGORIES_ROUTES } from './features/categories/categories.routes';
 import { REPORTS_ROUTES } from './features/reports/reports.routes';
+import { SYSTEM_STATUS_ROUTES } from './features/system-status/system-status.routes';
 import { LABELING_ROUTES } from './features/labeling/labeling.routes';
 import { MODELS_ROUTES } from './features/models/models.routes';
 import { TRAINING_JOB_ROUTES } from './features/training-jobs/training-jobs.routes';
@@ -60,6 +61,7 @@ export const routes: Routes = [
       ...ROSTER_ROUTES,
       ...CATEGORIES_ROUTES,
       ...REPORTS_ROUTES,
+      ...SYSTEM_STATUS_ROUTES,
       // MODELS_ROUTES' static 'manage/training/models' must precede LABELING_ROUTES' param route
       // 'manage/training/:datasetId' — see MODELS_ROUTES' own doc comment. TRAINING_JOB_ROUTES has
       // no such constraint (its own doc comment explains why — a different segment count than every

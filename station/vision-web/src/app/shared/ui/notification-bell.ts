@@ -4,12 +4,16 @@ import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { EventsStore } from '../../core/events/events-store';
 import { LiveStore } from '../../core/live/live-store';
+import { PollScheduler } from '../../core/poll-scheduler';
 import { ToastService } from '../../core/toast.service';
 import { GlobalOverlayStore } from '../../core/ui/overlay-store';
-import { eventNotificationText, resolveEventTarget, resolveReplayDeepLink } from '../../core/events/events-logic';
+import { eventNotificationText, relativeTimeLabel, resolveEventTarget, resolveReplayDeepLink } from '../../core/events/events-logic';
 import { geofenceBreachToastMessage } from '../../core/geofence/geofence-logic';
+import { describeSystemEventSource, type SystemEventRow as SystemEventRowModel } from '../../core/system-events/system-events-logic';
+import { SystemEventsStore } from '../../core/system-events/system-events-store';
 import { EventsRail } from './events-rail';
 import { newlyOpenedEvents, unreadEvents } from './notification-logic';
+import { SystemEventRow } from './system-event-row';
 import type { DetectionEvent } from '../../core/api/models';
 
 /**
@@ -73,10 +77,22 @@ import type { DetectionEvent } from '../../core/api/models';
  * `toggleBell()` below is the one place opening still has a side effect beyond visibility (marking
  * events read), so it can't be a bare `overlays.toggle()` call in the template the way
  * `identity-chip.ts`'s trigger is.
+ *
+ * **System events (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2-§3.3)** get a *second*, independent card in
+ * this same dropdown, `<vision-system-event-row>` per row — a **sibling** of `vision-event-row`
+ * (`EventsRail`'s own row component), not a widened version of it, since `EventRow.event` is typed
+ * to `DetectionEvent` and every one of its existing call sites stays untouched by this wave; see
+ * `system-event-row.ts`'s own class doc for the full "why a sibling" writeup. `SystemEventsStore`
+ * (`providedIn: 'root'`, backed by `LiveStore.liveEvents()`) is this section's one data source —
+ * `DETECTION` is excluded there already (that store's own doc comment), so this section can never
+ * duplicate a detection the card above it already shows, avoiding exactly the alert-noise failure
+ * mode `SYSTEM-STATUS-PLAN.md §1` names. `GEOFENCE_BREACH` still toasts *in addition* — the existing
+ * `toastedBreachIds` effect below is unchanged — this section is the durable record of the same
+ * event, not a replacement for its toast.
  */
 @Component({
   selector: 'vision-notification-bell',
-  imports: [EventsRail],
+  imports: [EventsRail, SystemEventRow],
   templateUrl: './notification-bell.html',
   styleUrl: './notification-bell.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -87,7 +103,9 @@ export class NotificationBell {
   private readonly fleet = inject(FleetStore);
   private readonly toasts = inject(ToastService);
   private readonly liveStore = inject(LiveStore);
+  private readonly poll = inject(PollScheduler);
   protected readonly events = inject(EventsStore);
+  protected readonly systemEvents = inject(SystemEventsStore);
   protected readonly overlays = inject(GlobalOverlayStore);
   private readonly host = inject(ElementRef<HTMLElement>);
   /** Optional, mirroring `identity-chip.ts`'s own `viewChild` — this trigger is in fact never behind
@@ -108,6 +126,18 @@ export class NotificationBell {
   /** The identical dedup idiom, for `GEOFENCE_BREACH` `LiveEvent`s — see class doc's own "Geofence breaches" paragraph. */
   private readonly toastedBreachIds = new Set<string>();
   private seededBreachToasts = false;
+
+  /**
+   * Drives the system-events card's own "…s ago" timestamps (mirrors `events-rail.ts`'s identical
+   * `nowSignal`/`CLOCK_TICK_MS` pair for the detections card above it) — but only *ticks* while the
+   * dropdown is actually open (see the constructor's own clock effect below), unlike `EventsRail`'s
+   * version: that component is only ever mounted while its host `@if` is true, so its own
+   * `PollScheduler` registration is naturally scoped already; this component is mounted for the
+   * entire session (class doc), so an unconditional 1s registration here would tick for the whole
+   * session for a row list nobody is looking at most of the time.
+   */
+  private readonly nowSignal = signal(Date.now());
+  private stopClock: (() => void) | null = null;
 
   constructor() {
     this.events.activate();
@@ -166,6 +196,22 @@ export class NotificationBell {
         }
       }
     });
+
+    // System-events clock (see `nowSignal`'s own doc comment) — starts the instant the dropdown
+    // opens (with an immediate tick, so the first render is never a stale timestamp from whenever
+    // the bell itself first mounted) and stops the instant it closes.
+    effect(() => {
+      if (this.overlays.isOpen('notification-bell')) {
+        if (!this.stopClock) {
+          this.nowSignal.set(Date.now());
+          this.stopClock = this.poll.schedule(1_000, () => this.nowSignal.set(Date.now()));
+        }
+      } else if (this.stopClock) {
+        this.stopClock();
+        this.stopClock = null;
+      }
+    });
+    inject(DestroyRef).onDestroy(() => this.stopClock?.());
   }
 
   /**
@@ -187,6 +233,16 @@ export class NotificationBell {
   protected onRailOpen(event: DetectionEvent): void {
     this.overlays.close('notification-bell');
     void this.navigate(event);
+  }
+
+  /** The system-events card's own row source label — see `SystemEventRow`'s (component) own
+   *  `sourceLabel` input doc comment for why this stays the host's job. */
+  protected systemEventSource(row: SystemEventRowModel): string {
+    return describeSystemEventSource(row, this.fleet.devices(), this.fleet.streams());
+  }
+
+  protected systemEventRelativeTime(row: SystemEventRowModel): string {
+    return relativeTimeLabel(row.atIso, this.nowSignal());
   }
 
   private toastNewEvent(event: DetectionEvent): void {

@@ -927,6 +927,10 @@ button.danger-action {
     background: var(--color-success);
 }
 
+.dot.warn {
+    background: var(--color-warn);
+}
+
 .dot.danger {
     background: var(--color-danger);
 }

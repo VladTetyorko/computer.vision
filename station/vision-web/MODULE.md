@@ -69,7 +69,7 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 
 **Nav IA (docs/plans/done/MVP3-PLAN.md §C-c's original "Information architecture change"; docs/plans/done/UX-REWORK-PLAN.md §U-c updated it again — see below):** `app.ts`'s `tabs` array (and the header nav it renders) is **Fly · Command · Assets · Settings** — job-oriented, one tab per persona's own page, `Assets` a label-only rename of the `Devices` tab (the route underneath is still `/devices`, unchanged — no call site needed touching). `Wall`/`Debug` are demoted into a header "More" overflow (`app.ts`'s `moreLinks`, rendered as a `<details>` dropdown in `app.html`, closed on link click via a template reference variable — `#more`/`more.open = false` — no new component state) — **not removed**: every route stays fully reachable, `routerLinkActive` still highlights the overflow trigger itself when one of its own links is active. **`Map` is gone from `moreLinks` (docs/plans/done/UX-REWORK-PLAN.md §U-c)**: `/map` now `redirectTo: 'command'` (`features/map/map.routes.ts` — `MapPage`/`map.html`/`map.css` themselves are deleted, not just unrouted; see the Command section below and the §U-c Status entry for the full "components fold in" writeup) — a separate "Map" link would just be a second door to the screen Command now *is*. `/live/:deviceId` was never a nav tab either way (only ever reached by "Watch live" from another page). `/assets/:assetId` and the replay route remain deliberately not tabs (detail pages reached by "Details"/"Replay", not top-level sections). **Both `/assets/:assetId` and the replay route below now name their params to match their own component's input names exactly** (`assetId`/`usageId`) — `withComponentInputBinding()` binds a route param to a component input only when the names match (`RoutedComponentInputBinder` looks up `data[templateName]` by the input's own public name); every `router.navigate([...])` call site in this app already addresses `/assets/:assetId` positionally (`this.router.navigate(['/assets', assetId])`, `features/devices/devices.ts`), not by param name, so the rename needed no call-site changes.
 
-**Query params bind to inputs by name too, automatically, with no route-table change** (docs/plans/done/MVP3-PLAN.md §C-b — confirmed by reading `RoutedComponentInputBinder`'s own source, not assumed: it merges `{...queryParams, ...params, ...data}` before matching against each input's `templateName`). `CockpitPage` uses this for `watch` (`?watch=1` — see its own section below). **`?asset=<id>`** (a manager's own drill-down, "click anything → that asset's cockpit in watch mode") is no longer a component input at all (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12) — `fly-redirect-guard.ts` consumes it straight off `route.queryParamMap` and redirects to `/fly/:assetId` before either `DronePickerPage` or `CockpitPage` ever mounts; see the dedicated `features/fly/**` bullet below. **`CommandPage` still has its own, separate `requestedAssetId`/`?asset=` input** (docs/plans/done/UX-REWORK-PLAN.md §U-c, unrelated to and untouched by the Fly-side change above) — the same one-shot "resolve once against the fetched list, never re-run from a later poll tick" rule, now `command.ts`'s own; see that page's own section below. `DevicesPage.addSource` (`?addSource=1`) is the same mechanism backing the Fly picker's empty-state "Add source" link (`/devices?addSource=1` actually opens the flow, not just the tab).
+**Query params bind to inputs by name too, automatically, with no route-table change** (docs/plans/done/MVP3-PLAN.md §C-b — confirmed by reading `RoutedComponentInputBinder`'s own source, not assumed: it merges `{...queryParams, ...params, ...data}` before matching against each input's `templateName`). `CockpitPage` uses this for `watch` (`?watch=1` — see its own section below). **`?asset=<id>`** (a manager's own drill-down, "click anything → that asset's cockpit in watch mode") is no longer a component input at all (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12) — `fly-redirect-guard.ts` consumes it straight off `route.queryParamMap` and redirects to `/fly/:assetId` before either `DronePickerPage` or `CockpitPage` ever mounts; see the dedicated `features/fly/**` bullet below. **`CommandPage` still has its own, separate `requestedAssetId`/`?asset=` input** (docs/plans/done/UX-REWORK-PLAN.md §U-c, unrelated to and untouched by the Fly-side change above) — the same one-shot "resolve once against the fetched list, never re-run from a later poll tick" rule, now `command.ts`'s own; see that page's own section below. `DevicesPage.addSource` (`?addSource=1`) still redirects straight to `/add-source` when reached, but **no longer backs the Fly picker's empty-state "Add source" link** — docs/plans/active/IA-TRUTH-PLAN.md §2, U1.1 retargeted that link straight at `/add-source` (dropping the `/devices` bounce entirely, since `/devices` is manager-only and a brand-new pilot's first-run path shouldn't route through it); `?addSource=1` is now an orphaned-but-still-functional deep link, not reachable from any in-app `routerLink`.
 
 ### Features (`src/app/features/**`) and shared code (`src/app/shared/**`)
 
@@ -114,7 +114,7 @@ The second of the app's two persona pages, the manager's own: *the map first, th
 **Layout**: `<vision-fleet-map>` fills the entire stage, full-bleed, between two independently collapsible docked panels — the entity rail (left) and the asset detail panel (right). These are **real CSS Grid track siblings, not `position: absolute` overlays on top of the map** — see `command-logic.ts#commandGridColumns`'s own doc comment for why: `shared/map/fleet-map.ts`'s own zoom/layer controls are fixed at `top: 0.5rem` in *its own* corners (out of this task's reach — the plan explicitly rules out reworking `fleet-map`/`live-map` themselves), so an absolutely-positioned rail sharing that corner would occlude them, reproducing the exact "switcher unreachable under the map inset" incident (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1) the task was told to learn from. Docking the panels as real layout siblings instead means the map's own corner controls and this page's own chrome never share a pixel — geometric separation by construction, no z-index coordination needed with a component this task cannot modify. Both panels persist their collapsed state per user (`core/panel-state.ts`, `vision.command.railOpen`/`vision.command.panelOpen` — same `readPersistedFlag`/`writePersistedFlag`/toggle-chip idiom as `features/live/live.ts`'s `railOpen`/`features/fly/fly.ts`'s `mapVisible`).
 
 - `command-logic.ts` (+`.spec.ts`) — pure, unit-tested:
-  - **Attention rules** (unchanged from the pre-§U-c queue): `batteryAttentionSeverity(percent)` (`'unknown'`/`'ok'`/`'warning'`/`'critical'`, thresholds 20%/10%), `attentionReasons(asset)` (`battery-critical`/`telemetry-stale`/`battery-low`/`open-events`, each an `AttentionReason{kind, severity, text}`, most-severe-first), `attentionAgeLabel(asset)`.
+  - **Attention rules — now live in `core/fleet/attention-logic.ts`** (moved docs/plans/done/UI-REDESIGN-PLAN.md Wave 4, re-exported here unchanged for every pre-existing import site; see that file's own doc comment for the full history): `batteryAttentionSeverity(percent)` (`'unknown'`/`'ok'`/`'warning'`/`'critical'`, thresholds 20%/10%), `attentionReasons(asset, gpsFixType?, geofenceBreaches?, pipelineErrorDetail?)` → one or more `AttentionReason{kind, severity, text}`, most-severe-first by `REASON_RANK`. Eight reason kinds today, highest rank first: `geofence-breach` (docs/plans/done/OPS-CORE-PLAN.md §G-c) → `failsafe` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) → `battery-critical` → `telemetry-stale` → `battery-low` → `gps-degraded` → **`pipeline-error`** (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4, new this wave — see the dated Status entry near the end of this file) → `open-events` (lowest, informational). `attentionAgeLabel(asset)`.
   - **`buildEntityRows(assets)` — the rail's own sort (bullet 1), replacing the old `buildAttentionQueue`**: every asset (not just flagged ones — "a slim always-available list", not a filtered queue), sorted attention-first (highest reason rank, then more simultaneous reasons, then alphabetical) with every quiet asset (rank 0) sorting after every flagged one, alphabetical among themselves. `EntityRow{asset, reasons, severity: AttentionSeverity | 'ok'}`.
   - **`commandGridColumns(railOpen, panel)` → `grid-template-columns` string (bullet 5)** — computed here, not assembled from template `[class.x]` toggles, so the 2×3 (rail open/closed × panel hidden/open/collapsed) combination is unit-tested directly. `DetailPanelState = 'hidden' | 'open' | 'collapsed'` — `'hidden'` only when there is no *resolvable* selection (`CommandPage.selectedAsset() === undefined`, not just a raw id — see below), so a selection that stops existing in the current summary self-heals the layout back to no panel rather than reserving a track for content that no longer renders.
   - **Deleted, not moved** (their one section is gone per the plan's own user-amendments blockquote — "Warehouse-readiness section: removed"; "live strip: removed"): `buildAttentionQueue`/`AttentionRow`, `sortReadinessTiles`/`totalStreaming`, `streamingAssets`/`shouldPollSnapshot`. `live-strip-tile.ts` (`LiveStripTile`) is deleted outright — grep-verified before deleting that `command.ts`/`.html` were its only consumers.
@@ -646,6 +646,17 @@ The final MVP2 UI cycle: "a person was seen at 14:03 — where?" E-a's own scopi
 - **Toasts, not native `Notification`s** — a **new**, always-on affordance, independent of `SettingsStore.eventNotifications`'s existing opt-in native-browser-notification toggle (unchanged, still gated on permission + `document.hidden`, see the "Notification opt-in" bullet above): every genuinely new `OPEN` event calls `ToastService.notify(...)` (new method + `'notification'` kind, `core/toast.service.ts` — see its own entry in the API surface section above) with a `{label: 'Watch live' | 'Details', onClick}` action built from the same `resolveEventTarget` every other events consumer uses. No permission/hidden gating on the toast itself — it's this app's own chrome, inert unless the tab is open, so there's no "user isn't looking" case left to gate on (unlike the native `Notification` path, which exists specifically for that case).
 - **Cost, measured**: `EventsRail`/`EventsStore`/`core/events/events-logic.ts` are now reachable from `App`'s own eager import graph (`NotificationBell` → `EventsRail`), so that whole chain moved from a shared **lazy** chunk into the **initial** bundle — confirmed via `ng build --configuration production`: initial bundle **309.26 kB → 325.88 kB raw** (+16.62 kB), pushing the pre-existing 300 kB *warning* budget overage from 9.26 kB to 25.88 kB over (still the warning threshold, not the 360 kB error one). This is the direct, unavoidable cost of "a bell in the header" — a header is eager by definition. Documented, not fixed; a future cycle chasing initial-bundle size should know this is where the recent growth came from, not re-diagnose it.
 
+**Update, docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2-§3.3 — the bell gains a second, durable list for *generic* platform events, sibling to the `DetectionEvent` one above, not merged into it.** This wave gave the SSE `LiveEvent` topic (bullet 618's own "no page here fakes an errors feed" — still true of `GET /api/events`/`DetectionEvent` specifically) a first read-side surface, sourced from the transport `core/live/live-store.ts#LiveStore` already keeps warm, not a new poll:
+
+- **`core/system-events/system-events-logic.ts` (+`.spec.ts`, new)** — pure: `toSystemEventRow(event)` maps one `LiveEvent` to a `SystemEventRow{id, atIso, type, severity, title, detail, streamId?}` or `undefined` — **`DETECTION` is the one excluded type**, deliberately: that feed already has its own dedicated, debounced surface (the `DetectionEvent` list this whole section describes above); surfacing it a second time here, unfiltered and un-debounced, would be exactly the alert-noise duplication docs/UX-DESIGN.md §7 warns against. Severity: `PIPELINE_ERROR`/`GEOFENCE_BREACH` → `danger`; `DEVICE_OFFLINE` → `warn`; `DEVICE_ONLINE`/`STREAM_STARTED`/`STREAM_STOPPED`/`TRAINING` (and any future/unrecognized type, forward-compat) → `neutral`. `systemEventRows(events, max = SYSTEM_EVENTS_DISPLAY_LIMIT)` filters+caps, assumes newest-first input (same contract as every other `liveEvents()` consumer). `describeSystemEventSource(row, devices, streams)` reuses `core/events/events-logic.ts#describeEventSource`'s device/stream-name resolution — see that function's own generalized signature below. `activePipelineErrorMessagesByStreamId(events, nowMs)` is the §3.4 decay feed, described in the Command/Reports sections' own updates below.
+- **`core/system-events/system-events-store.ts` (new)** — `SystemEventsStore` (`providedIn: 'root'`), one `rows = computed(() => systemEventRows(this.liveStore.liveEvents()))`. No poll, no `activate()`/`release()` — it costs nothing beyond `LiveStore`'s own already-open connection, so unlike `EventsStore` above there is no lifecycle to manage.
+- **`shared/ui/system-event-row.ts`/`.html`/`.css` (new) — a *sibling* component to `EventRow`, not a widened union.** `<vision-system-event-row>` takes a `SystemEventRow` (aliased `SystemEventRowModel` at every import site that also needs the component class, to avoid the name collision), a resolved `sourceLabel`, and a `relativeTime` string — informational only, no click output, mirroring the asset-detail Events section's own "informational, not a navigation target" precedent. **Why a sibling and not `EventRow`'s own input type widened to a union**: `EventRow`'s template reads `event().state`/`event().peakConfidence`/calls `formatConfidence` — all `DetectionEvent`-specific, no analog on the generic `LiveEvent`/`SystemEventRow` shape — so widening would mean every existing `EventRow` call site (`events-rail.ts`, `features/alerts/**`, asset-detail's Events section) gains a runtime branch it doesn't need today. A new, small, single-purpose component keeps every one of those byte-for-byte unchanged.
+- **`shared/ui/notification-bell.ts`/`.html`/`.css`** — the dropdown gains a second card, `<aside class="card system-events">`, below the existing `<vision-events-rail>` (unchanged) inside the same popover: "System" header, a count, and a `<vision-system-event-row>` per row from `SystemEventsStore.rows()` (an honest "No system events yet." empty state at zero). **Kept separate from the geofence-breach toast effect above, not replaced by it** — a breach still toasts immediately (safety-critical, stays loud) *and* now also lands in this durable list (via its own `GEOFENCE_BREACH` → `danger` mapping in `toSystemEventRow`), so a manager who missed the toast can still find it later. A dedicated 1s clock (`PollScheduler`-backed, `nowSignal`) starts/stops exactly when the dropdown opens/closes (a reactive `effect()` watching `overlays.isOpen('notification-bell')`) so `relativeTimeLabel` keeps ticking while open without a wasted always-on timer for a component that's mounted for the entire session.
+- **`core/fleet/attention-logic.ts` §3.4 — `pipeline-error`, a new, decaying attention reason.** A `PIPELINE_ERROR` `LiveEvent` is point-in-time (one message, one instant); an attention reason is a level a rail row keeps showing until it's resolved — so `system-events-logic.ts#activePipelineErrorMessagesByStreamId(events, nowMs)` derives the *current* set from the event stream with the same "first-seen-per-key-wins while scanning newest-first" idiom `activeGeofenceBreaches` already established: a `STREAM_STARTED` for a given `streamId` clears any prior `PIPELINE_ERROR` for that stream (an explicit "it recovered" signal); absent a clearing signal, the error decays after `PIPELINE_ERROR_ATTENTION_WINDOW_MS` (15 minutes); and independently, `AssetAttention.streamId` itself goes `undefined` the instant an asset stops streaming, so the reason stops rendering for that asset immediately on stream-stop with zero extra code. `command-facade.ts`/`reports-facade.ts` both thread this map's per-`streamId` message into `attentionReasons(...)`'s new 4th param; `command-facade.ts` also piggybacks a `nowSignal` tick onto its existing 5s summary poll so the 15-minute decay actually advances even with no new live events (`reports-facade.ts` has no periodic poll to piggyback on — its own clock reads `Date.now()` directly in the `computed`, so decay there only advances when something else re-triggers it, an accepted gap for a static one-shot dashboard, not a live one). `features/command/asset-panel.ts` does **not** thread this (nor `geofenceBreaches`) — that panel is deliberately store-free (see its own class doc comment); `command-facade.ts#entityRows` remains the authoritative source for both reasons everywhere else in the UI.
+- **`core/events/events-logic.ts#describeEventSource`** — its parameter type generalized from `DetectionEvent` to a new, smaller `EventSourceIdentifiers` interface (`{streamId?, assetId?}`), a non-destructive, purely-structural widening (every existing call site still compiles unchanged) that lets `describeSystemEventSource` above reuse the identical device/stream-name resolution rather than duplicating it.
+- **Sidebar + degraded-transport notice (§3.1, no relation to the bell)** — `shared/ui/app-sidebar/app-sidebar.ts`'s footer status row gained a quiet dot+text pair (`Live`/`Connecting`/`Polling`, ok/neutral/warn) reading `LiveStore.connectionState()` directly — **not a second chip** (frontend-style §5's "one chip per row max"), a separate axis from the existing "N live"/backend-reachable indicators already there. `src/app/app.ts`/`.html` render a durable `<vision-notice variant="warn" icon="alert">` (reusing the shared primitive, not a second bespoke banner) exactly when `connectionState() === 'closed' && fleet.reachable() === true` — the specific silent-degradation case where the backend itself is fine but only the SSE transport isn't (a fully offline backend already shows the louder, pre-existing `.offline-banner` instead; the two are mutually exclusive by construction). Copy: *"Live updates disconnected — falling back to a 5-second refresh. Retrying every 60 s."* — both numbers are real, grepped from `FleetStore.POLL_INTERVAL_MS`/`core/live/live-store.ts#SSE_RETRY_INTERVAL_MS`, not placeholders.
+- **Full writeup, tests, and the bundle delta**: see this wave's own dated Status entry near the end of this file.
+
 **Wire type / API client additions** (`core/api/models.ts`, `core/api/vision-api.ts`): `DetectionEventState = 'OPEN' | 'CLOSED'`, `DetectionEvent` (mirrors `dto.DetectionEventResponse`: `id`, `streamId`, `assetId?`, `label`, `peakConfidence`, `firstSeen`, `lastSeen`, `state`, `position?` — the latter two doc comments spelled out in `models.ts` itself: `position` is stamped once at open time and never updated, and this DTO is explicitly *not* where pipeline-error events would ever appear). `VisionApi.events(sinceMs?, limit = 50)` → `GET /api/events` (`sinceMs` only added to the query string when defined — the first poll of a session omits it entirely, matching `EventController`'s own "null means no lower bound"); `VisionApi.streamEvents(streamId, limit = 50)` → `GET /api/streams/{streamId}/events`.
 
 <a id="events-tests"></a>Tests: `core/events/events-logic.spec.ts` (40 cases), `core/events/events-store.spec.ts` (14 cases, `VisionApi`/`PollScheduler`/`SettingsStore` all stubbed via `TestBed` provider overrides — a scheduler stub that captures the registered callback lets a test trigger a second poll deterministically without reaching into a private method or juggling fake timers), `core/poll-scheduler.spec.ts` (+2, `ignoreHidden`), `core/api/vision-api.spec.ts` (+3), `core/settings/settings-store.spec.ts` (+2) — 336 → 397 (61 new). Full test-count/bundle-delta table: Status below.
@@ -688,6 +699,7 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
 - **`shared/ui/empty-state.ts`** — `<vision-empty title [message] [icon]>` (class `EmptyState`): the shared zero-state, generalizing the ~15 `<div class="empty"><h3>…</h3><p>…</p></div>` copies. Renders the global `.empty` primitive; CTA projected via `<ng-content>`. `title` is required — a single-line status `.empty` with no heading (e.g. onboarding's "Listening…") intentionally stays a raw `.empty` div, not this component.
 - **`shared/ui/kebab-menu.ts`** — `<vision-kebab-menu label>` (class `KebabMenu`): wraps the native `<details>/<summary>` `.kebab*` disclosure documented in `styles.css`; callers project only the menu entries (`<button>`, `.kebab-divider`, `.danger-action`). Self-closes when a projected entry is clicked (was a per-page `(click)="…open=false"`). `label` → the trigger `aria-label`. Consumers: assets, devices, asset-detail.
 - **`shared/ui/stat.ts`** — `<vision-stat label value [sub] [live] [tone]>` (class `Stat`): the shared KPI tile, generalizing asset-detail's `.kpi-tile` row. Follows the **`dataviz` stat-tile contract** — semibold **proportional** value (deliberately NOT `--mono`/`tabular-nums`, which is reserved for small fast-ticking OSD/HUD numerals in their own components) over a muted uppercase caption; optional `sub` line, `live` dot, and value `tone`. Owns the tile chrome; the responsive `.kpi-tiles` grid stays on the host.
+- **`shared/ui/preflight-checklist.ts`/`.html`/`.css`** — `<vision-preflight-checklist>` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d; **moved here from `features/fly/` in docs/plans/active/IA-TRUTH-PLAN.md §3, U2**): a compact, always-5-row pre-flight status card (Video feed/Telemetry link/GPS fix/Battery/Armable, `✓`/`✕`/`—` glyphs, worst-state-wins summary) driven entirely by `items`/`collapsible`/`collapsed` inputs and a `collapsedChange` output — no HTTP, no store, no reach into any host's local state (`core/telemetry/flight-state-logic.ts#derivePreflight` is what actually computes `items`, in each host's own facade). Two consumers: the Fly cockpit (`features/fly/cockpit.html`, `collapsible`, collapses to its one-line summary the moment the stream starts, re-openable) and the standalone `/operate/preflight` page (`features/preflight/preflight.html`, plain always-expanded heading, no `collapsible`) — unmodified by the move, byte-for-byte. **Why it moved**: U2 assessed whether `/operate/preflight`'s "no checklist" complaint was still true — it wasn't (this component has rendered per-asset on that page since docs/plans/done/UI-REDESIGN-PLAN.md Wave 4, 2026-07-31) — but the component itself still lived under `features/fly/`, one of its two consumers' own folders, breaking this codebase's "no page imports another page's module" precedent (`shared/map/live-map.ts`'s own doc comment names it first). Confirmed cleanly reusable (pure props in/out, `.spec.ts` exercises both mount shapes) before lifting it; see the dated Status entry for the full assessment.
 - **`core/rc/**` — RC transmitter input + the SITL relay client (docs/plans/active/RC-CONTROL-PLAN.md Phase 0, docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R5).**
   - **Phase 0 (read-only monitor).** `rc-input-logic.ts` (pure, unit-tested): `RcDeviceInfo`/`RcSnapshot` + display helpers (`axisToPercent`, center-origin `barLeftPercent`/`barWidthPercent`, `computeUpdateRateHz`, `deviceLabel`). `rc-input.service.ts` — `RcInputService`, **provided per host** (like `TelemetryStore`), reads a plugged-in transmitter via the **Gamepad API** (`connected`/`device`/`axes`/`buttons`/`updateRateHz` signals; an rAF poll loop, zoneless-safe; `start()`/`stop()` lifecycle guarded by `DestroyRef`). No backend, no MAVLink, no drone.
   - **R5 (the SITL relay — "Take control").** `manual-control-logic.ts` (pure, unit-tested, mirrors `rc-input-logic.ts`'s split): client→server frame builders (`buildEngageFrame`/`buildChannelsFrame`/`buildReleaseFrame`), a defensive `parseManualControlServerMessage(raw)` (any malformed/missing field → `undefined`, never a crash — mirrors `geofence-logic.ts#parseGeofenceBreach`'s own rule; **`denied.code` is deliberately NOT validated against the four frozen refusal codes** — the backend also sends a handler-defensive code, see Gotchas), `computeLatencyMs(tSent, nowMs)` (glass-to-stick RTT = `nowMs - tSent`, **not** `tServer - tSent`), `pushLatencySample`/`rollingAverageMs` (a 10-sample rolling window, `undefined` until the first `ack`), `sendIntervalMs(rateHz)` (clamped 10..50Hz, mirrors the adapter's own `VISION_RC_OVERRIDE_HZ` clamp). `manual-control-client.ts` — `ManualControlClient`, **provided per host** alongside `RcInputService` (injects it directly, DI-sharing the host's instance): opens one `WebSocket('/ws/manual-control')` per `engage(assetId)` call (same-origin, session-cookie auth, mirrors `core/live/live-store.ts`'s `EventSource`), sends `engage` on open, and once the server's own `engaged` frame confirms, streams `channels` frames (`RcInputService.axes()`/`buttons()`, an incrementing `seq`, `tSent=Date.now()`) via `setInterval` at the server-confirmed `rateHz`. Signals: `state` (`'idle'|'engaging'|'engaged'|'denied'|'released'`), `deniedReason`, `latencyMs` (rolling from `ack`), `channelMap`, `rateHz`, `watchdogTripped`. **One socket per session, deliberately** — every release path (explicit, deadman, `denied`, `released`, `watchdog`) closes the socket rather than reusing it for a later `engage`, even though §4 technically allows connection reuse; a documented v1 simplification (this class's own doc comment), not a protocol requirement. **The deadman — `release()` is idempotent, every trigger just calls it**: the explicit RELEASE control, this class's own `DestroyRef.onDestroy` (the RC panel closing — `rc-monitor.ts` only mounts this provider while `isPanelOpen('rc')`), a `visibilitychange` listener (tab hiding), a constructor `effect()` over `RcInputService.connected()` (gamepad disconnecting), and the raw `WebSocket`'s own `onclose`/`onerror` (any drop). A `watchdog`/`released` server frame mirrors the same teardown client-side. No optimistic UI in the *positive* direction (`state` only reads `'engaged'` after the server's own frame); the *negative* direction sets `'released'` synchronously with this class giving up on the connection, regardless of whether the server's own `released` frame ever arrives.
@@ -8934,3 +8946,578 @@ this task; nothing here needed a split.
   branch's own established precedent for waves integrating ahead of/alongside a concurrently-landing
   backend (e.g. the T7 entry above). Both themes should get a live check next time `/fly` is opened
   against a running stream with tracking on.
+
+## Status — SYSTEM-STATUS-PLAN Wave S1: the eight event types stop dying silently at the transport (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1-§3.4) — 2026-08-15
+
+The plan's own §1.1 finding: all eight `EventType`s already reach the browser over the SSE `event`
+topic (`LiveStore.liveEvents()`), but every consumer either only understood `GEOFENCE_BREACH`
+(the bell's toast effect, `command-facade.ts`'s breach grouping) or ignored the topic entirely — a
+`PIPELINE_ERROR`, a `DEVICE_OFFLINE`, a `TRAINING` completion all arrived and were dropped with zero
+UI effect, an honesty gap against UX-DESIGN §7.2. This wave built the read side for the other six
+types (`DETECTION` stays excluded — it already has its own dedicated, debounced surface, see below)
+plus the two other §3 deliverables: a live-transport indicator and a decaying attention reason for a
+stream whose detection pipeline is currently erroring. Scope was `station/vision-web/**` only, no new
+routes, `features/hubs/**` untouched, no git commits — S2 (the backend `/api/system/status` endpoint)
+ran concurrently on a separate agent and this wave has no dependency on it (everything here reads the
+already-open SSE connection, not a new endpoint).
+
+### What shipped
+
+- **§3.2 — `core/system-events/system-events-logic.ts`/`.spec.ts` (new), `core/system-events/system-events-store.ts` (new)**: `toSystemEventRow(event)` maps a `LiveEvent` to a `SystemEventRow` or `undefined`. Severity: `PIPELINE_ERROR`/`GEOFENCE_BREACH` → `danger`; `DEVICE_OFFLINE` → `warn`; `DEVICE_ONLINE`/`STREAM_STARTED`/`STREAM_STOPPED`/`TRAINING` → `neutral`; **`DETECTION` → `undefined`, always** — the plan's own explicit exclusion, since that feed already has `EventsStore`/the bell's `DetectionEvent` list/the events rail, and duplicating it here would be exactly the alert-noise fatal failure UX-DESIGN warns against. `SystemEventsStore` (`providedIn: 'root'`) is one `computed()` over `LiveStore.liveEvents()` — no poll, no lifecycle, since it costs nothing beyond a connection the app already keeps open.
+- **§3.3 — durable home in the bell.** `shared/ui/notification-bell.ts`'s dropdown gained a second card (`<aside class="card system-events">`) below the existing `<vision-events-rail>`, listing `SystemEventsStore.rows()` via a new sibling component, `shared/ui/system-event-row.ts`/`.html`/`.css` (`<vision-system-event-row>`). **Sibling, not a union on `EventRow`** — see "Decision 1" below. The geofence-breach toast effect is unchanged and still fires (safety-critical, stays loud) *in addition to* the breach now also landing in this durable list via its own mapping, so a breach missed in the moment is still findable later. A dropdown-scoped 1s clock (`PollScheduler`, started/stopped by an `effect()` watching `overlays.isOpen('notification-bell')`) drives `relativeTimeLabel` without an always-on timer on a component that's mounted for the whole session.
+- **§3.1 — sidebar footer indicator + degraded notice.** `shared/ui/app-sidebar/app-sidebar.ts`'s status row gained a quiet `.dot` + plain text pair reading `LiveStore.connectionState()` — `Live`/`Connecting`/`Polling` with `ok`/`neutral`/`warn` severity — deliberately **not** a second chip (frontend-style §5's "one chip per row max"; the row already has the pre-existing "N live" chip). `src/app/app.ts`/`.html` render a durable `<vision-notice variant="warn" icon="alert">` (the shared primitive, not a new bespoke banner — the pre-existing `.offline-banner` is untouched) exactly when `connectionState() === 'closed' && fleet.reachable() === true`: the specific silent-degradation case where the backend is fine but only the SSE transport isn't (a dead backend already shows the louder offline banner instead — the two conditions are mutually exclusive by construction, verified by a dedicated test). Copy: *"Live updates disconnected — falling back to a 5-second refresh. Retrying every 60 s."* — both numbers read straight from `FleetStore.POLL_INTERVAL_MS`/`core/live/live-store.ts#SSE_RETRY_INTERVAL_MS`, not invented.
+- **§3.4 — `pipeline-error`, a new attention reason, with a decay rule.** `core/fleet/attention-logic.ts` gained an 8th `AttentionReasonKind` (`REASON_RANK`: `geofence-breach` 8 → `failsafe` 7 → `battery-critical` 6 → `telemetry-stale` 5 → `battery-low` 4 → `gps-degraded` 3 → **`pipeline-error` 2** → `open-events` 1 — below every flight-safety reason, since a broken detection pipeline is a perception-quality problem, not a "this drone may not come back" one, but above open-events, since a stream that's stopped seeing anything at all is more actionable than an already-triaged open event). See "Decision 2" below for the decay rule itself. `command-facade.ts`/`reports-facade.ts` both thread `system-events-logic.ts#activePipelineErrorMessagesByStreamId(liveStore.liveEvents(), now)`'s per-`streamId` message into `attentionReasons(...)`'s new 4th parameter; `features/command/command-logic.ts#buildEntityRows` resolves it per row via `asset.streamId`.
+- **New global primitive**: `.dot.warn { background: var(--color-warn); }` in `src/styles.css`, alongside the pre-existing `.dot.live`/`.dot.ok`/`.dot.danger` — this wave's sidebar indicator and system-event-row dots are the first consumers of the `warn` tier of that family.
+- **Non-destructive generalization**: `core/events/events-logic.ts#describeEventSource`'s parameter widened from `DetectionEvent` to a new, smaller `EventSourceIdentifiers` interface (`{streamId?, assetId?}`) — purely structural, every existing call site compiles unchanged — so `system-events-logic.ts#describeSystemEventSource` could reuse the same device/stream-name resolution instead of duplicating it.
+
+### Decision 1 — sibling component, not a union on `EventRow` (§3.3's own explicit design question)
+
+`shared/ui/events-rail.ts`'s `EventRow` is typed to `DetectionEvent` and its template reads
+`event().state`/`event().peakConfidence`/calls `formatConfidence` — all fields with no analog on the
+generic `LiveEvent`/`SystemEventRow` shape. Widening `EventRow`'s input to a union would mean every
+existing call site (`events-rail.ts` itself, `features/alerts/**`, the asset-detail Events section)
+gains a runtime branch or optional-field guard it doesn't need today, purely to serve one new
+consumer. Built a dedicated sibling instead (`shared/ui/system-event-row.ts`, `<vision-system-event-row>`)
+— small, informational-only (no click output, mirroring the asset-detail Events section's own
+"informational, not a navigation target" precedent, since a generic system event has no single
+canonical navigation destination the way a detection event does), keeping every `EventRow` call site
+byte-for-byte unchanged. The two component classes share a name with `system-events-logic.ts`'s own
+`SystemEventRow` data interface — resolved everywhere both are needed by importing the type as
+`SystemEventRowModel`.
+
+### Decision 2 — the decay rule for `pipeline-error` (§3.4's own explicit design question)
+
+`PIPELINE_ERROR` is a point-in-time `LiveEvent` (one message, one instant); an attention reason is a
+*level* a rail row keeps showing until it clears — "a reason that never clears is worse than no
+reason" (a stream that errored once, five hours ago, and has been fine since must not still show red
+today). `system-events-logic.ts#activePipelineErrorMessagesByStreamId(events, nowMs)` derives the
+*current* set with the same "first-seen-per-key-wins while scanning newest-first" idiom
+`activeGeofenceBreaches` already established for breach tracking, layered three ways:
+
+1. **Explicit clear** — a `STREAM_STARTED` for a given `streamId` clears any prior `PIPELINE_ERROR`
+   for that same stream (an "it recovered and was restarted" signal).
+2. **Time decay** — absent a clearing signal, the error expires after `PIPELINE_ERROR_ATTENTION_WINDOW_MS`
+   (15 minutes) — long enough to survive a normal operator glance-away, short enough that a genuinely
+   abandoned error doesn't haunt the rail for the rest of the session.
+3. **Natural absence** — `AssetAttention.streamId` itself goes `undefined` the instant an asset stops
+   streaming, so the reason stops rendering for that asset immediately on stream-stop with zero extra
+   code — an asset that isn't streaming can't have a streaming-pipeline error.
+
+A plain `computed()` deriving from `liveEvents()` alone only re-evaluates on a *new* live event, not
+from wall-clock time passing, so a stream that errored once and went silent would stay "active" past
+its 15-minute window until some unrelated event happened to re-trigger the computed. `command-facade.ts`
+piggybacks a `nowSignal` tick onto its own pre-existing 5s summary poll (no new timer) so decay
+actually advances on its own. `reports-facade.ts` has no periodic poll to piggyback on (a one-shot
+`load()`, not a live dashboard) — its own computed reads `Date.now()` directly, an accepted, documented
+gap where decay only advances when something else re-triggers the computed, judged acceptable for a
+static report snapshot, not a live one.
+
+### Degrade / role-gate / dev-parity notes
+
+- **Everything here degrades to absence, never a fabricated value.** No system events → the bell's
+  second card shows "No system events yet." (an honest empty state, not a spinner or a fake row). SSE
+  never opens at all → `connectionState()` stays `'connecting'` (or the transport falls back per
+  `LiveStore`'s own pre-existing reconnect logic) — no new failure mode introduced, since every reader
+  here (`SystemEventsStore`, the sidebar dot, `activePipelineErrorMessagesByStreamId`) only ever reads
+  `LiveStore.liveEvents()`/`connectionState()`, both of which already degrade honestly on their own.
+- **No new role-gating** — nothing shipped this wave is role-specific. The bell, the sidebar footer,
+  and every attention reason are already visible to whatever role could see their host surface before
+  (the bell/sidebar are shell chrome, shown to every authenticated role; Command/Reports' attention
+  rows were already gated by those pages' own existing route guards, unchanged here).
+- **Dev parity** (`vision.auth.enabled=false`) — untouched. Nothing here reads `MeResponse.topRole` or
+  any auth state; the dev admin sees the exact same live-transport indicator, bell contents, and
+  attention reasons as an authenticated ADMIN, because none of this wave's surfaces branch on identity
+  at all.
+
+### Tests
+
+`npm run test:ci` — **116 test files / 1961 tests, all passing** (up from the pre-wave baseline; new
+coverage: `core/system-events/system-events-logic.spec.ts`, a new `describe` block each in
+`core/fleet/attention-logic.spec.ts` (`pipeline-error` — never fires with no detail, fires with the
+detail verbatim and no appended period since `detail` is an arbitrary backend exception message, ranks
+below `gps-degraded`/above `open-events`), `shared/ui/notification-bell.spec.ts` (system events card:
+renders a row for a non-`DETECTION` event, excludes `DETECTION`, empty-state hint at zero events,
+closes with the rest of the dropdown), `shared/ui/app-sidebar/app-sidebar.spec.ts` (`Live`/`Connecting`/`Polling`
++ correct dot severity per `connectionState`, confirms the indicator never carries the `.chip` class),
+`src/app/app.spec.ts` (the notice appears only for `closed` + `reachable: true`, not for `connecting`,
+and not when the louder offline banner is already showing for `reachable: false`).
+
+`npx tsc --noEmit` — clean on both `tsconfig.app.json` and `tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production --progress=false` (the flag is required in this sandboxed shell —
+without it the bare command panics with `terminal initialize failure`, a Rust TUI/progress-bar issue
+unrelated to the build itself), measured against a same-commit baseline built in a separate
+`git worktree add --detach` at this wave's own starting commit (`9bd8313`, this branch's tip before any
+of this task's edits — no `git stash`, since a git write on the primary tree was out of scope):
+
+- **Initial bundle**: 396.50 kB → 403.75 kB raw / 111.72 kB → 114.61 kB transfer (**+7.25 kB raw /
+  +2.89 kB transfer**). The pre-existing 390 kB budget overage worsens from +6.50 kB to **+13.75 kB**
+  over — stated plainly, not hidden. Landed almost entirely in the `main` chunk, because the new
+  eager-shell code (`SystemEventsStore`, `system-events-logic.ts`, the new `SystemEventRow` 3-file
+  component, `attention-logic.ts`'s additions, the new `Notice` import in `app.ts`) is transitively
+  pulled in by `App`/`AppSidebar`/`NotificationBell` — all part of the eagerly-loaded shell, not a lazy
+  route, by architectural necessity: a notification bell and a sidebar footer must be always-mounted to
+  be durable, persistent surfaces. The 271 kB vendor/framework chunk is unchanged (confirmed no
+  accidental heavy transitive import); `styles.css`'s own growth is negligible (the one new `.dot.warn`
+  rule).
+- Every lazy chunk not touched by this wave is unaffected.
+
+### Files touched
+
+Modified: `src/app/app.ts`/`.html`/`.css`/`.spec.ts`, `src/app/core/events/events-logic.ts`,
+`src/app/core/fleet/attention-logic.ts`+`.spec.ts`, `src/app/features/command/asset-panel.ts`
+(doc-only), `src/app/features/command/command-facade.ts`, `src/app/features/command/command-logic.ts`,
+`src/app/features/reports/reports-facade.ts`, `src/app/features/reports/reports-logic.ts`,
+`src/app/shared/ui/app-sidebar/app-sidebar.ts`/`.html`/`.css`/`.spec.ts`,
+`src/app/shared/ui/notification-bell.ts`/`.html`/`.css`/`.spec.ts`, `src/styles.css` (+`.dot.warn`),
+this file (`station/vision-web/MODULE.md`). New: `src/app/core/system-events/system-events-logic.ts`+`.spec.ts`,
+`src/app/core/system-events/system-events-store.ts`, `src/app/shared/ui/system-event-row.ts`/`.html`/`.css`.
+
+### Left incomplete / deferred, named honestly
+
+- **`features/command/asset-panel.ts` does not thread `pipelineErrorDetail`/`geofenceBreaches` into
+  its own local `attentionReasons()` call** — that panel is deliberately store-free (holds no
+  `LiveStore`, issues no HTTP itself, by its own pre-existing class doc comment), so it can't derive
+  either without widening its scope beyond this wave's task. `command-facade.ts#entityRows` remains the
+  authoritative source for both reasons everywhere else in the UI (the rail behind this panel shows the
+  correct severity/rank); the panel's own "why" line just doesn't restate a pipeline error or breach
+  for the one asset currently selected into it. A small, disjoint follow-up if ever wanted.
+- **`reports-facade.ts`'s pipeline-error decay clock doesn't tick on its own** — no periodic poll to
+  piggyback a `nowSignal` on (unlike `command-facade.ts`), so the 15-minute decay window only advances
+  when something else re-triggers the `computed` (e.g. a new live event arriving). Accepted as a
+  documented gap for a static, one-shot dashboard snapshot rather than adding a dedicated clock for one
+  reason kind on one page.
+- **No live-browser, both-themes screenshot** — no running dev server/backend was available in this
+  environment (S2, the backend `/api/system/status` counterpart, was still running concurrently on a
+  separate agent). Verified structurally instead: every new color reference in the diff uses semantic
+  design tokens only (`--text-muted`, `--panel-raised`, `--border`, `--color-warn`, `.dot.ok`/`.dot.warn`
+  etc.), zero raw hex/rgb, zero `--hud-*`/`--scrim*` usage anywhere in the diff (grep-confirmed) — both
+  themes are structurally covered by the existing token system's own dual-theme definitions, but this
+  has not been visually screenshotted live. Should get a live check next time `ng serve` is run against
+  a backend with `vision.live.enabled=true` and a stream that can be made to error.
+- **The plan's own §1.1 table also named `command-facade.ts`'s breach-only `activeGeofenceBreaches`
+  scan as a "drops everything else" consumer** — that scan is unchanged by this wave (it still only
+  ever looks for `GEOFENCE_BREACH`) because it feeds a *different* reason (`geofence-breach`, already
+  correct); the new `pipeline-error` reason is fed by the new, separate
+  `activePipelineErrorMessagesByStreamId` scan instead, not a widening of the breach one.
+
+## Status — SYSTEM-STATUS-PLAN Wave S3: a page that says why, and a sidebar dot that stops lying (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1-§5.3) — 2026-08-16
+
+S1 (this file's own preceding entry) built the read side for six event types over the already-open SSE
+transport; S2 (backend, concurrent, not reviewed here) added `GET /api/system/status`. This wave is
+the one that actually surfaces that endpoint: a routed `/manage/system` page (§5.1), the shell sidebar
+dot that §5.2 calls "the whole point of the wave" — it stopped reading `FleetStore.reachable()` alone
+and became a true rollup of backend reachability + SSE transport + the backend's own `overall`
+verdict — and a repoint of `/debug`'s Health card at the same endpoint (§5.3), demoting the raw
+Actuator probe to a secondary disclosure now that there's a real, product-level status source to lead
+with. Scope was `station/vision-web/**` only, no backend touched, no git commits, `/manage/health`
+(a different, pre-existing feature) left untouched per the task's explicit non-goal.
+
+### What shipped
+
+- **`core/api/models.ts`/`vision-api.ts`** — the frozen wire contract, mirrored 1:1: `SubsystemHealth`
+  (`'OK'|'DEGRADED'|'DOWN'|'DISABLED'|'UNKNOWN'`), `OverallHealth` (the same set minus `DISABLED`),
+  `SubsystemStatus{id,label,health,detail,since?,hint?}`, `SystemStatus{overall,checkedAt,subsystems}`.
+  `since`/`hint` are optional (`?:`), never `null` — matching the backend's `@JsonInclude(NON_NULL)`.
+  `VisionApi.systemStatus()` — one `GET /api/system/status` call, no params.
+- **`core/system-status/system-status-logic.ts`+`.spec.ts` (new, pure, no Angular)** —
+  `ShellSeverity = 'ok'|'warn'|'danger'|'neutral'`, deliberately the same four values as
+  `<vision-notice>`'s `variant` so a severity converts to a notice variant with no mapping step.
+  `healthSeverity`/`healthLabel` (per-subsystem or overall), `connectionSeverity` (SSE state),
+  `reachableSeverity` (backend up/down/unknown), `worstSeverity` (rank `ok < neutral < warn < danger`,
+  defaults to `'ok'` on an empty array), `shellStatusSeverity(reachable, connectionState, overall)` —
+  the rollup itself — and `shellStatusLabel`. See Decision 1 for the DISABLED/UNKNOWN → `neutral` call.
+- **`core/system-status/system-status-store.ts`+`.spec.ts` (new)** — `providedIn: 'root'`, polls
+  `VisionApi.systemStatus()` on the shared `PollScheduler` every 15s, **unconditionally** (not gated
+  behind the `/manage/system` route) — the shell rollup dot needs it app-wide, and `AppSidebar` is
+  always mounted. Degrades like every other store here: a failed poll sets `error` but leaves the
+  last-known `status` in place (stale-but-shown), never wiped, never fabricated.
+- **`features/system-status/**` (new) — the `/manage/system` page.** `SystemStatusFacade` (thin,
+  `@Injectable()` not root) composes `SystemStatusStore` + S1's `SystemEventsStore` + `FleetStore` +
+  `LiveStore`; the routed `SystemStatusPage` injects only the facade (architecture-guard clean, see
+  Files touched). Anatomy: `<vision-page-bar>` with a subsystem count + Refresh action → a top
+  `<vision-notice [variant]="overallSeverity()">` stating the overall verdict + `checkedAt` relative
+  time + a stale-error note if the last poll failed → `.grid12` with a Subsystems card (`.col-8`, one
+  `.chip` per row, `detail` in body text, `hint` as the next-action line, `since` in `.mono` —
+  `<vision-empty>` when the list is empty, since **the subsystem list is not fixed and nothing here
+  hard-codes an id**), a Live transport card (`.col-4`, `.dot` + label + explanatory note reading
+  `LiveStore.connectionState()`), and a System events card (`.col-12`) reusing S1's
+  `<vision-system-event-row>`/`SystemEventsStore` wholesale rather than building a second log.
+- **§5.2 — the shell rollup dot (`shared/ui/app-sidebar/app-sidebar.ts`/`.html`).** The old
+  reachable-only `<span class="dot status-dot">` (`ok`/`danger` off `FleetStore.reachable()` alone,
+  silently staying green while the backend was up but degraded) is now an `<a routerLink="/manage/system"
+  class="dot status-dot">` colored by `shellStatusSeverity(fleet.reachable(), liveStore.connectionState(),
+  systemStatus.overall())` — `ok`/`warn`/`danger`, or a bare undecorated dot for the `neutral`
+  "still checking" state before the first fetch ever settles. `aria-label`/`title` both read
+  `shellStatusLabel(...)` (`"System status: all clear"|"…degraded"|"…down"|"…checking…"`). A real
+  anchor, not a span+click handler — free keyboard/focus support, and it doubles as the one-click path
+  to the page that explains *why* the dot isn't green.
+- **§5.3 — `/debug`'s Health card repointed.** Primary content is now `SystemStatusStore.status()` —
+  overall chip, an "Open full status page ›" link to `/manage/system`, a per-subsystem chip list, the
+  same stale-but-shown degrade as everywhere else. The pre-existing raw `GET /actuator/health` probe
+  (`describeHealthProbe`/`healthComponents`/`healthRaw`, **kept byte-for-byte**, not touched) moves
+  into a collapsed `<details>` as a secondary, lower-level check now that there's a real product-level
+  status source to lead with. `debug/debug.ts` is not in `architecture.spec.ts`'s `ROUTED_PAGES` list
+  (pre-existing exemption — it injects `DebugApiService` directly, predates the facade sweep), so
+  `inject(SystemStatusStore)` there is in-contract with no `DebugFacade` needed.
+- **Nav entry** — `features/hubs/nav-entries.ts` gained a `System status` entry, `group: 'diagnostics'`,
+  `to: '/manage/system'`, deliberately **not** `managerOnly` — the file's own class doc otherwise
+  states every grouped entry is manager-only; this is a named, documented, single carve-out (an
+  operator whose CV pipeline just died needs to see why, not just a manager). `nav-entries.spec.ts`'s
+  blanket "every grouped entry is also managerOnly" test now carves this one entry out by name rather
+  than being weakened generally.
+
+### Decision 1 — `DISABLED` and `UNKNOWN` both map to `neutral`, not `warn` (`system-status-logic.ts`)
+
+Per S2's own outcome notes, `mavlink-link` reports `UNKNOWN` for the routine "no vehicle currently
+claimed" state — not a fault, just nothing to check yet. Coloring `UNKNOWN` as a warning would put a
+permanent false alarm in front of every operator who hasn't claimed a vehicle, which is most of the
+time on a fleet with idle capacity. `DISABLED` gets the same treatment for the same reason — an
+operator/admin turned a subsystem off on purpose; that's an intentional configuration state, not
+degradation. Both render as the default, unmodified `.chip` (already a neutral gray in this app's
+token system — no new CSS needed) and both are excluded from the rollup dot ever turning `warn`/`danger`
+on their account alone: `worstSeverity` only escalates past `neutral` when a subsystem is genuinely
+`DEGRADED`/`DOWN`, or reachability/transport itself is bad.
+
+### Decision 2 — a real `<a routerLink>`, not a span + click handler, for the rollup dot
+
+Considered keeping the pre-existing `<span class="dot">` and adding `(click)="router.navigate(...)"`.
+Rejected: a span with a click handler needs `tabindex`, a keyboard handler, and an ARIA role bolted on
+by hand to be as accessible as a plain anchor is by default — extra code to reach parity with what
+`<a routerLink>` gives for free. Verified via a rendered-shell test
+(`app-sidebar.spec.ts`) that `.dot` styling holds up unchanged on an anchor (flex item, blockified) and
+that Angular's `RouterLink` correctly intercepts a plain `.click()` in this test harness — no special
+workaround needed. The mobile off-canvas sheet closes on this navigation the same way it does for
+every other nav link, via the pre-existing app-wide `NavigationEnd` → `GlobalOverlayStore` mechanism —
+no extra `(click)="closeMobile()"` needed on this one link.
+
+### Decision 3 — the store polls unconditionally, not gated behind the route (accepted eager-bundle cost)
+
+`SystemStatusStore` starts its 15s poll from its own constructor the moment anything injects it —
+which happens the instant the app shell mounts, since `AppSidebar` (always-mounted) needs
+`overall()` for the rollup dot regardless of what route is active. The alternative — only polling while
+`/manage/system` is the active route — would leave the rollup dot showing stale-forever data (or
+requiring its own separate, redundant poll) on every other page, defeating §5.2's entire point ("an
+operator whose CV died needs to see why" from wherever they currently are, not just from the one page
+built to explain it). Accepted cost: `SystemStatusStore` and `system-status-logic.ts` are pulled into
+the eager bundle rather than the lazy `/manage/system` chunk — quantified in Build below.
+
+### Degrade / role-gate / dev-parity notes
+
+- **Empty subsystem list** (a legal, documented backend response) → `<vision-empty>` on the page, no
+  hard-coded id or count assumed anywhere in the template.
+- **A failed status poll never wipes the last-known status** — `SystemStatusStore.error` is a sibling
+  signal to `status`, not a replacement for it; the page/debug card both show the stale data plus an
+  inline "Could not read system status." note, exactly the "— never a fabricated value, never a
+  blocked page" rule.
+- **Before the first fetch ever settles**, `overall()` is `undefined` — the facade's `overallMessage`
+  computed renders `"Checking system status…"` as its own complete sentence rather than forcing it
+  through the `"System is ${label.toLowerCase()}."` template (which would have produced the
+  punctuation defect "System is checking….”), and the rollup dot renders as a bare undecorated
+  `.dot` (no `ok`/`warn`/`danger` class) rather than guessing green or red.
+- **No new role-gating** — `/manage/system` is deliberately not `managerOnly` (§5.1's explicit
+  instruction); every other surface touched (sidebar dot, debug card) was already visible to every
+  authenticated role before this wave.
+- **Dev parity** (`vision.auth.enabled=false`) — untouched. Nothing shipped here reads
+  `MeResponse.topRole` or branches on identity; the dev admin sees exactly the same page, dot, and
+  debug card as an authenticated ADMIN, because none of it is role-conditional in the first place.
+
+### Tests
+
+`npm run test:ci` — **118 test files / 1989 tests, all passing** (up from S1's own reported baseline of
+116 files / 1961 tests). New coverage: `core/system-status/system-status-logic.spec.ts` (all five
+`SubsystemHealth` values, all three connection states, `reachableSeverity`'s true/false/null,
+`worstSeverity` ordering + empty-array default, `shellStatusSeverity` across combinations,
+`shellStatusLabel` for all four severities), `core/system-status/system-status-store.spec.ts`
+(immediate fetch + 15s poll registration, stale-but-shown on a later poll failure, error clears once a
+later poll succeeds), a new `describe('AppSidebar — shell rollup dot …')` block in
+`app-sidebar.spec.ts` (closed-transport → warn, DOWN → danger, DEGRADED → warn-not-danger, undefined
+overall → bare neutral dot with no severity class, a real click navigates to `/manage/system`), plus
+the two pre-existing `app-sidebar.spec.ts` tests whose expectations legitimately changed from
+`'Backend reachable'`/`'Backend unreachable'` to the new rollup labels. `nav-entries.spec.ts` gained a
+named carve-out test for the one non-`managerOnly` diagnostics entry.
+
+`npx tsc --noEmit` — clean on both `tsconfig.app.json` and `tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production --progress=false` (flag required in this sandboxed shell, per
+S1's own finding). Isolated this wave's own contribution via `git stash push -u -m "S3-web-only" --
+<this wave's own file list>` (S1/S2's already-landed, uncommitted changes stayed in the tree; only my
+own 12 modified + 2 new-directory paths were stashed), building before and after, then `git stash pop`
+to restore (round-trip verified clean via `git status --porcelain`):
+
+- **Before S3** (S1+S2 landed, S3 stashed out): initial bundle 403.10 kB raw / 114.47 kB transfer —
+  390 kB budget overage **+13.10 kB**.
+- **After S3** (current tree): initial bundle 406.26 kB raw / 115.96 kB transfer — budget overage
+  **+16.26 kB**.
+- **S3's own eager-bundle delta: +3.16 kB raw / +1.49 kB transfer.** Attributed to `SystemStatusStore`
+  + `system-status-logic.ts` + the `models.ts`/`vision-api.ts` additions + `AppSidebar`'s/`DebugPage`'s
+  own changed source being pulled into the eager `main` chunk — architecturally necessary per Decision
+  3 above, not an oversight.
+- **New lazy chunk confirmed**: `system-status`, **7.54 kB raw / 2.50 kB transfer** — the routed
+  `/manage/system` page itself is correctly lazy and does not bloat the initial bundle; only the
+  shared, always-needed store does. Verified via `ng build --configuration production --progress=false
+  --verbose | grep -iE "system-status|Lazy chunk|Initial total"`.
+- Every other lazy chunk not touched by this wave is unaffected.
+
+### Files touched
+
+Modified: `src/app/core/api/models.ts`, `src/app/core/api/vision-api.ts`, `src/app/app.routes.ts`,
+`src/app/core/ui/architecture.spec.ts`, `src/app/features/hubs/nav-entries.ts`+`.spec.ts`,
+`src/app/shared/ui/app-sidebar/app-sidebar.ts`/`.html`/`.spec.ts`, `src/app/features/debug/debug.ts`/
+`.html`/`.css`, this file (`station/vision-web/MODULE.md`). New:
+`src/app/core/system-status/system-status-logic.ts`+`.spec.ts`,
+`src/app/core/system-status/system-status-store.ts`+`.spec.ts`,
+`src/app/features/system-status/system-status-facade.ts`, `system-status.routes.ts`,
+`system-status.ts`/`.html`/`.css`.
+
+### Left incomplete / deferred, named honestly
+
+- **No live-browser, both-themes screenshot** — same environment constraint S1 hit: no running dev
+  server/backend available. Verified structurally instead: grepped every file in this wave's diff for
+  raw hex/`rgb()`, off-grid `px` (outside 1px hairlines and pre-existing breakpoint comments), and
+  `--hud-*`/`--scrim*` — zero hits. `system-status.css` reuses only global tokens/primitives already
+  proven in both themes (`.chip`, `.dot`, `.grid12`/`.col-*`, `--border`, `--space-*`,
+  `--color-warn-text`, `--color-info-text`); no new color was introduced. Should still get a live
+  `ng serve` check against a backend exercising all five `SubsystemHealth` values next time one is
+  available.
+- **The plan's §5.1 mention of "`.dot` for secondary state" per subsystem row was read as a general
+  style-law reference** (frontend-style §5), not a literal mandate — a `SubsystemStatus` has exactly
+  one state axis (`health`), so there is no natural secondary state to express as a second dot; each
+  row renders health as its one `.chip` only, per §5's own "one chip per row max" rule.
+- **The Routes/API-surface narrative sections near the top of this file were not rewritten** to
+  enumerate `/manage/system` or `SystemStatus`/`systemStatus()` line-by-line — following this file's
+  own established precedent (S1 didn't add a permanent `core/system-events/**` reference subsection
+  either): those sections are broad prose that several other already-shipped routed features
+  (`reports`, `labeling`, `models`, `training-jobs`) also aren't itemized into, so a partial addition
+  here would be inconsistent rather than more complete. This wave's full surface is documented in this
+  Status entry instead.
+
+## Status — IA-TRUTH-PLAN Wave U1+U2: nine stray `/devices` links retargeted, a dead scaffold removed, the model registry gets a door, wizard vocabulary aligned, Operate reordered, a stale comment fixed (docs/plans/active/IA-TRUTH-PLAN.md §2-3) — 2026-08-16
+
+Scope was `station/vision-web/**` only, no backend touched, no git commits. All six U1 items shipped as
+specified; U2 required an on-the-ground assessment before acting (the plan itself calls this out) and
+found its own premise partly stale — see that section below for what actually happened.
+
+### U1.1 — the nine stray `/devices` links retargeted (highest value)
+
+Every in-page link/programmatic navigation that pointed a pilot at `/devices` (`group: 'advanced'` +
+`managerOnly` — out of a pilot's nav entirely) now points at `/assets` (the asset-first grid every role
+can already reach) or, for the one true add-a-source path, straight at `/add-source`:
+
+- **`features/fly/drone-picker.html`** (the empty-cockpit first-run path — the worst offender: it used
+  to bounce a brand-new pilot through `/devices?addSource=1`, a page their role can't open, before
+  landing on the wizard) — now `routerLink="/add-source"` directly, no query param, no bounce. Copy
+  fixed too: "Add a source from the Devices tab" → "Add a source" (the tab doesn't exist for this
+  reader).
+- **`features/wall/wall.html`**, **`features/command/command.html`** — both retargeted to `/assets`
+  ("Go to Devices" → "Go to Assets"). Command's card was self-contradicting before this (its own prose
+  already said "Assets tab" while the button said "Go to Devices") — now both agree.
+- **`features/onboarding/onboarding.html`** — the wizard's "Cancel" action → `/assets`.
+- **`features/asset-detail/asset-detail.html`**, **`features/live/live.html`** — "Back to Devices"/"All
+  devices" → "Back to assets"/"All assets", both retargeted to `/assets`.
+- **`features/asset-detail/asset-detail-facade.ts#back()`**, **`features/live/live-facade.ts#back()`**
+  — both dead code today (unused by either template, confirmed by grep — carried over verbatim from
+  before the facade sweep), retargeted anyway per the plan so a future consumer never silently reaches
+  for a manager-only page.
+
+`/devices` itself is untouched — still routed, still in `Manage`'s `advanced` group, still fully usable
+by an admin/manager. Only what fed a pilot into it is gone. **One side effect worth naming**:
+`DevicesPage.addSource`'s `?addSource=1` query-param redirect (still present, still functional if
+visited directly) is now an orphaned deep link — nothing in-app links to `/devices?addSource=1` anymore,
+since the one caller (`drone-picker.html`) now goes straight to `/add-source`. Not removed (out of this
+task's scope, and it's a harmless dead path, not a broken one) — flagged in the Routes section above
+where this file previously documented it as live.
+
+### U1.2 — the orphaned `/monitor/replay` scaffold deleted
+
+Removed the `monitor/replay` → `ComingSoon` route from `hubs.routes.ts` (its `data` block advertised "a
+library listing every finished flight… is coming" — false; `/replay` has served exactly that,
+`ReplayLibraryPage`, since Wave 4). Corrected the class doc's stale "Five `ComingSoon` scaffold routes"
+to four and rewrote the paragraph explaining `/monitor/replay`'s history now that the scaffold itself is
+gone (previous text described *why* it existed; new text explains why it's deleted and confirms the flat
+`/replay` route survives for its three real deep-link callers). Dropped the matching
+`app.routes.spec.ts` regression test (`/monitor/replay resolves to the ComingSoon scaffold…`) and its
+name from the `scaffolds` array in the "every remaining pure-scaffold path resolves" test. **Confirmed
+zero link loss before deleting**: grep-verified `nav-entries.ts` never had a `NAV_MODES` entry pointing
+at `/monitor/replay` in the first place (the plan's own claim, re-verified independently) — this is why
+the test count below is 1988, not 1989: one regression test for a route that no longer exists is gone,
+not a coverage loss.
+
+### U1.3 — the CV model registry gets a nav entry
+
+Added to `nav-entries.ts`'s Manage `configuration` group, immediately after CV training:
+
+```
+{
+  icon: 'archive',
+  name: 'CV model registry',
+  description: 'Every model cv-service knows about — promote one to make it the live default for new detections.',
+  to: '/manage/training/models',
+  group: 'configuration',
+  managerOnly: true,
+}
+```
+
+Name matches `ModelsPage`'s own `<vision-page-bar title="CV model registry">` verbatim, following this
+file's own established "nav entry name = the page's own title" pattern (`Asset categories`, `Inventory
+reports` do the same). Icon: `archive` — previously registered in `icon-registry.ts` but consumed
+nowhere in the app (grep-verified before picking it), and a storage/registry box reads better for "a
+registry of promotable model artifacts" than reusing `target` (already CV training's icon) or the
+unrelated `chip`/`firmware` glyphs. `group: 'configuration'` + `managerOnly: true` matches every other
+grouped Manage entry except the one documented `System status` carve-out — `nav-entries.spec.ts`'s F3
+suite (every grouped entry is managerOnly except that one name) and F1 (no duplicate `to`) both still
+pass with the addition. No route change needed — `features/models/models.routes.ts` already registered
+`/manage/training/models`; this was purely a missing door, not a missing page.
+
+### U1.4 — one vocabulary through the add-source wizard
+
+- **`onboarding-facade.ts#CONNECT_METHOD_LABELS`** — realigned to the tile wording verbatim:
+  `register: 'Register manually'` → `'Enter a stream address'`, `discover: 'Discover on network'` →
+  `'Find cameras on my network'`, `simulate: 'Simulate'` → `'Use a test source'` (`listen`/`drone` were
+  already correct). This is what the chosen-method breadcrumb (`onboarding.html:160`) renders, so a user
+  who clicked "Enter a stream address" now sees that same phrase reflected back, not "Register
+  manually".
+- **`onboarding.html`**'s two disabled-reason hints ("…or switch to Register manually.") → "…or switch
+  to entering a stream address instead." — same fix, worded as a verb phrase so the sentence still
+  reads naturally.
+- **`nav-entries.ts`**'s "Add source" description — "Register, discover, or simulate a new device in
+  three steps" (wrong vocabulary *and* wrong count — the wizard is four steps,
+  `onboarding-facade.ts`'s `WIZARD_STEPS`, with five methods) → "Enter an address, scan the network,
+  listen for a drone, or simulate one — four steps."
+- **`features/assets/assets.html`**'s empty-state copy — "(register, scan, or simulate a moving test
+  drone)" → "(enter an address, scan, or simulate a moving test drone)".
+
+Left alone, deliberately: the several `drone-scan-logic.ts`/`onboarding-facade.ts` **code comments**
+that reference "Discover on network" as a descriptive name distinguishing the general ONVIF/mDNS/V4L2
+scan from the targeted MAVLink vehicle scan — these aren't user-facing copy (the plan's own U1.4 scope),
+and rewriting every internal comment that happens to echo an old label would have widened this task's
+diff well past its six named sites for zero behavior or user-facing-copy change.
+
+### U1.5 — Operate reordered by frequency of use
+
+Swapped the `Detection defaults` and `Pre-flight checklist` blocks in `nav-entries.ts`'s Operate mode —
+the touched-every-flight item now sits above the set-once-and-forget one. **Did not** move Detection
+defaults into Manage (the audit's own recommendation, explicitly declined by the plan): every grouped
+Manage entry is `managerOnly`, so that move would have silently taken the capability away from every
+pilot — a regression dressed as a cleanup. The reorder is the whole change here.
+
+### U1.6 — the stale cockpit rail comment fixed
+
+`cockpit.html:276-293`'s tool-rail comment claimed "the rail is down to 6" and listed the Situational
+group as just `marks`, omitting the `map` drawer (docs/plans/done/MAP-REWORK-PLAN.md §5.2) from both the
+frozen-id list and the group breakdown — while `cockpit.ts`'s own `ACTIVE_PANEL_KEY` comment, three
+lines away in the sibling file, correctly said seven (`flight`/`rc`/`cv`/`detections`/`marks`/`map`/
+`help`). Rewrote the `.html` comment to match: seven drawers, `map` present in both the id list and the
+Situational group. **No rail restructuring** — same explicit non-goal the plan states; this is a comment
+fix only, verified by diffing the two files' rail-related markup (unchanged) against their comments
+(now consistent).
+
+### U2 — the pre-flight page's checklist: assessed, found already-shipped, and relocated for the one real gap
+
+**The plan's own stated premise for U2 turned out to be stale.** Re-reading it verbatim: "`/operate/
+preflight` is labelled 'Pre-flight checklist' and renders a single read-only status card... plus a
+notice admitting templates are 'coming'... A working checklist component already exists:
+`features/fly/preflight-checklist.ts`... **This is the same complaint that started this cycle — the
+feature exists and isn't shown.**" Reading the actual current tree: `features/preflight/preflight.html`
+already renders `<vision-preflight-checklist [items]="facade.preflightItems()" />` — the exact same
+component, unmodified — and `features/preflight/preflight-facade.ts` already derives `preflightItems`
+from `core/telemetry/flight-state-logic.ts#derivePreflight` fed by real per-asset telemetry, exactly the
+"takes telemetry/capability inputs" shape the plan's own assess-first instruction asks to verify. **This
+integration is not new** — `git log` traces it to commit `7ae9943`, "Wave 4 functional hub pages…",
+2026-07-31 (docs/plans/done/UI-REDESIGN-PLAN.md Wave 4), over two weeks before this plan's own 2026-08-16
+audit date. The "single read-only status card" the plan describes *is* the checklist — its rows (Video
+feed/Telemetry link/GPS fix/Battery/Armable) are exactly `derivePreflight`'s rows, not a lesser
+placeholder. The one honest gap the plan also names — "saved, editable checklist templates are coming"
+— is real and unchanged; the `<vision-notice>` stating that stays exactly where it was, per the plan's
+own "either way" instruction.
+
+**What the assessment did find worth fixing**: the component itself still lived at
+`features/fly/preflight-checklist.ts` even though `features/preflight/**` — a different routed
+feature — has imported it directly (`import { PreflightChecklist } from '../fly/preflight-checklist'`)
+since that same Wave 4 commit. That's a standing violation of this codebase's own "no page imports
+another page's module" precedent (this file's Gotchas section names `shared/map/live-map.ts`'s identical
+move as the precedent to follow). U2's own assess-first instruction — "if the component is cleanly
+reusable (takes telemetry/capability inputs rather than reaching into cockpit-local state), lift it to
+`shared/ui/`" — was answered **yes** on inspection: `PreflightChecklist`'s only inputs are `items`
+(`readonly PreflightItem[]`), `collapsible`, `collapsed`, and one `collapsedChange` output; it injects
+nothing, calls no store/HTTP, and reads no cockpit-local signal — every fact it renders is handed to it.
+Its own `.spec.ts` already exercised both mount shapes (collapsible and not) before this wave, which is
+what made the lift low-risk to verify.
+
+**Action taken**: `git mv` (preserving history) `features/fly/preflight-checklist.{ts,html,css,spec.ts}`
+→ `shared/ui/preflight-checklist.{ts,html,css,spec.ts}`. Only two lines of actual code changed:
+`preflight-checklist.ts`'s own `Icon` import (`'../../shared/ui/icon'` → `'./icon'`, now a sibling) and
+its doc comment (recording the move and the "already reused since Wave 4" history); `cockpit.ts` and
+`preflight.ts` each got their one import path updated (`'./preflight-checklist'` /
+`'../fly/preflight-checklist'` → `'../../shared/ui/preflight-checklist'`). The `.html`/`.css`/`.spec.ts`
+files are byte-for-byte unchanged — every relative import inside them (`../../core/telemetry/…`) already
+resolved identically from the new location, since `shared/ui/` and `features/fly/` sit at the same depth
+under `src/app/`. `preflight-logic.ts`'s own doc comment (referenced the old path) updated to match.
+
+**This is exactly the "cleanly reusable → lift it" branch of the plan's assess-then-act instruction —
+not the "welded to cockpit state → stop and report" branch.** No second copy was forked, the cockpit's
+own usage was not rewritten to suit the other page (its `[collapsible]="true"` / `[collapsed]=`/
+`(collapsedChange)=` wiring is untouched), and the standalone page's usage is equally untouched. The
+"give the pre-flight page a checklist" functional work described by U2's problem statement does not need
+doing — it was already done, two weeks before this plan was written — so the entire delta for U2 is a
+correctness relocation plus this write-up, not a new feature.
+
+### Degrade / role-gate / dev-parity notes
+
+- **No new degrade paths** — every U1 change is a link retarget or copy fix; the pages at both ends of
+  every retargeted link already had their own honest empty/error states, untouched by this wave.
+- **No new role-gating** — U1.3's new nav entry inherits `managerOnly: true` from the pattern every
+  other `configuration`-group entry already uses; the page it points to (`ModelsPage`) already
+  role-gates Promote via `ModelsFacade.canManage`, unchanged. U1.1's retargets *remove* an accidental
+  role-mismatch (a pilot could click a link into a page their role can't open) rather than adding one.
+- **Dev parity** (`vision.auth.enabled=false`) — untouched by every item here. Nothing in U1 or U2 reads
+  `MeResponse.topRole` or branches on identity beyond the pre-existing `managerOnly` filter
+  `AppSidebar` already applies once, app-wide; the dev admin (ADMIN/unbounded) sees the same nav, same
+  retargeted links, same relocated component as an authenticated ADMIN.
+
+### Tests
+
+`npm run test:ci`: **118 test files, 1988 tests, all passing** (down from the pre-existing 118/1989 by
+exactly the one `/monitor/replay` regression test U1.2 deliberately removed — confirmed by re-running
+before/after that specific edit, not just trusting the arithmetic). `npx tsc --noEmit` clean on both
+`tsconfig.app.json` and `tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production`: green. Initial bundle **406.10 kB** (16.10 kB over the 390 kB
+budget warning), against a stated baseline of 406.26 kB (+16.26 kB) — a **-0.16 kB delta**, i.e.
+unchanged within noise. This tracks: `nav-entries.ts` (eager — `AppSidebar` is always-mounted) gained one
+~230-byte entry object (U1.3) and lost none; `hubs.routes.ts` lost one ~350-byte `ComingSoon` data object
+(U1.2); every other change is copy/target edits or comment-only; the `shared/ui/preflight-checklist.*`
+move adds zero net code (same files, same content, relocated). No lazy-chunk regressions — `cockpit`
+(106.56 kB raw) and `onboarding`/`preflight`'s own chunks are unaffected by the file move since both
+still resolve to the identical compiled output via their new import path.
+
+### Files touched
+
+`features/fly/drone-picker.html`, `features/wall/wall.html`, `features/command/command.html`,
+`features/onboarding/onboarding.html`, `features/onboarding/onboarding-facade.ts`,
+`features/asset-detail/asset-detail.html`, `features/asset-detail/asset-detail-facade.ts`,
+`features/live/live.html`, `features/live/live-facade.ts` (U1.1) · `features/hubs/hubs.routes.ts`,
+`app.routes.spec.ts` (U1.2) · `features/hubs/nav-entries.ts` (U1.3, U1.4, U1.5 — all in the same file) ·
+`features/assets/assets.html` (U1.4) · `features/fly/cockpit.html` (U1.6) · `features/fly/cockpit.ts`,
+`features/preflight/preflight.ts`, `features/preflight/preflight-logic.ts` (U2 import-path updates) ·
+**Moved** (`git mv`, history preserved): `features/fly/preflight-checklist.{ts,html,css,spec.ts}` →
+`shared/ui/preflight-checklist.{ts,html,css,spec.ts}` (U2). This file (new `shared/ui/` bullet + this
+Status entry + one corrected `Routes` section sentence about `?addSource=1`).
+
+### Left incomplete / deferred, named honestly
+
+- **`DevicesPage.addSource`'s `?addSource=1` deep link is now orphaned** (no in-app `routerLink` reaches
+  it since U1.1's drone-picker fix) but not removed — still functions if visited directly, and removing
+  it was never in this task's scope (it would touch `features/devices/**`, a page this task was
+  explicitly told to leave alone beyond de-linking pilots from it).
+- **The `drone-scan-logic.ts`/`onboarding-facade.ts` code comments that still say "Discover on network"**
+  (U1.4's note above) are internal-only and left as historical/descriptive text, not user-facing
+  vocabulary debt.
+- **Nothing else from IA-TRUTH-PLAN §2-3 was left undone** — all six U1 items and U2's assess-then-act
+  both completed within this wave.

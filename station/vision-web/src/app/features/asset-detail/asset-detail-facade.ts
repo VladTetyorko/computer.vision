@@ -334,10 +334,10 @@ export class AssetDetailFacade {
   }
 
   /** Unused by the current template (carried over verbatim from the pre-facade page, which never
-   *  wired a "Back" button to it either — the header's own "All devices" link uses a plain
+   *  wired a "Back" button to it either — the header's own "All assets" link uses a plain
    *  `routerLink` instead) — kept so relocating it here is a pure move, not a behavior decision. */
   back(): Promise<boolean> {
-    return this.router.navigate(['/devices']);
+    return this.router.navigate(['/assets']);
   }
 
   // --- Registration/tail number + attributes editors — both submit the asset's full replacement

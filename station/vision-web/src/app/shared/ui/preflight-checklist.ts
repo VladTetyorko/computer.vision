@@ -1,16 +1,25 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { preflightSummary, type PreflightItem } from '../../core/telemetry/flight-state-logic';
-import { Icon } from '../../shared/ui/icon';
+import { Icon } from './icon';
 
 /**
- * The Fly cockpit's pre-flight checklist card (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — a compact,
+ * The pre-flight checklist card (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — a compact,
  * always-5-row rundown of `flight-state-logic.ts#derivePreflight`'s own rows (Video feed,
  * Telemetry link, GPS fix, Battery, Armable), each glyphed `✓`/`✕`/`—` for ok/fail/unknown.
- * Deliberately dumb: the inputs are the only state, computed by `CockpitFacade` from
- * `TelemetryStore.latest()`/`primaryDevice()`/`live()` — this component issues no HTTP and holds no
- * store, mirroring `features/command/asset-panel.ts`'s own "deliberately dumb" convention. That
- * extends to the collapse: `collapsed` is an input and the toggle only emits `collapsedChange`, so
- * the host owns when the card is open (see `CockpitFacade#preflightCollapsed`).
+ * Deliberately dumb: `items`/`collapsible`/`collapsed` inputs are the only state, and the toggle
+ * only emits `collapsedChange` — this component issues no HTTP, holds no store, and reaches into no
+ * host's local state, mirroring `features/command/asset-panel.ts`'s own "deliberately dumb"
+ * convention. That is what makes it safe to share across two unrelated routed features.
+ *
+ * **Moved here from `features/fly/` (docs/plans/active/IA-TRUTH-PLAN.md §3, U2)** — `features/preflight/**`
+ * (`/operate/preflight`) has reused this component, unmodified, since docs/plans/done/UI-REDESIGN-PLAN.md
+ * Wave 4; it living under a different feature's folder while itself being cross-feature-consumed
+ * broke this codebase's own "no page imports another page's module" precedent (`shared/map/live-map.ts`'s
+ * own doc comment names it first). U2's assessment: cleanly reusable by construction (pure
+ * `items in / collapsedChange out`, no cockpit-local state reached into) — the lift here is a pure
+ * relocation, not a rewrite; every input/output/behavior is byte-for-byte unchanged, and both
+ * consumers (`features/fly/cockpit.ts`, `features/preflight/preflight.ts`) only needed their own
+ * import path updated.
  *
  * `cockpit.html` shows this only pre-arm (watch mode off, and either no telemetry yet or the FC
  * reports `armed !== true`) — once the aircraft is confirmed armed, the OSD chip bar is the live

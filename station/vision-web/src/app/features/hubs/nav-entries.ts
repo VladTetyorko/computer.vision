@@ -61,13 +61,17 @@ import type { IconName } from '../../shared/ui/icon-registry';
  * - **`managerOnly`** — hidden unless `canManageOrg(topRole)` (`core/org/org-logic.ts`, ADMIN/MANAGER)
  *   is true, the exact same gate `shared/ui/identity-chip.ts`'s Organization link and
  *   `core/org/org-guard.ts`'s route guard already use — reused here, not a new role system. Every
- *   `group`-carrying entry is `managerOnly`; so is `Pilots / roster` (its own route is already
+ *   `group`-carrying entry is `managerOnly`, with **one deliberate exception**: `System status`
+ *   (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1) sits in the `diagnostics` group but is not
+ *   `managerOnly` — an operator whose CV pipeline just died needs to see why, the same "don't gate
+ *   the explanation behind the role that isn't looking at the failure" reasoning `/command` already
+ *   applies more broadly. `Pilots / roster` is `managerOnly` too (its own route is already
  *   `orgGuard`-gated, so hiding the tile for a pilot matches where a click would land anyway, not a
  *   new restriction). `Assets`/`Add source` stay ungated — every authenticated role can already reach
- *   both today. Net effect: a plain PILOT sees just two Manage entries (Assets, Add source); an
- *   ADMIN/MANAGER sees the full grouped set. The sidebar applies this filter **once**, for the whole
- *   app — the split-brain where only the hub page filtered and the dropdown did not is gone with the
- *   hub pages themselves.
+ *   both today. Net effect: a plain PILOT sees three Manage entries (Assets, Add source, System
+ *   status); an ADMIN/MANAGER sees the full grouped set. The sidebar applies this filter **once**, for
+ *   the whole app — the split-brain where only the hub page filtered and the dropdown did not is gone
+ *   with the hub pages themselves.
  */
 export type NavModeId = 'operate' | 'monitor' | 'manage';
 
@@ -159,16 +163,16 @@ export const NAV_MODES: readonly NavMode[] = [
         to: '/wall',
       },
       {
-        icon: 'settings',
-        name: 'Detection defaults',
-        description: 'Detection profile, model, and per-pipeline options applied to every new stream.',
-        to: '/settings/detection',
-      },
-      {
         icon: 'list',
         name: 'Pre-flight checklist',
         description: "The live status card for any drone — saved, editable templates are coming.",
         to: '/operate/preflight',
+      },
+      {
+        icon: 'settings',
+        name: 'Detection defaults',
+        description: 'Detection profile, model, and per-pipeline options applied to every new stream.',
+        to: '/settings/detection',
       },
       {
         icon: 'compass',
@@ -234,7 +238,7 @@ export const NAV_MODES: readonly NavMode[] = [
       {
         icon: 'plus',
         name: 'Add source',
-        description: 'Register, discover, or simulate a new device in three steps.',
+        description: 'Enter an address, scan the network, listen for a drone, or simulate one — four steps.',
         to: '/add-source',
       },
       {
@@ -258,6 +262,14 @@ export const NAV_MODES: readonly NavMode[] = [
         name: 'CV training',
         description: 'Capture live frames, correct the boxes, and export YOLO datasets to improve detection models.',
         to: '/manage/training',
+        group: 'configuration',
+        managerOnly: true,
+      },
+      {
+        icon: 'archive',
+        name: 'CV model registry',
+        description: 'Every model cv-service knows about — promote one to make it the live default for new detections.',
+        to: '/manage/training/models',
         group: 'configuration',
         managerOnly: true,
       },
@@ -295,6 +307,18 @@ export const NAV_MODES: readonly NavMode[] = [
         to: '/debug',
         group: 'diagnostics',
         managerOnly: true,
+      },
+      // Deliberately NOT managerOnly (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1) — the one exception to
+      // "every grouped entry is managerOnly" this file's own class doc otherwise states as a rule.
+      // An operator whose CV pipeline just died needs to see why the system is degraded; gating that
+      // behind ADMIN/MANAGER would hide the one page that explains a problem they're already looking
+      // at. `nav-entries.spec.ts` carries a named, documented carve-out for this one entry.
+      {
+        icon: 'signal',
+        name: 'System status',
+        description: 'What the platform reports about its own health — subsystems, live transport, and system events.',
+        to: '/manage/system',
+        group: 'diagnostics',
       },
       // --- Advanced — raw device plumbing; most device actions already live inside each asset's
       //     own Hardware section (docs/conclusions/UX-SIMPLIFY-REVIEW.md F2). ADMIN/MANAGER only. -----------

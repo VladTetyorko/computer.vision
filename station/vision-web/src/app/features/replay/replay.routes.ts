@@ -17,8 +17,10 @@ import type { Routes } from '@angular/router';
  * usage, t}})` — the real, shipped event → replay deep link — grep-verified live call sites, not a
  * hypothetical. Before Wave 4 this route pointed at `ReplayPage` directly, which answered a
  * param-less visit with "No usage specified."; Wave 1 closed the one navigation path that could
- * reach that (`features/hubs/hubs.routes.ts`'s `monitor/replay` → `ComingSoon`) without touching
- * this route, since deleting it outright would have 404'd all three deep-link callers. Wave 4 goes
+ * reach that (a `monitor/replay` → `ComingSoon` scaffold, since deleted — docs/plans/active/IA-TRUTH-PLAN.md
+ * §2 U1.2, once this route served a real library the scaffold was advertising a shipped feature as
+ * unbuilt) without touching this route, since deleting it outright would have 404'd all three
+ * deep-link callers. Wave 4 goes
  * one step further and makes the param-less case itself honest: it now answers with an actual
  * library instead of an error state that merely became unreachable.
  */

@@ -3,7 +3,7 @@ import type { AssetSummary } from '../../core/api/models';
 /**
  * Pure, Angular-free logic behind `PreflightPage` (`/operate/preflight`, docs/plans/done/UI-REDESIGN-PLAN.md
  * Wave 4 — **SPLIT**: the live status card is functional, reusing `core/telemetry/flight-state-logic.ts#derivePreflight`
- * and `features/fly/preflight-checklist.ts` unmodified; saved, editable checklist templates are not
+ * and `shared/ui/preflight-checklist.ts` unmodified; saved, editable checklist templates are not
  * built — no checklist-template entity/endpoint exists).
  */
 

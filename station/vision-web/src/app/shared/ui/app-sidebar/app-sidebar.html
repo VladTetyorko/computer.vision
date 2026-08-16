@@ -150,14 +150,32 @@
       @if (liveCount() > 0) {
         <span class="chip"><span class="dot live"></span>{{ liveCount() }} live</span>
       }
-      <span
+      <!-- Live-transport state (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1) — a quiet dot + plain text, not a
+           second chip (frontend-style §5). Distinct from the backend-reachable dot below: this one is
+           about the SSE `/api/live` connection specifically, see `app-sidebar.ts`'s own doc comment. -->
+      <span class="live-transport" role="status" [attr.aria-label]="liveTransportLabel() + ' updates'">
+        <span
+          class="dot"
+          [class.ok]="liveTransportSeverity() === 'ok'"
+          [class.warn]="liveTransportSeverity() === 'warn'"
+          aria-hidden="true"
+        ></span>
+        <span class="live-transport-text">{{ liveTransportLabel() }}</span>
+      </span>
+      <!-- Shell rollup dot (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2) — worst of backend reachability,
+           live-transport state and the platform's own `overall` health (`app-sidebar.ts#shellSeverity`).
+           A real `routerLink`, not a click handler on a bare `<span>`, so it navigates on click *and*
+           gets native keyboard/focus support for free — clicking it takes you to `/manage/system`. -->
+      <a
+        routerLink="/manage/system"
         class="dot status-dot"
-        [class.ok]="fleet.reachable() === true"
-        [class.danger]="offline()"
+        [class.ok]="shellSeverity() === 'ok'"
+        [class.warn]="shellSeverity() === 'warn'"
+        [class.danger]="shellSeverity() === 'danger'"
         role="status"
-        [attr.aria-label]="offline() ? 'Backend unreachable' : 'Backend reachable'"
-        [title]="offline() ? 'Backend unreachable' : 'Backend reachable'"
-      ></span>
+        [attr.aria-label]="shellLabel()"
+        [title]="shellLabel()"
+      ></a>
       <vision-notification-bell />
     </div>
   </div>

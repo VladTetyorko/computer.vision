@@ -9,6 +9,16 @@
       <code>./mvnw spring-boot:run -pl vision-app</code>.
     </div>
   }
+  <!-- The silent-degradation case (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1) — mutually exclusive with the
+       banner above (`liveDegraded` requires `reachable() === true`, `offline` requires `false`), so
+       the two never stack. Reuses `<vision-notice>` rather than a new bespoke banner (the plan's own
+       explicit instruction) — the `.offline-banner` above stays untouched, a pre-existing bespoke
+       banner this wave was told only to note, not fix. -->
+  @if (liveDegraded()) {
+    <vision-notice variant="warn" icon="alert">
+      Live updates disconnected — falling back to a 5-second refresh. Retrying every 60 s.
+    </vision-notice>
+  }
   <router-outlet />
 </main>
 

@@ -131,7 +131,7 @@
         } @else {
           <vision-empty
             title="No assets yet"
-            message='Register the built-in simulated source to see the whole pipeline work without any hardware — then use "+ Add source" above to bring in the real thing (register, scan, or simulate a moving test drone) as a first-class asset.'
+            message='Register the built-in simulated source to see the whole pipeline work without any hardware — then use "+ Add source" above to bring in the real thing (enter an address, scan, or simulate a moving test drone) as a first-class asset.'
           >
             <button type="button" class="btn" (click)="facade.registerSimulator()" [disabled]="facade.submitting()">
               Add the simulated source

@@ -174,6 +174,33 @@ describe('geofence-breach (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
   });
 });
 
+describe('pipeline-error (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4)', () => {
+  it('never fires with no detail given at all', () => {
+    expect(attentionReasons(asset())).toEqual([]);
+    expect(attentionReasons(asset(), undefined, undefined, undefined)).toEqual([]);
+  });
+
+  it('fires with a detail, naming it verbatim in the reason text', () => {
+    const reasons = attentionReasons(asset(), undefined, undefined, 'RTSP source unreachable');
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toEqual({
+      kind: 'pipeline-error',
+      severity: 'warning',
+      text: 'Detection pipeline error — RTSP source unreachable',
+    });
+  });
+
+  it('ranks below gps-degraded and above open-events', () => {
+    const reasons = attentionReasons(asset({ openEventCount: 1 }), 2, undefined, 'RTSP source unreachable');
+    expect(reasons.map((r) => r.kind)).toEqual(['gps-degraded', 'pipeline-error', 'open-events']);
+  });
+
+  it('ranks below every flight-safety reason, including battery-low', () => {
+    const reasons = attentionReasons(asset({ batteryPercent: 15 }), undefined, undefined, 'RTSP source unreachable');
+    expect(reasons.map((r) => r.kind)).toEqual(['battery-low', 'pipeline-error']);
+  });
+});
+
 describe('attentionAgeLabel', () => {
   it('renders a dash with no telemetry reading yet', () => {
     expect(attentionAgeLabel(asset({ telemetryAgeMs: undefined }))).toBe('—');

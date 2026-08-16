@@ -8,6 +8,7 @@ import { FleetMapStore } from '../../core/map/map-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { activeGeofenceBreaches, groupBreachesByAsset } from '../../core/geofence/geofence-logic';
+import { activePipelineErrorMessagesByStreamId } from '../../core/system-events/system-events-logic';
 import { MarksStore } from '../../core/map-data/marks-store';
 import { LayersStore } from '../../core/map-data/layers-store';
 import { DrawingsStore } from '../../core/map-data/drawings-store';
@@ -121,8 +122,33 @@ export class CommandFacade {
     groupBreachesByAsset(activeGeofenceBreaches(this.liveStore.liveEvents())),
   );
 
+  /**
+   * Wall-clock ms, ticked from `refreshSummary()`'s own 5s poll (below) rather than a second timer —
+   * `activePipelineErrorMessagesByStreamId`'s 15-minute decay window (docs/plans/active/SYSTEM-STATUS-PLAN.md
+   * §3.4) needs *some* source of "time is passing" independent of new `LiveEvent`s arriving, or a
+   * stream that errored once and then went silent would stay flagged forever until the next
+   * unrelated live event happened to re-run this computed. Piggybacking on the poll this page
+   * already runs avoids adding a dedicated interval for one derived value.
+   */
+  private readonly nowSignal = signal(Date.now());
+
+  /**
+   * `streamId → active PIPELINE_ERROR message` (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4), derived from
+   * `LiveStore.liveEvents()` exactly like `geofenceBreachesByAssetId` above, but keyed by `streamId`
+   * (a pipeline error carries no `assetId` — see that function's own doc comment) rather than
+   * `assetId`. Feeds `buildEntityRows`' `pipeline-error` reason.
+   */
+  private readonly pipelineErrorMessagesByStreamId = computed(() =>
+    activePipelineErrorMessagesByStreamId(this.liveStore.liveEvents(), this.nowSignal()),
+  );
+
   readonly entityRows = computed(() =>
-    buildEntityRows(this.summary()?.assets ?? [], this.gpsFixTypeByAssetId(), this.geofenceBreachesByAssetId()),
+    buildEntityRows(
+      this.summary()?.assets ?? [],
+      this.gpsFixTypeByAssetId(),
+      this.geofenceBreachesByAssetId(),
+      this.pipelineErrorMessagesByStreamId(),
+    ),
   );
 
   /**
@@ -257,6 +283,10 @@ export class CommandFacade {
   }
 
   private async refreshSummary(): Promise<void> {
+    // Piggybacked tick for `pipelineErrorMessagesByStreamId`'s decay window — see `nowSignal`'s own
+    // doc comment. Set unconditionally, on both success and failure paths, since decay should keep
+    // advancing even while the summary itself is failing to refresh.
+    this.nowSignal.set(Date.now());
     try {
       const data = await this.api.fleetSummary(this.includeArchivedSignal());
       this.summarySignal.set(data);

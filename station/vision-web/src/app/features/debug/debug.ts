@@ -1,6 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
+import { healthLabel, healthSeverity } from '../../core/system-status/system-status-logic';
+import { SystemStatusStore } from '../../core/system-status/system-status-store';
 import { DebugApiService, type RawResponse } from './debug-api.service';
 import { DEBUG_ENDPOINTS, methodHasBody, prefillForEndpoint } from './debug-endpoints';
 import { describeHealthProbe, formatResponseBody, isSuccessStatus, type FormattedBody } from './debug-response';
@@ -33,20 +36,50 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
  * **The response pane, request-history panel, and demoting Health to a header chip are out of this
  * wave's scope** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md's own wave-2 brief) — the console/Health/Last-scan
  * three-card layout is otherwise unchanged.
+ *
+ * **Health card repointed at `GET /api/system/status` (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.3, wave S3).**
+ * The card's primary content is now the platform's own self-reported status (`SystemStatusStore`,
+ * the same `providedIn: 'root'` singleton the shell rollup dot and `/manage/system` both read — no
+ * second HTTP call, this page is simply a third reader), with a link to the full `/manage/system`
+ * page for the live-transport card and system-event log this card has no room for. The raw
+ * `/actuator/health` probe (`describeHealthProbe`/`healthComponents`/`healthRaw` below, **kept
+ * byte-for-byte** per this wave's own instruction — "its verdict logic is sound and should be kept")
+ * moves into a collapsed `<details>` as a secondary, lower-level probe — now that §4.4 wires Actuator
+ * for real, this is the one place to check whether the two ever disagree, rather than the console's
+ * one and only health source. **This page is not in `core/ui/architecture.spec.ts`'s `ROUTED_PAGES`
+ * list** (it predates the facade sweep and stays exempt, matching its own pre-existing "injects
+ * `DebugApiService` directly" shape) — `inject(SystemStatusStore)` below is therefore in-contract,
+ * unlike a page the architecture guard does scan.
  */
 @Component({
   selector: 'vision-debug',
-  imports: [FormsModule, PageBar],
+  imports: [FormsModule, PageBar, RouterLink],
   templateUrl: './debug.html',
   styleUrl: './debug.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class DebugPage {
   private readonly api = inject(DebugApiService);
+  private readonly systemStatusStore = inject(SystemStatusStore);
 
   protected readonly endpoints = DEBUG_ENDPOINTS;
   protected readonly methods = METHODS;
   protected readonly historyLimit = DEBUG_HISTORY_LIMIT;
+
+  // --- System status (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.3) --------------------------------
+
+  /** Already warm by the time this page mounts — `AppSidebar` (always mounted) injects the same
+   *  singleton for its own rollup dot, so there is no extra fetch to kick off here (contrast
+   *  `loadHealth()` below, this page's own one-shot actuator probe). */
+  protected readonly systemStatus = this.systemStatusStore.status;
+  protected readonly systemStatusLoading = this.systemStatusStore.loading;
+  protected readonly systemStatusError = this.systemStatusStore.error;
+  protected readonly healthLabel = healthLabel;
+  protected readonly healthSeverity = healthSeverity;
+
+  protected refreshSystemStatus(): Promise<void> {
+    return this.systemStatusStore.refresh();
+  }
 
   constructor() {
     // Best-effort convenience; a stale/absent result is still shown honestly (see template).

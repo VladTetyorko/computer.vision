@@ -72,6 +72,17 @@ vision-undo-toast {
   font-size: 0.82rem;
 }
 
+/* `<vision-notice>` (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1) is a *card* (border + radius, see its own
+   `.notice` primitive in `src/styles.css`) meant to sit inside a padded content area — unlike
+   `.offline-banner` above (deliberately edge-to-edge, no radius, a `border-bottom` only), so this
+   margin keeps it from touching `main`'s own scroll edges when it renders directly above the routed
+   page's own content, which (unlike the offline banner) has no page-level padding of its own to lend
+   it here. */
+vision-notice {
+  display: block;
+  margin: var(--space-8) var(--space-24) 0;
+}
+
 .offline-banner code {
   font-family: var(--mono);
   /* Bespoke low-opacity black wash for an inline code chip, not a video/map scrim — 25% is

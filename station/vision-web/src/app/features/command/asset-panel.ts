@@ -51,7 +51,18 @@ export class AssetPanel {
 
   protected readonly activeTab = signal<AssetPanelTab>('status');
 
-  /** `marker()?.gpsFixType` feeds the same `gps-degraded` reason the rail's own row rank uses — see `command-logic.ts#gpsDegradedReason`'s doc comment. */
+  /**
+   * `marker()?.gpsFixType` feeds the same `gps-degraded` reason the rail's own row rank uses — see
+   * `command-logic.ts#gpsDegradedReason`'s doc comment. `geofenceBreaches`/`pipelineErrorDetail`
+   * (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4) are **not** threaded here, matching this component's
+   * pre-existing gap for `geofenceBreaches` (both need a `LiveStore` read this deliberately-dumb,
+   * store-free panel doesn't have — see class doc's "issues no HTTP itself and holds no store" line);
+   * `buildEntityRows`' own rail-row computation (`command-facade.ts#entityRows`) is still the
+   * authoritative source for both reasons — an asset selected into this panel while erroring/breaching
+   * shows the correct severity/rank in the rail behind it, just not restated in this panel's own
+   * "why" line. Widening this panel to read `LiveStore` directly, if ever wanted, is a small,
+   * disjoint follow-up.
+   */
   protected readonly reasons = computed(() => attentionReasons(this.asset(), this.marker()?.gpsFixType));
   protected readonly ageLabel = computed(() => attentionAgeLabel(this.asset()));
   protected readonly batterySeverity = computed(() => batteryAttentionSeverity(this.marker()?.batteryPercent));
