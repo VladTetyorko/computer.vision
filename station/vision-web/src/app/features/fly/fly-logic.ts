@@ -86,6 +86,20 @@ export function isWatchMode(param: string | undefined): boolean {
   return param === '1';
 }
 
+/**
+ * Whether `cockpit.html`'s video-surface "Detection is off — video only" chip should show
+ * (docs/plans/active/CV-DEMAND-PLAN.md wave D3 — the honest affordance that replaces "an operator sees no
+ * boxes and has no idea why"). Requires **both** that a stream is actually live and that detection
+ * is off — not just the latter, unlike the tool-rail's own `rail-dot` tell (`cockpit.html`), which
+ * fires off `detectionEnabled` alone because it previews what a not-yet-started stream *would* send.
+ * This chip sits directly on the video, so "this is video only" must be a statement about a stream
+ * that actually exists — before Start there is no video for it to describe, only the picture the
+ * operator is about to get.
+ */
+export function showDetectionOffChip(live: boolean, detectionEnabled: boolean): boolean {
+  return live && !detectionEnabled;
+}
+
 /** How many rows the events ticker overlay shows at once — glanceable, not a full feed (see the Wall rail for that). */
 export const TICKER_MAX_EVENTS = 4;
 

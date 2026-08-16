@@ -117,9 +117,16 @@ export interface ActiveStream {
  *
  * `labelFilter`/`detectionEnabled` (docs/plans/done/CV-CONTROL-PLAN.md §2's frozen contract) are this cycle's
  * own additions, both optional — an absent `labelFilter` keeps today's "empty = all labels"
- * semantics, an absent `detectionEnabled` defaults `true` server-side (`PipelineConfig`'s own
- * `DEFAULT_DETECTION_ENABLED`). Both are also PATCH-able live afterward — see
- * `UpdateStreamConfigRequest`.
+ * semantics, an absent `detectionEnabled` defaults to `PipelineConfig.DEFAULT_DETECTION_ENABLED`
+ * server-side — **`false`** as of docs/plans/active/CV-DEMAND-PLAN.md wave D1 (flipped from `true`: detection
+ * is opt-in per stream now, not opt-out). This app never relies on that server fallback either way —
+ * `core/settings/settings-store.ts#SettingsStore.effective()` always resolves a concrete
+ * `detectionEnabled` value, and every call site that starts a stream
+ * (`features/fly/cockpit-facade.ts#start`, `features/live/live-facade.ts`,
+ * `features/devices/devices-facade.ts`) passes `settings.effective()` straight through as this
+ * request, so it is always sent explicitly — the SPA's own default (also flipped to `false`, same
+ * wave, §D3) is what actually governs a stream this app started, not this field's absence. Both are
+ * also PATCH-able live afterward — see `UpdateStreamConfigRequest`.
  */
 export interface StartStreamRequest {
   readonly confidenceThreshold?: number;

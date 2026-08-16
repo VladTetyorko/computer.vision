@@ -39,6 +39,21 @@
           <div class="notice stage-notice">This drone has no camera device to watch.</div>
         } @else if (facade.live() && !facade.stream()?.viewUrl) {
           <div class="notice stage-notice">The stream is running but has no view URL yet.</div>
+        } @else if (detectionOffChipVisible()) {
+          <!-- ---- Detection-off affordance (docs/plans/active/CV-DEMAND-PLAN.md wave D3) --------------------
+               Detection now defaults off, both here and server-side, so a stream with no boxes is the
+               normal case, not a fault — an operator would otherwise have no idea why nothing is being
+               drawn, with the only control buried at the bottom of the `cv` drawer (`cv-control-panel.html`).
+               A neutral status pill (never the amber `.notice` above, which is reserved for a genuine
+               problem), same slot: the three states here are mutually exclusive, this one only shows once
+               a stream is actually live, exactly when the other two cannot be showing. -->
+          <div class="stage-notice detection-off-chip">
+            <span class="dot" aria-hidden="true"></span>
+            <span>Detection off — video only</span>
+            @if (!facade.watchMode()) {
+              <button type="button" class="btn small" (click)="facade.enableDetection()">Turn on</button>
+            }
+          </div>
         }
       </div>
 

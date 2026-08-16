@@ -255,6 +255,37 @@
   text-align: center;
 }
 
+/* Detection-off affordance (docs/plans/active/CV-DEMAND-PLAN.md wave D3) — shares `.stage-notice`'s own
+   position above (the three stage states are mutually exclusive, see `cockpit.html`'s own comment)
+   but never the amber `.notice` chrome above it: detection defaulting off is the new normal, not a
+   fault, so this reads as a neutral HUD pill instead — the same frosted-chrome family every other
+   overlay control in this cockpit already uses (`.icon-btn`/`.switcher-control` above,
+   `fly-osd.ts`'s own `.osd-group`), not a warning banner. `.dot` (base, unmodified — styles.css) is
+   the neutral/muted tier of this app's one dot-status language; a red dot here would say "problem",
+   which off-by-default deliberately is not. */
+.detection-off-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4) var(--space-8);
+  padding: var(--space-4) var(--space-8) var(--space-4) var(--space-12);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  backdrop-filter: blur(var(--hud-blur));
+  border: var(--hud-border);
+  color: var(--text);
+  font-size: 0.78rem;
+  /* Never nowrap here (unlike the compact `.icon-btn`/`.switcher-control` pills above) — this one
+     carries a full sentence plus a button, wide enough on a narrow phone to need the wrap; capped so
+     it can never push past the video's own safe margin regardless of viewport width. */
+  max-width: calc(100% - 2 * var(--overlay-pad));
+}
+
+.detection-off-chip .dot {
+  flex: none;
+}
+
 /* ---- Main header overlay: exit, drone switcher, "Bring home" ------------------------------ */
 /* A real 3-column safe-area grid, not a flex row relying on wrap-if-it-overflows
    (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F11, docs/extracts/design/01-fly.md — "Bring home is clipped at the right

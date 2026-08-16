@@ -11,6 +11,7 @@ import {
   nextCollapseAction,
   positionLabel,
   rememberedStreamingAssetId,
+  showDetectionOffChip,
   sortAssetsForPicker,
   streamStateLabel,
 } from './fly-logic';
@@ -105,6 +106,21 @@ describe('isWatchMode', () => {
     expect(isWatchMode('0')).toBe(false);
     expect(isWatchMode('')).toBe(false);
     expect(isWatchMode(undefined)).toBe(false);
+  });
+});
+
+describe('showDetectionOffChip (docs/plans/active/CV-DEMAND-PLAN.md wave D3 — the cockpit\'s video-surface "Detection is off" affordance)', () => {
+  it('shows once a stream is live and detection is off', () => {
+    expect(showDetectionOffChip(true, false)).toBe(true);
+  });
+
+  it('stays hidden while detection is on, live or not', () => {
+    expect(showDetectionOffChip(true, true)).toBe(false);
+    expect(showDetectionOffChip(false, true)).toBe(false);
+  });
+
+  it('stays hidden before Start even if the draft would start dark — no video yet to call "video only"', () => {
+    expect(showDetectionOffChip(false, false)).toBe(false);
   });
 });
 

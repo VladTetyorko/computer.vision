@@ -54,7 +54,7 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 - `../stream-info-logic.ts` (docs/plans/done/MVP2-PLAN.md §U-info, folded into CD-b) — pure derivations behind `shared/player/stream-info-panel.ts`: `describeSource(device)` → `{protocolLabel, description}`, a human-readable "MJPEG · 192.168.0.107:8080" / "File · flight.mp4 (looped)" / "Simulated · Pattern generator, no camera" line instead of a bare URI (credentials in an `rtsp://user:pass@…` URI are never surfaced in this primary description — `hostOf` parses `new URL(uri)` and reads only `hostname[:port]`; the raw URI, credentials included, stays reachable in the panel's "Technical details" disclosure). `sessionDurationSeconds`/`formatDuration` turn a raw `startedAt` timestamp into a live-ticking "12s" / "4m 07s" / "1h 03m" duration. `formatLatency(seconds)` renders `shared/player/player.ts`'s own measured `behindLive` (piped up via its `latencyChanged` output, never re-measured) as "~2.3s behind live" / "measuring…".
 - `../toast.service.ts` — `ToastService.ok/info/error/notify(text)`, auto-dismissing signal-backed toast list; rendered by `shared/ui/toast-host.ts`. `ok(text, action?)`/**`notify(text, action?)`** (docs/plans/done/UX-REWORK-PLAN.md §U-c, new — `shared/ui/notification-bell.ts`'s own newly-arrived-detection-event toasts) both accept an optional `ToastAction { label, onClick }` (docs/main/CYCLES-PLAN.md §4's original "Watch" action precedent); `toast-host.ts` renders it as an inline button that runs `onClick` and dismisses the toast. `info`/`error` don't take one — only a toast the user's own action caused (or that invites a specific follow-up click) earns one. **`ToastKind` gained `'notification'`** (own `.toast.notification` style in `toast-host.ts` — the app's one accent color, `var(--accent-soft)`/`var(--accent)`, docs/plans/done/UX-REWORK-PLAN.md §U-b item 2's "one saturated accent" rule, no new hue). **`DISMISS_AFTER_MS` is a flat 5s for every kind** (user decision, 2026-08-04) — it used to be a severity ladder (ok 4s → info 5s → notification 6s → warning 7s → error 9s), so kind now drives only *appearance* and whether an `action` is offered, never how long the toast stays. Consequence worth knowing before adding a toast: nothing an operator must not miss can rely on lingering longer than its siblings — that belongs in durable chrome (the bell dropdown, an inline error on the control that failed). Unit-tested: `core/toast.service.spec.ts`, fake-timers-based, covers the uniform 5s dismiss (plus per-toast clocks starting at push time), action wiring, and `dismiss(id)`. **Deliberately left out of the CU-b poll-scheduler consolidation** (see Status below) — its `setTimeout` per toast is a one-shot auto-dismiss, not a recurring poll. **Superseded, for the archive/deactivate Undo case specifically, by `shared/ui/undo-toast.service.ts` (docs/plans/done/OPS-CORE-PLAN.md §Q2, new — see that file's own bullet below)** — this service and `shared/ui/toast-host.ts` are otherwise completely unchanged and still carry every other toast in this app (`ok`/`info`/`error`/`notify`, including plain lifecycle confirmations like "X is now active").
 - **`shared/ui/undo-toast.service.ts`/`undo-toast.ts`** (docs/plans/done/OPS-CORE-PLAN.md §Q2, new) — a *separate* one-at-a-time "Undo" toast primitive, not a mode of `ToastService` above: `UndoToastService.showUndo(message, undo, {timeoutMs? = 10_000, onCommit?})` shows a single toast (`toast: Signal<UndoToastState | null>`) with a 10s default window (the plan's own pinned duration — closes U-a2 item 3b's own documented gap of reusing `ToastService.ok`'s fixed dismiss timer, then 4s and now a flat 5s, with no Undo-specific timing; this service's 10s is functional, an undo grace period, and is deliberately *not* affected by that flattening). **One toast at a time, commit-on-replace, undo-only-cancels**: a second `showUndo()` call while one is still open immediately *commits* the first (runs its own `onCommit` if given, then drops it — its mutation already happened optimistically before `showUndo` was ever called, so "commit" is normally a no-op) before showing the new one; the only way an action is ever reversed is clicking **that toast's own** `Undo` before it's replaced, dismissed, or times out. `undo()` (the toast's Undo button) cancels the timer and runs the stored `undo` callback, never `onCommit`; `dismiss()` (the `×` button, or `Escape` — keyboard-dismissable) resolves exactly like a natural timeout: commits, never undoes. `shared/ui/undo-toast.ts` (`<vision-undo-toast>`) renders it — mounted once at the app root (`app.html`, next to `<vision-toast-host>`) **bottom-left** (`ToastHost` already owns bottom-right; bottom-center is the Fly cockpit's own primary Start/Stop control, `features/fly/fly.css#.hud-controls`, at every viewport this app supports) — a shrinking progress bar (pure CSS animation timed off `timeoutMs`, no interval/rAF ticking) gives the countdown a visual; `@for (… track toast.id)` over a computed single-element array (mirrors `toast-host.ts`'s own `track`-by-id precedent) is what makes the bar actually restart on replace rather than reusing a stale, already-part-way-shrunk element. Wired into the two existing archive flows (`features/devices/devices.ts`/`features/asset-detail/asset-detail.ts`'s `archiveAssetNow`/`archiveDeviceNow`, previously `ToastService.ok(text, {label:'Undo', onClick})`) **and** into device `deactivate` (previously silent-immediacy — a plain `FleetStore.setDeviceState` confirmation toast with no way back short of re-opening the row's kebab; both pages now bypass `FleetStore` for `deactivate` too, same reasoning as `archive`'s own existing bypass, via new `deactivateDeviceNow` methods). `activate`/the explicit `restore` kebab entry are unchanged — re-activating isn't the "silent immediacy" this item is about. Unit-tested: `undo-toast.service.spec.ts` (11 cases — default/custom timeout, undo cancels the timer and never commits (plus a no-op-when-idle case), natural timeout commits and never undoes, dismiss commits (plus a no-op-when-idle case), both callbacks optional, replace commits the outgoing toast and only the new one's Undo applies afterward, a stale replaced-toast's timer never double-commits, increasing ids).
-- `../settings/settings-store.ts` — `SettingsStore`: built-in + custom `PipelineProfile`s, `effective()` (draft-over-profile). **`model` is now a plain `string`, not the old closed `DetectionModelId` union** (docs/plans/done/CV-CONTROL-PLAN.md Wave E — `DETECTION_MODEL_OPTIONS`/`DetectionModelId` are gone; the roster is data-driven from `FleetStore.models`, see above). `PipelineProfile`/`PipelineSettings` both gained `labelFilter: readonly string[]` (empty = "all labels") and `detectionEnabled: boolean` (default `true`), same profile/draft/custom-save/revert semantics confidence/fps/model already had; migration-safe restore backfills all three independently (`withValidPipelineFields`, superseding the old `withValidModel`) — a persisted `model` string the current roster doesn't recognize is **accepted as-is** now (only a missing/non-string value falls back to `DEFAULT_DETECTION_MODEL`, now `'yolo26n.pt'` — mirrors `PipelineConfig.defaults()`'s own Wave-B bug-fix off the dead `"yolo"` id). See the dedicated CV-CONTROL-PLAN Wave E changelog section at the end of this file for the full write-up. Also: `mapLayer: WritableSignal<MapLayerId>` (docs/main/CYCLES-PLAN.md §9, CU-b item 6 — `'standard'|'night'|'relief'|'satellite'`, default `'night'`; set directly, e.g. `settings.mapLayer.set('satellite')`, same convention as `wallDensity`) — all persisted to `localStorage['vision.settings.v1']`; a corrupt/unknown persisted `mapLayer` is ignored (falls back to the default) rather than adopted. **`eventNotifications: WritableSignal<boolean>`** (docs/plans/done/MVP2-PLAN.md §E, E-b, new, default `false`) — the user's own opt-in for browser detection-event notifications; `features/settings/settings.ts#toggleEventNotifications` is the only call site that ever sets it `true` (and the only place `Notification.requestPermission()` is called, from the direct user gesture most browsers require), a corrupt/non-boolean persisted value is ignored like every other field here. **`flyAssetId: WritableSignal<string | null>`** (docs/plans/done/MVP3-PLAN.md §C-b, new, default `null`) — the operator's remembered drone for `/fly`; `null` means "show the picker", any other value is an asset id `FlyPage` still validates against the live fleet before trusting it (a stale id for an archived/deleted asset falls back to the picker, this store never checks). Both the picker's first pick and the cockpit's own header switcher write here — "switching drones" and "picking one for the first time" are the same write. A non-string persisted value is ignored like every other field here.
+- `../settings/settings-store.ts` — `SettingsStore`: built-in + custom `PipelineProfile`s, `effective()` (draft-over-profile). **`model` is now a plain `string`, not the old closed `DetectionModelId` union** (docs/plans/done/CV-CONTROL-PLAN.md Wave E — `DETECTION_MODEL_OPTIONS`/`DetectionModelId` are gone; the roster is data-driven from `FleetStore.models`, see above). `PipelineProfile`/`PipelineSettings` both gained `labelFilter: readonly string[]` (empty = "all labels") and `detectionEnabled: boolean` (**default `false`** as of docs/plans/active/CV-DEMAND-PLAN.md wave D3 — was `true` through CV-CONTROL-PLAN Wave E; see the dedicated D3 changelog section at the end of this file for the flip and its migration-backfill reasoning), same profile/draft/custom-save/revert semantics confidence/fps/model already had; migration-safe restore backfills all three independently (`withValidPipelineFields`, superseding the old `withValidModel`) — a persisted `model` string the current roster doesn't recognize is **accepted as-is** now (only a missing/non-string value falls back to `DEFAULT_DETECTION_MODEL`, now `'yolo26n.pt'` — mirrors `PipelineConfig.defaults()`'s own Wave-B bug-fix off the dead `"yolo"` id). See the dedicated CV-CONTROL-PLAN Wave E changelog section at the end of this file for the full write-up. Also: `mapLayer: WritableSignal<MapLayerId>` (docs/main/CYCLES-PLAN.md §9, CU-b item 6 — `'standard'|'night'|'relief'|'satellite'`, default `'night'`; set directly, e.g. `settings.mapLayer.set('satellite')`, same convention as `wallDensity`) — all persisted to `localStorage['vision.settings.v1']`; a corrupt/unknown persisted `mapLayer` is ignored (falls back to the default) rather than adopted. **`eventNotifications: WritableSignal<boolean>`** (docs/plans/done/MVP2-PLAN.md §E, E-b, new, default `false`) — the user's own opt-in for browser detection-event notifications; `features/settings/settings.ts#toggleEventNotifications` is the only call site that ever sets it `true` (and the only place `Notification.requestPermission()` is called, from the direct user gesture most browsers require), a corrupt/non-boolean persisted value is ignored like every other field here. **`flyAssetId: WritableSignal<string | null>`** (docs/plans/done/MVP3-PLAN.md §C-b, new, default `null`) — the operator's remembered drone for `/fly`; `null` means "show the picker", any other value is an asset id `FlyPage` still validates against the live fleet before trusting it (a stale id for an archived/deleted asset falls back to the picker, this store never checks). Both the picker's first pick and the cockpit's own header switcher write here — "switching drones" and "picking one for the first time" are the same write. A non-string persisted value is ignored like every other field here.
 - **`../training/training-store.ts` + `.spec.ts`** (docs/plans/done/CV-TRAINING-PLAN.md Wave T5, new) — `TrainingStore` (`@Injectable providedIn: 'root'`, lazy like `OrgStore` — no self-initializing fetch): the dataset list's source of truth (`datasets`, `loading`, `loaded`, **`disabled`**) plus `refresh()`/`createDataset()`/`deleteDataset()`. `disabled` is the honest "not enabled here" signal — set the moment `GET /api/datasets` (the one call that can only mean "the whole controller is absent" on a `404`, never "unknown id") 404s; every other failure stays a toast. One dataset's own samples/annotations are page-local, single-consumer state handled directly by `features/labeling/**`'s own facades (`VisionApi` injected there, not this store) — see the dedicated CV-TRAINING-PLAN Wave T5 section at the end of this file for the full write-up.
 - `../idle-preload.ts` — `IdlePreload` (`PreloadingStrategy`): preloads lazy route chunks on browser idle; opt out via route `data: { preload: false }`. As of docs/main/CYCLES-PLAN.md §9, CU-b item 2, **no route opts out any more** — every tab chunk (including `/map` and `/debug`, previously excluded) is idle-preloaded; see Status below for why that's safe against the initial-bundle budget.
 - **`shared/player/webrtc-certificate.ts`/`webrtc-certificate-logic.ts`/`webrtc-certificate-db.ts`** (docs/plans/done/REALTIME-PLAN.md Phase R-b item 3, new; moved out of `core/` into `shared/player/` per station/vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §3, D2 — Player-only WebRTC internals, not a store) — `WebrtcCertificateService` (`providedIn: 'root'`, one instance app-wide): `certificates(): Promise<readonly RTCCertificate[]>` lazily creates (`RTCPeerConnection.generateCertificate({name:'ECDSA', namedCurve:'P-256'})`), persists in IndexedDB, and hands back the browser's *one* stable ECDSA certificate — `shared/player/player.ts` passes it to every `RTCPeerConnection` via the `certificates` option, so every `<vision-player>` tile and every reconnect presents the identical DTLS fingerprint (server-side viewer correlation, no application-level session/cookie needed) and skips ECDSA keygen latency after the first attach. Memoized and **re-validated on every call**, not just once at startup — `isCertificateUsable`/`CERTIFICATE_EXPIRY_SAFETY_MARGIN_MS` (`webrtc-certificate-logic.ts`, pure, unit-tested, 9 cases) is the one place "is this cert still safe to hand out" is decided, so a certificate that expires mid-session (Safari caps a generated cert's own lifetime at roughly a week regardless of what's requested) regenerates transparently on the *next* call rather than silently going stale. `webrtc-certificate-db.ts` is the minimal IndexedDB glue (one object store, one record — mirrors `shared/map/tile-cache-db.ts`'s identical "thin, undocumented-by-spec, no dedicated test" precedent; jsdom has neither IndexedDB nor `generateCertificate` to test against regardless); both `getStoredCertificate`/`putStoredCertificate` degrade to `undefined`/a no-op rather than throwing, which is what makes the private-mode/IndexedDB-unavailable fallback "just generate a fresh in-memory certificate, per tab" fall out for free rather than needing its own special-cased branch. Logs the fingerprint (`getFingerprints()`, formatted by `formatFingerprints`) at `info` once per session — memoization means this only fires once regardless of how many `<vision-player>` tiles call `certificates()`.
@@ -8934,3 +8934,160 @@ this task; nothing here needed a split.
   branch's own established precedent for waves integrating ahead of/alongside a concurrently-landing
   backend (e.g. the T7 entry above). Both themes should get a live check next time `/fly` is opened
   against a running stream with tracking on.
+
+## Status — CV-DEMAND wave D3: detection stops being the silent default (docs/plans/active/CV-DEMAND-PLAN.md) — 2026-08-16
+
+**Done.** Detection is now opt-in end to end. D1 (perception) flipped
+`PipelineConfig.DEFAULT_DETECTION_ENABLED` to `false` and D2 (vision-api/vision-app) gates the CV
+pipeline on someone actually watching — both landed on this branch ahead of this wave, outside
+`station/vision-web/**`. This wave's job was narrower: stop the SPA from silently asking for
+detection on every stream start (it was overriding the new honest backend default via its own
+built-in profiles), and make the new "video-only" state visible and actionable on the cockpit
+surface itself instead of leaving it discoverable only at the bottom of the CV drawer.
+
+### What shipped
+
+- **`core/settings/settings-store.ts`** — all three built-in profiles (`balanced`, `low-latency`,
+  `high-quality`) now default `detectionEnabled: false`, with a doc comment recording the
+  CV-DEMAND-PLAN D3 reasoning. `withValidPipelineFields`'s migration backfill for a
+  missing/corrupt stored value changed from `true` to `false`. This was a deliberate two-part
+  decision, made explicit in code comments and here:
+  - **An explicit persisted boolean (`true` or `false`) is a real user choice and is never
+    touched** — the existing `typeof value.detectionEnabled === 'boolean'` check already
+    preserves it unchanged on every reload, before and after this wave. A returning operator who
+    had turned detection on keeps it on.
+  - **A missing or corrupt field is not a decision, it's an absence** — there is no way to
+    distinguish "never saved" from "explicitly chose off" once the field is simply not a boolean,
+    so the only defensible fallback is the platform's new honest default (`false`), not the old
+    one. Backfilling missing data to the *old* default would silently resurrect a stance the
+    backend no longer holds; backfilling to the new default matches what a fresh profile gets
+    today.
+  - Net effect: every stream-start call site (`cockpit-facade.ts#start`, `live-facade.ts`,
+    `devices-facade.ts`) sends `settings.effective()` explicitly, so the SPA and the new backend
+    default now agree — detection starts off unless an operator (past or present) asked for it.
+- **`core/api/models.ts`** — updated the `StartStreamRequest` doc comment for `detectionEnabled`
+  to record the new server-side default (`false`, CV-DEMAND-PLAN D1) and to note the SPA never
+  relies on that server fallback since it always sends the field explicitly. No wire-shape change
+  — `PATCH /api/streams/{id}/config` and the start-stream payload keep their existing fields.
+- **A minimal, honest "detection is off" affordance on the cockpit video surface** — not a redesign
+  of `cv-control-panel.html` (that is separately scoped to `docs/plans/active/CV-UX-RESEARCH.md`
+  and was explicitly not touched here):
+  - `features/fly/fly-logic.ts#showDetectionOffChip(live, detectionEnabled)` — pure predicate,
+    true only once a stream is actually live and the operator's current settings have detection
+    off; false before Start (nothing to contradict yet) and false whenever detection is on.
+  - `features/fly/cockpit.ts#detectionOffChipVisible` — a thin `computed()` wrapping the pure
+    function over `facade.live()` and `facade.settings.effective().detectionEnabled`.
+  - `features/fly/cockpit-facade.ts#enableDetection()` — the chip's action. Updates the settings
+    draft (`this.settings.adjust({ detectionEnabled: true })`) and, when a stream is live,
+    PATCHes it into the running stream via the existing `buildHotKnobPatch` (imported from
+    `cv-control-panel-logic.ts`, not duplicated) — the same "live vs. draft, one rule" pattern the
+    CV panel itself already uses, so this new entry point doesn't add a second way of changing a
+    hot knob.
+  - `features/fly/cockpit.html` — added a third `@else if` branch to the existing `.stage-video`
+    notice chain (previously: no camera / no view URL), rendering when
+    `detectionOffChipVisible()`: a neutral `.dot`, the text "Detection off — video only", and — only
+    when `!facade.watchMode()` — a `<button class="btn small">Turn on</button>` calling
+    `facade.enableDetection()`. The three branches are mutually exclusive by construction: if the
+    stream is live (a precondition of `showDetectionOffChip`), a device and view URL already
+    resolved, so the first two branches cannot also be true.
+  - `features/fly/cockpit.css` — new `.detection-off-chip`/`.detection-off-chip .dot` rules,
+    reusing the same bottom-center `.stage-notice` position as the two pre-existing notices. Built
+    from `.surface-hud` frosted-pill tokens (`--hud-bg`, `--hud-border`, `--hud-blur`,
+    `--radius-pill`) — legal here because the Fly cockpit is a `.surface-dark` enclave. Deliberately
+    **not** the amber `.notice` class: cockpit.css hardcodes `.notice` to a warn tint regardless of
+    sub-class, and "detection off" is now the honest default/normal state, not a fault — a colored
+    warning would misrepresent it. The dot is the base neutral variant (`--text-faint`), not a
+    status color, per the skill's "status colours mean state, never decoration" rule. Wrapping
+    (`flex-wrap: wrap`) plus `max-width: calc(100% - 2 * var(--overlay-pad))` keeps the chip inside
+    the stage's safe area at any viewport width instead of risking horizontal overflow on a narrow
+    phone with `white-space: nowrap`.
+
+### Design/dataviz choices
+
+No chart or stat tile involved — this is a single status chip, so the `frontend-style` skill (not
+`dataviz`) governs it end to end: one chip-equivalent per surface, tokens only, neutral (not
+colored) because it reports the new normal state rather than a fault, sized and positioned to
+match the cockpit's existing notice idiom rather than inventing a new placement.
+
+### Error/degradation behavior
+
+Nothing here reads from the network on its own — `detectionOffChipVisible` derives purely from
+already-loaded local state (`facade.live()`, `facade.settings.effective()`), so there is no new
+failure mode to degrade from. `enableDetection()`'s live PATCH follows the exact same
+fire-and-forget pattern `FleetStore.patchStreamConfig` already uses elsewhere in the cockpit (no
+new error path introduced, none removed).
+
+### Role-gating
+
+No new role restriction was needed or added. The "Turn on" button is hidden in watch mode
+(`!facade.watchMode()`), mirroring the existing convention for every other cockpit control action
+(Start/Stop, the CV drawer toggle) — a read-only viewer sees the informational text and dot but no
+actionable control, exactly like every other operator-only affordance already on this page. No
+`topRole`/`MeResponse` surface was touched by this wave.
+
+### Dev-parity handling
+
+Not implicated by this change — `vision.auth.enabled=false` dev parity is a backend/auth concern;
+this wave only changes client-side default values and a purely local, already-loaded-state-driven
+UI affordance. Nothing here branches on auth mode.
+
+### Tests
+
+- `core/settings/settings-store.spec.ts` — ~7 existing expectations updated to the new `false`
+  default; the built-in-profiles test renamed to say "detection off"; the `adjust()`/draft test
+  changed to exercise a real `false → true` transition and its revert; two new tests added proving
+  an explicit persisted `detectionEnabled: true` (in a `customProfiles` entry and in a draft)
+  survives reload unchanged — the concrete proof that a real user choice is never silently
+  reverted by the default flip.
+- `features/fly/fly-logic.spec.ts` — new `describe('showDetectionOffChip', …)` block, 3 cases:
+  live + off → true; on (live or not) → false; not yet live + off → false (nothing to contradict
+  before Start).
+- No new component spec for `cockpit.ts` — matches this repo's own established precedent (pure-logic
+  vitest over component specs); `detectionOffChipVisible` is a one-line wrapper around the tested
+  pure function.
+- Full suite: `npm run test:ci` → **115 test files / 1934 tests, all passing.**
+
+### Build
+
+- `npx tsc --noEmit -p tsconfig.app.json` — clean.
+- `npx tsc --noEmit -p tsconfig.spec.json` — clean.
+- `ng build --configuration production` — green. The pre-existing "initial bundle exceeds 390 kB
+  budget" warning is unchanged from baseline (the baseline itself was already over budget before
+  this wave; not introduced or worsened here).
+- Bundle delta, measured via a `git stash push -u --` scoped to exactly this wave's 9 changed files
+  (not a bare `git stash`, to avoid touching the concurrently-landing D1/D2 Java changes and
+  untracked plan docs already in the working tree), build, then `git stash pop`:
+  - **Initial bundle**: 396.50 kB → 396.54 kB raw / 111.74 kB → 111.78 kB transfer (**+0.04 kB
+    raw / +0.04 kB transfer**) — three string literal defaults changed and one new pure predicate;
+    negligible as expected.
+  - **`cockpit` lazy chunk**: 106.56 kB → 107.90 kB raw / 23.73 kB → 23.95 kB transfer (**+1.34 kB
+    raw / +0.22 kB transfer**) — the new chip markup, its CSS, and `enableDetection()`.
+  - Every other lazy chunk untouched by this wave.
+
+### Files touched
+
+Modified: `core/settings/settings-store.ts`+`.spec.ts`, `core/api/models.ts`,
+`features/fly/fly-logic.ts`+`.spec.ts`, `features/fly/cockpit-facade.ts`, `features/fly/cockpit.ts`,
+`features/fly/cockpit.html`, `features/fly/cockpit.css`, this file (`station/vision-web/MODULE.md`).
+No new files — every three-file-component rule was already satisfied by `cockpit.ts`/`.html`/`.css`
+before this task. `features/fly/cv-control-panel.ts`/`.html` were read and studied (to reuse
+`buildHotKnobPatch` and confirm the existing bottom-of-drawer toggle pattern) but deliberately not
+modified — the larger CV-panel redesign is out of scope for this wave, per
+`docs/plans/active/CV-UX-RESEARCH.md`.
+
+### Left incomplete / deferred, named honestly
+
+- **Not verified live in a browser, in either theme** — there is no dev server available in this
+  environment. The new chip was built strictly from `frontend-style` skill tokens
+  (`.surface-hud`/`--hud-*`/`--radius-pill`, base neutral `.dot`, no raw colour), and the cockpit's
+  `.surface-dark` enclave already redeclares every Tier-2 token it references, so it is expected to
+  render correctly in both themes — but this is a reasoned expectation, not a confirmed one. A live
+  check of `/fly` with a stream started and detection off (both app themes) is the concrete
+  follow-up before calling this visually done, matching this file's own established precedent for
+  prior waves that shipped without a live browser check (e.g. the TRACKING-V3-BAND1 J4 entry above).
+- **D1/D2 (backend default flip + watcher-driven demand gating)** are out of this wave's scope by
+  design (CV-DEMAND-PLAN §4: "D3 is independent of both") and were verified only by source
+  inspection (`PipelineConfig.DEFAULT_DETECTION_ENABLED = false`), not by running the Java suite —
+  that verification belongs to whichever wave owns those modules.
+- **The pull-transport gap and other demand-related consequences** noted in CV-DEMAND-PLAN §5
+  ("Deliberately NOT in scope") remain exactly as scoped there; nothing in this wave touches them.

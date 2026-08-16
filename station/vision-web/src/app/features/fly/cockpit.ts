@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, effect, inject, input, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
@@ -23,7 +23,7 @@ import { DrawingToolbar } from '../../shared/map/map-controls/drawing-toolbar';
 import { LayerManager } from '../../shared/map/map-controls/layer-manager';
 import { MarksPanel } from './marks-panel';
 import { CockpitFacade } from './cockpit-facade';
-import { nextCollapseAction, type ToolRailPanelId } from './fly-logic';
+import { nextCollapseAction, showDetectionOffChip, type ToolRailPanelId } from './fly-logic';
 
 /** `UiStore`'s own storage key for this page's tool-rail (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D) —
  * one key for all seven drawers (`flight`/`rc`/`cv`/`detections`/`marks`/`map`/`help`; the former
@@ -117,6 +117,16 @@ export class CockpitPage {
   protected readonly facade = inject(CockpitFacade);
 
   private readonly stageHost = viewChild<ElementRef<HTMLDivElement>>('stage');
+
+  /**
+   * `cockpit.html`'s own video-surface "Detection is off — video only" chip
+   * (docs/plans/active/CV-DEMAND-PLAN.md wave D3) — a thin template-friendly wrapper over the facade's raw
+   * signals, same posture as {@link isPanelOpen} below; the actual decision is the pure, unit-tested
+   * `fly-logic.ts#showDetectionOffChip`.
+   */
+  protected readonly detectionOffChipVisible = computed(() =>
+    showDetectionOffChip(this.facade.live(), this.facade.settings.effective().detectionEnabled),
+  );
 
   // --- Overlay state — host-owned, see this class's own doc comment above ------------------------
 

@@ -23,7 +23,7 @@ import type { BoxesMode, Transport } from '../../shared/player/player';
 import { cycleBoxesMode, defaultBoxesMode } from '../../shared/player/detection-overlay-logic';
 import { followMarkers, type DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import { canShowCommandPanel } from './flight-command-panel-logic';
-import { buildFollowLockPatch } from './cv-control-panel-logic';
+import { buildFollowLockPatch, buildHotKnobPatch } from './cv-control-panel-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
@@ -625,6 +625,24 @@ export class CockpitFacade {
       return;
     }
     void this.fleet.patchStreamConfig(streamId, buildFollowLockPatch(trackId));
+  }
+
+  /**
+   * The "Turn on" action on `cockpit.html`'s own video-surface affordance (docs/plans/active/CV-DEMAND-PLAN.md
+   * wave D3) — the honest chip shown over the video whenever `settings.effective().detectionEnabled`
+   * is `false` and a stream is actually live (`fly-logic.ts#showDetectionOffChip`). Mirrors
+   * `CvControlPanel#onDetectionEnabledToggle`'s own "draft first, then also PATCH the live stream"
+   * rule (that component's own class doc comment, "Live vs. draft, one rule") so this quick action can
+   * never drift from what the drawer's own toggle would have sent — same draft write, same
+   * `buildHotKnobPatch` body, just fired immediately rather than debounced (a single explicit click,
+   * not a slider drag that might still be mid-gesture).
+   */
+  enableDetection(): void {
+    this.settings.adjust({ detectionEnabled: true });
+    const streamId = this.stream()?.streamId;
+    if (streamId) {
+      void this.fleet.patchStreamConfig(streamId, buildHotKnobPatch(this.settings.effective()));
+    }
   }
 
   // --- Start / Stop ------------------------------------------------------------------------
