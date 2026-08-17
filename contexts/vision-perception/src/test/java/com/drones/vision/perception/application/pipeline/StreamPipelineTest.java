@@ -1459,6 +1459,125 @@ class StreamPipelineTest {
                         + "so disabling detection must never also read as 'nobody is watching'");
     }
 
+    // --- docs/plans/active/CV-DEMAND-PLAN.md §5/§7: closing the gate clears what it already served,
+    // not just what it would have served next -- reversing this task's own first-cut decision that
+    // a frozen last result was harmless. It is not: DetectionsStore polls every 2s and only preserves
+    // a stale value on an *empty or failed* poll, so an un-cleared frozen result keeps being served,
+    // forever, as though it were live. CLAUDE.md §9: "Newest data ... should be used, even if
+    // previous is still available." ---
+
+    @Test
+    void closingTheDetectionEnabledGateClearsEstablishedBoxesAndTheRateWindowThenReopeningResumesFreshDetection() {
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+
+        pipeline.onNext(frame(0));
+        assertFalse(pipeline.latestDetections().isEmpty(), "boxes must be established before the gate closes");
+        assertEquals(1L, pipeline.detectionRate().submitted());
+        assertEquals(1L, pipeline.pipelineLatency().samples());
+
+        // Same model id ("yolo"): this is a hot-knob-only patch except for detectionEnabled, so any
+        // clearing observed below is attributable to the gate closing, not to a model re-arm.
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), true, false);
+        pipeline.updateConfig(detectionOff);
+
+        assertTrue(pipeline.latestDetections().isEmpty(),
+                "turning detection off must not leave the last boxes standing -- they would be re-served "
+                        + "every poll as though still live");
+        assertTrue(pipeline.tracks().isEmpty());
+        assertEquals(0L, pipeline.detectionRate().submitted(),
+                "the rate window must not keep reporting a stale submitted count once the state reads OFF");
+        assertEquals(0L, pipeline.pipelineLatency().samples());
+
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(1)));
+        PipelineConfig detectionOn = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), true, true);
+        pipeline.updateConfig(detectionOn);
+        pipeline.onNext(frame(1));
+
+        assertFalse(pipeline.latestDetections().isEmpty(),
+                "re-enabling must resume real detection on the next sampled frame, not just stop hiding "
+                        + "the old one");
+    }
+
+    @Test
+    void closingTheDetectionDemandGateClearsEstablishedBoxesAndTheRateWindowThenReopeningResumesFreshDetection() {
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+
+        pipeline.onNext(frame(0));
+        assertFalse(pipeline.latestDetections().isEmpty(), "boxes must be established before the gate closes");
+        assertEquals(1L, pipeline.detectionRate().submitted());
+
+        pipeline.updateDetectionDemand(false);
+
+        assertTrue(pipeline.latestDetections().isEmpty(),
+                "IDLE_NO_VIEWERS must not keep re-serving the last viewer's boxes to whoever polls next");
+        assertTrue(pipeline.tracks().isEmpty());
+        assertEquals(0L, pipeline.detectionRate().submitted());
+        assertEquals(0L, pipeline.pipelineLatency().samples());
+
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(1)));
+        pipeline.updateDetectionDemand(true);
+        pipeline.onNext(frame(1));
+
+        assertFalse(pipeline.latestDetections().isEmpty(),
+                "a returning viewer must get boxes from fresh inference, not a snapshot from before they left");
+    }
+
+    @Test
+    void repeatedlyConfirmingDemandIsStillGoneDoesNotCorruptTheEdgeTrackingNeededToReopenLater() {
+        // A demand-poll scheduler calls updateDetectionDemand(false) on every tick while nobody is
+        // watching, not just once on the transition. handleDetectionGateTransition() must key off the
+        // true->false *edge*, not the level, or repeated confirmations would spuriously re-clear on
+        // every tick -- harmless to observable state here, but this also guards against a broken edge
+        // flag getting stuck and refusing to recognise the eventual true transition below.
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+        pipeline.onNext(frame(0));
+
+        pipeline.updateDetectionDemand(false);
+        pipeline.updateDetectionDemand(false);
+        pipeline.updateDetectionDemand(false);
+        assertTrue(pipeline.latestDetections().isEmpty());
+
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(1)));
+        pipeline.updateDetectionDemand(true);
+        pipeline.onNext(frame(1));
+
+        assertFalse(pipeline.latestDetections().isEmpty(),
+                "repeated false confirmations must not prevent the gate from recognising the later true");
+    }
+
+    @Test
+    void aResultCompletingAfterTheGateClosedIsDroppedNotResurrectingTheStateTheCloseJustCleared() {
+        // The in-flight race: submitDetection()'s CompletableFuture can complete on an arbitrary
+        // executor thread after updateConfig/updateDetectionDemand has already closed the gate and
+        // cleared state. onDetectionResult() re-checks detectionGateOpen() on entry specifically so a
+        // late-arriving result (submitted while open, landing after close) is dropped rather than
+        // silently repopulating latestDetections right after handleDetectionGateTransition() emptied it.
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+        pipeline.onNext(frame(0));
+        assertFalse(pipeline.latestDetections().isEmpty(), "boxes must be established before the race is exercised");
+
+        CompletableFuture<DetectionResult> pending = new CompletableFuture<>();
+        when(detectionPort.detect(any(), any())).thenReturn(pending);
+        pipeline.onNext(frame(1)); // submitted while the gate is still open; its completion is delayed
+
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), true, false);
+        pipeline.updateConfig(detectionOff); // gate closes -- clears the boxes established above
+        assertTrue(pipeline.latestDetections().isEmpty());
+
+        pending.complete(nonEmptyResult(1)); // the in-flight inference, submitted before the close, lands late
+
+        assertTrue(pipeline.latestDetections().isEmpty(),
+                "a result computed before the gate closed must not resurrect the state the close just cleared");
+        verify(detectionRepositoryPort, times(1)).save(any());
+    }
+
     @Test
     void emptyLabelFilterKeepsEveryDetection() {
         VideoFrame f = frame(0);
