@@ -8,10 +8,12 @@
 #   scripts/demo.sh ~/Videos/your-clip.mp4
 #
 # Services:
-#   postgres    - fleet persistence (categories/devices/assets, adapter-persistence,
-#                 docs/plans/done/MVP2-PLAN.md P-a): vision-app below wires VISION_PERSISTENCE_ENABLED=true
-#                 against it, Flyway-migrated on first use. History (usages/telemetry/
-#                 detections) is P-b, still in-memory for now.
+#   postgres    - persistence for every repository port (adapter-persistence,
+#                 docs/plans/done/MVP2-PLAN.md P-a/P-b): vision-app below wires
+#                 VISION_PERSISTENCE_JDBC_URL/USERNAME/PASSWORD against it,
+#                 Flyway-migrated on first use. Unconditional since
+#                 docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b -- there is no
+#                 in-memory fallback left to opt out into.
 #   mediamtx    - RTSP ingest / HLS egress sidecar (see ARCHITECTURE.md §6)
 #   cv-service  - Python gRPC YOLO inference service (docs/plans/done/MVP1-PLAN.md §C7)
 #   vision-app  - the Java application (this repo's root ./Dockerfile)
@@ -407,23 +409,30 @@ services:
       # hostname/port, not the host-mapped ${POSTGRES_PORT} below (same
       # container-vs-host addressing split as mediamtx's ports). Credentials
       # come straight from .env (see .env.example) via compose interpolation.
-      VISION_PERSISTENCE_ENABLED: "true"
+      # Unconditional wiring since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b -- there
+      # is no longer a flag to set here.
       VISION_PERSISTENCE_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       VISION_PERSISTENCE_USERNAME: ${POSTGRES_USER}
       VISION_PERSISTENCE_PASSWORD: ${POSTGRES_PASSWORD}
+      # docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1: replaces the deleted code-based
+      # AuthSeedRunner, which used to seed these same three accounts unconditionally
+      # at boot (and, before W1, minted a *random* root group id every restart --
+      # the empty-fleet bug this plan fixes). Seeding now lives in a Flyway
+      # migration (storage/persistence/.../db/seed/dev) that only applies when this
+      # flag is true, so the demo stack keeps working exactly as it did before:
+      # admin/admin (ADMIN), manager/manager (MANAGER), pilot/pilot (PILOT) --
+      # DEV-ONLY passwords equal to their usernames, see that migration's own
+      # header warning. Anyone standing this compose file up beyond local
+      # dev/demo MUST create real users through UserService and change/remove
+      # these seeded accounts before exposing it.
+      VISION_PERSISTENCE_SEED_DEV_USERS: "true"
       # docs/plans/done/U-AUTH-PLAN.md wave 3: turn on real Spring Security session auth
       # for anyone using `docker compose up`. The *compiled* default
       # (vision.auth.enabled=false in vision-app's application.yaml)
       # stays off on purpose -- ~26 unrelated @SpringBootTest classes plus
       # AuthDisabledSecurityTest rely on that default, so only this
       # compose-level override flips it, never the compiled default (see
-      # station/vision-app/MODULE.md's "Auth / session security" section). On first
-      # boot AuthSeedRunner seeds three DEV-ONLY accounts, password equal to
-      # username -- admin/admin (ADMIN), manager/manager (MANAGER),
-      # pilot/pilot (PILOT), see AuthSeedRunner's own javadoc warning. Anyone
-      # standing this compose file up beyond local dev/demo MUST create real
-      # users through UserService and change/remove these seeded accounts
-      # before exposing it.
+      # station/vision-app/MODULE.md's "Auth / session security" section).
       VISION_AUTH_ENABLED: "true"
     ports:
       - "8080:8080"
