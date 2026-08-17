@@ -45,7 +45,8 @@ import static org.hamcrest.Matchers.not;
  * owned by their group subtree, and a PILOT sees only the assets explicitly assigned to them.
  *
  * <p>Uses the seeded {@code manager}/{@code pilot} accounts (both members of the seeded {@code Root}
- * group — {@code AuthSeedRunner}), plus data this test creates through the application services: a
+ * group — {@link DevAccountSeeder}, this suite's stand-in for the production Flyway seed, see that
+ * class's own javadoc), plus data this test creates through the application services: a
  * second, unrelated group and one asset owned by each group. The security filter chain is applied to
  * MockMvc exactly as {@link AuthEnabledFlowTest} does; the session from login is carried forward via
  * {@link MockHttpSession}.
@@ -83,6 +84,7 @@ class ScopedAssetReadAuthEnabledTest {
 
     @BeforeEach
     void setUp() {
+        DevAccountSeeder.seedIfAbsent(userService, groupService);
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .addFilters(springSecurityFilterChain)
                 .build();

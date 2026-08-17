@@ -1,9 +1,9 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
+import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
 import com.drones.vision.api.controller.LiveController;
 import com.drones.vision.api.live.LiveUpdateRegistry;
-import com.drones.vision.app.devsupport.InMemoryAuditTrail;
-import com.drones.vision.app.devsupport.InMemoryDetectionEventRepository;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
 import com.drones.vision.app.devsupport.NoopLiveUpdatePublisher;
 import com.drones.vision.platform.AuditTrailPort;
@@ -31,8 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * back to {@link NoopLiveUpdatePublisher}, {@code GET /api/live}'s {@link LiveController}/{@link
  * LiveUpdateRegistry} beans entirely absent (so the endpoint 404s, same as any other unmapped
  * route), and neither {@link EventPublisherPort} nor {@link AuditTrailPort} wrapped in their
- * live-update decorators — see {@link LiveWiringTest} for the opposite (enabled/default)
- * counterpart.
+ * live-update decorators — i.e. the plain {@link JpaAuditTrail}/{@link
+ * JpaDetectionEventRepository} delegates (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b —
+ * Postgres-backed unconditionally now, not the old devsupport in-memory fallbacks) — see {@link
+ * LiveWiringTest} for the opposite (enabled/default) counterpart.
  *
  * <p>Looks up {@link LiveController}/{@link LiveUpdateRegistry} via {@link
  * ApplicationContext#getBeansOfType} rather than {@code @Autowired}, mirroring {@link
@@ -95,11 +97,11 @@ class LiveDisabledWiringTest {
 
     @Test
     void auditTrailIsNotWrappedWhenDisabled() {
-        assertInstanceOf(InMemoryAuditTrail.class, auditTrailPort);
+        assertInstanceOf(JpaAuditTrail.class, auditTrailPort);
     }
 
     @Test
     void detectionEventRepositoryIsNotWrappedWhenDisabled() {
-        assertInstanceOf(InMemoryDetectionEventRepository.class, detectionEventRepositoryPort);
+        assertInstanceOf(JpaDetectionEventRepository.class, detectionEventRepositoryPort);
     }
 }

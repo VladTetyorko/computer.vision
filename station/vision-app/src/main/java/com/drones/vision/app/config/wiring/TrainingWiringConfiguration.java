@@ -62,20 +62,18 @@ import org.springframework.context.annotation.Configuration;
  *
  * <p>Split into its own {@code @Configuration} class rather than added to {@code
  * ApplicationServiceWiring} — same "split out by concern" precedent as {@link
- * DiscoveryWiringConfiguration}/{@link PersistenceWiringConfiguration} — because, unlike most ports
- * in this codebase, none of the beans below has a no-op/in-memory fallback to select between when
- * disabled: they simply don't exist at all, the same "absent entirely" posture {@code
+ * DiscoveryWiringConfiguration}/{@link PersistenceWiringConfiguration} — because, unlike every port
+ * {@link PersistenceWiringConfiguration} wires, none of the beans below has a fallback to select
+ * between when disabled: they simply don't exist at all, the same "absent entirely" posture {@code
  * LiveController} takes for its own property, applied here to a whole small cluster of beans
  * instead of one controller. Every bean is therefore individually {@code
- * @ConditionalOnProperty}-gated (mirroring {@link
- * PersistenceWiringConfiguration#persistenceEntityManagerFactory}'s own precedent for a bean with
- * no fallback), rather than that class's usual real-impl-vs-in-memory-fallback {@code if/else}
- * shape.
+ * @ConditionalOnProperty}-gated — a shape {@link PersistenceWiringConfiguration} itself no longer
+ * has any of, since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b made every one of its beans
+ * unconditional.
  *
  * <p>{@link DatasetRepositoryPort}/{@link TrainingSampleRepositoryPort}/{@link
  * SampleImageStorePort} are already unconditionally wired in {@link PersistenceWiringConfiguration}
- * (docs/plans/done/CV-TRAINING-PLAN.md Wave T3) — real JPA or in-memory devsupport, selected independently by
- * {@code vision.persistence.enabled} — so the beans below just consume them as already-resolved
+ * (docs/plans/done/CV-TRAINING-PLAN.md Wave T3) — so the beans below just consume them as already-resolved
  * collaborators, same as {@code ApplicationServiceWiring#markService} consumes {@code
  * markRepositoryPort}. {@link #replaySources} does the same for {@link AssetUsageRepositoryPort}/
  * {@link DetectionRepositoryPort} — both are already unconditionally wired in {@code

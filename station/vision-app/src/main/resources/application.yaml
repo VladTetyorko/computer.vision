@@ -26,20 +26,36 @@ vision:
 
   # --- adapter-persistence: fleet persistence (see docs/plans/done/MVP2-PLAN.md P-a) ---
   persistence:
-    # Whether PersistenceWiringConfiguration wires CategoryRepositoryPort/
-    # DeviceRepositoryPort/AssetRepositoryPort to adapter-persistence's JPA/
-    # Postgres implementations (migrated with Flyway on first use). When false
-    # (default), those ports stay the devsupport in-memory fallbacks -- today's
-    # behavior, no database required to run this app or its tests.
-    enabled: false
-    # JDBC URL/credentials of the Postgres database. Only read when
-    # vision.persistence.enabled=true. Defaults match docker-compose.yml's
-    # postgres service on its host-mapped port; docker-compose overrides these
-    # for vision-app's own container to address the compose-internal hostname
-    # instead (see VISION_PERSISTENCE_JDBC_URL there).
+    # PersistenceWiringConfiguration wires CategoryRepositoryPort/
+    # DeviceRepositoryPort/AssetRepositoryPort (and the rest of the seventeen
+    # repository ports it selects, see vision-app's MODULE.md) to
+    # adapter-persistence's JPA/Postgres implementations (migrated with Flyway
+    # on first use), unconditionally -- a reachable Postgres is required to run
+    # this app, and to run vision-app's own @SpringBootTest suite, which gets
+    # one from a shared Testcontainers container (see that module's MODULE.md
+    # "Test infrastructure" section); a Docker-less environment skips those
+    # tests cleanly rather than failing with a connection error. There used to
+    # be a vision.persistence.enabled flag selecting a devsupport in-memory
+    # fallback instead; docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b removed it --
+    # a flag with exactly one legal value (true, since W4) was a lie.
+    #
+    # JDBC URL/credentials of the Postgres database. Defaults match
+    # docker-compose.yml's postgres service on its host-mapped port;
+    # docker-compose overrides these for vision-app's own container to address
+    # the compose-internal hostname instead (see VISION_PERSISTENCE_JDBC_URL
+    # there).
     jdbc-url: jdbc:postgresql://localhost:5432/vision
     username: vision
     password: vision
+    # Whether PersistenceUnit also applies classpath:db/seed/dev -- three DEV-ONLY
+    # accounts (admin/admin, manager/manager, pilot/pilot -- password equal to
+    # username) plus the fixed root group they join; there is no in-memory
+    # equivalent (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 deleted the old
+    # code-based AuthSeedRunner, which used to seed unconditionally into
+    # whichever repositories were wired). ANY DATABASE WITH THIS ON IS UNSECURED
+    # -- docker-compose.yml sets it true for the friends-demo stack; nothing
+    # else should.
+    seed-dev-users: false
 
   # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3) ---
   auth:
@@ -48,10 +64,9 @@ vision:
     # exactly as before auth existed; CurrentUser returns the fixed dev principal
     # (auto-admin) and /api/auth/* report that dev admin with authEnabled=false.
     # true: a session is required for /api/** except /api/auth/login|logout and
-    # static/SPA routes; the three seeded users (admin/admin, manager/manager,
-    # pilot/pilot -- DEV-ONLY passwords, see AuthSeedRunner) can log in. Seeding
-    # runs regardless of this flag (so flipping it on has accounts to use), but is
-    # a no-op once any user exists.
+    # static/SPA routes -- but a session only has someone to log in as if
+    # vision.persistence.seed-dev-users is also true (see above), or real users
+    # were created through UserService.
     enabled: false
 
   # --- adapter-publish-hls: stream egress (Phase 1, see docs/plans/done/PHASE1-PLAN.md Task U5) ---
@@ -366,9 +381,6 @@ vision:
     # boot, restarting the TX feed for every persisted simulated asset whose rtsp
     # video device is one of this app's own TX-fed feeds (fixes "frozen video"
     # after a restart -- see DefaultSimulationService#resumeAll's own javadoc).
-    # Only takes effect when vision.persistence.enabled=true too -- the
-    # in-memory profile has nothing to resume after a restart either, since its
-    # assets are gone at the same restart.
     resume-on-boot: true
     # SimulatedVideoSource's default frame width/height/fps (docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2, wave F4).
     # video:

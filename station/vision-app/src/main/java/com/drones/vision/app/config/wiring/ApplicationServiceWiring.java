@@ -27,12 +27,13 @@ import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
+import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
+import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
 import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.config.properties.VisionLiveProperties;
-import com.drones.vision.app.config.properties.VisionPersistenceProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.config.properties.VisionSimulationProperties;
@@ -67,6 +68,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import jakarta.persistence.EntityManagerFactory;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -77,13 +80,17 @@ import java.util.concurrent.TimeUnit;
 /**
  * Wires the {@code vision-application} service layer — the largest slice of what used to be one
  * 825-line {@code WiringConfiguration} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D): every {@code
- * DefaultXService}, the event/audit/live-update decorator chains, and the two {@code
- * ApplicationRunner}s. This is the only place in the codebase allowed to know about both the
+ * DefaultXService}, the event/audit/live-update decorator chains, and {@link
+ * #simulationResumeRunner}. This is the only place in the codebase allowed to know about both the
  * application layer and concrete adapters/devsupport fallbacks for these ports — enforced by
  * {@code ArchitectureTest}.
  *
- * <p>Ports that don't yet have a real adapter are wired to in-process dev-support fallbacks so the
- * platform runs end to end from Phase 0 onward. The server-push data plane (docs/plans/done/REALTIME-PLAN.md
+ * <p>Every repository-shaped port is Postgres-backed via {@code adapter-persistence} since
+ * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b removed the last two in-memory-only ones ({@link
+ * #auditTrailPort}/{@link #detectionEventRepositoryPort}); ports that back a genuinely optional
+ * feature (CV detection, stream publishing, replay extraction) still fall back to an in-process
+ * no-op when that feature is switched off — see {@code devsupport}'s remaining classes. The live
+ * server-push data plane (docs/plans/done/REALTIME-PLAN.md
  * §4): {@link #fleetLiveUpdatePort}/{@link #telemetryLiveUpdatePort}/{@link
  * #detectionLiveUpdatePort}/{@link #mapLiveUpdatePort}/{@link #eventLiveUpdatePort} each select
  * between the real {@code LiveUpdateRegistry} (vision-api, which implements all five — one of the
@@ -100,8 +107,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Configuration
 @EnableConfigurationProperties({VisionCvProperties.class, VisionLiveProperties.class, VisionRcProperties.class,
-        VisionApplicationProperties.class, VisionPublishProperties.class, VisionPersistenceProperties.class,
-        VisionSimulationProperties.class})
+        VisionApplicationProperties.class, VisionPublishProperties.class, VisionSimulationProperties.class})
 public class ApplicationServiceWiring {
 
     /**
@@ -228,14 +234,18 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Append-only record of who changed the fleet. In-memory, unconditionally. When {@link
-     * VisionLiveProperties#enabled()} is {@code true}, wrapped in {@link LiveUpdateAuditTrail},
-     * which announces a "fleet changed" live update for every recorded entry.
+     * Append-only record of who changed the fleet — Postgres-backed via {@link JpaAuditTrail}
+     * (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3/W2b: the durable replacement for the old
+     * {@code InMemoryAuditTrail}, whose own javadoc called out that an audit trail evaporating on
+     * restart was not one). When {@link VisionLiveProperties#enabled()} is {@code true}, wrapped in
+     * {@link LiveUpdateAuditTrail}, which announces a "fleet changed" live update for every
+     * recorded entry.
      */
     @Bean
     public AuditTrailPort auditTrailPort(FleetLiveUpdatePort fleetLiveUpdatePort,
-                                          VisionLiveProperties liveProperties) {
-        AuditTrailPort delegate = new InMemoryAuditTrail();
+                                          VisionLiveProperties liveProperties,
+                                          EntityManagerFactory entityManagerFactory) {
+        AuditTrailPort delegate = new JpaAuditTrail(entityManagerFactory);
         if (liveProperties.enabled()) {
             return new LiveUpdateAuditTrail(delegate, fleetLiveUpdatePort);
         }
@@ -243,14 +253,17 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Debounced detection events (docs/plans/done/MVP2-PLAN.md §E, E-a). In-memory, unconditionally. When
-     * {@link VisionLiveProperties#enabled()} is {@code true}, wrapped in {@link
-     * LiveUpdateDetectionEventRepository}, which announces every {@code save} as a live update.
+     * Debounced detection events (docs/plans/done/MVP2-PLAN.md §E, E-a) — Postgres-backed via {@link
+     * JpaDetectionEventRepository} (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3/W2b, replacing the
+     * old {@code InMemoryDetectionEventRepository}). When {@link VisionLiveProperties#enabled()} is
+     * {@code true}, wrapped in {@link LiveUpdateDetectionEventRepository}, which announces every
+     * {@code save} as a live update.
      */
     @Bean
     public DetectionEventRepositoryPort detectionEventRepositoryPort(DetectionLiveUpdatePort detectionLiveUpdatePort,
-                                                                       VisionLiveProperties liveProperties) {
-        DetectionEventRepositoryPort delegate = new InMemoryDetectionEventRepository();
+                                                                       VisionLiveProperties liveProperties,
+                                                                       EntityManagerFactory entityManagerFactory) {
+        DetectionEventRepositoryPort delegate = new JpaDetectionEventRepository(entityManagerFactory);
         if (liveProperties.enabled()) {
             return new LiveUpdateDetectionEventRepository(delegate, detectionLiveUpdatePort);
         }
@@ -363,23 +376,6 @@ public class ApplicationServiceWiring {
                                           MapAccessPolicy mapAccessPolicy, LayerResolver layerResolver) {
         return new DefaultDrawingService(drawingRepositoryPort, mapLiveUpdatePort, mapAccessPolicy,
                 layerResolver);
-    }
-
-    /**
-     * Ensures the single COP layer exists before the first request can ask for it
-     * (docs/plans/done/MAP-REWORK-PLAN.md §3's "ensured at startup").
-     *
-     * <p>{@code copLayerId()} is a synchronized find-or-create and therefore already idempotent, so
-     * this runner is not a correctness requirement — it is a timing one. Without it, the first
-     * caller to promote a mark (or the first {@code GET /api/map/layers}) would be the one to create
-     * the layer, which means the layer's {@code CREATED} SSE event would race that caller's own
-     * response. Calling it once at startup makes the shared picture present from boot, in both
-     * persistence modes: with Postgres {@code V12__map_layers.sql} has already inserted the row and
-     * this call simply finds it; in memory, this call is what creates it.
-     */
-    @Bean
-    public ApplicationRunner mapLayerBootstrapRunner(MapLayerService mapLayerService) {
-        return args -> mapLayerService.copLayerId();
     }
 
     /**
@@ -651,14 +647,14 @@ public class ApplicationServiceWiring {
     /**
      * Simulated-feed resume-on-boot: restarts the TX feed for every persisted simulated asset
      * whose {@code rtsp} video device is one of this app's own TX-fed feeds. {@code enabled} is
-     * resolved once, here, from both gates: {@link VisionPersistenceProperties#enabled()}
-     * <em>and</em> {@link VisionSimulationProperties#resumeOnBoot()} (default {@code true}).
+     * resolved once, here, from {@link VisionSimulationProperties#resumeOnBoot()} (default {@code
+     * true}) — the former {@code VisionPersistenceProperties#enabled()} half of this gate is gone
+     * along with the flag itself (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b: Postgres is the
+     * only store now, so there is always something to resume from).
      */
     @Bean
     public ApplicationRunner simulationResumeRunner(SimulationService simulationService,
-                                                     VisionPersistenceProperties persistenceProperties,
                                                      VisionSimulationProperties simulationProperties) {
-        return new SimulationResumeRunner(simulationService,
-                persistenceProperties.enabled() && simulationProperties.resumeOnBoot());
+        return new SimulationResumeRunner(simulationService, simulationProperties.resumeOnBoot());
     }
 }

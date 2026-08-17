@@ -20,32 +20,24 @@ import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
 import com.drones.vision.adapter.persistence.repository.*;
 import com.drones.vision.app.config.properties.VisionPersistenceProperties;
-import com.drones.vision.app.devsupport.*;
 
 import jakarta.persistence.EntityManagerFactory;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
  * Wires the fleet-side repository ports (docs/plans/done/MVP2-PLAN.md P-a: categories, devices, assets) and
- * the history repository ports (docs/plans/done/MVP2-PLAN.md P-b: asset usages, telemetry, detections) to
- * either {@code adapter-persistence}'s Postgres-backed JPA implementations or their devsupport
- * in-memory fallbacks, selected by {@link VisionPersistenceProperties#enabled()} (default
- * {@code false} — unchanged in-memory behavior for every existing test and IDE run).
+ * the history repository ports (docs/plans/done/MVP2-PLAN.md P-b: asset usages, telemetry, detections) — plus
+ * every other repository port {@code adapter-persistence} covers — to their Postgres-backed JPA
+ * implementations.
  *
- * <p>{@link #persistenceEntityManagerFactory} is the only bean gated by {@code @Conditional*}
- * here (rather than a plain if/else inside one method, {@code WiringConfiguration}'s usual
- * style, e.g. {@code detectionPort}): unlike a no-op fallback object, actually *constructing* an
- * {@link EntityManagerFactory} opens a real database connection and runs Flyway, so it must not
- * even be attempted when persistence is disabled — {@link ConditionalOnProperty}
- * keeps the bean method itself from ever running in that case (same idiom {@code
- * DiscoveryWiringConfiguration} uses for its scanner beans). The twelve port beans below then
- * consume it through {@link ObjectProvider}, which tolerates the bean being entirely absent when
- * disabled — {@link ObjectProvider#getObject()} is only ever called on the branch where {@link
- * VisionPersistenceProperties#enabled()} guarantees it exists.
+ * <p>Straight-line wiring, no {@code @Conditional*}: docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b removed
+ * {@code vision.persistence.enabled} (it had exactly one legal value, {@code true}, since W4) along
+ * with the devsupport in-memory fallbacks it used to select between. {@link
+ * #persistenceEntityManagerFactory} is therefore an ordinary bean like any other here — every port
+ * bean below takes it as a plain constructor argument rather than reaching through an {@code
+ * ObjectProvider}, since it is now guaranteed to exist by the time Spring resolves any of them.
  *
  * <p>The three P-b beans ({@link #assetUsageRepositoryPort}/{@link #telemetryRepositoryPort}/
  * {@link #detectionRepositoryPort}) use each {@code Jpa*Repository}'s one-argument constructor —
@@ -60,183 +52,111 @@ import org.springframework.context.annotation.Configuration;
 public class PersistenceWiringConfiguration {
 
     @Bean(destroyMethod = "close")
-    @ConditionalOnProperty(prefix = "vision.persistence", name = "enabled", havingValue = "true")
     public EntityManagerFactory persistenceEntityManagerFactory(VisionPersistenceProperties properties) {
-        return PersistenceUnit.start(properties.jdbcUrl(), properties.username(), properties.password());
+        return PersistenceUnit.start(properties.jdbcUrl(), properties.username(), properties.password(),
+                properties.seedDevUsers());
     }
 
     @Bean
-    public CategoryRepositoryPort categoryRepositoryPort(VisionPersistenceProperties properties,
-                                                           ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaCategoryRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryCategoryRepository();
+    public CategoryRepositoryPort categoryRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaCategoryRepository(entityManagerFactory);
     }
 
     @Bean
-    public DeviceRepositoryPort deviceRepositoryPort(VisionPersistenceProperties properties,
-                                                       ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaDeviceRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryDeviceRepository();
+    public DeviceRepositoryPort deviceRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaDeviceRepository(entityManagerFactory);
     }
 
     @Bean
-    public AssetRepositoryPort assetRepositoryPort(VisionPersistenceProperties properties,
-                                                     ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaAssetRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryAssetRepository();
+    public AssetRepositoryPort assetRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaAssetRepository(entityManagerFactory);
     }
 
     @Bean
-    public AssetUsageRepositoryPort assetUsageRepositoryPort(VisionPersistenceProperties properties,
-                                                                ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaAssetUsageRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryAssetUsageRepository();
+    public AssetUsageRepositoryPort assetUsageRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaAssetUsageRepository(entityManagerFactory);
     }
 
     @Bean
-    public TelemetryRepositoryPort telemetryRepositoryPort(VisionPersistenceProperties properties,
-                                                              ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaTelemetryRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryTelemetryRepository();
+    public TelemetryRepositoryPort telemetryRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaTelemetryRepository(entityManagerFactory);
     }
 
     @Bean
-    public DetectionRepositoryPort detectionRepositoryPort(VisionPersistenceProperties properties,
-                                                              ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaDetectionRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryDetectionRepository();
+    public DetectionRepositoryPort detectionRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaDetectionRepository(entityManagerFactory);
     }
 
-    /** docs/plans/done/UX-REWORK-PLAN.md §U-d item 3 — the asset image store, same toggle idiom as the six above. */
+    /** docs/plans/done/UX-REWORK-PLAN.md §U-d item 3 — the asset image store, same shape as the six above. */
     @Bean
-    public AssetImageRepositoryPort assetImageRepositoryPort(VisionPersistenceProperties properties,
-                                                                ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaAssetImageRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryAssetImageRepository();
+    public AssetImageRepositoryPort assetImageRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaAssetImageRepository(entityManagerFactory);
     }
 
-    /** docs/plans/done/OPS-CORE-PLAN.md §G — geofence zones, same toggle idiom as the seven above. */
+    /** docs/plans/done/OPS-CORE-PLAN.md §G — geofence zones, same shape as the seven above. */
     @Bean
-    public GeofenceRepositoryPort geofenceRepositoryPort(VisionPersistenceProperties properties,
-                                                           ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaGeofenceRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryGeofenceRepository();
+    public GeofenceRepositoryPort geofenceRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaGeofenceRepository(entityManagerFactory);
     }
 
-    /** docs/plans/done/U-AUTH-PLAN.md wave 3 — users (identity aggregate), same toggle idiom as the eight above. */
+    /** docs/plans/done/U-AUTH-PLAN.md wave 3 — users (identity aggregate), same shape as the eight above. */
     @Bean
-    public UserRepositoryPort userRepositoryPort(VisionPersistenceProperties properties,
-                                                  ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaUserRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryUserRepository();
+    public UserRepositoryPort userRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaUserRepository(entityManagerFactory);
     }
 
-    /** docs/plans/done/U-AUTH-PLAN.md wave 3 — groups (org-chart nodes), same toggle idiom as the nine above. */
+    /** docs/plans/done/U-AUTH-PLAN.md wave 3 — groups (org-chart nodes), same shape as the nine above. */
     @Bean
-    public GroupRepositoryPort groupRepositoryPort(VisionPersistenceProperties properties,
-                                                    ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaGroupRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryGroupRepository();
+    public GroupRepositoryPort groupRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaGroupRepository(entityManagerFactory);
     }
 
-    /** docs/plans/done/U-SCOPE-PLAN.md slice 2 — pilot→asset assignments, same toggle idiom as the ten above. */
+    /** docs/plans/done/U-SCOPE-PLAN.md slice 2 — pilot→asset assignments, same shape as the ten above. */
     @Bean
-    public AssignmentRepositoryPort assignmentRepositoryPort(VisionPersistenceProperties properties,
-                                                             ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaAssignmentRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryAssignmentRepository();
+    public AssignmentRepositoryPort assignmentRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaAssignmentRepository(entityManagerFactory);
     }
 
-    /** docs/plans/done/TACTICAL-MARKS-PLAN.md §3 — tactical marks, same toggle idiom as the eleven above. */
+    /** docs/plans/done/TACTICAL-MARKS-PLAN.md §3 — tactical marks, same shape as the eleven above. */
     @Bean
-    public MarkRepositoryPort markRepositoryPort(VisionPersistenceProperties properties,
-                                                  ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaMarkRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryMarkRepository();
+    public MarkRepositoryPort markRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaMarkRepository(entityManagerFactory);
     }
 
-    /** docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — training datasets, same toggle idiom as the twelve above. */
+    /** docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — training datasets, same shape as the twelve above. */
     @Bean
-    public DatasetRepositoryPort datasetRepositoryPort(VisionPersistenceProperties properties,
-                                                        ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaDatasetRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryDatasetRepository();
+    public DatasetRepositoryPort datasetRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaDatasetRepository(entityManagerFactory);
     }
 
-    /** docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — training samples, same toggle idiom as the thirteen above. */
+    /** docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — training samples, same shape as the thirteen above. */
     @Bean
-    public TrainingSampleRepositoryPort trainingSampleRepositoryPort(VisionPersistenceProperties properties,
-                                                                     ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaTrainingSampleRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryTrainingSampleRepository();
+    public TrainingSampleRepositoryPort trainingSampleRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaTrainingSampleRepository(entityManagerFactory);
     }
 
     /**
-     * docs/plans/done/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the training-sample image store, same toggle idiom
+     * docs/plans/done/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the training-sample image store, same shape
      * as the fourteen above.
      */
     @Bean
-    public SampleImageStorePort sampleImageStorePort(VisionPersistenceProperties properties,
-                                                      ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaSampleImageStore(entityManagerFactory.getObject());
-        }
-        return new InMemorySampleImageStore();
+    public SampleImageStorePort sampleImageStorePort(EntityManagerFactory entityManagerFactory) {
+        return new JpaSampleImageStore(entityManagerFactory);
     }
 
     /**
-     * docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — map layers (with their grant list), same toggle idiom as
-     * the fifteen above.
-     *
-     * <p>The two persistence modes seed the COP layer differently but converge: {@code
-     * V12__map_layers.sql} inserts it with a fixed id, while the in-memory fallback starts empty and
-     * relies on {@code LayerResolver#copLayerId()}'s synchronized find-or-create, which {@code
-     * ApplicationServiceWiring#mapLayerBootstrapRunner} calls once at startup.
+     * docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — map layers (with their grant list), same shape as
+     * the fifteen above. {@code V12__map_layers.sql} seeds the COP layer at a fixed id, so {@code
+     * LayerResolver#copLayerId()}'s find-or-create always finds it rather than creating one.
      */
     @Bean
-    public MapLayerRepositoryPort mapLayerRepositoryPort(VisionPersistenceProperties properties,
-                                                          ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaMapLayerRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryMapLayerRepository();
+    public MapLayerRepositoryPort mapLayerRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaMapLayerRepository(entityManagerFactory);
     }
 
-    /** docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — map drawings, same toggle idiom as the sixteen above. */
+    /** docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — map drawings, same shape as the sixteen above. */
     @Bean
-    public DrawingRepositoryPort drawingRepositoryPort(VisionPersistenceProperties properties,
-                                                        ObjectProvider<EntityManagerFactory> entityManagerFactory) {
-        if (properties.enabled()) {
-            return new JpaDrawingRepository(entityManagerFactory.getObject());
-        }
-        return new InMemoryDrawingRepository();
+    public DrawingRepositoryPort drawingRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaDrawingRepository(entityManagerFactory);
     }
 }

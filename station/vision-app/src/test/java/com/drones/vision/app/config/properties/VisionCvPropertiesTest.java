@@ -14,8 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Plain unit tests (no Spring context) for {@link VisionCvProperties}'s compact-constructor
  * validation and {@link VisionCvProperties#host()}/{@link VisionCvProperties#port()} parsing —
  * mirrors this module's other no-context record/port-behavior test classes (e.g. {@code
- * devsupport.InMemoryDetectionEventRepositoryTest}) rather than requiring a full {@code
- * @SpringBootTest} just to exercise a record's own constructor.
+ * SimulationResumeRunnerTest}) rather than requiring a full {@code @SpringBootTest} just to
+ * exercise a record's own constructor.
  */
 class VisionCvPropertiesTest {
 

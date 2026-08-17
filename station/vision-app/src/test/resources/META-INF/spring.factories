@@ -1,0 +1,13 @@
+# docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4 -- global Spring TestContext seams, auto-detected via
+# SpringFactoriesLoader so every @SpringBootTest context in this module picks them up with zero
+# per-class annotation. See com.drones.vision.app.testsupport for the implementations.
+
+# Points every context's vision.persistence.jdbc-url/username/password at the one shared
+# Testcontainers Postgres for this JVM instead of application.yaml's localhost:5432 default.
+org.springframework.test.context.ContextCustomizerFactory=\
+com.drones.vision.app.testsupport.PostgresContextCustomizerFactory
+
+# Flyway clean()+migrate()s that same database before every test class, so no test's writes leak
+# into the next class's assertions even when Spring reuses one cached context across several classes.
+org.springframework.test.context.TestExecutionListener=\
+com.drones.vision.app.testsupport.PostgresResetTestExecutionListener

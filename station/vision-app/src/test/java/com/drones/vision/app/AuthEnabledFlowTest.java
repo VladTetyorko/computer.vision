@@ -1,5 +1,7 @@
 package com.drones.vision.app;
 
+import com.drones.vision.identity.application.GroupService;
+import com.drones.vision.identity.application.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,11 +24,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@code /api/auth/login}, the session then reflects that identity through {@code /api/auth/me}, and
  * {@code /api/auth/logout} ends it (a subsequent {@code me} is {@code 401} again).
  *
- * <p>Uses the seeded {@code admin}/{@code admin} account (the {@code AuthSeedRunner} runs at startup
- * regardless of {@code vision.auth.enabled}, against the in-memory repositories in this
- * persistence-disabled profile). The security filter chain is applied to MockMvc via {@code
- * springSecurityFilterChain}; the session established on login is carried forward via {@link
- * MockHttpSession}.
+ * <p>Uses the seeded {@code admin}/{@code admin} account — seeded by {@link DevAccountSeeder} against
+ * the in-memory repositories this persistence-disabled profile runs (the production seed is now a
+ * Flyway migration, {@code storage/persistence}'s {@code db/seed/dev}, which only fires against a real
+ * Postgres — see {@link DevAccountSeeder}'s own javadoc). The security filter chain is applied to
+ * MockMvc via {@code springSecurityFilterChain}; the session established on login is carried forward
+ * via {@link MockHttpSession}.
  */
 @SpringBootTest(properties = {"vision.auth.enabled=true", "vision.publish.enabled=false"})
 class AuthEnabledFlowTest {
@@ -37,10 +40,17 @@ class AuthEnabledFlowTest {
     @Autowired
     private FilterChainProxy springSecurityFilterChain;
 
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private GroupService groupService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
+        DevAccountSeeder.seedIfAbsent(userService, groupService);
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .addFilters(springSecurityFilterChain)
                 .build();
