@@ -80,8 +80,25 @@ class DefaultModelRegistryServiceTest {
     }
 
     @Test
-    void promoteSucceedsForAManagerScopeAndAuditsPromoted() {
-        service.promote(modelA, actor, VisibilityScope.groups(Set.of()));
+    void promoteDeniedForAManagerScopeAndAuditsTheDenialWithoutCallingThePort() {
+        // docs/plans/active/OPS-UX-PLAN.md §1: promoting the live model is deployment-global, so a
+        // MANAGER's own-subtree authority (canManageOrg()) is not enough -- only ADMIN may.
+        VisibilityScope managerScope = VisibilityScope.groups(Set.of());
+
+        AccessDeniedException ex = assertThrows(AccessDeniedException.class,
+                () -> service.promote(modelA, actor, managerScope));
+        assertTrue(ex.getMessage().toLowerCase().contains("not permitted"));
+
+        assertNull(modelRegistry.lastPromoted);
+        AuditEntry entry = onlyEntry();
+        assertEquals(AuditAction.UPDATED, entry.action());
+        assertEquals(AuditTargetType.MODEL, entry.targetType());
+        assertEquals("DENIED:out of scope", entry.details().get("result"));
+    }
+
+    @Test
+    void promoteSucceedsForAnUnboundedScopeAndAuditsPromoted() {
+        service.promote(modelA, actor, VisibilityScope.unbounded());
 
         assertEquals(modelA, modelRegistry.lastPromoted);
         AuditEntry entry = onlyEntry();

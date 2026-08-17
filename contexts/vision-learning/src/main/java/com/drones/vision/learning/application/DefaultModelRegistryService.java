@@ -20,11 +20,13 @@ import com.drones.vision.platform.VisibilityScope;
  * The one implementation of {@link ModelRegistryService}.
  *
  * <h2>Scope gate</h2>
- * {@link #promote} requires {@link VisibilityScope#canManageOrg()} — any manager/admin, mirroring
- * {@code DefaultDatasetService#create}'s gate exactly (docs/plans/done/CV-TRAINING-PLAN.md §7/§8: promotion is
- * the one privileged control-plane action the registry exposes). {@link #models()} is unscoped and
- * never throws, matching {@code CvModelsController}'s existing "any authenticated caller may read
- * the roster" precedent.
+ * {@link #promote} requires {@link VisibilityScope#canAdminister()} — ADMIN only, not any
+ * manager (docs/plans/active/OPS-UX-PLAN.md §1: promoting the live CV model swaps what every
+ * stream in the deployment infers with, a deployment-global blast radius no single group's manager
+ * should have from managing their own subtree alone; {@code DefaultDatasetService#create}'s
+ * {@code canManageOrg()} gate is the right shape for a *team-scoped* action, this is not one).
+ * {@link #models()} is unscoped and never throws, matching {@code CvModelsController}'s existing
+ * "any authenticated caller may read the roster" precedent.
  *
  * <h2>Audit</h2>
  * Every {@link #promote} attempt writes exactly one {@link AuditEntry} against {@link
@@ -71,7 +73,7 @@ public final class DefaultModelRegistryService implements ModelRegistryService {
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
 
-        if (!scope.canManageOrg()) {
+        if (!scope.canAdminister()) {
             audit(actor, ref, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException("Not permitted to promote models");
         }
