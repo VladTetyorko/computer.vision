@@ -85,8 +85,47 @@ docs merge whenever they land. Then the orchestrator applies the reserved-file c
 
 | Wave | State |
 |---|---|
-| S0 | dispatched |
-| S1 | dispatched |
-| S2 | dispatched |
-| S3 | dispatched |
+| S0 | in flight (restarted — see §6) |
+| S1 | **merged** `73d3cc6` — 592/592 green, verified independently by the orchestrator |
+| S2 | in flight (restarted — see §6) |
+| S3 | **merged** `5060686` + wiring `cb99829` — 148 persistence / 190 app tests green |
 | S4–S7 | not started (Band B) |
+
+### Orchestrator changes on top of the agents' work
+
+- **S3:** dropped the `hibernate-hikaricp` dependency the agent added. It supplies only
+  `HikariCPConnectionProvider`, which the chosen design deliberately does not use (it would build a
+  second, unshared pool), so nothing would ever have loaded it. `com.zaxxer:HikariCP` alone is the
+  real dependency. Rebuilt green without it.
+- **Plan §4 decision 2 reversed — `spring.threads.virtual.enabled` stays OFF.** See §7.
+
+---
+
+## 6. Incident: stale worktree bases
+
+Two of the four Band A worktrees were created at `331a6a7` — **28 commits behind**, predating the
+module regroup, so `station/vision-api/` and `storage/persistence/` did not exist in them at all.
+S1 detected this itself and reset; S3 was unaffected. **S2 and S0 were both affected** and were
+redirected to `git reset --hard feat/scale-100`.
+
+Cost was zero only by luck: S2 had written nothing yet, and S0 had only untracked files (which
+survive a hard reset). **Check `git rev-parse HEAD` in every agent worktree before trusting its
+output** — a stale base is silent, and an agent that finds none of its target paths will improvise
+rather than stop.
+
+---
+
+## 7. Reversal: virtual threads stay off
+
+The plan pinned `spring.threads.virtual.enabled=true` as decision 2. That is **wrong for this
+codebase today** and `application.yaml` now records why.
+
+This project targets **Java 21**, where a virtual thread blocking inside a `synchronized` block pins
+its carrier — JEP 491 removes that only in Java 24. `LiveConnection` wraps every blocking
+`SseEmitter#send` in `synchronized (sendLock)`, and `LiveUpdateRegistry#connect` runs its whole
+snapshot burst on the **request** thread. Enabling virtual threads globally would let a handful of
+concurrent `/api/live` connects pin every carrier in the scheduler pool and stall unrelated
+requests — the precise opposite of this plan's purpose.
+
+Revisit after S2 moves those sends off the request thread, or after a move to Java 24+, and only
+with an S0 measurement rather than on reasoning alone.
