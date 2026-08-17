@@ -5,10 +5,12 @@ A reusable, framework-free MAVLink library. Zero project dependencies — it doe
 third-party dependency: `io.dronefleet.mavlink:mavlink`. Frozen seam contract: `API.md`.
 docs/plans/active/MAVLINK-CORE-PLAN.md **W1 done** (L0 kernel, L1 transport, L2 codec, config, ArchUnit),
 **W2 done** (L3 session: peers, dispatch, correlation, link health, TX scheduling), **W3 done**
-(L4 services: heartbeat, command, manual control, message interval; L4½ the broker-seam `api` package).
+(L4 services: heartbeat, command, manual control, message interval; L4½ the broker-seam `api` package),
+**W4 done** — `adapter-mavlink` was rebuilt on this library (its own MODULE.md carries that wave's notes;
+`MavlinkSocketHub`/`CommandAckRegistry`/`MavlinkUdpInputStream`/`MavlinkUdpOutputStream` deleted there).
 
-**Depends on:** nothing internal · `io.dronefleet.mavlink:mavlink` · **Used by:** nobody yet (W1/W2/W3) — `adapter-mavlink` starts consuming it in W4
-**Build/test:** `./mvnw -B -pl drone-link/mavlink-core test` — 101 tests, all green, verified stable across three consecutive full-module runs (W3's own suite; W1/W2 were separately verified across five in their own waves).
+**Depends on:** nothing internal · `io.dronefleet.mavlink:mavlink` · **Used by:** `adapter-mavlink` (`drone-link/mavlink`, since W4 — 7 source files import `com.drones.mavlink.*`)
+**Build/test:** `./mvnw -B -pl drone-link/mavlink-core test` — **102 tests**, all green (re-measured 2026-08-16 after W4; the 101 figure below was W3's, before W4's per-sysid dialect fix added `MavlinkSessionSelfRemovalTest`). Verified stable across three consecutive full-module runs (W3's own suite; W1/W2 were separately verified across five in their own waves).
 
 ## API surface
 

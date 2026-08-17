@@ -32,9 +32,23 @@ chart in daylight, not a SaaS dashboard and not an "AI product". Migration histo
 - Full-bleed video surfaces (Fly cockpit, Wall, the replay player region) carry `.surface-dark`
   and are dark in **both** themes. Never apply it to a lone widget inside a themed page, and never
   hand-build a dark look with tier-1 grays.
-- `--hud-*` frosted pills and `--scrim*` are compositing-over-video values — theme-invariant and
-  legal **only inside `.surface-dark`**. A control floating over a *map* on a themed page is a
-  `--panel-raised` + `--border` + `--shadow` card instead.
+- `--hud-*` frosted pills and `--scrim*` are compositing-over-*imagery* values — theme-invariant
+  and legal inside `.surface-dark` **or on any control floating directly over map tiles or video**,
+  regardless of whether that control's own enclave happens to be dark (widened from "only inside
+  `.surface-dark`" — MAP-UX-RESEARCH M-follow-up, 2026-08-16: `TacticalMap`'s corner chrome was a
+  `--panel-raised` card per the old rule, which is transparent-adjacent `.btn.secondary` ghost
+  buttons in practice and reads as an empty outlined box whenever the map tile under it happens to
+  be light while the button's own tokens resolve dark, or vice versa — no themed pairing is correct
+  against a tile that can be either light or dark independent of app theme or enclave; `--hud-*` is
+  the one surface built to composite over exactly that). This does **not** widen to ordinary page
+  chrome floating over a themed `--panel`/`--bg` (a toolbar, a docked dialog) — those still use
+  `--panel-raised` + `--border` + `--shadow`; a control on a `--panel-raised`/map hybrid card (e.g.
+  `drawing-toolbar.css`'s `card` variant) stays a themed card too, since it never sits directly on
+  the tile. A control outside `.surface-dark` that adopts `--hud-*` must self-apply the `surface-dark`
+  class alongside it (`tactical-map.html`'s chrome buttons/panels; `preflight-checklist.html`'s own
+  card is the original precedent) — the background tokens are already theme-invariant, but a plain
+  `color: var(--text)`/`border-color: var(--border-strong)` etc. underneath is not, and reads
+  invisibly against the dark wash without that lock.
 - Anything you style must be checked in **both themes** before you're done.
 - **When you add a new `.surface-dark` root** (a new full-bleed video surface), it needs two things
   the shared `styles.css` rule does *not* give it for free: (1) if it can render with less content
@@ -89,8 +103,14 @@ Selected/active anything — sidebar route, table row, list row, map marker's li
 
 The default basemap follows the theme (light tiles ↔ light theme; dark tiles ↔ dark theme and
 `.surface-dark`); an explicit user layer pick always wins. One marker glyph, state by colour only (live/offline/attention), `--color-info`
-ring for selection. Overlay controls are light cards pinned to corners on the 8px grid; the
-legend is one quiet row of count chips.
+ring for selection. Overlay controls floating directly over the map tiles — corner toggles, the
+dropdowns they open, the legend — are `--hud-*` frosted pills pinned to corners on the 8px grid
+(§2's widened rule; not the themed `--panel-raised` card this section used to prescribe, which
+ghosts invisible against a tile of the wrong lightness), self-applying `surface-dark` alongside so
+their own text/border tokens lock dark to match. A control that sits on a card *of its own* rather
+than bare tile (a docked toolbar, a dialog opened from the map) stays a themed
+`--panel-raised` + `--border` + `--shadow` card. The legend is one quiet row of count chips.
+Leaflet's own zoom control gets the same HUD treatment via `::ng-deep` where a component draws one.
 
 ## 8. Typography registers
 
@@ -117,7 +137,8 @@ everywhere except structural labels (§8).
 ## Checklist before finishing any UI task
 
 1. Grep your diff: no raw hex/`rgb()`, no off-grid px, no `--hud-*`/`--scrim*` outside
-   `.surface-dark`.
+   `.surface-dark` or a control floating directly over map tiles/video (§2) — and any such control
+   self-applies `surface-dark` alongside it.
 2. Every table/panel you touched conforms to §5/§6; selection per §4.
 3. Screenshot the touched surface in **both themes** (and inside `.surface-dark` if applicable).
 4. `npm run test:ci` + `npx tsc --noEmit` green; `station/vision-web/MODULE.md` updated if the surface
