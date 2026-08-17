@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -188,6 +189,90 @@ class HlsProxyControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().bytes(finalBody))
                 .andExpect(header().string("Set-Cookie", "mtx-session=pinned; Path=/"));
+    }
+
+    /**
+     * The wave's acceptance gate (docs/plans/active/SCALE-100-PLAN.md §5 S1): the per-request
+     * {@code HttpClient} was replaced with one shared client that has no {@link
+     * java.net.CookieHandler}. A shared {@code CookieHandler} would remember whichever cookie it
+     * last saw for the upstream host and hand it to the *next* request through that same client --
+     * exactly the leak this test rules out, using one shared controller instance (one shared
+     * client) across two "viewers" with different cookies.
+     */
+    @Test
+    void sharedClientDoesNotLeakOneViewersCookieToAnother() throws Exception {
+        byte[] body = "segment-bytes".getBytes(StandardCharsets.UTF_8);
+        AtomicReference<String> cookieSeenForStreamA = new AtomicReference<>();
+        AtomicReference<String> cookieSeenForStreamB = new AtomicReference<>();
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/stream-a/seg.mp4", exchange -> {
+            cookieSeenForStreamA.set(exchange.getRequestHeaders().getFirst("Cookie"));
+            // Simulates mediamtx pinning viewer A to a session -- this Set-Cookie must never be
+            // replayed on any *other* viewer's request through the shared client.
+            exchange.getResponseHeaders().add("Set-Cookie", "mtx-session=alice-session; Path=/");
+            exchange.getResponseHeaders().add("Content-Type", "video/mp4");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.createContext("/stream-b/seg.mp4", exchange -> {
+            cookieSeenForStreamB.set(exchange.getRequestHeaders().getFirst("Cookie"));
+            exchange.getResponseHeaders().add("Content-Type", "video/mp4");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.start();
+        // One shared controller instance == one shared HttpClient, exactly like the real bean.
+        MockMvc mockMvc = mockMvcFor(upstream);
+
+        mockMvc.perform(get("/hls/{streamId}/seg.mp4", "stream-a").header("Cookie", "viewer=alice"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/hls/{streamId}/seg.mp4", "stream-b").header("Cookie", "viewer=bob"))
+                .andExpect(status().isOk());
+
+        assertNotNull(cookieSeenForStreamA.get());
+        assertTrue(cookieSeenForStreamA.get().contains("viewer=alice"),
+                "viewer A's own cookie must reach upstream, got: " + cookieSeenForStreamA.get());
+
+        assertNotNull(cookieSeenForStreamB.get());
+        assertTrue(cookieSeenForStreamB.get().contains("viewer=bob"),
+                "viewer B's own cookie must reach upstream, got: " + cookieSeenForStreamB.get());
+        assertFalse(cookieSeenForStreamB.get().contains("viewer=alice"),
+                "viewer A's cookie must never reach viewer B's upstream request, got: " + cookieSeenForStreamB.get());
+        assertFalse(cookieSeenForStreamB.get().contains("mtx-session=alice-session"),
+                "the session cookie mediamtx set for viewer A must never reach viewer B's upstream request, got: "
+                        + cookieSeenForStreamB.get());
+    }
+
+    /**
+     * Byte-range requests are dropped today (harmless for live HLS, which never sends one) but
+     * wrong for the recording playback path (docs/plans/active/SCALE-100-PLAN.md §5 S1, task 3).
+     */
+    @Test
+    void rangeHeaderIsForwardedUpstreamAndContentRangeAcceptRangesArePassedBack() throws Exception {
+        byte[] partialBody = new byte[]{5, 6, 7, 8};
+        AtomicReference<String> receivedRange = new AtomicReference<>();
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            receivedRange.set(exchange.getRequestHeaders().getFirst("Range"));
+            exchange.getResponseHeaders().add("Content-Type", "video/mp4");
+            exchange.getResponseHeaders().add("Content-Range", "bytes 4-7/20");
+            exchange.getResponseHeaders().add("Accept-Ranges", "bytes");
+            exchange.sendResponseHeaders(206, partialBody.length);
+            exchange.getResponseBody().write(partialBody);
+            exchange.close();
+        });
+        upstream.start();
+        MockMvc mockMvc = mockMvcFor(upstream);
+
+        mockMvc.perform(get("/hls/{streamId}/recording.mp4", "stream-1").header("Range", "bytes=4-7"))
+                .andExpect(status().isPartialContent())
+                .andExpect(header().string("Content-Range", "bytes 4-7/20"))
+                .andExpect(header().string("Accept-Ranges", "bytes"))
+                .andExpect(content().bytes(partialBody));
+
+        assertEquals("bytes=4-7", receivedRange.get());
     }
 
     @Test

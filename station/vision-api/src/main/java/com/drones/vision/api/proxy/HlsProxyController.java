@@ -2,17 +2,19 @@ package com.drones.vision.api.proxy;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.exception.HlsUpstreamUnavailableException;
+import jakarta.annotation.PreDestroy;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.net.CookieManager;
-import java.net.CookiePolicy;
-import java.net.HttpCookie;
+import java.io.InputStream;
+import java.io.SequenceInputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -20,10 +22,13 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Driving REST adapter that proxies HLS playback traffic through this app's
@@ -47,52 +52,94 @@ import java.util.Optional;
  * URL-decodes) so segment/playlist names are never decoded and re-encoded
  * in transit. A request under {@code /hls} with no further path segment
  * (e.g. {@code /hls} or {@code /hls/}) simply doesn't match this mapping and
- * falls through to Spring's normal 404 handling.
+ * falls through to Spring's normal 404 handling. The incoming {@code Range}
+ * header (byte-range requests — used by the recording playback path; plain
+ * live HLS never sends one) is forwarded upstream verbatim, and the
+ * upstream's {@code Content-Range}/{@code Accept-Ranges}/{@code
+ * Content-Length} are passed back exactly as received, alongside {@code
+ * Content-Type} and {@code Cache-Control}.
  *
- * <h2>Redirects and cookies</h2>
+ * <h2>Streaming, not buffering</h2>
+ * The response body is streamed straight from the upstream connection to
+ * the browser ({@link HttpResponse.BodyHandlers#ofInputStream()} into an
+ * {@link InputStreamResource}, which Spring's {@code
+ * ResourceHttpMessageConverter} copies in fixed-size chunks) rather than
+ * read fully into a {@code byte[]} first — an fMP4 segment is a few hundred
+ * KB to a couple of MB, and at roughly one segment per second per viewer,
+ * buffering every one of them whole in heap was the single largest
+ * allocation source in the app. The only body content this controller ever
+ * holds in a Java array is the diagnostic preview of a non-2xx upstream
+ * response (at most {@value #ERROR_BODY_PREVIEW_MAX_CHARS} bytes, see
+ * {@link #logProxyOutcome}) — the remainder of even an error body still
+ * streams through untouched, stitched back onto the preview with a {@link
+ * SequenceInputStream} so the browser still sees the whole thing.
+ *
+ * <h2>One shared client, no shared cookie jar</h2>
+ * A single {@link HttpClient} is built once ({@link #HlsProxyController}
+ * constructor) and reused for every proxied request, replacing the
+ * previous per-request client (which allocated a selector thread and a
+ * connection pool per request and never closed either). The previous
+ * per-request client existed <em>because</em> of a per-request {@link
+ * java.net.CookieManager}: mediamtx issues per-viewer session cookies, and
+ * a {@link java.net.CookieHandler} attached to a shared client would
+ * remember viewer A's cookie and hand it to viewer B's request to the same
+ * upstream host — a cross-viewer session leak. This client therefore has
+ * <strong>no</strong> {@code cookieHandler} at all; cookies are handled
+ * entirely as request/response headers scoped to the one servlet request
+ * each proxied call belongs to (see {@link #fetch}), never stored on the
+ * client itself.
+ *
+ * <h2>Redirects, followed by hand instead of by the client</h2>
  * mediamtx pins HLS viewers to a specific internal node with a {@code
- * Set-Cookie} on an initial {@code 302} redirect. This controller follows
- * such redirects itself, server-side, via {@link
- * java.net.http.HttpClient.Redirect#NORMAL} — the browser only ever sees
- * this app's origin and a final {@code 200} — using a fresh {@link
- * CookieManager} per incoming request (seeded from that request's own
- * {@code Cookie} header) so cookies set partway through a redirect chain are
- * carried to the next hop without leaking between unrelated browser
- * requests. Every {@code Set-Cookie} observed across the whole redirect
- * chain (via {@link HttpResponse#previousResponse()}) is relayed back to the
- * browser, oldest hop first, so the browser (and thus its next request) ends
- * up pinned the same way a direct client of mediamtx would be.
- *
- * <h2>Body size</h2>
- * Bodies are buffered fully in memory ({@link HttpResponse.BodyHandlers#ofByteArray()})
- * rather than streamed — acceptable at this scale (playlists are tiny,
- * fMP4 segments are at most a few MB) and far simpler than a true streaming
- * proxy.
+ * Set-Cookie} on an initial {@code 302} redirect. With no cookie handler on
+ * the shared client, {@link HttpClient.Redirect#NORMAL} cannot be trusted
+ * to carry a cookie set on the first hop's response onto the second hop's
+ * request — that carry-over is exactly what a {@code CookieHandler} would
+ * normally supply, and it is deliberately absent here. So this controller
+ * follows redirects itself in {@link #fetch}: the client is built with
+ * {@link HttpClient.Redirect#NEVER}, a bounded loop resolves each {@code
+ * Location} against the previous hop's URI, and each hop's {@code
+ * Set-Cookie} values are explicitly folded into the {@code Cookie} header
+ * sent on the next hop ({@link #mergeCookies}) — a deliberate, local,
+ * per-request replacement for what a shared cookie jar would have done
+ * unsafely. Every hop's {@code Set-Cookie} is also collected, oldest hop
+ * first, and relayed back to the browser so it ends up pinned the same way
+ * a direct client of mediamtx would be.
  *
  * <h2>Failure handling</h2>
  * Only a failure to reach the upstream at all (connection refused, DNS
- * failure, timeout, broken redirect chain) is treated as an error, surfaced
- * as {@link HlsUpstreamUnavailableException} and mapped to {@code 502} by
- * {@link ApiExceptionHandler}. A normal non-2xx response actually received
- * from upstream (e.g. {@code 404} for a not-yet-ready segment) is passed
- * through verbatim, exactly as {@link #proxy} passes through the upstream's
- * {@code Content-Type}, {@code Cache-Control}, and status on success — this
- * controller adds no caching headers of its own, and forwards (rather than
- * drops) whatever caching header mediamtx itself sent (docs/plans/done/MVP2-PLAN.md
- * V-a proxy audit), so mediamtx's own {@code no-cache} on live LL-HLS
- * playlists reaches the browser instead of silently vanishing.
+ * failure, timeout, a redirect chain longer than {@value
+ * #MAX_REDIRECT_HOPS} hops) is treated as an error, surfaced as {@link
+ * HlsUpstreamUnavailableException} and mapped to {@code 502} by {@link
+ * ApiExceptionHandler}. A normal non-2xx response actually received from
+ * upstream (e.g. {@code 404} for a not-yet-ready segment) is passed through
+ * verbatim, exactly as {@link #proxy} passes through the upstream's status
+ * and headers on success — this controller adds no caching headers of its
+ * own, and forwards (rather than drops) whatever caching header mediamtx
+ * itself sent (docs/plans/done/MVP2-PLAN.md V-a proxy audit), so mediamtx's
+ * own {@code no-cache} on live LL-HLS playlists reaches the browser instead
+ * of silently vanishing.
  */
 @RestController
 public class HlsProxyController {
 
     private static final System.Logger LOG = System.getLogger(HlsProxyController.class.getName());
     private static final String HLS_PREFIX = "/hls/";
+    // docs/plans/active/SCALE-100-PLAN.md §5 S1, task 4: these duplicate
+    // VisionApiProperties.HlsProxy's values exactly. Left as local constants
+    // deliberately -- wiring them up is S7's job (station/vision-app/.../support/VisionApiProperties.java
+    // is reserved for that wave), not this one.
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
-    /** How much of a non-2xx upstream error body to include in the WARN log line — enough to identify the problem, not a full dump. */
+    /** How much of a non-2xx upstream error body to include in the WARN log line -- enough to identify the problem, not a full dump. The only body bytes this controller ever buffers (see class javadoc). */
     private static final int ERROR_BODY_PREVIEW_MAX_CHARS = 200;
+    /** mediamtx's own node-pinning flow is exactly one hop (a 302, then a 200 from the pinned node); bounded higher only so a misbehaving or looping upstream fails fast instead of hanging this thread forever. */
+    private static final int MAX_REDIRECT_HOPS = 5;
+    /** Statuses this proxy follows itself, matching the set {@link HttpClient.Redirect#NORMAL} follows. */
+    private static final Set<Integer> REDIRECT_STATUS_CODES = Set.of(301, 302, 303, 307, 308);
 
     private final URI hlsUpstreamBase;
+    private final HttpClient httpClient;
 
     /**
      * @param hlsUpstreamBase base HTTP URL of the mediamtx sidecar's HLS egress that this
@@ -101,33 +148,43 @@ public class HlsProxyController {
      */
     public HlsProxyController(URI hlsUpstreamBase) {
         this.hlsUpstreamBase = Objects.requireNonNull(hlsUpstreamBase, "hlsUpstreamBase must not be null");
+        this.httpClient = HttpClient.newBuilder()
+                // No cookieHandler: see class javadoc "One shared client, no shared cookie jar".
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .connectTimeout(CONNECT_TIMEOUT)
+                .build();
+    }
+
+    /** Releases the shared client's selector thread and pooled connections when this bean is destroyed, since (unlike the old per-request client) this one is held open for the whole app lifetime. */
+    @PreDestroy
+    void closeHttpClient() {
+        httpClient.close();
     }
 
     @GetMapping("/hls/{streamId}/**")
-    public ResponseEntity<byte[]> proxy(@PathVariable String streamId, HttpServletRequest request) {
+    public ResponseEntity<InputStreamResource> proxy(@PathVariable String streamId, HttpServletRequest request) {
         URI upstreamUri = buildUpstreamUri(request);
         try {
-            HttpResponse<byte[]> upstreamResponse = fetch(upstreamUri, request.getHeader(HttpHeaders.COOKIE));
-            logProxyOutcome(request, upstreamResponse);
+            UpstreamResult result = fetch(upstreamUri, request.getHeader(HttpHeaders.COOKIE), request.getHeader(HttpHeaders.RANGE));
+            HttpResponse<InputStream> upstreamResponse = result.finalResponse();
+            int status = upstreamResponse.statusCode();
+            InputStream upstreamBody = upstreamResponse.body();
 
-            HttpHeaders headers = new HttpHeaders();
-            upstreamResponse.headers().firstValue("content-type")
-                    .ifPresent(contentType -> headers.add(HttpHeaders.CONTENT_TYPE, contentType));
-            // docs/plans/done/MVP2-PLAN.md V-a proxy audit: mediamtx marks every LL-HLS live media
-            // playlist response "Cache-Control: no-cache" (never cacheable — the whole point
-            // of polling/blocking-reloading it) and completed segments/older non-LL playlists
-            // "public, max-age=<segment-duration>" (genuinely safe to cache, they're immutable
-            // once named). Forwarding it verbatim, rather than silently dropping it as before,
-            // is what makes "adds no caching to live playlists" true by construction instead of
-            // by the accident of the browser also receiving no Last-Modified/ETag to key a
-            // heuristic cache on — a stock (non-lowLatencyMode) hls.js still re-polls the exact
-            // same index.m3u8 URL on a timer pre-V-b, which a browser HTTP cache CAN legally
-            // serve stale without this header, silently freezing the live edge.
-            upstreamResponse.headers().firstValue("cache-control")
-                    .ifPresent(cacheControl -> headers.add(HttpHeaders.CACHE_CONTROL, cacheControl));
-            collectSetCookies(upstreamResponse).forEach(setCookie -> headers.add(HttpHeaders.SET_COOKIE, setCookie));
+            byte[] errorPreview = null;
+            if (status < 200 || status >= 300) {
+                // Only place this controller buffers anything: a bounded diagnostic preview,
+                // never the whole (possibly large) error body. Re-stitched onto the rest of the
+                // stream below so the browser still receives the complete body.
+                errorPreview = upstreamBody.readNBytes(ERROR_BODY_PREVIEW_MAX_CHARS);
+            }
+            logProxyOutcome(request, upstreamResponse, errorPreview);
 
-            return ResponseEntity.status(upstreamResponse.statusCode()).headers(headers).body(upstreamResponse.body());
+            InputStream responseBody = errorPreview == null
+                    ? upstreamBody
+                    : new SequenceInputStream(new ByteArrayInputStream(errorPreview), upstreamBody);
+
+            HttpHeaders headers = responseHeaders(upstreamResponse, result.setCookies());
+            return ResponseEntity.status(status).headers(headers).body(new InputStreamResource(responseBody));
         } catch (IOException e) {
             throw new HlsUpstreamUnavailableException(
                     "Upstream HLS server unreachable for stream " + streamId + " at " + upstreamUri + ": "
@@ -141,13 +198,15 @@ public class HlsProxyController {
 
     /**
      * DEBUG-logs every proxied request's path and upstream status; WARN-logs the two failure
-     * shapes an operator actually hits in practice — a non-2xx upstream response (with a preview of
+     * shapes an operator actually hits in practice -- a non-2xx upstream response (with a preview of
      * its body, since mediamtx's own error bodies are short and diagnostic) and an upstream {@code
      * Content-Type} of {@code text/html}, which means some *other* service (not mediamtx) is
-     * actually bound to the configured HLS port — this happened for real when uvicorn squatted on
+     * actually bound to the configured HLS port -- this happened for real when uvicorn squatted on
      * mediamtx's default {@code 8888} (see this module's {@code hls-base} config comments).
+     *
+     * @param nonSuccessPreview the bounded preview read from a non-2xx body, or {@code null} for a 2xx response
      */
-    private static void logProxyOutcome(HttpServletRequest request, HttpResponse<byte[]> upstreamResponse) {
+    private static void logProxyOutcome(HttpServletRequest request, HttpResponse<InputStream> upstreamResponse, byte[] nonSuccessPreview) {
         String path = request.getRequestURI();
         int status = upstreamResponse.statusCode();
         LOG.log(System.Logger.Level.DEBUG, () -> "Proxied " + path + " -> upstream status " + status);
@@ -158,20 +217,11 @@ public class HlsProxyController {
                     + contentType.get() + ") -- wrong service on the HLS port?");
         }
 
-        if (status < 200 || status >= 300) {
-            String bodyPreview = bodyPreview(upstreamResponse.body());
+        if (nonSuccessPreview != null) {
+            String bodyPreview = new String(nonSuccessPreview, StandardCharsets.UTF_8);
             LOG.log(System.Logger.Level.WARNING, () -> "Upstream returned " + status + " for " + path
                     + (bodyPreview.isEmpty() ? "" : ": " + bodyPreview));
         }
-    }
-
-    /** First {@value #ERROR_BODY_PREVIEW_MAX_CHARS} characters of a (presumed textual) upstream error body, or {@code ""} for an empty/absent one. */
-    private static String bodyPreview(byte[] body) {
-        if (body == null || body.length == 0) {
-            return "";
-        }
-        String text = new String(body, 0, Math.min(body.length, ERROR_BODY_PREVIEW_MAX_CHARS), StandardCharsets.UTF_8);
-        return text.length() > ERROR_BODY_PREVIEW_MAX_CHARS ? text.substring(0, ERROR_BODY_PREVIEW_MAX_CHARS) : text;
     }
 
     private URI buildUpstreamUri(HttpServletRequest request) {
@@ -185,58 +235,128 @@ public class HlsProxyController {
         return URI.create(target);
     }
 
-    private HttpResponse<byte[]> fetch(URI upstreamUri, String cookieHeader) throws IOException, InterruptedException {
-        CookieManager cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
-        seedCookies(cookieManager, upstreamUri, cookieHeader);
+    /**
+     * Fetches {@code initialUri}, following redirects itself (see class javadoc) up to {@value
+     * #MAX_REDIRECT_HOPS} hops. {@code cookieHeader}/{@code rangeHeader} are the browser's own
+     * request headers, forwarded on every hop; a redirect hop's {@code Set-Cookie} values are
+     * folded into the {@code Cookie} header carried to the next hop ({@link #mergeCookies}) and
+     * also accumulated, oldest first, into the result for relaying back to the browser.
+     */
+    private UpstreamResult fetch(URI initialUri, String cookieHeader, String rangeHeader) throws IOException, InterruptedException {
+        URI uri = initialUri;
+        String cookie = cookieHeader;
+        List<String> setCookies = new ArrayList<>();
 
-        HttpClient client = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .cookieHandler(cookieManager)
-                .connectTimeout(CONNECT_TIMEOUT)
-                .build();
-        HttpRequest httpRequest = HttpRequest.newBuilder(upstreamUri).timeout(REQUEST_TIMEOUT).GET().build();
-        return client.send(httpRequest, HttpResponse.BodyHandlers.ofByteArray());
+        for (int attempt = 0; attempt <= MAX_REDIRECT_HOPS; attempt++) {
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri).timeout(REQUEST_TIMEOUT).GET();
+            if (cookie != null && !cookie.isBlank()) {
+                requestBuilder.header(HttpHeaders.COOKIE, cookie);
+            }
+            if (rangeHeader != null && !rangeHeader.isBlank()) {
+                requestBuilder.header(HttpHeaders.RANGE, rangeHeader);
+            }
+            HttpResponse<InputStream> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
+            List<String> hopSetCookies = response.headers().allValues("set-cookie");
+            setCookies.addAll(hopSetCookies);
+
+            Optional<URI> redirectTarget = redirectLocation(response, uri);
+            if (redirectTarget.isEmpty()) {
+                return new UpstreamResult(response, setCookies);
+            }
+            // Redirect hop: this controller never forwards its body to the browser, so it's
+            // closed/drained here rather than read into the diagnostic-preview path above.
+            response.body().close();
+            cookie = mergeCookies(cookie, hopSetCookies);
+            uri = redirectTarget.get();
+        }
+        throw new IOException("Too many redirects (> " + MAX_REDIRECT_HOPS + ") fetching upstream HLS at " + initialUri);
     }
 
-    /** Seeds the per-request {@link CookieManager} from the browser's own {@code Cookie} header, so it rides along on the initial upstream request and any redirect hop that follows. */
-    private static void seedCookies(CookieManager cookieManager, URI upstreamUri, String cookieHeader) {
+    private static Optional<URI> redirectLocation(HttpResponse<InputStream> response, URI requestUri) {
+        if (!REDIRECT_STATUS_CODES.contains(response.statusCode())) {
+            return Optional.empty();
+        }
+        return response.headers().firstValue("location").map(requestUri::resolve);
+    }
+
+    /**
+     * Folds a redirect hop's {@code Set-Cookie} values into the {@code Cookie} header carried to
+     * the next hop, so a session cookie mediamtx sets partway through a redirect (pinning the
+     * viewer to a node) reaches that node's own request -- replicating, by hand and scoped to this
+     * one request, the one thing a shared {@link java.net.CookieHandler} would otherwise have done
+     * unsafely (see class javadoc). Cookie attributes ({@code Path}, {@code Max-Age}, ...) are
+     * discarded; only the {@code name=value} pair is carried forward, which is all an outgoing
+     * {@code Cookie} header can express anyway.
+     */
+    private static String mergeCookies(String existingCookieHeader, List<String> setCookies) {
+        if (setCookies.isEmpty()) {
+            return existingCookieHeader;
+        }
+        Map<String, String> cookies = new LinkedHashMap<>();
+        putCookiePairs(existingCookieHeader, cookies);
+        for (String setCookie : setCookies) {
+            putCookiePair(setCookie.split(";", 2)[0], cookies);
+        }
+        if (cookies.isEmpty()) {
+            return null;
+        }
+        StringBuilder merged = new StringBuilder();
+        cookies.forEach((name, value) -> {
+            if (!merged.isEmpty()) {
+                merged.append("; ");
+            }
+            merged.append(name).append('=').append(value);
+        });
+        return merged.toString();
+    }
+
+    private static void putCookiePairs(String cookieHeader, Map<String, String> target) {
         if (cookieHeader == null || cookieHeader.isBlank()) {
             return;
         }
         for (String pair : cookieHeader.split(";")) {
-            String trimmed = pair.trim();
-            int eq = trimmed.indexOf('=');
-            if (eq <= 0) {
-                continue; // malformed pair; skip rather than fail the whole proxy request
-            }
-            String name = trimmed.substring(0, eq).trim();
-            String value = trimmed.substring(eq + 1).trim();
-            try {
-                HttpCookie cookie = new HttpCookie(name, value);
-                // HttpCookie(name, value) defaults to RFC 2965 version 1, which CookieManager
-                // then serializes back into an outgoing Cookie header using the legacy
-                // $Version="1"; name="value";$Path="/" syntax -- not what the browser actually
-                // sent and not what a plain HTTP server like mediamtx expects. Version 0 gets
-                // the modern "name=value" syntax real servers understand.
-                cookie.setVersion(0);
-                cookie.setPath("/");
-                cookieManager.getCookieStore().add(upstreamUri, cookie);
-            } catch (IllegalArgumentException e) {
-                LOG.log(System.Logger.Level.DEBUG, () -> "Skipping malformed incoming cookie: " + name);
-            }
+            putCookiePair(pair, target);
         }
     }
 
-    /** Walks the whole redirect chain (oldest hop first) collecting every {@code Set-Cookie} value observed. */
-    private static List<String> collectSetCookies(HttpResponse<byte[]> response) {
-        List<String> setCookies = new ArrayList<>();
-        for (Optional<HttpResponse<byte[]>> hop = Optional.of(response); hop.isPresent(); hop = hop.get().previousResponse()) {
-            setCookies.addAll(0, hop.get().headers().allValues("set-cookie"));
+    private static void putCookiePair(String pair, Map<String, String> target) {
+        String trimmed = pair.trim();
+        int eq = trimmed.indexOf('=');
+        if (eq > 0) {
+            target.put(trimmed.substring(0, eq).trim(), trimmed.substring(eq + 1).trim());
         }
-        return setCookies;
+    }
+
+    private static HttpHeaders responseHeaders(HttpResponse<InputStream> upstreamResponse, List<String> setCookies) {
+        HttpHeaders headers = new HttpHeaders();
+        var upstream = upstreamResponse.headers();
+        upstream.firstValue("content-type").ifPresent(v -> headers.add(HttpHeaders.CONTENT_TYPE, v));
+        // docs/plans/done/MVP2-PLAN.md V-a proxy audit: mediamtx marks every LL-HLS live media
+        // playlist response "Cache-Control: no-cache" (never cacheable -- the whole point
+        // of polling/blocking-reloading it) and completed segments/older non-LL playlists
+        // "public, max-age=<segment-duration>" (genuinely safe to cache, they're immutable
+        // once named). Forwarding it verbatim, rather than silently dropping it as before,
+        // is what makes "adds no caching to live playlists" true by construction instead of
+        // by the accident of the browser also receiving no Last-Modified/ETag to key a
+        // heuristic cache on -- a stock (non-lowLatencyMode) hls.js still re-polls the exact
+        // same index.m3u8 URL on a timer pre-V-b, which a browser HTTP cache CAN legally
+        // serve stale without this header, silently freezing the live edge.
+        upstream.firstValue("cache-control").ifPresent(v -> headers.add(HttpHeaders.CACHE_CONTROL, v));
+        // Byte-range support (recording playback path -- live HLS never triggers these).
+        // Content-Length is forwarded unchanged even on the buffered-preview error path above,
+        // since re-splitting an unchanged body into two InputStreams doesn't change its total size.
+        upstream.firstValue("content-range").ifPresent(v -> headers.add(HttpHeaders.CONTENT_RANGE, v));
+        upstream.firstValue("accept-ranges").ifPresent(v -> headers.add(HttpHeaders.ACCEPT_RANGES, v));
+        upstream.firstValue("content-length").ifPresent(v -> headers.add(HttpHeaders.CONTENT_LENGTH, v));
+        setCookies.forEach(setCookie -> headers.add(HttpHeaders.SET_COOKIE, setCookie));
+        return headers;
     }
 
     private static String withoutTrailingSlash(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    /** The final (non-redirect) upstream response, plus every {@code Set-Cookie} seen across the whole redirect chain, oldest hop first. */
+    private record UpstreamResult(HttpResponse<InputStream> finalResponse, List<String> setCookies) {
     }
 }

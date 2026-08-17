@@ -86,7 +86,7 @@ literal it replaced (see `VisionApiProperties` below).
 | SimulationController | POST | `/api/simulations` | 201 `SimulationResponse` (absent/blank `videoPath` with the default `direct` transport is a fully synthetic simulation, docs/main/CYCLES-PLAN.md §9, CU-a — not an error) | 400 a non-null `videoPath` failing `SimulationService`'s filesystem checks, unrecognized `transport`, (docs/main/CYCLES-PLAN.md §9, CU-a) a `null`/blank `videoPath` combined with `transport=rtsp`/`mjpeg`, (docs/main/CYCLES-PLAN.md §3, §5) a `transport=rtsp`/`mjpeg` spec no registered `FeedTransmitterPort` supports, or (docs/main/CYCLES-PLAN.md §7) an invalid `telemetry` object (fewer than 2 waypoints, an out-of-range coordinate, a non-positive `speedMps`, or an unrecognized `routeMode`); 409 `simulated` category not seeded |
 | SimulationController | DELETE | `/api/simulations/{assetId}` | 204 | idempotent no-op (unknown/already-stopped asset); 400 bad UUID |
 | DiscoveryController | POST | `/api/discovery/scan` | 200 `ScanResultResponse` | 400 unknown method name |
-| HlsProxyController | GET | `/hls/{streamId}/**` | proxied upstream status (typically 200), `Content-Type`/`Cache-Control`/`Set-Cookie` passed through (docs/plans/done/MVP2-PLAN.md V-a: `Cache-Control` forwarding added, was previously dropped) | 502 upstream unreachable; 404 if no `{streamId}` segment (unmapped, Spring's default) |
+| HlsProxyController | GET | `/hls/{streamId}/**` | proxied upstream status (typically 200 or 206 for a `Range` request), `Content-Type`/`Cache-Control`/`Set-Cookie`/`Content-Range`/`Accept-Ranges`/`Content-Length` passed through (docs/plans/done/MVP2-PLAN.md V-a: `Cache-Control` forwarding added, was previously dropped; docs/plans/active/SCALE-100-PLAN.md §5 S1: streamed rather than buffered, `Range` forwarded) | 502 upstream unreachable or a redirect chain longer than 5 hops; 404 if no `{streamId}` segment (unmapped, Spring's default) |
 | AuthController | POST | `/api/auth/login` | 200 `MeResponse` (+ session cookie when auth enabled) | 401 bad credentials (auth enabled); with auth **disabled** always 200 dev admin, no-op (docs/plans/done/U-AUTH-PLAN.md wave 3) |
 | AuthController | POST | `/api/auth/logout` | 204 (invalidates session) | — (idempotent; no-op when auth disabled) |
 | AuthController | GET | `/api/auth/me` | 200 `MeResponse` | 401 when auth enabled + unauthenticated (Spring Security answers it — `/api/auth/me` is not in the enabled chain's permit-list); with auth disabled always 200 dev admin (`authEnabled=false`) (docs/plans/done/U-AUTH-PLAN.md wave 3) |
@@ -246,14 +246,18 @@ for exactly when that is.
 
 `HlsProxyController(URI hlsUpstreamBase)` (constructor-injected raw `URI`, wired by `vision-app`'s `WiringConfiguration` from `VisionPublishProperties.Mediamtx#hlsBase()` — see Conventions for why this one controller deviates from the "ports only" rule). `GET /hls/{streamId}/**` forwards the request to `hlsUpstreamBase + "/" + <raw remainder after "/hls/">`, so browsers never talk to the mediamtx sidecar directly — see `StreamPublisherPort#viewUrl`'s new app-relative contract below.
 
-- **Raw pass-through**: the forwarded path/segment name comes from `HttpServletRequest#getRequestURI()` (servlet-spec-guaranteed undecoded), not the decoded `@PathVariable`, so percent-encoded segment names are never decoded-then-re-encoded.
-- **Redirects**: followed server-side via `java.net.http.HttpClient` (`Redirect.NORMAL`) — the browser only ever sees this app's origin and a final status, never mediamtx's own `302`.
-- **Cookies**: a fresh `CookieManager`/`CookieStore` per incoming request (not shared across browser requests) is seeded from the incoming `Cookie` header and installed as the `HttpClient`'s cookie handler, so a `Set-Cookie` mid-chain (mediamtx's viewer-pinning cookie) rides along to the next redirect hop; every `Set-Cookie` seen across the whole chain (via `HttpResponse#previousResponse()`) is relayed back to the browser, oldest hop first. **Gotcha**: seeded cookies must be built with `HttpCookie#setVersion(0)` — the `HttpCookie(name, value)` constructor defaults to RFC 2965 version 1, which `CookieManager` then re-serializes as the legacy `$Version="1"; name="value";$Path="/"` header instead of the plain `name=value` a real server expects; found by an actual failing test, not by inspection.
-- **Body**: buffered fully as `byte[]` (`HttpResponse.BodyHandlers.ofByteArray()`) — no true streaming; acceptable at this scale (playlists tiny, fMP4 segments at most a few MB, and post-docs/plans/done/MVP2-PLAN.md-V-a's 1s GOP even smaller than before) per KISS. Re-audited for docs/plans/done/MVP2-PLAN.md V-a's latency work and left unchanged: buffering these payload sizes costs single-digit milliseconds, nowhere near the multi-second problem V-a solves elsewhere (encoder GOP, mediamtx LL-HLS config) — not "broken," so not rewritten into a true streaming proxy.
-- **Failure**: only a failure to reach upstream at all (`IOException`/interrupted) throws `HlsUpstreamUnavailableException` → 502; a normal non-2xx actually received from upstream (e.g. a segment not ready yet) passes through verbatim, same as `Content-Type`/`Cache-Control`/status on success.
-- **Caching (docs/plans/done/MVP2-PLAN.md V-a proxy audit)**: this controller never *sets* a `Cache-Control` header of its own — but as of V-a it now *forwards* whatever value upstream (mediamtx) sent, rather than silently dropping it as before. mediamtx marks every LL-HLS live media playlist response `no-cache` (verified against `gohlslib`'s `muxerStream.mediaPlaylistMaxAge()`, the library mediamtx's HLS server is built on); dropping that header entirely relied on the *accidental* fact that a browser with zero cache/validator headers to go on usually won't cache — not a guarantee, and exactly the kind of gap that would silently freeze a stock (pre-`lowLatencyMode`) `hls.js` player's live edge if a browser ever did decide to serve a stale cached copy of the repeatedly-polled `index.m3u8`. See `cacheControlIsForwardedFromUpstreamNotAddedOrDropped` in `HlsProxyControllerTest`.
-- **LL-HLS query strings (docs/plans/done/MVP2-PLAN.md V-a proxy audit)**: `buildUpstreamUri` already forwarded the full raw query string (`request.getQueryString()`) untouched before V-a — LL-HLS's blocking-reload protocol (`_HLS_msn`/`_HLS_part`/`_HLS_skip`) rides on exactly that, so blocking requests already worked correctly; V-a added `llHlsBlockingReloadQueryParametersAreForwardedUntouched` as a regression test since nothing previously asserted it explicitly. Also audited: the controller's own `REQUEST_TIMEOUT`=15s bounds how long a single proxied fetch (including a blocking LL-HLS reload) can take before this controller gives up and surfaces a 502 — mediamtx's own blocking-wait has no independent timeout beyond an initial "too-far-ahead" 400 check, so a genuinely stalled stream could in principle hold a request open that long; a 502 rather than an indefinite hang is a reasonable failure mode, left as-is. Not yet exercised by real traffic — today's shipped player doesn't send `_HLS_msn` at all (stock `hls.js`, not `lowLatencyMode`); relevant once docs/plans/done/MVP2-PLAN.md V-b turns that on.
-- **404 without `{streamId}`**: `/hls` or `/hls/` simply doesn't match the `@GetMapping` pattern and falls through to Spring's ordinary unmapped-route 404 — no special-case code.
+**Rewritten for docs/plans/active/SCALE-100-PLAN.md §5 S1** (video out of the JVM byte path — the app's hardest concurrency ceiling per that plan's §2a/b): streaming instead of buffering, one shared `HttpClient` instead of one per request, `Range` forwarding. Full detail lives in the class's own javadoc; summary below.
+
+- **Raw pass-through**: unchanged — the forwarded path/segment name comes from `HttpServletRequest#getRequestURI()` (servlet-spec-guaranteed undecoded), not the decoded `@PathVariable`, so percent-encoded segment names are never decoded-then-re-encoded.
+- **Body — streamed, not buffered**: `proxy` now returns `ResponseEntity<InputStreamResource>` wrapping `HttpResponse.BodyHandlers.ofInputStream()`, and Spring's `ResourceHttpMessageConverter` copies it to the servlet output stream in fixed-size chunks — no full-segment `byte[]` allocation per request any more. The **only** body content this controller ever buffers is a bounded diagnostic preview (`ERROR_BODY_PREVIEW_MAX_CHARS` = 200 bytes) of a **non-2xx** upstream response, read via `InputStream#readNBytes` and stitched back onto the rest of the (still-streamed) body with a `SequenceInputStream` so the browser still receives the complete error body. `Content-Length` is forwarded from upstream unchanged in both cases, since re-splitting an unchanged body into two `InputStream`s doesn't change its total size.
+- **One shared `HttpClient`, no shared cookie jar**: built once in the constructor (`Redirect.NEVER`, `connectTimeout` only — deliberately **no** `cookieHandler`) and reused for every request, replacing the old per-request client that leaked a selector thread + connection pool on every call (never closed). `@PreDestroy` closes it (`HttpClient` is `AutoCloseable` since Java 21) when the bean is destroyed. **Why no cookie handler**: mediamtx issues per-viewer session cookies; a `java.net.CookieHandler` attached to a *shared* client would remember viewer A's cookie and hand it to viewer B's request to the same upstream host — a cross-viewer session leak. Cookies are instead handled entirely as request/response headers, scoped to the one servlet request each call belongs to. Proven by `sharedClientDoesNotLeakOneViewersCookieToAnother` (`HlsProxyControllerTest`) — this wave's acceptance gate: two sequential requests through the *same* controller instance (same shared client) with different `Cookie` headers each reach upstream carrying only their own cookie, and the `Set-Cookie` mediamtx issues for viewer A never reaches viewer B's request.
+- **Redirects — followed by hand, not by the client**: with no cookie handler, `HttpClient.Redirect.NORMAL` can't be trusted to carry a cookie set on hop 1's response onto hop 2's request (that carry-over is exactly what a `CookieHandler` would otherwise supply). So `fetch` loops itself (`Redirect.NEVER` on the client, bounded at `MAX_REDIRECT_HOPS` = 5 — mediamtx's own pinning flow is exactly one hop, more than 5 throws `IOException` → 502), resolving each hop's `Location` against the previous URI and folding each hop's `Set-Cookie` values into the `Cookie` header sent on the next hop by hand (`mergeCookies` — parses just the `name=value` pair, attributes like `Path`/`Max-Age` are dropped since an outgoing `Cookie` header can't carry them anyway). Every hop's `Set-Cookie` is still collected, oldest hop first, and relayed back to the browser exactly as before.
+- **`Range` forwarded**: the incoming `Range` header (byte-range requests — the recording playback path; live HLS never sends one) is forwarded on every hop, and the upstream's `Content-Range`/`Accept-Ranges` are passed back alongside `Content-Type`/`Cache-Control`. Covered by `rangeHeaderIsForwardedUpstreamAndContentRangeAcceptRangesArePassedBack`.
+- **Failure**: unchanged in shape — only a failure to reach upstream at all (`IOException`/interrupted/too many redirects) throws `HlsUpstreamUnavailableException` → 502; a normal non-2xx actually received from upstream (e.g. a segment not ready yet) passes through verbatim, same as `Content-Type`/`Cache-Control`/status on success.
+- **Caching (docs/plans/done/MVP2-PLAN.md V-a proxy audit)**: unchanged — this controller never *sets* a `Cache-Control` header of its own, only *forwards* whatever value upstream sent (mediamtx marks every LL-HLS live media playlist `no-cache`). See `cacheControlIsForwardedFromUpstreamNotAddedOrDropped` in `HlsProxyControllerTest`.
+- **LL-HLS query strings (docs/plans/done/MVP2-PLAN.md V-a proxy audit)**: unchanged — `buildUpstreamUri` forwards the full raw query string untouched, so LL-HLS's blocking-reload protocol (`_HLS_msn`/`_HLS_part`/`_HLS_skip`) still rides through correctly. The controller's own `REQUEST_TIMEOUT`=15s still bounds how long a single hop (including a blocking LL-HLS reload) can take before surfacing a 502 — mediamtx's own blocking-wait has no independent timeout beyond an initial "too-far-ahead" 400 check.
+- **404 without `{streamId}`**: unchanged — `/hls` or `/hls/` simply doesn't match the `@GetMapping` pattern and falls through to Spring's ordinary unmapped-route 404 — no special-case code.
+- **`CONNECT_TIMEOUT`/`REQUEST_TIMEOUT` still local constants**: docs/plans/active/SCALE-100-PLAN.md §5 S1 task 4 says to leave them — they duplicate `VisionApiProperties.HlsProxy`'s values exactly, but wiring them up is explicitly S7's job (`VisionApiProperties.java` and `vision-app`'s wiring are reserved for that wave, not touched here).
 
 ### `com.drones.vision.api.support` — edge-local helpers + `VisionApiProperties`
 
@@ -1385,3 +1389,53 @@ storage/persistence,station/vision-api,station/vision-app test -DskipWeb`: `adap
 wiring change was needed — no new constructor parameter or bean was introduced, `AssetController`'s
 constructor shape is unchanged (still `AssetService, CurrentUser, TelemetryRepositoryPort,
 AssetImageRepositoryPort`).
+
+## docs/plans/active/SCALE-100-PLAN.md §5 S1 done (video out of the JVM byte path — `HlsProxyController` rewrite)
+
+Rewrote `HlsProxyController` per the plan's three ranked tasks: stream instead of buffer, one shared
+`HttpClient` with no shared cookie handler, forward `Range`. Full mechanism documented in the class's
+own javadoc and summarized in the `com.drones.vision.api.proxy` section above; not repeated here.
+
+**Decisions**:
+- **Streaming**: `ResponseEntity<InputStreamResource>` (Spring's `ResourceHttpMessageConverter`,
+  which copies in fixed-size chunks synchronously on the request thread) chosen over
+  `StreamingResponseBody` specifically because the latter triggers Spring MVC's async request
+  processing, which would have forced every existing `MockMvc` test in `HlsProxyControllerTest` to
+  add explicit `asyncDispatch` plumbing — a test-shape change the wave's acceptance bar ("no
+  assertion edited") ruled out. `InputStreamResource` needed none of that: it's a normal synchronous
+  return type, so every pre-existing test still passes unmodified.
+- **Redirects**: `HttpClient.Redirect.NEVER` + a bounded manual hop loop (`fetch`, `MAX_REDIRECT_HOPS`
+  = 5), not `Redirect.NORMAL`. With the cookie handler removed (see below), whether the JDK client's
+  own `NORMAL` redirect logic replays a manually-set `Cookie` header from hop 1 onto hop 2 is
+  undocumented internal behavior — not something to build mediamtx's viewer-pinning flow on top of.
+  Manual hop-following makes the cookie carry-over explicit and testable (`mergeCookies`) instead of
+  relying on it.
+- **Cookie isolation**: no `cookieHandler` on the shared client at all; cookies flow only as
+  request/response headers scoped to one servlet request. This is the wave's stated security trap and
+  its acceptance gate — `sharedClientDoesNotLeakOneViewersCookieToAnother` proves two sequential
+  requests through the same shared client with different `Cookie` headers never cross-contaminate,
+  including the `Set-Cookie` mediamtx issues mid-chain.
+- **`CONNECT_TIMEOUT`/`REQUEST_TIMEOUT`**: left as local constants exactly as instructed (plan §5 S1
+  task 4) — they duplicate `VisionApiProperties.HlsProxy` already, but wiring them up belongs to S7,
+  which also owns `VisionApiProperties.java` and `vision-app`'s wiring (both reserved, untouched here).
+
+**Config keys for the orchestrator** (not added here — `application.yaml` and
+`station/vision-app/.../config/wiring/**` are reserved for Band A, per
+docs/plans/active/SCALE-100-CONTEXT.md §1): none *new* were introduced by this wave — no constructor
+parameter or bean changed shape (`HlsProxyController(URI hlsUpstreamBase)` is unchanged), so no wiring
+edit is required for this wave to function. The plan's own §5 S1 task 4 and §6 additionally ask for
+`spring.threads.virtual.enabled=true` and a pinned `server.tomcat.max-connections` — those are plain
+`application.yaml` lines with no code-side dependency on anything in this wave's diff, left for the
+orchestrator to apply alongside S2/S3's reserved-file keys.
+
+**Before/after** (`./mvnw -B -pl station/vision-api test -DskipWeb`): `HlsProxyControllerTest`
+**8 → 10** (2 new: the cookie-isolation acceptance gate, and `Range`/`Content-Range`/`Accept-Ranges`
+forwarding). All 8 pre-existing tests pass with **zero assertions edited**. Module total: **592/592**
+green, no other test file touched or affected (`git diff --stat` for this task: only
+`HlsProxyController.java` and `HlsProxyControllerTest.java`).
+
+**Not done, deferred to later waves**: `spring.threads.virtual.enabled` / `server.tomcat.max-connections`
+(application.yaml, reserved); wiring `CONNECT_TIMEOUT`/`REQUEST_TIMEOUT` to `VisionApiProperties.HlsProxy`
+(S7, `VisionApiProperties.java` reserved); the S0 load-rig numbers this wave's acceptance criteria are
+ultimately measured against (heap allocation rate, thread count under 100 concurrent viewers,
+byte-identical segment hashes) — those are S0's rig's job, not exercised by this module's unit tests.
