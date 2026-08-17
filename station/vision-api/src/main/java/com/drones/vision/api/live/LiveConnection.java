@@ -7,9 +7,14 @@ import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 
 /**
@@ -21,9 +26,26 @@ import java.util.function.Predicate;
  * <h2>Threading</h2>
  * {@link #topics()} is a concurrent set — safe to read/mutate from the connecting request thread,
  * a later {@code PATCH} request thread, and the shared dispatcher thread broadcasting updates, all
- * without external locking. Every {@code send*}/{@link #heartbeat()} call serializes on one lock
- * per connection, since {@link SseEmitter#send} is not safe to call concurrently from two threads
- * for the same emitter.
+ * without external locking. Every {@code send*}/{@link #heartbeat()} call still acquires {@link
+ * #sendLock} around the actual {@link SseEmitter#send} call, since two writes to the same emitter
+ * must never interleave on the wire — but {@link #sendLock} is a {@link ReentrantLock}, not {@code
+ * synchronized}: this connection's write is dispatched onto a virtual thread (docs/plans/active/SCALE-100-PLAN.md
+ * §5 S2 item 2, see {@code LiveUpdateRegistry}'s {@code connectionWriteExecutor}), and a {@code
+ * synchronized} block held across a blocking I/O call pins that virtual thread's carrier for the
+ * whole blocked duration regardless of contention — exactly the kind of stall this wave exists to
+ * remove. {@link ReentrantLock} parks instead of pinning.
+ *
+ * <h2>Ordering under concurrent dispatch</h2>
+ * A lock (fair or not) only excludes concurrent execution; it makes no promise about which waiting
+ * thread runs next once dispatch runs on a virtual-thread-per-task executor with no shared, ordered
+ * work queue — two envelopes submitted A-then-B could race to acquire the lock B-then-A. {@link
+ * #enqueueSend}/{@link #enqueueHeartbeat} close that gap: each queues its write onto {@link
+ * #writeChain}, a per-connection {@link CompletableFuture} chain, so a later write cannot even
+ * <em>start</em> running until the earlier one has finished — ordering by construction, not by
+ * scheduling luck. {@link #sendConnected} (the {@code connect()} handshake burst) is not chained —
+ * it runs synchronously, once, before this connection is reachable by a concurrent dispatch for any
+ * topic it did not yet subscribe to; {@link #sendLock} alone is enough to keep it from corrupting a
+ * write that races in from another topic mid-burst.
  */
 final class LiveConnection {
 
@@ -31,7 +53,9 @@ final class LiveConnection {
     private final SseEmitter emitter;
     private final Predicate<String> mapVisibility;
     private final Set<LiveTopic> topics = ConcurrentHashMap.newKeySet();
-    private final Object sendLock = new Object();
+    private final ReentrantLock sendLock = new ReentrantLock();
+    private final AtomicReference<CompletableFuture<Void>> writeChain =
+            new AtomicReference<>(CompletableFuture.completedFuture(null));
 
     /**
      * @param mapVisibility whether this connection's viewer may see a {@code map} event about a given
@@ -76,25 +100,83 @@ final class LiveConnection {
     }
 
     void sendConnected(LiveConnectedResponse connected) throws IOException {
-        synchronized (sendLock) {
+        sendLock.lock();
+        try {
             emitter.send(SseEmitter.event().name("connection").data(connected, MediaType.APPLICATION_JSON));
+        } finally {
+            sendLock.unlock();
         }
     }
 
-    void send(LiveEnvelopeResponse envelope) throws IOException {
-        synchronized (sendLock) {
-            emitter.send(SseEmitter.event().id(Long.toString(envelope.seq())).data(envelope, MediaType.APPLICATION_JSON));
+    /**
+     * Writes one already-serialized envelope (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 1 — the caller
+     * serializes once in {@code LiveUpdateRegistry#serialize} and hands the same {@code String} to
+     * every subscribed connection, rather than each connection re-encoding the same object). {@code
+     * seq} still carries the SSE event's own {@code id:} field so {@code Last-Event-ID} resume keeps
+     * working unchanged.
+     *
+     * @param seq  the envelope's sequence number, sent as the SSE {@code id:} field
+     * @param json the envelope, already serialized to JSON
+     */
+    void send(long seq, String json) throws IOException {
+        sendLock.lock();
+        try {
+            emitter.send(SseEmitter.event().id(Long.toString(seq)).data(json, MediaType.APPLICATION_JSON));
+        } finally {
+            sendLock.unlock();
         }
     }
 
     /** A comment line (not a {@code data:} event — never reaches {@code EventSource.onmessage}) so proxies don't kill an idle connection. */
     void heartbeat() throws IOException {
-        synchronized (sendLock) {
+        sendLock.lock();
+        try {
             emitter.send(SseEmitter.event().comment("keepalive"));
+        } finally {
+            sendLock.unlock();
+        }
+    }
+
+    /**
+     * Queues a data-envelope write onto {@link #writeChain} (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 2)
+     * — see this class's "Ordering under concurrent dispatch" javadoc. The returned future completes
+     * (successfully or exceptionally) once the write has actually run; it never completes exceptionally
+     * with a checked type since {@link #send} is wrapped in {@link UncheckedIOException}, and it never
+     * throws synchronously — the caller ({@code LiveUpdateRegistry#dispatchWrite}) attaches its own
+     * timeout and failure handling.
+     *
+     * @param seq      the envelope's sequence number
+     * @param json     the envelope, already serialized to JSON
+     * @param executor where the write actually runs
+     * @return a future completing when the write has run
+     */
+    CompletableFuture<Void> enqueueSend(long seq, String json, Executor executor) {
+        return enqueueWrite(() -> send(seq, json), executor);
+    }
+
+    /** Queues a heartbeat write onto {@link #writeChain} — see {@link #enqueueSend}. */
+    CompletableFuture<Void> enqueueHeartbeat(Executor executor) {
+        return enqueueWrite(this::heartbeat, executor);
+    }
+
+    private CompletableFuture<Void> enqueueWrite(IoRunnable write, Executor executor) {
+        return writeChain.updateAndGet(previous -> previous.thenRunAsync(() -> runOrThrow(write), executor));
+    }
+
+    private static void runOrThrow(IoRunnable write) {
+        try {
+            write.run();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
     void completeWithError(Throwable cause) {
         emitter.completeWithError(cause);
+    }
+
+    @FunctionalInterface
+    private interface IoRunnable {
+        void run() throws IOException;
     }
 }

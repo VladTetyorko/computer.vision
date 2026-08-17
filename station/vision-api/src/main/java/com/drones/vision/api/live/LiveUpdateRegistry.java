@@ -35,6 +35,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.net.URI;
@@ -45,13 +46,16 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import com.drones.vision.api.controller.AssetController;
 import com.drones.vision.api.controller.EventController;
 import com.drones.vision.api.controller.StreamController;
@@ -160,17 +164,55 @@ import com.drones.vision.api.controller.StreamController;
  * snapshots in the same dispatch, instead of {@code vision-app} needing a second call site (and
  * {@link FleetLiveUpdatePort} a second, near-duplicate method) for what is, at every call site
  * that matters, the same fact: "fleet-level state changed, re-derive your own snapshot(s)".
+ *
+ * <h2>Connection writes</h2>
+ * Everything above — sequencing ({@link #sequencer}), coalescing, and deciding which connections a
+ * topic reaches — still happens on {@link #scheduler}'s single thread, so envelope ordering within
+ * a topic is exactly the order {@link #scheduler} ran the code that appended/broadcast them.
+ * What's off that thread (docs/plans/active/SCALE-100-PLAN.md §5 S2) is the actual write: {@link #broadcast}
+ * serializes an envelope to JSON exactly once ({@link #serialize}) and hands that one {@code
+ * String} to every subscribed {@link LiveConnection}, each of which queues its own write onto
+ * {@link #connectionWriteExecutor} (one virtual thread per write) instead of blocking {@link
+ * #scheduler} on {@code SseEmitter.send()} once per connection — a single slow/stalled client used
+ * to hold up delivery to every other connection, and delay the next coalesce/heartbeat tick
+ * besides. {@link LiveConnection#enqueueSend}/{@link LiveConnection#enqueueHeartbeat} still
+ * guarantee one connection's own writes run in the order they were queued (see that class's
+ * "Ordering under concurrent dispatch" javadoc), so no client ever sees its own stream reordered
+ * even though many connections now write concurrently. {@link #dispatchWrite} bounds each write at
+ * {@value #CONNECTION_WRITE_TIMEOUT_MILLIS}ms; past that — whether the write itself stalled or an
+ * earlier write still ahead of it in that connection's own chain is stuck — the connection is
+ * unregistered, the same outcome an {@link IOException} from a dead client always produced.
  */
 @Component
 @ConditionalOnProperty(prefix = "vision.live", name = "enabled", matchIfMissing = true)
 public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryLiveUpdatePort,
         DetectionLiveUpdatePort, MapLiveUpdatePort, EventLiveUpdatePort {
 
+    private static final System.Logger LOG = System.getLogger(LiveUpdateRegistry.class.getName());
+
     /** How often {@link #flushPending()} drains coalesced telemetry/detections (docs/plans/done/REALTIME-PLAN.md §4, item 3). */
     static final long COALESCE_MILLIS = 150L;
 
     /** How often {@link #heartbeatAll()} sends a keepalive comment (docs/plans/done/REALTIME-PLAN.md §4, item 3). */
     static final long HEARTBEAT_MILLIS = 15_000L;
+
+    /**
+     * How long {@link #dispatchWrite} waits for one connection's queued write before giving up on
+     * it and unregistering the connection (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 3, candidate config
+     * key {@code vision.api.live.send-timeout} per that plan's §6) — bounds a stalled client's
+     * blast radius to itself, never to any other connection's delivery.
+     */
+    static final long CONNECTION_WRITE_TIMEOUT_MILLIS = 3_000L;
+
+    /**
+     * How often {@link #evictUnusedAssetBuffers()} sweeps {@link #telemetryBuffers}/{@link
+     * #detectionBuffers} for asset ids no open connection subscribes to anymore
+     * (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 4) — those two maps are otherwise the one part of this
+     * class's state with no natural upper bound: {@link #bufferFor} only ever adds to them, so a
+     * fleet that has ever had N distinct assets watched keeps N buffers for the life of the
+     * process even after every one of them stops being watched.
+     */
+    static final long BUFFER_EVICTION_MILLIS = 60_000L;
 
     /** Retained samples per asset's {@code telemetry} topic (FIFO — see {@link LiveRingBuffer}). */
     static final int TELEMETRY_BUFFER_CAPACITY = 50;
@@ -206,6 +248,19 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     private final ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort;
     private final ScheduledExecutorService scheduler;
 
+    /** One JSON encode per envelope, not one per connection — see the class javadoc's "Connection writes" section. */
+    private final JsonMapper jsonMapper = new JsonMapper();
+
+    /**
+     * Where a connection's own write actually runs, off {@link #scheduler} — a virtual thread per
+     * write, unconditionally instantiated (not constructor-injected: this class already sits at the
+     * five-constructor-parameter ceiling, see {@code .claude/skills/java-clean-code/SKILL.md} §3,
+     * and unlike {@link #scheduler} nothing here needs deterministic single-step test control, only
+     * real concurrency to exercise). Candidate config key {@code vision.api.live.dispatch-threads}
+     * per docs/plans/active/SCALE-100-PLAN.md §6 if a bounded platform thread pool is ever preferred instead.
+     */
+    private final ExecutorService connectionWriteExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
     private final AtomicLong sequencer = new AtomicLong(0L);
     private final ConcurrentHashMap<String, LiveConnection> connections = new ConcurrentHashMap<>();
 
@@ -214,6 +269,13 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     private final LiveRingBuffer devicesBuffer = new LiveRingBuffer(1, true);
     private final LiveRingBuffer detectionEventsBuffer = new LiveRingBuffer(DETECTION_EVENT_BUFFER_CAPACITY, false);
     private final LiveRingBuffer mapBuffer = new LiveRingBuffer(MAP_BUFFER_CAPACITY, false);
+
+    /**
+     * Per-asset buffers for {@code telemetry:<assetId>}/{@code detections:<assetId>} — {@link
+     * #bufferFor} only ever adds an entry here ({@code computeIfAbsent}); {@link
+     * #evictUnusedAssetBuffers()} is what keeps these two maps from retaining one buffer per asset
+     * ever watched for the life of the process (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 4).
+     */
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> telemetryBuffers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> detectionBuffers = new ConcurrentHashMap<>();
 
@@ -271,6 +333,8 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
         this.scheduler.scheduleAtFixedRate(this::flushPending, COALESCE_MILLIS, COALESCE_MILLIS, TimeUnit.MILLISECONDS);
         this.scheduler.scheduleAtFixedRate(this::heartbeatAll, HEARTBEAT_MILLIS, HEARTBEAT_MILLIS, TimeUnit.MILLISECONDS);
+        this.scheduler.scheduleAtFixedRate(this::evictUnusedAssetBuffers, BUFFER_EVICTION_MILLIS, BUFFER_EVICTION_MILLIS,
+                TimeUnit.MILLISECONDS);
     }
 
     private static ScheduledExecutorService defaultScheduler() {
@@ -325,7 +389,10 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             for (LiveTopic topic : connection.topics()) {
                 for (LiveEnvelopeResponse envelope : replayFor(topic, lastEventId)) {
                     if (connection.mayReceive(envelope)) {
-                        connection.send(envelope);
+                        String json = serialize(envelope);
+                        if (json != null) {
+                            connection.send(envelope.seq(), json);
+                        }
                     }
                 }
             }
@@ -333,6 +400,22 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             connections.remove(connectionId);
         }
         return emitter;
+    }
+
+    /**
+     * Test seam: registers a connection around an already-constructed {@link SseEmitter} — a test
+     * double that records or deliberately blocks on {@code send}, typically — bypassing the real
+     * {@link #connect} handshake and snapshot burst, so a test can observe exactly what {@link
+     * #broadcast}/{@link #heartbeatAll} write without a real servlet request/response round trip.
+     *
+     * @return the new connection's id
+     */
+    String register(SseEmitter emitter, Set<LiveTopic> topics, Predicate<String> mapVisibility) {
+        String connectionId = UUID.randomUUID().toString();
+        LiveConnection connection = new LiveConnection(connectionId, emitter, mapVisibility);
+        connection.topics().addAll(topics);
+        connections.put(connectionId, connection);
+        return connectionId;
     }
 
     /**
@@ -363,7 +446,10 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
                 if (connection.topics().add(topic)) {
                     for (LiveEnvelopeResponse envelope : bufferFor(topic).snapshot()) {
                         if (connection.mayReceive(envelope)) {
-                            connection.send(envelope);
+                            String json = serialize(envelope);
+                            if (json != null) {
+                                connection.send(envelope.seq(), json);
+                            }
                         }
                     }
                 }
@@ -498,14 +584,16 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         }
     }
 
-    /** Package-private so a test can trigger a heartbeat deterministically instead of waiting on the real timer. */
+    /**
+     * Package-private so a test can trigger a heartbeat deterministically instead of waiting on the
+     * real timer. Each connection's write is queued/dispatched exactly like {@link #broadcast}'s —
+     * see the class javadoc's "Connection writes" section — so one connection with a stalled write
+     * already queued ahead of its heartbeat never delays this method's return, nor any other
+     * connection's heartbeat.
+     */
     void heartbeatAll() {
         for (LiveConnection connection : connections.values()) {
-            try {
-                connection.heartbeat();
-            } catch (IOException e) {
-                unregister(connection.id(), e);
-            }
+            dispatchWrite(connection, connection.enqueueHeartbeat(connectionWriteExecutor));
         }
     }
 
@@ -522,18 +610,59 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * Sends {@code envelope} to every connection subscribed to {@code topic} <em>and</em> permitted
      * to receive it — the second condition only ever excludes anything on the {@code map} topic (see
      * {@link LiveConnection#mayReceive}); every other topic's payload passes unconditionally.
+     *
+     * <p>Serializes {@code envelope} exactly once and dispatches one write per matching connection
+     * onto {@link #connectionWriteExecutor} — see the class javadoc's "Connection writes" section.
+     * This method itself never blocks on a connection's write, so a stalled client cannot delay
+     * delivery to any other connection subscribed to the same topic, nor the next scheduled tick.
      */
     private void broadcast(LiveTopic topic, LiveEnvelopeResponse envelope) {
+        String json = serialize(envelope);
+        if (json == null) {
+            return; // already logged in serialize() -- nothing valid to send to anyone
+        }
         for (LiveConnection connection : connections.values()) {
             if (!connection.topics().contains(topic) || !connection.mayReceive(envelope)) {
                 continue;
             }
-            try {
-                connection.send(envelope);
-            } catch (IOException e) {
-                unregister(connection.id(), e);
-            }
+            dispatchWrite(connection, connection.enqueueSend(envelope.seq(), json, connectionWriteExecutor));
         }
+    }
+
+    /**
+     * Serializes {@code envelope} to JSON exactly once (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 1) so
+     * {@link #broadcast} can hand the same {@code String} to every subscribed connection instead of
+     * each one re-encoding the same object — {@code broadcast}'s cost used to grow with both the
+     * number of connections and the size of the envelope; now only with the number of connections.
+     *
+     * @return the serialized envelope, or {@code null} if serialization failed (logged here; the
+     *         caller treats {@code null} as "nothing valid to send" rather than propagating — an
+     *         uncaught exception here would otherwise permanently kill {@link #flushPending}'s own
+     *         {@code scheduleAtFixedRate} tick, taking every future topic down with it)
+     */
+    private String serialize(LiveEnvelopeResponse envelope) {
+        try {
+            return jsonMapper.writeValueAsString(envelope);
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING, "failed to serialize live envelope, type=" + envelope.type(), e);
+            return null;
+        }
+    }
+
+    /**
+     * Bounds one already-queued connection write (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 3): if it has
+     * not completed within {@link #CONNECTION_WRITE_TIMEOUT_MILLIS} — whether because the write
+     * itself stalled or because an earlier write still ahead of it in {@link LiveConnection}'s own
+     * chain is stuck — this connection is unregistered so a slow/dead client can never hold up
+     * anyone else's delivery. {@link CompletableFuture#orTimeout} schedules its own timer rather
+     * than blocking, so nothing here blocks the caller (always {@link #scheduler}'s thread).
+     */
+    private void dispatchWrite(LiveConnection connection, CompletableFuture<Void> write) {
+        write.orTimeout(CONNECTION_WRITE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+                .exceptionally(cause -> {
+                    unregister(connection.id(), cause);
+                    return null;
+                });
     }
 
     private void unregister(String connectionId, Throwable cause) {
@@ -541,6 +670,25 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         if (removed != null) {
             removed.completeWithError(cause);
         }
+    }
+
+    /**
+     * Removes any {@link #telemetryBuffers}/{@link #detectionBuffers} entry for an asset no
+     * currently-open connection subscribes to anymore (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 4) — see
+     * those fields' own javadoc for why this sweep exists. Package-private so a test can trigger it
+     * directly instead of waiting on the real {@value #BUFFER_EVICTION_MILLIS}ms timer.
+     */
+    void evictUnusedAssetBuffers() {
+        telemetryBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.TELEMETRY));
+        detectionBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.DETECTIONS));
+    }
+
+    private Set<AssetId> subscribedAssetIds(LiveTopicKind kind) {
+        return connections.values().stream()
+                .flatMap(connection -> connection.topics().stream())
+                .filter(topic -> topic.kind() == kind)
+                .map(LiveTopic::assetId)
+                .collect(Collectors.toSet());
     }
 
     /** Package-private (rather than {@code private}) purely so a pure unit test in this package can exercise the resume-vs-snapshot decision directly, without going through a real {@code SseEmitter}. */
