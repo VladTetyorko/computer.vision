@@ -88,6 +88,25 @@
             <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Test-only: DevAccountSeedMigrationTest verifies db/seed/dev's hardcoded password
+             hashes against their plaintexts with the same BCryptPasswordEncoder vision-app's
+             BcryptPasswordHasher wraps (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1). This module has no
+             runtime dependency on Spring Security and never will; version comes from
+             spring-boot-dependencies, no root-pom pin needed, same as every other dependency here. -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- spring-security-crypto marks spring-core optional (it expects a Spring Boot app to
+             already have it); spring-core bundles its own commons-logging bridge (spring-jcl), so
+             pulling it in here is the whole fix for BCryptPasswordEncoder's NoClassDefFoundError,
+             not a step toward any runtime Spring dependency. -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 </project>
