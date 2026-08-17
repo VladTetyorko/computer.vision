@@ -54,7 +54,7 @@ public class PersistenceWiringConfiguration {
     @Bean(destroyMethod = "close")
     public EntityManagerFactory persistenceEntityManagerFactory(VisionPersistenceProperties properties) {
         return PersistenceUnit.start(properties.jdbcUrl(), properties.username(), properties.password(),
-                properties.seedDevUsers());
+                properties.seedDevUsers(), properties.pool().toSettings());
     }
 
     @Bean

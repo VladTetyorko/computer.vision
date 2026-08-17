@@ -21,6 +21,19 @@
 spring:
   application:
     name: vision
+  # threads.virtual.enabled is deliberately NOT set here, reversing
+  # docs/plans/active/SCALE-100-PLAN.md §4 decision 2, which pinned it "on".
+  # This project targets Java 21 (root pom java.version), where a virtual thread
+  # that blocks inside a `synchronized` block PINS its carrier thread -- JEP 491
+  # removes that only from Java 24. LiveConnection guards every SseEmitter#send
+  # with `synchronized (sendLock)` and that send is blocking network I/O, and
+  # LiveUpdateRegistry#connect runs its whole snapshot burst on the request
+  # thread. Turning virtual threads on globally would therefore let a handful of
+  # concurrent /api/live connects pin every carrier in the scheduler's pool and
+  # stall unrelated requests -- the opposite of what the wave is for.
+  # Re-evaluate once SCALE-100 S2 has moved those sends off the request thread
+  # (or once this project moves to Java 24+), then measure with the S0 rig
+  # before flipping it.
 
 vision:
 
@@ -56,6 +69,25 @@ vision:
     # -- docker-compose.yml sets it true for the friends-demo stack; nothing
     # else should.
     seed-dev-users: false
+    # HikariCP sizing for the ONE pool PersistenceUnit shares between Flyway and
+    # Hibernate (docs/plans/active/SCALE-100-PLAN.md S3). Before S3 there was no
+    # pool at all -- Hibernate's built-in DriverManager provider opened a
+    # connection per EntityManager and said "not intended for production use" at
+    # every startup. Every key below is commented out because it DOCUMENTS the
+    # default PersistencePoolSettings.defaults() already declares; uncommenting
+    # one changes nothing until you edit it.
+    #
+    # max-size is the real concurrency ceiling of this app's write path:
+    # JpaOperations opens an EntityManager (and therefore takes a connection) per
+    # repository call, so a request touching three repositories holds three in
+    # sequence. Raise it with Postgres's own max_connections in mind, not in
+    # isolation -- the database is the shared resource, and several app instances
+    # would each carry a pool of this size.
+    # pool:
+    #   max-size: 20
+    #   min-idle: 5
+    #   connection-timeout: 30s
+    #   leak-detection-threshold: 30s
 
   # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3) ---
   auth:
