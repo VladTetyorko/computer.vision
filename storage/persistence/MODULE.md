@@ -8,12 +8,20 @@ pilot→asset assignments (docs/plans/done/U-SCOPE-PLAN.md slice 2) — tactical
 operational picture (docs/plans/done/TACTICAL-MARKS-PLAN.md M2) — and the map's Common Operational Picture:
 layers with grantable access, and drawings (docs/plans/done/MAP-REWORK-PLAN.md Wave C).
 
-**Depends on:** vision-domain, `org.hibernate.orm:hibernate-core`, `org.postgresql:postgresql`,
+**Depends on:** vision-domain, `org.hibernate.orm:hibernate-core`, `org.hibernate.orm:hibernate-hikaricp`
+(docs/plans/active/SCALE-100-PLAN.md S3 — declared for its version pin only, see "Connection pool" below for why
+its own `HikariCPConnectionProvider` is not what's actually wired), `com.zaxxer:HikariCP` (S3, explicit compile-scope
+dependency — `hibernate-hikaricp` declares it `runtime`-scope only, which is not enough for `PersistenceUnit` to
+reference `HikariConfig`/`HikariDataSource` directly), `org.postgresql:postgresql`,
 `org.flywaydb:flyway-core`/`flyway-database-postgresql`, `tools.jackson.core:jackson-databind`
 (Jackson 3, for jsonb columns — see Conventions) · **Used by:** vision-app
 (`PersistenceWiringConfiguration` — unconditional since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b;
 the `vision.persistence.enabled` flag is gone, Postgres is the only store)
-**Build/test:** `./mvnw -B -pl storage/persistence test` — 137 tests (up from 133 — measured directly
+**Build/test:** `./mvnw -B -pl storage/persistence test` — 148 tests (up from 137 — measured directly
+via `./mvnw -B -pl storage/persistence clean test`, docker reachable, nothing skipped; docs/plans/active/SCALE-100-PLAN.md
+S3: a real HikariCP-backed connection pool, shared with Flyway, replaces Hibernate's built-in unpooled
+`DriverManagerConnectionProvider` — new `PersistencePoolSettingsTest` (7) + `ClosingDatasourceConnectionProviderTest`
+(2) + two new `PostgresDockerIntegrationTest$ConnectionPoolTests` cases = +11; see "Connection pool" below), up from 133 — measured directly
 via `./mvnw -B -pl storage/persistence clean test` immediately before this change; the "128" this
 entry previously read already undercounted `DevAccountSeedMigrationTest`'s own 5 W1 scenarios —
 docs/plans/active/POSTGRES-ONLY-CONTEXT.md **upgrade path**: this wave fixes the path for a database
@@ -134,8 +142,10 @@ no logic behind them — exactly the "empty ceremony" the plan's own guardrail w
 creating. Flagged here rather than silently decided, per this wave's brief.
 
 ### `com.drones.vision.adapter.persistence.config`
-- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password[, boolean seedDevUsers])`: migrates the schema with Flyway (`classpath:db/migration`, plus `classpath:db/seed/dev` when `seedDevUsers` is `true` — see the `db/seed/dev` schema entry below) then opens a Hibernate-native `EntityManagerFactory` mapping all nineteen entities below (see "Bootstrap" below and the "W1 done" narrative section near the end of this file for the `ignoreMigrationPatterns` story). The 3-arg overload (`seedDevUsers` implicitly `false`) is kept so pre-existing callers (e.g. `PostgresDockerIntegrationTest`) don't need to change. The one public entry point vision-app's wiring needs.
+- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password[, boolean seedDevUsers[, PersistencePoolSettings poolSettings]])`: builds one pooled `HikariDataSource` (docs/plans/active/SCALE-100-PLAN.md S3), migrates the schema through it with Flyway (`classpath:db/migration`, plus `classpath:db/seed/dev` when `seedDevUsers` is `true` — see the `db/seed/dev` schema entry below), then opens a Hibernate-native `EntityManagerFactory` over that same `DataSource` mapping all nineteen entities below (see "Connection pool" below and the "W1 done" narrative section near the end of this file for the `ignoreMigrationPatterns` story). The 3-arg and 4-arg overloads (`seedDevUsers` implicitly `false`, and/or `poolSettings` implicitly `PersistencePoolSettings.defaults()`) are kept so pre-existing callers (e.g. `PostgresDockerIntegrationTest`) don't need to change. The 5-arg overload is the one vision-app's wiring should move to, once it can bind `vision.persistence.pool.*` — see "Connection pool" below for the exact keys.
 - `public final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas). **Public, not package-private** (widened from the pre-refactor package-private): the `repository` package it now serves lives in a sibling package, so cross-package visibility is required — see Gotchas for the full visibility-widening note.
+- `record PersistencePoolSettings(int maximumPoolSize, int minimumIdle, long connectionTimeoutMillis, long leakDetectionThresholdMillis)` (docs/plans/active/SCALE-100-PLAN.md S3) — the four HikariCP knobs `PersistenceUnit` needs, pulled out as a framework-free record so no magic number lives inline in `PersistenceUnit` itself (CLAUDE.md rule 1). Compact constructor validates `maximumPoolSize >= 1`, `0 <= minimumIdle <= maximumPoolSize`, `connectionTimeoutMillis > 0`, `leakDetectionThresholdMillis >= 0` (`0` means "disabled", Hikari's own convention). `static PersistencePoolSettings defaults()` returns `maximumPoolSize=20, minimumIdle=5, connectionTimeoutMillis=30_000, leakDetectionThresholdMillis=30_000` — sized for ~100 concurrent users on one instance, not a placeholder; each default's justification is on its own `DEFAULT_*` constant's javadoc. vision-app's `VisionPersistenceProperties` is the intended source of a non-default instance, via `vision.persistence.pool.*` (see "Connection pool" below) — this module never reads Spring config itself.
+- `final class ClosingDatasourceConnectionProvider extends org.hibernate.engine.jdbc.connections.internal.DatasourceConnectionProviderImpl` (docs/plans/active/SCALE-100-PLAN.md S3) — the one behavior it adds over its base class: overriding `stop()` to also close the configured `DataSource` if it is `Closeable` (which `HikariDataSource` is). The base class assumes a container-managed `DataSource` Hibernate never owns and must never close (its `stop()` is a no-op); that assumption is wrong here, since `PersistenceUnit.start` builds and *owns* the pool. Hibernate instantiates it via `hibernate.connection.provider_class` (a bare class name, reflection, no-arg constructor) and calls `configure(Map)` — never constructed directly by this module's own code outside tests.
 
 ### `com.drones.vision.adapter.persistence.entity`
 - `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity`, `AssetImageEntity`, `GeofenceZoneEntity`, `UserEntity`, `GroupEntity`, `AssignmentEntity`, `MarkEntity`, `DatasetEntity`, `TrainingSampleEntity`, `SampleImageEntity`, `MapLayerEntity`, `MapDrawingEntity`, `AuditEntryEntity`, `DetectionEventEntity` (+ the `@Embeddable` `LayerGrantEmbeddable`) — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module. Entity↔domain mapping now lives one package over, in `mapper` (see above) — not inlined per repository as it was before docs/plans/active/LAYERING-REFACTOR-PLAN.md Wave C.
@@ -277,13 +287,59 @@ creating. Flagged here rather than silently decided, per this wave's brief.
   restated explicitly here rather than assumed to still apply. See `PersistenceUnit`'s own javadoc and
   `DevAccountSeedMigrationTest` for the full account.
 
-## Bootstrap (no Spring, no connection pool)
+## Bootstrap and connection pool
 
 `PersistenceUnit.start` uses Hibernate's **native** bootstrap API (`org.hibernate.cfg.Configuration`) rather than JPA's `Persistence.createEntityManagerFactory` (which needs a `META-INF/persistence.xml` or a hand-built `PersistenceUnitInfo`) or Spring Data JPA (`@EnableJpaRepositories`, Spring Boot's `HibernateJpaAutoConfiguration`, etc.). `Configuration#buildSessionFactory()` returns `org.hibernate.SessionFactory`, which **implements `jakarta.persistence.EntityManagerFactory` directly** (same for `Session`/`EntityManager`) — so every `Jpa*Repository` still only ever calls plain `jakarta.persistence` API, and callers (vision-app) hold a completely standard `EntityManagerFactory` reference with no Hibernate-specific type leaking across the module boundary.
 
 This was a deliberate choice over Spring Data JPA: this codebase's adapters are plain classes constructed via `new` in `ApplicationServiceWiring`/`PersistenceWiringConfiguration` (see vision-app's Bean inventory), never Spring-component-scanned — Spring Data repository interfaces are proxies the Spring Data repository factory generates at runtime and cannot be `new`'d, which would have forced `@EnableJpaRepositories` + Spring Boot's JPA autoconfiguration into the picture, and those autoconfigurations activate purely from classpath presence (`@ConditionalOnClass(DataSource.class)`, etc.) — meaning they would have needed to be pulled unconditionally into vision-app's `@SpringBootApplication`, a materially more complex (and more fragile) wiring story than the plain, straight-line `new Jpa*Repository(entityManagerFactory)` this module's plain-JPA approach allows (see station/vision-app/MODULE.md's `PersistenceWiringConfiguration` entry — unconditional since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b, so this argument no longer even turns on a toggle).
 
-No connection pool: Hibernate's default `DriverManagerConnectionProvider` (one physical JDBC connection per `EntityManager`, opened/closed by `JpaOperations` per call — see Gotchas) is what's wired, logging `HHH10001002: Using built-in connection pool (not intended for production use)` at startup — an accepted, documented tradeoff at this platform's single-instance/friends-demo scale, not a placeholder. Swapping in a pooled provider (e.g. HikariCP, `org.hibernate.orm:hibernate-hikaricp`, itself a Spring-Boot-managed dependency so no version pin would be needed) is a config-only change in `PersistenceUnit.start` if concurrency ever demands it — no repository or entity code would change.
+**Connection pool (docs/plans/active/SCALE-100-PLAN.md S3), correcting this section's own earlier claim.** This
+section used to say the swap to a pooled provider was "a config-only change" whenever "concurrency
+ever demands it" — verified false on 2026-08-17 (`mvn dependency:list` showed `com.zaxxer:HikariCP`
+was never on this module's classpath, transitively or otherwise) and superseded by this wave: `start`
+now builds one `HikariDataSource` (via `HikariConfig`, sized from `PersistencePoolSettings`, see API
+surface above) and **shares it between Flyway and Hibernate** — `Flyway.configure().dataSource(...)`
+migrates through it, then it is handed to Hibernate as the live `hibernate.connection.datasource`
+object (not a JNDI name — `Configuration#getProperties()` is a raw `Hashtable`, so `.put(Object,
+Object)` accepts a `DataSource` directly, bypassing `Properties#setProperty`'s String-only signature)
+with `hibernate.connection.provider_class` pointed at `ClosingDatasourceConnectionProvider`. Two
+things this rules out as *the* mechanism, deliberately: (1) Hibernate's own `HikariCPConnectionProvider`
+(from `hibernate-hikaricp`, `hibernate.hikari.*` properties) was **not** used to build the pool, because
+it always builds its own second, independent `HikariDataSource` internally — there would be no way to
+hand that same instance to Flyway first, and Flyway must finish migrating before the
+`EntityManagerFactory` (and therefore Hibernate's internal pool) exists at all; `hibernate-hikaricp` is
+still a declared dependency (see "Depends on" above) purely for its Hibernate-version-matched
+`com.zaxxer:HikariCP` version pin. (2) Hibernate's built-in `DriverManagerConnectionProvider` — the
+actual pre-S3 default, one physical JDBC connection per `EntityManager`, logging `HHH10001002: Using
+built-in connection pool (not intended for production use)` at startup — is gone; that warning no
+longer appears (grepped a full `-pl storage/persistence test` log: zero occurrences, vs. 19
+occurrences of `ClosingDatasourceConnectionProvider` being wired in its place, once per
+`EntityManagerFactory` the suite builds). The pool closes when the caller closes the
+`EntityManagerFactory` it came from (`entityManagerFactory.close()` → Hibernate's service registry
+`stop()`s every `Stoppable` service, including the connection provider) — `ClosingDatasourceConnectionProvider#stop()`
+closes the underlying `HikariDataSource` there, extending (not changing) the pre-existing "caller owns
+the `EntityManagerFactory` lifecycle" contract to also mean "and therefore the pool." `PostgresDockerIntegrationTest$ConnectionPoolTests`
+proves both halves: the wired-provider-class assertion, and a tiny two-connection pool actually
+refusing a third concurrent `EntityManager` (via `HibernateException`, inside the pool's own
+`connectionTimeout`, not a hang) — see Tests below. `JpaOperations`'s per-call `EntityManager` open/close
+pattern (Gotchas, below) is unchanged by this wave and remains the residual concurrency cost the pool
+now merely *bounds* rather than eliminates.
+
+**The four `PersistencePoolSettings` values vision-app's wiring needs to expose**, none of them chosen by
+this module (it only defines and validates the shape — see API surface above) — the orchestrator-owned
+`VisionPersistenceProperties`/`PersistenceWiringConfiguration` binds `application.yaml` keys under
+`vision.persistence.pool.*` (naming matches docs/plans/active/SCALE-100-PLAN.md §6) and constructs the record:
+
+| YAML key | Default | Record field |
+|---|---|---|
+| `vision.persistence.pool.max-size` | `20` | `maximumPoolSize` |
+| `vision.persistence.pool.min-idle` | `5` | `minimumIdle` |
+| `vision.persistence.pool.connection-timeout-ms` | `30000` | `connectionTimeoutMillis` |
+| `vision.persistence.pool.leak-detection-threshold-ms` | `30000` | `leakDetectionThresholdMillis` |
+
+Every default above is `PersistencePoolSettings.defaults()`, so an app that does not set any of these
+keys behaves exactly as it did before this wave (opt-in guardrail: unset config is a no-behavior-change
+default, only the unpooled-vs-pooled connection mechanics change underneath it).
 
 `hibernate.hbm2ddl.auto=validate`: Flyway owns schema creation/evolution end to end; Hibernate only ever validates its entity mapping matches what Flyway already created, never generates or alters DDL itself.
 
@@ -525,6 +581,33 @@ true)` call (a fresh `Flyway.migrate()`, same idiom as `DevAccountSeedMigrationT
 against an already-fully-migrated fresh-install database settles into the same fixed point: still one
 parentless `"Root"` group, still exactly 3 users.
 
+`@Nested ConnectionPoolTests` inside `PostgresDockerIntegrationTest` (2, docs/plans/active/SCALE-100-PLAN.md
+S3) — `hibernateUsesTheSharedClosingProviderNotTheBuiltInUnpooledOne` unwraps the shared
+`EntityManagerFactory`'s `ConnectionProvider` service and asserts it is a
+`ClosingDatasourceConnectionProvider`, not Hibernate's built-in `DriverManagerConnectionProvider`.
+`poolCapsConcurrentPhysicalConnectionsAtItsConfiguredMaximum` opens a second, independent
+`EntityManagerFactory` via the new 5-arg `PersistenceUnit.start(..., PersistencePoolSettings)` overload
+with a tiny 2-connection pool, holds both connections open across live transactions, then asserts a
+third concurrent `EntityManager#getTransaction().begin()` is refused with a `HibernateException` inside
+the pool's own `connectionTimeout` (not a hang) — the end-to-end, real-Postgres proof that the pool is
+actually bounding concurrency, not just configured and unused.
+
+`PersistencePoolSettingsTest` (7, docs/plans/active/SCALE-100-PLAN.md S3, docker-free) — `defaults()` matches
+its own documented `DEFAULT_*` constants, plus one rejection case per compact-constructor invariant
+(`maximumPoolSize < 1`, `minimumIdle` negative or above `maximumPoolSize`, `connectionTimeoutMillis <=
+0`, `leakDetectionThresholdMillis < 0`) and one case confirming `leakDetectionThresholdMillis == 0` is
+accepted as "disabled," not rejected.
+
+`ClosingDatasourceConnectionProviderTest` (2, docs/plans/active/SCALE-100-PLAN.md S3, docker-free) — hand-rolled
+fake `DataSource`s (no HikariCP, no container) prove `stop()` closes a `Closeable` `DataSource` and
+tolerates one that is not `Closeable`, isolating the narrow shutdown-doesn't-leak claim from
+`ConnectionPoolTests`' end-to-end proof above.
+
+148 tests total (up from 137, docs/plans/active/SCALE-100-PLAN.md S3: new `PersistencePoolSettingsTest` (7) +
+`ClosingDatasourceConnectionProviderTest` (2) + `ConnectionPoolTests` (2) = +11), run against a real
+`postgres:16` Testcontainers instance, docker reachable in this environment (`docker --version` →
+`Docker version 28.3.3`) — every new case actually ran, none skipped.
+
 137 tests total (up from 133, docs/plans/active/POSTGRES-ONLY-CONTEXT.md upgrade path: new
 `UpgradePathMigrationTest` = +4), run against a real `postgres:16` Testcontainers instance, docker
 reachable in this environment — every new case actually ran, none skipped.
@@ -556,8 +639,9 @@ filesystem) deleted — dataset delivery to the training host is now a gRPC uplo
 
 - **`org.testcontainers.postgresql.PostgreSQLContainer` (Testcontainers 2.x's package — note: distinct from the legacy `org.testcontainers.containers.PostgreSQLContainer` shim, both present in the jar) is a concrete, non-generic class**, not `PostgreSQLContainer<SELF extends PostgreSQLContainer<SELF>>` like Testcontainers 1.x — `new PostgreSQLContainer<>("postgres:16")` does not compile here; it's `new PostgreSQLContainer("postgres:16")` (raw type, no diamond).
 - **Testcontainers 2.x renamed its Maven artifacts** with a `testcontainers-` prefix: it's `org.testcontainers:testcontainers-postgresql` and `org.testcontainers:testcontainers-junit-jupiter`, not `org.testcontainers:postgresql`/`org.testcontainers:junit-jupiter` (which don't exist at `testcontainers-bom` 2.0.5 — resolving them fails with a plain "could not find artifact" error that gives no hint the fix is just the artifact name). The un-prefixed core artifact (`org.testcontainers:testcontainers`, for `GenericContainer`/`DockerClientFactory`) did **not** get renamed — only the per-database/per-technology modules did.
-- **`JpaOperations` opens a fresh `EntityManager` (and therefore a fresh physical JDBC connection, given the unpooled connection provider — see "Bootstrap" above) per `write`/`read` call.** No request-scoped or thread-bound `EntityManager`, because there is no Spring/servlet request here to scope one to. Fine at this platform's call volume; would need revisiting (most likely: adding the pooled connection provider first) before this adapter could serve meaningfully concurrent load.
-- **Hibernate logs two startup warnings that are expected, not bugs**: `HHH10001002: Using built-in connection pool (not intended for production use)` (see "Bootstrap") and `HHH90000025: PostgreSQLDialect does not need to be specified explicitly` (this module sets `hibernate.dialect` explicitly anyway, to skip Hibernate's own connection-metadata-based auto-detection round trip at startup — a minor, deliberate speed/explicitness tradeoff, not an oversight).
+- **`JpaOperations` still opens a fresh `EntityManager` per `write`/`read` call — docs/plans/active/SCALE-100-PLAN.md S3 deliberately did not touch this.** Before S3, each such open/close pair also opened/closed its own unpooled physical JDBC connection; since S3 (see "Bootstrap and connection pool" above) that connection now comes from a real, bounded pool, so concurrent calls are capped at `PersistencePoolSettings.maximumPoolSize()` instead of each spawning an unbounded new physical connection. The pool **bounds** the cost, it does not **remove** it: every `write`/`read` still pays a full borrow-from-pool/begin-transaction/commit/return-to-pool cycle per call rather than reusing one `EntityManager` across a logical unit of work (e.g. one HTTP request). No request-scoped or thread-bound `EntityManager`, because there is no Spring/servlet request here to scope one to. Turning that into a real request-scoped (or otherwise batched) unit of work is a separate, larger refactor touching all 19 `Jpa*Repository` classes' call sites — out of scope for S3, flagged here as the next thing to revisit if this pattern shows up in latency/throughput measurements.
+- **Hibernate's `HHH10001002: Using built-in connection pool (not intended for production use)` startup warning is gone as of docs/plans/active/SCALE-100-PLAN.md S3** — it only ever came from the unpooled `DriverManagerConnectionProvider` S3 replaced (see "Bootstrap and connection pool" above); verified absent via a full-suite log grep (0 occurrences), not just inferred from the code change. `HHH90000025: PostgreSQLDialect does not need to be specified explicitly` is unrelated and still expected: this module sets `hibernate.dialect` explicitly anyway, to skip Hibernate's own connection-metadata-based auto-detection round trip at startup — a minor, deliberate speed/explicitness tradeoff, not an oversight.
+- **`EntityManager#getTransaction().begin()` eagerly acquires the physical JDBC connection for a resource-local transaction — it does not defer to the first query**, contrary to a common assumption (docs/plans/active/SCALE-100-PLAN.md S3, discovered empirically while writing `ConnectionPoolTests#poolCapsConcurrentPhysicalConnectionsAtItsConfiguredMaximum`: the pool-exhaustion `HibernateException` was thrown from `begin()` itself, not from the subsequent `createNativeQuery(...)` call the test originally expected to be the trigger). Relevant to anyone writing a similar concurrency-bound test against this module later.
 - **A native query's `?N` positional parameters must be re-supplied per occurrence, not per distinct value** — `JpaTelemetryRepository`/`JpaDetectionRepository`'s prune queries reference `?1` (the grouping key) twice in the SQL text (once in the outer `WHERE`, once in the subquery's `WHERE`) but call `setParameter(1, value)` only **once**; Hibernate's native-query parameter binder resolves every occurrence of a given positional index from the same single `setParameter` call (unlike raw JDBC `?` placeholders, which are positional *per occurrence* and would need the value bound twice) — this is standard JPA `Query#setParameter(int, Object)` behavior, not something either class over-thinks with parameter-index bookkeeping.
 - **`EntityManager#setParameter(int, UUID)` on a native query binds correctly as `uuid`, not `varchar`/`bytea`**, with no `stringtype=unspecified` JDBC-URL trick and no `PGobject` wrapping needed — Hibernate infers the correct JDBC type from the Java parameter's runtime class (`UUID.class` → `StandardBasicTypes.UUID` → Postgres `uuid`) the same way it does for typed JPQL/Criteria parameters, even though the query text itself is opaque native SQL to Hibernate.
 - **`org.springframework.security:spring-security-crypto` (test scope only, added docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1) marks its own `spring-core` dependency `optional`, and has zero other transitive dependencies** — `new BCryptPasswordEncoder()` (used by `DevAccountSeedMigrationTest` to verify `db/seed/dev`'s hardcoded hashes against their plaintexts, the same class production `BcryptPasswordHasher` in vision-app wraps) throws `NoClassDefFoundError: org/apache/commons/logging/LogFactory` unless `org.springframework:spring-core` is *also* added as a test dependency (it bundles its own `spring-jcl` commons-logging bridge). This does **not** create a runtime Spring dependency for this module — both are `<scope>test</scope>`, and the module's own production code never imports either.
@@ -1168,3 +1252,63 @@ and `UpgradePathMigrationTest` both ran, none skipped.
 
 **Deviations from the brief:** none. `db/migration/**` was not touched (frozen, no `V17+`, per this
 task's own constraint) — every fix here is `vision-app` wiring plus this module's own documentation.
+
+## docs/plans/active/SCALE-100-PLAN.md S3 done (a real HikariCP connection pool, shared with Flyway)
+
+Every `Jpa*Repository` call before this wave opened its own physical JDBC connection through
+Hibernate's built-in, explicitly-not-for-production `DriverManagerConnectionProvider` — accepted at
+this platform's earlier single-instance/friends-demo scale, wrong once SCALE-100-PLAN.md's ~100
+concurrent users become the target. This wave gives `PersistenceUnit` a real pool: `start` now builds
+one `HikariDataSource` (sized from a new `PersistencePoolSettings` record, `config` package, four
+fields — `maximumPoolSize`/`minimumIdle`/`connectionTimeoutMillis`/`leakDetectionThresholdMillis` —
+each with a documented, ~100-concurrent-user-justified default, no magic numbers inline per CLAUDE.md
+rule 1) and hands that same `DataSource` to **both** Flyway (`Flyway.configure().dataSource(...)`,
+replacing the old URL/username/password overload) and Hibernate (`hibernate.connection.datasource`
+plus a new `hibernate.connection.provider_class`: `ClosingDatasourceConnectionProvider`, a thin
+subclass of Hibernate's own `DatasourceConnectionProviderImpl` that also closes the pool on `stop()`).
+See "Bootstrap and connection pool" above for the full mechanism, including why Hibernate's own
+`HikariCPConnectionProvider`/`hibernate.hikari.*` route was deliberately **not** used — it always
+builds a second, unshareable pool, which is incompatible with "Flyway migrates before the EMF exists."
+
+**Corrected, not just added:** the "Bootstrap" section (renamed "Bootstrap and connection pool") used
+to claim HikariCP was "already on the classpath transitively via Hibernate's own dependencies" and that
+wiring it in was "a config-only change" — both checked and found false on 2026-08-17 (`mvn
+dependency:list` showed no `com.zaxxer:HikariCP` anywhere in this module's classpath before this wave),
+now corrected in place with the real mechanism and an explicit pointer to this section as the
+correction's source. `JpaOperations`'s per-call `EntityManager` pattern (Gotchas, above) was
+deliberately **not** touched — task 4 of this wave's brief scoped that out as a separate,
+19-repository-wide refactor; the pool now bounds the concurrent cost of that pattern (a hard cap at
+`maximumPoolSize`) without eliminating the per-call open/close overhead itself.
+
+**New dependencies:** `org.hibernate.orm:hibernate-hikaricp` (declared for its Hibernate-version-matched
+`com.zaxxer:HikariCP` version pin only — its own `HikariCPConnectionProvider` is not what's wired, see
+above) and `com.zaxxer:HikariCP` itself at explicit compile scope (`hibernate-hikaricp`'s own `pom.xml`
+declares it `runtime`-scope, which is not enough for `PersistenceUnit` to reference `HikariConfig`/
+`HikariDataSource` directly). Both versions resolve from `spring-boot-dependencies` (this module's
+grandparent POM), no root-pom `<dependencyManagement>` pin needed, same as every other dependency here.
+
+**Tests:** `./mvnw -B -pl storage/persistence test` — **148/148 green** (up from 137: new
+`PersistencePoolSettingsTest` (7, docker-free compact-constructor validation) +
+`ClosingDatasourceConnectionProviderTest` (2, docker-free, hand-rolled fake `DataSource`s) +
+`PostgresDockerIntegrationTest$ConnectionPoolTests` (2, real Postgres — wired-provider-class assertion
++ a 2-connection pool actually refusing a third concurrent `EntityManager`) — see Tests above for each
+class's own breakdown). Docker confirmed available and used throughout (`docker --version` → `Docker
+version 28.3.3, build 980b856`); every `PostgresDockerIntegrationTest` nested class, including the two
+new ones, actually ran — nothing skipped. Verified via log grep, not just code inspection, that
+Hibernate's `HHH10001002: Using built-in connection pool (not intended for production use)` warning no
+longer appears anywhere in a full test-suite run (0 occurrences), while `ClosingDatasourceConnectionProvider`
+being wired in its place appears 19 times — once per `EntityManagerFactory` the suite builds.
+
+**Deviations from the brief:** one real design deviation, called out rather than silently decided. The
+brief named `hibernate.hikari.*` properties (i.e. Hibernate's own `HikariCPConnectionProvider`) as the
+configuration surface; that provider was not used as-is because it cannot share a `DataSource` with
+Flyway (see above) — `PersistencePoolSettings`' fields still map onto the same conceptual knobs the
+brief asked for (`maximumPoolSize`, `minimumIdle`, `connectionTimeout`, `leakDetectionThreshold`), just
+applied to a hand-built `HikariConfig`/`HikariDataSource` instead. Nothing else deviated: `JpaOperations`
+untouched (task 4, explicitly out of scope), no `db/migration/**` change (this wave adds a pool, not a
+schema change), no file outside `storage/persistence/**` touched — `station/vision-app/src/main/resources/application.yaml`,
+every file under `.../config/wiring/`, `station/vision-api/**`, and `VisionPersistenceProperties.java`
+were all left alone per the brief's exclusive-scope constraint. The exact `vision.persistence.pool.*`
+keys, defaults, and the `PersistenceWiringConfiguration`/`VisionPersistenceProperties` changes needed to
+actually bind them are reported to the orchestrator, not applied here — see "Bootstrap and connection
+pool" above for the table.

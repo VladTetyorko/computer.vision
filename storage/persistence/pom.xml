@@ -50,6 +50,18 @@
             <groupId>org.hibernate.orm</groupId>
             <artifactId>hibernate-core</artifactId>
         </dependency>
+        <!-- SCALE-100-PLAN.md S3: a real connection pool for PersistenceUnit's native bootstrap,
+             which builds the HikariConfig/HikariDataSource by hand so that ONE pool is shared with
+             Flyway. Deliberately NOT org.hibernate.orm:hibernate-hikaricp, an artifact that exists
+             only to supply HikariCPConnectionProvider, which always builds a second, unshared pool
+             from hibernate.hikari.* properties (see ClosingDatasourceConnectionProvider's javadoc),
+             so nothing here would ever load it. Version comes from spring-boot-dependencies (this
+             module's grandparent POM: ${hikaricp.version}), no root-pom pin needed, same as
+             hibernate-core above. -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>

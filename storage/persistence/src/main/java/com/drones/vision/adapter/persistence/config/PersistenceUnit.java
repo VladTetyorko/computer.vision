@@ -20,6 +20,9 @@ import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
 import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
 
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+
 import jakarta.persistence.EntityManagerFactory;
 
 import org.flywaydb.core.Flyway;
@@ -30,23 +33,33 @@ import org.hibernate.cfg.Configuration;
  * schema with Flyway ({@code classpath:db/migration}), then opens a Hibernate {@link
  * EntityManagerFactory} against the same database.
  *
- * <p>No connection pool and no Spring involved: {@link #start} uses Hibernate's native bootstrap
- * API ({@link Configuration}, whose {@link Configuration#buildSessionFactory()} return type —
- * {@link org.hibernate.SessionFactory} — implements {@link EntityManagerFactory} directly, so
- * every {@code Jpa*Repository} still only ever calls standard {@code jakarta.persistence} API)
- * and its default {@code DriverManager}-based connection provider (one JDBC connection per
- * {@code EntityManager}, opened/closed per call — see {@link JpaOperations}). Adequate for this
- * platform's single-instance scope; swapping in a pooled provider (e.g. HikariCP, already on the
- * classpath transitively via Hibernate's own dependencies) is a config-only change if concurrency
- * ever demands it — see MODULE.md's Gotchas.
+ * <p>Hibernate is bootstrapped via its native API ({@link Configuration}, whose {@link
+ * Configuration#buildSessionFactory()} return type — {@link org.hibernate.SessionFactory} —
+ * implements {@link EntityManagerFactory} directly, so every {@code Jpa*Repository} still only
+ * ever calls standard {@code jakarta.persistence} API) and no Spring. {@link #start} builds
+ * exactly one pooled {@code javax.sql.DataSource} (HikariCP, sized by {@link
+ * PersistencePoolSettings}) and hands that same instance to both Flyway's migration connection
+ * and Hibernate's {@link ClosingDatasourceConnectionProvider} — one shared, bounded pool for
+ * migration and every request, replacing Hibernate's built-in {@code
+ * DriverManagerConnectionProvider}, which used to open a fresh, unpooled JDBC connection per
+ * {@code EntityManager} (see {@link JpaOperations}) and logged {@code HHH10001002: Using built-in
+ * connection pool (not intended for production use)} at every startup.
+ * <strong>Correction:</strong> a prior version of this paragraph claimed HikariCP was "already on
+ * the classpath transitively via Hibernate's own dependencies" and that adding it was "a
+ * config-only change" — both were false, verified by {@code mvn -pl storage/persistence
+ * dependency:list} returning no pool library at all (docs/plans/active/SCALE-100-PLAN.md §2 g2,
+ * 2026-08-17). {@code com.zaxxer:HikariCP} had to be added to {@code pom.xml} and this class had
+ * to change, which is what this paragraph and {@link ClosingDatasourceConnectionProvider}'s own
+ * javadoc now document — including why the provider is a hand-written {@code DataSource} wrapper
+ * rather than Hibernate's own {@code HikariCPConnectionProvider} (that class always builds a
+ * second, unshared pool, so {@code hibernate-hikaricp} is not a dependency here at all).
  *
  * <p>Every value {@link #start} sets on {@link Configuration} is either a caller-supplied
- * argument (JDBC URL/user/password) or a fixed protocol/design constant (the JDBC driver class,
- * the SQL dialect, {@code hibernate.hbm2ddl.auto=validate}) — there is no hardcoded
- * connection-pool sizing, batch size, or timeout here to externalize into a settings record
- * (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C item 5): this module has no framework dependency of
- * its own to read such a setting from, and none of these three properties varies per environment
- * the way a pool size or timeout would.
+ * argument (JDBC URL/user/password), a fixed protocol/design constant (the JDBC driver class, the
+ * SQL dialect, the connection-provider class name, {@code hibernate.hbm2ddl.auto=validate} — none
+ * of these vary per environment the way a pool size or timeout does), or read straight through
+ * from the caller-supplied {@link PersistencePoolSettings} (CLAUDE.md rule 1: no hardcoded pool
+ * sizing or timeout literal lives in this class).
  *
  * <p><strong>Dev-account seeding ({@code seedDevUsers})</strong> — docs/plans/active/POSTGRES-ONLY-CONTEXT.md
  * W1: {@code classpath:db/seed/dev} (today, one migration — {@code V90001__dev_accounts.sql}, the
@@ -82,24 +95,36 @@ public final class PersistenceUnit {
     private PersistenceUnit() {
     }
 
+    /** The JDBC driver Postgres always uses here — a fixed protocol constant, not a setting. */
+    private static final String JDBC_DRIVER_CLASS_NAME = "org.postgresql.Driver";
+
     /**
-     * {@link #start(String, String, String, boolean)} with dev-account seeding off — the shape
-     * every caller used before docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 introduced the flag, kept so
-     * existing callers (e.g. {@code PostgresDockerIntegrationTest}) don't need to change.
+     * Identifies this pool in HikariCP's own logging/metrics — a fixed identity constant (this
+     * module runs exactly one pool), not a per-environment setting.
+     */
+    private static final String POOL_NAME = "vision-persistence";
+
+    /**
+     * {@link #start(String, String, String, boolean, PersistencePoolSettings)} with dev-account
+     * seeding off and default pool sizing — the shape every caller used before
+     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 introduced the seeding flag, kept so existing callers
+     * (e.g. {@code PostgresDockerIntegrationTest}) don't need to change.
      *
      * @param jdbcUrl  JDBC URL, e.g. {@code jdbc:postgresql://localhost:5432/vision}
      * @param username database user
      * @param password database password
      * @return an open {@link EntityManagerFactory}; the caller owns its lifecycle and must
-     *         {@code close()} it on shutdown
+     *         {@code close()} it on shutdown — closing it also closes the connection pool
+     *         underneath it, see {@link ClosingDatasourceConnectionProvider}
      */
     public static EntityManagerFactory start(String jdbcUrl, String username, String password) {
-        return start(jdbcUrl, username, password, false);
+        return start(jdbcUrl, username, password, false, PersistencePoolSettings.defaults());
     }
 
     /**
-     * Migrates the schema then opens an {@link EntityManagerFactory} mapping every entity in
-     * {@link com.drones.vision.adapter.persistence.entity}.
+     * {@link #start(String, String, String, boolean, PersistencePoolSettings)} with default pool
+     * sizing — the shape every caller used before docs/plans/active/SCALE-100-PLAN.md S3 introduced pool
+     * settings, kept so existing callers don't need to change.
      *
      * @param jdbcUrl      JDBC URL, e.g. {@code jdbc:postgresql://localhost:5432/vision}
      * @param username     database user
@@ -109,15 +134,44 @@ public final class PersistenceUnit {
      *                     own javadoc. Only ever {@code true} when an operator explicitly opted in
      *                     ({@code vision.persistence.seed-dev-users=true}); default {@code false}.
      * @return an open {@link EntityManagerFactory}; the caller owns its lifecycle and must
-     *         {@code close()} it on shutdown
+     *         {@code close()} it on shutdown — closing it also closes the connection pool
+     *         underneath it, see {@link ClosingDatasourceConnectionProvider}
      */
     public static EntityManagerFactory start(String jdbcUrl, String username, String password,
                                               boolean seedDevUsers) {
+        return start(jdbcUrl, username, password, seedDevUsers, PersistencePoolSettings.defaults());
+    }
+
+    /**
+     * Migrates the schema then opens an {@link EntityManagerFactory} mapping every entity in
+     * {@link com.drones.vision.adapter.persistence.entity}, both riding the one pooled {@code
+     * DataSource} this method builds from {@code poolSettings} (docs/plans/active/SCALE-100-PLAN.md S3).
+     *
+     * @param jdbcUrl      JDBC URL, e.g. {@code jdbc:postgresql://localhost:5432/vision}
+     * @param username     database user
+     * @param password     database password
+     * @param seedDevUsers whether to also apply {@code classpath:db/seed/dev}'s DEV-ONLY
+     *                     {@code admin}/{@code manager}/{@code pilot} accounts — see this class's
+     *                     own javadoc. Only ever {@code true} when an operator explicitly opted in
+     *                     ({@code vision.persistence.seed-dev-users=true}); default {@code false}.
+     * @param poolSettings HikariCP sizing for the shared pool — see {@link PersistencePoolSettings}
+     *                     for each field's default and why.
+     * @return an open {@link EntityManagerFactory}; the caller owns its lifecycle and must
+     *         {@code close()} it on shutdown — closing it also closes the connection pool
+     *         underneath it, see {@link ClosingDatasourceConnectionProvider}
+     */
+    public static EntityManagerFactory start(String jdbcUrl, String username, String password,
+                                              boolean seedDevUsers, PersistencePoolSettings poolSettings) {
+        HikariDataSource dataSource = buildDataSource(jdbcUrl, username, password, poolSettings);
+
         String[] locations = seedDevUsers
                 ? new String[] {"classpath:db/migration", "classpath:db/seed/dev"}
                 : new String[] {"classpath:db/migration"};
         Flyway.configure()
-                .dataSource(jdbcUrl, username, password)
+                // Shares the same pooled DataSource Hibernate will use below (docs/plans/active/SCALE-100-PLAN.md
+                // S3) instead of opening its own independent, unpooled JDBC connection — migration
+                // and every subsequent request now draw from one bounded pool.
+                .dataSource(dataSource)
                 .locations(locations)
                 // See this class's own javadoc ("Dev-account seeding") for why this is required —
                 // a database seeded while seedDevUsers was true still carries db/seed/dev's
@@ -138,10 +192,13 @@ public final class PersistenceUnit {
                 .migrate();
 
         Configuration configuration = new Configuration();
-        configuration.setProperty("jakarta.persistence.jdbc.url", jdbcUrl);
-        configuration.setProperty("jakarta.persistence.jdbc.user", username);
-        configuration.setProperty("jakarta.persistence.jdbc.password", password);
-        configuration.setProperty("jakarta.persistence.jdbc.driver", "org.postgresql.Driver");
+        // Hands Hibernate the exact same pooled DataSource Flyway just migrated through, via
+        // Hibernate's own supported "pre-built DataSource" property (a live object, not a JNDI
+        // name — see AvailableSettings#DATASOURCE), and selects the provider that (a) understands
+        // that property and (b) closes the pool when this EntityManagerFactory closes.
+        configuration.getProperties().put("hibernate.connection.datasource", dataSource);
+        configuration.setProperty("hibernate.connection.provider_class",
+                ClosingDatasourceConnectionProvider.class.getName());
         configuration.setProperty("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
         // Flyway owns the schema; Hibernate only ever validates its entity mapping against it.
         configuration.setProperty("hibernate.hbm2ddl.auto", "validate");
@@ -169,5 +226,25 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(AuditEntryEntity.class);
         configuration.addAnnotatedClass(DetectionEventEntity.class);
         return configuration.buildSessionFactory();
+    }
+
+    /**
+     * The one pooled {@code DataSource} {@link #start} shares between Flyway and Hibernate — see
+     * this class's own javadoc for why sharing one pool (rather than each building its own) is
+     * the point of docs/plans/active/SCALE-100-PLAN.md S3.
+     */
+    private static HikariDataSource buildDataSource(String jdbcUrl, String username, String password,
+                                                      PersistencePoolSettings poolSettings) {
+        HikariConfig hikariConfig = new HikariConfig();
+        hikariConfig.setPoolName(POOL_NAME);
+        hikariConfig.setJdbcUrl(jdbcUrl);
+        hikariConfig.setUsername(username);
+        hikariConfig.setPassword(password);
+        hikariConfig.setDriverClassName(JDBC_DRIVER_CLASS_NAME);
+        hikariConfig.setMaximumPoolSize(poolSettings.maximumPoolSize());
+        hikariConfig.setMinimumIdle(poolSettings.minimumIdle());
+        hikariConfig.setConnectionTimeout(poolSettings.connectionTimeoutMillis());
+        hikariConfig.setLeakDetectionThreshold(poolSettings.leakDetectionThresholdMillis());
+        return new HikariDataSource(hikariConfig);
     }
 }

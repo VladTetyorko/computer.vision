@@ -88,6 +88,8 @@ import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
 
+import com.drones.vision.adapter.persistence.config.ClosingDatasourceConnectionProvider;
+import com.drones.vision.adapter.persistence.config.PersistencePoolSettings;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
 import com.drones.vision.adapter.persistence.repository.JpaAssetImageRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssetRepository;
@@ -112,6 +114,9 @@ import com.drones.vision.adapter.persistence.repository.JpaUserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 
+import org.hibernate.HibernateException;
+import org.hibernate.engine.jdbc.connections.spi.ConnectionProvider;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
@@ -137,6 +142,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -2375,6 +2381,70 @@ class PostgresDockerIntegrationTest {
             assertEquals("NO", lastSeenNullable, "last_seen is required");
         } finally {
             em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/SCALE-100-PLAN.md S3 -- proves the pool is real, not merely configured. Two
+     * independent, mutually-reinforcing proofs: the {@link ConnectionProvider} Hibernate actually
+     * runs against is {@link ClosingDatasourceConnectionProvider} (not the built-in unpooled
+     * provider that used to serve every request here), and a deliberately tiny pool genuinely caps
+     * concurrent physical connections -- if the old unpooled provider were still wired in, the
+     * over-limit acquisition below would succeed immediately instead of timing out.
+     */
+    @Nested
+    class ConnectionPoolTests {
+
+        @Test
+        void hibernateUsesTheSharedClosingProviderNotTheBuiltInUnpooledOne() {
+            ConnectionProvider provider = entityManagerFactory.unwrap(SessionFactoryImplementor.class)
+                    .getServiceRegistry().getService(ConnectionProvider.class);
+
+            assertTrue(provider instanceof ClosingDatasourceConnectionProvider,
+                    "must use the shared, closeable Hikari-backed provider, not Hibernate's built-in "
+                            + "DriverManagerConnectionProvider (the one that logs \"not for production use\")");
+        }
+
+        @Test
+        void poolCapsConcurrentPhysicalConnectionsAtItsConfiguredMaximum() {
+            PersistencePoolSettings tinyPool = new PersistencePoolSettings(2, 0, 500, 0);
+            EntityManagerFactory smallPoolContext = PersistenceUnit.start(POSTGRES.getJdbcUrl(),
+                    POSTGRES.getUsername(), POSTGRES.getPassword(), false, tinyPool);
+            List<EntityManager> holdingTheWholePool = new ArrayList<>();
+            try {
+                for (int i = 0; i < tinyPool.maximumPoolSize(); i++) {
+                    EntityManager em = smallPoolContext.createEntityManager();
+                    em.getTransaction().begin();
+                    em.createNativeQuery("select 1").getSingleResult(); // forces the physical borrow
+                    holdingTheWholePool.add(em);
+                }
+
+                EntityManager overLimit = smallPoolContext.createEntityManager();
+                try {
+                    long startNanos = System.nanoTime();
+                    // begin() itself acquires the physical connection for a resource-local
+                    // transaction (confirmed by running this test: the exception below actually
+                    // comes from here, not from the first query), so the pool is exhausted before
+                    // any SQL is even sent.
+                    assertThrows(HibernateException.class, () -> overLimit.getTransaction().begin(),
+                            "a third connection must be refused once the pool of "
+                                    + tinyPool.maximumPoolSize() + " is exhausted");
+                    long elapsedMillis = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
+                    assertTrue(elapsedMillis < 5_000,
+                            "must fail via the pool's own connectionTimeout (" + tinyPool.connectionTimeoutMillis()
+                                    + "ms), not hang indefinitely");
+                } finally {
+                    overLimit.close();
+                }
+            } finally {
+                for (EntityManager em : holdingTheWholePool) {
+                    if (em.getTransaction().isActive()) {
+                        em.getTransaction().rollback();
+                    }
+                    em.close();
+                }
+                smallPoolContext.close();
+            }
         }
     }
 }
