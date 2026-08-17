@@ -25,13 +25,15 @@
       }
     </div>
   } @else if (facade.orderedPickerAssets().length === 0) {
+    <!-- Truthful empty state (docs/plans/active/OPS-UX-PLAN.md §2 A2) — `facade.emptyState()` is the whole
+         view model (title/message/CTA), resolved by role in `fly-logic.ts#pickerEmptyStateCopy`; this
+         template only ever renders it, never branches on `topRole` itself. -->
     <div class="card empty">
-      <h3>No drones registered yet</h3>
-      <p>
-        Add a source from the Devices tab — the synthetic test drone flies a route with no
-        hardware at all.
-      </p>
-      <a class="btn" routerLink="/devices" [queryParams]="{ addSource: 1 }">Add source</a>
+      <h3>{{ facade.emptyState().title }}</h3>
+      <p>{{ facade.emptyState().message }}</p>
+      @if (facade.emptyState().showAddSource) {
+        <a class="btn" routerLink="/add-source">Add source</a>
+      }
     </div>
   } @else {
     <div class="picker-grid">

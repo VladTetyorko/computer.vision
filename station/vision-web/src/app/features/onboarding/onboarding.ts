@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { FlightPlanDialog } from '../../shared/map/fleet-plan-dialog/flight-plan-dialog';
+import { EmptyState } from '../../shared/ui/empty-state';
 import { Notice } from '../../shared/ui/notice';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { OnboardingStore } from './onboarding-store';
@@ -9,16 +10,19 @@ import { OnboardingFacade } from './onboarding-facade';
 
 /**
  * The onboarding wizard's own route (`/add-source`, docs/plans/done/UX-REWORK-PLAN.md §U-d) — replaces the
- * inline "+ Add source" card the pre-wizard Devices/Warehouse page used to open on itself. Four
- * steps, one visible at a time, back-navigable, all state kept in `OnboardingStore` (this
- * component's own page-provided "component store" — see that class's own doc comment): Profile
+ * inline "+ Add source" card the pre-wizard Devices/Warehouse page used to open on itself. Five
+ * steps, one visible at a time, all state kept in `OnboardingStore` (this component's own
+ * page-provided "component store" — see that class's own doc comment): Profile
  * (name/registration/photo/category) → Connect (the pre-existing 3-choice register/discover/
  * simulate component, moved here verbatim) → Test (probe + decoded frame before save — UX-DESIGN
  * §5.1's "test-before-save", skipped for Simulate) → Create (summary, then the actual
- * `POST /api/assets`/`POST /api/simulations` call).
+ * `POST /api/assets`/`POST /api/simulations` call) → **Assign** (docs/plans/active/OPS-UX-PLAN.md §2 A3, "Who
+ * flies this?" — offered only once the asset already exists; see `onboarding-logic.ts#WizardStep`'s
+ * own doc comment for why it's the one step that isn't back-navigable).
  *
  * This component itself is deliberately thin — a `@switch` over `store.step()` plus a Back/Next
- * footer — every decision and request shape lives in `onboarding-logic.ts`/`OnboardingStore`,
+ * footer (Assign carries its own Skip/Assign-and-finish pair instead, see `onboarding.html`'s own
+ * footer comment) — every decision and request shape lives in `onboarding-logic.ts`/`OnboardingStore`,
  * orchestrated by `OnboardingFacade` (docs/plans/done/UI-ARCHITECTURE-PLAN.md), which this component injects
  * exclusively. `onPhotoSelected` is the one bit of DOM-specific glue left here (resetting the raw
  * `<input type="file">`'s own value so the same file can be re-selected later) — a truly
@@ -40,7 +44,7 @@ import { OnboardingFacade } from './onboarding-facade';
  */
 @Component({
   selector: 'vision-onboarding',
-  imports: [FormsModule, RouterLink, FlightPlanDialog, Notice, PageBar],
+  imports: [FormsModule, RouterLink, FlightPlanDialog, EmptyState, Notice, PageBar],
   templateUrl: './onboarding.html',
   styleUrl: './onboarding.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

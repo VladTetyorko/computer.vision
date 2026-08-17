@@ -1,6 +1,7 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
+import { AuthStore } from '../../core/auth/auth-store';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
@@ -44,11 +45,15 @@ import {
   canAdvanceFromConnect,
   canAdvanceFromProfile,
   canAdvanceFromTest,
+  creatorOwnershipGroup,
+  defaultPilotSelection,
   nextStep,
+  pilotsInGroup,
   prevStep,
   type ConnectMethod,
   type WizardStep,
 } from './onboarding-logic';
+import type { UserSummary } from '../../core/api/models';
 
 interface OptionRow {
   key: string;
@@ -93,6 +98,7 @@ export class OnboardingStore {
   private readonly fleet = inject(FleetStore);
   private readonly toasts = inject(ToastService);
   private readonly router = inject(Router);
+  private readonly auth = inject(AuthStore);
 
   readonly step = signal<WizardStep>('profile');
 
@@ -608,7 +614,102 @@ export class OnboardingStore {
     }
     await this.fleet.refresh({ quiet: true });
     this.toasts.ok(`"${displayName}" is ready.`);
-    await this.router.navigate(['/assets', assetId]);
+    // Docs/plans/active/OPS-UX-PLAN.md §2 A3: the wizard's last step, not a redirect — "Who flies this?"
+    // renders in place of navigating straight to /assets/:id, see `enterAssignStep` below.
+    await this.enterAssignStep(assetId, displayName);
+  }
+
+  // --- Step 5: "Who flies this?" (docs/plans/active/OPS-UX-PLAN.md §2 A3) -------------------------------
+  // Offered only *after* `POST /api/assets` has already succeeded (`finishCreate` above is this
+  // section's one caller) — every signal below is therefore about assignment, never creation, and
+  // `assignmentError` is read that way too (see its own doc comment and `confirmPilots`'s own
+  // try/catch): a failure here can never be mistaken for "the asset wasn't created" because the
+  // asset demonstrably already exists by the time any of this runs.
+
+  readonly createdAssetId = signal<string | null>(null);
+  readonly createdAssetDisplayName = signal('');
+
+  /** The candidate list — every enabled PILOT-role member of the asset's own (silently-assigned) ownership group. Empty means "couldn't offer anyone", not "nobody exists" — see `ownerGroupName`'s own doc comment for how the template tells those two apart. */
+  readonly pilotCandidates = signal<readonly UserSummary[]>([]);
+  readonly pilotCandidatesLoading = signal(false);
+  /** `undefined` only when the creator's own group could not be resolved at all (a membership-less account) — `onboarding.html` reads this to distinguish "nobody in your group flies yet" from "couldn't tell what your group even is", never fabricating either. */
+  readonly ownerGroupName = signal<string | undefined>(undefined);
+  readonly selectedPilotIds = signal<ReadonlySet<string>>(new Set());
+  readonly assigningPilots = signal(false);
+  /** Set only if `PUT /api/assets/{id}/pilots/{userId}` itself fails — see this section's own class-doc paragraph for why that can never read as a creation failure. `null` clears it (a fresh attempt, or leaving the step). */
+  readonly assignmentError = signal<string | null>(null);
+
+  togglePilot(userId: string): void {
+    const next = new Set(this.selectedPilotIds());
+    if (next.has(userId)) {
+      next.delete(userId);
+    } else {
+      next.add(userId);
+    }
+    this.selectedPilotIds.set(next);
+  }
+
+  private async enterAssignStep(assetId: string, displayName: string): Promise<void> {
+    this.createdAssetId.set(assetId);
+    this.createdAssetDisplayName.set(displayName);
+    this.step.set('assign');
+    this.pilotCandidatesLoading.set(true);
+    try {
+      const creator = this.auth.user();
+      const group = creatorOwnershipGroup(creator?.memberships ?? []);
+      this.ownerGroupName.set(group?.groupName);
+      const users = await this.api.listUsers();
+      this.pilotCandidates.set(pilotsInGroup(users, group?.groupId));
+      this.selectedPilotIds.set(new Set(creator ? defaultPilotSelection(creator.userId, group) : []));
+    } catch {
+      // Silent-degrade (this app's own background-check convention, e.g. `loadCategoryOptions`
+      // below) — `GET /api/users` may 403 for a caller without org-management rights (a plain
+      // PILOT self-registering, still reachable ahead of the backend's own wave-C gate); the
+      // asset is already created and unaffected either way, so this only ever narrows the picker
+      // to its own empty state, never blocks the page.
+      this.pilotCandidates.set([]);
+    } finally {
+      this.pilotCandidatesLoading.set(false);
+    }
+  }
+
+  /** The step's primary action. Assigns every selected pilot, then leaves the wizard — or, with nothing selected, just leaves it (same destination as `skipAssignment`). */
+  async confirmPilots(): Promise<void> {
+    const assetId = this.createdAssetId();
+    if (!assetId || this.assigningPilots()) {
+      return;
+    }
+    const userIds = [...this.selectedPilotIds()];
+    if (userIds.length === 0) {
+      this.leaveWizard();
+      return;
+    }
+    this.assigningPilots.set(true);
+    this.assignmentError.set(null);
+    try {
+      await Promise.all(userIds.map((userId) => this.api.assignPilot(assetId, userId)));
+      this.toasts.ok(userIds.length === 1 ? 'Pilot assigned.' : `${userIds.length} pilots assigned.`);
+      this.leaveWizard();
+    } catch (error) {
+      // The asset already exists (see this section's own class-doc paragraph) — this message is
+      // rendered plainly on the step itself (`onboarding.html`), not folded into a generic toast,
+      // precisely so it never reads as "the asset wasn't saved".
+      this.assignmentError.set(describeHttpError(error));
+    } finally {
+      this.assigningPilots.set(false);
+    }
+  }
+
+  /** The step's secondary action — leaves without assigning anyone; the roster can always do this later. */
+  skipAssignment(): void {
+    this.leaveWizard();
+  }
+
+  private leaveWizard(): void {
+    const assetId = this.createdAssetId();
+    if (assetId) {
+      void this.router.navigate(['/assets', assetId]);
+    }
   }
 
   // --- Step navigation (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1 — stepper, back-navable) -------------
@@ -623,6 +724,8 @@ export class OnboardingStore {
         return this.canAdvanceTest();
       case 'create':
         return false; // the Create step has its own "Create asset" action, not a "Next"
+      case 'assign':
+        return false; // the Assign step has its own "Assign & finish"/"Skip for now" actions, not a "Next"
     }
   });
 

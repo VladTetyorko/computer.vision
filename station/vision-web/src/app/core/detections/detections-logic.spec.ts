@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Detection, DetectionResult } from '../api/models';
-import { CV_STATUS_FRESH_SECONDS, cvStatus, deriveChips, MAX_DETECTION_CHIPS } from './detections-logic';
+import { CV_STATUS_FRESH_SECONDS, cvStatus, deriveChips, freshResults, MAX_DETECTION_CHIPS } from './detections-logic';
 
 function detection(partial: Partial<Detection>): Detection {
   return {
@@ -103,5 +103,50 @@ describe('cvStatus', () => {
   it('clamps a future-dated sample (clock skew) to age zero rather than going negative', () => {
     const capturedAt = new Date(now + 1000).toISOString();
     expect(cvStatus(capturedAt, now)).toBe('on');
+  });
+});
+
+describe('freshResults', () => {
+  const now = Date.parse('2026-07-23T10:00:10Z');
+
+  it('keeps a result within the freshness window', () => {
+    const r = result({ capturedAt: new Date(now - CV_STATUS_FRESH_SECONDS * 1000).toISOString() });
+    expect(freshResults([r], now)).toEqual([r]);
+  });
+
+  it('drops a result older than the freshness window', () => {
+    const r = result({ capturedAt: new Date(now - (CV_STATUS_FRESH_SECONDS * 1000 + 1)).toISOString() });
+    expect(freshResults([r], now)).toEqual([]);
+  });
+
+  it('filters per-result rather than all-or-nothing, preserving newest-first order', () => {
+    const fresh = result({
+      frameSequence: 2,
+      capturedAt: new Date(now - 1000).toISOString(),
+    });
+    const stale = result({
+      frameSequence: 1,
+      capturedAt: new Date(now - (CV_STATUS_FRESH_SECONDS * 1000 + 1)).toISOString(),
+    });
+
+    // newest-first, matching what DetectionsStore.results() feeds it
+    expect(freshResults([fresh, stale], now)).toEqual([fresh]);
+  });
+
+  it('returns an empty array once every result has aged out — the same moment cvStatus would read off', () => {
+    const r = result({ capturedAt: new Date(now - (CV_STATUS_FRESH_SECONDS * 1000 + 1)).toISOString() });
+
+    expect(freshResults([r], now)).toEqual([]);
+    expect(cvStatus(r.capturedAt, now)).toBe('off');
+  });
+
+  it('returns an empty array for no results', () => {
+    expect(freshResults([], now)).toEqual([]);
+  });
+
+  it('respects a custom freshSeconds window', () => {
+    const r = result({ capturedAt: new Date(now - 30_000).toISOString() });
+    expect(freshResults([r], now, 60)).toEqual([r]);
+    expect(freshResults([r], now, 10)).toEqual([]);
   });
 });

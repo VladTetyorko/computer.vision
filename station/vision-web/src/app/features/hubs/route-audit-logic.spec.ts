@@ -34,6 +34,18 @@ describe('flattenRoutes', () => {
     const routes: Routes = [{ path: '', children: [{ path: 'x', component: Dummy }] }];
     expect(flattenRoutes(routes)).toEqual([{ path: '/x', kind: 'component' }]);
   });
+
+  it('treats a guard-only leaf (canActivate + empty children, e.g. app.routes.ts\'s landingGuard) as a computed redirect', () => {
+    const routes: Routes = [{ path: '', canActivate: [() => true], children: [] }];
+    expect(flattenRoutes(routes)).toEqual([{ path: '/', kind: 'redirect' }]);
+  });
+
+  it('does NOT treat a canActivate wrapper with real children as a leaf of its own (children win)', () => {
+    const routes: Routes = [
+      { path: '', canActivate: [() => true], children: [{ path: 'fly', component: Dummy }] },
+    ];
+    expect(flattenRoutes(routes)).toEqual([{ path: '/fly', kind: 'component' }]);
+  });
 });
 
 describe('routeExists', () => {

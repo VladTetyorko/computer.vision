@@ -14,6 +14,71 @@
   gap: var(--space-8);
 }
 
+/* ---- Show on map / Basemap (docs/conclusions/MAP-UX-RESEARCH.md M1) ----------------------------
+   The map's own eye-toggle rows, folded in here from `<vision-tactical-map>`'s former corner panel
+   (see this component's own doc comment). Its own small rule set rather than reusing
+   `tactical-map.css`'s near-identical one — Angular's emulated view encapsulation can't share rules
+   across components. Same shape as `.layer-row` below: text left, numbers right in `.mono`, one
+   chip per row (frontend-style §5). ---------------------------------------------------------------- */
+
+.visibility-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.visibility-row {
+  min-height: 1.75rem;
+}
+
+.visibility-row.off {
+  color: var(--text-faint);
+}
+
+.row-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-count {
+  font-size: 0.72rem;
+}
+
+/* The eye toggle: a 24px hit target that grows to 32px on coarse pointers (the responsive block below). */
+.eye {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.eye:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.visibility-row.off .eye {
+  color: var(--text-faint);
+  opacity: 0.55;
+}
+
+.manage-heading {
+  display: block;
+  margin-top: var(--space-8);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--border);
+}
+
 .create-trigger {
   align-self: flex-start;
   align-items: center;
@@ -153,5 +218,14 @@
 
   .layer-actions .btn {
     min-height: 2.5rem;
+  }
+
+  .eye {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .visibility-row {
+    min-height: 2rem;
   }
 }

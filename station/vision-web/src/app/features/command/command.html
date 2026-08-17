@@ -50,17 +50,33 @@
   }
 
   <!-- Layer manager (docs/plans/done/MAP-REWORK-PLAN.md §5.2). A sibling drawer rather than an expansion of
-       the map's own data-layer panel — see `<vision-layer-manager>`'s own doc comment for why. Same
-       non-blocking `<vision-side-panel>` shell as Marks, for the same reason (a modal backdrop would
-       swallow map clicks). -->
+       the map's own data-layer panel — see `<vision-layer-manager>`'s own doc comment for why, and
+       for its "Show on map"/"Basemap" sections (docs/conclusions/MAP-UX-RESEARCH.md M1) fed from the stage
+       map's own instance below. Same non-blocking `<vision-side-panel>` shell as Marks, for the same
+       reason (a modal backdrop would swallow map clicks). -->
   @if (isOverlayOpen('layers')) {
     <vision-side-panel title="Map layers" icon="layers" subtitle="Who sees what" (close)="toggleLayersPanel()">
-      <vision-layer-manager />
+      <vision-layer-manager
+        [mapAvailable]="!!tacticalMap()"
+        [builtinLayerRows]="tacticalMap()?.builtinLayerRows() ?? []"
+        [dataLayerRows]="tacticalMap()?.dataRows() ?? []"
+        [basemaps]="tacticalMap()?.basemaps ?? []"
+        [activeBasemapId]="tacticalMap()?.activeBasemapId() ?? null"
+        (toggleLayerVisibility)="tacticalMap()?.toggleLayer($event)"
+        (basemapChanged)="tacticalMap()?.setBasemap($event)"
+      />
     </vision-side-panel>
   }
 
   @if (facade.summaryError() && facade.summary() === undefined) {
     <vision-notice variant="warn">Could not reach the fleet summary — retrying every 5 seconds. The map below still works independently.</vision-notice>
+  }
+
+  <!-- docs/plans/active/OPS-UX-PLAN.md §3 B2: ADMIN-only, and only while the station is still fresh
+       (`CommandFacade.showSetupChecklist`'s own doc comment has the exact rule) — in normal flow
+       above the map, never a modal/overlay, so it never blocks the map underneath. -->
+  @if (facade.showSetupChecklist()) {
+    <vision-setup-checklist [rows]="facade.setupChecklist()" />
   }
 
   <div class="command-body" [style.grid-template-columns]="facade.gridColumns()">
@@ -160,9 +176,11 @@
         />
 
         <!-- Drawing toolbar (docs/plans/done/MAP-REWORK-PLAN.md §5.2's "mode buttons on the map chrome") — a
-             `--panel-raised` card floating over the map, per frontend-style §2/§7: never `--hud-*`,
-             which is only legal inside a `.surface-dark` enclave. Only rendered while the Draw
-             overlay is on, so the map's own corners stay clear the rest of the time. -->
+             `--panel-raised` card floating over the map, not `--hud-*`: frontend-style §2/§7's HUD
+             rule (widened 2026-08-16 to cover `TacticalMap`'s own corner chrome, which sits directly
+             on the bare tile) still exempts a control like this one that carries a card of its own
+             rather than sitting straight on the tile. Only rendered while the Draw overlay is on, so
+             the map's own corners stay clear the rest of the time. -->
         @if (isOverlayOpen('draw')) {
           <vision-drawing-toolbar class="command-draw-toolbar" layout="card" />
         }

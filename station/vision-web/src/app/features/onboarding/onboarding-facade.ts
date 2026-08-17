@@ -29,6 +29,7 @@ const STEP_LABELS: Record<WizardStep, string> = {
   connect: 'Connect',
   test: 'Test',
   create: 'Create',
+  assign: 'Pilots',
 };
 
 const CONNECT_METHOD_LABELS: Record<ConnectMethod, string> = {

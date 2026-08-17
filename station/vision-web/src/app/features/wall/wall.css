@@ -7,9 +7,11 @@
    a viewport unit sidesteps that rather than patching around it, the same reasoning Fly's `.cockpit`
    and Command's `.command-shell` already use for their own dark, full-bleed roots. `min-`, not a
    fixed `height`, so a wall with enough tiles to exceed one screen still grows past it and scrolls
-   inside `<main>` instead of clipping. */
+   inside `<main>` instead of clipping. `--shell-h`, not a bare `100dvh`, for the same reason those
+   two roots now read it: the shell's banner strip is out of flow and reserved with a `padding-top`
+   no viewport unit down here can see. */
 .page.surface-dark {
-    min-height: 100dvh;
+    min-height: var(--shell-h);
 }
 
 .wall-layout {

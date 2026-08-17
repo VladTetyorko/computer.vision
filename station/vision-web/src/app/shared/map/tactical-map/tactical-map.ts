@@ -20,7 +20,7 @@ import { ThemeStore } from '../../../core/shell/theme-store';
 import { capitalizeLabel, formatConfidence, relativeTimeLabel } from '../../../core/events/events-logic';
 import type { GeoPosition, GeofenceZone } from '../../../core/api/models';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
-import { zoneLayerStyle } from '../../../core/geofence/geofence-logic';
+import { resolveZoneColors, zoneLayerStyle, FALLBACK_ZONE_COLORS, type ZoneColors } from '../../../core/geofence/geofence-logic';
 import type { MarkMoved } from '../../../core/map-data/mark-logic';
 import {
   MAP_LAYERS,
@@ -39,8 +39,8 @@ import {
   BUILTIN_ASSETS_LAYER,
   BUILTIN_EVENTS_LAYER,
   BUILTIN_ZONES_LAYER,
+  FALLBACK_MAP_COLORS,
   TACTICAL_MARK_KINDS,
-  TRAIL_COLOR,
   affiliationClass,
   affiliationCounts,
   affiliationLabel,
@@ -60,6 +60,7 @@ import {
   markKindLabel,
   markSymbolClasses,
   readHiddenLayers,
+  resolveMapColors,
   toggleLayerHidden,
   visibleDrawings,
   visibleMarks,
@@ -69,6 +70,7 @@ import {
   type EventMarker,
   type InteractionMode,
   type LayerView,
+  type MapColors,
   type MapDrawing,
   type TacticalMark,
 } from './tactical-map-logic';
@@ -117,11 +119,23 @@ interface DrawingHandle {
  *
  * **Self-explaining chrome** (what §5.1 means by "standalone"): a collapsible **legend** naming
  * every symbol currently on the map (affiliation frames, kind glyphs, asset states, zone kinds, all
- * with counts) and a collapsible **data-layer panel** with an eye toggle per layer — persisted per
- * browser under `vision.map.hiddenLayers`, purely client-side decluttering that is *orthogonal* to
- * the server-side visibility scope (docs/plans/done/MAP-REWORK-PLAN.md §3 decides what the viewer may see at
- * all; these toggles only decide what they're currently looking at). The basemap picker folds into
- * that same panel rather than claiming a second corner.
+ * with counts) and a collapsible **basemap picker** in the map's own corner. The per-layer eye
+ * toggles — persisted per browser under `vision.map.hiddenLayers`, purely client-side decluttering
+ * that is *orthogonal* to the server-side visibility scope (docs/plans/done/MAP-REWORK-PLAN.md §3
+ * decides what the viewer may see at all; these toggles only decide what they're currently looking
+ * at) — used to live in a second floating "Layers" panel here too, a few centimeters from the
+ * tool-rail/topbar button that opens the *actual* Layers drawer (`<vision-layer-manager>`) under the
+ * same label (`docs/conclusions/MAP-UX-RESEARCH.md` §1.1/§5 M1). That panel is gone: `builtinLayerRows`,
+ * `dataRows` and `toggleLayer` below are now `public` (not `protected`) precisely so a host can wire
+ * them into that drawer instead, via `viewChild(TacticalMap)` — see `LayerManager`'s own "Show on
+ * map" section and `cockpit.ts`/`command.ts`'s `tacticalMap` view query. `basemaps`/
+ * `activeBasemapId`/`setBasemap` are `public` for the same reason: the drawer renders its own
+ * "Basemap" section from them, in addition to this component's own corner picker (relabeled
+ * "Basemap", `map` icon — it no longer says "Layers" anywhere, so the two controls can no longer be
+ * confused). Nothing here is a second *source* of truth — `hiddenLayers` stays this component's own
+ * signal (still the "single source both the Leaflet effects and the legend counts read" the class
+ * doc below describes); the drawer just calls this component's own `toggleLayer`/`setBasemap`
+ * rather than owning a duplicate copy of the state.
  *
  * **Dumb by construction.** Unlike both components it replaces (which injected `FleetMapStore` /
  * `TelemetryStore` / `EventsStore` directly and therefore only worked on a page that provided
@@ -261,23 +275,42 @@ export class TacticalMap {
    * from then on.
    */
   protected readonly legendOpen = linkedSignal(() => !this.followMode());
-  protected readonly layersPanelOpen = signal(false);
+  /** The map's own corner panel — basemap picker only since M1 (see the class doc's "Self-explaining chrome"). */
+  protected readonly basemapPanelOpen = signal(false);
 
   /** Client-side eye toggles, restored from `vision.map.hiddenLayers` (see the class doc). */
   protected readonly hiddenLayers = signal<readonly string[]>(readHiddenLayers());
 
-  /** The four switchable basemaps, for the panel's `@for`. */
-  protected readonly basemaps = MAP_LAYERS;
+  /** The four switchable basemaps — `public`: also the `<vision-layer-manager>` drawer's own "Basemap" section (see the class doc's M1 note). */
+  readonly basemaps = MAP_LAYERS;
 
   /**
    * The basemap actually rendered — the operator's explicit pick once they have used the picker,
-   * otherwise the current theme's own default (docs/plans/done/VISUAL-REFRESH-PLAN.md F7). `isMapLayerExplicit()`
-   * is a plain `localStorage` read, safe inside this `computed()`: the only writer is `setBasemap`,
-   * which always writes it in the same call as the `settings.mapLayer` signal this already tracks.
+   * otherwise the current theme's own default (docs/plans/done/VISUAL-REFRESH-PLAN.md F7).
+   * `isMapLayerExplicit()` reads a genuine signal now (`leaflet-loader.ts#explicitMapLayer` — see its
+   * own doc comment), not a bare `localStorage` read — a `computed()` calling a plain read would be
+   * invisible to Angular's dependency graph, so `setBasemap`'s `settings.mapLayer.set(id)` call could
+   * no-op (an `Object.is`-equal re-pick of whatever the theme default already was) with nothing left
+   * to invalidate this computed at all; see `vision-web/MODULE.md` Gotchas for the incident.
+   * `public` for the same reason as {@link basemaps} — see the class doc's M1 note.
    */
-  protected readonly activeBasemapId = computed<MapLayerId>(() =>
+  readonly activeBasemapId = computed<MapLayerId>(() =>
     effectiveMapLayerId(this.theme.theme(), this.settings.mapLayer(), isMapLayerExplicit()),
   );
+
+  /**
+   * Every Leaflet-paint-layer colour (trail, drawing swatches, zone stroke/fill) this map currently
+   * draws with — read from the live theme, never a frozen import-time snapshot (`tactical-map-logic.ts#resolveMapColors`'s
+   * own comment has the full "why" and the bug this replaces). Refreshed by {@link refreshMapColors},
+   * called once the map exists, again whenever the basemap changes (`applyBasemap`'s own effect), and
+   * — independently — on every theme flip via its own dedicated effect below, since {@link
+   * activeBasemapId} stops tracking theme at all the moment a basemap becomes explicit (a computed's
+   * version only bumps when its *recomputed value* changes, and an explicit pick's own id never does
+   * on a theme flip — see that effect's own doc comment for the full mechanism), so a drawn line
+   * matches its own token in whichever theme is actually active, live, not just at the next full remount.
+   */
+  protected readonly mapColors = signal<MapColors>(FALLBACK_MAP_COLORS);
+  protected readonly zoneColors = signal<ZoneColors>(FALLBACK_ZONE_COLORS);
 
   // Overlay collections after the eye toggles have been applied — the single source both the
   // Leaflet effects and the legend counts read, so the panel and the map can never disagree.
@@ -293,10 +326,12 @@ export class TacticalMap {
   protected readonly shownMarks = computed(() => visibleMarks(this.marks(), this.hiddenLayers()));
   protected readonly shownDrawings = computed(() => visibleDrawings(this.drawings(), this.hiddenLayers()));
 
-  protected readonly dataRows = computed(() =>
+  /** The data-layer eye-toggle rows — `public`, rendered by `<vision-layer-manager>`'s "Show on map" section (M1). */
+  readonly dataRows = computed(() =>
     layerRows(this.layers(), this.marks(), this.drawings(), this.hiddenLayers()),
   );
-  protected readonly builtinLayerRows = computed(() =>
+  /** The built-in-overlay eye-toggle rows (Assets/Zones/Events) — `public` for the same reason as {@link dataRows}. */
+  readonly builtinLayerRows = computed(() =>
     builtinRows(
       { assets: this.assets().length, zones: this.zones().length, events: this.events().length },
       this.hiddenLayers(),
@@ -348,9 +383,27 @@ export class TacticalMap {
   constructor() {
     afterNextRender(() => void this.initMap());
 
-    // Basemap: `activeBasemapId()` tracks both `settings.mapLayer()` and `theme.theme()`, so a theme
-    // flip re-tiles the map exactly like an explicit pick does. No-op until `initMap()` has run.
+    // Basemap: `activeBasemapId()` tracks both `settings.mapLayer()` and `theme.theme()` while no
+    // explicit pick has been made, so a theme flip re-tiles the map exactly like an explicit pick
+    // does. No-op until `initMap()` has run.
     effect(() => this.applyBasemap());
+
+    // Paint-layer colours (trail/drawing/zone strokes) must resync on *every* theme flip, even once
+    // an explicit basemap pick makes `activeBasemapId()` stop depending on theme at all — a computed
+    // only re-notifies its own consumers when its recomputed value actually changes (`Object.is`),
+    // and an explicit pick's id is the same string regardless of theme, so folding this into the
+    // `applyBasemap` effect above (keyed only on `activeBasemapId()`) would silently stop re-running
+    // the moment a basemap becomes explicit — exactly docs/plans/done/VISUAL-REFRESH-PLAN.md §3's own
+    // invariant, broken. Kept as its own effect, tracking `theme.theme()` directly, rather than
+    // restoring `theme.theme()` as a tracked read inside `applyBasemap()` itself, so a theme flip
+    // never forces a needless tile-layer teardown/re-add (a visible flicker) when the basemap image
+    // itself hasn't changed — only the colours that need to.
+    effect(() => {
+      this.theme.theme();
+      if (this.leaflet && this.map) {
+        this.refreshMapColors();
+      }
+    });
 
     // Centres on each focus request. `untracked` is load-bearing: `centerOnAsset` reads `assets()`,
     // which changes on every telemetry tick, so a tracked read would re-centre the map underneath an
@@ -372,7 +425,9 @@ export class TacticalMap {
       this.selectedAssetId();
       const follow = this.followAssetId();
       const autoFollow = this.autoFollow();
-      this.applyAssets(assets, follow);
+      // Tracked so a theme flip recolors an already-drawn trail immediately, not just on next redraw.
+      const trailColor = this.mapColors().trail;
+      this.applyAssets(assets, follow, trailColor);
       if (follow !== null) {
         this.applyFollow(assets, follow, autoFollow);
       } else if (this.autoFit()) {
@@ -387,10 +442,10 @@ export class TacticalMap {
     // Every other overlay is its own independent layer, deliberately excluded from auto-fit: a zone,
     // a mark, or a stale event far from the fleet must never yank the camera off the assets.
     effect(() => this.applyEvents(this.shownEvents()));
-    effect(() => this.applyZones(this.shownZones()));
+    effect(() => this.applyZones(this.shownZones(), this.zoneColors()));
     effect(() => this.applyMarks(this.shownMarks(), this.selectedMarkId(), copLayerIds(this.layers())));
-    effect(() => this.applyDrawings(this.shownDrawings()));
-    effect(() => this.applyDraft(this.draft()));
+    effect(() => this.applyDrawings(this.shownDrawings(), this.mapColors()));
+    effect(() => this.applyDraft(this.draft(), this.mapColors().trail));
 
     // Leaflet sizes itself from the DOM at creation time; expanding/collapsing resizes that DOM out
     // from under it, so it must be told to remeasure — twice, since the transition takes a moment.
@@ -457,20 +512,20 @@ export class TacticalMap {
     this.legendOpen.update((value) => !value);
   }
 
-  protected toggleLayersPanel(): void {
-    this.layersPanelOpen.update((value) => !value);
+  protected toggleBasemapPanel(): void {
+    this.basemapPanelOpen.update((value) => !value);
   }
 
-  /** An eye toggle — client-side only, persisted per browser, announced to the host. */
-  protected toggleLayer(layerId: string): void {
+  /** An eye toggle — client-side only, persisted per browser, announced to the host. `public`: also called by the `<vision-layer-manager>` drawer's "Show on map" section (M1). */
+  toggleLayer(layerId: string): void {
     const next = toggleLayerHidden(this.hiddenLayers(), layerId);
     this.hiddenLayers.set(next);
     writeHiddenLayers(next);
     this.layerVisibilityChanged.emit(next);
   }
 
-  /** A basemap pick always wins over the theme default from here on (docs/plans/done/VISUAL-REFRESH-PLAN.md F7). */
-  protected setBasemap(id: MapLayerId): void {
+  /** A basemap pick always wins over the theme default from here on (docs/plans/done/VISUAL-REFRESH-PLAN.md F7). `public` for the same reason as {@link toggleLayer}. */
+  setBasemap(id: MapLayerId): void {
     markMapLayerExplicit();
     this.settings.mapLayer.set(id);
   }
@@ -487,8 +542,9 @@ export class TacticalMap {
     ensureLeafletStylesheet();
 
     // `zoomControl: false` + re-added at `bottomright`: Leaflet's default corner is `topleft`, where
-    // the data-layer panel lives. `bottomright` is the one corner this template never claims (the
-    // view controls sit topright, the legend + tiles badge bottomleft).
+    // the basemap panel lives (the eye-toggle data-layer panel that used to share that corner moved
+    // into the `<vision-layer-manager>` drawer — M1). `bottomright` is the one corner this template
+    // never claims (the view controls sit topright, the legend + tiles badge bottomleft).
     const map = L.map(this.mapHost().nativeElement, { center: [0, 0], zoom: 2, zoomControl: false });
     this.map = map;
     L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -531,9 +587,10 @@ export class TacticalMap {
     }
 
     // The inputs usually carry data before the Leaflet chunk lands — re-apply every layer now.
+    // `applyBasemap()` above already resolved `mapColors`/`zoneColors` from the live theme.
     const assets = this.shownAssets();
     const follow = this.followAssetId();
-    this.applyAssets(assets, follow);
+    this.applyAssets(assets, follow, this.mapColors().trail);
     if (follow !== null) {
       this.applyFollow(assets, follow, this.autoFollow());
     } else if (this.autoFit()) {
@@ -541,25 +598,50 @@ export class TacticalMap {
       this.fitToAssets(assets);
     }
     this.applyEvents(this.shownEvents());
-    this.applyZones(this.shownZones());
+    this.applyZones(this.shownZones(), this.zoneColors());
     this.applyMarks(this.shownMarks(), this.selectedMarkId(), copLayerIds(this.layers()));
-    this.applyDrawings(this.shownDrawings());
+    this.applyDrawings(this.shownDrawings(), this.mapColors());
   }
 
-  /** Swaps the active basemap — a no-op until the map exists (`initMap()` re-applies once it does). */
+  /**
+   * Swaps the active basemap — a no-op until the map exists (`initMap()` re-applies once it does).
+   * Also re-resolves {@link refreshMapColors} first: this effect re-fires whenever `activeBasemapId()`
+   * actually changes (an explicit pick, or a theme flip while nothing has been explicitly picked
+   * yet), so the paint-layer colours catch up alongside every basemap swap. **Not** the only place
+   * colours are refreshed, though — the constructor's own dedicated theme effect (see its doc
+   * comment) covers the case this one can't: a theme flip once a basemap *is* explicit, where
+   * `activeBasemapId()` never changes value at all.
+   */
   private applyBasemap(): void {
     const L = this.leaflet;
     if (!L || !this.map) {
       return;
     }
+    this.refreshMapColors();
     this.tileLayer?.remove();
     this.tileLayer = mapLayerTileLayer(L, this.activeBasemapId(), (ok) => this.tilesOk.set(ok));
     this.tileLayer.addTo(this.map);
   }
 
+  /**
+   * Reads every Leaflet-paint-layer colour from the live theme, off the element that actually
+   * paints (`this.mapHost()`, not `document.documentElement`/`:root`) — a Fly cockpit inset lives
+   * inside a `.surface-dark` enclave that is dark in *both* themes, so resolving against this
+   * component's own host is what makes the trail/drawing/zone colours correct on both hosts without
+   * this component ever having to know which one it's mounted in. See
+   * `tactical-map-logic.ts#resolveMapColors` / `geofence-logic.ts#resolveZoneColors` for the pure
+   * resolution rules this only supplies a DOM reader for.
+   */
+  private refreshMapColors(): void {
+    const el = this.mapHost().nativeElement;
+    const readVar = (name: string): string => getComputedStyle(el).getPropertyValue(name);
+    this.mapColors.set(resolveMapColors(readVar));
+    this.zoneColors.set(resolveZoneColors(readVar));
+  }
+
   // --- Assets -------------------------------------------------------------------------------------
 
-  private applyAssets(assets: readonly FleetMarker[], followAssetId: string | null): void {
+  private applyAssets(assets: readonly FleetMarker[], followAssetId: string | null, trailColor: string): void {
     const L = this.leaflet;
     const map = this.map;
     if (!L || !map) {
@@ -568,7 +650,7 @@ export class TacticalMap {
     const seen = new Set<string>();
     for (const asset of assets) {
       seen.add(asset.assetId);
-      this.upsertAsset(L, map, asset, asset.assetId === followAssetId);
+      this.upsertAsset(L, map, asset, asset.assetId === followAssetId, trailColor);
     }
     for (const assetId of [...this.assetHandles.keys()]) {
       if (!seen.has(assetId)) {
@@ -577,7 +659,7 @@ export class TacticalMap {
     }
   }
 
-  private upsertAsset(L: typeof Leaflet, map: Leaflet.Map, asset: FleetMarker, followed: boolean): void {
+  private upsertAsset(L: typeof Leaflet, map: Leaflet.Map, asset: FleetMarker, followed: boolean, trailColor: string): void {
     const point = L.latLng(asset.position.latitude, asset.position.longitude);
     let handle = this.assetHandles.get(asset.assetId);
 
@@ -617,7 +699,12 @@ export class TacticalMap {
     const wantsTrail = (asset.live || followed) && asset.trail.length > 0;
     if (wantsTrail) {
       if (!handle.trailLine) {
-        handle.trailLine = L.polyline([], { color: TRAIL_COLOR, weight: followed ? 3 : 2, opacity: 0.85 }).addTo(map);
+        handle.trailLine = L.polyline([], { color: trailColor, weight: followed ? 3 : 2, opacity: 0.85 }).addTo(map);
+      } else {
+        // Re-stated every call, not just at creation — a theme flip re-resolves `trailColor` and
+        // this is what makes an already-drawn trail catch up immediately (`setLatLngs` alone never
+        // touches an existing path's own style).
+        handle.trailLine.setStyle({ color: trailColor });
       }
       handle.trailLine.setLatLngs(asset.trail.map((p) => L.latLng(p.latitude, p.longitude)));
     } else if (handle.trailLine) {
@@ -830,7 +917,7 @@ export class TacticalMap {
 
   // --- Geofence zones (read-only) ------------------------------------------------------------------
 
-  private applyZones(zones: readonly GeofenceZone[]): void {
+  private applyZones(zones: readonly GeofenceZone[], colors: ZoneColors): void {
     const L = this.leaflet;
     const map = this.map;
     if (!L || !map) {
@@ -839,7 +926,7 @@ export class TacticalMap {
     const seen = new Set<string>();
     for (const zone of zones) {
       seen.add(zone.id);
-      const style = zoneLayerStyle(zone.kind, zone.enabled);
+      const style = zoneLayerStyle(zone.kind, zone.enabled, colors);
       const points = zone.polygon.map((vertex) => L.latLng(vertex.latitude, vertex.longitude));
       const label = escapeHtml(zoneTooltipLabel(zone));
       let polygon = this.zoneHandles.get(zone.id);
@@ -928,7 +1015,7 @@ export class TacticalMap {
 
   // --- Drawings -------------------------------------------------------------------------------------
 
-  private applyDrawings(drawings: readonly MapDrawing[]): void {
+  private applyDrawings(drawings: readonly MapDrawing[], colors: MapColors): void {
     const L = this.leaflet;
     const map = this.map;
     if (!L || !map) {
@@ -937,7 +1024,7 @@ export class TacticalMap {
     const seen = new Set<string>();
     for (const drawing of drawings) {
       seen.add(drawing.id);
-      this.upsertDrawing(L, map, drawing);
+      this.upsertDrawing(L, map, drawing, colors);
     }
     for (const id of [...this.drawingHandles.keys()]) {
       if (!seen.has(id)) {
@@ -946,11 +1033,13 @@ export class TacticalMap {
     }
   }
 
-  private upsertDrawing(L: typeof Leaflet, map: Leaflet.Map, drawing: MapDrawing): void {
+  private upsertDrawing(L: typeof Leaflet, map: Leaflet.Map, drawing: MapDrawing, colors: MapColors): void {
     // Geometry changes are rare and cheap to rebuild; recreating avoids having to reconcile a shape
-    // that switched kind (a polyline can't become a polygon in place).
+    // that switched kind (a polyline can't become a polygon in place) — this also means a theme flip
+    // (this method's own `colors` re-resolving) recolors every drawing for free on its next run,
+    // since nothing here is skipped for an already-existing shape.
     this.removeDrawing(drawing.id);
-    const color = drawingColor(drawing.colorToken);
+    const color = drawingColor(drawing.colorToken, colors);
     const points = drawing.points.map((point) => L.latLng(point.latitude, point.longitude));
     const handle: DrawingHandle = { shape: null, decoration: null };
 
@@ -994,7 +1083,7 @@ export class TacticalMap {
   }
 
   /** The in-progress draft, rendered as a dashed rubber band so the operator sees what they're building. */
-  private applyDraft(draft: DrawingDraft | null): void {
+  private applyDraft(draft: DrawingDraft | null, trailColor: string): void {
     const L = this.leaflet;
     const map = this.map;
     if (!L || !map) {
@@ -1007,9 +1096,10 @@ export class TacticalMap {
     }
     const points = draft.points.map((point) => L.latLng(point.latitude, point.longitude));
     if (!this.draftLine) {
-      this.draftLine = L.polyline(points, { color: TRAIL_COLOR, weight: 2, dashArray: '5 5' }).addTo(map);
+      this.draftLine = L.polyline(points, { color: trailColor, weight: 2, dashArray: '5 5' }).addTo(map);
     } else {
       this.draftLine.setLatLngs(points);
+      this.draftLine.setStyle({ color: trailColor });
     }
   }
 

@@ -19,7 +19,15 @@
      definite size (exactly this container's own `height: 100dvh`), which is what makes `.sidebar`'s
      `height: 100%` — and therefore its body's internal scroll — actually take effect. */
   grid-template-rows: 1fr;
-  height: 100dvh;
+  /* `--shell-h`, not a bare `100dvh` (`styles.css` defines both) — `.shell-banners` below is
+     `position: fixed`, so it occupies no row here and the shell would otherwise start *underneath*
+     it. `padding-top` reserves the strip's measured height and `--shell-h` is what's left, which is
+     exactly the number `.sidebar`, `.cockpit` and `.command-shell` each independently measure
+     themselves against. With no banner showing (`--shell-banner-h: 0px`, the normal case) both terms
+     collapse and this is byte-for-byte the old `height: 100dvh` layout. */
+  box-sizing: border-box;
+  padding-top: var(--shell-banner-h);
+  height: var(--shell-h);
 }
 
 /* `<vision-app-sidebar>`'s own host is `display: contents` (see that component's own CSS) — its
@@ -43,7 +51,7 @@
    this bug's own root cause rather than patching around it). */
 main {
   grid-column: 2;
-  height: 100dvh;
+  height: var(--shell-h);
   overflow-y: auto;
 }
 
@@ -64,15 +72,61 @@ vision-undo-toast {
   display: contents;
 }
 
-.offline-banner {
+/* The shell's one banner region (docs/plans/active/OPS-UX-PLAN.md §2 A6 rev.2). `position: fixed`,
+   NOT an in-flow sibling of `<router-outlet>`: an in-flow banner would sit above the routed page's
+   own root inside `main`'s `height`/`overflow-y: auto` box — harmless for an ordinary scrolling page,
+   but `.cockpit`/`.command-shell` (`features/fly/cockpit.css`, `features/command/command.css`) size
+   themselves against the *viewport*, not against their now-shorter parent, so the banner's height
+   would push their bottom edge below the fold instead of shrinking them to fit. That is the same
+   class of bug this file's own `main` comment already documents for a different rule.
+
+   Out of flow means nothing reserves space for it automatically, which is precisely how the first
+   revision of this banner ended up painted over the sidebar's brand row, over a `.side-panel`
+   drawer's title, and over the offline banner. The fix is in two halves and both are required:
+   **one** stack (a `flex` column — a second banner pushes the first up, it never lands on top of it)
+   and a **measured** height (`App` writes `--shell-banner-h`; `:host` above and every viewport-
+   anchored box in the app subtract it). Measured rather than a constant because the copy wraps to
+   two lines below ~520px wide.
+
+   `z-index` above every shell layer (the sidebar's 110/125/126, a drawer's 120) but below a true
+   modal's 150 — a banner is a standing fact and should stay visible while a drawer is open, but must
+   not sit over a confirm prompt the operator has to answer. No `pointer-events: none` any more:
+   nothing renders underneath this strip now, so there is no click left for it to steal. */
+.shell-banners {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 130;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell-banner {
+  padding: var(--space-4) var(--space-24);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.shell-banner--danger {
+  background: var(--color-danger-soft);
+  border-bottom: 1px solid var(--color-danger-line);
+  color: var(--color-danger-text);
+}
+
+/* Reachability is a transient, self-resolving condition and its copy carries a shell command, so it
+   reads at the body size and left-aligned rather than as a centred one-line stamp like the danger
+   row above — the same two registers `shared/ui/notice.ts` already distinguishes. */
+.shell-banner--warn {
   background: var(--color-warn-soft);
   border-bottom: 1px solid var(--color-warn-line);
   color: var(--color-warn-text);
   padding: var(--space-8) var(--space-24);
   font-size: 0.82rem;
+  font-weight: 400;
+  text-align: left;
 }
 
-.offline-banner code {
+.shell-banner--warn code {
   font-family: var(--mono);
   /* Bespoke low-opacity black wash for an inline code chip, not a video/map scrim — 25% is
      intentionally lighter than either --scrim step (55%/70%) so the chip stays legible against

@@ -4,6 +4,7 @@ import {
   DestroyRef,
   ElementRef,
   afterNextRender,
+  computed,
   effect,
   inject,
   input,
@@ -13,7 +14,17 @@ import {
 import type * as Leaflet from 'leaflet';
 import type { GeoPosition } from '../../core/api/models';
 import { SettingsStore, type MapLayerId } from '../../core/settings/settings-store';
-import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../../shared/map/tile-cache/leaflet-loader';
+import { ThemeStore } from '../../core/shell/theme-store';
+import {
+  MAP_LAYERS,
+  droneDivIcon,
+  effectiveMapLayerId,
+  ensureLeafletStylesheet,
+  importLeaflet,
+  isMapLayerExplicit,
+  markMapLayerExplicit,
+  mapLayerTileLayer,
+} from '../../shared/map/tile-cache/leaflet-loader';
 
 const DEFAULT_ZOOM = 17;
 
@@ -38,6 +49,16 @@ const DEFAULT_ZOOM = 17;
  * shape immediately — replay is reviewed, not chased. `autoFollow` (default off, a toggle mirroring
  * `LiveMap`'s own) optionally recenters on the marker as the scrub position moves; "Fit route"
  * re-runs the initial fit on demand after the user has panned/zoomed away.
+ *
+ * **Basemap follows the same theme-aware/explicit-pick mechanism every other map in this app uses**
+ * (docs/plans/done/VISUAL-REFRESH-PLAN.md F7 — `activeLayerId`/`setLayer`, mirroring `TacticalMap`/
+ * `GeofenceZoneDialog`/`FlightPlanDialog`'s identical trio). This page used to bypass it entirely —
+ * rendering `settings.mapLayer()` raw and never calling `markMapLayerExplicit()` on a pick — which
+ * meant a fresh light-theme profile showed `/command` basemap-highlighted Standard while `/replay`
+ * showed Night highlighted from the very same persisted `mapLayer` value, and picking Satellite here
+ * was silently discarded the moment `/command` (or any other host) recomputed its own theme-aware
+ * default over that same raw signal. Fixed so this is one shared basemap contract, not five slightly
+ * different ones.
  */
 @Component({
   selector: 'vision-replay-map',
@@ -55,9 +76,17 @@ export class ReplayMap {
   readonly markerHeadingDegrees = input<number | undefined>(undefined);
 
   protected readonly settings = inject(SettingsStore);
+  protected readonly theme = inject(ThemeStore);
   protected readonly layers = MAP_LAYERS;
   protected readonly tilesOk = signal(true);
   protected readonly autoFollow = signal(false);
+
+  /** The layer actually rendered (docs/plans/done/VISUAL-REFRESH-PLAN.md F7) — see `TacticalMap`'s
+   * identical `activeBasemapId`/`GeofenceZoneDialog`'s `activeLayerId` for the shared contract this
+   * mirrors: an explicit picker click always wins over the theme-implied default. */
+  protected readonly activeLayerId = computed<MapLayerId>(() =>
+    effectiveMapLayerId(this.theme.theme(), this.settings.mapLayer(), isMapLayerExplicit()),
+  );
 
   private readonly mapHost = viewChild.required<ElementRef<HTMLDivElement>>('mapHost');
 
@@ -82,12 +111,15 @@ export class ReplayMap {
 
     effect(() => this.fitRoute(this.fullTrail()));
 
-    effect(() => this.applyLayer(this.settings.mapLayer()));
+    effect(() => this.applyLayer(this.activeLayerId()));
 
     inject(DestroyRef).onDestroy(() => this.teardown());
   }
 
+  /** A layer-picker click — an explicit pick always wins over the theme default from here on
+   * (docs/plans/done/VISUAL-REFRESH-PLAN.md F7); see `TacticalMap#setBasemap`'s identical doc comment. */
   protected setLayer(id: MapLayerId): void {
+    markMapLayerExplicit();
     this.settings.mapLayer.set(id);
   }
 
@@ -112,7 +144,7 @@ export class ReplayMap {
 
     const map = L.map(this.mapHost().nativeElement, { center: [0, 0], zoom: 2 });
     this.map = map;
-    this.applyLayer(this.settings.mapLayer());
+    this.applyLayer(this.activeLayerId());
 
     this.trailLine = L.polyline([], { color: '#4f8cff', weight: 3, opacity: 0.85 }).addTo(map);
     this.marker = L.marker([0, 0], { icon: droneDivIcon(L, 0), opacity: 0, keyboard: false }).addTo(map);

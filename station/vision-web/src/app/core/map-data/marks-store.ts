@@ -1,4 +1,7 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router } from '@angular/router';
+import { filter } from 'rxjs';
 import { VisionApi } from '../api/vision-api';
 import type {
   Affiliation,
@@ -68,6 +71,17 @@ const MARKS_POLL_INTERVAL_MS = 30_000;
  * the same routed page with no parent/child relationship** — `<vision-tactical-map>` (wired in the
  * host's template) and the marks panel / `<vision-mark-palette>` (siblings). A facade signal would
  * have to be threaded through both; a root store is simply what both already inject.
+ *
+ * <h2>`providedIn: 'root'` leaks arming across pages unless it resets itself</h2>
+ * A page-provided facade dies with its route; this store does not — arm "place mark" on `/command`,
+ * navigate to `/fly/:assetId` without disarming first, and the cockpit's own map inset inherits the
+ * still-armed state with nothing on screen explaining why. `armed`/`draft`/`palette` are *interaction*
+ * state (what the operator is mid-doing), not *data* (the marks themselves, which correctly stay
+ * shared across every page — that is this store's entire reason to be `root`), so only those three
+ * reset, on every navigation whose **path** actually changes (a query-param-only navigation, e.g.
+ * `CommandFacade`'s `?asset=` sync, does not — see `resetOnRouteChange`'s own doc comment). Modeled on
+ * `core/ui/overlay-store.ts#GlobalOverlayStore`'s identical `Router.events` + `NavigationEnd` seam, the
+ * only other place in this app a `root` store has to fence its own state off from routing.
  */
 @Injectable({ providedIn: 'root' })
 export class MarksStore {
@@ -111,6 +125,9 @@ export class MarksStore {
   /** How many live map deltas this store has already folded in (see `LayersStore`'s identical cursor). */
   private processedLiveEventCount = 0;
 
+  /** The last `NavigationEnd`'s path (no query/hash) — `null` until the first event. See `resetOnRouteChange`. */
+  private lastRoutePath: string | null = null;
+
   constructor() {
     void this.refresh();
     inject(PollScheduler).schedule(MARKS_POLL_INTERVAL_MS, () => this.refresh());
@@ -134,6 +151,32 @@ export class MarksStore {
       const fallback = this.layers.defaultLayerId();
       this.paletteSignal.update((palette) => reconcilePaletteLayer(palette, contributableIds, fallback));
     });
+
+    inject(Router)
+      .events.pipe(
+        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+        takeUntilDestroyed(),
+      )
+      .subscribe((event) => this.resetOnRouteChange(event.urlAfterRedirects));
+  }
+
+  /**
+   * Disarms/discards the create flow on a genuine page change — see this class's own "leaks arming
+   * across pages" doc comment for the repro this closes. Compares the URL's **path only** (query and
+   * hash stripped) against the last navigation: `CommandFacade`'s own `?asset=` URL sync (BUG 4) fires
+   * a `NavigationEnd` on every selection with an unchanged path, and must not disarm an operator who
+   * is simultaneously mid-placing a mark and clicking through assets in the roster. The very first
+   * `NavigationEnd` after boot never resets (`lastRoutePath` starts `null`) — everything is already at
+   * its default then anyway.
+   */
+  private resetOnRouteChange(url: string): void {
+    const path = url.split('?')[0].split('#')[0];
+    if (this.lastRoutePath !== null && path !== this.lastRoutePath) {
+      this.armedSignal.set(false);
+      this.draftSignal.set(null);
+      this.paletteSignal.set(DEFAULT_MARK_PALETTE);
+    }
+    this.lastRoutePath = path;
   }
 
   async refresh(): Promise<void> {

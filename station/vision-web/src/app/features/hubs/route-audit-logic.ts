@@ -9,9 +9,12 @@ import type { Routes } from '@angular/router';
  * `children`, so a spec can assert "this path resolves to *something*" without booting a
  * `RouterTestingHarness`/`TestBed` for every candidate URL.
  *
- * Only two questions matter for that check: does a path terminate in an actual component
- * (`loadComponent`/`component`), or a redirect (`redirectTo`) — either means "no dead link"; neither
- * means the path was never registered at all (would 404 via the `**` catch-all).
+ * Three questions matter for that check: does a path terminate in an actual component
+ * (`loadComponent`/`component`), a static redirect (`redirectTo`), or a guard-only leaf
+ * (`canActivate` with no `children` of its own — `app.routes.ts`'s `landingGuard` route,
+ * docs/plans/active/OPS-UX-PLAN.md §2 A1, which resolves its destination by role at navigation time
+ * rather than naming one statically) — any of the three means "no dead link"; none of them means the
+ * path was never registered at all (would 404 via the `**` catch-all).
  */
 export interface FlatRoute {
   /** Normalized, leading-slash path, e.g. `/assets/:assetId`; the bare root is `/`. */
@@ -37,6 +40,12 @@ export function flattenRoutes(routes: Routes, prefix = ''): FlatRoute[] {
     if (route.loadComponent || route.component) {
       out.push({ path: full || '/', kind: 'component' });
     } else if (typeof route.redirectTo === 'string') {
+      out.push({ path: full || '/', kind: 'redirect' });
+    } else if (route.canActivate && route.children?.length === 0) {
+      // A guard-only leaf (`{ path, canActivate, children: [] }`) — its `canActivate` always
+      // returns a `UrlTree` at navigation time (e.g. `app.routes.ts`'s `landingGuard`), so it
+      // resolves exactly like a static redirect for "does this URL 404" purposes, just computed
+      // rather than named.
       out.push({ path: full || '/', kind: 'redirect' });
     }
   }

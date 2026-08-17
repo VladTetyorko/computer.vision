@@ -2,6 +2,16 @@
    `src/styles.css` — no new colors. The old accordion styling (`.roster-summary`/`.roster-chevron`/
    `details[open]`) is gone with the accordion itself (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4). */
 
+/* The two headline gap tiles (docs/plans/active/OPS-UX-PLAN.md §3 B3) — mirrors
+   `features/reports/reports.css`'s own `.kpi-tiles` grid exactly (`vision-stat`'s responsive
+   contract: `auto-fit`/`minmax` so two tiles sit side by side on a phone and never overflow). */
+.kpi-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: var(--space-16);
+  margin-bottom: var(--space-16);
+}
+
 /* Explicit width, not just `min-width` — the global `input { width: 100% }` rule would otherwise
    stretch this to the full page-bar row once it wraps onto its own line
    (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F4's "1075px-wide" finding). */

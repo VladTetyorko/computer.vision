@@ -1,0 +1,72 @@
+/* Reuses `.dot`/`.truncate` from `src/styles.css` — no new colors; `--color-success`/`--color-info`
+   are the only two accents this card uses, both already tokens. Sits as a normal in-flow card above
+   `command-body` (see `command.html`'s own placement comment) — themed like the rest of the shell
+   chrome, not `.surface-dark` (this card never sits over video). */
+
+.setup-checklist {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-16);
+  padding: var(--space-8) var(--space-16);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.setup-checklist-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex: none;
+  color: var(--color-info);
+}
+
+.setup-checklist-title {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.setup-checklist-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-16);
+}
+
+.setup-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--text-muted);
+  text-decoration: none;
+  max-width: 14rem;
+}
+
+a.setup-row:hover {
+  color: var(--color-info);
+}
+
+.setup-row.done {
+  color: var(--color-success);
+}
+
+@media (max-width: 720px) {
+  .setup-checklist {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .setup-checklist-rows {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .setup-row {
+    max-width: 100%;
+  }
+}

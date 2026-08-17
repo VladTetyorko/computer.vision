@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetSummary, AssetUsage, GeoPosition } from '../../core/api/models';
+import type { AssetSummary, AssetUsage, GeoPosition, Membership, Role } from '../../core/api/models';
 import {
   ALL_DRONES_OPTION_VALUE,
   cycleBoxesMode,
@@ -9,6 +9,7 @@ import {
   lastSeenLabel,
   latestFinishedUsage,
   nextCollapseAction,
+  pickerEmptyStateCopy,
   positionLabel,
   rememberedStreamingAssetId,
   showDetectionOffChip,
@@ -224,5 +225,55 @@ describe('nextCollapseAction (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2 D-D —
 
   it('is a no-op when nothing is open', () => {
     expect(nextCollapseAction({ panelOpen: false, stopConfirmOpen: false, mapVisible: false })).toBeNull();
+  });
+});
+
+function membership(groupName: string, role: Membership['role'] = 'PILOT'): Membership {
+  return { groupId: `g-${groupName}`, groupName, role };
+}
+
+describe('pickerEmptyStateCopy (docs/plans/active/OPS-UX-PLAN.md §2 A2 — truthful Fly-picker empty state)', () => {
+  it('a PILOT with one membership is told which group has nobody assigned to them', () => {
+    const state = pickerEmptyStateCopy('PILOT', [membership('Alpha Squadron')]);
+    expect(state.title).toBe('No aircraft assigned to you yet');
+    expect(state.message).toContain('Alpha Squadron');
+    expect(state.showAddSource).toBe(false);
+  });
+
+  it('a PILOT in several groups gets every distinct group name named, never just the first', () => {
+    const state = pickerEmptyStateCopy('PILOT', [membership('Alpha Squadron'), membership('Bravo Team')]);
+    expect(state.message).toContain('Alpha Squadron');
+    expect(state.message).toContain('Bravo Team');
+  });
+
+  it('de-duplicates a repeated group name rather than naming it twice', () => {
+    const state = pickerEmptyStateCopy('PILOT', [membership('Alpha Squadron'), membership('Alpha Squadron')]);
+    expect(state.message.match(/Alpha Squadron/g)?.length).toBe(1);
+  });
+
+  it('a PILOT with no memberships at all gets an honest "could not determine" message, never a fabricated group', () => {
+    const state = pickerEmptyStateCopy('PILOT', []);
+    expect(state.title).toBe('No aircraft assigned to you yet');
+    expect(state.message).not.toMatch(/undefined|null/i);
+    expect(state.message.toLowerCase()).toContain('could not determine');
+    expect(state.showAddSource).toBe(false);
+  });
+
+  it('a PILOT never gets the Add source CTA, even with memberships resolved', () => {
+    expect(pickerEmptyStateCopy('PILOT', [membership('Alpha Squadron')]).showAddSource).toBe(false);
+  });
+
+  it.each<Role | null | undefined>(['MANAGER', 'ADMIN', undefined, null])(
+    '%s sees the genuinely-empty-fleet message, with the Add source CTA offered',
+    (topRole) => {
+      const state = pickerEmptyStateCopy(topRole, []);
+      expect(state.title).toBe('No drones registered yet');
+      expect(state.showAddSource).toBe(topRole === 'MANAGER' || topRole === 'ADMIN');
+    },
+  );
+
+  it('MANAGER/ADMIN copy is unaffected by memberships — the fleet-empty message never mentions a group', () => {
+    const state = pickerEmptyStateCopy('MANAGER', [membership('Alpha Squadron')]);
+    expect(state.message).not.toContain('Alpha Squadron');
   });
 });

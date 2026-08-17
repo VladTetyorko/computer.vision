@@ -1,14 +1,31 @@
+<!-- One banner region for the whole shell (docs/plans/active/OPS-UX-PLAN.md §2 A6 rev.2). Every
+     station-wide notice renders here, in one stack, in severity order — never as an in-flow sibling
+     of `<router-outlet>` (which would push `.cockpit`/`.command-shell`'s viewport-height root below
+     the fold) and never as independent `position: fixed` strips (which is how the unsecured banner
+     came to sit on top of both the sidebar and the offline banner). `app.css` explains the layout;
+     `app.ts` measures this element so the rest of the shell can reserve exactly its height. -->
+<div class="shell-banners" #shellBanners>
+  @if (unsecured()) {
+    <!-- Non-dismissable by design — there is no "got it" button, because the fact stays true for the
+         entire session. -->
+    <div class="shell-banner shell-banner--danger" role="status">
+      This station is unsecured — anyone on this network is an administrator.
+    </div>
+  }
+
+  @if (offline()) {
+    <div class="shell-banner shell-banner--warn" role="status">
+      Cannot reach the Vision backend. Showing the last known state — start the app with
+      <code>./mvnw spring-boot:run -pl vision-app</code>.
+    </div>
+  }
+</div>
+
 @if (auth.user()) {
   <vision-app-sidebar />
 }
 
 <main>
-  @if (offline()) {
-    <div class="offline-banner" role="status">
-      Cannot reach the Vision backend. Showing the last known state — start the app with
-      <code>./mvnw spring-boot:run -pl vision-app</code>.
-    </div>
-  }
   <router-outlet />
 </main>
 

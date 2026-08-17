@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { Icon } from '../../shared/ui/icon';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
+import { Stat } from '../../shared/ui/stat';
 import { TwoPane } from '../../shared/ui/two-pane/two-pane';
 import type { PilotAssetAssignment } from '../../core/roster/roster-pivot-logic';
 import { PilotsCard } from '../asset-detail/pilots-card';
@@ -37,7 +37,7 @@ import { RosterFacade } from './roster-facade';
  */
 @Component({
   selector: 'vision-roster',
-  imports: [FormsModule, RouterLink, PageBar, Icon, EmptyState, TwoPane, PilotsCard, PilotAssignmentsPanel],
+  imports: [FormsModule, RouterLink, PageBar, EmptyState, Stat, TwoPane, PilotsCard, PilotAssignmentsPanel],
   templateUrl: './roster.html',
   styleUrl: './roster.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

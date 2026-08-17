@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LiveEvent } from '../api/models';
 import {
+  FALLBACK_ZONE_COLORS,
   activeGeofenceBreaches,
   assetsOutsideZoneCount,
   canSaveZone,
@@ -9,6 +10,7 @@ import {
   groupBreachesByAsset,
   parseGeofenceBreach,
   polygonContains,
+  resolveZoneColors,
   zoneKindLabel,
   zoneLayerStyle,
   zoneVertexCountReason,
@@ -123,6 +125,29 @@ describe('zoneLayerStyle', () => {
     expect(disabled.color).toBe(enabled.color);
     expect(disabled.opacity).toBeLessThan(enabled.opacity);
     expect(disabled.fillOpacity!).toBeLessThan(enabled.fillOpacity!);
+  });
+
+  it('uses the passed-in live colours instead of the fallback once given some', () => {
+    const live = { keepIn: '#111111', keepOut: '#222222' };
+    expect(zoneLayerStyle('KEEP_IN', true, live).color).toBe('#111111');
+    const out = zoneLayerStyle('KEEP_OUT', true, live);
+    expect(out.color).toBe('#222222');
+    expect(out.fillColor).toBe('#222222');
+  });
+});
+
+describe('resolveZoneColors', () => {
+  it('reads keepIn/keepOut from --color-info/--color-danger, trimming whitespace', () => {
+    const values: Record<string, string> = { '--color-info': ' #2e6bcf ', '--color-danger': '#c9333f' };
+    expect(resolveZoneColors((name) => values[name])).toEqual({ keepIn: '#2e6bcf', keepOut: '#c9333f' });
+  });
+
+  it('falls back per-token when a variable resolves empty or is missing', () => {
+    expect(resolveZoneColors(() => undefined)).toEqual(FALLBACK_ZONE_COLORS);
+    expect(resolveZoneColors((name) => (name === '--color-info' ? '' : '#c9333f'))).toEqual({
+      keepIn: FALLBACK_ZONE_COLORS.keepIn,
+      keepOut: '#c9333f',
+    });
   });
 });
 

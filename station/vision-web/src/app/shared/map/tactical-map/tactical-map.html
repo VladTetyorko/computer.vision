@@ -1,64 +1,28 @@
 <div class="map-shell" [class.expanded]="expanded()">
   <div class="map-host" #mapHost></div>
 
-  <!-- ---- Top-left: the data-layer panel (eye toggles + basemap picker) --------------------- -->
+  <!-- ---- Top-left: the basemap picker ------------------------------------------------------
+       Was "Layers" (eye toggles + basemap) until docs/conclusions/MAP-UX-RESEARCH.md M1: two controls
+       named "Layers" were on screen at once (this one and the tool-rail/topbar button that opens the
+       real Layers drawer, `<vision-layer-manager>`). The eye toggles moved into that drawer — see
+       `tactical-map.ts`'s class doc — and this corner keeps only what is genuinely map-chrome: which
+       basemap tiles render. Relabeled "Basemap", `map` icon (not `layers`), so it can't be mistaken
+       for the drawer button again. -->
   <div class="chrome chrome-tl">
     <button
       type="button"
-      class="btn secondary small chrome-toggle"
-      [class.active]="layersPanelOpen()"
-      (click)="toggleLayersPanel()"
-      [attr.aria-expanded]="layersPanelOpen()"
-      title="Show or hide map layers and pick a basemap"
+      class="btn secondary small chrome-toggle surface-dark"
+      [class.active]="basemapPanelOpen()"
+      (click)="toggleBasemapPanel()"
+      [attr.aria-expanded]="basemapPanelOpen()"
+      title="Pick a basemap"
     >
-      <vision-icon name="layers" [size]="14" />
-      <span class="chrome-toggle-label">Layers</span>
+      <vision-icon name="map" [size]="14" />
+      <span class="chrome-toggle-label">Basemap</span>
     </button>
 
-    @if (layersPanelOpen()) {
-      <div class="panel" role="group" aria-label="Map layers">
-        @if (builtinLayerRows().length > 0 || dataRows().length > 0) {
-          <p class="panel-label">Data layers</p>
-          <ul class="rows">
-            @for (row of builtinLayerRows(); track row.id) {
-              <li class="row" [class.off]="row.hidden">
-                <button
-                  type="button"
-                  class="eye"
-                  (click)="toggleLayer(row.id)"
-                  [attr.aria-pressed]="!row.hidden"
-                  [title]="row.hidden ? 'Show ' + row.name : 'Hide ' + row.name"
-                >
-                  <vision-icon name="eye" [size]="14" />
-                </button>
-                <span class="row-name truncate">{{ row.name }}</span>
-                <span class="row-count mono">{{ row.count }}</span>
-              </li>
-            }
-            @for (row of dataRows(); track row.id) {
-              <li class="row" [class.off]="row.hidden">
-                <button
-                  type="button"
-                  class="eye"
-                  (click)="toggleLayer(row.id)"
-                  [attr.aria-pressed]="!row.hidden"
-                  [title]="row.hidden ? 'Show ' + row.name : 'Hide ' + row.name"
-                >
-                  <vision-icon name="eye" [size]="14" />
-                </button>
-                <span class="row-name truncate">{{ row.name }}</span>
-                @if (row.kind) {
-                  <span class="chip layer-kind">{{ row.kind === 'COP' ? 'Common' : row.kind === 'TEAM' ? 'Team' : 'Personal' }}</span>
-                }
-                <span class="row-count mono">{{ row.markCount + row.drawingCount }}</span>
-              </li>
-            }
-          </ul>
-        } @else {
-          <p class="panel-empty">No overlays on this map yet.</p>
-        }
-
-        <p class="panel-label">Basemap</p>
+    @if (basemapPanelOpen()) {
+      <div class="panel surface-dark" role="group" aria-label="Basemap">
         <div class="segmented basemaps" role="group" aria-label="Basemap">
           @for (basemap of basemaps; track basemap.id) {
             <button
@@ -80,20 +44,20 @@
     @if (followMode()) {
       <button
         type="button"
-        class="btn secondary small"
+        class="btn secondary small surface-dark"
         [class.active]="autoFollow()"
         (click)="toggleFollow()"
         title="Recenter on the drone as new positions arrive"
       >
         {{ autoFollow() ? 'Following' : 'Follow' }}
       </button>
-      <button type="button" class="btn secondary small" (click)="toggleExpanded()">
+      <button type="button" class="btn secondary small surface-dark" (click)="toggleExpanded()">
         {{ expanded() ? 'Collapse' : 'Expand' }}
       </button>
     } @else {
       <button
         type="button"
-        class="btn secondary small"
+        class="btn secondary small surface-dark"
         [class.active]="autoFit()"
         (click)="recenter()"
         title="Fit the map to every plotted asset and keep following as positions update"
@@ -106,7 +70,7 @@
   <!-- ---- Bottom-left: the legend, then the tiles-unavailable badge -------------------------- -->
   <div class="chrome chrome-bl">
     @if (legendOpen()) {
-      <div class="panel legend" role="note" aria-label="Map legend">
+      <div class="panel legend surface-dark" role="note" aria-label="Map legend">
         <p class="panel-label">Assets</p>
         <ul class="rows">
           <li class="row"><span class="swatch dot live"></span><span class="row-name">Streaming</span><span class="row-count mono">{{ assetCounts().streaming }}</span></li>
@@ -156,7 +120,7 @@
 
     <button
       type="button"
-      class="btn secondary small chrome-toggle"
+      class="btn secondary small chrome-toggle surface-dark"
       [class.active]="legendOpen()"
       (click)="toggleLegend()"
       [attr.aria-expanded]="legendOpen()"
@@ -167,7 +131,7 @@
     </button>
 
     @if (!tilesOk()) {
-      <div class="badge">Tiles unavailable — overlays still shown</div>
+      <div class="badge surface-dark">Tiles unavailable — overlays still shown</div>
     }
   </div>
 </div>

@@ -1,3 +1,4 @@
+import { computed } from '@angular/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   defaultMapLayerIdForTheme,
@@ -31,6 +32,12 @@ describe('effectiveMapLayerId', () => {
   });
 });
 
+// This module seeds one reactive signal from `localStorage` once per file load (see
+// `leaflet-loader.ts#explicitMapLayer`'s own doc comment) — `markMapLayerExplicit()` only ever
+// moves it false→true, mirroring the real product invariant ("an explicit pick always wins,
+// forever"), so — unlike a bare `localStorage` read — `localStorage.clear()` alone cannot roll it
+// back mid-file. The cases below are therefore intentionally ordered: the "defaults to false" and
+// "is reactive" cases must run before anything else in this describe block flips the flag.
 describe('isMapLayerExplicit / markMapLayerExplicit', () => {
   beforeEach(() => localStorage.clear());
 
@@ -38,9 +45,21 @@ describe('isMapLayerExplicit / markMapLayerExplicit', () => {
     expect(isMapLayerExplicit()).toBe(false);
   });
 
+  it('BUG 1 regression guard: is a genuine reactive signal, not a plain localStorage read — a computed() over it re-notifies the instant it flips, not only after a fresh read', () => {
+    const derived = computed(() => isMapLayerExplicit());
+    expect(derived()).toBe(false);
+    markMapLayerExplicit();
+    expect(derived()).toBe(true);
+  });
+
   it('flips true once a layer pick is recorded, and stays true', () => {
     markMapLayerExplicit();
     expect(isMapLayerExplicit()).toBe(true);
+  });
+
+  it('persists the flip to localStorage as well as the in-memory signal', () => {
+    markMapLayerExplicit();
+    expect(localStorage.getItem('vision.map.layerExplicit')).toBe('true');
   });
 });
 

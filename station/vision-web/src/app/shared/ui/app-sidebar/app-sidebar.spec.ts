@@ -127,7 +127,9 @@ describe('AppSidebar — tiering + role gate', () => {
   });
 
   it('folds badge:"soon" entries under a collapsed Upcoming disclosure, each dimmed and carrying no per-row chip (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1 — the disclosure title already says it)', () => {
-    const fixture = render();
+    // Explicit MANAGER — since docs/plans/active/OPS-UX-PLAN.md §2 A5 (below), `badge: 'soon'` entries only
+    // reach anyone at all for ADMIN/MANAGER; see the dedicated PILOT test for the opposite case.
+    const fixture = render({ topRole: 'MANAGER' });
     const root = fixture.nativeElement as HTMLElement;
     const operateIndex = NAV_MODES.findIndex((mode) => mode.id === 'operate');
     const operateGroup = root.querySelectorAll('.nav-group')[operateIndex];
@@ -173,6 +175,38 @@ describe('AppSidebar — tiering + role gate', () => {
     for (const mode of NAV_MODES) {
       for (const entry of mode.entries) {
         expect(adminHrefs, `ADMIN should see ${entry.name}`).toContain(entry.to);
+      }
+    }
+  });
+
+  /**
+   * docs/plans/active/OPS-UX-PLAN.md §2 A5: `badge: 'soon'` scaffold entries are a roadmap preview for
+   * ADMIN/MANAGER, not a working page — a PILOT following one is a dead end with no `managerOnly`
+   * gate to have hidden it. Same F10 "filtered exactly once, here" claim as the `managerOnly` test
+   * above, extended to this second predicate.
+   */
+  it('a PILOT sees no badge:"soon" entry anywhere; ADMIN/MANAGER keep seeing every one, as roadmap', () => {
+    const pilot = render({ topRole: 'PILOT' });
+    const pilotHrefs = navRowHrefs(pilot.nativeElement as HTMLElement);
+    let sawAtLeastOneSoonEntry = false;
+    for (const mode of NAV_MODES) {
+      for (const entry of mode.entries) {
+        if (entry.badge === 'soon') {
+          sawAtLeastOneSoonEntry = true;
+          expect(pilotHrefs, `PILOT should not see upcoming "${entry.name}"`).not.toContain(entry.to);
+        }
+      }
+    }
+    expect(sawAtLeastOneSoonEntry).toBe(true); // sanity: the fixture actually exercises this path
+
+    TestBed.resetTestingModule();
+    const manager = render({ topRole: 'MANAGER' });
+    const managerHrefs = navRowHrefs(manager.nativeElement as HTMLElement);
+    for (const mode of NAV_MODES) {
+      for (const entry of mode.entries) {
+        if (entry.badge === 'soon') {
+          expect(managerHrefs, `MANAGER should still see upcoming "${entry.name}"`).toContain(entry.to);
+        }
       }
     }
   });

@@ -32,17 +32,22 @@ function fakeLiveStore() {
   return { liveEvents: () => [] as unknown[] };
 }
 
-function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
+/** `authEnabled` defaults to `false` — this app's own real default (`vision.auth.enabled=false`),
+ *  so every existing call site here keeps exercising dev parity unless a test opts into a "real"
+ *  secured session (docs/plans/active/OPS-UX-PLAN.md §2 A6's own dedicated tests below). */
+function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT', authEnabled = false) {
   return {
     user: () => (topRole ? { topRole, displayName: 'Test User', username: 'test' } : null),
-    authEnabled: () => false,
+    authEnabled: () => authEnabled,
   };
 }
 
 @Component({ selector: 'vision-test-stub-page', template: '' })
 class StubPage {}
 
-function render(options: { topRole?: 'ADMIN' | 'MANAGER' | 'PILOT'; reachable?: boolean } = {}) {
+function render(
+  options: { topRole?: 'ADMIN' | 'MANAGER' | 'PILOT'; reachable?: boolean; authEnabled?: boolean } = {},
+) {
   TestBed.configureTestingModule({
     providers: [
       provideRouter([
@@ -51,7 +56,7 @@ function render(options: { topRole?: 'ADMIN' | 'MANAGER' | 'PILOT'; reachable?: 
       ]),
       { provide: FleetStore, useValue: fakeFleetStore(options.reachable) },
       { provide: LeafletWarmup, useValue: { schedule: () => {} } },
-      { provide: AuthStore, useValue: fakeAuthStore(options.topRole) },
+      { provide: AuthStore, useValue: fakeAuthStore(options.topRole, options.authEnabled) },
       { provide: EventsStore, useValue: fakeEventsStore() },
       { provide: LiveStore, useValue: fakeLiveStore() },
       { provide: VisionApi, useValue: {} },
@@ -111,14 +116,101 @@ describe('App shell', () => {
 
   it('shows the offline banner only when the fleet is unreachable', () => {
     const online = render({ topRole: 'PILOT', reachable: true });
-    expect((online.nativeElement as HTMLElement).querySelector('.offline-banner')).toBeNull();
+    expect((online.nativeElement as HTMLElement).querySelector('.shell-banner--warn')).toBeNull();
 
     // A fresh testing module — TestBed refuses `configureTestingModule` again once a previous call's
     // component has already been instantiated (mirrors `features/hubs/hub-pages.spec.ts`'s own
     // `renderManageHub` precedent for the identical situation).
     TestBed.resetTestingModule();
     const offline = render({ topRole: 'PILOT', reachable: false });
-    expect((offline.nativeElement as HTMLElement).querySelector('.offline-banner')).not.toBeNull();
+    expect((offline.nativeElement as HTMLElement).querySelector('.shell-banner--warn')).not.toBeNull();
+  });
+
+  /**
+   * docs/plans/active/OPS-UX-PLAN.md §2 A6, docs/conclusions/OPS-UX-REVIEW.md §O3 — the persistent,
+   * non-dismissable "this station has no login" strip.
+   */
+  describe('the unsecured-station banner', () => {
+    it('shows once a session resolves with authEnabled=false (dev parity, this app\'s own real default)', () => {
+      const fixture = render({ topRole: 'ADMIN', authEnabled: false });
+      const root = fixture.nativeElement as HTMLElement;
+      const banner = root.querySelector('.shell-banner--danger');
+      expect(banner).not.toBeNull();
+      expect(banner?.textContent).toContain('This station is unsecured');
+    });
+
+    it('is absent once auth is actually enabled — a real session needs no such warning', () => {
+      const fixture = render({ topRole: 'ADMIN', authEnabled: true });
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.querySelector('.shell-banner--danger')).toBeNull();
+    });
+
+    it('never shows before a session has resolved, even though authEnabled defaults to false pre-boot (no flash of a claim about a session that hasn\'t loaded yet)', () => {
+      const fixture = render(); // no topRole → user() is null, exactly the pre-boot/unauthenticated shape
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.querySelector('.shell-banner--danger')).toBeNull();
+    });
+
+    it('shows for every role, not just ADMIN — the fact is about the station, not the viewer', () => {
+      for (const topRole of ['PILOT', 'MANAGER', 'ADMIN'] as const) {
+        TestBed.resetTestingModule();
+        const fixture = render({ topRole, authEnabled: false });
+        expect((fixture.nativeElement as HTMLElement).querySelector('.shell-banner--danger'), topRole).not.toBeNull();
+      }
+    });
+
+    it('renders on a full-bleed route without shifting the cockpit stub out of its own layout (position: fixed, never in-flow above <router-outlet>)', async () => {
+      const fixture = render({ topRole: 'PILOT', authEnabled: false });
+      const router = TestBed.inject(Router);
+      await router.navigateByUrl('/fly');
+      fixture.detectChanges();
+
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.querySelector('.shell-banner--danger')).not.toBeNull();
+      // The *stack* is what's `position: fixed` — out of normal flow, so its presence contributes no
+      // height to `main`'s box and the routed stub page still mounts inside `main` unaffected.
+      const main = root.querySelector('main') as HTMLElement;
+      expect(main.querySelector('vision-test-stub-page')).not.toBeNull();
+      expect(getComputedStyle(root.querySelector('.shell-banners') as HTMLElement).position).toBe('fixed');
+    });
+  });
+
+  /**
+   * The regression this stack exists for (docs/plans/active/OPS-UX-PLAN.md §2 A6 rev.2): the first
+   * revision made the unsecured banner its own `position: fixed` strip at the viewport top, which
+   * painted it over the sidebar's brand row, over an open drawer's title, and over the offline
+   * banner — two independent fixed strips at `inset: 0 0 auto 0` occupy the *same* pixels. Both
+   * banners sharing one flow-laid-out parent is what makes stacking, rather than overlapping, the
+   * only thing they can do.
+   */
+  describe('banner stacking', () => {
+    it('puts every showing banner in the one stack, in severity order, never on top of each other', () => {
+      const fixture = render({ topRole: 'PILOT', authEnabled: false, reachable: false });
+      const root = fixture.nativeElement as HTMLElement;
+      const stack = root.querySelector('.shell-banners') as HTMLElement;
+
+      expect(stack.querySelectorAll('.shell-banner')).toHaveLength(2);
+      expect([...stack.children].map((child) => child.className.split(' ')[1])).toEqual([
+        'shell-banner--danger',
+        'shell-banner--warn',
+      ]);
+      // A flex column: the second banner is pushed *below* the first rather than layered over it.
+      expect(getComputedStyle(stack).flexDirection).toBe('column');
+    });
+
+    it('leaves no banner outside the stack — nothing renders a strip of its own inside <main>', () => {
+      const fixture = render({ topRole: 'PILOT', authEnabled: false, reachable: false });
+      const root = fixture.nativeElement as HTMLElement;
+      expect((root.querySelector('main') as HTMLElement).querySelector('.shell-banner')).toBeNull();
+    });
+
+    it('publishes the stack height as --shell-banner-h so the rest of the shell can reserve it', () => {
+      render({ topRole: 'PILOT', authEnabled: false });
+      // jsdom reports 0 for every measured box, so the assertion is that the token is *written* at
+      // all (an unwritten token leaves `--shell-h` referencing an undefined value, which makes every
+      // `height: var(--shell-h)` in the app invalid-at-computed-value-time rather than merely wrong).
+      expect(document.documentElement.style.getPropertyValue('--shell-banner-h')).toMatch(/^\d+px$/);
+    });
   });
 
   it('preserves the toast host and undo toast', () => {

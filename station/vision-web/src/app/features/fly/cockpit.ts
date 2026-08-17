@@ -119,6 +119,16 @@ export class CockpitPage {
   private readonly stageHost = viewChild<ElementRef<HTMLDivElement>>('stage');
 
   /**
+   * The map inset's own component instance — `undefined` whenever it isn't rendered (`mapVisible()`
+   * off, or no telemetry device). A type-based `viewChild` query, not a template `#ref`: the inset
+   * and the `map` drawer sit inside two different `@if` blocks in `cockpit.html`, and a template
+   * reference variable's scope doesn't cross that boundary the way a view query does. Used to feed
+   * the `map` drawer's `<vision-layer-manager>` its "Show on map"/"Basemap" sections
+   * (docs/conclusions/MAP-UX-RESEARCH.md M1) — see `cockpit.html`'s own comment on that drawer.
+   */
+  protected readonly tacticalMap = viewChild(TacticalMap);
+
+  /**
    * `cockpit.html`'s own video-surface "Detection is off — video only" chip
    * (docs/plans/active/CV-DEMAND-PLAN.md wave D3) — a thin template-friendly wrapper over the facade's raw
    * signals, same posture as {@link isPanelOpen} below; the actual decision is the pure, unit-tested

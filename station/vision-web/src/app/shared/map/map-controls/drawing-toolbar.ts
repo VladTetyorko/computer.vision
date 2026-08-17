@@ -60,8 +60,21 @@ export class DrawingToolbar {
     return mode === null ? 0 : remainingPoints(mode, 0);
   });
 
-  /** The selected drawing's label as an editable working copy — re-seeded on every selection change. */
-  protected readonly editLabel = linkedSignal(() => this.drawings.selected()?.label ?? '');
+  /**
+   * The selected drawing's label as an editable working copy — re-seeded only when the *selected
+   * drawing's identity* changes (`DrawingsStore.selectedDrawingId`, already a primitive id signal),
+   * never on an unrelated data refresh of the same drawing. `DrawingsStore.selected` hands out a
+   * brand-new `MapDrawing` object on every SSE event and 30s safety-net poll (`drawings-store.ts`)
+   * even when the selection hasn't moved — seeding straight off that object (as this used to) silently
+   * discarded an in-progress label edit whenever a poll landed mid-edit. Mirrors `MarkPalette`'s
+   * identical fix and `CockpitFacade#streamBurnedIn`'s "guard on a derived primitive" precedent — see
+   * `vision-web/MODULE.md` Gotchas ("`linkedSignal` over an object input").
+   */
+  protected readonly editLabel = linkedSignal<string | undefined, string>({
+    source: this.drawings.selectedDrawingId,
+    computation: (id, previous) =>
+      previous && previous.source === id ? previous.value : (this.drawings.selected()?.label ?? ''),
+  });
 
   protected setMode(kind: DrawKind): void {
     // Both modes write the map's single `[interactionMode]`; arming a drawing disarms mark

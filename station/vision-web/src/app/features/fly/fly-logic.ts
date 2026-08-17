@@ -1,4 +1,4 @@
-import type { AssetStatus, AssetSummary, AssetUsage, GeoPosition } from '../../core/api/models';
+import type { AssetStatus, AssetSummary, AssetUsage, GeoPosition, Membership, Role } from '../../core/api/models';
 import { formatDuration } from '../../core/stream-info-logic';
 
 /**
@@ -239,4 +239,75 @@ export const ALL_DRONES_OPTION_VALUE = '__all-drones__';
 /** Whether the switcher's `(change)` value is the "All drones" sentinel rather than a real asset id. */
 export function isAllDronesOption(value: string): boolean {
   return value === ALL_DRONES_OPTION_VALUE;
+}
+
+// --- Truthful empty state (docs/plans/active/OPS-UX-PLAN.md §2 A2, docs/conclusions/OPS-UX-REVIEW.md §U2) -------
+//
+// `GET /api/assets` is already visibility-scoped (OPS-UX-PLAN.md §1's own table: "Every read …
+// unchanged" — this predates Wave A, nothing new here): a PILOT's `VisibilityScope` is
+// `ASSIGNED_ASSETS`, so an empty `listAssets()` response for a PILOT already means "nothing is
+// assigned to *you*", not "the fleet is empty" — the two cases this empty state has to tell apart
+// were conflated only in the picker's own copy, never in the data. A MANAGER/ADMIN's empty response
+// (`GROUPS`/`UNBOUNDED` scope) still means the fleet genuinely has nothing in it.
+
+/** One resolved empty-picker view — `drone-picker.html`'s only source for what to render in the empty state. */
+export interface PickerEmptyState {
+  readonly title: string;
+  readonly message: string;
+  /** Only ADMIN/MANAGER get the CTA (docs/plans/active/OPS-UX-PLAN.md §2 A4 — the API now refuses `POST
+   * /api/assets` from anyone else, so the door must not be dangled for a PILOT either). */
+  readonly showAddSource: boolean;
+}
+
+/**
+ * Comma-joined, de-duplicated group names from a PILOT's own `memberships` — never a person's name
+ * (nothing here is asked of a directory the SPA doesn't have), and `undefined` rather than a
+ * fabricated placeholder when `memberships` is empty (a real account always carries at least one
+ * per `MeResponse`'s own contract, but the picker must still degrade honestly if that ever isn't
+ * true — see `pickerEmptyStateCopy`'s own doc comment).
+ */
+function membershipGroupNames(memberships: readonly Membership[]): string | undefined {
+  const names = [...new Set(memberships.map((membership) => membership.groupName))];
+  return names.length > 0 ? names.join(', ') : undefined;
+}
+
+/**
+ * The picker's empty-state copy, resolved by role — the one place `drone-picker.html`'s three-way
+ * branch (error / loading / empty) collapses its "empty" leg down to a single view model, mirroring
+ * `onboarding-logic.ts`'s "component reads a computed, never branches on `topRole` itself" convention.
+ *
+ * **PILOT** (docs/plans/active/OPS-UX-PLAN.md §2 A2, verbatim wording): *"No aircraft assigned to you
+ * yet"*, naming their group from `memberships` when one resolves — never a fabricated person's name.
+ * A PILOT with genuinely no membership at all (an edge the plan doesn't name a copy for) gets an
+ * honest "could not determine your group" rather than either blank text or an invented one — the
+ * same "degrade honestly, never fabricate" rule every other empty state in this app follows.
+ *
+ * **ADMIN/MANAGER**: unchanged title/message from before this task ("keeps its current, correct
+ * message" — OPS-UX-PLAN.md §2 A2) — only `drone-picker.html`'s CTA target changes, from
+ * `/devices?addSource=1` to `/add-source` (A4), which is why that link lives in the template, not
+ * in this string.
+ *
+ * **An unresolved `topRole`** (`undefined`/`null` — every real caller reaches this page behind
+ * `authGuard`, which already awaited `AuthStore.ready`, so this is a defensive fallback, not a path
+ * any real visit takes) gets the fleet-empty title/message — never the PILOT copy, which would
+ * claim a specific relationship ("assigned to you") the app cannot back up for an unknown role —
+ * but **not** the CTA: `showAddSource` mirrors `canManageOrg` exactly (`ADMIN`/`MANAGER` only), so an
+ * unconfirmed role never gets offered a door `POST /api/assets` (A4) might refuse.
+ */
+export function pickerEmptyStateCopy(topRole: Role | null | undefined, memberships: readonly Membership[]): PickerEmptyState {
+  if (topRole === 'PILOT') {
+    const groupNames = membershipGroupNames(memberships);
+    return {
+      title: 'No aircraft assigned to you yet',
+      message: groupNames
+        ? `Nobody has assigned you a drone in ${groupNames} yet — ask a manager there to assign one.`
+        : 'Could not determine your group — ask a manager to assign you a drone.',
+      showAddSource: false,
+    };
+  }
+  return {
+    title: 'No drones registered yet',
+    message: 'Add a source from the Devices tab — the synthetic test drone flies a route with no hardware at all.',
+    showAddSource: topRole === 'ADMIN' || topRole === 'MANAGER',
+  };
 }

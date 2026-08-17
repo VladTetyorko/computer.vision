@@ -426,29 +426,92 @@ export function arrowRotationDegrees(points: readonly GeoPosition[]): number {
   return (((Math.atan2(dx, dy) * 180) / Math.PI) + 360) % 360;
 }
 
-// --- Leaflet vector colours ---------------------------------------------------------------------
+// --- Leaflet vector colours (re-derived from the live theme, never a frozen snapshot) -----------
 //
 // Leaflet writes path colours as SVG presentation attributes, which do not resolve `var(--token)` —
 // so a vector overlay's colour has to be a literal, exactly as `core/geofence/geofence-logic.ts`
-// (`KEEP_IN_COLOR`/`KEEP_OUT_COLOR`) and `core/marks/mark-logic.ts` (`markColor`) already establish
-// for this app's other Leaflet layers. Every literal below mirrors a `src/styles.css` tier-2 token;
-// anything rendered as *HTML* (every divIcon symbol, all the chrome) uses the tokens directly.
+// (`resolveZoneColors`) already establishes for this app's other Leaflet layer. Anything rendered as
+// *HTML* instead (every divIcon symbol, all the chrome) uses the tokens directly and needs none of
+// this.
+//
+// These used to be permanent, hand-copied hex snapshots of the *dark* theme's tokens
+// (`TRAIL_COLOR`/`DRAWING_COLORS`, frozen at import time) — correct only while dark was this app's
+// default theme. Once light became the default (docs/plans/done/VISUAL-REFRESH-PLAN.md), every one of these
+// literals silently kept painting the drone trail and every "accent"-toned drawing in dark-theme
+// blue on a light page — and three of the five drawing-toolbar swatch colours
+// (`danger`/`warn`/`success`) never matched *either* theme's ramp at all (an orphaned, unrelated
+// palette; the swatches themselves, `drawing-toolbar.css`'s `.tone-*` rules, were always correct,
+// reading `var(--color-danger)` etc. directly — only what actually got painted onto the map drifted
+// from them). `resolveMapColors` fixes both problems the same way: read every literal from the live
+// theme, via `readVar` — a thin seam the caller supplies (typically a `getComputedStyle` read off
+// the element that actually paints; see `TacticalMap#refreshMapColors`'s own comment for why that
+// beats `:root`, e.g. inside a `.surface-dark` enclave) — so this module itself stays DOM-free and
+// unit-testable with a fake reader.
 
-/** The breadcrumb-trail blue — matches `--color-info`/`--accent` (and the trail colour both deleted map components used). */
-export const TRAIL_COLOR = '#4f8cff';
+/** Every Leaflet-paint-layer literal this map draws, resolved from the live theme — see the section comment above. */
+export interface MapColors {
+  readonly trail: string;
+  readonly danger: string;
+  readonly warn: string;
+  readonly success: string;
+  readonly neutral: string;
+}
 
-const DRAWING_COLORS: Record<string, string> = {
-  accent: TRAIL_COLOR,
-  info: TRAIL_COLOR,
+/**
+ * Last-resort literals — the exact pre-fix, dark-theme-only values, used only where `readVar`
+ * genuinely can't resolve a token (e.g. a test with no stylesheet loaded, or a call before the DOM
+ * is ready). A resolution failure degrades to today's known behaviour rather than an invalid/empty
+ * Leaflet colour string.
+ */
+export const FALLBACK_MAP_COLORS: MapColors = {
+  trail: '#4f8cff',
   danger: '#e5484d',
   warn: '#f5a524',
   success: '#30a46c',
   neutral: '#8b94a7',
 };
 
-/** A `Drawing.colorToken` slug → its literal stroke colour; unknown/absent tokens fall back to the accent. */
-export function drawingColor(colorToken: string | undefined): string {
-  return (colorToken && DRAWING_COLORS[colorToken]) || TRAIL_COLOR;
+/**
+ * Resolves {@link MapColors} via `readVar` — kept as an injected function rather than a direct
+ * `getComputedStyle` call so this module stays pure/DOM-free and testable with a fake reader.
+ * `neutral` maps to `--text-faint`, the exact token `drawing-toolbar.css`'s own `.tone-neutral`
+ * swatch already uses, so a drawn "Neutral" line matches its own swatch precisely; every other role
+ * maps to the semantic token its name already names.
+ */
+export function resolveMapColors(readVar: (name: string) => string | undefined): MapColors {
+  const read = (name: string, fallback: string): string => {
+    const value = readVar(name)?.trim();
+    return value && value.length > 0 ? value : fallback;
+  };
+  return {
+    trail: read('--color-info', FALLBACK_MAP_COLORS.trail),
+    danger: read('--color-danger', FALLBACK_MAP_COLORS.danger),
+    warn: read('--color-warn', FALLBACK_MAP_COLORS.warn),
+    success: read('--color-success', FALLBACK_MAP_COLORS.success),
+    neutral: read('--text-faint', FALLBACK_MAP_COLORS.neutral),
+  };
+}
+
+/**
+ * A `Drawing.colorToken` slug → its stroke colour; unknown/absent tokens fall back to the trail/
+ * accent colour. `colors` defaults to {@link FALLBACK_MAP_COLORS} so an existing caller that only
+ * cares about *which* token maps to *which* role (`drawings-logic.ts`'s own token-roster test, this
+ * file's own spec) keeps compiling and behaving unchanged; `TacticalMap` is the one caller that
+ * passes the live-resolved {@link MapColors} it read at paint time (see `resolveMapColors` above).
+ */
+export function drawingColor(colorToken: string | undefined, colors: MapColors = FALLBACK_MAP_COLORS): string {
+  switch (colorToken) {
+    case 'danger':
+      return colors.danger;
+    case 'warn':
+      return colors.warn;
+    case 'success':
+      return colors.success;
+    case 'neutral':
+      return colors.neutral;
+    default:
+      return colors.trail; // 'accent' | 'info' | unknown/absent — trail is the deliberate fallback
+  }
 }
 
 // --- Shared helpers lifted from the two deleted components --------------------------------------

@@ -464,6 +464,57 @@ export interface StreamTrack {
 }
 
 /**
+ * Mirrors `dto.DetectionState` (docs/plans/active/CV-DEMAND-PLAN.md §3.6) — which of the two
+ * independent detection gates currently explains a stream's boxes-or-no-boxes state: `'OFF'` (the
+ * operator's own choice), `'IDLE_NO_VIEWERS'` (enabled, but nobody has consumed this stream's
+ * detections within the grace period — not a fault), `'RUNNING'` (both gates open; says nothing
+ * about detector *health* — a stalled cv-service still reads `'RUNNING'`, see the Java enum's own
+ * javadoc). Absent on `StreamTracksResponse` for an unknown/not-running stream or an old server —
+ * every reader degrades to the honest "nothing measured yet" case, never a guess.
+ */
+export type DetectionState = 'OFF' | 'IDLE_NO_VIEWERS' | 'RUNNING';
+
+/**
+ * Mirrors the `"rate"` object of `GET /api/streams/{streamId}/tracks` (`dto.DetectionRateResponse`,
+ * docs/plans/active/CV-RATE-CONTROL-PLAN.md §1) — why this stream is detecting at the rate it is.
+ * `submittedFps` is the one figure `cv-control-panel.ts`'s honest status line actually reads (the
+ * *measured* rate, replacing the fps slider's now-false "this is the rate" label per
+ * docs/plans/active/CV-UX-RESEARCH.md §1.2) — every other field mirrors the DTO 1:1 for parity even
+ * though only `submittedFps` has a reader today.
+ */
+export interface DetectionRate {
+  readonly windowSeconds: number;
+  readonly sourceFps: number;
+  readonly targetFps: number;
+  readonly demandFps: number;
+  readonly submittedFps: number;
+  readonly submitted: number;
+  readonly droppedInFlight: number;
+  readonly droppedOutage: number;
+  readonly missedDeadlines: number;
+  readonly dropRatio: number;
+  readonly transport: string;
+  readonly decodeMillisP50: number;
+}
+
+/**
+ * Mirrors the `"latency"` object of `GET /api/streams/{streamId}/tracks` (`dto.PipelineLatencyResponse`,
+ * docs/conclusions/CV-RATE-BUDGET.md §3) — what a detection costs in wall-clock time. Present
+ * whatever the tracking mode is (independent of `stats`), absent before the first completed
+ * detection. Mirrored for DTO parity alongside {@link DetectionRate}; no reader yet.
+ */
+export interface PipelineLatency {
+  readonly windowSeconds: number;
+  readonly samples: number;
+  readonly roundTripMillisP50: number;
+  readonly roundTripMillisP95: number;
+  readonly roundTripMillisMax: number;
+  readonly updateIntervalMillisP50: number;
+  readonly effectiveFps: number;
+  readonly worstBoxAgeMillis: number;
+}
+
+/**
  * Mirrors `GET /api/streams/{streamId}/tracks`'s 200 body (docs/plans/done/TRACKING-PLAN.md §4.E) — never
  * errors server-side; an unknown/stopped stream returns an empty `tracks` list and `lockedTrackId:
  * 0` (the same forgiving idiom `GET .../detections` already uses). A **transport failure** (this
@@ -476,12 +527,20 @@ export interface StreamTrack {
  * the Fly cockpit's "Following #N — release" chip gates on**: the chip renders only once this
  * response confirms a lock, never from local click intent (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's
  * honesty rule) — see `cv-control-panel.ts`'s own doc comment.
+ *
+ * `rate`/`latency`/`detectionState` (docs/plans/active/CV-UX-RESEARCH.md §7 wave U3, the backend
+ * already served all three — this app simply hadn't read them) are each independently absent when
+ * there's nothing honest to report yet (no completed detection, or an old server) — never a zeroed
+ * placeholder.
  */
 export interface StreamTracksResponse {
   readonly streamId: string;
   readonly lockedTrackId: number;
   readonly tracks: readonly StreamTrack[];
   readonly stats?: TrackStats;
+  readonly latency?: PipelineLatency;
+  readonly rate?: DetectionRate;
+  readonly detectionState?: DetectionState;
 }
 
 /**
@@ -1695,10 +1754,14 @@ export interface Assignment {
 
 /**
  * Mirrors `dto.AuditEntryResponse` — one entry of `GET /api/me/activity` (docs/plans/done/U-SCOPE-PLAN.md
- * feature 7), the acting user's own recent actions. `summary` is written to read on its own (no id
- * reconstruction needed); `details` carries before→after specifics. `action` is one of
+ * feature 7), the acting user's own recent actions, **and**, since docs/plans/active/OPS-UX-PLAN.md §3 B1,
+ * `GET /api/audit` (`core/api/vision-api.ts#listAudit`), the fleet-wide equivalent behind
+ * `features/audit/**` — the same DTO on the wire, so one type backs both. `summary` is written to
+ * read on its own (no id reconstruction needed); `details` carries before→after specifics, and,
+ * on some entries, a `result` key (`"DENIED:<reason>"` on a refused attempt — see
+ * `core/audit/audit-logic.ts#auditResult`). `action` is one of
  * `CREATED`/`UPDATED`/`DEACTIVATED`/`ACTIVATED`/`DELETED`/`RESTORED`, `targetType` one of
- * `ASSET`/`DEVICE` — both left as plain strings here (the UI renders them via
+ * `ASSET`/`DEVICE`/`DATASET`/`MODEL` — both left as plain strings here (the UI renders them via
  * `core/org/org-logic.ts#formatActivity`, which tolerates an unrecognized value rather than a
  * closed union that a new backend action would break).
  */

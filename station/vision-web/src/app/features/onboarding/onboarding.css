@@ -508,3 +508,23 @@ td.actions {
     height: 8rem;
     margin-bottom: var(--space-16);
 }
+
+/* ---- Step 5: Assign — "Who flies this?" (docs/plans/active/OPS-UX-PLAN.md §2 A3) ------------- */
+
+.pilot-list {
+    list-style: none;
+    margin: 0 0 var(--space-16);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.pilot-row {
+    padding: var(--space-8) 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+}
+
+.pilot-list li:last-child .pilot-row {
+    border-bottom: none;
+}

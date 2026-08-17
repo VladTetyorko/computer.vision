@@ -63,9 +63,11 @@ import type { IconName } from '../../shared/ui/icon-registry';
  *   `core/org/org-guard.ts`'s route guard already use — reused here, not a new role system. Every
  *   `group`-carrying entry is `managerOnly`; so is `Pilots / roster` (its own route is already
  *   `orgGuard`-gated, so hiding the tile for a pilot matches where a click would land anyway, not a
- *   new restriction). `Assets`/`Add source` stay ungated — every authenticated role can already reach
- *   both today. Net effect: a plain PILOT sees just two Manage entries (Assets, Add source); an
- *   ADMIN/MANAGER sees the full grouped set. The sidebar applies this filter **once**, for the whole
+ *   new restriction). **`Add source` is `managerOnly` too (docs/plans/active/OPS-UX-PLAN.md §2 A4)** — the
+ *   concurrent backend wave gates `POST /api/assets` itself on `canManageOrg()`, so the nav must not
+ *   dangle a door the API will now refuse. `Assets` alone stays ungated — reading the fleet is not a
+ *   management action. Net effect: a plain PILOT sees just one Manage entry (Assets); an ADMIN/MANAGER
+ *   sees the full grouped set. The sidebar applies this filter **once**, for the whole
  *   app — the split-brain where only the hub page filtered and the dropdown did not is gone with the
  *   hub pages themselves.
  */
@@ -198,6 +200,15 @@ export const NAV_MODES: readonly NavMode[] = [
         to: '/activity',
       },
       {
+        icon: 'shield',
+        name: 'Audit trail',
+        description: 'Who changed what, fleet-wide — actor, action, target, and result.',
+        to: '/monitor/audit',
+        // docs/plans/active/OPS-UX-PLAN.md §3 B1: mirrors `AuditController#list`'s own
+        // `canManageOrg()` gate — the manager's accountability surface, not a pilot's.
+        managerOnly: true,
+      },
+      {
         icon: 'alert',
         name: 'Alerts center',
         description: 'The live detection-events feed — saved thresholds and acknowledgement are coming.',
@@ -236,6 +247,10 @@ export const NAV_MODES: readonly NavMode[] = [
         name: 'Add source',
         description: 'Register, discover, or simulate a new device in three steps.',
         to: '/add-source',
+        // docs/plans/active/OPS-UX-PLAN.md §2 A4: the concurrent backend wave gates `POST /api/assets` on
+        // `canManageOrg()` — the nav must not offer a door the API will now refuse. `Assets`, its
+        // sibling above, stays ungated (reading the fleet is not a management action).
+        managerOnly: true,
       },
       {
         icon: 'pilot',

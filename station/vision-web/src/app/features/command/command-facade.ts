@@ -1,6 +1,7 @@
-import { DestroyRef, Injectable, type Signal, computed, effect, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { DestroyRef, Injectable, type Signal, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
+import { AuthStore } from '../../core/auth/auth-store';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { buildTestDroneRequest } from '../../core/fleet/simulation-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
@@ -18,8 +19,9 @@ import { LiveStore } from '../../core/live/live-store';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { fleetCentroid } from '../../core/weather/weather-logic';
 import { buildEntityRows, commandGridColumns, type DetailPanelState } from './command-logic';
+import { buildSetupChecklist, isFreshStation, type SetupChecklistRow } from '../../core/command/setup-checklist-logic';
 import type { DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
-import type { AssetAttention, FleetSummary } from '../../core/api/models';
+import type { AssetAttention, FleetSummary, GroupSummary, UserSummary } from '../../core/api/models';
 
 /** The one poll driving the entity rail and the selected asset's Status/Telemetry facts alike. */
 const SUMMARY_POLL_INTERVAL_MS = 5_000;
@@ -54,7 +56,12 @@ const PANEL_OPEN_KEY = 'vision.command.panelOpen';
 @Injectable()
 export class CommandFacade {
   private readonly router = inject(Router);
+  /** `selectAsset`/`closePanel`'s own `relativeTo` anchor — the same `router.navigate([], {relativeTo, queryParamsHandling: 'merge'})`
+   *  idiom every sibling page's facade uses to keep a selection alive across reload/Back (`assets-facade.ts`,
+   *  `devices-facade.ts`, `alerts-facade.ts`, `roster-facade.ts`, `replay-library-facade.ts`). */
+  private readonly route = inject(ActivatedRoute);
   private readonly api = inject(VisionApi);
+  private readonly auth = inject(AuthStore);
   private readonly fleet = inject(FleetStore);
   private readonly mapStore = inject(FleetMapStore);
   private readonly geofence = inject(GeofenceStore);
@@ -214,6 +221,43 @@ export class CommandFacade {
   private readonly addingTestDroneSignal = signal(false);
   readonly addingTestDrone = this.addingTestDroneSignal.asReadonly();
 
+  // --- "Set up this station" checklist (docs/plans/active/OPS-UX-PLAN.md §3 B2) ------------------------------
+  // ADMIN-only (`AuthStore.user()?.topRole`) — ADMIN is the one role that can act on every row (create a
+  // group, create a user, add a source, assign a pilot), so a MANAGER/PILOT landing on `/command` never
+  // sees a checklist pointing at doors they can't open. **Dev parity**: with `vision.auth.enabled=false`
+  // the backend's fixed dev principal reports `topRole: 'ADMIN'` (`AuthStore`'s own class doc comment,
+  // "Dev parity" paragraph) — so this gate is effectively "everyone" on a default install, which is the
+  // *right* call here (unlike, say, `core/shell/landing-logic.ts`'s stricter decision for a different
+  // question): a fresh unsecured station genuinely needs this setup walked through by whoever is sitting
+  // at it, same as a real ADMIN would.
+  private readonly setupUsersSignal = signal<readonly UserSummary[]>([]);
+  private readonly setupGroupsSignal = signal<readonly GroupSummary[]>([]);
+  /** Guards the very first render from a false "fresh!" flash before `listUsers`/`listGroups` land — see `showSetupChecklist`. */
+  private readonly setupDataLoadedSignal = signal(false);
+  /**
+   * Best-effort "does *any* asset anywhere already have a pilot assigned" — mirrors
+   * `RosterFacade`'s own per-asset `listAssetPilots` fan-out (`features/roster/roster-facade.ts`),
+   * scoped down to "any at all" rather than a full `assetId → pilots` map, since the checklist only
+   * ever needs the yes/no. Starts `false` and only ever flips to `true`: an admin unassigning the one
+   * pilot they just assigned should not make a completed row reappear and re-nag them.
+   */
+  private readonly hasAnyPilotAssignmentSignal = signal(false);
+
+  /**
+   * Whether to show the checklist at all — ADMIN, plus `isFreshStation` (see that function's own doc
+   * comment for the "no users beyond the seeded three, or zero assets" rule) — gated on
+   * `setupDataLoadedSignal` so this never flashes `true` off an empty `[]` default before the user/group
+   * load resolves.
+   */
+  readonly showSetupChecklist = computed(
+    () => this.setupDataLoadedSignal() && this.auth.user()?.topRole === 'ADMIN' && isFreshStation(this.setupUsersSignal(), this.summary()?.totalAssets ?? 0),
+  );
+
+  /** The four rows themselves — only built while `showSetupChecklist` is true (no reason to compute it otherwise). */
+  readonly setupChecklist = computed<readonly SetupChecklistRow[]>(() =>
+    buildSetupChecklist(this.setupUsersSignal(), this.setupGroupsSignal(), this.summary()?.totalAssets ?? 0, this.hasAnyPilotAssignmentSignal()),
+  );
+
   private appliedDeepLink = false;
 
   constructor() {
@@ -227,6 +271,64 @@ export class CommandFacade {
     // Keeps the weather chip fresh as the fleet centroid moves — `WeatherStore.track` itself
     // no-ops instantly unless the 10-minute cache is actually stale (docs/plans/done/OPS-CORE-PLAN.md §W).
     effect(() => this.weather.track(this.weatherPosition()));
+
+    void this.loadSetupChecklistData();
+
+    // The checklist's own "assign a pilot" row (docs/plans/active/OPS-UX-PLAN.md §3 B2): re-checks pilot
+    // coverage on every fleet-summary tick while the checklist is showing and nothing has been found yet
+    // — `hasAnyPilotAssignmentSignal` only ever flips false→true (see its own doc comment), so this stops
+    // polling for good the moment it finds one, rather than fanning out `listAssetPilots` forever.
+    // `untracked()` (mirrors `shared/map/tactical-map/tactical-map.ts`'s identical use) reads `summary()`
+    // for the async call without making *that* the thing this effect depends on twice over — `summary`
+    // is already the signal driving re-runs here.
+    effect(() => {
+      const shouldCheck = this.showSetupChecklist() && !this.hasAnyPilotAssignmentSignal();
+      const assets = this.summary()?.assets;
+      if (!shouldCheck || !assets || assets.length === 0) {
+        return;
+      }
+      untracked(() => void this.refreshPilotCoverage(assets));
+    });
+  }
+
+  /** Loads the checklist's own two small lists once — best-effort, mirrors every other poller's silent-degrade rule: a failed load just leaves the checklist not-yet-shown rather than surfacing a page-blocking error over the map. */
+  private async loadSetupChecklistData(): Promise<void> {
+    await this.auth.ready;
+    if (this.auth.user()?.topRole !== 'ADMIN') {
+      return; // never fetched for a role that could never see the checklist anyway
+    }
+    try {
+      const [users, groups] = await Promise.all([this.api.listUsers(), this.api.listGroups()]);
+      this.setupUsersSignal.set(users);
+      this.setupGroupsSignal.set(groups);
+    } catch {
+      // Silent-degrade: the checklist simply never turns on this session; nothing else on
+      // `/command` depends on this data, so there is nothing to retry into.
+    } finally {
+      this.setupDataLoadedSignal.set(true);
+    }
+  }
+
+  /**
+   * One best-effort pass over `assets`, stopping at the first asset found with ≥1 assigned pilot —
+   * see the constructor effect's own doc comment for why this only runs while it can still find
+   * something new. Sequential (not `RosterFacade.load`'s parallel `Promise.all` fan-out) and with an
+   * early exit: this only ever needs a yes/no, not a full `assetId → pilots` map, so stopping at the
+   * first hit is strictly less work than always fetching every asset.
+   */
+  private async refreshPilotCoverage(assets: readonly AssetAttention[]): Promise<void> {
+    for (const asset of assets) {
+      try {
+        const pilots = await this.api.listAssetPilots(asset.assetId);
+        if (pilots.length > 0) {
+          this.hasAnyPilotAssignmentSignal.set(true);
+          return;
+        }
+      } catch {
+        // One asset's pilots failing to resolve never blocks checking the rest — same
+        // catch-and-continue idiom `RosterFacade.load` uses per asset.
+      }
+    }
   }
 
   /**
@@ -238,6 +340,11 @@ export class CommandFacade {
    * can't declare an Angular component input itself, so `CommandPage`'s constructor passes the
    * signal-accessor in once; reading it (and `summary()`) inside this `effect()` still re-runs on
    * every later change to either, exactly like the effect this replaces.
+   *
+   * Since BUG 4's fix, `selectAsset` itself writes `?asset=`, which makes `requestedAssetId()` change
+   * too — `selectAsset` latches `appliedDeepLink = true` *before* navigating for exactly this reason,
+   * so this effect never mistakes its own selection's URL write for a fresh inbound deep link and
+   * double-fires `selectAsset`.
    */
   trackRequestedAsset(requestedAssetId: Signal<string | undefined>): void {
     effect(() => {
@@ -290,8 +397,22 @@ export class CommandFacade {
    * the pre-§U-c docked-preview's own `onPreview`). A fresh selection always shows the panel, even
    * if the operator had previously collapsed it — collapsing is "get this out of my way for now",
    * not "never show me a panel again".
+   *
+   * **BUG 4 fix**: also mirrors the choice into `?asset=` — every sibling page's facade round-trips
+   * its selection through the URL (`assets-facade.ts#selectRow`, `devices-facade.ts`, `alerts-facade.ts`,
+   * `roster-facade.ts`, `replay-library-facade.ts`) so it survives reload and Back; `CommandFacade` is
+   * page-provided (not `providedIn: 'root'`), so without this a selection died the moment the tab
+   * reloaded even though `trackRequestedAsset` reads `?asset=` right back in on the next boot.
+   * `replaceUrl: true` — same reasoning as every sibling's identical choice: picking a rail row is
+   * browsing, not a step Back should have to undo one click at a time.
    */
   async selectAsset(assetId: string): Promise<void> {
+    // A manual selection supersedes whatever `?asset=` originally asked for — latching this here (not
+    // just inside `trackRequestedAsset`'s own effect) stops that effect from re-firing a redundant
+    // second `selectAsset` call the moment this method's own `router.navigate` below lands and the
+    // routed `requestedAssetId` input updates to match. Without it, the very first selection in a
+    // session double-fires (an extra focus-tick bump + a duplicate `resolveWatchDevice` call).
+    this.appliedDeepLink = true;
     // Bumped on *every* selection, including re-selecting the asset already selected. The map
     // centres on `focusRequest` changing; keying that off the asset id alone meant clicking the
     // current asset did nothing, so an operator who had panned away could not click it to bring the
@@ -300,6 +421,7 @@ export class CommandFacade {
     this.selectedAssetIdSignal.set(assetId);
     this.selectedVideoDeviceIdSignal.set(undefined);
     this.panelOpenPreferenceSignal.set(true);
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { asset: assetId }, queryParamsHandling: 'merge', replaceUrl: true });
     const device = await this.mapStore.resolveWatchDevice(assetId);
     // Guard against a stale response landing after the operator already selected someone else.
     if (this.selectedAssetId() === assetId) {
@@ -317,9 +439,12 @@ export class CommandFacade {
     return assetId ? { assetId, tick: this.focusTickSignal() } : undefined;
   });
 
+  /** Clears the selection and, per the same BUG 4 fix as `selectAsset`, `?asset=` — so a closed panel
+   *  stays closed across reload rather than the deep link re-opening it. */
   closePanel(): void {
     this.selectedAssetIdSignal.set(null);
     this.selectedVideoDeviceIdSignal.set(undefined);
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { asset: null }, queryParamsHandling: 'merge', replaceUrl: true });
   }
 
   // --- Navigation (the verb dictionary's two terms — docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 1) --------

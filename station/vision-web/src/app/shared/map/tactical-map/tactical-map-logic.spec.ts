@@ -4,6 +4,7 @@ import {
   BUILTIN_ASSETS_LAYER,
   BUILTIN_EVENTS_LAYER,
   BUILTIN_ZONES_LAYER,
+  FALLBACK_MAP_COLORS,
   HIDDEN_LAYERS_KEY,
   affiliationCounts,
   appendVertex,
@@ -23,12 +24,14 @@ import {
   minPointsFor,
   parseHiddenLayers,
   readHiddenLayers,
+  resolveMapColors,
   toggleLayerHidden,
   visibleDrawings,
   visibleMarks,
   writeHiddenLayers,
   zoneTooltipLabel,
   type LayerView,
+  type MapColors,
   type MapDrawing,
   type TacticalMark,
 } from './tactical-map-logic';
@@ -283,5 +286,51 @@ describe('shared helpers lifted from the two deleted map components', () => {
     expect(drawingColor('danger')).not.toBe(drawingColor('accent'));
     expect(drawingColor(undefined)).toBe(drawingColor('accent'));
     expect(drawingColor('not-a-token')).toBe(drawingColor('accent'));
+  });
+
+  it('drawingColor resolves against the passed-in live colours, not the fallback, once given one', () => {
+    const live: MapColors = { trail: '#111111', danger: '#222222', warn: '#333333', success: '#444444', neutral: '#555555' };
+    expect(drawingColor('accent', live)).toBe('#111111');
+    expect(drawingColor('info', live)).toBe('#111111');
+    expect(drawingColor('danger', live)).toBe('#222222');
+    expect(drawingColor('warn', live)).toBe('#333333');
+    expect(drawingColor('success', live)).toBe('#444444');
+    expect(drawingColor('neutral', live)).toBe('#555555');
+    expect(drawingColor(undefined, live)).toBe('#111111');
+    expect(drawingColor('not-a-token', live)).toBe('#111111');
+  });
+});
+
+describe('resolveMapColors', () => {
+  it('reads every role from its own token, trimming whitespace a real getComputedStyle read leaves in', () => {
+    const values: Record<string, string> = {
+      '--color-info': '  #2e6bcf  ',
+      '--color-danger': '#c9333f',
+      '--color-warn': '#b26a00',
+      '--color-success': '#1f7f4c',
+      '--text-faint': '#8a94a2',
+    };
+    const colors = resolveMapColors((name) => values[name]);
+    expect(colors).toEqual({
+      trail: '#2e6bcf',
+      danger: '#c9333f',
+      warn: '#b26a00',
+      success: '#1f7f4c',
+      neutral: '#8a94a2',
+    });
+  });
+
+  it('falls back per-token when a variable resolves empty or is missing entirely', () => {
+    const colors = resolveMapColors((name) => (name === '--color-danger' ? '' : undefined));
+    expect(colors).toEqual(FALLBACK_MAP_COLORS);
+  });
+
+  it('never returns the same object reference as FALLBACK_MAP_COLORS even when every value matches it', () => {
+    // A caller (`TacticalMap`) sets a signal from this return value on every theme flip — asserting a
+    // fresh object here is what guards against ever "optimizing" this into returning the shared
+    // fallback constant directly, which would make the signal's `Object.is` check silently no-op.
+    const colors = resolveMapColors(() => undefined);
+    expect(colors).toEqual(FALLBACK_MAP_COLORS);
+    expect(colors).not.toBe(FALLBACK_MAP_COLORS);
   });
 });

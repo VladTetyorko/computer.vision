@@ -7,7 +7,14 @@ import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
 import type { AssetSummary, AssignedPilot, UserSummary } from '../../core/api/models';
 import { buildRosterRows, countAssetsWithoutPilot, searchRosterRows, type RosterRow } from './roster-logic';
-import { buildPilotRows, parseRosterPivot, searchPilotRows, type RosterPivot, type RosterPilotRow } from '../../core/roster/roster-pivot-logic';
+import {
+  buildPilotRows,
+  countPilotsWithoutAssets,
+  parseRosterPivot,
+  searchPilotRows,
+  type RosterPivot,
+  type RosterPilotRow,
+} from '../../core/roster/roster-pivot-logic';
 
 /**
  * `RosterPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — the `/manage/roster` route is already
@@ -74,6 +81,16 @@ export class RosterFacade {
   /** `⚠ N assets have no pilot` (docs/extracts/design/13-roster.md) — against every loaded asset, not the search-filtered subset. */
   readonly assetsWithoutPilotCount = computed(() =>
     countAssetsWithoutPilot(buildRosterRows(this.assets(), this.pilotsByAsset(), this.users())),
+  );
+
+  /**
+   * The mirror gap (docs/plans/active/OPS-UX-PLAN.md §3 B3): how many users who hold a `PILOT`
+   * membership somewhere are assigned to zero assets. Built the same way as `assetsWithoutPilotCount`
+   * above — against every loaded pilot row, not the search-filtered subset — so both headline tiles
+   * answer "as things stand", not "as currently filtered".
+   */
+  readonly pilotsWithoutAssignmentCount = computed(() =>
+    countPilotsWithoutAssets(buildPilotRows(this.assets(), this.pilotsByAsset(), this.users()), this.users()),
   );
 
   readonly selectedAssetRow = computed(() => this.rows().find((row) => row.asset.assetId === this.selectedId()));

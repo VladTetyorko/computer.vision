@@ -3,7 +3,7 @@ import { VisionApi } from '../api/vision-api';
 import type { DetectionResult } from '../api/models';
 import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
-import { cvStatus, deriveChips } from './detections-logic';
+import { cvStatus, deriveChips, freshResults } from './detections-logic';
 import { type AssetScopedTransport, resolveAssetScopedTransport, trackSessionKey } from '../live/live-fallback-logic';
 
 /** How often a tracked stream's recent detections are re-read while **polling** (the fallback) is active. */
@@ -35,7 +35,10 @@ const DETECTIONS_LIMIT = 50;
  * presents the same shape the poll fallback always has — a short recent-history list, newest first
  * — by prepending every newly-arrived live result onto a running `liveResultsSignal` itself
  * (capped at `DETECTIONS_LIMIT`, same as the poll's own `limit` query param), rather than
- * re-deriving history from a single latest value on every read.
+ * re-deriving history from a single latest value on every read. `liveResultsSignal` itself only ever
+ * grows (until the cap) or gets replaced wholesale by `track()`/`reset()` — nothing ever removes a
+ * single stale entry from it. Aging individual entries out is `results`' job, not this accumulator's;
+ * see `freshResults` on the `results` computed below.
  *
  * **Subscription lifecycle vs. transport, kept separate** (mirrors `TelemetryStore`'s own split —
  * see that class's doc comment for the full reasoning): `track()` subscribes to `LiveStore` once
@@ -49,9 +52,13 @@ const DETECTIONS_LIMIT = 50;
  * `providers`, so a fresh instance — and its poll/subscription — starts/stops with the route,
  * exactly like `TelemetryStore`.
  *
- * **Errors silent-degrade, no toast.** A failed or empty poll just leaves `results` at its
- * last-known value; the CV status dot naturally reads `'off'` once that value goes stale
- * (`detections-logic.ts#cvStatus`), so there is no separate error state to invent or report.
+ * **Errors silent-degrade, no toast.** A *throwing* poll leaves `pollResultsSignal` at its
+ * last-known value (an empty/successful poll, by contrast, replaces it immediately, `[]` included);
+ * either way, `results` itself never surfaces anything the status dot would already call stale —
+ * `detections-logic.ts#freshResults` ages every entry out of both transports on the same clock
+ * `detections-logic.ts#cvStatus` uses for the dot, so a stream that stopped producing detections
+ * (switched off, no viewers, a CV outage, cv-service crashed) stops being drawn within one freshness
+ * window regardless of which transport was feeding it or whether the server ever clears anything.
  */
 @Injectable()
 export class DetectionsStore {
@@ -87,9 +94,17 @@ export class DetectionsStore {
    */
   private lastTrackKey: string | undefined;
 
-  /** Whichever source is currently active — every other computed below derives from this. */
+  /**
+   * Whichever source is currently active, aged out through {@link freshResults} — every other
+   * computed below derives from this, so nothing downstream (chip strip, box overlay, counts) can
+   * see a result the status dot itself would already call stale. Re-evaluates on `nowSignal`'s own
+   * tick, not a second timer.
+   */
   readonly results = computed<readonly DetectionResult[]>(() =>
-    this.transportSignal() === 'live' ? this.liveResultsSignal() : this.pollResultsSignal(),
+    freshResults(
+      this.transportSignal() === 'live' ? this.liveResultsSignal() : this.pollResultsSignal(),
+      this.nowSignal(),
+    ),
   );
 
   /** The last ~8 distinct labels seen, each with its most recently recorded confidence. */
