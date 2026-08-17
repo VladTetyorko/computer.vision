@@ -35,14 +35,14 @@ literal it replaced (see `VisionApiProperties` below).
 
 | Controller | Method | Path | Success | Failure |
 |---|---|---|---|---|
-| AssetController | POST | `/api/assets` | 201 `AssetDetailsResponse` | 400 validation (incl. 0-device asset) |
+| AssetController | POST | `/api/assets` | 201 `AssetDetailsResponse` | 400 validation (incl. 0-device asset), 403 `!scope.canManageOrg()` (docs/plans/active/OPS-UX-PLAN.md §1/C2) |
 | AssetController | GET | `/api/assets?includeDeleted=` | 200 `List<AssetSummaryResponse>` | — (`includeDeleted` defaults `false`) |
 | AssetController | GET | `/api/assets/{id}` | 200 `AssetDetailsResponse` | 404 unknown id, 400 bad UUID |
-| AssetController | PATCH | `/api/assets/{id}` | 200 `AssetDetailsResponse` | 404 unknown id, 400 bad UUID/unknown category (docs/main/CYCLES-PLAN.md §8's pinned contract) |
-| AssetController | POST | `/api/assets/{id}/state` | 200 `AssetDetailsResponse` | 404 unknown id, 400 unrecognized state, 409 `DELETED`→`ACTIVE` (docs/main/CYCLES-PLAN.md §8; idempotent; `DEACTIVATED` on a `DELETED` asset restores it) |
-| AssetController | DELETE | `/api/assets/{id}` | 200 `AssetDeletionResponse` | 404 unknown id (soft delete/archive, idempotent; docs/main/CYCLES-PLAN.md §8) |
-| AssetController | POST | `/api/assets/{id}/devices` | 200 `AssetDetailsResponse` | 404 unknown asset/device, 400 blank deviceId, 409 device already owned (docs/main/CYCLES-PLAN.md §8) |
-| AssetController | DELETE | `/api/assets/{id}/devices/{deviceId}` | 200 `AssetDetailsResponse` | 404 unknown asset, 400 device not on this asset, 409 last remaining device (docs/main/CYCLES-PLAN.md §8) |
+| AssetController | PATCH | `/api/assets/{id}` | 200 `AssetDetailsResponse` | 404 unknown/out-of-visibility id, 400 bad UUID/unknown category (docs/main/CYCLES-PLAN.md §8's pinned contract), 403 visible but `!scope.canManage(ownership)` (docs/plans/active/OPS-UX-PLAN.md §1/C2) |
+| AssetController | POST | `/api/assets/{id}/state` | 200 `AssetDetailsResponse` | 404 unknown/out-of-visibility id, 400 unrecognized state, 409 `DELETED`→`ACTIVE` (docs/main/CYCLES-PLAN.md §8; idempotent; `DEACTIVATED` on a `DELETED` asset restores it), 403 visible but `!scope.canManage(ownership)` |
+| AssetController | DELETE | `/api/assets/{id}` | 200 `AssetDeletionResponse` | 404 unknown/out-of-visibility id (soft delete/archive, idempotent; docs/main/CYCLES-PLAN.md §8), 403 visible but `!scope.canManage(ownership)` |
+| AssetController | POST | `/api/assets/{id}/devices` | 200 `AssetDetailsResponse` | 404 unknown/out-of-visibility asset, unknown device, 400 blank deviceId, 409 device already owned (docs/main/CYCLES-PLAN.md §8), 403 asset visible but `!scope.canManage(ownership)` |
+| AssetController | DELETE | `/api/assets/{id}/devices/{deviceId}` | 200 `AssetDetailsResponse` | 404 unknown/out-of-visibility asset, 400 device not on this asset, 409 last remaining device (docs/main/CYCLES-PLAN.md §8), 403 asset visible but `!scope.canManage(ownership)` |
 | AssetStreamController | POST | `/api/assets/{id}/stream` | 201 `StartStreamResponse` | 404 unknown asset, 400 ambiguous device/bad UUID |
 | AssetStreamController | DELETE | `/api/assets/{id}/stream` | 204 | idempotent no-op |
 | AssetController | GET | `/api/usages/{usageId}/telemetry?limit=` | 200 `List<TelemetrySampleResponse>` | — (unknown usage → empty list) |
@@ -212,7 +212,7 @@ Response DTOs (`@JsonInclude(NON_NULL)` unless noted — see Conventions), each 
 
 **Detections** (docs/plans/done/MVP1-PLAN.md §C8 bullet 3, body of `GET /api/streams/{streamId}/detections`, and the `detections` SSE topic's payload): `BoundingBoxResponse(x, y, width, height)` (no `NON_NULL`; mirrors `kernel.BoundingBox`, each component normalized [0,1]) · `DetectionResponse(label, confidence, box:BoundingBoxResponse, modelId, modelVersion, track?:DetectionTrackResponse)` · `DetectionResultResponse(streamId, frameSequence, capturedAt, inferenceMillis, detections:List<DetectionResponse>, tracking?:FrameTrackingResponse)`. **The last two gained `@JsonInclude(NON_NULL)` for exactly one field each** (docs/plans/done/TRACKING-PLAN.md §4.G, wave T6) — every other field is still always present, and an untracked payload is therefore **byte-identical to the pre-tracking wire**, which is the whole reason the track facts are one nested object rather than five flat siblings (docs/extracts/TRACKING-ORCHESTRATION.md §6 rule 1). Both keep their pre-T6 canonical constructor as an N-1-arg convenience ctor, so every existing call site compiles unchanged.
 
-**Tracking wire shapes** (docs/plans/done/TRACKING-PLAN.md §4.D/§4.E/§4.F/§4.G, wave T6; V3 fields added docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2, wave J3): `DetectionTrackResponse(id, state, source, velocityX, velocityY, reupdated)` — the nested `"track"` object, deliberately **without** `ageFrames` (book-keeping the tracks endpoint carries, not something a box needs 6×/s); `reupdated` (wave J3, a 5-arg convenience ctor defaults it `false`) is `TrackRef#reupdated()` verbatim — this track's gap was reconstructed by ORU on this frame · `FrameTrackingResponse(detectorRan, detectorReason?, trackerMillis, engineId, lockedTrackId, detectionLagMillis, reupdateMillis, reupdatedTracks, capability?:TrackingCapabilityResponse)` (`@JsonInclude(NON_NULL)`) — the nested `"tracking"` object; **`detectorReason` is present iff `detectorRan`**, and `trackerMillis` is a *fractional* millisecond (nanos/1e6 — `Duration#toMillis()` would report every 0.4 ms tracker pass as `0`, which is precisely the number this feature exists to show); the four wave-J3 fields are a straight `TrackingTelemetry` mapping (a 5-arg convenience ctor defaults them to `0`/`0`/`0`/absent, the pre-V3 shape) — `detectionLagMillis`/`reupdateMillis` are whole milliseconds (the wire itself carries them as proto `int64`, no sub-millisecond precision to lose), and **`capability` is present only when `TrackingTelemetry#capability()` is non-null** (invariant B3) · `TrackingCapabilityResponse(levelServed, reason)` — the nested `"capability"` object, a straight `TrackingCapability` mapping; **`levelServed` is what the server actually served, never what a request asked for** (invariant B5 — see `TrackingConfigRequest#capabilityLevel` below, which this type has no relationship to at the Java level: `FrameTrackingResponse.from` builds `capability` purely from `TrackingTelemetry`, so there is no request value in scope to confuse it with) · `TrackResponse(trackId, label, confidence, box, state, source, velocityX, velocityY, ageFrames, reupdated, firstSeen, lastSeen)` from `perception.domain.model.TrackedObject` — flat, not nested, because *this is* the track resource; `reupdated` (wave J3) added between `ageFrames` and `firstSeen`, matching `TrackRef`'s own field order · `TrackStatsResponse(mode, engineId, windowSeconds, detectorPasses, trackerFrames, dutyRatio, trackerMillisP50, trackerMillisP95, lastDetectorReason, byState:Map<String,Integer>)` from `application.pipeline.TrackingStats` (`window.toSeconds()` → `windowSeconds`; `byState` is a `LinkedHashMap` copy so every state appears, zero included, in lifecycle order; **no `lockedTrackId` here** — §4.E hoists it) · `StreamTracksResponse(streamId, lockedTrackId, tracks, stats?, latency?, rate?)` (`@JsonInclude(NON_NULL)` for all three optionals; a 5-arg convenience ctor defaults `rate` to absent) · `PipelineLatencyResponse(windowSeconds, samples, roundTripMillisP50, roundTripMillisP95, roundTripMillisMax, updateIntervalMillisP50, effectiveFps, worstBoxAgeMillis)` from `application.pipeline.PipelineLatency` (docs/conclusions/CV-RATE-BUDGET.md §3) — **present independently of `stats`**, gated only on the window having sampled anything: a stream with tracking off reports latency and no stats, which is the combination this endpoint most needs to serve, since a lagging overlay is exactly the complaint likely to be raised against it. `roundTripMillis*` is what the pipeline adds (encode, both hops, inference, decode); `updateIntervalMillisP50` is how long until the next box, set by the sample rate; `worstBoxAgeMillis` sums the two and is the number to quote for "how far behind is the overlay?" · `DetectionRateResponse(windowSeconds, sourceFps, targetFps, demandFps, submittedFps, submitted, droppedInFlight, droppedOutage, missedDeadlines, dropRatio, transport, decodeMillisP50)` from `application.pipeline.DetectionRate` (docs/plans/active/CV-RATE-CONTROL-PLAN.md §1; `transport`/`decodeMillisP50` added docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§7, wave M5) — the `"rate"` object, **beside** `latency` rather than inside it: `effectiveFps` reports the rate boxes arrive at but cannot say *why* it fell short, and a starving source and a saturated detector look identical from it while having opposite fixes. Compare `targetFps` with `submittedFps`; when they differ exactly one counter is non-zero and names the loss — `missedDeadlines` (source slower than the target; `sourceFps` will confirm), `droppedInFlight` (detector saturated), `droppedOutage` (cv-service down). `demandFps` is what the tracked target's motion asked for before any ceiling applied, so `demandFps > targetFps` is the one comparison separating "raise the ceiling" from "shrink the round trip". Gated on a **served deadline** (`due() > 0`), not a completed detection, so a stream whose samples are *all* being dropped still reports why. **`transport`** (`"push"`|`"pull"`) is which loop counted these figures, and doubles as the reader's cue for which definition the sibling `latency.roundTripMillis*` is using (§7: pull mode redefines it as `receivedAt - capturedAt`, box age at arrival, since there is no Java→Python round trip to measure) — `PipelineLatencyResponse` itself gained no field of its own for this. **`decodeMillisP50`** is the worker's median local decode cost, `0` in push mode · `CvTrackerResponse(id, displayName, modes:List<String>, needsAssets, costHint)` + `CvTrackersResponse(trackers)` (no `NON_NULL`, mirroring `CvModelResponse`/`CvModelsResponse` exactly). Request side: `TrackingConfigRequest(mode?, engineId?, verifyEveryMillis?, followFps?, redetectIouPercent?, maxAgeFrames?, minHits?, capabilityLevel?, reupdateMaxGapMillis?, lock?:TargetLockRequest)` with `toPatch()`/`toStartPatch()` — both map **one-for-one onto `application.stream.TrackingConfigPatch`**, an absent JSON field becoming a `null` the application layer reads as "leave this knob unchanged"; the latter additionally **rejects a `lock`** (it names a track that cannot exist before the stream produces one). `capabilityLevel`/`reupdateMaxGapMillis` (wave J3, docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2) are ordinary nullable patch fields at this edge like every other knob here — **a request state a *ceiling*** (invariant B5); this DTO has no field for, and must never be read as, what was actually served — that is `FrameTrackingResponse#capability()`'s job, on a later, different response. **Nothing is merged at this edge**: the running configuration is the application layer's state, and the deployment seed is applied there too — see the follow-up section at the end of this file. `TargetLockRequest(trackId?, pointX?, pointY?, release?)` with `toTargetLock()` leaves `lockSeq` at `0` and lets `perception.domain.model.TargetLock`'s own compact ctor be the single arbiter of the one-of-three rule (→400). `UpdateStreamConfigRequest` gained `tracking` (→ `toPatch()`), `UpdateStreamConfigResponse` gained `trackingChanged`, and both `StartStreamRequest`/`StartAssetStreamRequest` gained `tracking`, exposed to the controllers as a separate `trackingPatch()` beside the plain `mergeOntoDefaults()`.
+**Tracking wire shapes** (docs/plans/done/TRACKING-PLAN.md §4.D/§4.E/§4.F/§4.G, wave T6; V3 fields added docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2, wave J3): `DetectionTrackResponse(id, state, source, velocityX, velocityY, reupdated)` — the nested `"track"` object, deliberately **without** `ageFrames` (book-keeping the tracks endpoint carries, not something a box needs 6×/s); `reupdated` (wave J3, a 5-arg convenience ctor defaults it `false`) is `TrackRef#reupdated()` verbatim — this track's gap was reconstructed by ORU on this frame · `FrameTrackingResponse(detectorRan, detectorReason?, trackerMillis, engineId, lockedTrackId, detectionLagMillis, reupdateMillis, reupdatedTracks, capability?:TrackingCapabilityResponse)` (`@JsonInclude(NON_NULL)`) — the nested `"tracking"` object; **`detectorReason` is present iff `detectorRan`**, and `trackerMillis` is a *fractional* millisecond (nanos/1e6 — `Duration#toMillis()` would report every 0.4 ms tracker pass as `0`, which is precisely the number this feature exists to show); the four wave-J3 fields are a straight `TrackingTelemetry` mapping (a 5-arg convenience ctor defaults them to `0`/`0`/`0`/absent, the pre-V3 shape) — `detectionLagMillis`/`reupdateMillis` are whole milliseconds (the wire itself carries them as proto `int64`, no sub-millisecond precision to lose), and **`capability` is present only when `TrackingTelemetry#capability()` is non-null** (invariant B3) · `TrackingCapabilityResponse(levelServed, reason)` — the nested `"capability"` object, a straight `TrackingCapability` mapping; **`levelServed` is what the server actually served, never what a request asked for** (invariant B5 — see `TrackingConfigRequest#capabilityLevel` below, which this type has no relationship to at the Java level: `FrameTrackingResponse.from` builds `capability` purely from `TrackingTelemetry`, so there is no request value in scope to confuse it with) · `TrackResponse(trackId, label, confidence, box, state, source, velocityX, velocityY, ageFrames, reupdated, firstSeen, lastSeen)` from `perception.domain.model.TrackedObject` — flat, not nested, because *this is* the track resource; `reupdated` (wave J3) added between `ageFrames` and `firstSeen`, matching `TrackRef`'s own field order · `TrackStatsResponse(mode, engineId, windowSeconds, detectorPasses, trackerFrames, dutyRatio, trackerMillisP50, trackerMillisP95, lastDetectorReason, byState:Map<String,Integer>)` from `application.pipeline.TrackingStats` (`window.toSeconds()` → `windowSeconds`; `byState` is a `LinkedHashMap` copy so every state appears, zero included, in lifecycle order; **no `lockedTrackId` here** — §4.E hoists it) · `StreamTracksResponse(streamId, lockedTrackId, tracks, stats?, latency?, rate?, detectionState?)` (`@JsonInclude(NON_NULL)` for all four optionals; N-1-arg convenience ctors default `rate`/`detectionState` to absent, most recently `detectionState` — docs/plans/active/CV-DEMAND-PLAN.md §3.6, wave D2 — reporting which of the two independent detection gates (operator intent vs. system-derived demand) currently explains a stream's boxes-or-no-boxes state; absent for an unknown/not-running stream, same as `stats`) · `PipelineLatencyResponse(windowSeconds, samples, roundTripMillisP50, roundTripMillisP95, roundTripMillisMax, updateIntervalMillisP50, effectiveFps, worstBoxAgeMillis)` from `application.pipeline.PipelineLatency` (docs/conclusions/CV-RATE-BUDGET.md §3) — **present independently of `stats`**, gated only on the window having sampled anything: a stream with tracking off reports latency and no stats, which is the combination this endpoint most needs to serve, since a lagging overlay is exactly the complaint likely to be raised against it. `roundTripMillis*` is what the pipeline adds (encode, both hops, inference, decode); `updateIntervalMillisP50` is how long until the next box, set by the sample rate; `worstBoxAgeMillis` sums the two and is the number to quote for "how far behind is the overlay?" · `DetectionRateResponse(windowSeconds, sourceFps, targetFps, demandFps, submittedFps, submitted, droppedInFlight, droppedOutage, missedDeadlines, dropRatio, transport, decodeMillisP50)` from `application.pipeline.DetectionRate` (docs/plans/active/CV-RATE-CONTROL-PLAN.md §1; `transport`/`decodeMillisP50` added docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§7, wave M5) — the `"rate"` object, **beside** `latency` rather than inside it: `effectiveFps` reports the rate boxes arrive at but cannot say *why* it fell short, and a starving source and a saturated detector look identical from it while having opposite fixes. Compare `targetFps` with `submittedFps`; when they differ exactly one counter is non-zero and names the loss — `missedDeadlines` (source slower than the target; `sourceFps` will confirm), `droppedInFlight` (detector saturated), `droppedOutage` (cv-service down). `demandFps` is what the tracked target's motion asked for before any ceiling applied, so `demandFps > targetFps` is the one comparison separating "raise the ceiling" from "shrink the round trip". Gated on a **served deadline** (`due() > 0`), not a completed detection, so a stream whose samples are *all* being dropped still reports why. **`transport`** (`"push"`|`"pull"`) is which loop counted these figures, and doubles as the reader's cue for which definition the sibling `latency.roundTripMillis*` is using (§7: pull mode redefines it as `receivedAt - capturedAt`, box age at arrival, since there is no Java→Python round trip to measure) — `PipelineLatencyResponse` itself gained no field of its own for this. **`decodeMillisP50`** is the worker's median local decode cost, `0` in push mode · `CvTrackerResponse(id, displayName, modes:List<String>, needsAssets, costHint)` + `CvTrackersResponse(trackers)` (no `NON_NULL`, mirroring `CvModelResponse`/`CvModelsResponse` exactly). Request side: `TrackingConfigRequest(mode?, engineId?, verifyEveryMillis?, followFps?, redetectIouPercent?, maxAgeFrames?, minHits?, capabilityLevel?, reupdateMaxGapMillis?, lock?:TargetLockRequest)` with `toPatch()`/`toStartPatch()` — both map **one-for-one onto `application.stream.TrackingConfigPatch`**, an absent JSON field becoming a `null` the application layer reads as "leave this knob unchanged"; the latter additionally **rejects a `lock`** (it names a track that cannot exist before the stream produces one). `capabilityLevel`/`reupdateMaxGapMillis` (wave J3, docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2) are ordinary nullable patch fields at this edge like every other knob here — **a request state a *ceiling*** (invariant B5); this DTO has no field for, and must never be read as, what was actually served — that is `FrameTrackingResponse#capability()`'s job, on a later, different response. **Nothing is merged at this edge**: the running configuration is the application layer's state, and the deployment seed is applied there too — see the follow-up section at the end of this file. `TargetLockRequest(trackId?, pointX?, pointY?, release?)` with `toTargetLock()` leaves `lockSeq` at `0` and lets `perception.domain.model.TargetLock`'s own compact ctor be the single arbiter of the one-of-three rule (→400). `UpdateStreamConfigRequest` gained `tracking` (→ `toPatch()`), `UpdateStreamConfigResponse` gained `trackingChanged`, and both `StartStreamRequest`/`StartAssetStreamRequest` gained `tracking`, exposed to the controllers as a separate `trackingPatch()` beside the plain `mergeOntoDefaults()`.
 
 **Replay library** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/extracts/design/10-replay.md's frozen wire
 contract, body of `GET /api/usages`), `@JsonInclude(NON_NULL)` (`endedAt`/`durationSeconds` genuinely
@@ -356,7 +356,9 @@ anywhere else. `DemoScenario` logs a `WARN` on every press saying exactly that.
 
 **`CurrentUser`/`PrincipalResolver` live in `com.drones.vision.api.security`** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row B — the token→`UserId` edge, still zero `org.springframework.security` dependency). **`CurrentUser` was rewritten around a seam.** It no longer takes an `Ownership fallback`; it takes a `PrincipalResolver` (interface, `security/`: `UserId userId()` + `Ownership ownership()` + `VisibilityScope scope()` — the last added by docs/plans/done/U-SCOPE-PLAN.md slice 2) and delegates. `vision-app` supplies the resolver — a fixed dev principal when `vision.auth.enabled=false` (identical to the pre-auth behavior), or one reading Spring Security's `SecurityContextHolder` when `true`. **This is deliberately how vision-api stays free of any `org.springframework.security` dependency** (the architecture rule for wave 3): the SecurityContext-reading lives entirely in vision-app; vision-api only knows the plain seam. Every controller still calls `currentUser.userId()`/`.ownership()` unchanged; scope-aware controllers additionally call `currentUser.scope()`. A convenience constructor `CurrentUser(Ownership)` (wrapping `PrincipalResolver.fixed(...)`) is kept so the standalone controller unit tests construct it from a plain `Ownership` exactly as before — and, crucially, **`PrincipalResolver.fixed(...)#scope()` returns `VisibilityScope.unbounded()`**, so every test that builds `CurrentUser(ownership)` (and the auth-off dev principal) keeps behaving as if scoping were off: a scoped read given an unbounded scope returns exactly the unscoped result. The production `PrincipalResolver` constructor is the `@Autowired` one so Spring never picks the convenience ctor.
 
-**Visibility scoping (docs/plans/done/U-SCOPE-PLAN.md slice 2, feature 1).** `VisibilityScope` is an application type; vision-api already depends on vision-application, so `CurrentUser#scope()` threads it into the scoped read/command methods with no new dependency. `AssetController` scopes `list()`→`assetService.assets(scope, includeDeleted)` and `details`/every post-mutation render→`assetService.details(scope, id)` (an out-of-scope asset 404s exactly as an unknown id, hiding existence); each mutation first re-reads through the scope via a private `requireInScope(id)` so an out-of-scope write 404s *before* it runs — but **request-body validation is parsed first** (a malformed edit/state/device-id is a 400 before the scope 404, so a bad request never depends on the caller's scope; this ordering is what keeps `AssetControllerTest`'s `verifyNoInteractions` cases green). `FleetController` scopes `summary(scope, includeArchived)`; `FlightCommandController` passes `currentUser.userId()` + `currentUser.scope()` to `returnToHome`. Wave 1 scoped only reads + command + assign, so asset *writes* are guarded by this cheap "read-scope guards the write" posture rather than a scope argument on the write services — documented as the deliberate interim until the asset services take a scope on writes directly.
+**Visibility scoping (docs/plans/done/U-SCOPE-PLAN.md slice 2, feature 1).** `VisibilityScope` is an application type; vision-api already depends on vision-application, so `CurrentUser#scope()` threads it into the scoped read/command methods with no new dependency. `AssetController` scopes `list()`→`assetService.assets(scope, includeDeleted)` and `details`/every post-mutation render→`assetService.details(scope, id)` (an out-of-scope asset 404s exactly as an unknown id, hiding existence). `FleetController` scopes `summary(scope, includeArchived)`; `FlightCommandController` passes `currentUser.userId()` + `currentUser.scope()` to `returnToHome`.
+
+**Authority, not visibility, guards the five asset writes (docs/plans/active/OPS-UX-PLAN.md §1, Wave C, C2).** `update`/`setState`/`delete`/`assignDevice`/`unassignDevice` each call a private `requireManageable(id)` — the renamed, extended successor of the old `requireInScope(id)` — which still re-reads the asset through `scope` first (an unknown-or-invisible asset still 404s *before* the mutation runs, hiding existence exactly as before), then additionally requires `scope.canManage(details.summary().asset().ownership())`, throwing `AccessDeniedException` (→403 via `ApiExceptionHandler`, already-existing mapping, no handler change needed) for an asset the caller can see but does not administer — the case a PILOT hits on their own assigned aircraft (seeing it is what lets them fly it; `canManage` is unconditionally `false` for `ASSIGNED_ASSETS`, so this is not a `getAsset`-then-branch race, it is structural). **Request-body validation still runs first** (a malformed edit/state/device-id is a 400 before either the visibility 404 or the authority 403, so a bad request never depends on the caller's scope; this ordering is what keeps `AssetControllerTest`'s `verifyNoInteractions` cases green). `create` gets its own gate, `!scope.canManageOrg()` → 403, checked before `request.toSpec()` runs (so an invalid body from a caller who also lacks authority still surfaces as 403, not 400 — authority is checked first, matching "does this caller need to know the body was well-formed" reasoning). With `vision.auth.enabled=false` every `CurrentUser` is `unbounded()`, so both `canManage`/`canManageOrg` are always `true` and every one of these gates is a no-op — proved by the full existing `AssetControllerTest`/vision-api suite staying green (see Status).
 
 **`SessionAuthenticator`** (interface, `security/`) is the login/logout seam `AuthController` uses — `Optional<User> login(username, password, HttpServletRequest, HttpServletResponse)` (establishes a session on success) + `void logout(...)`. Only `jakarta.servlet` + domain types cross it; vision-app implements it (a no-op when auth disabled, a real session-establishing one when enabled). This is why login/logout run through a thin controller-plus-seam rather than Spring Security's own JSON form-login filter — it keeps spring-security out of vision-api, the explicitly-allowed alternative in the plan.
 
@@ -374,6 +376,22 @@ anywhere else. `DemoScenario` logs a `WARN` on every press saying exactly that.
 - **`FleetController#summary`'s `includeArchived` query parameter is a deliberate naming exception**, not an oversight: every other "include soft-deleted" list endpoint (`GET /api/assets`/`GET /api/devices`) names it `includeDeleted`, but docs/plans/done/MVP3-PLAN.md C-a's own spec names the fleet-summary one `includeArchived` — matching the MVP3 information-architecture rename (`LifecycleState.DELETED` assets live under the "Assets" warehouse page, described there as "archived"). Both flow to the exact same `AssetService#assets(boolean includeDeleted)` parameter underneath.
 - **Logging: `System.Logger`, not SLF4J** — `private static final System.Logger LOG = System.getLogger(...)`, matching `HlsProxyController`'s pre-existing convention (itself matching `adapter-publish-hls`/`vision-application`'s `StreamPipeline` across the rest of the codebase). SLF4J appears in this codebase only in `vision-app`'s `LoggingEventPublisher`, a Spring-only devsupport bean; every plain controller/adapter class uses `System.Logger` instead. See the streaming-freeze observability paragraph in Status below for exactly what's logged and why.
 - **`vision-domain` package layout changed (docs/plans/active/DOMAIN-SEPARATION-W1.md, wave W1.5a)**: the flat `com.drones.vision.domain.model`/`domain.port.out` packages this doc used to cite no longer exist. Domain types moved into per-context packages, `com.drones.vision.<context>.domain.model`/`.domain.port` (e.g. `TrackedObject`/`TargetLock` → `perception.domain.model`, `GeofenceZone` → `flight.domain.model`, `Mark` → `map.domain.model`, `DetectionEvent` → `events.domain.model`), except the shared-kernel types (every id type, `GeoPosition`, `BoundingBox`, `Ownership`, etc. — 17 since W1.6c added `Telemetry`/`FlightState`, docs/plans/active/DOMAIN-SEPARATION-W1.md §15) which moved to `com.drones.vision.kernel` instead — every context's domain may depend on those. This module's own REST/DTO/SSE behavior is unaffected; only the domain-package paths cited elsewhere in this doc were corrected to match. **W1.7a** (§16) later split `com.drones.vision.kernel` and its sibling `com.drones.vision.platform` (events, audit trail, visibility scope) out of `vision-domain` into their own Maven modules, `vision-kernel`/`vision-platform` — package names unchanged, so no import in this module needed touching; see those modules' own MODULE.mds.
+
+## Authority split on `PATCH /api/assets/{id}`
+
+`update` is the one asset write whose gate depends on the **body**, not just the caller
+(docs/plans/active/OPS-UX-PLAN.md §1). `AssetEdit#changesManagedFields()` decides: a body touching only
+`displayName`/`attributes` needs visibility alone, so a PILOT may rename the aircraft assigned to
+them and edit its custom fields; a body touching `category` is fleet classification and needs
+`scope().canManage(ownership)` — 403 otherwise. `setState`/`delete`/`assignDevice`/`unassignDevice`
+always require manage.
+
+**A 403 from any of these is a PILOT-only outcome, by construction.** For a `GROUPS` scope
+`canManage(ownership)` and `includes(id, ownership)` are the same predicate, so a manager who can
+see an asset can always manage it; one who cannot is stopped by `details()`'s existence-hiding 404
+first. Only a scope that sees without managing — a pilot's — reaches the 403. A test asserting a
+403 for an out-of-subtree *manager* is asserting a mock artifact, not behaviour (one did; it is now
+`updateReturns404ForAManagerScopeOutsideTheAssetsSubtree`).
 
 ## Gotchas
 
@@ -1185,3 +1203,185 @@ additive assertions on already-passing tests plus three new test methods.
 documented in station/vision-app/MODULE.md's own wave J3 section, including why that module's `mvn test` could
 not be run to completion in this task (a pre-existing, unrelated stale `adapter-cv-grpc` local-repo
 artifact — concurrent wave J2's module, not touched here).
+
+## docs/plans/active/CV-DEMAND-PLAN.md wave D2 done (system-derived detection demand — the REST + wiring half)
+
+D1 (`contexts/vision-perception`, out of scope, not touched here) added the `DetectionDemandPort`
+seam and flipped `PipelineConfig.defaults().detectionEnabled()` from `true` to `false` (D1's own
+javadoc, §1); D3 (`station/vision-web`, out of scope, not touched here) is the frontend half. This
+wave is the two REST-adjacent modules that had to wire the two halves together: an implementation of
+the port, the DTO/endpoint changes that let it observe real demand, and the deployment default that
+decides what a brand-new stream's detection starts at.
+
+**New `com.drones.vision.api.live.LiveAndPollDetectionDemand implements DetectionDemandPort`** — the
+one fact `DefaultStreamService`'s demand-poll task wants, collapsed from the two driving protocols the
+frontend actually uses:
+
+- **SSE half** — `assetId != null && watchingDetections.test(assetId)`, where `watchingDetections`
+  is a `Predicate<AssetId>`, not `LiveUpdateRegistry` itself. Same seam idiom
+  `ApplicationServiceWiring#usageTracker` already uses for `GeofenceMonitor::evaluate` — this class
+  needs exactly one capability off the registry (`LiveUpdateRegistry#watchingDetections(AssetId)`,
+  new method, see below), so it takes that capability as a narrow functional parameter instead of the
+  whole concrete `final` class. Keeps the port trivially testable with a plain lambda, including a
+  throwing one, without constructing or mocking `LiveUpdateRegistry` at all — this repo has no inline
+  Mockito mock-maker configured, so mocking a `final` class was never an option here.
+- **Poll half** — `touched(StreamId)` stamps a `ConcurrentHashMap<StreamId, Instant>` entry;
+  `detectionWanted` prunes expired entries (TTL = `VisionCvProperties.Demand#pollTtl()`, default 10s)
+  on every read rather than on a separate scheduled sweep, so the map never needs its own background
+  thread. `StreamController#detections` calls `touched(id)` on every `GET
+  /api/streams/{streamId}/detections` — a Wall/Live page polling that endpoint counts as demand
+  exactly like an open SSE `detections:<assetId>` subscription does.
+- **An internal failure fails OPEN — it answers "wanted", never "not wanted."** `detectionWanted`
+  honours the port's never-throw contract with a swallowing `catch`, and the *direction* of that
+  swallow is load-bearing enough to have its own test
+  (`aThrowingPredicateFailsOpenSoOneBrokenLookupNeverGatesDetectionOffEverywhere`). "We could not
+  determine whether anyone is watching" is not the confident negative "nobody is watching":
+  answering `false` would gate detection off for **every** stream at once and — since the gate is
+  precisely what `DetectionState` reports — surface as `IDLE_NO_VIEWERS` to an operator sitting
+  right there watching. A wrong answer that costs CPU is recoverable and visible; a wrong answer
+  that silently stops detection and then explains itself with a falsehood is neither. Points the
+  same way as every other failure decision in this feature (an absent port gates nothing;
+  `StreamPipeline`'s own demand flag initialises `true`). Shipped `false`; corrected during review.
+- **Never throws**, per `DetectionDemandPort`'s own contract: `detectionWanted` swallows any
+  `RuntimeException` from `watchingDetections` (or a `null` `assetId`) and reports "not watched"
+  rather than propagating — a periodically-scheduled caller (`DefaultStreamService`'s demand-poll
+  task) must never have one failing evaluation take down every later one.
+
+**New `com.drones.vision.api.support.StreamDetectionSupport`** (record, `defaultConfig:
+PipelineConfig`, `demand: LiveAndPollDetectionDemand` nullable) — bundles `StreamController`'s two new
+detection-demand collaborators behind one constructor parameter. `StreamController` was already at
+four constructor arguments; neither the deployment-default `PipelineConfig` read (once per `start`)
+nor the poll-touch delegation (once per `detections` read) is substantial enough alone to justify a
+fifth slot or splitting the controller — so both ride in one named, purpose-built bundle instead of an
+unlabeled extra field. `touched(StreamId)` is a no-op when `demand()` is `null` (`vision.cv.demand.enabled
+=false`, the port bean absent entirely). Plain class, not a `@Component` — assembled by `vision-app`'s
+`CvWiring#streamDetectionSupport`, mirroring `SnapshotJpegEncoder`'s own precedent for a
+framework-free support class this module holds but only `vision-app` knows how to build.
+
+**New `com.drones.vision.api.support.StreamViewerLinks`** (`@Component`) — the narrow
+`viewUrl`/`whepUrl`/`burnedIn` read `AssetStreamController` needs off `StreamPublisherPort`/
+`StreamService`, split out so that controller could add a `PipelineConfig defaultConfig` fifth
+parameter without exceeding `.claude/skills/java-clean-code/SKILL.md` §3's five-constructor-parameter
+ceiling — trading two parameters for one frees exactly the slot the new default needed.
+**`AssetStreamController`'s constructor is now `(AssetService, AssetStreamService, CurrentUser,
+StreamViewerLinks, PipelineConfig)`** — this corrects the "5 collaborators: `AssetService`,
+`AssetStreamService`, `CurrentUser`, `StreamPublisherPort`, `StreamService`" shape documented in the
+W1.6e section above, which this wave's own change made stale; that section is left as-is (it is an
+accurate record of the shape as of W1.6e) rather than rewritten, per this file's own append-only
+convention. `StreamController` keeps its own `StreamService`/`StreamPublisherPort` collaborators
+directly — it uses them for far more than these three reads, so wrapping there would be a swap, not a
+reduction. **This was a plan gap, not a spec item**: §3.8 of the frozen plan only named
+`StartStreamRequest`/`StartAssetStreamRequest`/`DemoFleet` as the merge-onto-defaults call sites,
+missing that `AssetStreamController` (added by the later, independent W1.6e split) is a fourth stream-start
+path with the identical need — found and fixed as part of this wave, not deferred.
+
+**`StreamTracksResponse` gained `detectionState`** — see the "Tracking wire shapes" paragraph above
+for the exact record shape; `StreamController#tracks` populates it from `StreamService#detectionState
+(StreamId)`, absent for an unknown/not-running stream, same absence idiom as `stats`.
+
+**`StartStreamRequest#mergeOntoDefaults()` (no-arg) became `mergeOnto(PipelineConfig defaults)`** (an
+instance method taking the deployment's default config as a parameter, replacing an internal call to
+the domain's static `PipelineConfig.defaults()`) — the mechanism that lets `vision.cv.detection
+-default-enabled` (`CvWiring#streamDefaultConfig`, `vision-app`) actually reach a started stream.
+`StartAssetStreamRequest#mergeOnto(PipelineConfig)` still just delegates to `StartStreamRequest`'s
+implementation, one more parameter along for the ride, same as every prior addition to this pair. Four
+call sites merge onto a deployment default now, not the domain default directly: `StreamController
+#start` (`streamDetectionSupport.defaultConfig()`), `AssetStreamController#startStream` (its own
+`PipelineConfig defaultConfig` parameter), `DemoFleet` (`api.demo`, its own `PipelineConfig
+defaultConfig` constructor parameter, 5 collaborators total), and `StartAssetStreamRequest`'s own
+delegation. Every one of these four beans/parameters is fed the **same** `CvWiring#streamDefaultConfig`
+bean from `vision-app`, so `vision.cv.detection-default-enabled` reaches every non-simulation stream
+start path identically — the same "one deployment default, every start path agrees" property
+`docs/extracts/TRACKING-ORCHESTRATION.md` §4.1 already established for the tracking seed.
+
+**`LiveUpdateRegistry` gained `boolean watchingDetections(AssetId)`** (public, package `api.live`) —
+`true` iff at least one open connection is subscribed to that asset's `detections:<assetId>` topic;
+the one capability `LiveAndPollDetectionDemand`'s SSE half needs, resolved once by `vision-app`'s
+`CvWiring#detectionDemandPort` into the `Predicate<AssetId>` seam described above.
+
+**Tests** — `LiveAndPollDetectionDemandTest` (new, 8 methods, pure unit, no Spring context): the SSE
+half true/false, a `null` assetId skipping the SSE half entirely, the poll half counting as demand on
+its own, cross-stream isolation (`touched` on one stream never demands another), a poll just inside
+the TTL still counting, a poll exactly at the TTL boundary having expired, and a throwing predicate
+being swallowed rather than propagated (the injectable-clock test constructor moves time without
+sleeping for the two TTL-boundary cases). `LiveUpdateRegistryTest` +2: `watchingDetections` false with
+no subscriber, true once a connection subscribes to that asset's `detections` topic — both pure unit
+tests, no `MockMvc`/real HTTP needed, since `SseEmitter`/`ResponseBodyEmitter` buffers early `send()`
+calls before `initialize()` rather than throwing, so calling `LiveUpdateRegistry#connect(...)` directly
+is safe in a plain test. `StreamControllerTest` +3: `tracksReportsWhichDetectionGateExplainsTheCurrentState`
+(`detectionState` present when the service reports one), `tracksOmitsDetectionStateForAnUnknownOrStoppedStream`
+(absent otherwise), `detectionsTouchesTheDemandPortSoAPollingReaderCountsAsDemand` (a real
+`LiveAndPollDetectionDemand` wired through `StreamDetectionSupport` in the test, asserting
+`detectionWanted` flips `false`→`true` after calling the endpoint once). One pre-existing
+`StreamControllerTest` assertion was **corrected, not weakened**: `startWithoutDetectionEnabledKeepsTheDefaultTrue`
+hardcoded `assertTrue(captor.getValue().detectionEnabled())`, an assumption D1's already-landed
+`PipelineConfig.defaults()` flip (`true`→`false`) silently broke — D1's own scoped build never
+re-verified this module's dependent tests. Renamed to
+`startWithoutDetectionEnabledKeepsWhateverStreamDetectionSupportsDefaultConfigSays` and changed to
+compare against `PipelineConfig.defaults().detectionEnabled()` dynamically: this controller never
+hardcodes that value itself, it only merges onto whatever `StreamDetectionSupport` hands it, so the
+test now pins that *delegation*, not a specific literal that belongs to a different module.
+`AssetStreamControllerTest`/`DemoFleetTest` were updated in place (constructor shape / mock wiring for
+the new `PipelineConfig`/`StreamViewerLinks` collaborators) with no new test methods — same "one
+shared-logic test suffices" judgment call this module already makes for `overlayBurnIn`/`model`/etc.
+
+**Before/after**: **562 → 575** (+13: 3 `StreamControllerTest`, 2 `LiveUpdateRegistryTest`, 8 new
+`LiveAndPollDetectionDemandTest`). `./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test
+-DskipWeb` confirmed green — `vision-api: Tests run: 575, Failures: 0, Errors: 0, Skipped: 0`.
+
+**Not touched, per scope**: `contexts/vision-perception` (D1) and `station/vision-web` (D3) — this
+wave's diff is contained entirely to `station/vision-api/**` and `station/vision-app/**`, confirmed via
+`git status` before finishing.
+
+**docs/plans/active/OPS-UX-PLAN.md Wave C (C2) done — authority, not visibility, guards asset writes.**
+`AssetController`'s private `requireInScope(id)` was renamed to `requireManageable(id)` and extended:
+it still 404s an unknown/invisible asset via its own scoped `assetService.details(scope, id)` read
+(unchanged, hides existence), then additionally throws `AccessDeniedException` (403) when
+`!scope.canManage(details.summary().asset().ownership())` — visible-but-not-administrable, the case a
+PILOT hits on their own assigned aircraft. All five write endpoints (`update`/`setState`/`delete`/
+`assignDevice`/`unassignDevice`) call it; `create` gets its own `!scope.canManageOrg()` → 403 gate,
+checked first, before `request.toSpec()` parses the body. No `ApiExceptionHandler` change needed —
+`AccessDeniedException`→403 already existed. See "Authority, not visibility" above for the full
+reasoning and the endpoint table for the per-route 403 additions.
+
+**Existing `AssetControllerTest` stubbing gap this surfaced, fixed, not weakened**: `requireManageable`
+now *dereferences* `assetService.details(...)`'s result (`.summary().asset().ownership()`), where the
+old `requireInScope` discarded it — every test that stubbed only the *write* method to throw (leaving
+`details(...)` an unstubbed Mockito-default `null`) started NPEing. Each was fixed per what it actually
+simulates: a genuinely-unknown-asset test (`updateReturns404ForUnknownAsset`,
+`setStateReturns404ForUnknownAsset`, `deleteReturns404ForUnknownAsset`,
+`unassignDeviceReturns404ForAnUnknownAsset`) now stubs `assetService.details(...)` itself to throw
+`NoSuchElementException` — the same exception the real `AssetService` throws for an unknown/invisible
+id, so this is a *more* accurate test double than before, not a workaround; a known-asset-other-failure
+test (`updateReturns400ForAnUnknownCategory`, `setStateActiveOnADeletedAssetReturns409`,
+`deleteReturns200WithTheDeletionSummary`, `assignDeviceReturns409WhenTheDeviceAlreadyBelongsToAnotherAsset`,
+`assignDeviceReturns404ForAnUnknownDevice`, `unassignDeviceReturns409WhenRemovingTheLastDevice`,
+`unassignDeviceReturns400WhenTheDeviceDoesNotBelongToTheAsset`) gained a `stubExistingAsset(assetWithId(assetId))`
+call so `requireManageable`'s own read succeeds before the write-stub's failure fires. New helper
+`assetWithId(AssetId)` (an `Asset` with a caller-chosen id, for tests that need to name the id before
+building the asset).
+
+**New C5 authority tests** (`AssetControllerTest`, 11 new methods) prove the PILOT-vs-MANAGER
+boundary this wave draws, via two new helpers: `currentUserWithScope(VisibilityScope)` (a `CurrentUser`
+built from an anonymous `PrincipalResolver` fixing `ownership`/`ownerId` but taking a caller-supplied
+scope — `viewer()` throws `UnsupportedOperationException`, since `AssetController` never calls it) and
+`mockMvcFor(CurrentUser)` (a fresh standalone `MockMvc` bound to that user, alongside the class-level
+`mockMvc` which stays on the unbounded `currentUser`). Covered: `create` 403 for a PILOT / 201 for a
+MANAGER (`canManageOrg()`); `update`/`setState`/`delete`/`assignDevice`/`unassignDevice` 403 for a
+PILOT scope even when the asset is the exact one assigned to them (`ASSIGNED_ASSETS` grants visibility,
+never `canManage`); `update`/`setState`/`delete` 200 for a MANAGER scope whose `groups()` contains the
+asset's own group; `update` 403 for a MANAGER scope whose `groups()` does **not** contain it (a second
+manager's subtree is not this asset's subtree — proves the gate isn't just "any `GROUPS` scope passes",
+the real `groups.contains(ownership.groupId())` check runs).
+
+**Before/after**: `AssetControllerTest` **44 → 55** (11 new C5 tests; 0 pre-existing tests deleted,
+11 pre-existing tests' stubs corrected as described above, all still passing). Module total (`./mvnw
+-B -pl station/vision-api test -DskipWeb`): **587/587** green. Combined `./mvnw -B -pl
+storage/persistence,station/vision-api,station/vision-app test -DskipWeb`: `adapter-persistence`,
+`vision-api` (587), `vision-app` (240) all green — the default-config guardrail (`vision.auth.enabled=false`
+→ every caller `unbounded()` → every new gate a no-op) holds across the full integration slice.
+
+**Not touched, per scope**: `station/vision-web/**` (owned by a concurrent wave); no `vision-app`
+wiring change was needed — no new constructor parameter or bean was introduced, `AssetController`'s
+constructor shape is unchanged (still `AssetService, CurrentUser, TelemetryRepositoryPort,
+AssetImageRepositoryPort`).

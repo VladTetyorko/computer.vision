@@ -44,6 +44,8 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.PrincipalResolver;
+import com.drones.vision.map.application.MapAccessPolicy;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -52,6 +54,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -100,6 +103,11 @@ class AssetControllerTest {
                 Map.of("weightKg", "1.2"));
     }
 
+    /** An asset with an explicit id (rather than a random one) — for a test that needs to name its own id up front. */
+    private Asset assetWithId(AssetId id) {
+        return new Asset(id, "my drone", new CategoryId("drone"), ownership, Set.of(DeviceId.random()), Map.of());
+    }
+
     /** Stubs {@link #assetService} so {@code asset} resolves as an existing asset. */
     private void stubExistingAsset(Asset asset, Device... devices) {
         AssetSummary summary = new AssetSummary(asset, "Drone",
@@ -107,6 +115,46 @@ class AssetControllerTest {
         AssetDetails details =
                 new AssetDetails(summary, List.of(devices), List.of());
         when(assetService.details(any(VisibilityScope.class), eq(asset.id()))).thenReturn(details);
+    }
+
+    /**
+     * A {@link CurrentUser} answering with {@code ownership}/{@code ownerId} (so {@link
+     * #stubExistingAsset} keeps working unmodified) but a caller-supplied {@link VisibilityScope} —
+     * for the authority tests below, which need a PILOT/MANAGER scope rather than the class-level
+     * {@link #currentUser}'s unbounded one. {@link PrincipalResolver#viewer()} is never called by
+     * {@link AssetController}, so it throws rather than fake a map viewer no test here needs.
+     */
+    private CurrentUser currentUserWithScope(VisibilityScope scope) {
+        return new CurrentUser(new PrincipalResolver() {
+            @Override
+            public UserId userId() {
+                return ownerId;
+            }
+
+            @Override
+            public Ownership ownership() {
+                return ownership;
+            }
+
+            @Override
+            public VisibilityScope scope() {
+                return scope;
+            }
+
+            @Override
+            public MapAccessPolicy.Viewer viewer() {
+                throw new UnsupportedOperationException("AssetController never calls viewer()");
+            }
+        });
+    }
+
+    /** A {@link MockMvc} bound to a fresh {@link AssetController} acting as {@code user}. */
+    private MockMvc mockMvcFor(CurrentUser user) {
+        return MockMvcBuilders
+                .standaloneSetup(new AssetController(assetService, user, telemetryRepositoryPort,
+                        assetImageRepositoryPort))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
     }
 
     // ---- POST /api/assets ----
@@ -420,8 +468,10 @@ class AssetControllerTest {
     @Test
     void updateReturns404ForUnknownAsset() throws Exception {
         AssetId unknown = AssetId.random();
-        doThrow(new NoSuchElementException("Unknown asset: " + unknown.value()))
-                .when(assetService).update(eq(unknown), any(), any());
+        // requireManageable's own scoped read is what actually 404s an unknown asset, before the
+        // mutation is ever attempted — the same NoSuchElementException the real AssetService throws.
+        when(assetService.details(any(VisibilityScope.class), eq(unknown)))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
 
         mockMvc.perform(patch("/api/assets/{id}", unknown.value())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"x\"}"))
@@ -432,6 +482,7 @@ class AssetControllerTest {
     @Test
     void updateReturns400ForAnUnknownCategory() throws Exception {
         AssetId assetId = AssetId.random();
+        stubExistingAsset(assetWithId(assetId));
         doThrow(new IllegalArgumentException("Unknown category: bogus"))
                 .when(assetService).update(eq(assetId), any(), any());
 
@@ -484,6 +535,7 @@ class AssetControllerTest {
     @Test
     void setStateActiveOnADeletedAssetReturns409() throws Exception {
         AssetId assetId = AssetId.random();
+        stubExistingAsset(assetWithId(assetId));
         doThrow(new IllegalStateException("Asset my drone is deleted; restore it before putting it back into service"))
                 .when(assetService).setState(eq(assetId), eq(LifecycleState.ACTIVE), any());
 
@@ -496,8 +548,8 @@ class AssetControllerTest {
     @Test
     void setStateReturns404ForUnknownAsset() throws Exception {
         AssetId unknown = AssetId.random();
-        doThrow(new NoSuchElementException("Unknown asset: " + unknown.value()))
-                .when(assetService).setState(eq(unknown), any(), any());
+        when(assetService.details(any(VisibilityScope.class), eq(unknown)))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
 
         mockMvc.perform(post("/api/assets/{id}/state", unknown.value())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"ACTIVE\"}"))
@@ -510,6 +562,7 @@ class AssetControllerTest {
     @Test
     void deleteReturns200WithTheDeletionSummary() throws Exception {
         AssetId assetId = AssetId.random();
+        stubExistingAsset(assetWithId(assetId));
         when(assetService.delete(eq(assetId), any()))
                 .thenReturn(new AssetDeletion(assetId, "my drone", 2, 5, 1));
 
@@ -525,7 +578,7 @@ class AssetControllerTest {
     @Test
     void deleteReturns404ForUnknownAsset() throws Exception {
         AssetId unknown = AssetId.random();
-        when(assetService.delete(eq(unknown), any()))
+        when(assetService.details(any(VisibilityScope.class), eq(unknown)))
                 .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
 
         mockMvc.perform(delete("/api/assets/{id}", unknown.value()))
@@ -557,6 +610,7 @@ class AssetControllerTest {
     void assignDeviceReturns409WhenTheDeviceAlreadyBelongsToAnotherAsset() throws Exception {
         AssetId assetId = AssetId.random();
         DeviceId deviceId = DeviceId.random();
+        stubExistingAsset(assetWithId(assetId));
         doThrow(new IllegalStateException("Device cam-1 already belongs to asset someone else's drone"))
                 .when(assetService).assignDevice(eq(assetId), eq(deviceId), any());
 
@@ -572,6 +626,7 @@ class AssetControllerTest {
     void assignDeviceReturns404ForAnUnknownDevice() throws Exception {
         AssetId assetId = AssetId.random();
         DeviceId unknownDevice = DeviceId.random();
+        stubExistingAsset(assetWithId(assetId));
         doThrow(new NoSuchElementException("Unknown device: " + unknownDevice.value()))
                 .when(assetService).assignDevice(eq(assetId), eq(unknownDevice), any());
 
@@ -613,6 +668,7 @@ class AssetControllerTest {
     void unassignDeviceReturns409WhenRemovingTheLastDevice() throws Exception {
         AssetId assetId = AssetId.random();
         DeviceId deviceId = DeviceId.random();
+        stubExistingAsset(assetWithId(assetId));
         doThrow(new IllegalStateException("Asset my drone must keep at least one device; unassign refused"))
                 .when(assetService).unassignDevice(eq(assetId), eq(deviceId), any());
 
@@ -625,6 +681,7 @@ class AssetControllerTest {
     void unassignDeviceReturns400WhenTheDeviceDoesNotBelongToTheAsset() throws Exception {
         AssetId assetId = AssetId.random();
         DeviceId deviceId = DeviceId.random();
+        stubExistingAsset(assetWithId(assetId));
         doThrow(new IllegalArgumentException("Device " + deviceId.value() + " does not belong to asset " + assetId.value()))
                 .when(assetService).unassignDevice(eq(assetId), eq(deviceId), any());
 
@@ -637,8 +694,10 @@ class AssetControllerTest {
     void unassignDeviceReturns404ForAnUnknownAsset() throws Exception {
         AssetId unknown = AssetId.random();
         DeviceId deviceId = DeviceId.random();
-        doThrow(new NoSuchElementException("Unknown asset: " + unknown.value()))
-                .when(assetService).unassignDevice(eq(unknown), eq(deviceId), any());
+        // requireManageable's own scoped read is what surfaces the 404 now -- it looks the asset up
+        // before checking manage authority, same as update/setState/delete.
+        when(assetService.details(any(VisibilityScope.class), eq(unknown)))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
 
         mockMvc.perform(delete("/api/assets/{id}/devices/{deviceId}", unknown.value(), deviceId.value()))
                 .andExpect(status().isNotFound())
@@ -850,5 +909,225 @@ class AssetControllerTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(telemetryRepositoryPort);
+    }
+
+    // ---- authority, not visibility (docs/plans/active/OPS-UX-PLAN.md §1, Wave C) ----
+    // A PILOT's scope makes an assigned asset visible (they may fly it) but grants no authority to
+    // administer it; a MANAGER's scope grants authority throughout their own group subtree, and
+    // nowhere else. See VisibilityScope#canManage/#canManageOrg and AssetController#requireManageable.
+
+    @Test
+    void createReturns403ForAPilotScope() throws Exception {
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of())));
+
+        String body = """
+                {"displayName":"my drone","category":"drone","attributes":{},"devices":[]}
+                """;
+
+        pilotMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(assetService, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void createSucceedsForAManagerScope() throws Exception {
+        MockMvc managerMvc = mockMvcFor(currentUserWithScope(VisibilityScope.groups(Set.of(ownership.groupId()))));
+        Device device = videoDevice();
+        Asset created = asset(device);
+        when(assetService.create(any(), any(), any())).thenReturn(created);
+        stubExistingAsset(created, device);
+
+        String body = """
+                {"displayName":"my drone","category":"drone","attributes":{"weightKg":"1.2"},
+                 "devices":[{"name":"fpv-cam","protocol":"sim","uri":"sim://demo","options":{"loop":"true"}}]}
+                """;
+
+        managerMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.assetId").value(created.id().value().toString()));
+    }
+
+    // A pilot's own record of the aircraft they fly — its name and custom fields — stays theirs to
+    // edit; only fleet classification is withheld (AssetEdit#changesManagedFields).
+    @Test
+    void updateLetsAPilotScopeRenameAnAssetAssignedToThem() throws Exception {
+        Asset asset = asset(videoDevice());
+        stubExistingAsset(asset);
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(asset.id()))));
+
+        pilotMvc.perform(patch("/api/assets/{id}", asset.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"renamed\"}"))
+                .andExpect(status().isOk());
+
+        verify(assetService).update(eq(asset.id()), any(), any());
+    }
+
+    @Test
+    void updateLetsAPilotScopeEditCustomFieldsOnAnAssetAssignedToThem() throws Exception {
+        Asset asset = asset(videoDevice());
+        stubExistingAsset(asset);
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(asset.id()))));
+
+        pilotMvc.perform(patch("/api/assets/{id}", asset.id().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attributes\":{\"registrationNumber\":\"UA-114\"}}"))
+                .andExpect(status().isOk());
+
+        verify(assetService).update(eq(asset.id()), any(), any());
+    }
+
+    @Test
+    void updateReturns403ForAPilotScopeChangingTheCategory() throws Exception {
+        Asset asset = asset(videoDevice());
+        stubExistingAsset(asset);
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(asset.id()))));
+
+        pilotMvc.perform(patch("/api/assets/{id}", asset.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"category\":\"fixed-wing\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(assetService, never()).update(any(), any(), any());
+    }
+
+    @Test
+    void updateReturns404ForAPilotScopeOnAnAssetNotAssignedToThem() throws Exception {
+        AssetId unassigned = AssetId.random();
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of())));
+        // Out-of-scope is indistinguishable from unknown by design: the real AssetService#details
+        // throws for both, so the operator-editable path still 404s before it can rename anything.
+        when(assetService.details(any(VisibilityScope.class), eq(unassigned)))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + unassigned.value()));
+
+        pilotMvc.perform(patch("/api/assets/{id}", unassigned.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"renamed\"}"))
+                .andExpect(status().isNotFound());
+
+        verify(assetService, never()).update(any(), any(), any());
+    }
+
+    @Test
+    void updateSucceedsForAManagerScopeInTheAssetsSubtree() throws Exception {
+        Asset asset = asset(videoDevice());
+        stubExistingAsset(asset);
+        MockMvc managerMvc = mockMvcFor(currentUserWithScope(VisibilityScope.groups(Set.of(ownership.groupId()))));
+
+        managerMvc.perform(patch("/api/assets/{id}", asset.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"renamed\"}"))
+                .andExpect(status().isOk());
+
+        verify(assetService).update(eq(asset.id()), any(), any());
+    }
+
+    /**
+     * An out-of-subtree manager 404s — it never reaches the 403.
+     *
+     * <p>For a {@code GROUPS} scope {@code canManage(ownership)} and {@code includes(id, ownership)}
+     * are the same predicate ({@code groups.contains(ownership.groupId())}), so a manager who can
+     * see an asset can always manage it, and one who cannot is stopped by {@code details()}'s own
+     * existence-hiding 404 first. The 403 branch of {@code requireManageable} is therefore reachable
+     * only by a scope that can see an asset without managing it — i.e. a PILOT's, covered above.
+     * An earlier version of this test asserted 403 here; that outcome existed only because the
+     * mocked {@code AssetService} ignores the scope it is handed.
+     */
+    @Test
+    void updateReturns404ForAManagerScopeOutsideTheAssetsSubtree() throws Exception {
+        AssetId elsewhere = AssetId.random();
+        MockMvc otherManagerMvc = mockMvcFor(currentUserWithScope(VisibilityScope.groups(Set.of(GroupId.random()))));
+        when(assetService.details(any(VisibilityScope.class), eq(elsewhere)))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + elsewhere.value()));
+
+        otherManagerMvc.perform(patch("/api/assets/{id}", elsewhere.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"renamed\"}"))
+                .andExpect(status().isNotFound());
+
+        verify(assetService, never()).update(any(), any(), any());
+    }
+
+    @Test
+    void setStateReturns403ForAPilotScopeEvenWhenTheAssetIsAssignedToThem() throws Exception {
+        Asset asset = asset(videoDevice());
+        stubExistingAsset(asset);
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(asset.id()))));
+
+        pilotMvc.perform(post("/api/assets/{id}/state", asset.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"DEACTIVATED\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(assetService, never()).setState(any(), any(), any());
+    }
+
+    @Test
+    void setStateSucceedsForAManagerScopeInTheAssetsSubtree() throws Exception {
+        Asset asset = asset(videoDevice());
+        stubExistingAsset(asset);
+        MockMvc managerMvc = mockMvcFor(currentUserWithScope(VisibilityScope.groups(Set.of(ownership.groupId()))));
+
+        managerMvc.perform(post("/api/assets/{id}/state", asset.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"DEACTIVATED\"}"))
+                .andExpect(status().isOk());
+
+        verify(assetService).setState(eq(asset.id()), any(), any());
+    }
+
+    @Test
+    void deleteReturns403ForAPilotScopeEvenWhenTheAssetIsAssignedToThem() throws Exception {
+        Asset asset = asset(videoDevice());
+        stubExistingAsset(asset);
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(asset.id()))));
+
+        pilotMvc.perform(delete("/api/assets/{id}", asset.id().value()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(assetService, never()).delete(any(), any());
+    }
+
+    @Test
+    void deleteSucceedsForAManagerScopeInTheAssetsSubtree() throws Exception {
+        Asset asset = asset(videoDevice());
+        stubExistingAsset(asset);
+        when(assetService.delete(eq(asset.id()), any()))
+                .thenReturn(new AssetDeletion(asset.id(), "my drone", 0, 0, 0));
+        MockMvc managerMvc = mockMvcFor(currentUserWithScope(VisibilityScope.groups(Set.of(ownership.groupId()))));
+
+        managerMvc.perform(delete("/api/assets/{id}", asset.id().value()))
+                .andExpect(status().isOk());
+
+        verify(assetService).delete(asset.id(), ownerId);
+    }
+
+    @Test
+    void assignDeviceReturns403ForAPilotScopeEvenWhenTheAssetIsAssignedToThem() throws Exception {
+        Asset asset = asset(videoDevice());
+        stubExistingAsset(asset);
+        DeviceId deviceId = DeviceId.random();
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(asset.id()))));
+
+        String body = "{\"deviceId\":\"" + deviceId.value() + "\"}";
+
+        pilotMvc.perform(post("/api/assets/{id}/devices", asset.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(assetService, never()).assignDevice(any(), any(), any());
+    }
+
+    @Test
+    void unassignDeviceReturns403ForAPilotScopeEvenWhenTheAssetIsAssignedToThem() throws Exception {
+        Asset asset = asset(videoDevice());
+        stubExistingAsset(asset);
+        DeviceId deviceId = DeviceId.random();
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(asset.id()))));
+
+        pilotMvc.perform(delete("/api/assets/{id}/devices/{deviceId}", asset.id().value(), deviceId.value()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(assetService, never()).unassignDevice(any(), any(), any());
     }
 }

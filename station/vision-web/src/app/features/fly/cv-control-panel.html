@@ -1,5 +1,5 @@
 @if (open()) {
-  <vision-side-panel title="Detection" icon="scan" subtitle="Model · classes · confidence · boxes" (close)="close.emit()">
+  <vision-side-panel title="Detection" icon="scan" subtitle="What to detect on this stream" (close)="close.emit()">
     <p class="muted hint cv-scope-hint">
       @if (streamId()) {
         Changes below apply live to the running stream.
@@ -8,350 +8,8 @@
       }
     </p>
 
-    <!-- ---- Model picker ------------------------------------------------------------------- -->
-    <section class="cv-section">
-      <span class="label">Model</span>
-      @if (models().length === 0) {
-        <p class="muted hint">
-          Model list unavailable — using <span class="mono">{{ settings.effective().model }}</span>.
-        </p>
-      } @else {
-        <div class="model-list" role="radiogroup" aria-label="Detection model">
-          @for (m of models(); track m.id) {
-            <button
-              type="button"
-              class="model-option"
-              role="radio"
-              [attr.aria-checked]="m.id === settings.effective().model"
-              [class.selected]="m.id === settings.effective().model"
-              [disabled]="modelBusy()"
-              (click)="onModelChange(m.id)"
-            >
-              <span class="model-name">{{ m.displayName }}</span>
-              <span class="chip model-kind">{{ m.kind }}</span>
-            </button>
-          }
-        </div>
-      }
-      @if (modelBusy()) {
-        <p class="muted hint">Applying — re-arming detection…</p>
-      }
-    </section>
-
-    <!-- ---- Classes: a checklist built from what the model is really seeing -----------------------
-         Flow (per direct user request — "what does the person see first, how do they show/hide
-         something"): 1) current state, in one line; 2) the fast path (a one-click preset + a way
-         back to "everything") right where the eye lands next; 3) search + individual toggle/remove
-         for fine control, once the quick actions above don't cover it. -->
-    <section class="cv-section" [class.emphasized]="isOpenVocab()">
-      <span class="label">
-        Classes
-        @if (isOpenVocab()) {
-          <span class="chip warn">Primary control for this model</span>
-        }
-      </span>
-
-      @if (settings.effective().labelFilter.length === 0) {
-        <p class="muted hint">Showing every class this model detects.</p>
-      } @else {
-        <p class="muted hint">
-          Showing {{ settings.effective().labelFilter.length }} of the classes below — the rest are hidden.
-        </p>
-      }
-
-      <div class="chip-action-row">
-        <button type="button" class="btn small" (click)="fillPreset()" title="Fill in a common starting set — stays fully editable afterward">
-          + People, vehicles &amp; buildings
-        </button>
-        @if (settings.effective().labelFilter.length > 0) {
-          <button type="button" class="btn secondary small" (click)="clearLabelFilter()" title="Show every class again">
-            Clear all
-          </button>
-        }
-      </div>
-
-      <div class="chip-search-row">
-        <input
-          [value]="classQuery()"
-          (input)="classQuery.set($any($event.target).value)"
-          (keydown.enter)="onClassQueryEnter()"
-          placeholder="Search to show or hide one class…"
-          aria-label="Search or add a class"
-        />
-      </div>
-
-      @if (filteredChips().length > 0) {
-        <div class="chip-checklist" role="group" aria-label="Classes seen">
-          @for (label of filteredChips(); track label) {
-            <span class="class-chip" [class.checked]="isChecked(label)">
-              <button
-                type="button"
-                class="chip-label"
-                [attr.aria-pressed]="isChecked(label)"
-                (click)="toggleChip(label)"
-                [title]="isChecked(label) ? 'Showing — click to hide' : 'Hidden — click to show'"
-              >
-                <span class="chip-check" aria-hidden="true">{{ isChecked(label) ? '✓' : '' }}</span>
-                {{ label }}
-              </button>
-              @if (isChecked(label)) {
-                <button
-                  type="button"
-                  class="chip-remove"
-                  [attr.aria-label]="'Remove ' + label"
-                  title="Remove"
-                  (click)="toggleChip(label)"
-                >
-                  ×
-                </button>
-              }
-            </span>
-          }
-        </div>
-      } @else if (classQuery().trim().length > 0) {
-        <p class="muted hint">No class matches "{{ classQuery().trim() }}".</p>
-      } @else {
-        <p class="muted hint">No classes observed yet — waiting for the first detections.</p>
-      }
-
-      @if (showAddClass()) {
-        <button type="button" class="btn secondary small chip-add-button" (click)="addClass()">
-          Add "{{ classQuery().trim() }}"
-        </button>
-      }
-    </section>
-
-    <!-- ---- Confidence / inference rate ------------------------------------------------------ -->
-    <section class="cv-section">
-      <label class="label" for="cv-confidence">
-        Confidence ≥ {{ settings.effective().confidenceThreshold.toFixed(2) }}
-      </label>
-      <input
-        id="cv-confidence"
-        type="range"
-        min="0.05"
-        max="0.95"
-        step="0.05"
-        [value]="settings.effective().confidenceThreshold"
-        (input)="onConfidence($any($event.target).value)"
-      />
-
-      <label class="label" for="cv-fps">Inference {{ settings.effective().inferenceFps }} fps</label>
-      <input
-        id="cv-fps"
-        type="range"
-        min="1"
-        max="30"
-        step="1"
-        [value]="settings.effective().inferenceFps"
-        (input)="onFps($any($event.target).value)"
-      />
-
-      <p class="muted hint">{{ perfHintText() }}</p>
-    </section>
-
-    <!-- ---- Tracking (docs/plans/done/TRACKING-PLAN.md, wave T7) — mode / engine / cadence, all live-only
-         (see the component's own "Tracking section" doc comment for why there is no draft here). -->
-    <section class="cv-section">
-      <span class="label">Tracking</span>
-
-      @if (!streamId()) {
-        <p class="muted hint">Start a stream to configure tracking — every control below is a live knob with nothing to save into a draft.</p>
-      } @else {
-        <div class="segmented" role="tablist" aria-label="Tracking mode">
-          <button
-            type="button"
-            role="tab"
-            class="btn secondary small"
-            [class.active]="trackingMode() === 'OFF'"
-            [attr.aria-selected]="trackingMode() === 'OFF'"
-            (click)="onTrackingMode('OFF')"
-          >
-            Off
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="btn secondary small"
-            [class.active]="trackingMode() === 'ASSOCIATE'"
-            [attr.aria-selected]="trackingMode() === 'ASSOCIATE'"
-            (click)="onTrackingMode('ASSOCIATE')"
-          >
-            Associate
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="btn secondary small"
-            [class.active]="trackingMode() === 'FOLLOW'"
-            [attr.aria-selected]="trackingMode() === 'FOLLOW'"
-            (click)="onTrackingMode('FOLLOW')"
-          >
-            Follow
-          </button>
-        </div>
-
-        <p class="muted hint">
-          @switch (trackingMode()) {
-            @case ('OFF') {
-              Detections carry no id — today's behavior.
-            }
-            @case ('ASSOCIATE') {
-              Every detection keeps a stable #id across frames, through a brief occlusion.
-            }
-            @case ('FOLLOW') {
-              One locked target is tracked every frame; the detector drops to a periodic verify pass.
-              Click a tracked box in the video to lock onto it.
-            }
-          }
-        </p>
-
-        <!-- ---- Capability ceiling (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md, wave J4) — a
-             request, never the outcome (invariant B5); what actually ran is the read-only "Serving"
-             readout further down, fed by a completely different, server-reported fact. -->
-        <label class="label" for="tracking-capability-level">Capability ceiling</label>
-        <select
-          id="tracking-capability-level"
-          aria-label="Capability level ceiling"
-          (change)="onCapabilityLevel($any($event.target).value)"
-        >
-          @for (option of capabilityLevelOptions; track option.value) {
-            <option [value]="option.value" [selected]="option.value === capabilityLevel()">{{ option.label }}</option>
-          }
-        </select>
-        <p class="muted hint">{{ capabilityLevelHintText() }}</p>
-
-        @if (trackingMode() !== 'OFF') {
-          @if (engineOptions().length === 0) {
-            <p class="muted hint">Engine list unavailable — using the server default for this mode.</p>
-          } @else {
-            <div class="segmented" role="tablist" aria-label="Tracking engine">
-              @for (engine of engineOptions(); track engine.id) {
-                <button
-                  type="button"
-                  role="tab"
-                  class="btn secondary small"
-                  [class.active]="engine.id === trackingEngineId()"
-                  [attr.aria-selected]="engine.id === trackingEngineId()"
-                  [title]="engine.costHint"
-                  (click)="onTrackingEngine(engine.id)"
-                >
-                  {{ engine.displayName }}
-                </button>
-              }
-            </div>
-          }
-        }
-
-        @if (trackingMode() === 'FOLLOW') {
-          <label class="label" for="tracking-verify-ms">Re-verify every {{ verifyEveryMillis() }} ms</label>
-          <input
-            id="tracking-verify-ms"
-            type="range"
-            min="500"
-            max="5000"
-            step="100"
-            [value]="verifyEveryMillis()"
-            (input)="onVerifyEveryMillis($any($event.target).value)"
-          />
-
-          <label class="label" for="tracking-follow-fps">Follow sampling {{ followFps() }} fps</label>
-          <input
-            id="tracking-follow-fps"
-            type="range"
-            min="5"
-            max="30"
-            step="1"
-            [value]="followFps()"
-            (input)="onFollowFps($any($event.target).value)"
-          />
-        }
-
-        @if (lockedTrackId(); as locked) {
-          <div class="tracking-lock-row">
-            <span class="chip accent">Following #{{ locked }}</span>
-            <button type="button" class="btn secondary small" (click)="releaseLock()">Release</button>
-          </div>
-        }
-
-        @if (flowStripText(); as flow) {
-          <p class="mono hint tracking-flow-strip">{{ flow }}</p>
-        }
-
-        <!-- ---- Served capability + detection lag (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
-             §4, wave J4) — the point of this wave: what the host actually served this frame, and
-             whether that fell short of the ceiling above. Hidden entirely while {@link frameTracking}
-             itself is absent (no tracking telemetry has arrived yet this session — same "nothing to
-             report" posture as the flow strip above); once a frame has arrived, `capability` being
-             absent within it is rendered explicitly (an old cv-service), never silently hidden and
-             never filled in with the ceiling picked above (B5). -->
-        @if (frameTracking()) {
-          <div class="capability-readout" [class.downgraded]="capabilityDowngraded()">
-            <div class="capability-readout-row">
-              <span class="capability-readout-label">Serving</span>
-              @if (servedCapability(); as capability) {
-                <span class="chip" [class.warn]="capabilityDowngraded()" [class.accent]="!capabilityDowngraded()">
-                  {{ capabilityLevelName(capability.levelServed) }}
-                </span>
-              } @else {
-                <span class="chip mono">no level reported</span>
-              }
-            </div>
-            @if (capabilityDowngraded()) {
-              <p class="notice warn capability-downgrade-reason">{{ servedCapability()?.reason }}</p>
-            }
-
-            <div class="capability-readout-row">
-              <span class="capability-readout-label">Detection lag</span>
-              <span class="mono capability-readout-value" [class.lag-over-budget]="detectionLagOverBudget()">
-                {{ detectionLagText() }}
-              </span>
-            </div>
-            @if (detectionLagOverBudget()) {
-              <p class="notice danger capability-downgrade-reason">
-                Over the Hold budget of {{ detectionLagBudgetMillis }} ms (CV-RATE-BUDGET §1) — staying
-                locked on gets harder above this.
-              </p>
-            }
-          </div>
-        }
-      }
-    </section>
-
-    <!-- ---- Boxes rendering — merged in from the former standalone `layers` drawer (per direct user
-         request); a client-side rendering preference (`FlyPage`'s `facade.boxesMode`), not part of
-         the `PipelineSettings` wire contract, so it round-trips via {@link boxesMode}/
-         {@link boxesModeChange} rather than `SettingsStore`. "Burned in" is omitted entirely once
-         {@link burnedIn} is confirmed `false` (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) — offering a
-         tab that draws nothing would read as a choice, not an absence. -->
-    <section class="cv-section">
-      <span class="label">Boxes (shortcut: B)</span>
-      <div class="segmented" role="tablist" aria-label="Detection boxes rendering">
-        <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'overlay'" [attr.aria-selected]="boxesMode() === 'overlay'" (click)="boxesModeChange.emit('overlay')">
-          Overlay
-        </button>
-        @if (showBurnedInOption()) {
-          <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'burned'" [attr.aria-selected]="boxesMode() === 'burned'" (click)="boxesModeChange.emit('burned')">
-            Burned in
-          </button>
-        }
-        <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'off'" [attr.aria-selected]="boxesMode() === 'off'" (click)="boxesModeChange.emit('off')">
-          Off
-        </button>
-      </div>
-      <p class="muted hint">
-        @if (showBurnedInOption()) {
-          Overlay draws boxes on top of the video; burned-in draws them into the picture itself; off
-          hides them entirely. Detection still runs the same either way.
-        } @else {
-          This stream's video carries no burned-in boxes — overlay draws them on top instead; off
-          hides them entirely. Detection still runs the same either way.
-        }
-      </p>
-    </section>
-
-    <!-- ---- Detection on/off ------------------------------------------------------------------ -->
-    <section class="cv-section">
+    <!-- ---- Detect hero — the primary act, now first (docs/plans/active/CV-UX-RESEARCH.md §3) ---- -->
+    <section class="cv-section cv-hero">
       <label class="toggle">
         <input
           type="checkbox"
@@ -359,14 +17,460 @@
           (change)="onDetectionEnabledToggle($any($event.target).checked)"
         />
         <span>
-          <strong>Detection</strong>
+          <strong>Detect on this stream</strong>
           <span class="muted">
-            Off stops inference entirely (zero CPU spent detecting) — video keeps streaming either
-            way. Separate from the boxes overlay (shortcut B), which only controls how detections
-            already found are drawn, not whether the model runs.
+            Runs only while this stream is watched — zero cost otherwise. The boxes row below
+            (shortcut B) only changes how detections are drawn, not whether the model runs.
           </span>
         </span>
       </label>
+      <p class="mono hint cv-status-line">{{ detectionStatusText() }}</p>
     </section>
+
+    <!-- ---- "Looking for" — model choice reframed as intent, not a filename (docs/plans/active/
+         CV-UX-RESEARCH.md §5, wave U2). Roster-driven: every card's name and cost word comes from
+         `models()`, nothing hardcoded per model id. -->
+    <section class="cv-section">
+      <span class="label">Looking for</span>
+      @if (models().length === 0) {
+        <p class="muted hint">
+          Model list unavailable — using <span class="mono">{{ settings.effective().model }}</span>.
+        </p>
+      } @else {
+        <div class="intent-cards" role="radiogroup" aria-label="What to detect">
+          @for (m of models(); track m.id) {
+            <div class="intent-card" [class.selected]="m.id === settings.effective().model">
+              <label class="intent-card-choice">
+                <input
+                  type="radio"
+                  name="cv-intent"
+                  [value]="m.id"
+                  [checked]="m.id === settings.effective().model"
+                  [disabled]="modelBusy()"
+                  (change)="onModelChange(m.id)"
+                />
+                <span class="intent-card-name">{{ m.displayName }}</span>
+                <span class="chip" [class.warn]="m.openVocab">{{ m.openVocab ? 'slower' : 'fast' }}</span>
+              </label>
+              @if (m.openVocab && m.id === settings.effective().model) {
+                <button
+                  type="button"
+                  class="btn secondary small intent-card-preset"
+                  (click)="fillPreset()"
+                  title="Fill in a common starting set — stays fully editable afterward"
+                >
+                  + People, vehicles &amp; buildings
+                </button>
+              }
+            </div>
+          }
+        </div>
+      }
+      @if (modelBusy()) {
+        <p class="muted hint">Applying — re-arming detection…</p>
+      }
+      @if (isOpenVocab()) {
+        <p class="muted hint">{{ perfHintText() }}</p>
+      }
+    </section>
+
+    <!-- ---- "Seen now" — capped, click to stage (docs/plans/active/CV-UX-RESEARCH.md §4.1, wave U4;
+         staged-selection rework, direct user request). A click no longer PATCHes by itself — it
+         edits {@link pendingLabels}, shared verbatim with Tune's full checklist below, and only
+         Submit actually writes it to the wire. The full, uncapped checklist with search/add/clear
+         lives in Tune. -->
+    <section class="cv-section">
+      <span class="label">Seen now</span>
+      @if (seenNowChips().length > 0) {
+        <div class="chip-checklist" role="group" aria-label="Recently seen classes">
+          @for (label of seenNowChips(); track label) {
+            <span class="class-chip" [class.checked]="isChecked(label)">
+              <button
+                type="button"
+                class="chip-label"
+                [attr.aria-pressed]="isChecked(label)"
+                (click)="toggleChip(label)"
+                [title]="isChecked(label) ? 'Selected — click to remove from the selection' : 'Click to add to the selection'"
+              >
+                <span class="chip-check" aria-hidden="true">{{ isChecked(label) ? '✓' : '' }}</span>
+                {{ label }}
+              </button>
+            </span>
+          }
+        </div>
+        @if (pendingLabels(); as pending) {
+          <p class="notice cv-pending-row">
+            <span class="chip accent mono">{{ pending.length > 0 ? pending.length + ' staged' : 'cleared' }}</span>
+            <button type="button" class="btn small" (click)="submitLabelFilter()">{{ submitButtonText(pending) }}</button>
+            <button type="button" class="btn secondary small" (click)="discardStagedLabels()" title="Discard the staged edit — keep what's currently applied">
+              Discard
+            </button>
+          </p>
+        }
+        <p class="muted hint">{{ hiddenClassTruth }}</p>
+        @if (showFirstHideHint()) {
+          <p class="notice cv-first-hide-hint">
+            {{ firstHideHintText }}
+            <button type="button" class="btn secondary small" (click)="dismissFirstHideHint()">Got it</button>
+          </p>
+        }
+      } @else {
+        <p class="muted hint">No classes observed yet — waiting for the first detections.</p>
+      }
+    </section>
+
+    <!-- ---- Boxes rendering — merged in from the former standalone `layers` drawer (per direct user
+         request); a client-side rendering preference (`FlyPage`'s `facade.boxesMode`), not part of
+         the `PipelineSettings` wire contract, so it round-trips via {@link boxesMode}/
+         {@link boxesModeChange} rather than `SettingsStore`. "Burned in" is omitted entirely once
+         {@link burnedIn} is confirmed `false` (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8). -->
+    <section class="cv-section">
+      <span class="label">Boxes (shortcut: B)</span>
+      <div class="segmented" role="tablist" aria-label="Detection boxes rendering">
+        <button type="button" role="tab" class="btn secondary small" [class.active]="boxesMode() === 'overlay'" [attr.aria-selected]="boxesMode() === 'overlay'" (click)="boxesModeChange.emit('overlay')">
+          Overlay
+        </button>
+        @if (showBurnedInOption()) {
+          <button type="button" role="tab" class="btn secondary small" [class.active]="boxesMode() === 'burned'" [attr.aria-selected]="boxesMode() === 'burned'" (click)="boxesModeChange.emit('burned')">
+            Burned in
+          </button>
+        }
+        <button type="button" role="tab" class="btn secondary small" [class.active]="boxesMode() === 'off'" [attr.aria-selected]="boxesMode() === 'off'" (click)="boxesModeChange.emit('off')">
+          Off
+        </button>
+      </div>
+      <p class="muted hint">How boxes are drawn — detection keeps running the same either way.</p>
+    </section>
+
+    <!-- ---- Click-to-follow + lock chip — the real Follow interaction is clicking a box in the
+         video (`buildFollowLockPatch`), not a control in this panel; kept at tier 0 regardless of
+         the Tune-tier tracking mode (docs/plans/active/CV-UX-RESEARCH.md §6). -->
+    @if (streamId()) {
+      <section class="cv-section">
+        <p class="muted hint">Click a tracked box in the video to lock onto it.</p>
+        @if (lockedTrackId(); as locked) {
+          <div class="tracking-lock-row">
+            <span class="chip accent">Following #{{ locked }}</span>
+            <button type="button" class="btn secondary small" (click)="releaseLock()">Release</button>
+          </div>
+        }
+      </section>
+    }
+
+    <!-- ---- Conditional honesty notices — kept at tier 0 even though the quiet numeric readouts
+         they explain move to Expert (docs/main/UX-DESIGN.md §7.2: bad news is never buried). Cost
+         nothing at rest — both render only while they actually fire. -->
+    @if (capabilityDowngraded()) {
+      <p class="notice warn">{{ servedCapability()?.reason }}</p>
+    }
+    @if (detectionLagOverBudget()) {
+      <p class="notice danger">
+        Detection lag is over the Hold budget of {{ detectionLagBudgetMillis }} ms — staying locked
+        on gets harder above this.
+      </p>
+    }
+
+    <!-- ---- Tier 1 "Tune" — confidence, the full class checklist, tracking mode
+         (docs/plans/active/CV-UX-RESEARCH.md §3/§7 wave U1). -->
+    <details class="cv-disclosure" [open]="tuneTier.isOpen('open')" (toggle)="onTierToggle(tuneTier, $event)">
+      <summary>
+        <span class="cv-disclosure-chevron" aria-hidden="true">▸</span>
+        <span>Tune</span>
+        <span class="muted cv-disclosure-hint">confidence · all classes · tracking</span>
+      </summary>
+      <div class="cv-disclosure-body">
+        <!-- Confidence, reworded as a symptom axis rather than a bare number. -->
+        <section class="cv-section">
+          <label class="label" for="cv-confidence">
+            Fewer false boxes <span class="mono">{{ settings.effective().confidenceThreshold.toFixed(2) }}</span> find more
+          </label>
+          <input
+            id="cv-confidence"
+            type="range"
+            min="0.05"
+            max="0.95"
+            step="0.05"
+            [value]="settings.effective().confidenceThreshold"
+            (input)="onConfidence($any($event.target).value)"
+          />
+        </section>
+
+        <!-- Full class checklist — search, individual toggle/remove, add, clear. Same staged
+             selection as tier 0's "Seen now" chips above (docs/plans/active/CV-UX-RESEARCH.md §4.2's
+             "unchanged in mechanism" plus the staged-selection rework, direct user request): every
+             control here calls the exact same `toggleChip`/`addClass`/`clearLabelFilter` methods, so
+             this checklist and "Seen now" can never disagree about what's staged. -->
+        <section class="cv-section">
+          <span class="label">All classes</span>
+          @if (settings.effective().labelFilter.length === 0) {
+            <p class="muted hint">Applied: every class this model detects.</p>
+          } @else {
+            <p class="muted hint">
+              Applied: {{ settings.effective().labelFilter.length }} of the classes below — the rest are hidden.
+            </p>
+          }
+
+          @if (pendingLabels(); as pending) {
+            <p class="notice cv-pending-row">
+              <span class="chip accent mono">{{ pending.length > 0 ? pending.length + ' staged' : 'cleared' }}</span>
+              <button type="button" class="btn small" (click)="submitLabelFilter()">{{ submitButtonText(pending) }}</button>
+              <button type="button" class="btn secondary small" (click)="discardStagedLabels()" title="Discard the staged edit — keep what's currently applied">
+                Discard
+              </button>
+            </p>
+          }
+
+          @if (labelFilterSeed().length > 0) {
+            <div class="chip-action-row">
+              <button type="button" class="btn secondary small" (click)="clearLabelFilter()" title="Stage &quot;every class&quot; — Submit to apply it">
+                Clear all
+              </button>
+            </div>
+          }
+
+          <div class="chip-search-row">
+            <input
+              [value]="classQuery()"
+              (input)="classQuery.set($any($event.target).value)"
+              (keydown.enter)="onClassQueryEnter()"
+              placeholder="Search to select or deselect one class…"
+              aria-label="Search or add a class"
+            />
+          </div>
+
+          @if (filteredChips().length > 0) {
+            <div class="chip-checklist" role="group" aria-label="Classes seen">
+              @for (label of filteredChips(); track label) {
+                <span class="class-chip" [class.checked]="isChecked(label)">
+                  <button
+                    type="button"
+                    class="chip-label"
+                    [attr.aria-pressed]="isChecked(label)"
+                    (click)="toggleChip(label)"
+                    [title]="isChecked(label) ? 'Selected — click to remove from the selection' : 'Click to add to the selection'"
+                  >
+                    <span class="chip-check" aria-hidden="true">{{ isChecked(label) ? '✓' : '' }}</span>
+                    {{ label }}
+                  </button>
+                  @if (isChecked(label)) {
+                    <button
+                      type="button"
+                      class="chip-remove"
+                      [attr.aria-label]="'Remove ' + label"
+                      title="Remove"
+                      (click)="toggleChip(label)"
+                    >
+                      ×
+                    </button>
+                  }
+                </span>
+              }
+            </div>
+          } @else if (classQuery().trim().length > 0) {
+            <p class="muted hint">No class matches "{{ classQuery().trim() }}".</p>
+          } @else {
+            <p class="muted hint">No classes observed yet — waiting for the first detections.</p>
+          }
+
+          @if (showAddClass()) {
+            <button type="button" class="btn secondary small chip-add-button" (click)="addClass()">
+              Add "{{ classQuery().trim() }}"
+            </button>
+          }
+
+          <p class="muted hint">{{ hiddenClassTruth }}</p>
+        </section>
+
+        <!-- Tracking mode — the pilot's real path is click-to-follow in the video (tier 0, above),
+             which already switches mode itself; this picker is for the occasional deliberate
+             Associate/Off choice. -->
+        <section class="cv-section">
+          <span class="label">Tracking</span>
+          @if (!streamId()) {
+            <p class="muted hint">Start a stream to configure tracking — every control below is a live knob with nothing to save into a draft.</p>
+          } @else {
+            <div class="segmented" role="tablist" aria-label="Tracking mode">
+              <button
+                type="button"
+                role="tab"
+                class="btn secondary small"
+                [class.active]="trackingMode() === 'OFF'"
+                [attr.aria-selected]="trackingMode() === 'OFF'"
+                (click)="onTrackingMode('OFF')"
+              >
+                Off
+              </button>
+              <button
+                type="button"
+                role="tab"
+                class="btn secondary small"
+                [class.active]="trackingMode() === 'ASSOCIATE'"
+                [attr.aria-selected]="trackingMode() === 'ASSOCIATE'"
+                (click)="onTrackingMode('ASSOCIATE')"
+              >
+                Associate
+              </button>
+              <button
+                type="button"
+                role="tab"
+                class="btn secondary small"
+                [class.active]="trackingMode() === 'FOLLOW'"
+                [attr.aria-selected]="trackingMode() === 'FOLLOW'"
+                (click)="onTrackingMode('FOLLOW')"
+              >
+                Follow
+              </button>
+            </div>
+
+            <p class="muted hint">
+              @switch (trackingMode()) {
+                @case ('OFF') {
+                  Detections carry no id — today's behavior.
+                }
+                @case ('ASSOCIATE') {
+                  Every detection keeps a stable #id across frames, through a brief occlusion.
+                }
+                @case ('FOLLOW') {
+                  One locked target is tracked every frame; the detector drops to a periodic verify pass.
+                }
+              }
+            </p>
+          }
+        </section>
+      </div>
+    </details>
+
+    <!-- ---- Tier 2 "Expert" — rates, ceiling, engine, cadences, flow strip, full readouts
+         (docs/plans/active/CV-UX-RESEARCH.md §3/§7 wave U1). Nothing here is deleted from the old
+         panel, only demoted; every honesty rule (B5, R11, the wire-confirmed lock chip) is unchanged. -->
+    <details class="cv-disclosure" [open]="expertTier.isOpen('open')" (toggle)="onTierToggle(expertTier, $event)">
+      <summary>
+        <span class="cv-disclosure-chevron" aria-hidden="true">▸</span>
+        <span>Expert</span>
+        <span class="muted cv-disclosure-hint">rates · ceiling · engine · flow</span>
+      </summary>
+      <div class="cv-disclosure-body">
+        @if (!streamId()) {
+          <p class="muted hint">Start a stream to see rate, ceiling, engine and flow diagnostics.</p>
+        } @else {
+          <!-- Detector floor — the fps slider's old "this is the rate" label is false since the
+               adaptive rate controller shipped (it only ever raises above this number). -->
+          <section class="cv-section">
+            <label class="label" for="cv-fps">
+              Detector floor {{ settings.effective().inferenceFps }} fps
+            </label>
+            <input
+              id="cv-fps"
+              type="range"
+              min="1"
+              max="30"
+              step="1"
+              [value]="settings.effective().inferenceFps"
+              (input)="onFps($any($event.target).value)"
+            />
+            <p class="muted hint">Adaptive rate raises above this floor, never below it.</p>
+            @if (!isOpenVocab()) {
+              <p class="muted hint">{{ perfHintText() }}</p>
+            }
+          </section>
+
+          <!-- Capability ceiling (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md, wave J4) — a
+               request, never the outcome (invariant B5); what actually ran is the "Serving" readout
+               further down. Only meaningful once tracking is on (fixes the old bug where this
+               rendered even with tracking Off, `cv-control-panel.html:212` pre-CV-UX-RESEARCH). -->
+          @if (trackingMode() !== 'OFF') {
+            <section class="cv-section">
+              <label class="label" for="tracking-capability-level">Capability ceiling</label>
+              <select
+                id="tracking-capability-level"
+                aria-label="Capability level ceiling"
+                (change)="onCapabilityLevel($any($event.target).value)"
+              >
+                @for (option of capabilityLevelOptions; track option.value) {
+                  <option [value]="option.value" [selected]="option.value === capabilityLevel()">{{ option.label }}</option>
+                }
+              </select>
+              <p class="muted hint">{{ capabilityLevelHintText() }}</p>
+            </section>
+
+            @if (engineOptions().length === 0) {
+              <p class="muted hint">Engine list unavailable — using the server default for this mode.</p>
+            } @else {
+              <section class="cv-section">
+                <span class="label">Engine</span>
+                <div class="segmented" role="tablist" aria-label="Tracking engine">
+                  @for (engine of engineOptions(); track engine.id) {
+                    <button
+                      type="button"
+                      role="tab"
+                      class="btn secondary small"
+                      [class.active]="engine.id === trackingEngineId()"
+                      [attr.aria-selected]="engine.id === trackingEngineId()"
+                      [title]="engine.costHint"
+                      (click)="onTrackingEngine(engine.id)"
+                    >
+                      {{ engine.displayName }}
+                    </button>
+                  }
+                </div>
+              </section>
+            }
+
+            @if (trackingMode() === 'FOLLOW') {
+              <section class="cv-section">
+                <label class="label" for="tracking-verify-ms">Re-verify every {{ verifyEveryMillis() }} ms</label>
+                <input
+                  id="tracking-verify-ms"
+                  type="range"
+                  min="500"
+                  max="5000"
+                  step="100"
+                  [value]="verifyEveryMillis()"
+                  (input)="onVerifyEveryMillis($any($event.target).value)"
+                />
+
+                <label class="label" for="tracking-follow-fps">Follow sampling {{ followFps() }} fps</label>
+                <input
+                  id="tracking-follow-fps"
+                  type="range"
+                  min="5"
+                  max="30"
+                  step="1"
+                  [value]="followFps()"
+                  (input)="onFollowFps($any($event.target).value)"
+                />
+              </section>
+            }
+
+            @if (flowStripText(); as flow) {
+              <p class="mono hint tracking-flow-strip">{{ flow }}</p>
+            }
+
+            <!-- Served capability + detection lag — the quiet numeric reading; the conditional
+                 downgrade/over-budget notices themselves stay surfaced at tier 0, above. -->
+            @if (frameTracking()) {
+              <div class="capability-readout" [class.downgraded]="capabilityDowngraded()">
+                <div class="capability-readout-row">
+                  <span class="capability-readout-label">Serving</span>
+                  @if (servedCapability(); as capability) {
+                    <span class="chip" [class.warn]="capabilityDowngraded()" [class.accent]="!capabilityDowngraded()">
+                      {{ capabilityLevelName(capability.levelServed) }}
+                    </span>
+                  } @else {
+                    <span class="chip mono">no level reported</span>
+                  }
+                </div>
+                <div class="capability-readout-row">
+                  <span class="capability-readout-label">Detection lag</span>
+                  <span class="mono capability-readout-value" [class.lag-over-budget]="detectionLagOverBudget()">
+                    {{ detectionLagText() }}
+                  </span>
+                </div>
+              </div>
+            }
+          }
+        }
+      </div>
+    </details>
   </vision-side-panel>
 }

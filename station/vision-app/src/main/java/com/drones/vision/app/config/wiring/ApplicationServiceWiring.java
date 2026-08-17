@@ -1,5 +1,6 @@
 package com.drones.vision.app.config.wiring;
 
+import com.drones.vision.perception.domain.port.DetectionDemandPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
@@ -401,6 +402,12 @@ public class ApplicationServiceWiring {
      * VideoSourcePort} at all). With that flag at its default {@code false} (D1), this method returns
      * the plain {@code DefaultStreamService} exactly as before this wave, so {@code
      * LiveFrameFallbackStreamService} is never even constructed in the default configuration.
+     *
+     * <p>{@code detectionDemandPort} (docs/plans/active/CV-DEMAND-PLAN.md §3.3) is an {@link
+     * ObjectProvider} because {@code CvWiring#detectionDemandPort} is itself conditionally present
+     * on {@code vision.cv.demand.enabled} (default {@code true}) — resolving to {@code null} when
+     * that flag is {@code false} reproduces {@code DefaultStreamService}'s pre-wave-D2 constructor
+     * exactly: the demand-poll task is never scheduled, and every stream stays fail-open on demand.
      */
     @Bean
     public StreamService streamService(DeviceRepositoryPort deviceRepositoryPort,
@@ -418,14 +425,16 @@ public class ApplicationServiceWiring {
                                         VisionCvProperties cvProperties,
                                         VisionPublishProperties publishProperties,
                                         ObjectProvider<PulledDetectionPort> pulledDetectionPort,
-                                        MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber) {
+                                        MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber,
+                                        ObjectProvider<DetectionDemandPort> detectionDemandPort) {
         PullDetectionSettings pullDetectionSettings = cvProperties.pullEnabled()
                 ? new PullDetectionSettings(pulledDetectionPort.getObject(), cvProperties.pull().rtspBase())
                 : null;
         StreamService defaultStreamService = new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry,
                 detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker,
                 overlayPort, detectionEventRepositoryPort, detectionLiveUpdatePort,
-                streamPipelineSettings(applicationProperties, trackingProperties), pullDetectionSettings);
+                streamPipelineSettings(applicationProperties, trackingProperties, cvProperties), pullDetectionSettings,
+                detectionDemandPort.getIfAvailable());
         if (publishProperties.sourceProxy().enabled()) {
             return new LiveFrameFallbackStreamService(defaultStreamService, mediamtxLiveFrameGrabber);
         }
@@ -454,11 +463,20 @@ public class ApplicationServiceWiring {
      * {@code DefaultStreamService#start} — the one point every start path passes through, so the
      * device, asset, simulation and demo-fleet paths cannot disagree about them
      * (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1).
+     *
+     * <p>{@code cvProperties.demand()} (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.4/&sect;3.7)
+     * supplies {@link StreamPipelineSettings#detectionDemandPollInterval()}/{@link
+     * StreamPipelineSettings#detectionDemandGrace()} — the two tunables that only matter once {@link
+     * #streamService} has actually wired a {@code DetectionDemandPort}, but are threaded through
+     * unconditionally since {@link StreamPipelineSettings}'s own compact constructor requires both
+     * regardless.
      */
     static StreamPipelineSettings streamPipelineSettings(VisionApplicationProperties properties,
-                                                          VisionTrackingProperties tracking) {
+                                                          VisionTrackingProperties tracking,
+                                                          VisionCvProperties cvProperties) {
         VisionApplicationProperties.Pipeline pipeline = properties.pipeline();
         VisionApplicationProperties.Extrapolation extrapolation = properties.extrapolation();
+        VisionCvProperties.Demand demand = cvProperties.demand();
         return new StreamPipelineSettings(pipeline.assumedSourceFps(), pipeline.measuredFpsEwmaAlpha(),
                 pipeline.warmupFrames(), pipeline.minMeasuredFps(), pipeline.maxMeasuredFps(),
                 TimeUnit.MILLISECONDS.toNanos(pipeline.detectionBackoff().initialMs()),
@@ -471,7 +489,8 @@ public class ApplicationServiceWiring {
                 TrackingWiring.streamStartTrackingSeed(tracking),
                 pipeline.cameraHfovDegrees(),
                 new AdaptiveRateSettings(pipeline.adaptiveRate().enabled(), pipeline.adaptiveRate().maxFps(),
-                        pipeline.adaptiveRate().ewmaAlpha()));
+                        pipeline.adaptiveRate().ewmaAlpha()),
+                demand.pollInterval(), demand.grace());
     }
 
     /**

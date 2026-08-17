@@ -3,6 +3,8 @@ import { FleetStore } from '../../core/fleet/fleet-store';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { SettingsStore, type PipelineSettings } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
+import { UiStore } from '../../core/ui/ui-store';
+import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { SidePanel } from '../../shared/ui/side-panel';
 import type { DetectionResult, StreamTracksResponse, TrackingMode, UpdateStreamConfigRequest } from '../../core/api/models';
 import type { BoxesMode } from '../../shared/player/player';
@@ -12,6 +14,8 @@ import {
   DEFAULT_FOLLOW_FPS,
   DEFAULT_VERIFY_EVERY_MILLIS,
   DETECTION_LAG_BUDGET_MILLIS,
+  FIRST_HIDE_HINT,
+  HIDDEN_CLASS_TRUTH,
   addLabel,
   applyPreset,
   buildCapabilityLevelPatch,
@@ -25,7 +29,9 @@ import {
   capabilityLevelHint,
   capabilityLevelLabel,
   chipCandidates,
+  classesOnScreenCount,
   debounce,
+  detectionStatus,
   engineOptionsForMode,
   filterLabelsByQuery,
   findModel,
@@ -39,8 +45,11 @@ import {
   observedLabels,
   perfHint,
   reArmHint,
+  recentObservedLabels,
   seedLabelFilterForModel,
   sortSelectedFirst,
+  stagedLabelSeed,
+  submitLabelFilterButtonText,
   toggleLabelChip,
 } from './cv-control-panel-logic';
 
@@ -105,6 +114,37 @@ const TRACKS_POLL_INTERVAL_MS = 2_000;
  * pixel level in `shared/player/player.ts`. The flow strip beside it (`stats`-fed, hidden entirely
  * when `stats` is absent — an old/absent server, or tracking never configured this session) is this
  * app's own "visible flow" surface (docs/extracts/TRACKING-ORCHESTRATION.md §7) — see `cv-control-panel-logic.ts#formatFlowStrip`.
+ *
+ * **Three-tier layout** (docs/plans/active/CV-UX-RESEARCH.md, waves U1-U5) — the panel used to be
+ * one flat scroll of 15 controls with the primary act (detection on/off) last; it is now:
+ * - **Tier 0 (always visible)**: the Detect hero switch with an honest status line
+ *   ({@link detectionStatusText}), the "Looking for" intent cards ({@link models}, U2), the capped
+ *   "Seen now" chips ({@link seenNowChips}, U4), Boxes rendering, the click-to-follow hint/lock
+ *   chip, and the two *conditional* capability-downgrade/lag-over-budget notices (still surfaced
+ *   here even though their quiet numeric readouts move to Expert — burying honest bad news would
+ *   violate docs/main/UX-DESIGN.md §7.2).
+ * - **Tier 1 "Tune"** ({@link tuneTier}, a `<details>`): confidence (reworded as a symptom axis),
+ *   the full class checklist (search/add/clear — today's mechanism, unchanged), tracking mode.
+ * - **Tier 2 "Expert"** ({@link expertTier}): the fps floor slider (relabeled — the adaptive rate
+ *   controller only ever raises above it, never holds it, so "the rate" would be a false label),
+ *   capability ceiling, engine picker, verify cadence, follow sampling, the flow strip, and the full
+ *   Serving/lag readout. Nothing is deleted, only demoted — every function above still backs it.
+ *
+ * Each disclosure's open state is a plain `UiStore` instance owned by this component
+ * (docs/plans/done/UI-ARCHITECTURE-PLAN.md's own pattern: "a host owns one as a plain field") rather
+ * than a new boolean — persisted via `localStorage` so an expert who keeps Expert open doesn't lose
+ * that every reload. The two disclosures are independent (separate `UiStore` instances, not one
+ * shared mutually-exclusive group) — nothing about this panel requires Tune and Expert to be
+ * exclusive of each other.
+ *
+ * **The class filter is staged, not immediate** ({@link pendingLabels}, direct user request): a
+ * chip click no longer PATCHes on every click — it edits a local staged selection that both class-
+ * filter surfaces (tier 0's "Seen now" chips, Tune's full checklist) share, and only
+ * {@link submitLabelFilter} actually writes the wire, once. This is a UI-only change: `labelFilter`
+ * itself is still the exact "empty means all" whitelist `PipelineConfig`'s own javadoc always
+ * described (see {@link HIDDEN_CLASS_TRUTH} for what a non-empty selection actually does — and does
+ * not do — once submitted). See {@link pendingLabels}'s own doc comment for the full staging model,
+ * including why it stays deliberately orthogonal to instance lock ({@link lockedTrackId}).
  */
 @Component({
   selector: 'vision-cv-control-panel',
@@ -153,23 +193,103 @@ export class CvControlPanel {
   protected readonly settings = inject(SettingsStore);
   private readonly toasts = inject(ToastService);
 
+  /** Tier 1's open/closed state — see this class's own "Three-tier layout" doc comment for why a
+   *  plain `UiStore` field, not a new boolean. */
+  protected readonly tuneTier = new UiStore('cv-panel-tune-open');
+  /** Tier 2's open/closed state — independent of {@link tuneTier} (its own `UiStore` instance, not a
+   *  shared mutually-exclusive group). */
+  protected readonly expertTier = new UiStore('cv-panel-expert-open');
+  private static readonly TIER_OPEN_ID = 'open';
+
+  /** A native `<details>`'s own `toggle` event carries whether it just opened or closed — read
+   *  straight off the element, mirroring `app-sidebar.ts#onAdvancedToggle`'s identical idiom. */
+  protected onTierToggle(tier: UiStore, event: Event): void {
+    const open = (event.target as HTMLDetailsElement).open;
+    if (open) {
+      tier.open(CvControlPanel.TIER_OPEN_ID);
+    } else {
+      tier.close(CvControlPanel.TIER_OPEN_ID);
+    }
+  }
+
+  /** The honest "hidden classes drop everywhere" sentence (docs/plans/active/CV-UX-RESEARCH.md
+   *  §4.3) — shown verbatim in both the tier-0 "Seen now" section and Tune's full checklist, so the
+   *  two surfaces never say something different. */
+  protected readonly hiddenClassTruth = HIDDEN_CLASS_TRUTH;
+
+  private static readonly FIRST_HIDE_HINT_KEY = 'cv-panel-first-hide-hint-dismissed';
+  /** Whether the tier-0 "Seen now" first-hide hint has already been dismissed once — persisted, so
+   *  it never nags an operator who has already seen it (docs/plans/active/CV-UX-RESEARCH.md §4.4). */
+  private readonly firstHideHintDismissed = signal(readPersistedFlag(CvControlPanel.FIRST_HIDE_HINT_KEY, false));
+  /** Shown once, as soon as the operator has staged (not necessarily submitted yet) their first
+   *  narrowing edit — a filter still at `[]` ("all") has nothing to warn about yet. Reads
+   *  {@link pendingLabels} directly rather than {@link labelFilterSeed} so the warning appears while
+   *  they're still deciding, before Submit, not only after it's already applied. */
+  protected readonly showFirstHideHint = computed(() => {
+    if (this.firstHideHintDismissed()) {
+      return false;
+    }
+    const pending = this.pendingLabels();
+    return pending !== null ? pending.length > 0 : this.settings.effective().labelFilter.length > 0;
+  });
+  protected readonly firstHideHintText = FIRST_HIDE_HINT;
+  protected dismissFirstHideHint(): void {
+    this.firstHideHintDismissed.set(true);
+    writePersistedFlag(CvControlPanel.FIRST_HIDE_HINT_KEY, true);
+  }
+
   /** Text in the Classes search box — filters {@link chips} live and, once nothing in that filtered
    * checklist matches, doubles as the "add a class not seen yet" free-text input. */
   protected readonly classQuery = signal('');
   protected readonly modelBusy = signal(false);
+
+  /**
+   * The staged class-filter edit, shared by tier 0's "Seen now" chips and Tune's full checklist —
+   * `null` means "no staged edit, mirrors {@link settings}'s own applied `labelFilter`"; a concrete
+   * (possibly empty) array is unapplied work waiting on {@link submitLabelFilter} or
+   * {@link discardStagedLabels}. Every chip/preset/add/clear handler in this component writes only
+   * this signal, never `settings.adjust` directly — see {@link labelFilterSeed} for the one read
+   * every one of them starts from, so the two surfaces can never disagree about what's staged.
+   *
+   * Reset to `null` on a {@link streamId} change (constructor `effect`, below) and on a model switch
+   * ({@link onModelChange}) — a staged edit built against one stream/model's observed vocabulary has
+   * no guaranteed meaning against the next one, and silently carrying it over would submit a
+   * selection the operator never actually reviewed against what's now on screen.
+   *
+   * **Orthogonal to instance lock, deliberately** ({@link lockedTrackId}/{@link releaseLock}): this
+   * signal is *which classes are kept* server-side after inference; the lock is *which single
+   * tracked object* the pipeline follows. A future "track just this one" feature (once tracking is
+   * reliable enough to hold a target) must stay a separate mechanism — do not fold instance identity
+   * into this array or otherwise couple the two axes.
+   */
+  protected readonly pendingLabels = signal<readonly string[] | null>(null);
+
+  /** The list any staged edit currently builds on — see {@link pendingLabels}'s own doc comment. */
+  protected readonly labelFilterSeed = computed(() =>
+    stagedLabelSeed(this.pendingLabels(), this.settings.effective().labelFilter),
+  );
 
   protected readonly models = computed(() => this.fleet.models());
   protected readonly selectedModel = computed(() => findModel(this.models(), this.settings.effective().model));
   protected readonly isOpenVocab = computed(() => this.selectedModel()?.openVocab ?? false);
   protected readonly perfHintText = computed(() => perfHint(this.isOpenVocab()));
 
+  /** The staged selection (or, with nothing staged, the applied filter) unioned with every
+   *  recently-observed label — reading through {@link labelFilterSeed} rather than the applied
+   *  filter directly means a class the operator just staged (but hasn't submitted yet) stays visible
+   *  in the checklist instead of disappearing until Submit. */
   protected readonly chips = computed(() =>
-    chipCandidates(this.settings.effective().labelFilter, observedLabels(this.detectionResults())),
+    chipCandidates(this.labelFilterSeed(), observedLabels(this.detectionResults())),
   );
+  /** Tier 0's capped "Seen now" chips (docs/plans/active/CV-UX-RESEARCH.md §4.1, wave U4) — the
+   *  quick glance; the full, uncapped {@link chips}/{@link filteredChips} checklist lives in Tune. */
+  protected readonly seenNowChips = computed(() => recentObservedLabels(this.detectionResults()));
   /** {@link chips}, narrowed by {@link classQuery} and selected-first sorted — what the checklist
-   * actually renders (see `sortSelectedFirst`'s own doc comment for why selected-first). */
+   * actually renders (see `sortSelectedFirst`'s own doc comment for why selected-first). Sorts
+   * against {@link labelFilterSeed} (staged, if any), the same "what's being edited right now" read
+   * {@link isChecked} uses, so a chip's checked state and its position in the list never disagree. */
   protected readonly filteredChips = computed(() =>
-    sortSelectedFirst(filterLabelsByQuery(this.chips(), this.classQuery()), this.settings.effective().labelFilter),
+    sortSelectedFirst(filterLabelsByQuery(this.chips(), this.classQuery()), this.labelFilterSeed()),
   );
   /** Whether the search box should offer "Add <query>" — only once a non-blank query matches nothing
    * already in {@link chips}, so typing an existing class's name filters to it instead of offering a
@@ -283,6 +403,29 @@ export class CvControlPanel {
     return stats ? formatFlowStrip(stats) : null;
   });
 
+  // --- Detection status line (docs/plans/active/CV-UX-RESEARCH.md §1.2/§3/§9.2, waves U3+U5) -----
+  // The Detect hero's one honest sentence — see `detectionStatus`'s own doc comment
+  // (`cv-control-panel-logic.ts`) for the full priority order. `tracksResponse` already carries
+  // `rate`/`detectionState` (mirrored 1:1 in `core/api/models.ts`, wave U3) — no new poll needed.
+
+  protected readonly hasStream = computed(() => !!this.streamId());
+  /** The single most recent detection result, or `undefined` — what's actually on screen right
+   *  now, distinct from {@link chips}'s running observed-label history. */
+  private readonly latestResult = computed(() => this.detectionResults()[0]);
+  protected readonly classesOnScreen = computed(() =>
+    classesOnScreenCount(this.latestResult(), this.settings.effective().labelFilter),
+  );
+  protected readonly detectionStatusInfo = computed(() =>
+    detectionStatus(
+      this.settings.effective().detectionEnabled,
+      this.hasStream(),
+      this.tracksResponse()?.detectionState,
+      this.tracksResponse()?.rate?.submittedFps,
+      this.classesOnScreen(),
+    ),
+  );
+  protected readonly detectionStatusText = computed(() => this.detectionStatusInfo().text);
+
   constructor() {
     inject(DestroyRef).onDestroy(() => this.hotKnobPatch.cancel());
 
@@ -300,10 +443,13 @@ export class CvControlPanel {
 
     // A stream change (including "stream stopped", `undefined`) must never show a stale lock/flow
     // strip from a *previous* stream while the next poll catches up — cleared immediately, not left
-    // to linger for up to `TRACKS_POLL_INTERVAL_MS`.
+    // to linger for up to `TRACKS_POLL_INTERVAL_MS`. Also drops any staged-but-unsubmitted class
+    // filter edit ({@link pendingLabels}'s own doc comment) — built against the previous stream's
+    // observed vocabulary, with no guaranteed meaning against whatever comes next.
     effect(() => {
       this.streamId();
       this.tracksResponse.set(null);
+      this.pendingLabels.set(null);
     });
 
     const stopTracksPoll = inject(PollScheduler).schedule(TRACKS_POLL_INTERVAL_MS, () => this.pollTracks());
@@ -361,8 +507,10 @@ export class CvControlPanel {
     }
   }
 
+  /** Reads {@link labelFilterSeed} — the staged selection if one is in progress, else the applied
+   *  filter — so a chip's checked state always matches what a click on it is about to do next. */
   protected isChecked(label: string): boolean {
-    return isLabelChecked(this.settings.effective().labelFilter, label);
+    return isLabelChecked(this.labelFilterSeed(), label);
   }
 
   // --- Hot knobs (live-patched, debounced, while a stream is running) --------------------------
@@ -379,25 +527,31 @@ export class CvControlPanel {
     this.applyHotKnob({ detectionEnabled: checked });
   }
 
-  /** Toggles one chip's checked state — bound to both the chip body (click anywhere to flip it) and
-   * a checked chip's own "×" remove button, which is just this same action under a more explicit
-   * affordance (`removeLabel`'s naive "filter it out" would silently no-op while `labelFilter` is
-   * still `[]`/"all" — `toggleLabelChip` is the one function that handles that edge case correctly,
-   * see its own doc comment). */
+  // --- Staged class-filter edits (see {@link pendingLabels}'s own doc comment) — every handler
+  // below writes only `pendingLabels`, never `settings.adjust`/`applyHotKnob` directly; only
+  // {@link submitLabelFilter} does that, once, on an explicit Submit click. Shared verbatim by tier
+  // 0's "Seen now" chips and Tune's full checklist (both call these same methods from their own
+  // templates), so the two surfaces can never commit `labelFilter` under two different rules.
+
+  /** Toggles one chip's staged checked state — bound to both the chip body (click anywhere to flip
+   * it) and a checked chip's own "×" remove button, which is just this same action under a more
+   * explicit affordance. Seeds the stage from what's actually applied on the first edit
+   * ({@link labelFilterSeed}), then reuses `toggleLabelChip`'s own array math unchanged — see that
+   * function's own doc comment for why staging didn't need a new toggle algorithm, only a new place
+   * to put the result. */
   protected toggleChip(label: string): void {
-    const current = this.settings.effective().labelFilter;
-    this.applyHotKnob({ labelFilter: toggleLabelChip(current, label, this.chips()) });
+    this.pendingLabels.set(toggleLabelChip(this.labelFilterSeed(), label, this.chips()));
   }
 
-  /** Adds {@link classQuery}'s text as a new class — only ever called once {@link showAddClass} is
-   * true (i.e. the query matched nothing already in the checklist to toggle instead). */
+  /** Adds {@link classQuery}'s text as a new staged class — only ever called once {@link showAddClass}
+   * is true (i.e. the query matched nothing already in the checklist to toggle instead). */
   protected addClass(): void {
     const label = this.classQuery();
-    const current = this.settings.effective().labelFilter;
-    const next = addLabel(current, label);
+    const seed = this.labelFilterSeed();
+    const next = addLabel(seed, label);
     this.classQuery.set('');
-    if (next !== current) {
-      this.applyHotKnob({ labelFilter: next });
+    if (next !== seed) {
+      this.pendingLabels.set(next);
     }
   }
 
@@ -409,12 +563,42 @@ export class CvControlPanel {
     }
   }
 
+  /** Stages "show every class" — does **not** submit by itself (design decision: Clear-then-Submit
+   *  is the one documented path back to "all objects", not an implicit side effect of clicking
+   *  Clear alone). */
   protected clearLabelFilter(): void {
-    this.applyHotKnob({ labelFilter: [] });
+    this.pendingLabels.set([]);
   }
 
+  /** Stages the convenience preset on top of {@link labelFilterSeed}, same "seed once, build on the
+   *  stage" rule every other staging handler here follows. */
   protected fillPreset(): void {
-    this.applyHotKnob({ labelFilter: applyPreset(this.settings.effective().labelFilter) });
+    this.pendingLabels.set(applyPreset(this.labelFilterSeed()));
+  }
+
+  /** The Submit button's own label (see `submitLabelFilterButtonText`'s own doc comment for why it
+   *  states the outcome rather than reading "Submit"). A thin wrapper so the template can call it as
+   *  a method, matching this file's existing `capabilityLevelName` precedent. */
+  protected submitButtonText(pending: readonly string[]): string {
+    return submitLabelFilterButtonText(pending);
+  }
+
+  /** Applies the staged class-filter edit exactly once, through the same `applyHotKnob` path every
+   *  other hot knob already uses, then clears the stage. A no-op if nothing is staged (defensive —
+   *  the Submit button only ever renders while {@link pendingLabels} is non-null). */
+  protected submitLabelFilter(): void {
+    const pending = this.pendingLabels();
+    if (pending === null) {
+      return;
+    }
+    this.applyHotKnob({ labelFilter: pending });
+    this.pendingLabels.set(null);
+  }
+
+  /** Drops the staged edit outright, reverting both class-filter surfaces back to mirroring whatever
+   *  is actually applied — the "discard" half of "count + Submit + a way to discard". */
+  protected discardStagedLabels(): void {
+    this.pendingLabels.set(null);
   }
 
   private applyHotKnob(patch: Partial<PipelineSettings>): void {
@@ -429,6 +613,7 @@ export class CvControlPanel {
       return;
     }
     this.hotKnobPatch.cancel(); // a deliberate model swap must never be coalesced with a pending hot-knob patch
+    this.pendingLabels.set(null); // a staged edit was built against the old model's own observed vocabulary
     const seeded = seedLabelFilterForModel(findModel(this.models(), modelId));
     this.settings.adjust({ model: modelId, labelFilter: seeded });
 

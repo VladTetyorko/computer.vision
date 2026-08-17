@@ -76,14 +76,41 @@ export class MarkPalette {
 
   protected readonly editing = computed(() => this.mark() !== undefined);
 
-  /** The edit mode's working copy — re-seeded whenever the host points this component at another mark. */
-  private readonly editPalette = linkedSignal<Palette>(() => {
-    const mark = this.mark();
-    return mark ? paletteFromMark(mark) : DEFAULT_MARK_PALETTE;
+  /**
+   * The edit-mode working copies below re-seed on the mark's *identity* (`markId`), never on the mark
+   * object itself. `MarksStore` replaces its whole list with brand-new `MapMark` objects on every SSE
+   * event and on its 30s safety-net poll (`marks-store.ts`) — if these `linkedSignal`s tracked `mark()`
+   * directly (as they used to), an operator's in-progress edit was silently discarded every time that
+   * poll landed mid-edit, even though the mark itself hadn't changed. See `vision-web/MODULE.md`
+   * Gotchas ("`linkedSignal` over an object input") and `CockpitFacade#streamBurnedIn`'s identical
+   * "guard a `linkedSignal`'s re-seed on a derived primitive, never the enclosing object" precedent.
+   */
+  private readonly editingMarkId = computed(() => this.mark()?.markId);
+
+  /** Reuses `previous.value` unless `editingMarkId()` has actually moved on — see `editingMarkId`'s doc comment. */
+  private reseed<T>(id: string | undefined, previous: { source: string | undefined; value: T } | undefined, computeFresh: () => T): T {
+    return previous && previous.source === id ? previous.value : computeFresh();
+  }
+
+  /** The edit mode's working copy — re-seeded only when `editingMarkId()` changes, not on every poll refresh. */
+  private readonly editPalette = linkedSignal<string | undefined, Palette>({
+    source: this.editingMarkId,
+    computation: (id, previous) =>
+      this.reseed(id, previous, () => {
+        const mark = this.mark();
+        return mark ? paletteFromMark(mark) : DEFAULT_MARK_PALETTE;
+      }),
   });
 
-  private readonly editLabel = linkedSignal(() => this.mark()?.label ?? '');
-  private readonly editNote = linkedSignal(() => this.mark()?.note ?? '');
+  private readonly editLabel = linkedSignal<string | undefined, string>({
+    source: this.editingMarkId,
+    computation: (id, previous) => this.reseed(id, previous, () => this.mark()?.label ?? ''),
+  });
+
+  private readonly editNote = linkedSignal<string | undefined, string>({
+    source: this.editingMarkId,
+    computation: (id, previous) => this.reseed(id, previous, () => this.mark()?.note ?? ''),
+  });
 
   /** The create flow's own label/note fields — only meaningful once a draft has been captured. */
   protected readonly draftLabel = signal('');

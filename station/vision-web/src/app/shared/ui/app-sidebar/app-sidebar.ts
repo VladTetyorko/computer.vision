@@ -29,9 +29,10 @@ import { NotificationBell } from '../notification-bell';
  * - **F3** ("the dropdown is the only path to most pages, and it clips") — nothing here is a
  *   popover that can run out of viewport height; the body scrolls (`overflow-y: auto`) instead of
  *   silently cutting off Manage's ten entries the way a 961px-tall dropdown used to.
- * - **F10** ("role filtering is applied in one of the two navigation copies") — `managerOnly` is
- *   filtered exactly once, in `modes()` below. The old split — `ManageHub` honoured it, the header
- *   dropdown didn't — cannot recur because there is only one place left that reads `NAV_MODES`.
+ * - **F10** ("role filtering is applied in one of the two navigation copies") — `managerOnly` (and,
+ *   since docs/plans/active/OPS-UX-PLAN.md §2 A5, `badge: 'soon'`) is filtered exactly once, in `modes()`
+ *   below. The old split — `ManageHub` honoured it, the header dropdown didn't — cannot recur
+ *   because there is only one place left that reads `NAV_MODES`.
  *
  * **Group headers are labels, never links** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1 rule 1) — this
  * component renders no `/operate`/`/monitor`/`/manage` destination at all; those paths still resolve
@@ -144,11 +145,24 @@ export class AppSidebar {
   /** Same ADMIN/MANAGER gate `identity-chip`/the former `ManageHub` used — applied exactly once, here (F10). */
   private readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
 
-  /** `NAV_MODES` with every `managerOnly` entry dropped for anyone who isn't ADMIN/MANAGER. */
+  /**
+   * `NAV_MODES` with every `managerOnly` entry dropped for anyone who isn't ADMIN/MANAGER, **and**
+   * (docs/plans/active/OPS-UX-PLAN.md §2 A5) every `badge: 'soon'` scaffold entry dropped for the same
+   * audience. A `badge: 'soon'` row is a roadmap preview, not a working page (`nav-entries.ts`'s own
+   * class doc: "every remaining pure-SCAFFOLD entry") — genuinely useful context for ADMIN/MANAGER
+   * sizing up what's coming, but a dead end for a PILOT, who has no manage-facing reason to browse
+   * it and no `managerOnly` gate of its own to hide behind (several `upcoming` entries, e.g. Operate's
+   * "Flight plans", are plain functional-role rows once shipped, not manager tools). Reuses the exact
+   * `canManage()` gate rather than a second predicate — same "safe default for an unresolved role"
+   * posture the `managerOnly` filter already has: a not-yet-loaded session hides both, never shows
+   * either speculatively.
+   */
   protected readonly modes = computed<readonly NavMode[]>(() =>
     NAV_MODES.map((mode) => ({
       ...mode,
-      entries: mode.entries.filter((entry) => !entry.managerOnly || this.canManage()),
+      entries: mode.entries.filter(
+        (entry) => (!entry.managerOnly || this.canManage()) && (entry.badge !== 'soon' || this.canManage()),
+      ),
     })),
   );
 

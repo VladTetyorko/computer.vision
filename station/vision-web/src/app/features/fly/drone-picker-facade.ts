@@ -1,7 +1,8 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
+import { AuthStore } from '../../core/auth/auth-store';
 import { PollScheduler } from '../../core/poll-scheduler';
-import { sortAssetsForPicker } from './fly-logic';
+import { pickerEmptyStateCopy, sortAssetsForPicker } from './fly-logic';
 import type { AssetSummary } from '../../core/api/models';
 
 /** Asset list re-read at this cadence — keeps a still-open picker's cards fresh (a card flipping
@@ -27,16 +28,28 @@ const ASSET_POLL_INTERVAL_MS = 5_000;
  * with the guard now skipping this page entirely whenever there's a live remembered drone, a bare
  * picker visit is typically brief. Narrowing this page's own dependencies to what it actually
  * displays is a deliberate simplification of the split, not an oversight.
+ *
+ * **`AuthStore` (docs/plans/active/OPS-UX-PLAN.md §2 A2)** — the one addition this wave makes. `emptyState`
+ * feeds `drone-picker.html`'s empty leg entirely from `fly-logic.ts#pickerEmptyStateCopy`: `topRole`
+ * decides the wording (PILOT vs ADMIN/MANAGER), `memberships` names the PILOT's group. No new HTTP
+ * call — `listAssets()` is already visibility-scoped, so an empty response for a PILOT already means
+ * "nothing assigned to you" (see that function's own doc comment).
  */
 @Injectable()
 export class DronePickerFacade {
   private readonly api = inject(VisionApi);
+  private readonly auth = inject(AuthStore);
 
   /** Skeleton card count while the first `listAssets()` call is in flight. */
   readonly skeletonRows = [1, 2, 3] as const;
   readonly pickerAssets = signal<readonly AssetSummary[] | undefined>(undefined);
   readonly pickerError = signal(false);
   readonly orderedPickerAssets = computed(() => sortAssetsForPicker(this.pickerAssets() ?? []));
+
+  /** The empty leg's whole view model — see this class's own doc comment. */
+  readonly emptyState = computed(() =>
+    pickerEmptyStateCopy(this.auth.user()?.topRole, this.auth.user()?.memberships ?? []),
+  );
 
   constructor() {
     void this.refresh();

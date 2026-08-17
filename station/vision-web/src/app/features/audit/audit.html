@@ -1,0 +1,113 @@
+<div class="page">
+  <!-- Two independent top-level `@if`s per filter, not one wrapping both selects — a single `@if`
+       with more than one root node breaks `[pageBarFilters]` content projection (NG8011: the
+       projector can't tell which of an `@if`'s several root nodes to match against the slot's own
+       selector) — same rule `features/alerts/alerts.html`'s own comment documents. -->
+  <vision-page-bar
+    title="Audit trail"
+    icon="shield"
+    [count]="facade.filteredRows().length"
+    countNoun="entry"
+    countNounPlural="entries"
+    hint="Who changed what, across the whole fleet — newest first."
+  >
+    @if (facade.actorOptions().length > 0) {
+      <select
+        pageBarFilters
+        name="auditActorFilter"
+        class="audit-filter"
+        aria-label="Filter by actor"
+        [ngModel]="facade.actorFilter()"
+        (ngModelChange)="facade.actorFilter.set($event)"
+      >
+        <option value="">All actors</option>
+        @for (option of facade.actorOptions(); track option.value) {
+          <option [value]="option.value">{{ option.label }}</option>
+        }
+      </select>
+    }
+    @if (facade.actionOptions().length > 0) {
+      <select
+        pageBarFilters
+        name="auditActionFilter"
+        class="audit-filter"
+        aria-label="Filter by action"
+        [ngModel]="facade.actionFilter()"
+        (ngModelChange)="facade.actionFilter.set($event)"
+      >
+        <option value="">All actions</option>
+        @for (option of facade.actionOptions(); track option.value) {
+          <option [value]="option.value">{{ option.label }}</option>
+        }
+      </select>
+    }
+    @if (facade.hasActiveFilters()) {
+      <button pageBarFilters type="button" class="btn secondary small" (click)="facade.clearFilters()">
+        Clear filters
+      </button>
+    }
+  </vision-page-bar>
+
+  @if (facade.loading()) {
+    <p class="muted">Loading…</p>
+  } @else if (facade.error(); as error) {
+    <!-- Honest 403 handling (docs/plans/active/OPS-UX-PLAN.md §3 B1) — `AuditFacade.error` carries
+         `ApiExceptionHandler`'s own `ErrorResponse.message` verbatim via `describeHttpError`, so a
+         caller whose role changed mid-session (the route guard already keeps a plain PILOT out, but
+         a stale session is still possible) sees the real reason, never a table that looks like
+         "nothing ever happened here". -->
+    <vision-empty title="Couldn't load the audit trail" [message]="error">
+      <button type="button" class="btn secondary" (click)="facade.load()">Try again</button>
+    </vision-empty>
+  } @else if (facade.rows().length === 0) {
+    <vision-empty
+      title="No audit entries yet"
+      message="Every deliberate change to an asset or device — created, edited, deactivated, deleted — will show up here."
+    />
+  } @else if (facade.filteredRows().length === 0) {
+    <vision-empty title="No entries match these filters" message="Try a different actor or action.">
+      <button type="button" class="btn secondary" (click)="facade.clearFilters()">Clear filters</button>
+    </vision-empty>
+  } @else {
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Actor</th>
+            <th>Action</th>
+            <th>Target</th>
+            <th>Result</th>
+            <th>Summary</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of facade.filteredRows(); track row.id) {
+            <tr
+              class="audit-row"
+              [class.tone-success]="row.accentTone === 'success'"
+              [class.tone-info]="row.accentTone === 'info'"
+              [class.tone-warn]="row.accentTone === 'warn'"
+              [class.tone-danger]="row.accentTone === 'danger'"
+            >
+              <td class="mono audit-time">{{ row.absoluteTime }}</td>
+              <td class="truncate audit-actor" [title]="row.actorLabel">{{ row.actorLabel }}</td>
+              <td class="muted">{{ row.actionLabel }}</td>
+              <td class="truncate audit-target" [title]="row.targetKindLabel + ' ' + row.targetName">
+                <span class="muted">{{ row.targetKindLabel }}</span> {{ row.targetName }}
+              </td>
+              <td>
+                @if (row.denied) {
+                  <span class="chip danger" [title]="row.resultLabel">Denied</span>
+                } @else {
+                  <span class="muted">OK</span>
+                }
+              </td>
+              <td class="truncate audit-summary" [title]="row.summary">{{ row.summary }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</div>

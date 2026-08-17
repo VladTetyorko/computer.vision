@@ -3,6 +3,7 @@ package com.drones.vision.perception.application.stream;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.platform.Event;
@@ -14,6 +15,7 @@ import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.model.TrackedObject;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.port.DetectionDemandPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
@@ -26,6 +28,7 @@ import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.perception.domain.port.VideoSourcePort;
 
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -36,7 +39,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import com.drones.vision.warehouse.application.discovery.DefaultDiscoveryService;
 import com.drones.vision.perception.application.pipeline.DetectionEventEngine;
@@ -84,6 +89,8 @@ import com.drones.vision.perception.application.pipeline.VideoSourceRegistry;
  */
 public final class DefaultStreamService implements StreamService {
 
+    private static final System.Logger LOG = System.getLogger(DefaultStreamService.class.getName());
+
     private final DeviceRepositoryPort deviceRepository;
     private final VideoSourceRegistry videoSourceRegistry;
     private final DetectionPort detectionPort;
@@ -105,6 +112,17 @@ public final class DefaultStreamService implements StreamService {
      * is decided per device).
      */
     private final PullDetectionSettings pullDetectionSettings;
+
+    /**
+     * Detection-demand evaluator (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3) — {@code null} means this
+     * service never schedules the demand-poll task at all, so no stream it starts is ever gated on
+     * anything but {@link PipelineConfig#detectionEnabled()}; {@link StreamPipeline}'s own {@code
+     * detectionDemand} field simply stays at its fail-open {@code true} default forever. Non-null
+     * schedules {@link #pollDetectionDemand} on {@link #retryScheduler} at {@link
+     * StreamPipelineSettings#detectionDemandPollInterval()} once, in the constructor — not per
+     * stream — since one tick already iterates every running stream (see that method's own javadoc).
+     */
+    private final DetectionDemandPort detectionDemandPort;
 
     /**
      * A video publisher that never emits (D4: when {@link StreamPublisherPort#proxiesSource} is
@@ -285,6 +303,33 @@ public final class DefaultStreamService implements StreamService {
                           OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
                           DetectionLiveUpdatePort liveUpdatePublisherPort,
                           StreamPipelineSettings settings, PullDetectionSettings pullDetectionSettings) {
+        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort,
+                settings, pullDetectionSettings, null);
+    }
+
+    /**
+     * Same as the 12-argument constructor, plus a {@link DetectionDemandPort} collaborator
+     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3): when present, this constructor schedules {@link
+     * #pollDetectionDemand} on {@link #retryScheduler} at {@link
+     * StreamPipelineSettings#detectionDemandPollInterval()}, re-evaluating every running stream's
+     * demand on each tick.
+     *
+     * @param detectionDemandPort nullable, following the same convention as {@code overlayPort}/
+     *                             {@code pullDetectionSettings}: {@code null} (the 12-argument
+     *                             constructor's default) means the demand-poll task is never
+     *                             scheduled at all, so every stream this service starts is fail-open
+     *                             on demand — gated on {@code detectionEnabled} alone, exactly as
+     *                             before this capability existed.
+     */
+    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
+                          DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
+                          DetectionRepositoryPort detectionRepositoryPort,
+                          EventPublisherPort eventPublisher, UsageTracker usageTracker,
+                          OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
+                          DetectionLiveUpdatePort liveUpdatePublisherPort,
+                          StreamPipelineSettings settings, PullDetectionSettings pullDetectionSettings,
+                          DetectionDemandPort detectionDemandPort) {
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
         this.detectionPort = Objects.requireNonNull(detectionPort, "detectionPort must not be null");
@@ -298,6 +343,12 @@ public final class DefaultStreamService implements StreamService {
         this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.pullDetectionSettings = pullDetectionSettings; // nullable: every stream uses push detection when absent
+        this.detectionDemandPort = detectionDemandPort; // nullable: demand-poll task never scheduled when absent
+        if (detectionDemandPort != null) {
+            long intervalNanos = settings.detectionDemandPollInterval().toNanos();
+            retryScheduler.scheduleAtFixedRate(this::pollDetectionDemand, intervalNanos, intervalNanos,
+                    TimeUnit.NANOSECONDS);
+        }
     }
 
     /** Copies {@code base} with its source-reopen backoff bounds replaced. */
@@ -435,8 +486,16 @@ public final class DefaultStreamService implements StreamService {
             // hand it regardless of which driver fed the extrapolator, so a JVM-published, pull-detected
             // stream (Phase 1's V4L2/MJPEG/sim answer) burns boxes exactly like push mode does.
             boolean burnedIn = !proxied && overlayPort != null && config.overlayBurnIn();
+            // docs/plans/active/CV-DEMAND-PLAN.md §1: seeded to Instant.EPOCH, not Instant.now() -- demand must
+            // be observed, never assumed. StreamPipeline#detectionDemand's own fail-open true default
+            // already covers a just-started stream until the first poll tick (at most
+            // detectionDemandPollInterval, not a full detectionDemandGrace); seeding this to "now" would
+            // instead grant every newly started stream a full grace window of assumed demand, exactly
+            // backwards for a wave whose point is "many streams started at once must not each burn a
+            // grace period of inference for nobody."
             activeStreams.put(streamId, new RunningStream(deviceId, source, supervisedSource, pulledDetectionPort,
-                    supervisedPulledResults, pipeline, Instant.now(), lockSeq, burnedIn));
+                    supervisedPulledResults, pipeline, Instant.now(), lockSeq, burnedIn,
+                    new AtomicReference<>(Instant.EPOCH)));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,
                     "Stream started for device " + device.name()));
@@ -586,6 +645,74 @@ public final class DefaultStreamService implements StreamService {
         return active == null ? Optional.empty() : Optional.of(active.pipeline().detectionRate());
     }
 
+    @Override
+    public Optional<DetectionState> detectionState(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? Optional.empty() : Optional.of(active.pipeline().detectionState());
+    }
+
+    /**
+     * The demand-poll task (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3), scheduled on {@link #retryScheduler}
+     * at {@link StreamPipelineSettings#detectionDemandPollInterval()} only when {@link
+     * #detectionDemandPort} is non-null — see the constructor. Re-evaluates every currently running
+     * stream once per tick.
+     *
+     * <p><b>Each stream's evaluation is individually wrapped in {@code catch (Throwable)}.</b> {@link
+     * java.util.concurrent.ScheduledExecutorService#scheduleAtFixedRate} silently cancels every
+     * future run of a task that ever propagates an exception out of it — a single stream's
+     * misbehaving {@link DetectionDemandPort} call (or an unexpected {@code null}, or any other
+     * bug) must never be allowed to freeze <em>every</em> stream's demand at whatever it last was,
+     * for the rest of the JVM's life, with no further error ever surfacing. A failure here is
+     * logged once and that one stream's demand is left exactly where it was until the next tick
+     * evaluates it again; every other stream in the same tick is unaffected.
+     */
+    private void pollDetectionDemand() {
+        Instant now = Instant.now();
+        for (StreamId streamId : activeStreams.keySet()) {
+            try {
+                evaluateDetectionDemand(streamId, now);
+            } catch (Throwable t) {
+                LOG.log(System.Logger.Level.WARNING,
+                        "detection-demand evaluation failed for stream " + streamId.value(), t);
+            }
+        }
+    }
+
+    /**
+     * Evaluates and applies one stream's detection demand (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3):
+     * resolves the stream's owning asset (mirroring {@link #start}'s own {@code ownerAssetId}
+     * resolution — {@code null} when {@link #usageTracker} is absent or the device has no owning
+     * asset), asks {@link #detectionDemandPort}, stamps {@code lastDemandAt} when wanted, and
+     * computes whether the stream is still within {@link
+     * StreamPipelineSettings#detectionDemandGrace()} of its last observed demand either way — a
+     * stream just stamped is trivially within grace of itself, so this single computation covers
+     * both the "wanted now" and "wanted recently" cases without a separate branch.
+     *
+     * <p>Package-private, taking an explicit {@code now} rather than reading {@link Instant#now()}
+     * itself, so the same-package test can drive the grace period deterministically — stamping a
+     * known instant, then asking again at a known later instant — instead of waiting on the real
+     * scheduler or the system clock. A no-op for an unknown/already-stopped stream id, mirroring
+     * every other per-stream read in this class.
+     *
+     * @param streamId the stream to evaluate
+     * @param now      the instant to evaluate demand as of
+     */
+    void evaluateDetectionDemand(StreamId streamId, Instant now) {
+        RunningStream active = activeStreams.get(streamId);
+        if (active == null) {
+            return;
+        }
+        AssetId assetId = usageTracker == null ? null : usageTracker.resolveAsset(active.deviceId()).orElse(null);
+        boolean wanted = detectionDemandPort.detectionWanted(streamId, assetId);
+        if (wanted) {
+            active.lastDemandAt().set(now);
+        }
+        Duration sinceLastDemand = Duration.between(active.lastDemandAt().get(), now);
+        boolean effective = sinceLastDemand.compareTo(settings.detectionDemandGrace()) < 0;
+        active.pipeline().updateDetectionDemand(effective);
+    }
+
     /**
      * Resolves the running stream, merges {@code patch} onto its {@link
      * StreamPipeline#config() current config}, and swaps it in (docs/plans/done/CV-CONTROL-PLAN.md &sect;5,
@@ -683,10 +810,33 @@ public final class DefaultStreamService implements StreamService {
      *                                 frame, not by how detections arrived. Computed once at start since
      *                                 neither {@code proxiesSource} nor {@code overlayBurnIn} can change
      *                                 over a running stream's life
+     * @param lastDemandAt            the instant {@link #evaluateDetectionDemand} last observed real
+     *                                 demand for this stream (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3);
+     *                                 seeded to {@link Instant#EPOCH} by {@link #start}, deliberately
+     *                                 <b>not</b> {@link Instant#now()} &mdash; demand must be
+     *                                 <i>observed</i>, never assumed, so a just-started stream with no
+     *                                 viewers is not silently granted a full {@link
+     *                                 StreamPipelineSettings#detectionDemandGrace()} window (30s) of
+     *                                 assumed demand it never earned. The narrower startup window this
+     *                                 opens instead is already covered by {@link
+     *                                 StreamPipeline#detectionDemand()}'s own fail-open {@code true}
+     *                                 default: a just-started stream detects until the <b>first</b>
+     *                                 poll tick decides otherwise, at most one {@link
+     *                                 StreamPipelineSettings#detectionDemandPollInterval()} (2s), not a
+     *                                 full grace period. Grace, once observed demand exists, then means
+     *                                 only what the plan says it means &mdash; keep detecting this long
+     *                                 <i>after</i> a consumer leaves, never "assume a consumer for this
+     *                                 long before any evaluation has happened." An {@link
+     *                                 AtomicReference}, not a plain field, because {@code
+     *                                 RunningStream} is otherwise immutable and this is its one piece
+     *                                 of state that genuinely mutates over a running stream's life,
+     *                                 from a different thread (the demand-poll scheduler) than the one
+     *                                 that created it
      */
     private record RunningStream(DeviceId deviceId, VideoSourcePort source, SupervisedPublisher<VideoFrame> supervisedSource,
                                   PulledDetectionPort pulledDetectionPort,
                                   SupervisedPublisher<DetectionResult> supervisedPulledResults,
-                                  StreamPipeline pipeline, Instant startedAt, AtomicLong lockSeq, boolean burnedIn) {
+                                  StreamPipeline pipeline, Instant startedAt, AtomicLong lockSeq, boolean burnedIn,
+                                  AtomicReference<Instant> lastDemandAt) {
     }
 }

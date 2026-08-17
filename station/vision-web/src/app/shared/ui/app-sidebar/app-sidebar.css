@@ -21,8 +21,11 @@
      the first place. A hardcoded `100dvh` (mirroring `app.css`'s own `main { height: 100dvh }`,
      exactly the same fixed-viewport-unit fix) sidesteps grid row-sizing/percentage-resolution
      subtlety entirely, and `min-height: 0` below overrides the automatic-minimum contribution
-     outright so nothing can grow this box past that cap regardless of how tall the nav list gets. */
-  height: 100dvh;
+     outright so nothing can grow this box past that cap regardless of how tall the nav list gets.
+     `--shell-h` rather than a bare `100dvh` (`styles.css`): the shell reserves the banner strip's
+     height with its own `padding-top`, which a viewport unit read here cannot see, so without the
+     subtraction a showing banner would push `.sidebar-foot` exactly one strip below the fold. */
+  height: var(--shell-h);
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -634,7 +637,9 @@
      also be open. */
   .sidebar {
     position: fixed;
-    inset: 0 auto 0 0;
+    /* Top edge under the shell's banner strip, not at the viewport top — `position: fixed` opts out
+       of the shell's own `padding-top`, so this sheet would otherwise slide up under the banner. */
+    inset: var(--shell-banner-h) auto 0 0;
     z-index: 126;
     width: var(--sidebar-w);
     transform: translateX(-100%);
@@ -655,7 +660,7 @@
   .sidebar-scrim {
     display: block;
     position: fixed;
-    inset: 0;
+    inset: var(--shell-banner-h) 0 0 0;
     z-index: 125;
     background: var(--scrim);
   }
@@ -665,7 +670,7 @@
     align-items: center;
     justify-content: center;
     position: fixed;
-    top: var(--space-16);
+    top: calc(var(--shell-banner-h) + var(--space-16));
     left: var(--space-16);
     z-index: 110;
     width: 2.5rem;

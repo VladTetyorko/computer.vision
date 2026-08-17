@@ -6,6 +6,7 @@ import { VisionApi } from '../api/vision-api';
 import { LiveStore, type LiveConnectionState } from '../live/live-store';
 import { PollScheduler } from '../poll-scheduler';
 import type { DetectionResult } from '../api/models';
+import { CV_STATUS_FRESH_SECONDS } from './detections-logic';
 
 /** Lets the fire-and-forget promise chain inside `track()` settle before asserting. */
 function flush(): Promise<void> {
@@ -107,6 +108,32 @@ describe('DetectionsStore', () => {
     expect(store.status()).toBe('off');
   });
 
+  it('ages a stale poll result out of results(), even though the server returned it', async () => {
+    // Reproduces the reported defect for the poll transport: the server can (today) keep serving
+    // an old detection — or a future fix could stop clearing it — and the client must not draw it
+    // regardless. `capturedAt` is already outside the freshness window by the time this arrives.
+    const stale: DetectionResult = {
+      streamId: 's-poll-stale',
+      frameSequence: 1,
+      capturedAt: new Date(Date.now() - (CV_STATUS_FRESH_SECONDS * 1000 + 1_000)).toISOString(),
+      inferenceMillis: 5,
+      detections: [
+        { label: 'person', confidence: 0.9, box: { x: 0, y: 0, width: 0.1, height: 0.1 }, modelId: 'yolo', modelVersion: 'latest' },
+      ],
+    };
+    const api = stubApi(vi.fn().mockResolvedValue([stale]));
+
+    const store = inject(api);
+    store.track('s-poll-stale');
+    await flush();
+
+    expect(store.results()).toEqual([]);
+    expect(store.chips()).toEqual([]);
+    expect(store.status()).toBe('off');
+
+    store.reset();
+  });
+
   it('reset() clears results and stops polling', async () => {
     const result: DetectionResult = {
       streamId: 's-3',
@@ -193,6 +220,31 @@ describe('DetectionsStore', () => {
     live.pushResult('a-9', second);
     TestBed.tick();
     expect(store.results()).toEqual([second, first]); // newest first, accumulated — not replaced
+    store.reset();
+  });
+
+  it('ages a stale live-accumulated result out of results() — the fix for boxes lingering after detection stops', () => {
+    // The defect this task fixes: `liveResultsSignal` only ever grows via the accumulator effect
+    // (see class doc) — nothing removes an entry once envelopes stop arriving. Detection switching
+    // off, no viewers, or cv-service crashing all look the same here: no *new* envelope arrives, so
+    // the last one just sits there aging. `results()` must stop surfacing it anyway.
+    const api = stubApi();
+    const live = stubLiveStore('open');
+    const scheduler = stubScheduler();
+
+    const store = inject(api, { live, scheduler });
+    store.track('s-live-stale', 'a-live-stale');
+
+    const stale: DetectionResult = {
+      ...detectionResult('s-live-stale', 1),
+      capturedAt: new Date(Date.now() - (CV_STATUS_FRESH_SECONDS * 1000 + 1_000)).toISOString(),
+    };
+    live.pushResult('a-live-stale', stale);
+    TestBed.tick(); // flushes the live-accumulator effect
+
+    expect(store.results()).toEqual([]); // still sitting in liveResultsSignal, but no longer fresh
+    expect(store.chips()).toEqual([]);
+    expect(store.status()).toBe('off');
     store.reset();
   });
 

@@ -279,6 +279,24 @@
        reads it (as a hardcoded `1024px` in its own `@media`, per the note just below on why `@media`
        can't read `var()` — the same convention every other breakpoint token here already follows). */
     --sidebar-bp: 1024px;
+
+    /* Shell banner strip (docs/plans/active/OPS-UX-PLAN.md §2 A6 rev.2) — the height of the one
+       stacked banner region `app.html` renders above everything (unsecured station, backend
+       unreachable, …). **Measured at runtime, not declared**: `App` observes the strip and writes the
+       real pixel height here (see its own doc for why a token can't be hardcoded — the copy wraps to
+       two lines on a narrow viewport and a wrong constant would either overlap the shell or leave a
+       gap under it). `0px` is the honest default and the value whenever no banner is showing, which
+       is the normal case for a secured, reachable station.
+
+       `--shell-h` is the height every viewport-anchored box in this app must use in place of a bare
+       `100dvh`: the shell grid, the sidebar, and the two full-bleed page roots (`.cockpit`,
+       `.command-shell`) each measure themselves against the viewport directly — deliberately, to
+       avoid a percentage-resolution chain (see `app.css`'s own comment) — which means none of them
+       can *see* an ancestor's banner strip and every one of them would otherwise render a banner's
+       worth of content below the fold. One token keeps that subtraction in a single place instead of
+       four `calc()`s that could drift apart. */
+    --shell-banner-h: 0px;
+    --shell-h: calc(100dvh - var(--shell-banner-h));
 }
 
 /* ==========================================================================
@@ -600,7 +618,15 @@ input[type="range"] {
     accent-color: var(--color-info);
 }
 
-input[type="checkbox"] {
+/* Checkbox and radio are fixed-size glyphs, not fields — the `width: 100%` + panel surface + border
+   + padding above is *field* chrome, and applying it to a 16px glyph makes it claim an entire row.
+   Radio joined this rule when the CV panel's intent cards became this app's first `type="radio"`
+   (docs/conclusions/MAP-UX-RESEARCH.md-era work, 2026-08-16): the omission had been invisible for as
+   long as nothing rendered one, and it surfaced as a stretched radio pushing its own label into a
+   sliver that wrapped around its badge. Keep both selectors together so the next control added here
+   inherits the same reasoning rather than rediscovering it. */
+input[type="checkbox"],
+input[type="radio"] {
     width: auto;
     accent-color: var(--color-info);
 }

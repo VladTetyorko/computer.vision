@@ -14,8 +14,8 @@ import java.util.List;
  * resolves the asset's single {@code VIDEO}-capable device, throwing
  * {@link IllegalArgumentException} (surfaced as 400) if that
  * is ambiguous. The rest of the fields override the corresponding
- * {@link PipelineConfig#defaults()} values, delegating to
- * {@link StartStreamRequest#mergeOntoDefaults()} for that merge so the two
+ * deployment-default {@link PipelineConfig} values, delegating to
+ * {@link StartStreamRequest#mergeOnto(PipelineConfig)} for that merge so the two
  * start-stream request shapes share one implementation.
  *
  * @param deviceId            the device to stream from, as a canonical UUID string; {@code null} means "the asset's single video-capable device"
@@ -70,15 +70,17 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
 
     /**
      * Merges {@link #confidenceThreshold()}/{@link #inferenceFps()}/{@link #overlayBurnIn()}/{@link
-     * #model()}/{@link #labelFilter()}/{@link #detectionEnabled()} onto {@link
-     * PipelineConfig#defaults()}, delegating to {@link StartStreamRequest#mergeOntoDefaults()} so the
-     * two start-stream shapes keep sharing exactly one merge implementation. Tracking travels
-     * separately as {@link #trackingPatch()} — see that method and its device-level twin.
+     * #model()}/{@link #labelFilter()}/{@link #detectionEnabled()} onto {@code defaults}, delegating
+     * to {@link StartStreamRequest#mergeOnto(PipelineConfig)} so the two start-stream shapes keep
+     * sharing exactly one merge implementation. Tracking travels separately as {@link
+     * #trackingPatch()} — see that method and its device-level twin.
      *
+     * @param defaults the deployment's default pipeline configuration to merge this request onto
+     *                 (docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8)
      * @return the effective pipeline configuration for the new stream
      */
-    public PipelineConfig mergeOntoDefaults() {
-        return asDeviceLevelRequest().mergeOntoDefaults();
+    public PipelineConfig mergeOnto(PipelineConfig defaults) {
+        return asDeviceLevelRequest().mergeOnto(defaults);
     }
 
     /**

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { UiStore } from '../../core/ui/ui-store';
 import { FleetMapStore } from '../../core/map/map-store';
@@ -12,6 +12,7 @@ import { LayerManager } from '../../shared/map/map-controls/layer-manager';
 import { AssetPanel } from './asset-panel';
 import { ZonesPanel } from './zones-panel';
 import { MarksPanel } from './marks-panel';
+import { SetupChecklist } from './setup-checklist';
 import { CommandFacade } from './command-facade';
 
 /** Command's mutually-exclusive overlay group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — Zones, Marks (since
@@ -70,6 +71,7 @@ type CommandOverlay = 'zones' | 'marks' | 'layers' | 'draw';
     AssetPanel,
     ZonesPanel,
     MarksPanel,
+    SetupChecklist,
     SidePanel,
     LayerManager,
     DrawingToolbar,
@@ -97,6 +99,15 @@ export class CommandPage {
    * this signal-accessor once below rather than owning the input itself.
    */
   readonly requestedAssetId = input<string | undefined>(undefined, { alias: 'asset' });
+
+  /**
+   * The stage map's own component instance — `undefined` while `facade.mapIsEmpty()` (no assets
+   * registered yet, `command.html`'s own empty state renders instead). A type-based `viewChild`
+   * query rather than a template `#ref`, mirroring `cockpit.ts#tacticalMap`'s identical doc comment
+   * — used to feed the Layers panel's "Show on map"/"Basemap" sections (docs/conclusions/MAP-UX-RESEARCH.md
+   * M1).
+   */
+  protected readonly tacticalMap = viewChild(TacticalMap);
 
   /**
    * The Zones panel's own mutually-exclusive overlay group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) —

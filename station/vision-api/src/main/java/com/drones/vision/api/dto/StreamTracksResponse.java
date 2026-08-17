@@ -1,5 +1,6 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.perception.domain.model.DetectionState;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.List;
@@ -32,23 +33,40 @@ import java.util.List;
  *                      sample. The companion to {@code latency} — that one is what a detection
  *                      cost, this one is how many were asked for and what became of them
  *                      (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1)
+ * @param detectionState which of the two independent detection gates currently explains this
+ *                       stream's boxes-or-no-boxes state (docs/plans/active/CV-DEMAND-PLAN.md
+ *                       &sect;3.6), or absent for an unknown/not-running stream. See {@link
+ *                       DetectionState}'s own javadoc: this reports gating, never health.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
                                     TrackStatsResponse stats, PipelineLatencyResponse latency,
-                                    DetectionRateResponse rate) {
+                                    DetectionRateResponse rate, DetectionState detectionState) {
 
     public StreamTracksResponse {
         tracks = List.copyOf(tracks);
     }
 
     /**
-     * The shape before {@code rate} was added, kept as a convenience constructor defaulting it to
-     * absent — same "N-1-arg convenience ctor" idiom the domain records use, so every pre-existing
-     * caller (and every test asserting the old body) compiles and behaves unchanged.
+     * The shape before {@code detectionState} was added, kept as a convenience constructor
+     * defaulting it to absent — same "N-1-arg convenience ctor" idiom the domain records use, so
+     * every pre-existing caller (and every test asserting the old body) compiles and behaves
+     * unchanged.
+     */
+    public StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
+                                 TrackStatsResponse stats, PipelineLatencyResponse latency,
+                                 DetectionRateResponse rate) {
+        this(streamId, lockedTrackId, tracks, stats, latency, rate, null);
+    }
+
+    /**
+     * The shape before {@code rate} was added, kept as a convenience constructor defaulting both
+     * {@code rate} and {@code detectionState} to absent — same "N-1-arg convenience ctor" idiom, so
+     * every pre-existing caller (and every test asserting the old body) compiles and behaves
+     * unchanged.
      */
     public StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
                                  TrackStatsResponse stats, PipelineLatencyResponse latency) {
-        this(streamId, lockedTrackId, tracks, stats, latency, null);
+        this(streamId, lockedTrackId, tracks, stats, latency, null, null);
     }
 }

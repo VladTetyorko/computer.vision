@@ -48,9 +48,19 @@
   inset: 0;
 }
 
-/* ---- Chrome: light cards pinned to three corners on the 8px grid (the fourth is Leaflet's own
-   zoom control). Never a `--hud-*`/`--scrim*` frosted pill: this component is never inside a
-   `.surface-dark` enclave, and a control floating over a *map* stays a light card even there. --- */
+/* ---- Chrome: frosted HUD pills pinned to three corners on the 8px grid (the fourth is Leaflet's
+   own zoom control, restyled to match near the ::ng-deep section below). Corrected premise: this
+   component is NOT always outside a `.surface-dark` enclave — Fly mounts it inside `.cockpit`,
+   which is one — so a themed `--panel-raised` card here would read correctly in Fly but invisibly
+   ghost-transparent (the actual bug this replaced: `.btn.secondary` is background-less, near-white
+   text on light OSM tiles) whenever a themed page happened to pair with dark tile imagery or vice
+   versa. What sits behind these controls is always a map tile, never the app's own panel/canvas —
+   frontend-style's widened HUD rule ("floating over imagery, regardless of enclave") applies, so
+   every piece of chrome below self-applies `surface-dark` (template class, `tactical-map.html`) to
+   lock its own `--text`/`--border-strong`/`--color-*` to their dark-theme values, paired with the
+   already-theme-invariant `--hud-*` background/border/blur — the same "surface-hud-strong +
+   surface-dark" pairing `preflight-checklist.html` already uses to stay legible outside its own
+   enclave. --- */
 
 .chrome {
   position: absolute;
@@ -85,6 +95,31 @@
   gap: var(--space-4);
 }
 
+/* Every resting chrome button carries its own frosted-glass surface instead of `.btn.secondary`'s
+   ghost treatment (transparent background, assumes a `--panel`/`--bg` behind it — there is none
+   here, only whatever the map tile happens to be). `--hud-bg`/`--hud-border`/`--hud-blur` are
+   already theme-invariant; pairing them with `surface-dark` (see this file's own `.chrome` comment
+   above) is what keeps the label/icon `color: var(--text)` inherited from `.btn` legible against
+   that wash regardless of host theme. `:not(.active)` — a descendant selector like this one is
+   *more* specific than `.btn.active` below (two compound selectors vs. one, each carrying its own
+   Angular-appended scoping attribute), so without it this rule would win the cascade and paint the
+   selected/following state's own background HUD-dark too, quietly swallowing the blue accent
+   underneath (caught live, not by reasoning about specificity: `Following`'s `background-color`
+   read back as `--hud-bg` with `.active` still in its class list before this exclusion). */
+.chrome-tl .btn:not(.active),
+.chrome-tr .btn:not(.active),
+.chrome-bl .btn:not(.active) {
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+}
+
+.chrome-tl .btn:not(.active):hover:not(:disabled),
+.chrome-tr .btn:not(.active):hover:not(:disabled),
+.chrome-bl .btn:not(.active):hover:not(:disabled) {
+  background: var(--hud-bg-strong);
+}
+
 .btn.active {
   background: var(--color-info);
   color: var(--color-on-info);
@@ -98,8 +133,9 @@
   overflow-y: auto;
   padding: var(--space-8);
   border-radius: var(--radius);
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
+  background: var(--hud-bg-strong);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur-strong));
   box-shadow: var(--shadow);
 }
 
@@ -128,7 +164,6 @@
   border-top: 1px solid var(--border);
 }
 
-.panel-empty,
 .panel-note {
   margin: 0;
   font-size: 0.68rem;
@@ -139,6 +174,10 @@
   margin-top: var(--space-4);
 }
 
+/* The legend's own rows (asset states, affiliation, mark kinds, zones) — the data-layer eye-toggle
+   rows that used to share this markup moved to `<vision-layer-manager>`'s "Show on map" section
+   (docs/conclusions/MAP-UX-RESEARCH.md M1); that component has its own copy of this row shape since
+   Angular's view encapsulation can't share these rules across components. */
 .rows {
   list-style: none;
   margin: 0;
@@ -172,35 +211,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.chip.layer-kind {
-  font-size: 0.6rem;
-}
-
-/* The eye toggle: a 24px hit target that grows to 32px on coarse pointers (§responsive below). */
-.eye {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.eye:hover {
-  background: var(--panel-hover);
-  color: var(--text);
-}
-
-.row.off .eye {
-  color: var(--text-faint);
-  opacity: 0.55;
-}
-
 .basemaps {
   display: flex;
   flex-wrap: wrap;
@@ -210,8 +220,9 @@
 .badge {
   padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill);
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
+  background: var(--hud-bg-strong);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
   box-shadow: var(--shadow);
   color: var(--color-warn);
   font-size: 0.72rem;
@@ -279,11 +290,6 @@
     max-height: 40vh;
   }
 
-  .eye {
-    width: 2rem;
-    height: 2rem;
-  }
-
   .row {
     min-height: 2rem;
   }
@@ -303,6 +309,56 @@
 
 :host ::ng-deep .leaflet-control-attribution a {
   color: var(--text-muted);
+}
+
+/* ---- Leaflet's own zoom control: matched to the frosted HUD chrome above ----------------------
+   `public/leaflet/leaflet.css` paints `.leaflet-control-zoom` as an opaque white `.leaflet-bar`
+   (own comment: "kept in sync by hand", so its defaults can't just be edited there) — once every
+   button this component owns is HUD glass, an untouched white +/- card is the one piece of chrome
+   that still looks like a mistake. Leaflet has no per-control `className` option here and this
+   component never touches its own map instance's JS from CSS, so there is no template hook to
+   self-apply `surface-dark` the way the chrome buttons above do; `color: var(--color-info)` is used
+   instead of `var(--text)` for exactly that reason — it is the one text token already correct with
+   no enclave lock, since it is what a bare `<a>` resolves to everywhere in this app
+   (`styles.css`'s `a { color: var(--color-info) }`) and reads clearly on the dark `--hud-bg` wash in
+   both theme's blue steps. Disabled (at min/max zoom) dims via `opacity`, this app's existing
+   `.btn:disabled` convention, rather than a colour swap that would need the same invariant text
+   token this control doesn't have. `overflow: hidden` on the container lets Leaflet's own 4px
+   per-button corner radii get clipped to this app's `--radius-sm` by the container's radius, rather
+   than fighting each child's own radius individually. `.leaflet-bar.leaflet-control-zoom` (not just
+   `.leaflet-control-zoom`) because `leaflet.css` itself carries `.leaflet-touch .leaflet-bar {
+   border: 2px solid rgba(0,0,0,.2); }` for touch pointers — this dev/automation environment reports
+   as touch, and that selector ties this rule's specificity exactly (both one compound + one
+   ancestor class), so `leaflet.css`, injected after this stylesheet at runtime, wins the tie and
+   the border silently stayed Leaflet's own default (caught live: `getComputedStyle` still showed
+   `2px solid rgba(0,0,0,.2)` after this rule was "applied"). One more class clears the tie for
+   good, load order or not. */
+:host ::ng-deep .leaflet-bar.leaflet-control-zoom {
+  border: var(--hud-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: none;
+}
+
+:host ::ng-deep .leaflet-control-zoom a {
+  background-color: var(--hud-bg);
+  backdrop-filter: blur(var(--hud-blur));
+  border-bottom: 1px solid var(--hairline);
+  color: var(--color-info);
+}
+
+:host ::ng-deep .leaflet-control-zoom a:last-child {
+  border-bottom: none;
+}
+
+:host ::ng-deep .leaflet-control-zoom a:hover,
+:host ::ng-deep .leaflet-control-zoom a:focus {
+  background-color: var(--hud-bg-strong);
+}
+
+:host ::ng-deep .leaflet-control-zoom a.leaflet-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ---- Asset markers: one glyph, state by colour only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7) --------- */

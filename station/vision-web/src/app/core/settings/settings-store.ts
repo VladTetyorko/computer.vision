@@ -43,9 +43,18 @@ export const DEFAULT_DETECTION_MODEL: string = 'yolo26n.pt';
 /** `balanced` mirrors `PipelineConfig.defaults()` exactly, so "no override" and it agree —
  * including the fast NMS-free `yolo26n.pt` default (docs/plans/done/CV-CONTROL-PLAN.md §1: the domain's own
  * `defaults()` bug-fix, replacing the dead `"yolo"` id these profiles used to carry). `labelFilter:
- * []` ("all classes") and `detectionEnabled: true` on every built-in mirror `PipelineConfig`'s own
- * defaults too — none of the three built-ins target the open-vocabulary model, so none of them
- * narrow the class set. */
+ * []` ("all classes") on every built-in mirrors `PipelineConfig`'s own defaults too — none of the
+ * three built-ins target the open-vocabulary model, so none of them narrow the class set.
+ *
+ * **`detectionEnabled: false`** (docs/plans/active/CV-DEMAND-PLAN.md wave D3, flipped from `true`) — mirrors
+ * `PipelineConfig.DEFAULT_DETECTION_ENABLED`'s own flip (wave D1): detection is opt-in per stream
+ * now, both server-side and here. Sending `detectionEnabled: true` explicitly on every stream start
+ * (the old default) would silently override the new server default right back to "always on" for
+ * every SPA-driven start, which defeats the point of the flip entirely — see
+ * `StartStreamRequest.detectionEnabled`'s own doc comment. A custom profile a user already saved, or
+ * a draft already persisted, is untouched by this change (only the three *built-ins* move); see
+ * `withValidPipelineFields`'s own doc comment below for the parallel, but distinct, decision about a
+ * *missing* persisted field. */
 export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
   {
     id: 'balanced',
@@ -56,7 +65,7 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     inferenceFps: 5,
     model: DEFAULT_DETECTION_MODEL,
     labelFilter: [],
-    detectionEnabled: true,
+    detectionEnabled: false,
   },
   {
     id: 'low-latency',
@@ -67,7 +76,7 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     inferenceFps: 3,
     model: DEFAULT_DETECTION_MODEL,
     labelFilter: [],
-    detectionEnabled: true,
+    detectionEnabled: false,
   },
   {
     id: 'high-quality',
@@ -78,7 +87,7 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     inferenceFps: 10,
     model: DEFAULT_DETECTION_MODEL,
     labelFilter: [],
-    detectionEnabled: true,
+    detectionEnabled: false,
   },
 ];
 
@@ -96,10 +105,12 @@ export interface PipelineSettings {
    */
   readonly labelFilter: readonly string[];
   /** Server-side detection on/off (docs/plans/done/CV-CONTROL-PLAN.md §1) — `false` means zero inference CPU
-   * spent on this stream; video keeps flowing regardless either way. Defaults `true`, mirroring
-   * `PipelineConfig.DEFAULT_DETECTION_ENABLED`. Distinct from `FlyPage`'s own `boxesMode` (a purely
-   * client-side render toggle for detections already computed) — see `cv-control-panel.html`'s own
-   * copy for the exact wording that keeps the two from being confused in the UI. */
+   * spent on this stream; video keeps flowing regardless either way. **Defaults `false`**
+   * (docs/plans/active/CV-DEMAND-PLAN.md wave D3, flipped from `true`), mirroring
+   * `PipelineConfig.DEFAULT_DETECTION_ENABLED`'s own flip — detection is opt-in per stream now, not
+   * on-by-default. Distinct from `FlyPage`'s own `boxesMode` (a purely client-side render toggle for
+   * detections already computed) — see `cv-control-panel.html`'s own copy for the exact wording that
+   * keeps the two from being confused in the UI. */
   readonly detectionEnabled: boolean;
 }
 
@@ -340,6 +351,20 @@ function isStringArray(value: unknown): value is readonly string[] {
  * unchanged, including an id the current roster no longer lists — the picker degrades that to a
  * bare id display, it is never treated as corrupt data. Only a missing/non-string value falls back
  * to the default.
+ *
+ * **`detectionEnabled`'s own fallback flipped from `true` to `false`** (docs/plans/active/CV-DEMAND-PLAN.md
+ * wave D3) — but only for a value that is genuinely *missing or corrupt*, never one that is present.
+ * An explicit `true` or `false` already sitting in storage is a choice a person made (most profiles
+ * a real user has saved since docs/plans/done/CV-CONTROL-PLAN.md Wave E carry the field explicitly, defaulted
+ * `true` at the time) — silently flipping that to `false` on this wave's redeploy would be exactly
+ * the kind of dishonest surprise this app avoids everywhere else (an operator who deliberately turned
+ * detection on finds it off next session, with no toast, no explanation). Only the *absence* of the
+ * field (a profile saved before it existed at all, or a value that isn't literally `true`/`false`)
+ * counts as "no decision was ever made" — and an undecided value should read as the app's current
+ * honest default, which is now off, not the stale `true` this function used to backfill to. The
+ * `typeof value.detectionEnabled === 'boolean'` check below is what draws that line: it already
+ * passes an explicit `false` (or `true`) through untouched, so this change is exactly and only the
+ * one literal below.
  */
 function withValidPipelineFields<T extends { model?: unknown; labelFilter?: unknown; detectionEnabled?: unknown }>(
   value: T,
@@ -348,6 +373,6 @@ function withValidPipelineFields<T extends { model?: unknown; labelFilter?: unkn
     ...value,
     model: isNonEmptyString(value.model) ? value.model : DEFAULT_DETECTION_MODEL,
     labelFilter: isStringArray(value.labelFilter) ? value.labelFilter : [],
-    detectionEnabled: typeof value.detectionEnabled === 'boolean' ? value.detectionEnabled : true,
+    detectionEnabled: typeof value.detectionEnabled === 'boolean' ? value.detectionEnabled : false,
   };
 }

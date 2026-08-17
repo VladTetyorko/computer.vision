@@ -88,13 +88,24 @@ describe('NAV_MODES', () => {
       }
     });
 
-    it('Assets and Add source are ungrouped and ungated — every role reaches them', () => {
-      for (const name of ['Assets', 'Add source']) {
-        const entry = manage.entries.find((e) => e.name === name)!;
-        expect(entry, name).toBeDefined();
-        expect(entry.group, name).toBeUndefined();
-        expect(entry.managerOnly, name).toBeFalsy();
-      }
+    it('Assets is ungrouped and ungated — every role reaches it (reading the fleet is not a management action)', () => {
+      const assets = manage.entries.find((e) => e.name === 'Assets')!;
+      expect(assets).toBeDefined();
+      expect(assets.group).toBeUndefined();
+      expect(assets.managerOnly).toBeFalsy();
+    });
+
+    /**
+     * docs/plans/active/OPS-UX-PLAN.md §2 A4: the concurrent backend wave gates `POST /api/assets` on
+     * `canManageOrg()`, so the nav must not dangle a door the API now refuses — "Add source" moved
+     * from ungated to `managerOnly` (it stays ungrouped: it's a primary action for the roles that can
+     * use it, not tucked into an advanced/diagnostics disclosure).
+     */
+    it('Add source is ungrouped but managerOnly — a PILOT no longer sees a door the API would refuse', () => {
+      const addSource = manage.entries.find((e) => e.name === 'Add source')!;
+      expect(addSource).toBeDefined();
+      expect(addSource.group).toBeUndefined();
+      expect(addSource.managerOnly).toBe(true);
     });
 
     it('Devices is demoted into the advanced group, managerOnly', () => {
@@ -116,6 +127,18 @@ describe('NAV_MODES', () => {
 
     it('has no separate "Wall" entry — Wall\'s canonical home is Operate', () => {
       expect(monitor.entries.some((entry) => entry.name === 'Wall' || entry.to === '/wall')).toBe(false);
+    });
+
+    /**
+     * docs/plans/active/OPS-UX-PLAN.md §3 B1: "Audit trail" mirrors the backend's own `canManageOrg()`
+     * gate on `AuditController#list` — a PILOT must never see a door the API would 403 on.
+     */
+    it('Audit trail is managerOnly and ungrouped (Monitor never groups)', () => {
+      const audit = monitor.entries.find((e) => e.name === 'Audit trail')!;
+      expect(audit).toBeDefined();
+      expect(audit.to).toBe('/monitor/audit');
+      expect(audit.managerOnly).toBe(true);
+      expect(audit.group).toBeUndefined();
     });
   });
 });

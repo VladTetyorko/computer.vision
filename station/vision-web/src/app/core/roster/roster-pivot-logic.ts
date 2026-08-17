@@ -71,6 +71,31 @@ export function buildPilotRows(
     }));
 }
 
+/**
+ * Whether `user` holds a `PILOT` membership in *any* group — the identical per-role membership
+ * check `features/onboarding/onboarding-logic.ts#pilotsInGroup` uses (just not scoped to one
+ * group), not `UserSummary#topRole`: a user's `topRole` is their *highest* role across every
+ * membership, so a user who is `PILOT` in one group and `MANAGER` in another would silently drop
+ * out of "pilots" if this checked `topRole` instead — see that function's own doc comment for the
+ * same reasoning applied there first.
+ */
+export function isPilot(user: UserSummary): boolean {
+  return user.memberships.some((membership) => membership.role === 'PILOT');
+}
+
+/**
+ * The roster's other gap indicator (docs/plans/active/OPS-UX-PLAN.md §3 B3) — the mirror of
+ * `features/roster/roster-logic.ts#countAssetsWithoutPilot`: how many users who hold a `PILOT`
+ * membership somewhere are assigned to zero assets. Counts against every row `buildPilotRows`
+ * produced (which already includes every user, pilot or not — see that function's own doc comment),
+ * filtered down to pilots here, so a MANAGER/ADMIN with zero assignments (expected — they don't fly)
+ * never inflates this number.
+ */
+export function countPilotsWithoutAssets(rows: readonly RosterPilotRow[], users: readonly UserSummary[]): number {
+  const pilotIds = new Set(users.filter(isPilot).map((user) => user.userId));
+  return rows.filter((row) => pilotIds.has(row.userId) && row.assignments.length === 0).length;
+}
+
 /** Case-insensitive substring match on the pilot's own name/username, or any of their assigned assets' names. */
 export function searchPilotRows(rows: readonly RosterPilotRow[], query: string): readonly RosterPilotRow[] {
   const q = query.trim().toLowerCase();

@@ -39,20 +39,51 @@
           <div class="notice stage-notice">This drone has no camera device to watch.</div>
         } @else if (facade.live() && !facade.stream()?.viewUrl) {
           <div class="notice stage-notice">The stream is running but has no view URL yet.</div>
+        } @else if (detectionOffChipVisible()) {
+          <!-- ---- Detection-off affordance (docs/plans/active/CV-DEMAND-PLAN.md wave D3) --------------------
+               Detection now defaults off, both here and server-side, so a stream with no boxes is the
+               normal case, not a fault — an operator would otherwise have no idea why nothing is being
+               drawn, with the only control buried at the bottom of the `cv` drawer (`cv-control-panel.html`).
+               A neutral status pill (never the amber `.notice` above, which is reserved for a genuine
+               problem), same slot: the three states here are mutually exclusive, this one only shows once
+               a stream is actually live, exactly when the other two cannot be showing. -->
+          <div class="stage-notice detection-off-chip">
+            <span class="dot" aria-hidden="true"></span>
+            <span>Detection off — video only</span>
+            @if (!facade.watchMode()) {
+              <button type="button" class="btn small" (click)="facade.enableDetection()">Turn on</button>
+            }
+          </div>
         }
       </div>
 
-      <!-- ---- Main header overlay: exit, drone switcher, "Bring home" -------------------------
+      <!-- ---- Main header overlay: exit, map toggle, drone switcher, "Bring home" ---------------
            A real CSS grid, not a flex row relying on wrap-if-it-overflows (docs/plans/done/NAV-IA-REDESIGN-PLAN.md
            F11, docs/extracts/design/01-fly.md — "give the overlay a real safe area rather than nudging
            positions"): `.header-actions` is its own right-anchored cluster in a `minmax(0, auto)`
            column, so the switcher+"Bring home" pair can wrap onto a second line inside the safe area
            if it ever has to, but can never push past `--overlay-pad` and clip behind/off the edge —
-           see cockpit.css's own comment on `.main-header` for the full mechanics. -->
+           see cockpit.css's own comment on `.main-header` for the full mechanics. `.header-left`
+           (new, docs/conclusions/MAP-UX-RESEARCH.md §1.3/M5) is the same idea one column over: the map
+           inset's on/off state (`facade.mapVisible()`) used to have no on-screen control at all —
+           `M` was the only way in, discoverable only via the Help drawer. This is a persistent
+           affordance (not gated on the inset's own visibility, unlike everything inside `.main-map`
+           below) so it stays reachable to turn the map back *on* too, not just off. -->
       <div class="main-header">
-        <a class="icon-btn" routerLink="/wall" title="Exit to the Wall">
-          <vision-icon name="chevron-left" />
-        </a>
+        <div class="header-left">
+          <a class="icon-btn" routerLink="/wall" title="Exit to the Wall">
+            <vision-icon name="chevron-left" />
+          </a>
+          @if (facade.hasTelemetryDevice()) {
+            <vision-icon-button
+              icon="map"
+              [label]="facade.mapVisible() ? 'Hide map' : 'Show map'"
+              variant="hud"
+              [active]="facade.mapVisible()"
+              (activated)="facade.toggleMapVisible()"
+            />
+          }
+        </div>
 
         <div class="header-actions">
           <!-- U-a bullet 4: the old standalone "All drones" button and this switcher did the same job
@@ -86,9 +117,10 @@
         </div>
       </div>
 
-      <!-- ---- Map inset (M) — a separate persisted toggle, not a drawer (docs/plans/done/UI-REDESIGN-PLAN.md
-           D-D: "glanceable, not a modal drawer"); overlays `main`, hidden entirely below `--bp-md`
-           (900px, cockpit.css) regardless of this toggle's own state. -->
+      <!-- ---- Map inset (M, or the header's own map-toggle button, docs/conclusions/MAP-UX-RESEARCH.md M5) —
+           a separate persisted toggle, not a drawer (docs/plans/done/UI-REDESIGN-PLAN.md D-D: "glanceable,
+           not a modal drawer"); overlays `main`, hidden entirely below `--bp-md` (900px, cockpit.css)
+           regardless of this toggle's own state. -->
       @if (facade.mapVisible() && facade.hasTelemetryDevice()) {
         <div class="main-map">
           <vision-tactical-map
@@ -215,14 +247,26 @@
            two rail buttons: the cockpit's own map is a 220px inset, so a toolbar floating over it
            (Command's shape) would eat the picture it is meant to annotate. See
            `<vision-layer-manager>`'s doc comment for why the grants editor is a sibling panel rather
-           than an expansion of the map's own data-layer panel. -->
+           than an expansion of the map's own data-layer panel — and for its own "Show on map"/
+           "Basemap" sections below (docs/conclusions/MAP-UX-RESEARCH.md M1): this is now the one drawer
+           that answers both "what's visible" and "who manages what", fed straight from the map
+           inset's own instance (`tacticalMap()`) so nothing here duplicates the map's own state. -->
       @if (isPanelOpen('map')) {
         <vision-side-panel title="Map" icon="layers" subtitle="Layers and drawing" (close)="panels.close()">
           <div class="map-drawer-section">
             <vision-drawing-toolbar layout="stacked" />
           </div>
           <div class="map-drawer-section">
-            <vision-layer-manager />
+            <vision-layer-manager
+              [mapAvailable]="!!tacticalMap()"
+              [builtinLayerRows]="tacticalMap()?.builtinLayerRows() ?? []"
+              [dataLayerRows]="tacticalMap()?.dataRows() ?? []"
+              [basemaps]="tacticalMap()?.basemaps ?? []"
+              [activeBasemapId]="tacticalMap()?.activeBasemapId() ?? null"
+              [compactCreate]="true"
+              (toggleLayerVisibility)="tacticalMap()?.toggleLayer($event)"
+              (basemapChanged)="tacticalMap()?.setBasemap($event)"
+            />
           </div>
         </vision-side-panel>
       }

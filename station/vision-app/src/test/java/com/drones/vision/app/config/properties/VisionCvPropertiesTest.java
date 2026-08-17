@@ -2,9 +2,13 @@ package com.drones.vision.app.config.properties;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Plain unit tests (no Spring context) for {@link VisionCvProperties}'s compact-constructor
@@ -67,5 +71,25 @@ class VisionCvPropertiesTest {
         VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f);
         assertEquals(640, properties.detectWidth());
         assertEquals(0.8f, properties.jpegQuality());
+    }
+
+    @Test
+    void detectionDefaultEnabledDefaultsToFalseThroughTheConvenienceConstructor() {
+        // docs/plans/active/CV-DEMAND-PLAN.md §3.7: a deployment that never sets this stays on
+        // today's behavior -- a new stream starts with detection off until something asks for it.
+        VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f);
+        assertFalse(properties.detectionDefaultEnabled());
+    }
+
+    @Test
+    void demandDefaultsToEnabledWithTheDocumentedTunablesWhenAbsent() {
+        // The compact constructor substitutes a fully-defaulted Demand when the @NestedConfigurationProperty
+        // is absent -- this pins the exact values application.yaml's commented vision.cv.demand.* block
+        // documents as "the default".
+        VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f);
+        assertTrue(properties.demand().enabled());
+        assertEquals(Duration.ofSeconds(2), properties.demand().pollInterval());
+        assertEquals(Duration.ofSeconds(30), properties.demand().grace());
+        assertEquals(Duration.ofSeconds(10), properties.demand().pollTtl());
     }
 }

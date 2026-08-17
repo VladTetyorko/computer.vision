@@ -83,11 +83,52 @@ export function assetsOutsideZoneCount(polygon: readonly ZoneVertex[], positions
 
 // --- Map-layer style (docs/plans/done/OPS-CORE-PLAN.md §G-c: "KEEP_OUT red ~12% fill + dashed border; KEEP_IN
 // accent dashed border no fill") -----------------------------------------------------------------
+//
+// Leaflet writes path colours as SVG presentation attributes, which do not resolve `var(--token)` —
+// so, like `shared/map/tactical-map/tactical-map-logic.ts#resolveMapColors` (the identical seam,
+// read that function's own comment for the full "why the live theme, why the painting element"
+// case), the zone stroke/fill colour has to be a literal. It used to be a permanent hex snapshot of
+// the *dark* theme's tokens (`KEEP_OUT_COLOR`/`KEEP_IN_COLOR`, frozen at import time) — correct only
+// while dark was this app's default theme; once light became the default
+// (docs/plans/done/VISUAL-REFRESH-PLAN.md) every keep-in zone boundary kept painting in dark-theme blue on a
+// light page. `resolveZoneColors` fixes it the same way `resolveMapColors` does: read the literal
+// from the live theme, via a `readVar` seam the caller supplies, so this module itself stays
+// DOM-free and unit-testable with a fake reader.
 
-/** Matches `src/styles.css`'s `--danger` token — see that file's own doc comment for the hue rationale. */
-export const KEEP_OUT_COLOR = '#ff5d5d';
-/** Matches `src/styles.css`'s `--accent` token (also `shared/map/fleet-map/fleet-map.ts#TRAIL_COLOR`). */
-export const KEEP_IN_COLOR = '#4f8cff';
+/** The zone stroke colours this module draws, resolved from the live theme — see the section comment above. */
+export interface ZoneColors {
+  readonly keepIn: string;
+  readonly keepOut: string;
+}
+
+/**
+ * Last-resort literals — the exact pre-fix, dark-theme-only values (`--color-danger`/`--color-info`
+ * at their dark-theme step), used only where `resolveZoneColors`'s `readVar` genuinely can't resolve
+ * a token (e.g. a test with no stylesheet loaded). A resolution failure degrades to today's known
+ * behaviour rather than an invalid/empty Leaflet colour string.
+ */
+export const FALLBACK_ZONE_COLORS: ZoneColors = {
+  keepIn: '#4f8cff',
+  keepOut: '#ff5d5d',
+};
+
+/**
+ * Resolves {@link ZoneColors} via `readVar` (typically
+ * `(name) => getComputedStyle(element).getPropertyValue(name)`, read off the element that actually
+ * paints — see `TacticalMap#refreshMapColors`'s own comment for why that beats `:root`). `keepIn`
+ * tracks `--color-info` (the app's one accent), `keepOut` tracks `--color-danger` — exactly the
+ * roles `zoneLayerStyle`'s own doc comment names.
+ */
+export function resolveZoneColors(readVar: (name: string) => string | undefined): ZoneColors {
+  const read = (name: string, fallback: string): string => {
+    const value = readVar(name)?.trim();
+    return value && value.length > 0 ? value : fallback;
+  };
+  return {
+    keepIn: read('--color-info', FALLBACK_ZONE_COLORS.keepIn),
+    keepOut: read('--color-danger', FALLBACK_ZONE_COLORS.keepOut),
+  };
+}
 
 /** A plain, Leaflet-`PathOptions`-shaped style object — kept structural (not `import`ing Leaflet's own type) so this stays a pure, framework-free module. */
 export interface ZoneLayerStyle {
@@ -104,14 +145,18 @@ export interface ZoneLayerStyle {
  * The zone→Leaflet-layer style mapping (docs/plans/done/OPS-CORE-PLAN.md §G-c's frozen visual spec):
  * `KEEP_OUT` — red ~12% fill, dashed border; `KEEP_IN` — accent dashed border, no fill. A disabled
  * zone (`enabled === false`) renders dimmed (halved opacity) rather than a third color — "this zone
- * exists but isn't currently enforced", not a new visual language.
+ * exists but isn't currently enforced", not a new visual language. `colors` defaults to
+ * {@link FALLBACK_ZONE_COLORS} so an existing caller that only cares about the style *shape*
+ * (`geofence-zone-dialog.ts`'s own preview map, this file's own spec) keeps compiling and behaving
+ * unchanged; `TacticalMap` is the one caller that passes the live-resolved colours it read at paint
+ * time (see `resolveZoneColors` above).
  */
-export function zoneLayerStyle(kind: ZoneKind, enabled: boolean = true): ZoneLayerStyle {
+export function zoneLayerStyle(kind: ZoneKind, enabled: boolean = true, colors: ZoneColors = FALLBACK_ZONE_COLORS): ZoneLayerStyle {
   const opacity = enabled ? 0.9 : 0.4;
   if (kind === 'KEEP_OUT') {
-    return { color: KEEP_OUT_COLOR, weight: 2, dashArray: '6 6', fill: true, fillColor: KEEP_OUT_COLOR, fillOpacity: enabled ? 0.12 : 0.05, opacity };
+    return { color: colors.keepOut, weight: 2, dashArray: '6 6', fill: true, fillColor: colors.keepOut, fillOpacity: enabled ? 0.12 : 0.05, opacity };
   }
-  return { color: KEEP_IN_COLOR, weight: 2, dashArray: '6 6', fill: false, opacity };
+  return { color: colors.keepIn, weight: 2, dashArray: '6 6', fill: false, opacity };
 }
 
 /** `KEEP_OUT` → `"KEEP-OUT"`, `KEEP_IN` → `"KEEP-IN"` — the hyphenated display form used in every message/label. */

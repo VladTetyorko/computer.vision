@@ -1,5 +1,7 @@
 package com.drones.vision.app;
 
+import com.drones.vision.api.live.LiveAndPollDetectionDemand;
+import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
@@ -10,7 +12,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -62,5 +66,18 @@ class CvWiringTest {
     @Test
     void defaultConfigurationBuildsNoSharedCvGrpcChannel() {
         assertTrue(applicationContext.getBeansOfType(ManagedChannel.class).isEmpty());
+    }
+
+    /**
+     * docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8: {@code vision.cv.demand.enabled} defaults to
+     * {@code true}, so the default-config context builds a real demand-poll port and
+     * {@link StreamDetectionSupport} carries it — see {@link DetectionDemandDisabledWiringTest} for
+     * the {@code false} counterpart.
+     */
+    @Test
+    void defaultConfigurationWiresTheDetectionDemandPortIntoStreamDetectionSupport() {
+        assertEquals(1, applicationContext.getBeansOfType(LiveAndPollDetectionDemand.class).size());
+        StreamDetectionSupport support = applicationContext.getBean(StreamDetectionSupport.class);
+        assertNotNull(support.demand());
     }
 }

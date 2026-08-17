@@ -60,8 +60,15 @@
      exists, so there is no seam left to hide. Both `/fly` and `/fly/:assetId` also carry
      `data: {fullBleed: true}` (`fly.routes.ts`), which auto-collapses the sidebar to its icon rail
      while either page is active — the actual F11 fix (72px of chrome above the failsafe banner), not
-     merely a cosmetic seam patch. */
-  height: 100dvh;
+     merely a cosmetic seam patch.
+
+     `--shell-h` (`styles.css`) rather than a bare `100dvh`: the shell reserves the banner
+     strip's measured height with its own `padding-top`, and a viewport unit read from down here
+     cannot see that — without the subtraction, a showing banner pushes this page's bottom edge
+     exactly one strip below the fold, which is the bug the strip's first revision worked around by
+     painting over the sidebar instead. `--shell-banner-h` is `0px` in the normal case, so this stays
+     byte-for-byte the `100dvh` layout described above whenever no banner is showing. */
+  height: var(--shell-h);
   min-height: 20rem;
   overflow: hidden;
   background: var(--black);
@@ -180,9 +187,15 @@
   display: inline-flex;
 }
 
-/* The CV rail button's own "detection is off" tell — the same small red dot
-   `cv-control-panel.ts`'s old `.cv-off-dot` toggle button used to carry, now positioned over the
-   shared `vision-icon-button` from the host page rather than baked into that component. */
+/* The CV rail button's own "detection is off" tell — the same small dot `cv-control-panel.ts`'s old
+   `.cv-off-dot` toggle button used to carry, now positioned over the shared `vision-icon-button`
+   from the host page rather than baked into that component. `--text-faint` (docs/conclusions/MAP-UX-RESEARCH.md
+   §4 point 3/M3), not `--color-danger`: detection defaulting off is the normal state, not a fault
+   (`showDetectionOffChip`'s own gate only ever shows this alongside the neutral `.detection-off-chip`
+   pill above, never a `.notice` warning) — a red dot here contradicted that pill's own "this is
+   fine" framing for the identical fact, 200px away on the same screen. `--text-faint` is this app's
+   own neutral/muted dot tone (`styles.css`'s base, unmodified `.dot`, which `.detection-off-chip
+   .dot` above already relies on) — same tone, same meaning, both places. */
 .rail-dot {
   position: absolute;
   top: var(--space-2);
@@ -190,7 +203,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--color-danger);
+  background: var(--text-faint);
   pointer-events: none;
 }
 
@@ -255,6 +268,37 @@
   text-align: center;
 }
 
+/* Detection-off affordance (docs/plans/active/CV-DEMAND-PLAN.md wave D3) — shares `.stage-notice`'s own
+   position above (the three stage states are mutually exclusive, see `cockpit.html`'s own comment)
+   but never the amber `.notice` chrome above it: detection defaulting off is the new normal, not a
+   fault, so this reads as a neutral HUD pill instead — the same frosted-chrome family every other
+   overlay control in this cockpit already uses (`.icon-btn`/`.switcher-control` above,
+   `fly-osd.ts`'s own `.osd-group`), not a warning banner. `.dot` (base, unmodified — styles.css) is
+   the neutral/muted tier of this app's one dot-status language; a red dot here would say "problem",
+   which off-by-default deliberately is not. */
+.detection-off-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4) var(--space-8);
+  padding: var(--space-4) var(--space-8) var(--space-4) var(--space-12);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  backdrop-filter: blur(var(--hud-blur));
+  border: var(--hud-border);
+  color: var(--text);
+  font-size: 0.78rem;
+  /* Never nowrap here (unlike the compact `.icon-btn`/`.switcher-control` pills above) — this one
+     carries a full sentence plus a button, wide enough on a narrow phone to need the wrap; capped so
+     it can never push past the video's own safe margin regardless of viewport width. */
+  max-width: calc(100% - 2 * var(--overlay-pad));
+}
+
+.detection-off-chip .dot {
+  flex: none;
+}
+
 /* ---- Main header overlay: exit, drone switcher, "Bring home" ------------------------------ */
 /* A real 3-column safe-area grid, not a flex row relying on wrap-if-it-overflows
    (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F11, docs/extracts/design/01-fly.md — "Bring home is clipped at the right
@@ -278,6 +322,16 @@
   grid-template-columns: auto minmax(0, 1fr) minmax(0, auto);
   align-items: start;
   column-gap: var(--space-8);
+}
+
+/* The left cluster (Exit + the map-visibility toggle, docs/conclusions/MAP-UX-RESEARCH.md M5) — an `auto`
+   grid column sized to whatever it holds, same reasoning as `.header-actions`' own `min-width: 0`
+   note just without the wrap concern: two icon-sized buttons never approach this column's own
+   `1fr` neighbor. */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
 }
 
 /* The right-hand cluster (switcher + "Bring home") — `min-width: 0` is load-bearing (the grid-item

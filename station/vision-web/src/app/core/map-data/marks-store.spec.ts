@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import { Component, signal } from '@angular/core';
+import { Router, provideRouter } from '@angular/router';
 import { describe, expect, it, vi } from 'vitest';
 import { MarksStore } from './marks-store';
 import { LayersStore } from './layers-store';
@@ -9,6 +10,10 @@ import { ToastService } from '../toast.service';
 import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
 import type { MapEventPayload, MapLayer, MapMark } from '../api/models';
+
+/** Routed stand-in for BUG 3's `resetOnRouteChange` coverage — `create()` always provides a router now. */
+@Component({ selector: 'vision-test-stub-page', template: '' })
+class StubPage {}
 
 /**
  * Store-level coverage carried over from the deleted `core/marks/marks-store.spec.ts` and extended
@@ -98,6 +103,10 @@ function create(api: ReturnType<typeof stubApi>, options: { layers?: readonly Ma
       { provide: PollScheduler, useValue: { schedule: vi.fn().mockReturnValue(() => undefined) } },
       { provide: LiveStore, useValue: live },
       { provide: LayersStore, useValue: stubLayersStore(options.layers) },
+      provideRouter([
+        { path: 'command', component: StubPage },
+        { path: 'fly/:assetId', component: StubPage },
+      ]),
     ],
   });
   return { store: TestBed.inject(MarksStore), toasts, live };
@@ -394,6 +403,52 @@ describe('MarksStore', () => {
       expect(store.selected()).toMatchObject({ markId: 'm1' });
       store.select('m1');
       expect(store.selectedMarkId()).toBeUndefined();
+    });
+  });
+
+  describe('BUG 3: arming/draft/palette reset on a genuine page change, not on a same-page navigation', () => {
+    it('leaves an armed mark placement alone across a same-path, query-param-only navigation', async () => {
+      const { store } = create(stubApi());
+      await flush();
+      const router = TestBed.inject(Router);
+
+      await router.navigateByUrl('/command');
+      store.arm();
+      expect(store.armed()).toBe(true);
+
+      // Mirrors `CommandFacade`'s own `?asset=` URL sync (BUG 4): same path, query-only navigation.
+      await router.navigateByUrl('/command?asset=abc');
+      expect(store.armed()).toBe(true);
+    });
+
+    it('disarms and drops the draft once the path actually changes (the /command → /fly/:assetId repro)', async () => {
+      const { store } = create(stubApi());
+      await flush();
+      const router = TestBed.inject(Router);
+
+      await router.navigateByUrl('/command');
+      store.arm();
+      store.handleMapClick({ latitude: 1, longitude: 2 });
+      expect(store.armed()).toBe(false); // handleMapClick disarms itself, captures a draft instead
+      expect(store.draft()).not.toBeNull();
+
+      await router.navigateByUrl('/fly/asset-1');
+      expect(store.armed()).toBe(false);
+      expect(store.draft()).toBeNull();
+    });
+
+    it('resets the palette back to its default on a genuine page change', async () => {
+      const { store } = create(stubApi());
+      await flush();
+      const router = TestBed.inject(Router);
+
+      await router.navigateByUrl('/command');
+      store.setKind('HAZARD');
+      store.setAffiliation('FRIENDLY');
+      expect(store.palette()).toMatchObject({ kind: 'HAZARD', affiliation: 'FRIENDLY' });
+
+      await router.navigateByUrl('/fly/asset-1');
+      expect(store.palette()).toMatchObject({ kind: 'TARGET', affiliation: 'HOSTILE' });
     });
   });
 });

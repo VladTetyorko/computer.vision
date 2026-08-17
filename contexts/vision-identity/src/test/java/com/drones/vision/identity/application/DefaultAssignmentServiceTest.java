@@ -75,6 +75,17 @@ class DefaultAssignmentServiceTest {
     }
 
     @Test
+    void aPilotScopeMayNotGrantEvenWhenTheAssetIsAlreadyAssignedToThem() {
+        // Authority is not visibility (docs/plans/active/OPS-UX-PLAN.md §1): a pilot assigned to
+        // this very asset can see it, but seeing it is not authority to re-pilot it.
+        VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of(asset.id()));
+
+        assertThrows(AccessDeniedException.class, () -> service.assign(pilot, asset.id(), pilotScope));
+
+        assertFalse(assignmentRepository.isAssigned(pilot, asset.id()));
+    }
+
+    @Test
     void assignUnknownAssetThrowsNoSuchElement() {
         AssetId unknown = AssetId.random();
         when(assetRepository.findById(unknown)).thenReturn(Optional.empty());
@@ -106,6 +117,16 @@ class DefaultAssignmentServiceTest {
 
         assertThrows(AccessDeniedException.class,
                 () -> service.unassign(pilot, asset.id(), VisibilityScope.groups(Set.of())));
+        assertTrue(assignmentRepository.isAssigned(pilot, asset.id()));
+    }
+
+    @Test
+    void aPilotScopeMayNotUnassignEvenTheirOwnAssignment() {
+        service.assign(pilot, asset.id(), VisibilityScope.unbounded());
+        VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of(asset.id()));
+
+        assertThrows(AccessDeniedException.class, () -> service.unassign(pilot, asset.id(), pilotScope));
+
         assertTrue(assignmentRepository.isAssigned(pilot, asset.id()));
     }
 

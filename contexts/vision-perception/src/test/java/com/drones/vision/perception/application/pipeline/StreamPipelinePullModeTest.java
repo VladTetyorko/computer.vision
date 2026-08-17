@@ -6,10 +6,12 @@ import com.drones.vision.kernel.Capability;
 import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventType;
+import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PullTelemetry;
@@ -37,6 +39,7 @@ import java.util.concurrent.SubmissionPublisher;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -85,8 +88,20 @@ class StreamPipelinePullModeTest {
         results = new SubmissionPublisher<>(Runnable::run, Integer.MAX_VALUE);
     }
 
+    /**
+     * {@code detectionEnabled=true} stated explicitly, not left to default: {@link
+     * PipelineConfig#DEFAULT_DETECTION_ENABLED} is {@code false} since wave D1, and every test in
+     * this class below the gate section relies on results actually being forwarded, so the intent
+     * ("this stream's detection gate is open") must be on the page rather than inherited silently.
+     */
     private static PipelineConfig config() {
-        return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true, Set.of());
+        return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true, Set.of(),
+                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
+    }
+
+    private static PipelineConfig configWithDetectionEnabled(boolean detectionEnabled) {
+        return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true, Set.of(),
+                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, detectionEnabled);
     }
 
     private StreamPipeline pullPipeline(PipelineConfig config, PullDetectionBinding binding) {
@@ -227,6 +242,171 @@ class StreamPipelinePullModeTest {
 
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> pipeline.updateConfig(
                 new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.6, 15, 2, true, Set.of())));
+    }
+
+    // --- the detection gate reaches pull mode too (docs/plans/active/CV-DEMAND-PLAN.md &sect;5, the ---
+    // --- "one honest gap" closed at the application layer -- push mode's own gate applied here)   ---
+
+    @Test
+    void aResultIsDroppedWhenDetectionIsDisabled() {
+        PullDetectionBinding binding = new PullDetectionBinding(pulledDetectionPort, results, Instant::now);
+        StreamPipeline pipeline = pullPipeline(configWithDetectionEnabled(false), binding);
+        pipeline.start();
+        assertEquals(DetectionState.OFF, pipeline.detectionState());
+
+        results.submit(resultWithPullTelemetry(0, Instant.now(), SOME_TELEMETRY));
+
+        assertEquals(List.of(), pipeline.latestDetections());
+        assertEquals(0L, pipeline.detectionRate().submitted());
+        verifyNoInteractions(detectionRepositoryPort);
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void aResultIsDroppedWhenNobodyIsWatching() {
+        PullDetectionBinding binding = new PullDetectionBinding(pulledDetectionPort, results, Instant::now);
+        StreamPipeline pipeline = pullPipeline(config(), binding); // detectionEnabled=true
+        pipeline.start();
+        pipeline.updateDetectionDemand(false);
+        assertEquals(DetectionState.IDLE_NO_VIEWERS, pipeline.detectionState());
+
+        results.submit(resultWithPullTelemetry(0, Instant.now(), SOME_TELEMETRY));
+
+        assertEquals(List.of(), pipeline.latestDetections());
+        assertEquals(0L, pipeline.detectionRate().submitted());
+        verify(detectionRepositoryPort, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void aResultForwardsNormallyWhenBothGatesAreOpen() {
+        PullDetectionBinding binding = new PullDetectionBinding(pulledDetectionPort, results, Instant::now);
+        StreamPipeline pipeline = pullPipeline(config(), binding); // detectionEnabled=true, demand defaults true
+        pipeline.start();
+        assertEquals(DetectionState.RUNNING, pipeline.detectionState());
+
+        DetectionResult result = resultWithPullTelemetry(0, Instant.now(), SOME_TELEMETRY);
+        results.submit(result);
+
+        assertEquals(1, pipeline.latestDetections().size());
+        assertEquals(1L, pipeline.detectionRate().submitted());
+        verify(detectionRepositoryPort).save(result);
+    }
+
+    @Test
+    void togglingDetectionBackOnResumesForwardingOnTheVeryNextResult() {
+        PullDetectionBinding binding = new PullDetectionBinding(pulledDetectionPort, results, Instant::now);
+        StreamPipeline pipeline = pullPipeline(configWithDetectionEnabled(false), binding);
+        pipeline.start();
+
+        results.submit(resultWithPullTelemetry(0, Instant.now(), SOME_TELEMETRY));
+        assertEquals(List.of(), pipeline.latestDetections(), "gated off: first result must be dropped");
+
+        pipeline.updateConfig(configWithDetectionEnabled(true));
+        DetectionResult resumed = resultWithPullTelemetry(1, Instant.now(), SOME_TELEMETRY);
+        results.submit(resumed);
+
+        assertEquals(1, pipeline.latestDetections().size(), "gate reopened: the very next result must forward");
+        verify(detectionRepositoryPort).save(resumed);
+        verify(detectionRepositoryPort, never()).save(org.mockito.ArgumentMatchers.argThat(
+                r -> r != null && r.frameSequence() == 0));
+    }
+
+    @Test
+    void togglingDemandBackOnResumesForwardingOnTheVeryNextResult() {
+        PullDetectionBinding binding = new PullDetectionBinding(pulledDetectionPort, results, Instant::now);
+        StreamPipeline pipeline = pullPipeline(config(), binding); // detectionEnabled=true
+        pipeline.start();
+        pipeline.updateDetectionDemand(false);
+
+        results.submit(resultWithPullTelemetry(0, Instant.now(), SOME_TELEMETRY));
+        assertEquals(List.of(), pipeline.latestDetections(), "undemanded: first result must be dropped");
+
+        pipeline.updateDetectionDemand(true);
+        DetectionResult resumed = resultWithPullTelemetry(1, Instant.now(), SOME_TELEMETRY);
+        results.submit(resumed);
+
+        assertEquals(1, pipeline.latestDetections().size(), "demand restored: the very next result must forward");
+        verify(detectionRepositoryPort).save(resumed);
+    }
+
+    // --- docs/plans/active/CV-DEMAND-PLAN.md §5/§7: closing the gate clears what it already served,
+    // in pull mode too -- the coordinator's correction to this file's own first cut, which only
+    // proved gated-off results are dropped and left an established result's *prior* boxes standing.
+    // A frozen pull-mode result is exactly as dishonest a poll response as a frozen push-mode one:
+    // CLAUDE.md §9, "newest data ... should be used, even if previous is still available." ---
+
+    @Test
+    void closingTheDetectionEnabledGateClearsEstablishedBoxesAndTheRateWindowThenReopeningResumesFreshDetection() {
+        PullDetectionBinding binding = new PullDetectionBinding(pulledDetectionPort, results, Instant::now);
+        StreamPipeline pipeline = pullPipeline(config(), binding); // detectionEnabled=true
+        pipeline.start();
+
+        DetectionResult established = resultWithPullTelemetry(0, Instant.now(), SOME_TELEMETRY);
+        results.submit(established);
+        assertEquals(1, pipeline.latestDetections().size(), "boxes must be established before the gate closes");
+        assertEquals(1L, pipeline.detectionRate().submitted());
+
+        pipeline.updateConfig(configWithDetectionEnabled(false));
+
+        assertEquals(List.of(), pipeline.latestDetections(),
+                "turning detection off must not leave the last pull-mode boxes standing to be re-served");
+        assertEquals(0L, pipeline.detectionRate().submitted(),
+                "the rate window must not keep reporting a stale submitted count once the state reads OFF");
+
+        pipeline.updateConfig(configWithDetectionEnabled(true));
+        DetectionResult resumed = resultWithPullTelemetry(1, Instant.now(), SOME_TELEMETRY);
+        results.submit(resumed);
+
+        assertEquals(1, pipeline.latestDetections().size(), "fresh results must flow again once the gate reopens");
+        verify(detectionRepositoryPort).save(resumed);
+    }
+
+    @Test
+    void closingTheDetectionDemandGateClearsEstablishedBoxesAndTheRateWindowThenReopeningResumesFreshDetection() {
+        PullDetectionBinding binding = new PullDetectionBinding(pulledDetectionPort, results, Instant::now);
+        StreamPipeline pipeline = pullPipeline(config(), binding); // detectionEnabled=true
+        pipeline.start();
+
+        DetectionResult established = resultWithPullTelemetry(0, Instant.now(), SOME_TELEMETRY);
+        results.submit(established);
+        assertEquals(1, pipeline.latestDetections().size(), "boxes must be established before the gate closes");
+
+        pipeline.updateDetectionDemand(false);
+
+        assertEquals(List.of(), pipeline.latestDetections(),
+                "IDLE_NO_VIEWERS must not keep re-serving the last viewer's pull-mode boxes");
+        assertEquals(0L, pipeline.detectionRate().submitted());
+
+        pipeline.updateDetectionDemand(true);
+        DetectionResult resumed = resultWithPullTelemetry(1, Instant.now(), SOME_TELEMETRY);
+        results.submit(resumed);
+
+        assertEquals(1, pipeline.latestDetections().size(),
+                "a returning viewer must get boxes from fresh inference, not a stale snapshot");
+        verify(detectionRepositoryPort).save(resumed);
+    }
+
+    @Test
+    void repeatedlyConfirmingDemandIsStillGoneDoesNotCorruptTheEdgeTrackingNeededToReopenLater() {
+        // Mirrors StreamPipelineTest's push-mode equivalent: the demand-poll scheduler re-confirms
+        // "still nobody watching" on every tick, not just once on the transition. The shared
+        // handleDetectionGateTransition() must key off the true->false edge, not the level.
+        PullDetectionBinding binding = new PullDetectionBinding(pulledDetectionPort, results, Instant::now);
+        StreamPipeline pipeline = pullPipeline(config(), binding);
+        pipeline.start();
+        results.submit(resultWithPullTelemetry(0, Instant.now(), SOME_TELEMETRY));
+
+        pipeline.updateDetectionDemand(false);
+        pipeline.updateDetectionDemand(false);
+        pipeline.updateDetectionDemand(false);
+        assertEquals(List.of(), pipeline.latestDetections());
+
+        pipeline.updateDetectionDemand(true);
+        DetectionResult resumed = resultWithPullTelemetry(1, Instant.now(), SOME_TELEMETRY);
+        results.submit(resumed);
+
+        assertEquals(1, pipeline.latestDetections().size(),
+                "repeated false confirmations must not prevent the gate from recognising the later true");
     }
 
     private static Event argThatEvent(EventType type) {

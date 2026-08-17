@@ -12,9 +12,16 @@
    true}` (`command.routes.ts`), which auto-collapses the sidebar to its icon rail while this page is
    active, the same F11 fix Fly's `.cockpit` gets. No `box-shadow`/seam fix is needed here the way
    Fly's needed one: this page's own topbar is opaque and in normal flow (not translucent chrome over
-   a full-bleed video), so there is no hairline-seam class of bug to guard against. */
+   a full-bleed video), so there is no hairline-seam class of bug to guard against.
+
+   `--shell-h` (`styles.css`) rather than a bare `100dvh`: the shell reserves the banner
+     strip's measured height with its own `padding-top`, and a viewport unit read from down here
+     cannot see that — without the subtraction, a showing banner pushes this page's bottom edge
+     exactly one strip below the fold, which is the bug the strip's first revision worked around by
+     painting over the sidebar instead. `--shell-banner-h` is `0px` in the normal case, so this stays
+     byte-for-byte the `100dvh` layout described above whenever no banner is showing. */
 .command-shell {
-  height: 100dvh;
+  height: var(--shell-h);
   display: flex;
   flex-direction: column;
   overflow: hidden;

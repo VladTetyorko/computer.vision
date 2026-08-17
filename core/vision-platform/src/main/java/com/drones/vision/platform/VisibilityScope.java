@@ -30,6 +30,12 @@ import java.util.Set;
  * memberships and no assignments sees nothing until assigned (documented on {@code ScopeResolver}).
  * Both collections are defensively copied to immutable sets in the compact constructor.
  *
+ * <p><strong>Visibility is not authority.</strong> {@link #includes(AssetId, Ownership)}/{@link
+ * #includesGroup(GroupId)} answer "what may this request see"; {@link #canAdminister()}/{@link
+ * #canManage(Ownership)} answer "what may this request do" — a distinct question this type used to
+ * be asked without a dedicated answer (docs/plans/active/OPS-UX-PLAN.md §1). See their own javadoc
+ * for why the two questions diverge for {@link Kind#ASSIGNED_ASSETS}.
+ *
  * @param kind           which case this scope is
  * @param groups         the visible group ids (used only when {@code kind} is {@link Kind#GROUPS});
  *                       defensively copied
@@ -143,6 +149,56 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
         return switch (kind) {
             case UNBOUNDED -> true;
             case GROUPS -> groups.contains(groupId);
+            case ASSIGNED_ASSETS -> false;
+        };
+    }
+
+    /**
+     * Whether the acting user may take a deployment-global action — promote the live CV model,
+     * start a training job, or anything else with a blast radius wider than one group's fleet.
+     *
+     * <p>Exists because {@link #includes(AssetId, Ownership)} and {@link #canManageOrg()} both
+     * answer a <em>visibility</em> question ("what may this request see/reach"), and two real call
+     * sites (docs/plans/active/OPS-UX-PLAN.md §1, citing docs/conclusions/OPS-UX-REVIEW.md §A1) had
+     * been asking {@link #canManageOrg()} an <em>authority</em> question instead — whether the
+     * caller may swap the model every stream in the deployment uses, or claim the one training
+     * host. {@link Kind#GROUPS} (a MANAGER) is exactly as visible/manageable as {@link
+     * Kind#UNBOUNDED} for its own subtree, but has no more authority over the rest of the
+     * deployment than {@link Kind#ASSIGNED_ASSETS} does — a group boundary is not a promise of
+     * global authority, so only {@link Kind#UNBOUNDED} (ADMIN, or the dev principal when auth is
+     * off) may answer yes here.
+     *
+     * @return {@code true} iff {@link #kind()} is {@link Kind#UNBOUNDED}
+     */
+    public boolean canAdminister() {
+        return kind == Kind.UNBOUNDED;
+    }
+
+    /**
+     * Whether the acting user may administer (rename, deactivate, delete, reassign the devices of)
+     * the asset owned by {@code ownership} — as opposed to merely seeing it.
+     *
+     * <p>Exists for the same reason as {@link #canAdminister()}: {@link
+     * #includes(AssetId, Ownership)} is a visibility filter, and asset lifecycle writes
+     * (docs/plans/active/OPS-UX-PLAN.md §1) had been gated on it directly, which conflates "the
+     * caller can see this asset" with "the caller may administer it." A PILOT's {@link
+     * Kind#ASSIGNED_ASSETS} scope is built so they can see (and fly) exactly the aircraft assigned
+     * to them — that is the whole of a pilot's authority, so this predicate is {@code false} for
+     * {@link Kind#ASSIGNED_ASSETS} regardless of whether the asset is assigned to them. A MANAGER's
+     * {@link Kind#GROUPS} scope, by contrast, already *is* a management subtree, so it grants the
+     * same authority over an asset in it that {@link #includes(AssetId, Ownership)} already grants
+     * visibility — {@link Kind#GROUPS} is the one case where the two predicates agree.
+     *
+     * @param ownership the asset's ownership
+     * @return {@code true} for {@link Kind#UNBOUNDED}; for {@link Kind#GROUPS} iff {@link
+     *         Ownership#groupId()} is in {@link #groups()}; always {@code false} for {@link
+     *         Kind#ASSIGNED_ASSETS}
+     */
+    public boolean canManage(Ownership ownership) {
+        Objects.requireNonNull(ownership, "ownership must not be null");
+        return switch (kind) {
+            case UNBOUNDED -> true;
+            case GROUPS -> groups.contains(ownership.groupId());
             case ASSIGNED_ASSETS -> false;
         };
     }

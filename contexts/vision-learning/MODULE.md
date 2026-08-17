@@ -241,10 +241,13 @@ com.drones.vision.learning.application     — every service, command/read-model
   - `List<RegisteredModel> models()` — unscoped, unaudited read: any authenticated caller may see the
     roster. Marks every ref whose `equals` matches `port.active()` (`Optional.empty()` active → every
     row `false`, e.g. an empty/unreachable registry).
-  - `void promote(ModelRef, UserId actor, VisibilityScope scope)` — gated on `scope.canManageOrg()`
-    (`AccessDeniedException` + audited `DENIED:out of scope` otherwise, no per-model ownership to
-    restrict against). A cv-service refusal (`IllegalStateException`) is audited `REFUSED:<message>`
-    and rethrown unchanged; success is audited `PROMOTED`.
+  - `void promote(ModelRef, UserId actor, VisibilityScope scope)` — gated on `scope.canAdminister()`
+    (docs/plans/active/OPS-UX-PLAN.md §1/C4 — was `canManageOrg()`; promoting the live model is
+    deployment-global, not team-scoped, so a MANAGER's own-subtree `GROUPS` authority is no longer
+    enough, only `UNBOUNDED`/ADMIN may). `AccessDeniedException` + audited `DENIED:out of scope`
+    otherwise, no per-model ownership to restrict against. A cv-service refusal
+    (`IllegalStateException`) is audited `REFUSED:<message>` and rethrown unchanged; success is
+    audited `PROMOTED`.
 - **`TrainingJobView(String jobId, String baseModel, String datasetId, int epochs, int epoch, int totalEpochs, double loss, double map50, JobState state, String message, Instant startedAt)`**
   — one row of `TrainingJobService#jobs()`/`#job(jobId)`: the pollable state of one training job.
   `jobId` is the **locally generated** id `TrainingJobService#start` returns, never the wire
@@ -260,7 +263,9 @@ com.drones.vision.learning.application     — every service, command/read-model
     (5-arg: explicit `ExecutorService`+`Supplier<Instant> clock`; 6-arg: same plus `maxFinishedJobs`
     too) both delegate to the one 6-arg canonical constructor.
   - `String start(TrainingJobSpec, UserId actor, VisibilityScope scope)` — gated on
-    `scope.canManageOrg()`. Right after the gate: parses `DatasetId.of(spec.datasetId())` and runs one
+    `scope.canAdminister()` (docs/plans/active/OPS-UX-PLAN.md §1/C4 — was `canManageOrg()`; claiming
+    the shared training host is deployment-global, same reasoning as `promote` above — only
+    `UNBOUNDED`/ADMIN may). Right after the gate: parses `DatasetId.of(spec.datasetId())` and runs one
     cheap, bounded synchronous pre-check — `labelingService.samples(datasetId, LABELED, 1, actor, scope)`
     — **before** the job is registered, so an unknown dataset, an out-of-scope one, or one with
     nothing `LABELED` are real synchronous failures on the calling thread (none of the three touches
@@ -396,3 +401,20 @@ citing it once here: it is the wave that gave `DefaultLabelingService`/`Training
 `jpegQuality` constructor parameter and `DefaultTrainingJobService` its `maxFinishedJobs` one (both
 now folded into the constructor signatures documented above), and moved this context's classes from a
 flat `com.drones.vision.application.training` package into `com.drones.vision.learning.application`.
+
+**docs/plans/active/OPS-UX-PLAN.md Wave C (C4) done**: `DefaultModelRegistryService#promote` and
+`DefaultTrainingJobService#start` moved their gate from `scope.canManageOrg()` to
+`scope.canAdminister()` — both are deployment-global actions (swap the model every stream uses; claim
+the one shared training host), so a MANAGER's team-scoped authority is no longer enough, matching
+docs/conclusions/OPS-UX-REVIEW.md §A1. Both already audited denials before this wave (`DENIED:out of
+scope`) and still do — only the predicate deciding the outcome changed, the audit shape is untouched.
+Existing tests that had asserted a `groups()` (MANAGER) scope could `promote`/`start` were the
+finding, not a regression: `promoteSucceeds...` was re-targeted from a manager scope to
+`VisibilityScope.unbounded()`, and the manager case became its own `promoteDeniedForAManagerScope...`
+assertion; likewise a `startDeniedForAManagerScope...` test was added and every pre-existing
+happy-path/pre-check test in `DefaultTrainingJobServiceTest` was re-targeted from `managerScope` to a
+new `adminScope = VisibilityScope.unbounded()` field. 158 → 160 tests, `./mvnw -B -pl
+contexts/vision-learning test` green. With `vision.auth.enabled=false` every caller is `unbounded()`,
+so `canAdminister()` is always `true` and behavior is unchanged from before this wave.
+`DatasetService`/`LabelingService` are explicitly out of scope for this wave and remain on
+`canManageOrg()` — dataset lifecycle is team-scoped management, not deployment-global.

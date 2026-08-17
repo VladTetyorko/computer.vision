@@ -1,0 +1,64 @@
+/* Reuses `.page`/`vision-page-bar`/`table`/`th`/`td`/`.chip.danger`/`.mono`/`.truncate` from
+   `src/styles.css` — no new colors, mirrors `features/replay/replay-library.css`'s own "each control
+   gets an explicit width" note: `select { width: 100% }` (src/styles.css) would otherwise stretch
+   these to the full page-bar row once they wrap onto their own line. */
+.audit-filter {
+  width: 11rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  min-width: 48rem;
+}
+
+/* One `<tr>` per audit entry — the verb becomes the row's left accent color, mirroring
+   `features/activity/activity.css`'s identical tone-by-action idiom (`core/activity/activity-logic.ts
+   #activityAccentTone`), so a fleet-wide log and a personal one read as the same visual language.
+   Applied to the first `<td>`, not the `<tr>` itself: `table { border-collapse: collapse }`
+   (src/styles.css) only ever collapses/renders *cell* borders — a `border-left` set on a `<tr>` is
+   silently dropped by every browser under collapsed borders. */
+.audit-row td:first-child {
+  border-left: 2px solid transparent;
+}
+
+.audit-row.tone-success td:first-child {
+  border-left-color: var(--color-success);
+}
+
+.audit-row.tone-info td:first-child {
+  border-left-color: var(--color-info);
+}
+
+.audit-row.tone-warn td:first-child {
+  border-left-color: var(--color-warn);
+}
+
+.audit-row.tone-danger td:first-child {
+  border-left-color: var(--color-danger);
+}
+
+.audit-time {
+  white-space: nowrap;
+}
+
+.audit-actor {
+  max-width: 10rem;
+}
+
+.audit-target {
+  max-width: 14rem;
+}
+
+.audit-summary {
+  max-width: 26rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 640px) {
+  .audit-filter {
+    width: 100%;
+  }
+}

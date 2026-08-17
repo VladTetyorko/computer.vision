@@ -1,3 +1,4 @@
+import { signal } from '@angular/core';
 import type * as Leaflet from 'leaflet';
 import type { MapLayerId } from '../../../core/settings/settings-store';
 import type { Theme } from '../../../core/shell/theme-store';
@@ -110,15 +111,36 @@ export function defaultMapLayerIdForTheme(theme: Theme): MapLayerId {
   return theme === 'dark' ? 'night' : 'standard';
 }
 
+/**
+ * The reactive source of truth behind {@link isMapLayerExplicit}/{@link markMapLayerExplicit}.
+ * **`localStorage` is this signal's persistence, not its source of truth** — see `vision-web/MODULE.md`
+ * Gotchas for the bug this replaces: `isMapLayerExplicit()` used to be a bare `localStorage.getItem`
+ * read, invisible to Angular's dependency graph, so a `computed()` calling it inside `TacticalMap`
+ * never re-ran when the flag flipped false→true in the exact same click that also called
+ * `settings.mapLayer.set(id)` with an *already-equal* value (the theme-implied default happened to
+ * match the operator's pick) — that `.set()` is an `Object.is` no-op, so nothing else invalidated the
+ * computed and the map/button silently didn't update until a full reload. Seeded once per module
+ * load from whatever was already persisted; every later flip goes through `markMapLayerExplicit()`,
+ * which updates this signal *and* persists it in the same call, so every reader (`TacticalMap`,
+ * `GeofenceZoneDialog`, `FlightPlanDialog`, `ReplayMap` — see each one's own `activeBasemapId`/
+ * `activeLayerId` computed) picks up the flip on the very same tick it happens.
+ */
+const explicitMapLayer = signal(readPersistedFlag(MAP_LAYER_EXPLICIT_KEY, false));
+
 /** Whether the operator has ever explicitly used the layer picker (`markMapLayerExplicit`) — once
- * true, `effectiveMapLayerId` stops substituting the theme default and always returns their choice. */
+ * true, `effectiveMapLayerId` stops substituting the theme default and always returns their choice.
+ * Reads {@link explicitMapLayer}, not `localStorage` directly — see that signal's own doc comment. */
 export function isMapLayerExplicit(): boolean {
-  return readPersistedFlag(MAP_LAYER_EXPLICIT_KEY, false);
+  return explicitMapLayer();
 }
 
-/** Records an explicit layer-picker click — `TacticalMap`'s own `setBasemap` calls this
- * alongside `SettingsStore.mapLayer.set(id)`, so the two persisted values always change together. */
+/** Records an explicit layer-picker click — every host's own `setBasemap`/`setLayer` calls this
+ * alongside `SettingsStore.mapLayer.set(id)`, so the two persisted values always change together.
+ * Writes {@link explicitMapLayer} first (the reactive notification) and `localStorage` second (the
+ * persistence) — see that signal's own doc comment for why the signal write is load-bearing, not
+ * redundant with the `localStorage` one. */
 export function markMapLayerExplicit(): void {
+  explicitMapLayer.set(true);
   writePersistedFlag(MAP_LAYER_EXPLICIT_KEY, true);
 }
 

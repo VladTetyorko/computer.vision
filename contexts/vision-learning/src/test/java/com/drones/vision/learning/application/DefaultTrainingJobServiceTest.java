@@ -56,6 +56,10 @@ class DefaultTrainingJobServiceTest {
     private final UserId actor = UserId.random();
     private final DatasetId datasetId = DatasetId.random();
     private final TrainingJobSpec spec = new TrainingJobSpec("yolo26n.pt", datasetId.value().toString(), 10);
+    // docs/plans/active/OPS-UX-PLAN.md §1: starting a training job is deployment-global (it claims
+    // the single training host), so only an ADMIN/unbounded scope may -- adminScope is the scope
+    // every happy-path test below now runs as; managerScope exists solely to prove it is refused.
+    private final VisibilityScope adminScope = VisibilityScope.unbounded();
     private final VisibilityScope managerScope = VisibilityScope.groups(Set.of());
     private final VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of());
 
@@ -91,13 +95,30 @@ class DefaultTrainingJobServiceTest {
         assertTrue(service.jobs().isEmpty());
     }
 
+    @Test
+    void startDeniedForAManagerScopeAuditsTheDenialAndNeverCallsThePort() {
+        // docs/plans/active/OPS-UX-PLAN.md §1: a MANAGER may administer every asset in their
+        // subtree but training claims the one deployment-wide host, so canManageOrg() is not
+        // enough here -- only an unbounded (ADMIN) scope may start a job.
+        AccessDeniedException ex = assertThrows(AccessDeniedException.class,
+                () -> service.start(spec, actor, managerScope));
+        assertTrue(ex.getMessage().toLowerCase().contains("not permitted"));
+
+        assertNull(trainingPort.lastSpec, "the port must never have been called");
+        assertNull(labelingService.lastUploadDatasetId, "the dataset pre-check must never have run");
+
+        AuditEntry entry = onlyEntry();
+        assertEquals("DENIED:out of scope", entry.details().get("result"));
+        assertTrue(service.jobs().isEmpty());
+    }
+
     // -- synchronous dataset pre-check ---------------------------------------
 
     @Test
     void startThrowsNoSuchElementForAnUnknownDataset() {
         labelingService.datasetKnown = false;
 
-        assertThrows(NoSuchElementException.class, () -> service.start(spec, actor, managerScope));
+        assertThrows(NoSuchElementException.class, () -> service.start(spec, actor, adminScope));
 
         assertTrue(service.jobs().isEmpty(), "no job may be registered when the pre-check fails");
         assertNull(trainingPort.lastSpec, "training must never be submitted when the pre-check fails");
@@ -107,7 +128,7 @@ class DefaultTrainingJobServiceTest {
     void startThrowsAccessDeniedWhenTheDatasetIsOutOfScope() {
         labelingService.datasetInScope = false;
 
-        assertThrows(AccessDeniedException.class, () -> service.start(spec, actor, managerScope));
+        assertThrows(AccessDeniedException.class, () -> service.start(spec, actor, adminScope));
 
         assertTrue(service.jobs().isEmpty());
         assertNull(trainingPort.lastSpec);
@@ -118,7 +139,7 @@ class DefaultTrainingJobServiceTest {
         labelingService.labeledCount = 0;
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> service.start(spec, actor, managerScope));
+                () -> service.start(spec, actor, adminScope));
         assertTrue(ex.getMessage().contains("has no LABELED samples to train on"));
 
         assertTrue(service.jobs().isEmpty());
@@ -130,7 +151,7 @@ class DefaultTrainingJobServiceTest {
     @Test
     void startReturnsAJobIdAndTheJobAppearsRunningBeforeAnyProgressArrives() {
         // an empty script models a job that was submitted but has not yet reported any training progress
-        String jobId = service.start(spec, actor, managerScope);
+        String jobId = service.start(spec, actor, adminScope);
 
         assertFalse(jobId.isBlank());
         assertEquals(spec, trainingPort.lastSpec, "the job must actually have been submitted to the port");
@@ -161,7 +182,7 @@ class DefaultTrainingJobServiceTest {
                 new TrainingProgress("wire-job-xyz", 1, 10, 0.9, 0.10, JobState.RUNNING, ""),
                 new TrainingProgress("wire-job-xyz", 2, 10, 0.6, 0.35, JobState.RUNNING, ""));
 
-        String jobId = service.start(spec, actor, managerScope);
+        String jobId = service.start(spec, actor, adminScope);
 
         TrainingJobView job = service.job(jobId).orElseThrow();
         assertEquals(2, job.epoch());
@@ -183,7 +204,7 @@ class DefaultTrainingJobServiceTest {
                 new TrainingProgress("wire-job-completely-different", 10, 10, 0.05, 0.91, JobState.SUCCEEDED,
                         "yolo26n-finetuned-v7"));
 
-        String jobId = service.start(spec, actor, managerScope);
+        String jobId = service.start(spec, actor, adminScope);
 
         assertNotEquals("wire-job-completely-different", jobId);
         TrainingJobView job = service.job(jobId).orElseThrow();
@@ -199,7 +220,7 @@ class DefaultTrainingJobServiceTest {
                 new TrainingProgress("wire-job", 3, 10, 1.2, 0.05, JobState.RUNNING, ""),
                 new TrainingProgress("wire-job", 3, 10, 1.2, 0.05, JobState.FAILED, "GPU OOM at epoch 3"));
 
-        String jobId = service.start(spec, actor, managerScope);
+        String jobId = service.start(spec, actor, adminScope);
 
         TrainingJobView job = service.job(jobId).orElseThrow();
         assertEquals(JobState.FAILED, job.state());
@@ -213,7 +234,7 @@ class DefaultTrainingJobServiceTest {
         trainingPort.script = List.of(new TrainingProgress("wire-job", 2, 10, 0.8, 0.2, JobState.RUNNING, ""));
         trainingPort.failure = new IllegalStateException("connection reset by peer");
 
-        String jobId = service.start(spec, actor, managerScope); // must not throw
+        String jobId = service.start(spec, actor, adminScope); // must not throw
 
         TrainingJobView job = service.job(jobId).orElseThrow();
         assertEquals(JobState.FAILED, job.state());
@@ -226,7 +247,7 @@ class DefaultTrainingJobServiceTest {
     void aTrainingPortExceptionWithNoMessageFallsBackToTheExceptionClassName() {
         trainingPort.failure = new IllegalStateException();
 
-        String jobId = service.start(spec, actor, managerScope);
+        String jobId = service.start(spec, actor, adminScope);
 
         assertEquals("IllegalStateException", service.job(jobId).orElseThrow().message());
     }
@@ -237,7 +258,7 @@ class DefaultTrainingJobServiceTest {
     void anUploadFailureInsideRunJobResultsInAFailedJob() {
         labelingService.uploadFailure = new IllegalStateException("cv-service rejected the dataset upload: bad zip");
 
-        String jobId = service.start(spec, actor, managerScope); // must not throw -- the pre-check already passed
+        String jobId = service.start(spec, actor, adminScope); // must not throw -- the pre-check already passed
 
         TrainingJobView job = service.job(jobId).orElseThrow();
         assertEquals(JobState.FAILED, job.state());
@@ -249,11 +270,11 @@ class DefaultTrainingJobServiceTest {
 
     @Test
     void finishedJobsBeyondTheCapAreEvictedButRunningJobsNeverAre() {
-        String runningJobId = service.start(spec, actor, managerScope); // empty script -> stays RUNNING
+        String runningJobId = service.start(spec, actor, adminScope); // empty script -> stays RUNNING
 
         for (int i = 0; i < DefaultTrainingJobService.MAX_FINISHED_JOBS + 5; i++) {
             trainingPort.script = List.of(new TrainingProgress("w", 1, 1, 0.0, 1.0, JobState.SUCCEEDED, "m" + i));
-            service.start(spec, actor, managerScope);
+            service.start(spec, actor, adminScope);
         }
 
         assertTrue(service.job(runningJobId).isPresent(), "a still-RUNNING job must never be evicted");
@@ -269,11 +290,11 @@ class DefaultTrainingJobServiceTest {
 
         trainingPort.script = List.of(new TrainingProgress("w", 5, 20, 0.4, 0.5, JobState.RUNNING, ""));
         String jobA = service.start(new TrainingJobSpec("yolo26n.pt", datasetA.value().toString(), 20), actor,
-                managerScope);
+                adminScope);
 
         trainingPort.script = List.of(new TrainingProgress("w", 8, 30, 0.2, 0.7, JobState.SUCCEEDED, "model-B"));
         String jobB = service.start(new TrainingJobSpec("yolo11n.pt", datasetB.value().toString(), 30), actor,
-                managerScope);
+                adminScope);
 
         assertNotEquals(jobA, jobB);
         TrainingJobView viewA = service.job(jobA).orElseThrow();
@@ -302,9 +323,9 @@ class DefaultTrainingJobServiceTest {
             // A real cached-thread-pool executor returns from execute() without waiting for the
             // task, so these two run genuinely concurrently on background threads.
             String jobA = realService.start(new TrainingJobSpec("yolo26n.pt", datasetA.value().toString(), 5),
-                    actor, managerScope);
+                    actor, adminScope);
             String jobB = realService.start(new TrainingJobSpec("yolo11n.pt", datasetB.value().toString(), 7),
-                    actor, managerScope);
+                    actor, adminScope);
 
             awaitTerminal(realService, jobA);
             awaitTerminal(realService, jobB);

@@ -837,6 +837,34 @@ export class VisionApi {
     );
   }
 
+  /**
+   * The fleet-wide audit trail, newest first (`GET /api/audit`, docs/plans/active/OPS-UX-PLAN.md §3 B1) —
+   * unlike {@link myActivity} above, not scoped to the caller's own actions. Gated server-side on
+   * `VisibilityScope#canManageOrg()` (`AuditController`'s own class javadoc); a PILOT session gets a
+   * `403` with a real message (`ErrorResponse.message`), which `features/audit/audit-facade.ts`
+   * surfaces via `describeHttpError` exactly like any other rejected call, rather than rendering an
+   * empty table that would read as "nothing ever happened". `targetType`/`targetId` mirror the
+   * backend's own optional target-scoping pair (must be supplied together, or not at all — enforced
+   * server-side); `features/audit/**` never uses them today (its own actor/action filters are
+   * client-side over one already-fetched page), but they're wired through here rather than a
+   * narrower single-purpose method, since this is `AuditController#list`'s one full surface.
+   */
+  listAudit(params?: { readonly targetType?: string; readonly targetId?: string; readonly limit?: number }): Promise<AuditEntry[]> {
+    const query: Record<string, string | number> = {};
+    if (params?.targetType !== undefined) {
+      query['targetType'] = params.targetType;
+    }
+    if (params?.targetId !== undefined) {
+      query['targetId'] = params.targetId;
+    }
+    if (params?.limit !== undefined) {
+      query['limit'] = params.limit;
+    }
+    return firstValueFrom(
+      this.http.get<AuditEntry[]>('/api/audit', Object.keys(query).length > 0 ? { params: query } : {}),
+    );
+  }
+
   // --- CV training / dataset improvement loop (docs/plans/done/CV-TRAINING-PLAN.md §3-4's frozen wire
   // contract, Wave T5) — capture a live frame + its detections into a dataset, correct the boxes,
   // export a YOLO dataset. Every method below is gated server-side by `vision.training.enabled`

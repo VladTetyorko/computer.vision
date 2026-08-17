@@ -4,7 +4,10 @@ import type { PipelineSettings } from '../../core/settings/settings-store';
 import {
   CAPABILITY_LEVEL_OPTIONS,
   DETECTION_LAG_BUDGET_MILLIS,
+  FIRST_HIDE_HINT,
+  HIDDEN_CLASS_TRUTH,
   PEOPLE_VEHICLES_BUILDINGS_PRESET,
+  SEEN_NOW_CHIP_CAP,
   addLabel,
   applyPreset,
   buildCapabilityLevelPatch,
@@ -20,12 +23,15 @@ import {
   capabilityLevelLabel,
   capabilityLevelOption,
   chipCandidates,
+  classesOnScreenCount,
   debounce,
+  detectionStatus,
   engineOptionsForMode,
   filterLabelsByQuery,
   findModel,
   formatDetectionLag,
   formatFlowStrip,
+  formatMeasuredRate,
   hasExactLabelMatch,
   isCapabilityDowngraded,
   isDetectionLagOverBudget,
@@ -34,8 +40,11 @@ import {
   observedLabels,
   perfHint,
   reArmHint,
+  recentObservedLabels,
   seedLabelFilterForModel,
   sortSelectedFirst,
+  stagedLabelSeed,
+  submitLabelFilterButtonText,
   toggleLabelChip,
 } from './cv-control-panel-logic';
 
@@ -279,6 +288,56 @@ describe('cv-control-panel-logic', () => {
     it('never claims the class filter reduces CPU cost', () => {
       expect(perfHint(false)).not.toMatch(/class filter reduces cpu/i);
       expect(perfHint(false)).toMatch(/inference rate and detection on\/off/i);
+    });
+
+    it('no longer claims the class filter "only trims what\'s shown" — corrected per CV-UX-RESEARCH §1.2/§4.3', () => {
+      expect(perfHint(false)).not.toMatch(/only trims what.s shown/i);
+    });
+
+    it('the closed-set branch folds in the honest drop-everywhere sentence verbatim', () => {
+      expect(perfHint(false)).toContain(HIDDEN_CLASS_TRUTH);
+    });
+  });
+
+  describe('HIDDEN_CLASS_TRUTH / FIRST_HIDE_HINT', () => {
+    it('HIDDEN_CLASS_TRUTH names screen, alerts and recording, and denies a speed change', () => {
+      expect(HIDDEN_CLASS_TRUTH).toMatch(/alerts/i);
+      expect(HIDDEN_CLASS_TRUTH).toMatch(/recording/i);
+      expect(HIDDEN_CLASS_TRUTH).toMatch(/doesn't make it faster/i);
+    });
+
+    it('FIRST_HIDE_HINT names the whitelist mechanism and the real consequence of submitting it', () => {
+      expect(FIRST_HIDE_HINT).toMatch(/whitelist/i);
+      expect(FIRST_HIDE_HINT).toMatch(/newly detected/i);
+      expect(FIRST_HIDE_HINT).toMatch(/clear the selection and submit/i);
+    });
+  });
+
+  describe('stagedLabelSeed', () => {
+    it('returns the staged selection unchanged once one exists, ignoring the applied filter', () => {
+      expect(stagedLabelSeed(['car'], ['person'])).toEqual(['car']);
+    });
+
+    it('returns [] as the staged selection when that is what was explicitly staged, not falling back to effective', () => {
+      expect(stagedLabelSeed([], ['person'])).toEqual([]);
+    });
+
+    it('falls back to the applied filter when nothing is staged yet (null)', () => {
+      expect(stagedLabelSeed(null, ['person', 'car'])).toEqual(['person', 'car']);
+    });
+  });
+
+  describe('submitLabelFilterButtonText', () => {
+    it('states the empty-selection consequence honestly rather than reading as a no-op', () => {
+      expect(submitLabelFilterButtonText([])).toBe('Apply — show every class');
+    });
+
+    it('names the singular count', () => {
+      expect(submitLabelFilterButtonText(['person'])).toBe('Apply 1 class');
+    });
+
+    it('names the plural count', () => {
+      expect(submitLabelFilterButtonText(['person', 'car'])).toBe('Apply 2 classes');
     });
   });
 
@@ -564,6 +623,110 @@ describe('cv-control-panel-logic', () => {
     it('formats a negative or non-finite value as an em dash too', () => {
       expect(formatDetectionLag(-1)).toBe('—');
       expect(formatDetectionLag(Number.NaN)).toBe('—');
+    });
+  });
+
+  // --- Seen-now chips (docs/plans/active/CV-UX-RESEARCH.md §4.1, wave U4) --------------------------
+
+  describe('recentObservedLabels', () => {
+    it('collects distinct labels across results, capped', () => {
+      const results = [detectionResult(['person', 'car']), detectionResult(['car', 'building'])];
+      expect(recentObservedLabels(results, 2)).toEqual(['person', 'car']);
+    });
+
+    it('defaults to SEEN_NOW_CHIP_CAP when no cap is given', () => {
+      const labels = Array.from({ length: SEEN_NOW_CHIP_CAP + 5 }, (_, i) => `label-${i}`);
+      expect(recentObservedLabels([detectionResult(labels)])).toHaveLength(SEEN_NOW_CHIP_CAP);
+    });
+
+    it('returns [] for no results', () => {
+      expect(recentObservedLabels([])).toEqual([]);
+    });
+
+    it('returns fewer than the cap when there simply aren\'t that many distinct labels', () => {
+      expect(recentObservedLabels([detectionResult(['person'])], 8)).toEqual(['person']);
+    });
+  });
+
+  // --- Classes on screen right now (docs/plans/active/CV-UX-RESEARCH.md §3's status line) ---------
+
+  describe('classesOnScreenCount', () => {
+    it('counts distinct labels in the most recent result alone', () => {
+      expect(classesOnScreenCount(detectionResult(['person', 'car', 'person']), [])).toBe(2);
+    });
+
+    it('only counts labels that pass the filter', () => {
+      expect(classesOnScreenCount(detectionResult(['person', 'car']), ['person'])).toBe(1);
+    });
+
+    it('is 0 for no result yet', () => {
+      expect(classesOnScreenCount(undefined, [])).toBe(0);
+    });
+  });
+
+  // --- Detection status (docs/plans/active/CV-UX-RESEARCH.md §1.2/§3/§9.2, waves U3+U5) ------------
+
+  describe('formatMeasuredRate', () => {
+    it('formats a genuine positive reading, one decimal only when not whole', () => {
+      expect(formatMeasuredRate(9.94)).toBe('9.9 fps');
+      expect(formatMeasuredRate(10)).toBe('10 fps');
+    });
+
+    it('is null for undefined, zero, negative, or non-finite — never a fabricated "0 fps"', () => {
+      expect(formatMeasuredRate(undefined)).toBeNull();
+      expect(formatMeasuredRate(0)).toBeNull();
+      expect(formatMeasuredRate(-1)).toBeNull();
+      expect(formatMeasuredRate(Number.NaN)).toBeNull();
+    });
+  });
+
+  describe('detectionStatus', () => {
+    it('the operator\'s own off choice always wins, regardless of every other signal', () => {
+      expect(detectionStatus(false, true, 'RUNNING', 12, 3).kind).toBe('off');
+    });
+
+    it('reports waiting-to-start when enabled but no stream is running yet', () => {
+      const status = detectionStatus(true, false, undefined, undefined, 0);
+      expect(status.kind).toBe('waiting-to-start');
+      expect(status.text).toMatch(/once a stream is running/i);
+    });
+
+    it('reports waiting-for-viewer as explicitly not a fault, per DetectionState\'s own contract', () => {
+      const status = detectionStatus(true, true, 'IDLE_NO_VIEWERS', undefined, 0);
+      expect(status.kind).toBe('waiting-for-viewer');
+      expect(status.text).toMatch(/no cost while idle/i);
+    });
+
+    it('reports the measured rate and classes-on-screen count while running', () => {
+      const status = detectionStatus(true, true, 'RUNNING', 9.9, 3);
+      expect(status.kind).toBe('running');
+      expect(status.text).toBe('Running at 9.9 fps · 3 classes on screen');
+    });
+
+    it('running with exactly one class on screen is singular, not "1 classes"', () => {
+      expect(detectionStatus(true, true, 'RUNNING', 5, 1).text).toContain('1 class on screen');
+    });
+
+    it('running with an unmeasured rate never fabricates a number', () => {
+      const status = detectionStatus(true, true, 'RUNNING', undefined, 0);
+      expect(status.text).toContain('rate not yet measured');
+      expect(status.text).not.toMatch(/\d/);
+    });
+
+    it('running with nothing on screen omits the classes clause entirely', () => {
+      expect(detectionStatus(true, true, 'RUNNING', 5, 0).text).toBe('Running at 5 fps');
+    });
+
+    it('names a genuine sync gap rather than echoing the draft as confirmed "on"', () => {
+      const status = detectionStatus(true, true, 'OFF', undefined, 0);
+      expect(status.kind).toBe('unknown');
+      expect(status.text).toMatch(/waiting for the server to confirm/i);
+    });
+
+    it('degrades to unknown, never a guess, when detectionState is absent (an old server)', () => {
+      const status = detectionStatus(true, true, undefined, undefined, 0);
+      expect(status.kind).toBe('unknown');
+      expect(status.text).toMatch(/not reported/i);
     });
   });
 });

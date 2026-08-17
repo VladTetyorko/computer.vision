@@ -1,4 +1,7 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router } from '@angular/router';
+import { filter } from 'rxjs';
 import { VisionApi } from '../api/vision-api';
 import type { DrawKind, GeoPosition, MapDrawingResponse } from '../api/models';
 import { describeHttpError } from '../api-error';
@@ -43,6 +46,15 @@ const DRAWINGS_POLL_INTERVAL_MS = 30_000;
  * restructuring that component, which Wave E is explicitly scoped out of. {@link setGeometry} is the
  * ready seam for it: it is used today by "redraw" (draw a replacement shape for the selected
  * drawing), which delivers the same outcome without new map internals.
+ *
+ * <h2>`mode` disarms itself on a genuine page change</h2>
+ * `providedIn: 'root'` means this store outlives any one routed page — arm a draw mode on `/command`
+ * and navigate to `/fly/:assetId` without stopping first, and the cockpit's map inset inherits a still
+ * live drawing mode with nothing on screen explaining why. `mode` resets on every `NavigationEnd`
+ * whose **path** actually changed (a same-page query-param navigation, e.g. `CommandFacade`'s
+ * `?asset=` URL sync, does not — see `resetOnRouteChange`), mirroring `MarksStore`'s identical fix and
+ * `core/ui/overlay-store.ts#GlobalOverlayStore`'s `Router.events` seam. Drawing *data* (`drawings`)
+ * stays exactly as shared as before — only this transient interaction flag resets.
  */
 @Injectable({ providedIn: 'root' })
 export class DrawingsStore {
@@ -98,6 +110,9 @@ export class DrawingsStore {
 
   private processedLiveEventCount = 0;
 
+  /** The last `NavigationEnd`'s path (no query/hash) — `null` until the first event. See `resetOnRouteChange`. */
+  private lastRoutePath: string | null = null;
+
   constructor() {
     void this.refresh();
     inject(PollScheduler).schedule(DRAWINGS_POLL_INTERVAL_MS, () => this.refresh());
@@ -111,6 +126,28 @@ export class DrawingsStore {
       this.processedLiveEventCount = events.length;
       this.drawingsSignal.update((drawings) => applyDrawingEvents(drawings, newEvents));
     });
+
+    inject(Router)
+      .events.pipe(
+        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+        takeUntilDestroyed(),
+      )
+      .subscribe((event) => this.resetOnRouteChange(event.urlAfterRedirects));
+  }
+
+  /**
+   * Stops an in-progress draw mode on a genuine page change — see this class's own "disarms itself on
+   * a genuine page change" doc comment. Path-only comparison (query/hash stripped) so `CommandFacade`'s
+   * `?asset=` URL sync (BUG 4) — a same-path `NavigationEnd` fired on every selection — never stops an
+   * operator who happens to be mid-drawing while clicking through the roster. The first `NavigationEnd`
+   * after boot never resets (`lastRoutePath` starts `null`); `mode` is already `null` then anyway.
+   */
+  private resetOnRouteChange(url: string): void {
+    const path = url.split('?')[0].split('#')[0];
+    if (this.lastRoutePath !== null && path !== this.lastRoutePath) {
+      this.modeSignal.set(null);
+    }
+    this.lastRoutePath = path;
   }
 
   async refresh(): Promise<void> {

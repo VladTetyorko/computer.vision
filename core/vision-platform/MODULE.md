@@ -41,6 +41,7 @@ is user administration, not visibility.
 - `EventPublisherPort`: `void publish(Event)` — must not throw on ordinary delivery failure; called on hot pipeline path, must return quickly
 - `enum EventType` — DETECTION, DEVICE_ONLINE, DEVICE_OFFLINE, STREAM_STARTED, STREAM_STOPPED, PIPELINE_ERROR, TRAINING, GEOFENCE_BREACH (raised by `GeofenceMonitor`, `vision-application`, on a breach edge transition; attributes carry `{assetId, zoneId, zoneName, kind, direction}`, `streamId` always `null` since a breach is asset-scoped, not stream-scoped)
 - `record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assignedAssets)` — what a request may see, resolved once per request by `vision-application`'s `ScopeResolver` and threaded into user-facing reads/commands. Nested `enum Kind {UNBOUNDED, GROUPS, ASSIGNED_ASSETS}`; three static factories — `unbounded()` (ADMIN/auth-off), `groups(Set<GroupId>)` (MANAGER), `assignedAssets(Set<AssetId>)` (PILOT); both sets defensively copied, null→empty. `boolean includes(AssetId, Ownership)` — `UNBOUNDED`→true, `GROUPS`→`groups.contains(ownership.groupId())`, `ASSIGNED_ASSETS`→`assignedAssets.contains(assetId)`. `boolean canManageOrg()` — true iff `UNBOUNDED`/`GROUPS`. `boolean includesGroup(GroupId)` — the group half of `includes`
+- **Authority, not visibility (docs/plans/active/OPS-UX-PLAN.md §1, Wave C):** `includes`/`includesGroup`/`canManageOrg` all answer "what may this request see/reach" — two real call sites had been asking them an authority question instead (a PILOT could rename/delete their own assigned aircraft; `canManageOrg()` let a MANAGER promote the deployment's live CV model or start a training job, exactly as an ADMIN could). Two predicates answer "what may this request do": `boolean canAdminister()` — `true` iff `UNBOUNDED`; gates deployment-global actions with no group boundary (model promote, training start). `boolean canManage(Ownership)` — `true` for `UNBOUNDED`; for `GROUPS` iff `ownership.groupId()` is in `groups()` (a MANAGER's subtree is already a management boundary, so this agrees with `includes` for that one kind); always `false` for `ASSIGNED_ASSETS` — a PILOT's scope is built so they can see *and fly* exactly their assigned aircraft, and that is the whole of their authority, so `canManage` is `false` regardless of whether the asset is the very one assigned to them. With `vision.auth.enabled=false` every caller is `unbounded()`, so both predicates are always `true` and behavior is unchanged.
 
 ## Conventions
 
@@ -62,3 +63,8 @@ module's creation) moved the package's *jar*, not its contents — same 11 types
 `AuditTargetType` family, `AuditTrailPort`, `VisibilityScope`, `AccessDeniedException`), same
 behavior, zero import changes anywhere in the repo (verified: `./mvnw -B -DskipWeb test` green across
 the reactor after the split).
+
+**OPS-UX-PLAN Wave C (C1, docs/plans/active/OPS-UX-PLAN.md §4):** `VisibilityScope` gained
+`canAdminister()`/`canManage(Ownership)` — pure additions, no existing method's signature or
+behavior changed. `VisibilityScopeTest`: 9 → 12 (module total 17/17: `VisibilityScopeTest` 12 +
+`EventTest` 5). `./mvnw -B -pl core/vision-platform test` green.

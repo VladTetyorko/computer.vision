@@ -64,18 +64,23 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
     }
 
     /**
-     * Merges this request onto {@link PipelineConfig#defaults()}.
+     * Merges this request onto {@code defaults} — the deployment's own default {@link
+     * PipelineConfig} (docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8), not necessarily {@link
+     * PipelineConfig#defaults()} itself: {@code vision.cv.detection-default-enabled} lets a
+     * deployment override {@code detectionEnabled}'s starting value, and that only reaches a started
+     * stream if this merge starts from the supplied instance rather than always calling the static
+     * factory itself.
      *
-     * <p>The tracking component stays the domain's own default here — it is the <b>bottom</b> layer
+     * <p>The tracking component stays {@code defaults}' own value here — it is the <b>bottom</b> layer
      * of the fold, not the answer. What this request states about tracking travels separately as
      * {@link #trackingPatch()}, and the application layer composes the three layers (request &gt;
      * deployment seed &gt; this default) when the stream starts, so that every start path seeds
      * identically (docs/extracts/TRACKING-ORCHESTRATION.md §4.1).
      *
+     * @param defaults the deployment's default pipeline configuration to merge this request onto
      * @return the effective pipeline configuration for the new stream
      */
-    public PipelineConfig mergeOntoDefaults() {
-        PipelineConfig defaults = PipelineConfig.defaults();
+    public PipelineConfig mergeOnto(PipelineConfig defaults) {
         double confidence = confidenceThreshold != null ? confidenceThreshold : defaults.confidenceThreshold();
         int fps = inferenceFps != null ? inferenceFps : defaults.inferenceFps();
         boolean burnIn = overlayBurnIn != null ? overlayBurnIn : defaults.overlayBurnIn();

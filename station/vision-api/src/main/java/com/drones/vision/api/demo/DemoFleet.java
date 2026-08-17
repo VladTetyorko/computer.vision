@@ -82,13 +82,16 @@ public class DemoFleet {
     private final AssetService assets;
     private final AssetStreamService assetStreams;
     private final DemoVideoLibrary videos;
+    /** The deployment's default {@link PipelineConfig} for a newly started stream (docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8). */
+    private final PipelineConfig defaultConfig;
 
     public DemoFleet(SimulationService simulations, AssetService assets, AssetStreamService assetStreams,
-                      DemoVideoLibrary videos) {
+                      DemoVideoLibrary videos, PipelineConfig defaultConfig) {
         this.simulations = Objects.requireNonNull(simulations, "simulations must not be null");
         this.assets = Objects.requireNonNull(assets, "assets must not be null");
         this.assetStreams = Objects.requireNonNull(assetStreams, "assetStreams must not be null");
         this.videos = Objects.requireNonNull(videos, "videos must not be null");
+        this.defaultConfig = Objects.requireNonNull(defaultConfig, "defaultConfig must not be null");
     }
 
     /**
@@ -140,7 +143,7 @@ public class DemoFleet {
         int started = 0;
         for (DemoAsset asset : fleet.subList(0, Math.max(0, Math.min(howMany, fleet.size())))) {
             try {
-                assetStreams.startStream(asset.id(), null, PipelineConfig.defaults());
+                assetStreams.startStream(asset.id(), null, defaultConfig);
                 started++;
             } catch (RuntimeException e) {
                 problems.accept("stream " + asset.displayName() + ": " + describe(e));

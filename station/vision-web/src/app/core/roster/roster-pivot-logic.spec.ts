@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetSummary, AssignedPilot, UserSummary } from '../api/models';
-import { buildPilotRows, parseRosterPivot, searchPilotRows } from './roster-pivot-logic';
+import { buildPilotRows, countPilotsWithoutAssets, isPilot, parseRosterPivot, searchPilotRows } from './roster-pivot-logic';
 
 function asset(partial: Partial<AssetSummary> = {}): AssetSummary {
   return {
@@ -75,6 +75,67 @@ describe('buildPilotRows', () => {
     const rows = buildPilotRows(assets, pilotsByAsset, users);
     expect(rows.find((r) => r.userId === 'u-1')?.assignments).toHaveLength(2);
     expect(rows.find((r) => r.userId === 'u-2')?.assignments).toHaveLength(1);
+  });
+});
+
+describe('isPilot', () => {
+  it('true for a user with a PILOT membership', () => {
+    expect(isPilot(user({ memberships: [{ groupId: 'g-1', role: 'PILOT' }] }))).toBe(true);
+  });
+
+  it('false for a user with only a MANAGER/ADMIN membership', () => {
+    expect(isPilot(user({ memberships: [{ groupId: 'g-1', role: 'MANAGER' }] }))).toBe(false);
+    expect(isPilot(user({ memberships: [{ groupId: 'g-1', role: 'ADMIN' }] }))).toBe(false);
+  });
+
+  it('false for a user with no memberships at all', () => {
+    expect(isPilot(user({ memberships: [] }))).toBe(false);
+  });
+
+  it('true for a user who is PILOT in one group and MANAGER in another — topRole would miss this', () => {
+    const mixed = user({
+      memberships: [
+        { groupId: 'g-1', role: 'PILOT' },
+        { groupId: 'g-2', role: 'MANAGER' },
+      ],
+      topRole: 'MANAGER',
+    });
+    expect(isPilot(mixed)).toBe(true);
+  });
+});
+
+describe('countPilotsWithoutAssets', () => {
+  it('counts a pilot with zero assignments', () => {
+    const users = [user({ userId: 'u-1', memberships: [{ groupId: 'g-1', role: 'PILOT' }] })];
+    const rows = buildPilotRows([], new Map(), users);
+    expect(countPilotsWithoutAssets(rows, users)).toBe(1);
+  });
+
+  it('does not count a pilot who has at least one assignment', () => {
+    const assets = [asset({ assetId: 'a-1', displayName: 'Hawk' })];
+    const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]);
+    const users = [user({ userId: 'u-1', memberships: [{ groupId: 'g-1', role: 'PILOT' }] })];
+    const rows = buildPilotRows(assets, pilotsByAsset, users);
+    expect(countPilotsWithoutAssets(rows, users)).toBe(0);
+  });
+
+  it('does not count a MANAGER/ADMIN with zero assignments — they are not pilots', () => {
+    const users = [
+      user({ userId: 'u-1', memberships: [{ groupId: 'g-1', role: 'MANAGER' }] }),
+      user({ userId: 'u-2', memberships: [{ groupId: 'g-1', role: 'ADMIN' }] }),
+    ];
+    const rows = buildPilotRows([], new Map(), users);
+    expect(countPilotsWithoutAssets(rows, users)).toBe(0);
+  });
+
+  it('counts each unassigned pilot once, across several', () => {
+    const users = [
+      user({ userId: 'u-1', displayName: 'A', memberships: [{ groupId: 'g-1', role: 'PILOT' }] }),
+      user({ userId: 'u-2', displayName: 'B', memberships: [{ groupId: 'g-1', role: 'PILOT' }] }),
+      user({ userId: 'u-3', displayName: 'C', memberships: [{ groupId: 'g-1', role: 'MANAGER' }] }),
+    ];
+    const rows = buildPilotRows([], new Map(), users);
+    expect(countPilotsWithoutAssets(rows, users)).toBe(2);
   });
 });
 

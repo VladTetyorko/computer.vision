@@ -7,6 +7,7 @@ import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.simulation.application.SimulatedAsset;
 import com.drones.vision.simulation.application.SimulationService;
 import com.drones.vision.simulation.application.SimulationSpec;
+import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
@@ -171,7 +172,8 @@ class DemoFleetTest {
     }
 
     private DemoFleet fleet() {
-        return new DemoFleet(simulations, assets, assetStreams, new DemoVideoLibrary(videoFolder));
+        return new DemoFleet(simulations, assets, assetStreams, new DemoVideoLibrary(videoFolder),
+                PipelineConfig.defaults());
     }
 
     private AssetSummary summary(String displayName) {

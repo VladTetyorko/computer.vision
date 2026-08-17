@@ -40,53 +40,66 @@
   color: var(--text-muted);
 }
 
-/* ---- Model picker --------------------------------------------------------------------------- */
+/* ---- Detect hero (docs/plans/active/CV-UX-RESEARCH.md §3, wave U1) — the primary act, promoted to
+   the top of the panel; a quiet card (not `.emphasized`'s accent treatment — that's reserved for
+   "this is the one control that matters for the current model", a different signal). */
 
-.model-list {
+.cv-hero {
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-8);
+}
+
+/* The one honest status sentence (`detectionStatus`, `cv-control-panel-logic.ts`) — telemetry-
+   shaped text, so `.mono` like every other quiet reading in this app (the flow strip, the
+   capability readout); no status colour (frontend-style skill §3: this app has no dedicated "good"
+   hue, and "detecting normally" is not itself a warning/danger state to flag). */
+.cv-status-line {
+  margin: var(--space-8) 0 0;
+  padding-left: calc(1rem + var(--space-8) + var(--space-8));
+}
+
+/* ---- "Looking for" intent cards (docs/plans/active/CV-UX-RESEARCH.md §5, wave U2) ------------ */
+
+.intent-cards {
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
 }
 
-.model-option {
+.intent-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-8);
-  width: 100%;
-  text-align: left;
-  background: var(--panel-raised);
+  flex-direction: column;
+  gap: var(--space-4);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   padding: var(--space-8);
-  color: var(--text);
-  font-size: 0.82rem;
+}
+
+.intent-card.selected {
+  border-color: var(--color-info);
+  background: var(--color-info-soft);
+}
+
+.intent-card-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
   cursor: pointer;
   /* Comfortable tap target on touch, not just a thin text row. */
   min-height: 2.5rem;
 }
 
-.model-option:hover:not(:disabled) {
-  border-color: var(--color-info);
-}
-
-.model-option.selected {
-  border-color: var(--color-info);
-  background: var(--color-info-soft);
-}
-
-.model-option:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.model-name {
+.intent-card-name {
+  flex: 1;
   min-width: 0;
+  font-size: 0.82rem;
+  color: var(--text);
 }
 
-.model-kind {
-  flex: none;
-  text-transform: uppercase;
+.intent-card-preset {
+  align-self: flex-start;
 }
 
 /* ---- Class-filter chip checklist ------------------------------------------------------------ */
@@ -191,6 +204,90 @@
 
 .chip-add-button {
   margin-bottom: var(--space-8);
+}
+
+/* The tier-0 "Seen now" one-time first-hide hint (docs/plans/active/CV-UX-RESEARCH.md §4.4) — reuses
+   the shared `.notice` shell (no `.warn`/`.danger` intent: this is a plain fact, not bad news). */
+.cv-first-hide-hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* The staged class-filter edit's own "count + Submit + Discard" row (direct user request: "Seen
+   now" becomes staged selection + Submit) — same shell/layout as `.cv-first-hide-hint` above (a
+   plain `.notice`, no `.warn`/`.danger` intent: unapplied work in progress is not bad news, just a
+   fact that must stay visible per the frontend-style skill's "unapplied state must be visible"
+   rule). Rendered identically in both the tier-0 "Seen now" section and Tune's full checklist
+   (`cv-control-panel.html`) — the two surfaces share one `pendingLabels` signal, so their own
+   pending rows must read the same too. */
+.cv-pending-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* ---- Tune / Expert disclosures (docs/plans/active/CV-UX-RESEARCH.md §3/§7, wave U1) — the same
+   native `<details>` idiom `app-sidebar.css`'s own `.disclosure` already established for "Advanced"/
+   "Upcoming"; a feature-local rule set rather than reusing that class directly, since Angular's view
+   encapsulation scopes `app-sidebar.css` to `AppSidebar`'s own template. */
+
+.cv-disclosure {
+  margin-bottom: var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.cv-disclosure:last-child {
+  margin-bottom: 0;
+}
+
+.cv-disclosure summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-8);
+  padding: var(--space-8);
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  /* Comfortable tap target on touch, not just a thin text row. */
+  min-height: 2.5rem;
+}
+
+.cv-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.cv-disclosure-chevron {
+  display: inline-block;
+  flex: none;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.cv-disclosure[open] .cv-disclosure-chevron {
+  transform: rotate(90deg);
+}
+
+.cv-disclosure-hint {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 0.74rem;
+  text-align: right;
+}
+
+.cv-disclosure-body {
+  padding: 0 var(--space-8) var(--space-8);
+  border-top: 1px solid var(--border);
+}
+
+.cv-disclosure-body .cv-section:first-child {
+  margin-top: var(--space-8);
 }
 
 /* ---- Tracking (docs/plans/done/TRACKING-PLAN.md, wave T7) --------------------------------------------------- */

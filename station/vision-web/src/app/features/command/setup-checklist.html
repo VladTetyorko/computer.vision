@@ -1,0 +1,23 @@
+<div class="setup-checklist" role="group" aria-label="Set up this station">
+  <header class="setup-checklist-head">
+    <vision-icon name="list" [size]="16" />
+    <span class="setup-checklist-title">Set up this station</span>
+  </header>
+  <ul class="setup-checklist-rows">
+    @for (row of rows(); track row.id) {
+      <li>
+        @if (row.done) {
+          <span class="setup-row done">
+            <vision-icon name="check" [size]="14" />
+            <span class="truncate">{{ row.label }}</span>
+          </span>
+        } @else {
+          <a class="setup-row" [routerLink]="row.to">
+            <span class="dot" aria-hidden="true"></span>
+            <span class="truncate">{{ row.label }}</span>
+          </a>
+        }
+      </li>
+    }
+  </ul>
+</div>

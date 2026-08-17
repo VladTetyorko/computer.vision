@@ -1,68 +1,142 @@
 <div class="manager">
-  <!-- ---- Create ------------------------------------------------------------------------------ -->
-  <div class="section">
-    @if (creating()) {
-      <div class="create-form">
-        <span class="label" id="new-layer-name">Layer name</span>
-        <input
-          type="text"
-          aria-labelledby="new-layer-name"
-          placeholder="e.g. Recon east"
-          [ngModel]="newName()"
-          (ngModelChange)="newName.set($event)"
-          (keydown.enter)="submitCreate()"
-        />
-
-        @if (canCreateTeamLayer()) {
-          <span class="label" id="new-layer-kind">Shared with</span>
-          <div class="segmented" role="group" aria-labelledby="new-layer-kind">
-            <button
-              type="button"
-              class="btn secondary small"
-              [class.active]="newKind() === 'PERSONAL'"
-              (click)="setNewKind('PERSONAL')"
-            >
-              Only me
-            </button>
-            <button
-              type="button"
-              class="btn secondary small"
-              [class.active]="newKind() === 'TEAM'"
-              (click)="setNewKind('TEAM')"
-            >
-              A team
-            </button>
-          </div>
-
-          @if (newKind() === 'TEAM') {
-            <span class="label" id="new-layer-group">Team</span>
-            <select
-              aria-labelledby="new-layer-group"
-              [value]="newGroupId()"
-              (change)="newGroupId.set($any($event.target).value)"
-            >
-              <option value="">Pick a team…</option>
-              @for (group of teamGroups(); track group.id) {
-                <option [value]="group.id" [selected]="newGroupId() === group.id">{{ group.name }}</option>
-              }
-            </select>
+  <!-- ---- Show on map / Basemap (docs/conclusions/MAP-UX-RESEARCH.md M1) — folded in from the map's own
+       former "Layers" corner panel, which was a second, differently-scoped control wearing the same
+       label as this drawer's own button/topbar entry point. Only rendered while the host actually
+       has a `TacticalMap` to control (`mapAvailable()`); the map's own corner still has a basemap-
+       only picker for the "just swap tiles" case, so nothing here is the sole way to reach either
+       control. -------------------------------------------------------------------------------------- -->
+  @if (mapAvailable()) {
+    <div class="section">
+      <span class="label">Show on map</span>
+      @if (builtinLayerRows().length === 0 && dataLayerRows().length === 0) {
+        <p class="muted hint">No overlays on this map yet.</p>
+      } @else {
+        <ul class="visibility-list">
+          @for (row of builtinLayerRows(); track row.id) {
+            <li class="row visibility-row" [class.off]="row.hidden">
+              <button
+                type="button"
+                class="eye"
+                (click)="toggleLayerVisibility.emit(row.id)"
+                [attr.aria-pressed]="!row.hidden"
+                [title]="row.hidden ? 'Show ' + row.name : 'Hide ' + row.name"
+              >
+                <vision-icon name="eye" [size]="14" />
+              </button>
+              <span class="row-name truncate">{{ row.name }}</span>
+              <span class="muted mono row-count">{{ row.count }}</span>
+            </li>
           }
-        } @else {
-          <p class="muted hint">This layer will be yours alone. Team layers are created by whoever manages the team.</p>
-        }
+          @for (row of dataLayerRows(); track row.id) {
+            <li class="row visibility-row" [class.off]="row.hidden">
+              <button
+                type="button"
+                class="eye"
+                (click)="toggleLayerVisibility.emit(row.id)"
+                [attr.aria-pressed]="!row.hidden"
+                [title]="row.hidden ? 'Show ' + row.name : 'Hide ' + row.name"
+              >
+                <vision-icon name="eye" [size]="14" />
+              </button>
+              <span class="row-name truncate">{{ row.name }}</span>
+              @if (row.kind) {
+                <span class="chip">{{ row.kind === 'COP' ? 'Common' : row.kind === 'TEAM' ? 'Team' : 'Personal' }}</span>
+              }
+              <span class="muted mono row-count">{{ row.markCount + row.drawingCount }}</span>
+            </li>
+          }
+        </ul>
+      }
+    </div>
 
-        <div class="row actions">
-          <button type="button" class="btn small" (click)="submitCreate()" [disabled]="!canSubmitCreate()">Create layer</button>
-          <button type="button" class="btn secondary small" (click)="cancelCreate()">Cancel</button>
-        </div>
+    <div class="section">
+      <span class="label">Basemap</span>
+      <div class="segmented" role="group" aria-label="Basemap">
+        @for (basemap of basemaps(); track basemap.id) {
+          <button
+            type="button"
+            class="btn secondary small"
+            [class.active]="activeBasemapId() === basemap.id"
+            (click)="basemapChanged.emit(basemap.id)"
+          >
+            {{ basemap.label }}
+          </button>
+        }
       </div>
-    } @else {
-      <button type="button" class="btn secondary small create-trigger" (click)="startCreate()">
-        <vision-icon name="plus" [size]="14" />
-        New layer
-      </button>
-    }
-  </div>
+    </div>
+
+    <span class="label manage-heading">Manage layers</span>
+  }
+
+  <!-- ---- Create (docs/conclusions/MAP-UX-RESEARCH.md M2) --------------------------------------------
+       `showCreateTrigger()` only ever narrows this on Fly (`compactCreate()`, see this component's
+       own class doc) — Command's manager rail keeps it unconditionally, and even on Fly it never
+       hides when hiding it would strand the viewer with nowhere to put a mark. -->
+  @if (showCreateTrigger()) {
+    <div class="section">
+      @if (creating()) {
+        <div class="create-form">
+          <span class="label" id="new-layer-name">Layer name</span>
+          <input
+            type="text"
+            aria-labelledby="new-layer-name"
+            placeholder="e.g. Recon east"
+            [ngModel]="newName()"
+            (ngModelChange)="newName.set($event)"
+            (keydown.enter)="submitCreate()"
+          />
+
+          @if (canCreateTeamLayer()) {
+            <span class="label" id="new-layer-kind">Shared with</span>
+            <div class="segmented" role="group" aria-labelledby="new-layer-kind">
+              <button
+                type="button"
+                class="btn secondary small"
+                [class.active]="newKind() === 'PERSONAL'"
+                (click)="setNewKind('PERSONAL')"
+              >
+                Only me
+              </button>
+              <button
+                type="button"
+                class="btn secondary small"
+                [class.active]="newKind() === 'TEAM'"
+                (click)="setNewKind('TEAM')"
+              >
+                A team
+              </button>
+            </div>
+
+            @if (newKind() === 'TEAM') {
+              <span class="label" id="new-layer-group">Team</span>
+              <select
+                aria-labelledby="new-layer-group"
+                [value]="newGroupId()"
+                (change)="newGroupId.set($any($event.target).value)"
+              >
+                <option value="">Pick a team…</option>
+                @for (group of teamGroups(); track group.id) {
+                  <option [value]="group.id" [selected]="newGroupId() === group.id">{{ group.name }}</option>
+                }
+              </select>
+            }
+          } @else {
+            <p class="muted hint">This layer will be yours alone. Team layers are created by whoever manages the team.</p>
+          }
+
+          <div class="row actions">
+            <button type="button" class="btn small" (click)="submitCreate()" [disabled]="!canSubmitCreate()">Create layer</button>
+            <button type="button" class="btn secondary small" (click)="cancelCreate()">Cancel</button>
+          </div>
+        </div>
+      } @else {
+        <button type="button" class="btn secondary small create-trigger" (click)="startCreate()">
+          <vision-icon name="plus" [size]="14" />
+          New layer
+        </button>
+      }
+    </div>
+  }
 
   <!-- ---- Rows --------------------------------------------------------------------------------- -->
   <div class="section">

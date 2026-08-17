@@ -375,6 +375,21 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     }
 
     /**
+     * Whether any open connection currently subscribes to {@code detections:<assetId>}
+     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.5) — the SSE half of {@code
+     * LiveAndPollDetectionDemand}'s two-protocol demand signal. A cockpit open on this asset is
+     * exactly what this topic means (see this class's own javadoc), so one open connection with the
+     * topic in its set is already "someone is watching."
+     *
+     * @param assetId the asset whose {@code detections} topic to check
+     * @return {@code true} if at least one connection is subscribed
+     */
+    public boolean watchingDetections(AssetId assetId) {
+        LiveTopic topic = LiveTopic.detections(assetId);
+        return connections.values().stream().anyMatch(connection -> connection.topics().contains(topic));
+    }
+
+    /**
      * {@inheritDoc}
      *
      * <p>Recomputes and broadcasts <em>both</em> the {@code fleet} (asset-centric) and {@code

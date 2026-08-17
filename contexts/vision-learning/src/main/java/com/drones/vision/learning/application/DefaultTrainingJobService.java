@@ -34,8 +34,10 @@ import com.drones.vision.platform.VisibilityScope;
  * The one implementation of {@link TrainingJobService}.
  *
  * <h2>Scope gate</h2>
- * {@link #start} requires {@link VisibilityScope#canManageOrg()}, mirroring {@code
- * DefaultModelRegistryService#promote}'s manager/admin gate exactly.
+ * {@link #start} requires {@link VisibilityScope#canAdminister()} — ADMIN only, mirroring {@code
+ * DefaultModelRegistryService#promote}'s gate exactly (docs/plans/active/OPS-UX-PLAN.md §1):
+ * claiming the deployment's single training host is a deployment-global action, not a team-scoped
+ * one, so a group manager's {@code canManageOrg()} is not the right gate here either.
  *
  * <h2>Synchronous dataset pre-check (docs/plans/done/CV-TRAINING-V2-PLAN.md §4/§E)</h2>
  * After the scope gate, {@link #start} runs one cheap, bounded {@link
@@ -184,7 +186,7 @@ public final class DefaultTrainingJobService implements TrainingJobService {
 
         String jobId = UUID.randomUUID().toString();
 
-        if (!scope.canManageOrg()) {
+        if (!scope.canAdminister()) {
             audit(actor, jobId, spec, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException("Not permitted to start training jobs");
         }

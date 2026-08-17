@@ -772,16 +772,85 @@
           {{ facade.store.creating() ? 'Creating…' : 'Create asset' }}
         </button>
       }
+
+      <!-- ---- Step 5: Assign — "Who flies this?" (docs/plans/active/OPS-UX-PLAN.md §2 A3) ------------------- -->
+      @case ('assign') {
+        <h2>Who flies this?</h2>
+        <p class="muted hint">
+          "{{ facade.store.createdAssetDisplayName() }}" is saved. Assign the pilots who may fly it —
+          you can always change this later from the roster.
+        </p>
+
+        @if (facade.store.assignmentError(); as error) {
+          <!-- The asset already exists by the time this can ever render — worded so a failed
+               assignment is never mistaken for a failed creation (see `onboarding-store.ts`'s own
+               "Step 5" class-doc paragraph). -->
+          <vision-notice variant="danger" icon="alert">
+            The asset was created, but assigning pilots failed: {{ error }}. Manage pilots from
+            <a routerLink="/manage/roster">the roster</a> instead.
+          </vision-notice>
+        }
+
+        @if (facade.store.pilotCandidatesLoading()) {
+          <p class="muted">Loading pilots…</p>
+        } @else if (facade.store.pilotCandidates().length === 0) {
+          <vision-empty
+            title="No pilots to offer yet"
+            [message]="
+              facade.store.ownerGroupName()
+                ? 'Nobody in ' + facade.store.ownerGroupName() + ' is a pilot yet.'
+                : 'Could not determine your group.'
+            "
+          >
+            <a class="btn secondary" routerLink="/manage/roster">Go to roster</a>
+          </vision-empty>
+        } @else {
+          <p class="label">Pilots in {{ facade.store.ownerGroupName() }}</p>
+          <ul class="pilot-list">
+            @for (candidate of facade.store.pilotCandidates(); track candidate.userId) {
+              <li>
+                <label class="checkbox-field pilot-row">
+                  <input
+                    type="checkbox"
+                    [checked]="facade.store.selectedPilotIds().has(candidate.userId)"
+                    (change)="facade.store.togglePilot(candidate.userId)"
+                  />
+                  <span>{{ candidate.displayName }} ({{ candidate.username }})</span>
+                </label>
+              </li>
+            }
+          </ul>
+        }
+      }
     }
 
-    <div class="row wizard-nav">
-      @if (facade.store.step() !== 'profile') {
-        <button type="button" class="btn secondary" (click)="facade.store.back()">Back</button>
-      }
-      @if (facade.store.step() !== 'create') {
-        <button type="button" class="btn" [disabled]="!facade.store.canAdvance()" (click)="facade.store.next()">Next</button>
-      }
-    </div>
+    <!-- Assign carries its own footer (Skip/Assign-and-finish), never the generic Back/Next pair —
+         there is nothing to go "back" to (the asset already exists) and no forward step past it. -->
+    @if (facade.store.step() === 'assign') {
+      <div class="row wizard-nav">
+        <button type="button" class="btn secondary" (click)="facade.store.skipAssignment()" [disabled]="facade.store.assigningPilots()">
+          Skip for now
+        </button>
+        <button type="button" class="btn" (click)="facade.store.confirmPilots()" [disabled]="facade.store.assigningPilots()">
+          {{
+            facade.store.assigningPilots()
+              ? 'Assigning…'
+              : facade.store.selectedPilotIds().size === 0
+                ? 'Finish'
+                : 'Assign & finish'
+          }}
+        </button>
+      </div>
+    } @else {
+      <div class="row wizard-nav">
+        @if (facade.store.step() !== 'profile') {
+          <button type="button" class="btn secondary" (click)="facade.store.back()">Back</button>
+        }
+        @if (facade.store.step() !== 'create') {
+          <button type="button" class="btn" [disabled]="!facade.store.canAdvance()" (click)="facade.store.next()">Next</button>
+        }
+      </div>
+    }
   </section>
 
   @if (facade.store.flightPlanDialogOpen()) {

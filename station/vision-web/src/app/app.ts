@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, afterNextRender, computed, inject } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  type ElementRef,
+  afterNextRender,
+  computed,
+  inject,
+  viewChild,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
@@ -73,6 +82,23 @@ export class App {
 
   protected readonly offline = computed(() => this.fleet.reachable() === false);
 
+  /**
+   * The unsecured-station banner's own gate (docs/plans/active/OPS-UX-PLAN.md §2 A6,
+   * docs/conclusions/OPS-UX-REVIEW.md §O3 — "an operator has no way to know this station has no
+   * login at all"). Requires **both** `auth.user()` resolved and `authEnabled() === false`, not
+   * `authEnabled()` alone: `authEnabled` reads `false` for one tick before the boot `GET
+   * /api/auth/me` has ever answered (`AuthStore`'s own initial signal value), and showing a
+   * security-relevant claim before the session that claim is *about* has actually loaded would be a
+   * boot-time flash of a banner that might immediately vanish once auth turns out to be enabled — the
+   * same "no boot-time render flash" contract `AuthStore`'s own class doc already promises the
+   * sidebar. Sits in `app.ts` (not `AppSidebar`) because it renders in `app.html`, outside the
+   * sidebar entirely, in the shared `.shell-banners` stack (`app.css`'s own comment explains why
+   * that stack is `position: fixed`, and why it must be a *stack* rather than one strip per banner).
+   */
+  protected readonly unsecured = computed(() => this.auth.user() !== null && !this.auth.authEnabled());
+
+  private readonly bannerStack = viewChild.required<ElementRef<HTMLElement>>('shellBanners');
+
   constructor() {
     // Warms the Leaflet chunk on idle (docs/main/CYCLES-PLAN.md §9, CU-b item 2) — after render so it
     // never competes with first paint or the initial fleet fetch. `inject()` is called here, in
@@ -102,7 +128,33 @@ export class App {
     // in a form field or a contenteditable region so typing a literal `[` never fights the shell.
     const onKeydown = (event: KeyboardEvent): void => this.handleKeydown(event);
     document.addEventListener('keydown', onKeydown);
-    inject(DestroyRef).onDestroy(() => document.removeEventListener('keydown', onKeydown));
+    const destroyRef = inject(DestroyRef);
+    destroyRef.onDestroy(() => document.removeEventListener('keydown', onKeydown));
+
+    // Publishes the banner strip's real height as `--shell-banner-h` (docs/plans/active/OPS-UX-PLAN.md
+    // §2 A6 rev.2). The strip is `position: fixed`, so nothing reserves space for it automatically and
+    // every viewport-anchored box in the app — the shell grid, the sidebar, `.cockpit`,
+    // `.command-shell`, a `.side-panel` drawer — subtracts this token instead of overlapping it.
+    // Measured, not a constant: the copy wraps to two lines on a narrow viewport, and a wrong
+    // constant fails in both directions (a gap when the strip is absent, an overlap when it wraps).
+    // Written to `<html>` rather than this host so the boxes that need it can live anywhere in the
+    // tree, including inside a component with its own style encapsulation — custom properties
+    // inherit through the DOM regardless of which stylesheet declared them.
+    afterNextRender(() => {
+      const strip = this.bannerStack().nativeElement;
+      const publish = (): void =>
+        document.documentElement.style.setProperty('--shell-banner-h', `${Math.round(strip.getBoundingClientRect().height)}px`);
+      publish();
+      // Guarded because jsdom (this project's test environment) implements no `ResizeObserver` — the
+      // one `publish()` above still gives every spec a correct value for a strip that never resizes,
+      // which is every spec, so the guard costs no coverage.
+      if (typeof ResizeObserver === 'undefined') {
+        return;
+      }
+      const observer = new ResizeObserver(publish);
+      observer.observe(strip);
+      destroyRef.onDestroy(() => observer.disconnect());
+    });
   }
 
   private handleKeydown(event: KeyboardEvent): void {

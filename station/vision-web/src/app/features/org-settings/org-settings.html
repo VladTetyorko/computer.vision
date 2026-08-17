@@ -32,7 +32,11 @@
 
   @if (facade.tab() === 'users') {
     <section class="card">
-      <header><h2>Invite a user</h2></header>
+      <!-- docs/plans/active/OPS-UX-PLAN.md §3 B4: this form creates the account directly, with a password the
+           admin themselves types in below — nothing is emailed or otherwise sent to the new user. "Invite"
+           implied a message going out that never does; a real invite flow (a one-time link the invitee sets
+           their own password from) is wave D, not built yet. -->
+      <header><h2>Create a user</h2></header>
       <form class="org-form" (ngSubmit)="facade.submitUser()">
         <div class="org-form-grid">
           <label class="org-field">

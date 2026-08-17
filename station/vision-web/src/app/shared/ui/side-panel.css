@@ -10,7 +10,10 @@
    prompt opened from inside a drawer (e.g. Arm/Disarm from the flight drawer, Wave 2) still wins. */
 .side-panel {
   position: fixed;
-  top: 0;
+  /* Under the shell's banner strip (`app.css`'s `.shell-banners`), not at the viewport top — this is
+     the exact overlap the banner's first revision caused: a fixed strip painted over this drawer's
+     own title row and close button. `0px` whenever no banner is showing. */
+  top: var(--shell-banner-h);
   right: 0;
   bottom: 0;
   width: min(24rem, 92vw);

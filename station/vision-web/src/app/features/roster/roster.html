@@ -1,8 +1,9 @@
 <div class="page">
   <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 (Wave 2, committed) / §2.4 (this wave): `page-head` stays
-       gone. The `By asset | By pilot` pivot and the fleet-level gap indicator join search in the
-       bar's own `[pageBarFilters]` slot — the same projection idiom every other Wave 2/3 page uses,
-       not a change to the bar component itself. -->
+       gone. The `By asset | By pilot` pivot joins search in the bar's own `[pageBarFilters]` slot —
+       the same projection idiom every other Wave 2/3 page uses, not a change to the bar component
+       itself. The fleet-level gap indicator that used to live here moved into its own headline
+       `.kpi-tiles` row below (docs/plans/active/OPS-UX-PLAN.md §3 B3) — see that block's own comment. -->
   <vision-page-bar
     title="Pilots / roster"
     icon="pilot"
@@ -38,17 +39,6 @@
           </button>
         </div>
 
-        <!-- docs/extracts/design/13-roster.md: "a gap indicator — makes the page answer a real management
-             question at a glance." Signal only when non-zero (`@if` on a plain number is falsy at
-             0, so this already skips a "0 assets" confirmation — the same noise the CLOSED-chip
-             fix elsewhere in this wave exists to remove). -->
-        @if (facade.assetsWithoutPilotCount(); as gap) {
-          <span class="chip warn">
-            <vision-icon name="alert" [size]="12" />
-            {{ gap }} {{ gap === 1 ? 'asset has' : 'assets have' }} no pilot
-          </span>
-        }
-
         <input
           type="search"
           name="rosterSearch"
@@ -61,6 +51,27 @@
       </ng-container>
     }
   </vision-page-bar>
+
+  <!-- docs/plans/active/OPS-UX-PLAN.md §3 B3: both roster gap questions as headline tiles, not a
+       small page-bar chip only one of them had — "N assets have no pilot" (already computed;
+       see `RosterFacade.assetsWithoutPilotCount`'s own doc comment) sat next to search where it was
+       easy to miss and had no mirror at all for the opposite gap, "which pilots have nothing to
+       fly". Hidden with the rest of the page's live content while there's nothing to summarize yet
+       (`hasAnyAssets`) — same visibility rule the old chip used. -->
+  @if (facade.hasAnyAssets()) {
+    <div class="kpi-tiles">
+      <vision-stat
+        label="Assets without a pilot"
+        [value]="facade.assetsWithoutPilotCount()"
+        [tone]="facade.assetsWithoutPilotCount() > 0 ? 'warn' : 'ok'"
+      />
+      <vision-stat
+        label="Pilots without an assignment"
+        [value]="facade.pilotsWithoutAssignmentCount()"
+        [tone]="facade.pilotsWithoutAssignmentCount() > 0 ? 'warn' : 'ok'"
+      />
+    </div>
+  }
 
   @if (facade.loading()) {
     <p class="muted">Loading…</p>

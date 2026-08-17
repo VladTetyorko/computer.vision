@@ -5,6 +5,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventType;
@@ -224,6 +225,40 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * {@link #updateConfig}'s own javadoc for the model-id re-arm case.
      */
     private volatile PipelineConfig config;
+
+    /**
+     * Detection <b>demand</b> (docs/plans/active/CV-DEMAND-PLAN.md &sect;1, &sect;3.2) — the system-derived
+     * "someone is actually consuming the output" gate, independent of {@link #config}'s {@link
+     * PipelineConfig#detectionEnabled()} operator-intent gate. {@code volatile}, the same live-swap
+     * shape as {@link #config} itself: {@link #updateDetectionDemand} writes it from {@code
+     * DefaultStreamService}'s demand-poll scheduler thread, {@link #maybeDetect} reads it on the
+     * video thread, and a write is visible to the very next frame with no lock and no restart.
+     * Initializes to {@code true} — fail-open, so a pipeline whose {@code DefaultStreamService} was
+     * never given a {@code DetectionDemandPort} never has this field written at all, and {@link
+     * #maybeDetect} gates on {@link PipelineConfig#detectionEnabled()} alone, exactly as before this
+     * gate existed.
+     */
+    private volatile boolean detectionDemand = true;
+
+    /**
+     * Guards {@link #gateWasOpen} (docs/plans/active/CV-DEMAND-PLAN.md &sect;5/&sect;7's gate-close-clearing
+     * correction): {@link #updateConfig} (operator intent, an HTTP-request thread) and {@link
+     * #updateDetectionDemand} (viewer demand, {@code DefaultStreamService}'s demand-poll scheduler
+     * thread) can each close the gate, so the read-compare-write in {@link
+     * #handleDetectionGateTransition()} needs to be atomic across both — without this lock two closes
+     * racing on those threads could each observe the gate as still "open" and both fire the clear, or
+     * an interleaved close/reopen could leave {@link #gateWasOpen} out of sync with reality.
+     */
+    private final Object gateLock = new Object();
+
+    /**
+     * Last observed value of {@link #detectionGateOpen()}, read/written only under {@link
+     * #gateLock}. Seeded from the constructor's own {@link #config}/{@link #detectionDemand} so the
+     * very first genuine open&rarr;closed edge — not construction itself — is what triggers the
+     * first clear.
+     */
+    private boolean gateWasOpen;
+
     private final Flow.Publisher<VideoFrame> source;
     private final DetectionPort detectionPort;
     private final StreamPublisherPort streamPublisherPort;
@@ -241,9 +276,10 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * Pull-mode detection driver (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5/D6) — {@code null} means push
      * mode: {@link #maybeDetect} samples frames and calls {@link #detectionPort} directly, unchanged.
      * Non-null switches this pipeline to {@link PullResultSubscriber}, which subscribes to {@link
-     * PullDetectionBinding#results()} and forwards every arriving result to the same {@link
-     * #onDetectionResult} fan-out push mode uses — the seam is here and in {@link #maybeDetect}'s
-     * guard, never inside {@link #onDetectionResult} itself.
+     * PullDetectionBinding#results()} and forwards every arriving result whose {@link
+     * #detectionGateOpen()} holds to the same {@link #onDetectionResult} fan-out push mode uses — a
+     * gated-off result is dropped instead (docs/plans/active/CV-DEMAND-PLAN.md &sect;5) — the seam is
+     * here and in {@link #maybeDetect}'s guard, never inside {@link #onDetectionResult} itself.
      */
     private final PullDetectionBinding pullDetection;
 
@@ -599,6 +635,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
         this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
         this.backoffNanos = this.detectionBackoffInitialNanos;
+        // Seeded from this.config/this.detectionDemand, both already assigned above -- construction
+        // itself must never look like a close, only a later, genuine open->closed edge should.
+        this.gateWasOpen = detectionGateOpen();
     }
 
     /**
@@ -635,13 +674,20 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *
      * <p><b>Model-id re-arm.</b> When {@code next.model().id()} differs from the model this
      * pipeline is currently running, this call also clears this pipeline's own model-bound
-     * bookkeeping — {@link #extrapolator} (via {@link DetectionExtrapolator#reset()}) and {@link
-     * #latestDetections} — so no stale detection produced by the old model lingers (extrapolated
-     * against, persisted, or shown) past the swap; {@link #latestDetections()} reads empty again
-     * until the new model's first result completes. The very next sampled frame's {@link
-     * #detectionPort}{@code .detect} call already carries {@code next} — including the new model —
-     * since {@link DetectionPort}'s own contract runs inference "using the model ... in config" on
-     * every call.
+     * bookkeeping ({@link #clearDetectionDerivedState()}) — {@link #extrapolator}, {@link
+     * #latestDetections}, the track book/stats, and the rate/latency windows — so no stale detection
+     * produced by the old model lingers (extrapolated against, persisted, or shown) past the swap;
+     * {@link #latestDetections()} reads empty again until the new model's first result completes. The
+     * very next sampled frame's {@link #detectionPort}{@code .detect} call already carries {@code
+     * next} — including the new model — since {@link DetectionPort}'s own contract runs inference
+     * "using the model ... in config" on every call.
+     *
+     * <p><b>Detection-gate close.</b> When {@code next.detectionEnabled()} is what takes {@link
+     * #detectionGateOpen()} from open to closed, this call also clears that same state — see {@link
+     * #handleDetectionGateTransition()} — for a different reason than the model-change case above:
+     * turning detection off means there will never be another answer to hold the last one against
+     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;5/&sect;7), not merely that the next answer will look
+     * different.
      *
      * <p><b>Limitation, honestly documented</b> (docs/plans/done/CV-CONTROL-PLAN.md &sect;A's own escape
      * hatch): {@link DetectionPort} (vision-domain) exposes only {@code detect(frame, config)} — no
@@ -669,24 +715,69 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         boolean modelChanged = !config.model().id().equals(next.model().id());
         config = next;
         if (modelChanged) {
-            extrapolator.reset();
-            latestDetections = List.of();
-            // Same reason as the extrapolator: track ids and duty-cycle counters describe the model
-            // that produced them, so carrying either across a swap would attribute one model's
-            // objects and CPU to another's. A tracking-config change (mode, engine, cadences, lock)
-            // deliberately clears nothing -- tracking is a hot knob like confidence and fps.
-            trackBook.clear();
-            trackingStats.clear();
-            pipelineLatency.clear();
-            detectionRate.clear();
-            rateController.clear();
+            // Track ids and duty-cycle counters describe the model that produced them, so carrying
+            // either across a swap would attribute one model's objects and CPU to another's. A
+            // tracking-config change (mode, engine, cadences, lock) deliberately clears nothing --
+            // tracking is a hot knob like confidence and fps.
+            clearDetectionDerivedState();
         }
+        handleDetectionGateTransition();
         // docs/plans/active/MEDIA-SOT-PLAN.md wave M5, item 7: PATCH .../config keeps working in pull mode -- its
         // fields travel on the next PullControl via reconfigure() instead of the next FrameRequest,
         // since there is no per-frame outbound call in pull mode to carry them on.
         if (pullDetection != null) {
             pullDetection.port().reconfigure(streamId, next);
         }
+    }
+
+    /**
+     * Live-swaps this pipeline's detection-demand gate (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.2) — the
+     * same no-lock, visible-on-the-next-frame shape as {@link #updateConfig}, and mirroring its
+     * argument's own name: {@code demanded}, not {@code enabled}, since this is a fact about
+     * consumers, never an operator's own choice. Called only from {@code
+     * DefaultStreamService}'s demand-poll task, never the video path.
+     *
+     * <p>When {@code demanded} is what takes {@link #detectionGateOpen()} from open to closed, this
+     * also clears this pipeline's detection-derived state ({@link
+     * #handleDetectionGateTransition()}) — a viewer who returns after {@link
+     * DetectionState#IDLE_NO_VIEWERS} should see boxes from fresh inference, not a snapshot from
+     * whenever the last viewer left.
+     *
+     * @param demanded whether something is currently consuming this stream's detections
+     */
+    public void updateDetectionDemand(boolean demanded) {
+        this.detectionDemand = demanded;
+        handleDetectionGateTransition();
+    }
+
+    /**
+     * @return whether detection is currently demanded (docs/plans/active/CV-DEMAND-PLAN.md &sect;1) — a
+     *         volatile read, {@code true} until/unless {@link #updateDetectionDemand} ever says
+     *         otherwise, so a pipeline whose {@code DefaultStreamService} has no {@code
+     *         DetectionDemandPort} wired never observes this as {@code false}
+     */
+    public boolean detectionDemand() {
+        return detectionDemand;
+    }
+
+    /**
+     * Which of the two independent detection gates (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.6)
+     * currently explains this stream's boxes-or-no-boxes state — {@link DetectionState#OFF} takes
+     * precedence over {@link DetectionState#IDLE_NO_VIEWERS} when both hold, since the operator's own
+     * choice is the more specific truth: an operator who disabled detection does not need to also be
+     * told nobody is watching. See {@link DetectionState}'s own javadoc for why this reports gating,
+     * never health — a stalled {@code DetectionPort} still reads {@link DetectionState#RUNNING}.
+     *
+     * @return {@link DetectionState#OFF} when {@link PipelineConfig#detectionEnabled()} is {@code
+     *         false}; {@link DetectionState#IDLE_NO_VIEWERS} when enabled but {@link
+     *         #detectionDemand()} is currently {@code false}; {@link DetectionState#RUNNING} when
+     *         both gates are open
+     */
+    public DetectionState detectionState() {
+        if (!config.detectionEnabled()) {
+            return DetectionState.OFF;
+        }
+        return detectionDemand ? DetectionState.RUNNING : DetectionState.IDLE_NO_VIEWERS;
     }
 
     /**
@@ -1067,11 +1158,80 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Gated first — before the outage/in-flight logic below — on {@link
-     * PipelineConfig#detectionEnabled()} (docs/plans/done/CV-CONTROL-PLAN.md &sect;1, &sect;A): {@code false}
-     * returns immediately, so a disabled stream spends zero CPU on inference <i>and</i> stops
-     * probing during an outage too — nothing below this check ever runs. Re-enabling resumes on the
-     * next sampled frame, exactly where the (frozen, untouched) outage/backoff state left off.
+     * The same two-gate conjunction {@link #maybeDetect} and {@link PullResultSubscriber#onNext}
+     * both gate on (docs/plans/active/CV-DEMAND-PLAN.md &sect;1, &sect;3.2): {@link
+     * PipelineConfig#detectionEnabled()} (the operator's own per-stream choice) <b>and</b> {@link
+     * #detectionDemand()} (the system-derived "someone is actually watching" fact). Pulled into one
+     * method, read from both places, so push and pull mode can never drift out of sync about what
+     * "detection is gated off" means — see the class javadoc's pull-mode section and each caller's
+     * own javadoc for what each does once the gate is closed.
+     */
+    private boolean detectionGateOpen() {
+        return config.detectionEnabled() && detectionDemand;
+    }
+
+    /**
+     * Detects a true&rarr;false transition of {@link #detectionGateOpen()} and, exactly when one
+     * occurs, clears every piece of detection-derived state a consumer could otherwise keep reading
+     * as fresh ({@link #clearDetectionDerivedState()}) — docs/plans/active/CV-DEMAND-PLAN.md
+     * &sect;5/&sect;7's gate-close-clearing correction: turning detection off (or losing the last
+     * viewer) means there will never be another answer, so holding the last one and re-serving it
+     * forever — the reported "turn on and off doesn't work" complaint — asserts something false.
+     * Called from both {@link #updateConfig} (operator intent) and {@link #updateDetectionDemand}
+     * (viewer demand); the gate has two independent inputs and either can be the one that closes it,
+     * so the transition check lives here once instead of being duplicated at each call site.
+     *
+     * <p>This is genuinely different from an <b>outage</b> ({@link #onDetectionFailure}): during an
+     * outage the system is still trying and simply has no fresher answer <i>yet</i>, so holding the
+     * last one is the honest thing, and that state is deliberately left untouched (see the outage
+     * Gotcha in this module's {@code MODULE.md}). A closed gate has no "yet" — nothing will try again
+     * until it reopens — so the two cases clear differently on purpose.
+     *
+     * <p>Keyed off {@link #detectionGateOpen()}'s current value compared against the <em>last
+     * observed</em> one ({@link #gateWasOpen}), not "which setter ran": {@link #updateConfig} is
+     * called for plain confidence/fps/label-filter patches too, and {@link #updateDetectionDemand} is
+     * called on every demand-poll tick regardless of whether demand actually changed, so only a
+     * genuine open&rarr;closed <i>edge</i> may clear anything — a repeated {@code false} (an operator
+     * who already turned detection off patching the confidence threshold, or a poll tick
+     * re-confirming "still nobody watching" every 2s) must be a no-op here, not a re-clearing thrash.
+     * {@link #gateLock} makes the read-compare-write atomic across the two callers' different threads.
+     */
+    private void handleDetectionGateTransition() {
+        boolean open = detectionGateOpen();
+        synchronized (gateLock) {
+            if (gateWasOpen && !open) {
+                clearDetectionDerivedState();
+            }
+            gateWasOpen = open;
+        }
+    }
+
+    /**
+     * Clears every piece of detection-derived state a consumer could otherwise read as fresh: the
+     * raw result ({@link #latestDetections}), the smoothed burn-in view ({@link #extrapolator}), the
+     * track book/stats, and the rate/latency windows. Shared by two call sites that reach it for
+     * different reasons — {@link #updateConfig}'s model-id re-arm and {@link
+     * #handleDetectionGateTransition}'s gate close — both boiling down to the same fact: nothing
+     * already held describes what this pipeline is about to (or will never again) produce.
+     */
+    private void clearDetectionDerivedState() {
+        extrapolator.reset();
+        latestDetections = List.of();
+        trackBook.clear();
+        trackingStats.clear();
+        pipelineLatency.clear();
+        detectionRate.clear();
+        rateController.clear();
+    }
+
+    /**
+     * Gated first — before the outage/in-flight logic below — on {@link #detectionGateOpen()}: either
+     * conjunct being {@code false} returns immediately, so a disabled or undemanded stream spends
+     * zero CPU on inference <i>and</i> stops probing during an outage too — nothing below this check
+     * ever runs. The two gates are deliberately independent conjuncts rather than one merged flag —
+     * see {@code DetectionDemandPort}'s own javadoc for why collapsing them would be wrong. Either
+     * one flipping back resumes detection on the next sampled frame, exactly where the (frozen,
+     * untouched) outage/backoff state left off.
      *
      * <p>Also gated on {@link #pullDetection} being absent (docs/plans/active/MEDIA-SOT-PLAN.md wave M5): in
      * pull mode the worker runs its own (ported) deadline sampler and decides when to detect, so this
@@ -1081,7 +1241,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * caller, so the check below always falls through exactly as it did before this capability existed.
      */
     private void maybeDetect(VideoFrame frame, long now) {
-        if (!config.detectionEnabled() || pullDetection != null) {
+        if (!detectionGateOpen() || pullDetection != null) {
             return;
         }
         switch (outageDecision()) {
@@ -1250,8 +1410,23 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * genuinely lives in {@link TrackBook}/{@link TrackingStatsWindow}, carved as peers of {@link
      * DetectionExtrapolator} so the decomposition this class is queued for inherits well-shaped
      * perception stages rather than a fatter method.
+     *
+     * <p><b>Re-checks {@link #detectionGateOpen()} on entry</b> (docs/plans/active/CV-DEMAND-PLAN.md
+     * &sect;5/&sect;7): both callers already gate before reaching here — {@link #maybeDetect} before
+     * submitting, {@link PullResultSubscriber#onNext} before forwarding — but a push-mode inference
+     * submitted while the gate was open can complete on an arbitrary executor thread ({@link
+     * #submitDetection}'s {@code whenComplete}) <i>after</i> the gate has since closed and {@link
+     * #handleDetectionGateTransition()} has already cleared this pipeline's state. Applying such a
+     * result here would silently resurrect exactly what was just cleared, so a closed gate drops it
+     * instead — symmetrically with the drop {@link PullResultSubscriber#onNext} already does for the
+     * (much narrower) equivalent window in pull mode. This does not touch the outage/backoff
+     * bookkeeping in {@link #onDetectionSuccess}, which runs before this call regardless of the gate —
+     * detector health is a different, deliberately gate-independent concern (see the outage Gotcha).
      */
     private void onDetectionResult(DetectionResult result) {
+        if (!detectionGateOpen()) {
+            return;
+        }
         DetectionResult filtered = applyLabelFilter(result);
         latestDetections = filtered.detections();
         extrapolator.accept(filtered);
@@ -1333,6 +1508,43 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * diagnostics into the rate/latency windows ({@link #recordPullTelemetry}). Requests one item at a
      * time, mirroring this pipeline's own video-path backpressure discipline ({@link #onSubscribe}).
      *
+     * <p><b>Gated on {@link #detectionGateOpen()}</b> (docs/plans/active/CV-DEMAND-PLAN.md &sect;5's
+     * "one honest gap", closed at the application layer): in pull mode the worker owns its own
+     * sampling loop, so {@link #maybeDetect} never runs for this pipeline and this is the only place
+     * left to apply the operator/demand gate. Before this gate existed every arriving result was
+     * forwarded unconditionally regardless of {@link PipelineConfig#detectionEnabled()} or {@link
+     * #detectionDemand()} — {@link #detectionState()} could read {@code OFF} while boxes kept
+     * arriving, because nothing between the worker and the consumer ever checked. A gated-off result
+     * is <b>dropped, not buffered</b> — this project's failsafe rule is newest-data-wins (see
+     * CLAUDE.md &sect;9), and a result held during an off period would already be stale by the time
+     * detection resumes, so there is nothing worth keeping it for.
+     *
+     * <p><b>{@link #recordPullTelemetry} is skipped along with the forward</b>, not just {@link
+     * #onDetectionResult} — deliberately, not merely for symmetry. The worker genuinely did the
+     * decode/inference work behind a gated-off result, but {@link #detectionRate} is a <i>consumer-
+     * facing</i> read model, the counterpart {@link #detectionState()} sits beside on the same
+     * response: recording it here would report a healthy {@code submittedFps} for a stream the state
+     * says is {@code OFF}, reintroducing the exact class of lie this gate exists to close, just moved
+     * from the video overlay into the rate panel instead of fixed. Push mode already sets this
+     * precedent unprompted — {@link #maybeDetect}'s own early return means {@link #detectionRate}
+     * never observes a single sample while a push stream is gated off, so a gated pull stream now
+     * reports the same "nothing submitted" honesty. The worker still burns the CPU regardless (a
+     * cross-language follow-up wave, not fixable from here — see docs/plans/active/CV-DEMAND-PLAN.md
+     * &sect;5); that cost is real but is not this read model's job to surface.
+     *
+     * <p><b>{@link #latestDetections}/{@link #extrapolator}/{@link #trackBook} are cleared</b> the
+     * moment the gate closes, in both transports alike — not merely left to freeze. This class's
+     * first cut left them frozen at their last value, reasoning (wrongly) that push mode's own
+     * behavior was the reference to match; it was instead a shared defect, not a precedent, per
+     * CLAUDE.md &sect;9 ("newest data ... should be used, even if previous is still available"). An
+     * outage genuinely differs — the detector is still trying and simply has no fresher answer
+     * <i>yet</i>, so holding the last one there is honest (see the class javadoc's error-handling
+     * section) — but a closed gate has no "yet": nothing will try again until it reopens, so holding
+     * the last result and re-serving it to every poll forever asserts something false. The clearing
+     * itself happens in {@link #handleDetectionGateTransition()}, called from both {@link
+     * #updateConfig} and {@link #updateDetectionDemand} on whichever one detects the open&rarr;closed
+     * edge, so this subscriber does not duplicate it — it only has to stop forwarding.
+     *
      * <p>{@code onError}/{@code onComplete} reuse {@link #handleError}/{@link #close()} exactly as the
      * video-path {@link Flow.Subscriber} methods do — in practice these fire only when {@link
      * #pullDetection}'s publisher is not itself a reopen-with-backoff {@code SupervisedPublisher} (a
@@ -1352,8 +1564,10 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             if (closed.get()) {
                 return;
             }
-            recordPullTelemetry(result);
-            onDetectionResult(result);
+            if (detectionGateOpen()) {
+                recordPullTelemetry(result);
+                onDetectionResult(result);
+            }
             if (!closed.get()) {
                 pullSubscription.request(1);
             }

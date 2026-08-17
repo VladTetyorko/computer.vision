@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { LayersStore } from '../../../core/map-data/layers-store';
 import { AuthStore } from '../../../core/auth/auth-store';
@@ -11,6 +11,9 @@ import {
   removeGrant,
   upsertGrant,
 } from '../../../core/map-data/layers-logic';
+import type { BuiltinRow, LayerRow } from '../tactical-map/tactical-map-logic';
+import type { MapLayerDef } from '../tile-cache/leaflet-loader';
+import type { MapLayerId } from '../../../core/settings/settings-store';
 import { Icon } from '../../ui/icon';
 import { Notice } from '../../ui/notice';
 import type { AccessLevel, GrantSubjectType, LayerGrant, LayerKind, MapLayer } from '../../../core/api/models';
@@ -26,14 +29,26 @@ interface SubjectOption {
  * users and groups (docs/plans/done/MAP-REWORK-PLAN.md §5.2's "layer manager"). Shared by the Fly cockpit's Map
  * drawer and Command's Layers panel.
  *
- * **Deviation from §5.2, flagged.** The plan places this "from the data-layer panel": the map's own
- * built-in panel would grow a grants editor on MANAGE rows. That panel lives inside
- * `<vision-tactical-map>`, whose internals Wave E is explicitly scoped out of restructuring — and a
- * grants editor with two subject pickers, a level select and a create-layer form does not fit a
- * 14rem overlay pinned to a map corner anyway (frontend-style §7: overlay controls are *small* light
- * cards). So the map panel keeps exactly what it had — one eye toggle per layer, client-side
- * decluttering — and the *management* surface is this sibling panel, reachable from both hosts. The
- * two are complementary, and neither duplicates the other.
+ * **Deviation from §5.2, flagged (updated by MAP-UX-RESEARCH.md M1).** The plan places this "from
+ * the data-layer panel": the map's own built-in panel would grow a grants editor on MANAGE rows.
+ * `<vision-tactical-map>`'s grants editor never happened for the reason still true today — two
+ * subject pickers, a level select and a create-layer form do not fit a 14rem overlay pinned to a map
+ * corner (frontend-style §7: overlay controls are *small* light cards) — so the *management* surface
+ * stayed this sibling panel. What changed under M1: the map's own corner panel and this drawer were
+ * **both** labeled "Layers", open at the same time, a few centimeters apart
+ * (`docs/conclusions/MAP-UX-RESEARCH.md` §1.1) — not wrong individually, but the same word pointing at two
+ * different things reads as exactly the "settings are overwhelming" complaint that research
+ * document was written to chase down. Fix: the map's per-layer eye toggles (visibility) and basemap
+ * picker now render as this drawer's own **"Show on map"** and **"Basemap"** sections, above
+ * **"Manage layers"** (the create/rename/delete/grants content below, unchanged) — driven by
+ * {@link builtinLayerRows}/{@link dataLayerRows}/{@link basemaps}/{@link activeBasemapId}, forwarded
+ * by the host from its own `viewChild(TacticalMap)` (see `cockpit.ts`/`command.ts`). The map's own
+ * corner panel still exists — relabeled "Basemap", `map` icon, basemap-only — so a viewer who only
+ * wants to swap tiles doesn't have to open this drawer; but it no longer says "Layers", and no
+ * capability moved without staying reachable somewhere. `hiddenLayers` itself is not duplicated
+ * here: this component holds no view-visibility state of its own, only the rows the host's own
+ * `TacticalMap` instance computed, and emits {@link toggleLayerVisibility}/{@link basemapChanged}
+ * for the host to call straight back into that same instance's own `toggleLayer`/`setBasemap`.
  *
  * **What each viewer sees.** Every visible layer gets a row with its name, kind, the viewer's own
  * resolved access, and its mark/drawing counts. Rename, Delete and the Access editor render only on
@@ -68,6 +83,24 @@ export class LayerManager {
   private readonly auth = inject(AuthStore);
   protected readonly org = inject(OrgStore);
 
+  // --- "Show on map" / "Basemap" (M1 fold) --------------------------------------------------------
+  // These mirror `<vision-tactical-map>`'s own public `builtinLayerRows`/`dataRows`/`basemaps`/
+  // `activeBasemapId` — the host reads its own map instance (`viewChild(TacticalMap)`) and passes
+  // the current values straight through. `false`/`[]` defaults mean an unwired host (or a test)
+  // just renders the "Manage layers" section as before — an honest empty degrade, not a crash.
+
+  /** Whether a `TacticalMap` instance actually exists for the host to control right now (it may not — the map inset can be hidden, or Command can have zero assets). Gates the whole "Show on map"/"Basemap" section. */
+  readonly mapAvailable = input(false);
+  readonly builtinLayerRows = input<readonly BuiltinRow[]>([]);
+  readonly dataLayerRows = input<readonly LayerRow[]>([]);
+  readonly basemaps = input<readonly MapLayerDef[]>([]);
+  readonly activeBasemapId = input<MapLayerId | null>(null);
+
+  /** An eye toggle was clicked — the host forwards this to its `TacticalMap`'s own `toggleLayer`. */
+  readonly toggleLayerVisibility = output<string>();
+  /** A basemap was picked — the host forwards this to its `TacticalMap`'s own `setBasemap`. */
+  readonly basemapChanged = output<MapLayerId>();
+
   protected readonly levels = ACCESS_LEVELS;
   protected readonly accessLevelLabel = accessLevelLabel;
   protected readonly layerKindLabel = layerKindLabel;
@@ -76,6 +109,29 @@ export class LayerManager {
   protected readonly busy = signal(false);
 
   // --- Create ------------------------------------------------------------------------------------
+
+  /**
+   * M2 (docs/conclusions/MAP-UX-RESEARCH.md): Fly's own host input, `true` on the cockpit's Map drawer,
+   * left `false` (default) on Command — Command's Layers panel is a manager's whole job here, and
+   * keeps the create flow unconditional. On Fly, a mid-flight pilot who isn't managing anything and
+   * already has somewhere to put a mark has no reason to see a create-a-layer form by default; see
+   * {@link showCreateTrigger}.
+   */
+  readonly compactCreate = input(false);
+
+  /** Whether this viewer manages at least one visible layer already — the same MANAGE resolution the rename/delete/Access controls below gate on ({@link canManage}), rolled up across the whole list. */
+  protected readonly managesAnyLayer = computed(() => this.layers.layers().some((layer) => canManage(layer)));
+
+  /**
+   * M2's actual gate. `compactCreate()` only ever *narrows* visibility, never adds a restriction
+   * Command doesn't already avoid: hidden only when all three hold — this is the Fly host, the
+   * viewer manages nothing yet, and at least one layer already exists for their marks to land on
+   * (so hiding the trigger doesn't strand them with nowhere to contribute).
+   */
+  protected readonly showCreateTrigger = computed(
+    () => !this.compactCreate() || this.managesAnyLayer() || this.layers.layers().length === 0,
+  );
+
   protected readonly creating = signal(false);
   protected readonly newName = signal('');
   protected readonly newKind = signal<Exclude<LayerKind, 'COP'>>('PERSONAL');

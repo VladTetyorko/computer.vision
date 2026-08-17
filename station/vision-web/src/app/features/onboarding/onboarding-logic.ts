@@ -1,4 +1,11 @@
-import type { AssetEdit, CreateAssetRequest, ProbeDeviceRequest } from '../../core/api/models';
+import type {
+  AssetEdit,
+  CreateAssetRequest,
+  Membership,
+  ProbeDeviceRequest,
+  Role,
+  UserSummary,
+} from '../../core/api/models';
 import type { SimulateMode } from '../../core/fleet/simulation-logic';
 import { withRegistrationNumber } from '../../core/fleet/asset-attributes';
 
@@ -13,10 +20,20 @@ import { withRegistrationNumber } from '../../core/fleet/asset-attributes';
  * the actual HTTP calls, but defers every yes/no and every request shape to the functions here.
  */
 
-/** The wizard's four steps, always in this order — `nextStep`/`prevStep` are the only way to move. */
-export type WizardStep = 'profile' | 'connect' | 'test' | 'create';
+/**
+ * The wizard's five steps, always in this order — `nextStep`/`prevStep` are the only way to move
+ * through the first four. **`assign`** (docs/plans/active/OPS-UX-PLAN.md §2 A3, "Who flies this?") is the
+ * exception: the wizard never reaches it via `next()` (the `create` step's own action button is
+ * what gets there, only after `POST /api/assets` actually succeeds — see `OnboardingStore#finishCreate`)
+ * and it is never back-navigable into `create` (the asset already exists by the time it renders;
+ * "going back" would misleadingly suggest undoing that). `nextStep`/`prevStep` still define total
+ * cases for it (returning `'assign'`/`'create'` respectively) purely so both functions stay total
+ * over the whole `WizardStep` union — `onboarding.html`'s own footer is what actually withholds the
+ * Back/Next buttons on this step (see its own template comment).
+ */
+export type WizardStep = 'profile' | 'connect' | 'test' | 'create' | 'assign';
 
-export const WIZARD_STEPS: readonly WizardStep[] = ['profile', 'connect', 'test', 'create'];
+export const WIZARD_STEPS: readonly WizardStep[] = ['profile', 'connect', 'test', 'create', 'assign'];
 
 /**
  * The Connect step's entry points (docs/plans/done/UX-REWORK-PLAN.md §U-d — "the existing 3-choice connect
@@ -62,12 +79,18 @@ export function nextStep(current: WizardStep, method: ConnectMethod | null): Wiz
     case 'test':
     case 'create':
       return 'create';
+    case 'assign':
+      return 'assign'; // terminal, like 'create' above — see this type's own doc comment.
   }
 }
 
 /** The inverse of {@link nextStep} — back-navigable, per the plan's own "stepper … back-navable" ask. */
 export function prevStep(current: WizardStep, method: ConnectMethod | null): WizardStep {
   switch (current) {
+    // `assign`'s own immediate predecessor is `create`, kept only for totality — see this type's
+    // own doc comment for why `onboarding.html` never actually renders a Back button here.
+    case 'assign':
+      return 'create';
     case 'create':
       return method === 'simulate' ? 'connect' : 'test';
     case 'test':
@@ -206,4 +229,65 @@ export function buildPostSimulationAssetEdit(
     ...(displayName.length > 0 ? { displayName } : {}),
     ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
   };
+}
+
+// --- Step 5: "Who flies this?" (docs/plans/active/OPS-UX-PLAN.md §2 A3) -------------------------------
+
+/** Least→most privileged, mirroring the domain's own `Role` ordinal — used only to find the *highest* of a set of memberships below. */
+const ROLE_RANK: Readonly<Record<Role, number>> = { PILOT: 0, MANAGER: 1, ADMIN: 2 };
+
+/**
+ * The group a newly-created asset silently belongs to (docs/conclusions/OPS-UX-REVIEW.md §A4 — `POST
+ * /api/assets` "sets `Ownership` from the creator"). Mirrors the backend's own rule byte-for-byte
+ * (`VisionUserDetails#ownershipOf`, station/vision-app): the group tied to the creator's **highest**
+ * `Role` membership, ties broken by encounter order (the backend's own tie-break is undocumented as
+ * stable either — see that method's own comment) — never a group the caller has to pick, since the
+ * wizard's Profile/Connect/Test/Create steps never ask for one. Returns `undefined` only for a
+ * membership-less account (the "couldn't determine your group" honest-degrade case downstream).
+ *
+ * **Known dev-parity gap** (`vision.auth.enabled=false`): the fixed dev-admin principal's own
+ * `MeResponse.memberships` carries a synthetic group id that does not match the real seeded
+ * admin/manager/pilot users' own "Root" group id (two different, unrelated ids that merely share a
+ * display name) — so this function resolves *a* group correctly, but `pilotsInGroup` below will
+ * never find a match against it in that mode. This is a frontend-only wave (docs/plans/active/OPS-UX-PLAN.md
+ * §2) with no backend change available to fix the mismatch; the picker's own honest empty state
+ * ("nobody in *that* group is a pilot yet") is still a true statement about the data this app can
+ * see, never a fabrication — see `onboarding-store.ts#enterAssignStep`'s own note.
+ */
+export function creatorOwnershipGroup(memberships: readonly Membership[]): Membership | undefined {
+  return memberships.reduce<Membership | undefined>((best, candidate) => {
+    if (!best || ROLE_RANK[candidate.role] > ROLE_RANK[best.role]) {
+      return candidate;
+    }
+    return best;
+  }, undefined);
+}
+
+/**
+ * Every enabled user holding a `PILOT` membership in `groupId` — the wizard's own candidate list,
+ * same `enabled`-only filter `features/asset-detail/pilots-card.ts#assignable` already applies (a
+ * disabled account can't sign in to fly anything). `undefined`/unresolved `groupId` yields no
+ * candidates at all, never every pilot app-wide — offering the wrong team's roster would be worse
+ * than offering none (docs/plans/active/OPS-UX-PLAN.md §2 A3: "offer the group's pilots").
+ */
+export function pilotsInGroup(users: readonly UserSummary[], groupId: string | undefined): readonly UserSummary[] {
+  if (!groupId) {
+    return [];
+  }
+  return users.filter(
+    (user) => user.enabled && user.memberships.some((m) => m.groupId === groupId && m.role === 'PILOT'),
+  );
+}
+
+/**
+ * The picker's default selection (docs/plans/active/OPS-UX-PLAN.md §2 A3 — "Default selection: the creator
+ * when they are a pilot in that group, else none"). Deliberately checks the creator's *own* role
+ * within the resolved ownership group, not their global `topRole`: a MANAGER/ADMIN's ownership
+ * group is by construction the group of their own highest-role membership (see
+ * {@link creatorOwnershipGroup}'s own doc comment), so their role *there* is never `PILOT` — this
+ * only ever preselects the creator for the solo-pilot self-registration case (a plain PILOT's own
+ * single membership, still reachable today ahead of the backend's own wave-C gate landing).
+ */
+export function defaultPilotSelection(creatorUserId: string, ownershipGroup: Membership | undefined): readonly string[] {
+  return ownershipGroup?.role === 'PILOT' ? [creatorUserId] : [];
 }

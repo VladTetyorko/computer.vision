@@ -18,7 +18,9 @@ describe('SettingsStore', () => {
       inferenceFps: 5,
       model: DEFAULT_DETECTION_MODEL,
       labelFilter: [],
-      detectionEnabled: true,
+      // docs/plans/active/CV-DEMAND-PLAN.md wave D3: detection is opt-in now, off until the operator turns
+      // it on, both server-side (PipelineConfig.DEFAULT_DETECTION_ENABLED) and here.
+      detectionEnabled: false,
     });
     expect(store.isCustom()).toBe(false);
   });
@@ -39,7 +41,7 @@ describe('SettingsStore', () => {
       inferenceFps: 3,
       model: DEFAULT_DETECTION_MODEL,
       labelFilter: [],
-      detectionEnabled: true,
+      detectionEnabled: false,
     });
     // The preset it is based on is still identifiable, which is what the badge shows.
     expect(store.activeProfile().id).toBe('low-latency');
@@ -71,7 +73,7 @@ describe('SettingsStore', () => {
       inferenceFps: 12,
       model: DEFAULT_DETECTION_MODEL,
       labelFilter: [],
-      detectionEnabled: true,
+      detectionEnabled: false,
     });
   });
 
@@ -149,11 +151,11 @@ describe('SettingsStore', () => {
 
   // ---- Detection model (docs/plans/done/CV-CONTROL-PLAN.md Wave E, extending docs/plans/done/CV-MODELS-PLAN.md item 4) --
 
-  it('defaults every built-in profile to the general model, all classes, detection on', () => {
+  it('defaults every built-in profile to the general model, all classes, detection off (docs/plans/active/CV-DEMAND-PLAN.md wave D3)', () => {
     for (const profile of BUILT_IN_PROFILES) {
       expect(profile.model).toBe(DEFAULT_DETECTION_MODEL);
       expect(profile.labelFilter).toEqual([]);
-      expect(profile.detectionEnabled).toBe(true);
+      expect(profile.detectionEnabled).toBe(false);
     }
   });
 
@@ -167,7 +169,7 @@ describe('SettingsStore', () => {
       inferenceFps: 3,
       model: 'orion12l.pt',
       labelFilter: [],
-      detectionEnabled: true,
+      detectionEnabled: false,
     });
     // Confidence/fps stay exactly what the base preset had — only model moved.
     expect(store.activeProfile().id).toBe('low-latency');
@@ -178,18 +180,19 @@ describe('SettingsStore', () => {
   });
 
   it('adjusting labelFilter/detectionEnabled turns the active profile into a revertible custom draft', () => {
-    store.adjust({ labelFilter: ['person', 'car'], detectionEnabled: false });
+    store.adjust({ labelFilter: ['person', 'car'], detectionEnabled: true });
 
     expect(store.isCustom()).toBe(true);
     expect(store.effective().labelFilter).toEqual(['person', 'car']);
-    expect(store.effective().detectionEnabled).toBe(false);
+    expect(store.effective().detectionEnabled).toBe(true);
     // Everything else stays exactly what Balanced had.
     expect(store.effective().model).toBe(DEFAULT_DETECTION_MODEL);
     expect(store.effective().confidenceThreshold).toBe(0.4);
 
     store.revertDraft();
     expect(store.effective().labelFilter).toEqual([]);
-    expect(store.effective().detectionEnabled).toBe(true);
+    // Balanced's own default, docs/plans/active/CV-DEMAND-PLAN.md wave D3.
+    expect(store.effective().detectionEnabled).toBe(false);
   });
 
   it('saves a draft labelFilter/detectionEnabled choice as a reusable profile', () => {
@@ -271,7 +274,10 @@ describe('SettingsStore', () => {
     const reloaded = TestBed.inject(SettingsStore);
 
     expect(reloaded.effective().labelFilter).toEqual([]);
-    expect(reloaded.effective().detectionEnabled).toBe(true);
+    // `'yes'` isn't a boolean, so this counts as "no decision was ever made" — backfills to the
+    // app's current honest default (off, docs/plans/active/CV-DEMAND-PLAN.md wave D3), not the stale `true`
+    // this used to fall back to.
+    expect(reloaded.effective().detectionEnabled).toBe(false);
     expect(reloaded.effective().confidenceThreshold).toBe(0.6);
   });
 
@@ -301,12 +307,57 @@ describe('SettingsStore', () => {
     expect(reloaded.customProfiles()).toHaveLength(1);
     expect(reloaded.customProfiles()[0].model).toBe(DEFAULT_DETECTION_MODEL);
     expect(reloaded.customProfiles()[0].labelFilter).toEqual([]);
-    expect(reloaded.customProfiles()[0].detectionEnabled).toBe(true);
+    // A field that was never there is "no decision was ever made" — backfills to the app's current
+    // honest default (off, docs/plans/active/CV-DEMAND-PLAN.md wave D3), same reasoning as the corrupt-value
+    // case right above. Contrast with the next two tests, where the field IS present.
+    expect(reloaded.customProfiles()[0].detectionEnabled).toBe(false);
     expect(reloaded.activeProfile().id).toBe('custom-old-preset');
     expect(reloaded.effective().model).toBe(DEFAULT_DETECTION_MODEL);
     // Its own pre-existing fields are untouched by the migration.
     expect(reloaded.effective().confidenceThreshold).toBe(0.6);
     expect(reloaded.effective().inferenceFps).toBe(8);
+  });
+
+  it("preserves a returning user's own explicit detectionEnabled=true across this wave's default flip (docs/plans/active/CV-DEMAND-PLAN.md wave D3 — a real prior choice is never silently reverted)", () => {
+    localStorage.setItem(
+      'vision.settings.v1',
+      JSON.stringify({
+        activeProfileId: 'custom-watching',
+        customProfiles: [
+          {
+            id: 'custom-watching',
+            name: 'Watching',
+            description: 'Based on Balanced.',
+            builtIn: false,
+            confidenceThreshold: 0.4,
+            inferenceFps: 5,
+            model: DEFAULT_DETECTION_MODEL,
+            labelFilter: [],
+            detectionEnabled: true, // an explicit choice made before this wave shipped
+          },
+        ],
+      }),
+    );
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.customProfiles()[0].detectionEnabled).toBe(true);
+    expect(reloaded.effective().detectionEnabled).toBe(true);
+  });
+
+  it('preserves an explicit persisted draft detectionEnabled=true the same way (not just customProfiles)', () => {
+    localStorage.setItem(
+      'vision.settings.v1',
+      JSON.stringify({
+        draft: { confidenceThreshold: 0.6, inferenceFps: 8, detectionEnabled: true },
+      }),
+    );
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.effective().detectionEnabled).toBe(true);
   });
 
   it('survives corrupt persisted settings', () => {
