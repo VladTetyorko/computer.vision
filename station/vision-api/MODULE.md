@@ -35,14 +35,14 @@ literal it replaced (see `VisionApiProperties` below).
 
 | Controller | Method | Path | Success | Failure |
 |---|---|---|---|---|
-| AssetController | POST | `/api/assets` | 201 `AssetDetailsResponse` | 400 validation (incl. 0-device asset) |
+| AssetController | POST | `/api/assets` | 201 `AssetDetailsResponse` | 400 validation (incl. 0-device asset), 403 `!scope.canManageOrg()` (docs/plans/active/OPS-UX-PLAN.md §1/C2) |
 | AssetController | GET | `/api/assets?includeDeleted=` | 200 `List<AssetSummaryResponse>` | — (`includeDeleted` defaults `false`) |
 | AssetController | GET | `/api/assets/{id}` | 200 `AssetDetailsResponse` | 404 unknown id, 400 bad UUID |
-| AssetController | PATCH | `/api/assets/{id}` | 200 `AssetDetailsResponse` | 404 unknown id, 400 bad UUID/unknown category (docs/main/CYCLES-PLAN.md §8's pinned contract) |
-| AssetController | POST | `/api/assets/{id}/state` | 200 `AssetDetailsResponse` | 404 unknown id, 400 unrecognized state, 409 `DELETED`→`ACTIVE` (docs/main/CYCLES-PLAN.md §8; idempotent; `DEACTIVATED` on a `DELETED` asset restores it) |
-| AssetController | DELETE | `/api/assets/{id}` | 200 `AssetDeletionResponse` | 404 unknown id (soft delete/archive, idempotent; docs/main/CYCLES-PLAN.md §8) |
-| AssetController | POST | `/api/assets/{id}/devices` | 200 `AssetDetailsResponse` | 404 unknown asset/device, 400 blank deviceId, 409 device already owned (docs/main/CYCLES-PLAN.md §8) |
-| AssetController | DELETE | `/api/assets/{id}/devices/{deviceId}` | 200 `AssetDetailsResponse` | 404 unknown asset, 400 device not on this asset, 409 last remaining device (docs/main/CYCLES-PLAN.md §8) |
+| AssetController | PATCH | `/api/assets/{id}` | 200 `AssetDetailsResponse` | 404 unknown/out-of-visibility id, 400 bad UUID/unknown category (docs/main/CYCLES-PLAN.md §8's pinned contract), 403 visible but `!scope.canManage(ownership)` (docs/plans/active/OPS-UX-PLAN.md §1/C2) |
+| AssetController | POST | `/api/assets/{id}/state` | 200 `AssetDetailsResponse` | 404 unknown/out-of-visibility id, 400 unrecognized state, 409 `DELETED`→`ACTIVE` (docs/main/CYCLES-PLAN.md §8; idempotent; `DEACTIVATED` on a `DELETED` asset restores it), 403 visible but `!scope.canManage(ownership)` |
+| AssetController | DELETE | `/api/assets/{id}` | 200 `AssetDeletionResponse` | 404 unknown/out-of-visibility id (soft delete/archive, idempotent; docs/main/CYCLES-PLAN.md §8), 403 visible but `!scope.canManage(ownership)` |
+| AssetController | POST | `/api/assets/{id}/devices` | 200 `AssetDetailsResponse` | 404 unknown/out-of-visibility asset, unknown device, 400 blank deviceId, 409 device already owned (docs/main/CYCLES-PLAN.md §8), 403 asset visible but `!scope.canManage(ownership)` |
+| AssetController | DELETE | `/api/assets/{id}/devices/{deviceId}` | 200 `AssetDetailsResponse` | 404 unknown/out-of-visibility asset, 400 device not on this asset, 409 last remaining device (docs/main/CYCLES-PLAN.md §8), 403 asset visible but `!scope.canManage(ownership)` |
 | AssetStreamController | POST | `/api/assets/{id}/stream` | 201 `StartStreamResponse` | 404 unknown asset, 400 ambiguous device/bad UUID |
 | AssetStreamController | DELETE | `/api/assets/{id}/stream` | 204 | idempotent no-op |
 | AssetController | GET | `/api/usages/{usageId}/telemetry?limit=` | 200 `List<TelemetrySampleResponse>` | — (unknown usage → empty list) |
@@ -356,7 +356,9 @@ anywhere else. `DemoScenario` logs a `WARN` on every press saying exactly that.
 
 **`CurrentUser`/`PrincipalResolver` live in `com.drones.vision.api.security`** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row B — the token→`UserId` edge, still zero `org.springframework.security` dependency). **`CurrentUser` was rewritten around a seam.** It no longer takes an `Ownership fallback`; it takes a `PrincipalResolver` (interface, `security/`: `UserId userId()` + `Ownership ownership()` + `VisibilityScope scope()` — the last added by docs/plans/done/U-SCOPE-PLAN.md slice 2) and delegates. `vision-app` supplies the resolver — a fixed dev principal when `vision.auth.enabled=false` (identical to the pre-auth behavior), or one reading Spring Security's `SecurityContextHolder` when `true`. **This is deliberately how vision-api stays free of any `org.springframework.security` dependency** (the architecture rule for wave 3): the SecurityContext-reading lives entirely in vision-app; vision-api only knows the plain seam. Every controller still calls `currentUser.userId()`/`.ownership()` unchanged; scope-aware controllers additionally call `currentUser.scope()`. A convenience constructor `CurrentUser(Ownership)` (wrapping `PrincipalResolver.fixed(...)`) is kept so the standalone controller unit tests construct it from a plain `Ownership` exactly as before — and, crucially, **`PrincipalResolver.fixed(...)#scope()` returns `VisibilityScope.unbounded()`**, so every test that builds `CurrentUser(ownership)` (and the auth-off dev principal) keeps behaving as if scoping were off: a scoped read given an unbounded scope returns exactly the unscoped result. The production `PrincipalResolver` constructor is the `@Autowired` one so Spring never picks the convenience ctor.
 
-**Visibility scoping (docs/plans/done/U-SCOPE-PLAN.md slice 2, feature 1).** `VisibilityScope` is an application type; vision-api already depends on vision-application, so `CurrentUser#scope()` threads it into the scoped read/command methods with no new dependency. `AssetController` scopes `list()`→`assetService.assets(scope, includeDeleted)` and `details`/every post-mutation render→`assetService.details(scope, id)` (an out-of-scope asset 404s exactly as an unknown id, hiding existence); each mutation first re-reads through the scope via a private `requireInScope(id)` so an out-of-scope write 404s *before* it runs — but **request-body validation is parsed first** (a malformed edit/state/device-id is a 400 before the scope 404, so a bad request never depends on the caller's scope; this ordering is what keeps `AssetControllerTest`'s `verifyNoInteractions` cases green). `FleetController` scopes `summary(scope, includeArchived)`; `FlightCommandController` passes `currentUser.userId()` + `currentUser.scope()` to `returnToHome`. Wave 1 scoped only reads + command + assign, so asset *writes* are guarded by this cheap "read-scope guards the write" posture rather than a scope argument on the write services — documented as the deliberate interim until the asset services take a scope on writes directly.
+**Visibility scoping (docs/plans/done/U-SCOPE-PLAN.md slice 2, feature 1).** `VisibilityScope` is an application type; vision-api already depends on vision-application, so `CurrentUser#scope()` threads it into the scoped read/command methods with no new dependency. `AssetController` scopes `list()`→`assetService.assets(scope, includeDeleted)` and `details`/every post-mutation render→`assetService.details(scope, id)` (an out-of-scope asset 404s exactly as an unknown id, hiding existence). `FleetController` scopes `summary(scope, includeArchived)`; `FlightCommandController` passes `currentUser.userId()` + `currentUser.scope()` to `returnToHome`.
+
+**Authority, not visibility, guards the five asset writes (docs/plans/active/OPS-UX-PLAN.md §1, Wave C, C2).** `update`/`setState`/`delete`/`assignDevice`/`unassignDevice` each call a private `requireManageable(id)` — the renamed, extended successor of the old `requireInScope(id)` — which still re-reads the asset through `scope` first (an unknown-or-invisible asset still 404s *before* the mutation runs, hiding existence exactly as before), then additionally requires `scope.canManage(details.summary().asset().ownership())`, throwing `AccessDeniedException` (→403 via `ApiExceptionHandler`, already-existing mapping, no handler change needed) for an asset the caller can see but does not administer — the case a PILOT hits on their own assigned aircraft (seeing it is what lets them fly it; `canManage` is unconditionally `false` for `ASSIGNED_ASSETS`, so this is not a `getAsset`-then-branch race, it is structural). **Request-body validation still runs first** (a malformed edit/state/device-id is a 400 before either the visibility 404 or the authority 403, so a bad request never depends on the caller's scope; this ordering is what keeps `AssetControllerTest`'s `verifyNoInteractions` cases green). `create` gets its own gate, `!scope.canManageOrg()` → 403, checked before `request.toSpec()` runs (so an invalid body from a caller who also lacks authority still surfaces as 403, not 400 — authority is checked first, matching "does this caller need to know the body was well-formed" reasoning). With `vision.auth.enabled=false` every `CurrentUser` is `unbounded()`, so both `canManage`/`canManageOrg` are always `true` and every one of these gates is a no-op — proved by the full existing `AssetControllerTest`/vision-api suite staying green (see Status).
 
 **`SessionAuthenticator`** (interface, `security/`) is the login/logout seam `AuthController` uses — `Optional<User> login(username, password, HttpServletRequest, HttpServletResponse)` (establishes a session on success) + `void logout(...)`. Only `jakarta.servlet` + domain types cross it; vision-app implements it (a no-op when auth disabled, a real session-establishing one when enabled). This is why login/logout run through a thin controller-plus-seam rather than Spring Security's own JSON form-login filter — it keeps spring-security out of vision-api, the explicitly-allowed alternative in the plan.
 
@@ -374,6 +376,22 @@ anywhere else. `DemoScenario` logs a `WARN` on every press saying exactly that.
 - **`FleetController#summary`'s `includeArchived` query parameter is a deliberate naming exception**, not an oversight: every other "include soft-deleted" list endpoint (`GET /api/assets`/`GET /api/devices`) names it `includeDeleted`, but docs/plans/done/MVP3-PLAN.md C-a's own spec names the fleet-summary one `includeArchived` — matching the MVP3 information-architecture rename (`LifecycleState.DELETED` assets live under the "Assets" warehouse page, described there as "archived"). Both flow to the exact same `AssetService#assets(boolean includeDeleted)` parameter underneath.
 - **Logging: `System.Logger`, not SLF4J** — `private static final System.Logger LOG = System.getLogger(...)`, matching `HlsProxyController`'s pre-existing convention (itself matching `adapter-publish-hls`/`vision-application`'s `StreamPipeline` across the rest of the codebase). SLF4J appears in this codebase only in `vision-app`'s `LoggingEventPublisher`, a Spring-only devsupport bean; every plain controller/adapter class uses `System.Logger` instead. See the streaming-freeze observability paragraph in Status below for exactly what's logged and why.
 - **`vision-domain` package layout changed (docs/plans/active/DOMAIN-SEPARATION-W1.md, wave W1.5a)**: the flat `com.drones.vision.domain.model`/`domain.port.out` packages this doc used to cite no longer exist. Domain types moved into per-context packages, `com.drones.vision.<context>.domain.model`/`.domain.port` (e.g. `TrackedObject`/`TargetLock` → `perception.domain.model`, `GeofenceZone` → `flight.domain.model`, `Mark` → `map.domain.model`, `DetectionEvent` → `events.domain.model`), except the shared-kernel types (every id type, `GeoPosition`, `BoundingBox`, `Ownership`, etc. — 17 since W1.6c added `Telemetry`/`FlightState`, docs/plans/active/DOMAIN-SEPARATION-W1.md §15) which moved to `com.drones.vision.kernel` instead — every context's domain may depend on those. This module's own REST/DTO/SSE behavior is unaffected; only the domain-package paths cited elsewhere in this doc were corrected to match. **W1.7a** (§16) later split `com.drones.vision.kernel` and its sibling `com.drones.vision.platform` (events, audit trail, visibility scope) out of `vision-domain` into their own Maven modules, `vision-kernel`/`vision-platform` — package names unchanged, so no import in this module needed touching; see those modules' own MODULE.mds.
+
+## Authority split on `PATCH /api/assets/{id}`
+
+`update` is the one asset write whose gate depends on the **body**, not just the caller
+(docs/plans/active/OPS-UX-PLAN.md §1). `AssetEdit#changesManagedFields()` decides: a body touching only
+`displayName`/`attributes` needs visibility alone, so a PILOT may rename the aircraft assigned to
+them and edit its custom fields; a body touching `category` is fleet classification and needs
+`scope().canManage(ownership)` — 403 otherwise. `setState`/`delete`/`assignDevice`/`unassignDevice`
+always require manage.
+
+**A 403 from any of these is a PILOT-only outcome, by construction.** For a `GROUPS` scope
+`canManage(ownership)` and `includes(id, ownership)` are the same predicate, so a manager who can
+see an asset can always manage it; one who cannot is stopped by `details()`'s existence-hiding 404
+first. Only a scope that sees without managing — a pilot's — reaches the 403. A test asserting a
+403 for an out-of-subtree *manager* is asserting a mock artifact, not behaviour (one did; it is now
+`updateReturns404ForAManagerScopeOutsideTheAssetsSubtree`).
 
 ## Gotchas
 
@@ -1314,3 +1332,56 @@ shared-logic test suffices" judgment call this module already makes for `overlay
 **Not touched, per scope**: `contexts/vision-perception` (D1) and `station/vision-web` (D3) — this
 wave's diff is contained entirely to `station/vision-api/**` and `station/vision-app/**`, confirmed via
 `git status` before finishing.
+
+**docs/plans/active/OPS-UX-PLAN.md Wave C (C2) done — authority, not visibility, guards asset writes.**
+`AssetController`'s private `requireInScope(id)` was renamed to `requireManageable(id)` and extended:
+it still 404s an unknown/invisible asset via its own scoped `assetService.details(scope, id)` read
+(unchanged, hides existence), then additionally throws `AccessDeniedException` (403) when
+`!scope.canManage(details.summary().asset().ownership())` — visible-but-not-administrable, the case a
+PILOT hits on their own assigned aircraft. All five write endpoints (`update`/`setState`/`delete`/
+`assignDevice`/`unassignDevice`) call it; `create` gets its own `!scope.canManageOrg()` → 403 gate,
+checked first, before `request.toSpec()` parses the body. No `ApiExceptionHandler` change needed —
+`AccessDeniedException`→403 already existed. See "Authority, not visibility" above for the full
+reasoning and the endpoint table for the per-route 403 additions.
+
+**Existing `AssetControllerTest` stubbing gap this surfaced, fixed, not weakened**: `requireManageable`
+now *dereferences* `assetService.details(...)`'s result (`.summary().asset().ownership()`), where the
+old `requireInScope` discarded it — every test that stubbed only the *write* method to throw (leaving
+`details(...)` an unstubbed Mockito-default `null`) started NPEing. Each was fixed per what it actually
+simulates: a genuinely-unknown-asset test (`updateReturns404ForUnknownAsset`,
+`setStateReturns404ForUnknownAsset`, `deleteReturns404ForUnknownAsset`,
+`unassignDeviceReturns404ForAnUnknownAsset`) now stubs `assetService.details(...)` itself to throw
+`NoSuchElementException` — the same exception the real `AssetService` throws for an unknown/invisible
+id, so this is a *more* accurate test double than before, not a workaround; a known-asset-other-failure
+test (`updateReturns400ForAnUnknownCategory`, `setStateActiveOnADeletedAssetReturns409`,
+`deleteReturns200WithTheDeletionSummary`, `assignDeviceReturns409WhenTheDeviceAlreadyBelongsToAnotherAsset`,
+`assignDeviceReturns404ForAnUnknownDevice`, `unassignDeviceReturns409WhenRemovingTheLastDevice`,
+`unassignDeviceReturns400WhenTheDeviceDoesNotBelongToTheAsset`) gained a `stubExistingAsset(assetWithId(assetId))`
+call so `requireManageable`'s own read succeeds before the write-stub's failure fires. New helper
+`assetWithId(AssetId)` (an `Asset` with a caller-chosen id, for tests that need to name the id before
+building the asset).
+
+**New C5 authority tests** (`AssetControllerTest`, 11 new methods) prove the PILOT-vs-MANAGER
+boundary this wave draws, via two new helpers: `currentUserWithScope(VisibilityScope)` (a `CurrentUser`
+built from an anonymous `PrincipalResolver` fixing `ownership`/`ownerId` but taking a caller-supplied
+scope — `viewer()` throws `UnsupportedOperationException`, since `AssetController` never calls it) and
+`mockMvcFor(CurrentUser)` (a fresh standalone `MockMvc` bound to that user, alongside the class-level
+`mockMvc` which stays on the unbounded `currentUser`). Covered: `create` 403 for a PILOT / 201 for a
+MANAGER (`canManageOrg()`); `update`/`setState`/`delete`/`assignDevice`/`unassignDevice` 403 for a
+PILOT scope even when the asset is the exact one assigned to them (`ASSIGNED_ASSETS` grants visibility,
+never `canManage`); `update`/`setState`/`delete` 200 for a MANAGER scope whose `groups()` contains the
+asset's own group; `update` 403 for a MANAGER scope whose `groups()` does **not** contain it (a second
+manager's subtree is not this asset's subtree — proves the gate isn't just "any `GROUPS` scope passes",
+the real `groups.contains(ownership.groupId())` check runs).
+
+**Before/after**: `AssetControllerTest` **44 → 55** (11 new C5 tests; 0 pre-existing tests deleted,
+11 pre-existing tests' stubs corrected as described above, all still passing). Module total (`./mvnw
+-B -pl station/vision-api test -DskipWeb`): **587/587** green. Combined `./mvnw -B -pl
+storage/persistence,station/vision-api,station/vision-app test -DskipWeb`: `adapter-persistence`,
+`vision-api` (587), `vision-app` (240) all green — the default-config guardrail (`vision.auth.enabled=false`
+→ every caller `unbounded()` → every new gate a no-op) holds across the full integration slice.
+
+**Not touched, per scope**: `station/vision-web/**` (owned by a concurrent wave); no `vision-app`
+wiring change was needed — no new constructor parameter or bean was introduced, `AssetController`'s
+constructor shape is unchanged (still `AssetService, CurrentUser, TelemetryRepositoryPort,
+AssetImageRepositoryPort`).

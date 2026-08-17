@@ -9,6 +9,8 @@ import com.drones.vision.api.dto.SetLifecycleStateRequest;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateAssetRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
@@ -62,13 +64,26 @@ import com.drones.vision.api.security.CurrentUser;
  * <h2>Visibility scoping (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
  * Every read is scoped to {@link CurrentUser#scope()}: {@link #list} filters to the assets the
  * caller may see, and {@link #details} (and every post-mutation detail render) 404s an asset
- * outside the caller's scope exactly as it 404s an unknown id — existence is never revealed. Each
- * mutation ({@link #update}/{@link #setState}/{@link #delete}/{@link #assignDevice}/{@link
- * #unassignDevice}) first re-reads through the scope, so an out-of-scope asset
- * 404s before the mutation runs; wave 1 scoped only asset reads + command + assign, so this
- * cheap "read-scope guards the write" is the deliberate write-path posture until the asset services
- * take a scope on writes directly. With auth off the scope is unbounded, so all of this is a no-op
- * and behavior is identical to before scoping.
+ * outside the caller's scope exactly as it 404s an unknown id — existence is never revealed.
+ *
+ * <h2>Authority, not visibility, guards the writes (docs/plans/active/OPS-UX-PLAN.md §1)</h2>
+ * Seeing an asset and administering it are different questions — a PILOT's scope is built to let
+ * them see (and fly) exactly the aircraft assigned to them, which is not authority to rename,
+ * deactivate, delete, or reassign the devices of that same aircraft. Each mutation ({@link
+ * #update}/{@link #setState}/{@link #delete}/{@link #assignDevice}/{@link #unassignDevice}) calls
+ * {@link #requireManageable}, which first re-reads the asset through the scope exactly as before
+ * (an unknown or out-of-scope asset still 404s, hiding existence — the caller cannot even ask about
+ * something they cannot see), then additionally requires {@link
+ * com.drones.vision.platform.VisibilityScope#canManage(com.drones.vision.kernel.Ownership)
+ * scope().canManage(ownership)} — an asset the caller can see but does not administer now 403s,
+ * an honest "you may not do this" rather than a hiding 404, matching every other command gate in
+ * this codebase (see {@link ApiExceptionHandler}'s 403 mapping). {@link #create} gains its own
+ * gate, {@link com.drones.vision.platform.VisibilityScope#canManageOrg() scope().canManageOrg()} —
+ * registering a new asset is team-scoped management, the same gate {@code DatasetService#create}/
+ * {@code UserService#create} already use, not the deployment-global {@code canAdminister()} the
+ * write gate above deliberately avoids needing (a MANAGER may administer every asset in their own
+ * subtree without being an ADMIN). With auth off the scope is unbounded, so every one of these
+ * gates passes and behavior is identical to before this wave.
  *
  * <h2>Status codes</h2>
  * An unknown asset id surfaces as {@link java.util.NoSuchElementException} from {@link
@@ -105,6 +120,9 @@ public class AssetController {
     @PostMapping("/api/assets")
     @ResponseStatus(HttpStatus.CREATED)
     public AssetDetailsResponse create(@RequestBody CreateAssetRequest request) {
+        if (!currentUser.scope().canManageOrg()) {
+            throw new AccessDeniedException("Not permitted to register new assets");
+        }
         Asset created = assetService.create(request.toSpec(), currentUser.ownership(), currentUser.userId());
         return detailsResponse(created.id());
     }
@@ -126,7 +144,14 @@ public class AssetController {
         // Parse/validate the body (a malformed edit is a 400) before the scope guard's 404, so a
         // bad request never depends on the caller's scope.
         var edit = (request == null ? UpdateAssetRequest.EMPTY : request).toEdit();
-        requireInScope(assetId);
+        // Renaming an assigned aircraft or editing its custom fields is an operator act, not a
+        // management one — see AssetEdit#changesManagedFields for why the split is on the body
+        // rather than on the endpoint.
+        if (edit.changesManagedFields()) {
+            requireManageable(assetId);
+        } else {
+            requireVisible(assetId);
+        }
         assetService.update(assetId, edit, currentUser.userId());
         return detailsResponse(assetId);
     }
@@ -148,7 +173,7 @@ public class AssetController {
     public AssetDetailsResponse setState(@PathVariable String id, @RequestBody SetLifecycleStateRequest request) {
         AssetId assetId = AssetId.of(id);
         var state = request.toLifecycleState(); // an unrecognized state is a 400, before the scope 404
-        requireInScope(assetId);
+        requireManageable(assetId);
         assetService.setState(assetId, state, currentUser.userId());
         return detailsResponse(assetId);
     }
@@ -167,7 +192,7 @@ public class AssetController {
     @DeleteMapping("/api/assets/{id}")
     public AssetDeletionResponse delete(@PathVariable String id) {
         AssetId assetId = AssetId.of(id);
-        requireInScope(assetId);
+        requireManageable(assetId);
         return AssetDeletionResponse.from(assetService.delete(assetId, currentUser.userId()));
     }
 
@@ -209,7 +234,7 @@ public class AssetController {
     public AssetDetailsResponse assignDevice(@PathVariable String id, @RequestBody AssignDeviceRequest request) {
         AssetId assetId = AssetId.of(id);
         var deviceId = request.toDeviceId(); // a blank device id is a 400, before the scope 404
-        requireInScope(assetId);
+        requireManageable(assetId);
         assetService.assignDevice(assetId, deviceId, currentUser.userId());
         return detailsResponse(assetId);
     }
@@ -226,7 +251,7 @@ public class AssetController {
     public AssetDetailsResponse unassignDevice(@PathVariable String id, @PathVariable String deviceId) {
         AssetId assetId = AssetId.of(id);
         DeviceId device = DeviceId.of(deviceId); // a malformed device UUID is a 400, before the scope 404
-        requireInScope(assetId);
+        requireManageable(assetId);
         assetService.unassignDevice(assetId, device, currentUser.userId());
         return detailsResponse(assetId);
     }
@@ -265,12 +290,25 @@ public class AssetController {
     }
 
     /**
-     * Guards a mutation: re-reads {@code id} through the caller's scope so an out-of-scope (or
-     * unknown) asset 404s ({@link java.util.NoSuchElementException}) before the mutation runs. Cheap
-     * — the same scoped read the detail endpoint does — and the deliberate write-path posture until
-     * the asset services take a {@code VisibilityScope} on writes directly (see the class javadoc).
+     * Guards a mutation: re-reads {@code id} through the caller's scope, so an out-of-scope or
+     * unknown asset 404s ({@link java.util.NoSuchElementException}, hiding existence, unchanged
+     * from before this wave) before the mutation runs — then, for an asset the caller can see,
+     * additionally requires {@link com.drones.vision.platform.VisibilityScope#canManage
+     * scope().canManage(ownership)}, an honest 403 rather than a hiding 404 (see the class
+     * javadoc's "Authority, not visibility" section for why the second check exists).
+     *
+     * <p>{@link #requireVisible} is the first half alone — the 404 without the 403 — used by {@link
+     * #update} for an edit that only touches operator-editable fields ({@link
+     * com.drones.vision.warehouse.application.asset.AssetEdit#changesManagedFields}).
      */
-    private void requireInScope(AssetId id) {
+    private void requireVisible(AssetId id) {
         assetService.details(currentUser.scope(), id);
+    }
+
+    private void requireManageable(AssetId id) {
+        AssetDetails details = assetService.details(currentUser.scope(), id);
+        if (!currentUser.scope().canManage(details.summary().asset().ownership())) {
+            throw new AccessDeniedException("Asset " + id.value() + " is outside your management authority");
+        }
     }
 }
