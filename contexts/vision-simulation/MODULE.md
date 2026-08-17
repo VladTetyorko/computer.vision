@@ -152,12 +152,13 @@ same rule `events`/`flight` follow (no `simulation.application.simulation`).
 
 ## Gotchas
 - **`feedByAsset`/`telemetryFeedByAsset` are pure in-memory bookkeeping — a `transport=RTSP`/`MJPEG`
-  simulation's TX feed never survives a JVM restart on its own, even with `vision.persistence.enabled=true`.**
+  simulation's TX feed never survives a JVM restart on its own.**
   A restart starts with empty maps; the persisted `Device(protocol="rtsp", uri=...)` row survives, but
   nothing is pushing to that URI anymore. **Fixed by `#resumeAll()`** (see the API surface entry
   above) — `vision-app`'s `SimulationResumeRunner` (an `ApplicationRunner`, gated on
-  `vision.persistence.enabled` **and** `vision.simulation.resume-on-boot`) calls it once the context
-  is up. Nothing distinguishes "this RTSP device is one of our own TX-fed feeds" from "a real external
+  `vision.simulation.resume-on-boot` — the `vision.persistence.enabled` half of that gate is gone,
+  docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b) calls it once the context is up. Nothing distinguishes
+  "this RTSP device is one of our own TX-fed feeds" from "a real external
   RTSP camera" in storage — the only reliable signal is structural: an RTSP device whose `uri` host:port
   matches this app's own configured mediamtx push target is always one of this app's own feeds, since
   this architecture never registers a real external camera against mediamtx's own ingest port.
