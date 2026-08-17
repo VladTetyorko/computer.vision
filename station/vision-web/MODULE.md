@@ -9354,8 +9354,10 @@ those same gates without waiting on them, since `orgGuard` and `describeHttpErro
 - **B2 — "Set up this station" checklist.** New `core/command/setup-checklist-logic.ts` (pure):
   `isFreshStation(users, totalAssets)` = `hasOnlySeededUsers(users) || totalAssets === 0` (the
   plan's own OR wording, confirmed against `docs/plans/active/OPS-UX-PLAN.md` §3 B2), where
-  "seeded" means exactly `{admin, manager, pilot}` — the three usernames `AuthSeedRunner` creates on
-  a fresh install and never more. `buildSetupChecklist(users, groups, totalAssets,
+  "seeded" means exactly `{admin, manager, pilot}` — the three usernames a fresh install creates
+  (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1: this is now `storage/persistence`'s
+  `V90001__dev_accounts.sql` Flyway seed, not the `AuthSeedRunner` `ApplicationRunner` this note
+  originally referenced — same three usernames, never more, either way). `buildSetupChecklist(users, groups, totalAssets,
   hasAnyPilotAssignment)` returns four rows — create a group (`groups.length > 1`, target `/org`),
   add pilots (`pilotUserCount > 1`, target `/org`), add your first aircraft (`totalAssets > 0`,
   target `/add-source`), assign a pilot (`hasAnyPilotAssignment`, target `/manage/roster`) — each
