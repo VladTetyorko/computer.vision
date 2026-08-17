@@ -25,15 +25,26 @@ spring:
   # docs/plans/active/SCALE-100-PLAN.md §4 decision 2, which pinned it "on".
   # This project targets Java 21 (root pom java.version), where a virtual thread
   # that blocks inside a `synchronized` block PINS its carrier thread -- JEP 491
-  # removes that only from Java 24. LiveConnection guards every SseEmitter#send
-  # with `synchronized (sendLock)` and that send is blocking network I/O, and
-  # LiveUpdateRegistry#connect runs its whole snapshot burst on the request
-  # thread. Turning virtual threads on globally would therefore let a handful of
-  # concurrent /api/live connects pin every carrier in the scheduler's pool and
-  # stall unrelated requests -- the opposite of what the wave is for.
-  # Re-evaluate once SCALE-100 S2 has moved those sends off the request thread
-  # (or once this project moves to Java 24+), then measure with the S0 rig
-  # before flipping it.
+  # removes that only from Java 24. Blocking I/O held under `synchronized` is
+  # therefore a per-site hazard that has to be surveyed, not assumed away.
+  #
+  # SCALE-100 S2 already fixed the worst site: LiveConnection#sendLock is now a
+  # ReentrantLock (which parks instead of pinning) precisely so the SSE write
+  # path is virtual-thread-safe. Others remain reachable from a request thread
+  # and have NOT been audited or fixed -- ManualControlWebSocketHandler's
+  # `synchronized (state.sendLock)` around a blocking WebSocket send, and
+  # MediamtxStreamPublisher, which a stream start/stop request calls directly.
+  # LiveRingBuffer's `synchronized` methods are pure in-memory work and are not
+  # a concern.
+  #
+  # So this stays off until those sites are surveyed AND the S0 rig
+  # (tools/loadrig) shows a measured win -- not on reasoning alone. The rig and
+  # a pre-change baseline both exist now (docs/conclusions/SCALE-100-BASELINE.md),
+  # so this is a measurable question rather than an argued one.
+  #
+  # server.tomcat.max-connections is likewise unpinned: the same baseline should
+  # choose it. The S0 numbers show thread count, not connection count, as the
+  # binding constraint at 100 viewers.
 
 vision:
 

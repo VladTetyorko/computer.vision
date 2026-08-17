@@ -83,13 +83,38 @@ docs merge whenever they land. Then the orchestrator applies the reserved-file c
 
 ## 5. Status
 
+**Band A is complete.** All four waves merged, every one verified by the orchestrator re-running its
+build rather than trusting the agent's report.
+
 | Wave | State |
 |---|---|
-| S0 | in flight (restarted — see §6) |
-| S1 | **merged** `73d3cc6` — 592/592 green, verified independently by the orchestrator |
-| S2 | in flight (restarted — see §6) |
+| S0 | **merged** `4b13be6` — rig + real measured baseline at `a70c107` |
+| S1 | **merged** `73d3cc6` — HLS proxy streams; cookie-isolation gate passed |
+| S2 | **merged** `02cb7d8` — dispatch split; 598/598 green with S1 |
 | S3 | **merged** `5060686` + wiring `cb99829` — 148 persistence / 190 app tests green |
 | S4–S7 | not started (Band B) |
+
+### What the baseline actually showed (`docs/conclusions/SCALE-100-BASELINE.md`)
+
+Measured at `a70c107`, i.e. **before** S1/S2/S3:
+
+| Load | Threads | Heap | REST p99 | HLS p99 |
+|---|---|---|---|---|
+| idle | 138 | — | — | — |
+| 100 HLS viewers only | **908** | 901 MB | 632 ms | 2326 ms |
+| 100 combined | — | — | 424 ms | 3453 ms |
+
+The 138 → 908 thread jump is the unclosed per-request `HttpClient` seen from outside the JVM — it
+ranked S1 correctly, and independently of the reasoning that ranked it. Thread count fell back only
+to 232 a minute after load stopped.
+
+The document is careful about what it does **not** establish: REST p99 growing 60× is *consistent
+with* the missing pool but this rig cannot separate that from GC and Tomcat thread-pool effects. Two
+items are marked not-measured with reasons (a full K=100 sim sweep, and the browser idle-tab polling
+spot-check that §7 of the plan flagged as its weakest claim — still unverified).
+
+**The "after" sweep has not been run.** Every headroom claim in the plan's §3 remains an estimate
+until someone re-runs `tools/loadrig` against this branch's tip.
 
 ### Orchestrator changes on top of the agents' work
 
@@ -117,15 +142,23 @@ rather than stop.
 
 ## 7. Reversal: virtual threads stay off
 
-The plan pinned `spring.threads.virtual.enabled=true` as decision 2. That is **wrong for this
-codebase today** and `application.yaml` now records why.
+The plan pinned `spring.threads.virtual.enabled=true` as decision 2. It stays **off**, and
+`application.yaml` records why.
 
 This project targets **Java 21**, where a virtual thread blocking inside a `synchronized` block pins
-its carrier — JEP 491 removes that only in Java 24. `LiveConnection` wraps every blocking
-`SseEmitter#send` in `synchronized (sendLock)`, and `LiveUpdateRegistry#connect` runs its whole
-snapshot burst on the **request** thread. Enabling virtual threads globally would let a handful of
-concurrent `/api/live` connects pin every carrier in the scheduler pool and stall unrelated
-requests — the precise opposite of this plan's purpose.
+its carrier — JEP 491 removes that only in Java 24. Blocking I/O under `synchronized` is therefore a
+per-site hazard to be surveyed, not assumed away.
 
-Revisit after S2 moves those sends off the request thread, or after a move to Java 24+, and only
-with an S0 measurement rather than on reasoning alone.
+**Amended after S2 landed.** The original rationale named `LiveConnection`'s `synchronized (sendLock)`
+around a blocking `SseEmitter#send` as the blocker. S2 fixed exactly that — `sendLock` is now a
+`ReentrantLock`, which parks instead of pinning, and it was changed for this very reason. So the
+specific objection no longer holds and the note has been corrected rather than left standing.
+
+The decision is unchanged because **other sites remain, unaudited**:
+- `ManualControlWebSocketHandler:292` — `synchronized (state.sendLock)` around a blocking WebSocket send.
+- `MediamtxStreamPublisher` — called directly by a stream start/stop request thread.
+- (`LiveRingBuffer`'s `synchronized` methods are pure in-memory work — not a concern.)
+
+What changed is the *kind* of open question: it was an argued one, and it is now a measurable one.
+The rig and a pre-change baseline both exist. Survey those sites, then flip it and re-run
+`tools/loadrig` — do not flip it on reasoning alone.
