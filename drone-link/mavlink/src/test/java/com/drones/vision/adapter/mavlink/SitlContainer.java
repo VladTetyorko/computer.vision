@@ -2,11 +2,15 @@ package com.drones.vision.adapter.mavlink;
 
 import java.io.IOException;
 import java.net.DatagramSocket;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -29,6 +33,17 @@ import java.util.concurrent.TimeUnit;
  * defaults — the same env vars {@code infra/sitl/entrypoint.sh} already reads, pointed at a
  * test-local port instead of the well-known 14550.
  *
+ * <h2>Why {@code INSTANCE} is allocated rather than fixed at 0</h2>
+ * {@code --network host} is what makes the telemetry wiring simple, and it is also what makes SITL's
+ * <i>own</i> listeners host-global: {@code arducopter -I N} binds TCP {@value #SERIAL1_BASE_PORT} and
+ * {@value #SERIAL2_BASE_PORT} and UDP {@value #SIMULATION_BASE_PORT}, each offset by
+ * {@value #INSTANCE_PORT_STRIDE}·N, on the host. Two containers at the same instance therefore cannot
+ * coexist — the second dies at startup with {@code bind port 5762 for SERIAL1} and its test fails far
+ * downstream, looking like lost telemetry rather than a port clash. That is not hypothetical: it was
+ * reproduced by running two builds of this module at once, which is ordinary here (one agent verifying
+ * while another builds). {@link #claimInstance()} hands out a free instance instead, so concurrent
+ * builds and concurrent tests in one JVM stay out of each other's way.
+ *
  * <p>Extracted in wave O4 (docs/plans/active/DRONE-ONBOARDING-PLAN.md) because a third copy of this
  * plumbing was about to be written: {@link MavlinkSitlSmokeIntegrationTest} and
  * {@link MavlinkSitlReturnHomeIntegrationTest} each carried their own.
@@ -44,10 +59,35 @@ final class SitlContainer implements AutoCloseable {
             + "`docker build -t " + IMAGE + " infra/sitl` or `infra/sitl/up.sh` once to enable this test; "
             + "skipping rather than building ArduPilot as part of a test run";
 
+    /** {@code arducopter -I N} offsets every one of its own listeners by this much. */
+    private static final int INSTANCE_PORT_STRIDE = 10;
+
+    static final int SERIAL1_BASE_PORT = 5762;
+
+    static final int SERIAL2_BASE_PORT = 5763;
+
+    static final int SIMULATION_BASE_PORT = 5501;
+
+    /**
+     * Enough for ten concurrent SITLs; past that the ports would run into other services' territory,
+     * and a machine running ten of these is out of CPU long before it is out of instances.
+     */
+    private static final int MAX_INSTANCES = 10;
+
+    /**
+     * Instances this JVM has handed out and not yet released. Port probing alone cannot serialise two
+     * {@link #start} calls racing for the same instance — the loser would only find out at
+     * {@code docker run} — so the claim is taken here first, before any port is touched.
+     */
+    private static final Set<Integer> CLAIMED_INSTANCES = ConcurrentHashMap.newKeySet();
+
     private final String name;
 
-    private SitlContainer(String name) {
+    private final int instance;
+
+    private SitlContainer(String name, int instance) {
         this.name = name;
+        this.instance = instance;
     }
 
     /** True iff the {@code docker} CLI can talk to a daemon. */
@@ -86,11 +126,12 @@ final class SitlContainer implements AutoCloseable {
     static SitlContainer start(String purpose, int targetPort, int sysid, Integer speedup)
             throws IOException, InterruptedException {
         String name = "vision-sitl-" + purpose + "-" + UUID.randomUUID();
+        int instance = claimInstance();
         List<String> command = new ArrayList<>(List.of(
                 "docker", "run", "-d", "--rm", "--name", name,
                 "--network", "host",
                 "-e", "SYSID_THISMAV=" + sysid,
-                "-e", "INSTANCE=0",
+                "-e", "INSTANCE=" + instance,
                 "-e", "MAVLINK_TARGET_HOST=127.0.0.1",
                 "-e", "MAVLINK_TARGET_PORT=" + targetPort));
         if (speedup != null) {
@@ -100,9 +141,84 @@ final class SitlContainer implements AutoCloseable {
 
         ProcessResult result = run(Duration.ofSeconds(30), command.toArray(String[]::new));
         if (result.exitCode() != 0) {
+            CLAIMED_INSTANCES.remove(instance);
             throw new IllegalStateException("failed to start SITL container: " + result.output());
         }
-        return new SitlContainer(name);
+        SitlContainer container = new SitlContainer(name, instance);
+        try {
+            container.requireAlive();
+        } catch (RuntimeException | IOException | InterruptedException e) {
+            container.close();
+            throw e;
+        }
+        return container;
+    }
+
+    /**
+     * {@code docker run -d} reports success the moment the container is created, so a SITL that dies
+     * one second later — the shape every port clash takes — would otherwise surface minutes on as an
+     * unexplained telemetry timeout. Checking here turns that into a failure that names its own cause.
+     */
+    private void requireAlive() throws IOException, InterruptedException {
+        ProcessResult running = run(Duration.ofSeconds(10), "docker", "inspect", "-f", "{{.State.Running}}", name);
+        if (running.exitCode() == 0 && running.output().strip().equals("true")) {
+            return;
+        }
+        // `--rm` has usually reaped it by now, taking the logs with it; say what is knowable.
+        throw new IllegalStateException("SITL container " + name + " (instance " + instance
+                + ") exited immediately after starting -- it did not survive to serve telemetry. "
+                + "Its instance claims host ports TCP " + (SERIAL1_BASE_PORT + instance * INSTANCE_PORT_STRIDE)
+                + "/" + (SERIAL2_BASE_PORT + instance * INSTANCE_PORT_STRIDE) + " and UDP "
+                + (SIMULATION_BASE_PORT + instance * INSTANCE_PORT_STRIDE)
+                + "; docker said: " + running.output().strip());
+    }
+
+    /**
+     * @throws IllegalStateException if every instance is taken — a real failure, since a test that
+     *                               silently shared an instance would fail more confusingly later
+     */
+    private static int claimInstance() {
+        for (int instance = 0; instance < MAX_INSTANCES; instance++) {
+            if (!CLAIMED_INSTANCES.add(instance)) {
+                continue;
+            }
+            if (portsFree(instance)) {
+                return instance;
+            }
+            CLAIMED_INSTANCES.remove(instance);
+        }
+        throw new IllegalStateException("no free ArduPilot SITL instance below " + MAX_INSTANCES
+                + " -- every candidate's host ports are already bound, most likely by SITL containers "
+                + "left behind by an interrupted run (`docker ps --filter name=vision-sitl`)");
+    }
+
+    /** Probes what {@code arducopter -I instance} will itself try to bind, on the host it will bind it on. */
+    private static boolean portsFree(int instance) {
+        int offset = instance * INSTANCE_PORT_STRIDE;
+        return tcpPortFree(SERIAL1_BASE_PORT + offset)
+                && tcpPortFree(SERIAL2_BASE_PORT + offset)
+                && udpPortFree(SIMULATION_BASE_PORT + offset);
+    }
+
+    private static boolean tcpPortFree(int port) {
+        try (ServerSocket socket = new ServerSocket()) {
+            socket.setReuseAddress(false);
+            socket.bind(new InetSocketAddress("0.0.0.0", port));
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static boolean udpPortFree(int port) {
+        try (DatagramSocket socket = new DatagramSocket(null)) {
+            // Without this a second binder is welcomed rather than refused, and the probe always says "free".
+            socket.setReuseAddress(false);
+            socket.bind(new InetSocketAddress("0.0.0.0", port));
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     @Override
@@ -111,6 +227,10 @@ final class SitlContainer implements AutoCloseable {
             run(Duration.ofSeconds(15), "docker", "rm", "-f", name);
         } catch (Exception ignored) {
             // best-effort cleanup only -- `--rm` already reaps it when the process exits
+        } finally {
+            // Released even when removal fails: holding the claim would starve later tests of an
+            // instance whose ports the dying container is about to give back anyway.
+            CLAIMED_INSTANCES.remove(instance);
         }
     }
 

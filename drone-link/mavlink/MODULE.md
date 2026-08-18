@@ -255,7 +255,8 @@ row above through `STATUSTEXT` has fired at least once for the decoder's lifetim
   test in this module now shares (`dockerAvailable()`, `imagePresent()`, `start(purpose, port, sysid[,
   speedup])`, `AutoCloseable`, `freePort()`). `MavlinkSitlSmokeIntegrationTest` and
   `MavlinkSitlReturnHomeIntegrationTest` each carried their own copy before; a third was about to be
-  written.
+  written. It picks each container's ArduPilot `INSTANCE` itself rather than always using 0, so
+  concurrent builds do not collide on SITL's host-bound ports (see Gotchas).
 - `MavlinkGateway`/`VehicleClaimPolicy` are guarded by one private monitor each (`VehicleClaimPolicy`'s
   own lock protects claim state; `PeerDirectory` itself needs no external lock, it's independently
   thread-safe).
@@ -368,6 +369,15 @@ row above through `STATUSTEXT` has fired at least once for the decoder's lifetim
 - **`MessageObservation.name` is best-effort.** Resolved through `ArdupilotmegaDialect` (a superset of
   common) plus a CamelCase→SCREAMING_SNAKE transform (`VfrHud`→`VFR_HUD`), and `null` for an id the
   dialect does not know. An unrecognised message still counts toward the inventory.
+- **Two SITL containers at the same instance cannot coexist — `SitlContainer` allocates one.**
+  `--network host` is what keeps the telemetry wiring simple, and it is also what puts SITL's *own*
+  listeners on the host: `arducopter -I N` binds TCP 5762/5763 and UDP 5501, each offset by 10·N.
+  Started twice at instance 0, the second container dies at boot (`bind port 5762 for SERIAL1`) and
+  its test fails much later, looking like lost telemetry rather than a port clash. **Reproduced**
+  by running two builds of this module at once — ordinary here, since one agent may verify while
+  another builds. `SitlContainer.claimInstance()` now probes and reserves a free instance (0–9), and
+  `start()` verifies the container is still alive before returning, so this failure names itself.
+  Verified by parking a foreign SITL on instance 0 and running the suite green around it.
 
 ## Test scaffolding changed in W4 (docs/plans/active/MAVLINK-CORE-PLAN.md §6.1 rule 3)
 
