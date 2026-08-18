@@ -1540,20 +1540,34 @@ both directions, a round-trip test) is a `vision-warehouse`/`storage/persistence
 this wave's `contexts/vision-flight`-plus-`storage/persistence` file scope does not include touching
 `vision-warehouse` for — flagged again rather than silently worked around a second time.
 
-`./mvnw -B -pl contexts/vision-flight -am test`: **238/238 green** ×3 (216 pre-O11 + 22 new — 4
-`ParameterDriftTest` + 5 `ConfigDriftCalculatorTest` + 3 `FlightPassportTest` + 10 in
+`./mvnw -B -pl contexts/vision-flight -am test`: **240/240 green** ×3 (216 pre-O11 + 24 new — 4
+`ParameterDriftTest` + 5 `ConfigDriftCalculatorTest` + 3 `FlightPassportTest` + 12 in
 `DefaultVehicleProfileServiceTest`). `./mvnw -B -pl storage/persistence -am test`: **182/182 green**
 ×3 (176 pre-O11 + 6 new — 5 in `VehicleProfileRepositoryTests` + 1 new top-level schema test),
 against a real `postgres:16` Testcontainers instance every time, docker confirmed available, zero
 `[ERROR]`-prefixed lines and zero `<failure>`/`<error>` entries in the surefire XML in any run.
+
+**Post-merge-review fix, entirely inside `contexts/vision-flight`, no persistence-layer change**:
+review caught that `passport`'s original usage-ownership check went through `AssetDetails#recentUsages()`,
+capped to the 20 most recent flights — a passport for an older flight 404'd even though it genuinely
+belonged to the asset. Fixed by adding `AssetUsageRepositoryPort` (already implemented here,
+`JpaAssetUsageRepository` — see the `repository` section above, unchanged by this fix) as a 5th
+constructor parameter on `DefaultVehicleProfileService` and resolving the usage via its uncapped
+`findById` instead. Nothing in this module needed to change: no new port, no new query, no schema
+change — see `contexts/vision-flight/MODULE.md`'s own Status/Gotchas entries for the full story. The
+counts above already include this fix's 2 additional tests and re-run numbers.
 
 **Out-of-module call sites this wave leaves open** (not touched, per this wave's own strict file
 scope): `vision-perception`'s `UsageTracker` needs to actually call `VehicleProfileService#captureSnapshot`
 at the `PREFLIGHT`/`POSTFLIGHT` phase transitions — nothing calls it automatically today, this wave
 only builds the capability; `vision-api`/`vision-app` need controllers + DTOs + Spring wiring for
 `passport`/`driftFromPreviousFlight` (and `captureSnapshot` if it should also be manually
-triggerable) — `PersistenceWiringConfiguration`'s existing `VehicleProfileRepositoryPort` bean needs
-no change (same port, two new methods on the same implementation already wired in).
+triggerable) — `PersistenceWiringConfiguration`'s existing `VehicleProfileRepositoryPort`/
+`AssetUsageRepositoryPort` beans need no change (same ports, `AssetUsageRepositoryPort` was already
+exposed for other consumers); **`OnboardingWiringConfiguration`'s `new DefaultVehicleProfileService(...)`
+call site does need updating** — the post-review fix added a 5th constructor argument, so that call
+site (currently 4 arguments) will not compile until it passes the already-available
+`AssetUsageRepositoryPort` bean.
 
 **Deviations from the brief**: none. `VehicleProfileService` was extended rather than a new
 `FlightPassportService` interface created — see `contexts/vision-flight/MODULE.md`'s own note on

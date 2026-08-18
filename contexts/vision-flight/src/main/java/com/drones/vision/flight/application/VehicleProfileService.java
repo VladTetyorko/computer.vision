@@ -89,10 +89,13 @@ public interface VehicleProfileService {
      * captured so far. A scoped read, same 404 collapse as {@link #latestProfile}, plus one more
      * case: {@code usageId} not belonging to this asset also 404s, since a passport keyed purely by
      * {@code usageId} would otherwise leak another asset's profile data to a caller who only has
-     * scope over this one.
+     * scope over this one. This membership check is <b>not</b> limited to the asset's recent
+     * usages -- a passport must resolve a flight of any age, so it resolves {@code usageId}
+     * directly rather than through a capped recent-usage list (see {@code
+     * DefaultVehicleProfileService#requireUsageBelongsToAsset}).
      *
      * @throws java.util.NoSuchElementException if {@code assetId} is unknown, out of scope, or
-     *                                          {@code usageId} is not one of its recent usages
+     *                                          {@code usageId} does not belong to it
      */
     FlightPassport passport(AssetId assetId, UsageId usageId, VisibilityScope scope);
 
@@ -102,10 +105,12 @@ public interface VehicleProfileService {
      * flight's PREFLIGHT snapshot: the only window in which a parameter write is actually possible
      * (D10's disarmed-only interlock rules out drift occurring in the air). Empty, never thrown,
      * whenever there is no previous flight or either snapshot was never captured -- an honest
-     * "nothing to compare", not an error.
+     * "nothing to compare", not an error. Finding "the previous flight" does search only the
+     * asset's recent usages (unlike {@link #passport}'s own membership check) -- two flights being
+     * compared are adjacent by definition, so the previous one is always well inside that window.
      *
      * @throws java.util.NoSuchElementException if {@code assetId} is unknown, out of scope, or
-     *                                          {@code usageId} is not one of its recent usages
+     *                                          {@code usageId} does not belong to it
      */
     List<ParameterDrift> driftFromPreviousFlight(AssetId assetId, UsageId usageId, VisibilityScope scope);
 }

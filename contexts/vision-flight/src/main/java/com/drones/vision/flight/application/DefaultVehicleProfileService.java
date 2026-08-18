@@ -21,6 +21,7 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -64,13 +65,17 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
     private final AssetService assetService;
     private final VehicleConfigPort vehicleConfigPort;
     private final VehicleProfileRepositoryPort profileRepository;
+    private final AssetUsageRepositoryPort assetUsageRepository;
     private final AuditTrailPort auditTrail;
 
     public DefaultVehicleProfileService(AssetService assetService, VehicleConfigPort vehicleConfigPort,
-                                         VehicleProfileRepositoryPort profileRepository, AuditTrailPort auditTrail) {
+                                         VehicleProfileRepositoryPort profileRepository,
+                                         AssetUsageRepositoryPort assetUsageRepository, AuditTrailPort auditTrail) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.vehicleConfigPort = Objects.requireNonNull(vehicleConfigPort, "vehicleConfigPort must not be null");
         this.profileRepository = Objects.requireNonNull(profileRepository, "profileRepository must not be null");
+        this.assetUsageRepository =
+                Objects.requireNonNull(assetUsageRepository, "assetUsageRepository must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
     }
 
@@ -160,8 +165,8 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
         Objects.requireNonNull(usageId, "usageId must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
 
-        AssetDetails details = assetService.details(scope, assetId); // 404 unknown/out-of-scope
-        requireUsageBelongsToAsset(details, assetId, usageId);
+        assetService.details(scope, assetId); // 404 unknown/out-of-scope; result unused past the gate
+        requireUsageBelongsToAsset(assetId, usageId);
 
         VehicleProfile preflight = profileRepository.findByUsageAndPhase(usageId, FlightPhase.PREFLIGHT)
                 .orElse(null);
@@ -177,10 +182,11 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
         Objects.requireNonNull(scope, "scope must not be null");
 
         AssetDetails details = assetService.details(scope, assetId); // 404 unknown/out-of-scope
-        AssetUsage current = requireUsageBelongsToAsset(details, assetId, usageId);
+        AssetUsage current = requireUsageBelongsToAsset(assetId, usageId);
 
-        // recentUsages() is newest-first (AssetService#details), so the first entry strictly
-        // before the current usage's startedAt is the immediately-preceding flight.
+        // recentUsages() is newest-first (AssetService#details) and capped -- fine here, unlike
+        // requireUsageBelongsToAsset below: two flights being compared are by definition adjacent,
+        // so "the previous one" is always well inside any reasonable recent-window cap.
         Optional<AssetUsage> previous = details.recentUsages().stream()
                 .filter(usage -> usage.startedAt().isBefore(current.startedAt()))
                 .findFirst();
@@ -198,22 +204,27 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
     }
 
     /**
-     * {@code usageId} must be one of {@code assetId}'s recent usages -- the check that keeps {@link
+     * {@code usageId} must genuinely belong to {@code assetId} -- the check that keeps {@link
      * #passport}/{@link #driftFromPreviousFlight} from leaking another asset's profile data to a
      * caller who only has scope over this one, since {@code VehicleProfileRepositoryPort} keys
      * purely by {@code usageId}, not by asset.
      *
-     * <p>Relies on {@code AssetDetails#recentUsages()}'s own cap (the 20 most recent, per {@code
-     * DefaultAssetService}) -- same accepted "fetch-then-aggregate" limitation as {@code
-     * DefaultAssetStatsService}: a usage older than that window 404s here even though it genuinely
-     * belongs to this asset.
+     * <p>Looks the usage up directly via {@link AssetUsageRepositoryPort#findById}, deliberately
+     * <b>not</b> {@code AssetDetails#recentUsages()} (capped to the 20 most recent, per {@code
+     * DefaultAssetService}): a passport's whole purpose is answering "what was this aircraft's
+     * configuration on that flight", and the flight in question is routinely not one of the last
+     * 20 -- an asset flying five sorties a day would otherwise lose passport access after four
+     * days. {@code findById} has no such cap, so this check now works for a flight of any age.
+     *
+     * <p>"Unknown usage" and "usage belongs to a different asset" collapse to the identical {@link
+     * NoSuchElementException} -- a scoped caller must not learn which case it was, same info-hiding
+     * rule every other scoped read in this module follows.
      */
-    private static AssetUsage requireUsageBelongsToAsset(AssetDetails details, AssetId assetId, UsageId usageId) {
-        return details.recentUsages().stream()
-                .filter(usage -> usage.id().equals(usageId))
-                .findFirst()
+    private AssetUsage requireUsageBelongsToAsset(AssetId assetId, UsageId usageId) {
+        return assetUsageRepository.findById(usageId)
+                .filter(usage -> usage.assetId().equals(assetId))
                 .orElseThrow(() -> new NoSuchElementException(
-                        "Usage " + usageId.value() + " is not a recent usage of asset " + assetId.value()));
+                        "Usage " + usageId.value() + " is not a usage of asset " + assetId.value()));
     }
 
     private Optional<Device> firstSupportedDevice(List<Device> devices) {
