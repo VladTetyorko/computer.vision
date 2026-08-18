@@ -1,8 +1,12 @@
 package com.drones.vision.app.config.wiring;
 
+import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
+import com.drones.vision.adapter.mavlink.MavlinkVehicleConfigurator;
 import com.drones.vision.api.support.OnboardingProperties;
 import com.drones.vision.api.support.RemediationOrchestrator;
+import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionOnboardingProperties;
+import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.devsupport.NoopVehicleConfigPort;
 import com.drones.vision.flight.application.DefaultReadinessService;
 import com.drones.vision.flight.application.DefaultRemediationService;
@@ -33,18 +37,16 @@ import org.springframework.context.annotation.Configuration;
  * AuthWiringConfiguration}'s {@code AuthService}/{@code UserService}. What the flag actually gates
  * is {@link VehicleConfigPort}: {@link #noopVehicleConfigPort} when {@code
  * vision.onboarding.probe.enabled} is {@code false} (the default, D17 — with it off the system
- * behaves exactly as it does today) or absent. <strong>No bean at all when the flag is {@code
- * true}</strong>: this wave's file scope ({@code station/vision-api}, {@code station/vision-app},
- * {@code storage/persistence} only) cannot construct {@code adapter-mavlink}'s {@code
- * MavlinkVehicleConfigurator} (O4, a separate, concurrent wave), and a silent Noop fallback under a
- * flag an operator explicitly turned <em>on</em> would be exactly the "probably fine, didn't check"
- * lie C7 forbids — see {@link NoopVehicleConfigPort}'s own javadoc. Flipping the flag on before O4
- * lands must fail application startup (no {@code VehicleConfigPort} bean to satisfy {@link
- * VehicleProfileService}'s/{@link RemediationService}'s constructors), not fail quietly at request
- * time. <strong>Flagged for whoever wires O4</strong>: that wave needs to add the mirror-image
- * {@code @ConditionalOnProperty(havingValue = "true")} bean constructing {@code
- * MavlinkVehicleConfigurator} here (or in its own wiring class) before the flag can safely go live
- * anywhere.
+ * behaves exactly as it does today) or absent, and {@link #mavlinkVehicleConfigurator} — O4's real
+ * implementation, talking to actual firmware — when it is {@code true}. A silent Noop fallback under
+ * a flag an operator explicitly turned <em>on</em> would be exactly the "probably fine, didn't check"
+ * lie C7 forbids, so the two beans are mutually exclusive by condition rather than by ordering: see
+ * {@link NoopVehicleConfigPort}'s own javadoc.
+ *
+ * <p>O5 shipped only the {@code false} branch, because its file scope could not construct {@code
+ * adapter-mavlink}'s configurator while O4 was still in flight; turning the flag on then failed
+ * startup outright for want of a bean. That is no longer the trade — O4 has landed, so the flag now
+ * does what an operator reading it would expect.
  */
 @Configuration
 @EnableConfigurationProperties(VisionOnboardingProperties.class)
@@ -61,6 +63,26 @@ public class OnboardingWiringConfiguration {
             matchIfMissing = true)
     public VehicleConfigPort noopVehicleConfigPort() {
         return new NoopVehicleConfigPort();
+    }
+
+    /**
+     * Flag on: the real thing (O4). Borrows {@link TelemetryWiring#mavlinkTelemetrySource}'s
+     * gateways rather than opening sockets of its own — a probe of an already-registered aircraft
+     * must go out over the very link that aircraft is already talking on, and
+     * {@code MavlinkVehicleConfigurator} will only ever close a gateway it opened itself.
+     *
+     * <p>Declared as {@link VehicleConfigPort}, not as the concrete type: nothing in this module
+     * should be able to reach past the port to MAVLink-specific behaviour, and only one of these two
+     * beans exists at a time.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "vision.onboarding.probe", name = "enabled", havingValue = "true")
+    public VehicleConfigPort mavlinkVehicleConfigurator(MavlinkTelemetrySource mavlinkTelemetrySource,
+                                                          VisionMavlinkProperties mavlinkProperties,
+                                                          VisionRcProperties rcProperties,
+                                                          VisionOnboardingProperties onboardingProperties) {
+        return new MavlinkVehicleConfigurator(mavlinkTelemetrySource,
+                TelemetryWiring.toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties));
     }
 
     /** The PROBE stage (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1) — behind {@code OnboardingController}. */

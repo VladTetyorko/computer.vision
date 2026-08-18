@@ -74,7 +74,7 @@ com.drones.vision.app
 | `VisionMavlinkProperties` | **new** | `vision.mavlink` | `adapter-mavlink`'s `MavlinkSettings` minus `Rc` (which is `vision.rc`, see above) |
 | `VisionOverlayProperties` | **new** | `vision.overlay` | `adapter-overlay`'s `OverlaySettings` |
 | `VisionApiProperties` (`com.drones.vision.app.config.properties`) | **new**; extended SCALE-100 S6 with `rateLimit`, S7 with `hlsProxy`'s `errorBodyPreviewMaxChars`/`maxRedirectHops` and `live`'s `sendTimeout`/`bufferEviction` (+ `marksBuffer`→`mapBuffer` rename) | `vision.api` | maps across to `com.drones.vision.api.support.VisionApiProperties` (vision-api's own framework-free mirror) — consumers are `PublishWiring#snapshotJpegEncoder`/`#hlsProxySettings`/`#liveSettings` and (for `rateLimit` only) `RateLimitWiring`; `AssetImageController`/per-controller paging are the only ones still reading their own local constants, not this record's `paging`/`upload` fields (a documented gap, not an oversight) |
-| `VisionOnboardingProperties` | **new** (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5) | `vision.onboarding` | only `probe` (`enabled`/`inventoryWindow`/`requestTimeout`) is bound — §8.1's other two `vision.onboarding.*` keys (`remediate.message-interval.enabled` O8, `installer.enabled` O10) have no consumer in this module yet, deliberately not bound until their owning wave wires one; maps across to `com.drones.vision.api.support.OnboardingProperties` (vision-api's own framework-free mirror, same split as `VisionApiProperties` above) via `OnboardingWiringConfiguration#onboardingApiProperties` |
+| `VisionOnboardingProperties` | **new** (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5, extended O8) | `vision.onboarding` | `probe` (`enabled`/`inventoryWindow`/`requestTimeout`) and `remediate.messageInterval.enabled` are bound; §8.1's remaining key (`installer.enabled`, O10) has no consumer in this module yet and is deliberately not bound until its owning wave wires one. `probe` maps across to `com.drones.vision.api.support.OnboardingProperties` (vision-api's framework-free mirror, same split as `VisionApiProperties` above) via `OnboardingWiringConfiguration#onboardingApiProperties`; **both** slices also feed `TelemetryWiring#toMavlinkSettings`, which is what puts them in front of `adapter-mavlink` — `requestTimeout` becomes `MavlinkSettings.Onboarding`'s capability/parameter timeouts, and `remediate.messageInterval.enabled` becomes `requestMessagesOnConnect`. The two flags are independent on purpose: probing only **reads**, while on-connect remediation **transmits** to an aircraft nobody asked about (the plan's one exception to §6.2 rule 3), so wanting to look must not imply consenting to send |
 
 **Naming collision, deliberate**: `com.drones.vision.app.config.properties.VisionApiProperties` (Spring-bound, this module) and `com.drones.vision.api.support.VisionApiProperties` (plain, vision-api) are two distinct classes sharing a simple name in two different packages — see `PublishWiring#snapshotJpegEncoder`'s own javadoc and the vision-app-side `VisionApiProperties`'s own javadoc for why they stay separate (vision-api may not depend on Spring's `@ConfigurationProperties` machinery) and how the one file that needs both (`PublishWiring`) tells them apart (fully-qualifies the vision-api one, imports the Spring one plain).
 
@@ -2439,11 +2439,19 @@ control plane (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1/§8.1). `Vehicle
 established for `AuthService`/`UserService`. Only `VehicleConfigPort` is flag-gated
 (`vision.onboarding.probe.enabled`, default `false`, D17): `NoopVehicleConfigPort` (new,
 `devsupport/`) when off/absent, refusing every call with §8.1's frozen 409 body
-(`"vehicle probing is disabled (vision.onboarding.probe.enabled)"`); **no bean at all** when the flag
-is `true` — this wave's file scope cannot construct `adapter-mavlink`'s real
-`MavlinkVehicleConfigurator` (O4, a separate concurrent wave), so flipping the flag on ahead of O4
-landing fails application startup rather than silently degrading to a no-op that looks like it's
-working. `PersistenceWiringConfiguration` gained two more unconditional repository-port beans,
+(`"vehicle probing is disabled (vision.onboarding.probe.enabled)"`), and
+`OnboardingWiringConfiguration#mavlinkVehicleConfigurator` — O4's real `MavlinkVehicleConfigurator`,
+built on `TelemetryWiring#mavlinkTelemetrySource`'s existing gateways — when it is `true`.
+
+> **Corrected after O4/O8 landed.** As O5 shipped it, the `true` branch had **no bean at all**: the
+> wave's file scope could not construct `adapter-mavlink`'s configurator while O4 was still in
+> flight, so flipping the flag on failed application startup outright. That was the right trade at
+> the time (better than a silent no-op that looks like it works) but it is not a state to leave
+> behind — an operator reading the yaml had no way to tell the flag was inert. `OnboardingProbeEnabledWiringTest`
+> now pins the flag-on path: the context must start, and the port must be the real configurator. A
+> conditional bean that is simply *absent* is invisible to every unit test; only a context test catches it.
+
+`PersistenceWiringConfiguration` gained two more unconditional repository-port beans,
 `vehicleProfileRepositoryPort`/`featureRequirementRepositoryPort` (same straight-line shape as the
 other seventeen — see "Persistence wiring" above), and `VisionOnboardingProperties` (new
 `@ConfigurationProperties`, `vision.onboarding.probe.*`) is mapped onto `vision-api`'s own

@@ -553,17 +553,29 @@ vision:
       # (OnboardingWiringConfiguration falls back to NoopVehicleConfigPort) -- POST
       # /api/onboarding/probe and every /api/assets/{id}/probe|remediate call 409 naming this flag,
       # and readiness still answers from whatever was already probed (or UNKNOWN if never). true:
-      # requires adapter-mavlink's MavlinkVehicleConfigurator (O4) to actually be wired -- flipping
-      # this on before O4 lands fails application startup, deliberately (see
-      # OnboardingWiringConfiguration's own javadoc), rather than silently doing nothing.
+      # adapter-mavlink's MavlinkVehicleConfigurator (O4) is wired instead, and probes talk to real
+      # firmware over the same link the aircraft already streams telemetry on. Reads only -- turning
+      # this on does not let the platform write to an aircraft.
       enabled: false
       # How long a PROBE listens to the link before summarizing the passive message inventory
       # (VehicleConfigPort#probe's window argument). Commented out here to document the default
       # rather than override it.
       # inventory-window: 10s
-      # Per-request timeout for one REQUEST_MESSAGE/parameter read during a probe. Not yet threaded
-      # into any constructor in this module -- see VisionOnboardingProperties' own javadoc.
+      # Per-request timeout for one capability/parameter read during a probe. Note that an absent
+      # parameter name costs a full timeout: MAVLink gives an autopilot no way to say "I don't have
+      # that", so it simply says nothing.
       # request-timeout: 3s
+    remediate:
+      message-interval:
+        # false (default): no MAV_CMD_SET_MESSAGE_INTERVAL is ever sent. true: every gateway asks
+        # each aircraft it learns for the configured message set, so a link that streams almost
+        # nothing starts streaming what the platform needs. This is the plan's one deliberate
+        # exception to "nothing automatic from discovery" (§6.2 rule 3), which is why it is a
+        # separate flag from probe.enabled above -- an operator who wants to *look* at an aircraft
+        # should not thereby be made to *transmit* to it. Nothing is written and nothing persists:
+        # the request is session-scoped on the wire and a reboot forgets it. Measured on ArduPilot
+        # Copter 4.7, a fresh link carries four message types until this asks for more.
+        enabled: false
 
   # --- CV model-improvement training loop (docs/plans/done/CV-TRAINING-PLAN.md, Wave T4; delta docs/plans/done/CV-TRAINING-V2-PLAN.md) ---
   training:
