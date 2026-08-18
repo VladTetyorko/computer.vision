@@ -10273,3 +10273,78 @@ found already correct, **not modified**: `features/command/geofence-zone-dialog.
 `shared/map/fleet-plan-dialog/flight-plan-dialog.ts`, `shared/map/layer-manager.html` — see the BUG 1
 section above for why. Not committed, per this task's own instruction; the shared working tree was
 not stashed or reset at any point, per the same instruction.
+
+---
+
+## Status — S6 frontend: gate the ungated pollers on `LiveStore` (docs/plans/active/SCALE-100-PLAN.md §5 S6, items 1-2) — 2026-08-18
+
+Frontend half of S6 ("close the ungated polls, add a rate limit"); item 3, a backend rate-limit
+filter, is a different module and out of this task's scope entirely. The plan named four pollers
+running unconditionally even while `GET /api/live`'s SSE connection is open and already carrying the
+same data: `cockpit-facade.ts`'s asset-switcher poll, `drone-picker-facade.ts`'s picker-grid poll,
+`core/geofence/geofence-store.ts`'s zone poll, and `cv-control-panel.ts`'s tracks-drawer poll.
+
+**Two** of the four are now gated on `LiveStore`, mirroring `core/fleet/fleet-store.ts#FleetStore`'s
+existing transport-switch idiom exactly rather than inventing a second one: an `effect()` pauses the
+poll the instant `isLiveAvailable(live.connectionState())` is `true` and resumes it — refetching
+immediately, since the list may be stale from however long the live connection was up — the instant
+it drops back to `false`. `cockpit-facade.ts` and `drone-picker-facade.ts` both got a *second* effect
+too, projecting `LiveStore.fleet()` (the `fleet` SSE topic, `AssetSummary[]`) straight onto their own
+asset signals whenever a snapshot arrives, independent of whether the poll happens to be paused —
+the same "apply the moment one arrives" half of `FleetStore.applyDevicesSnapshot`'s job.
+**`core/geofence/geofence-store.ts` stays ungated, deliberately.** It could only ever have got the
+first half: `LiveEnvelope`'s union in `core/api/models.ts` has no `geofence`/`zone` member at all
+(zone *breaches* are a different signal, riding the generic `event` topic), so pausing that 30s poll
+has no live projection standing in for it the way the other two do. Gating it was implemented and
+then **reverted at integration**: it would leave a second operator's newly drawn no-fly zone
+invisible for a whole session, on a safety-adjacent layer, to save 0.033 req/s against a 0.2 req/s
+budget — a correctness loss out of all proportion to the saving, and against CLAUDE.md rule 9. The
+rule this wave actually follows is therefore **gate only what has a live topic to project**; adding a
+zones topic to the live stream is what would make gating it correct later. The reverted work is
+recoverable from this task's own history if that topic ever lands. The original call was flagged for
+review rather than presented as settled, which is why it got caught.
+
+`cv-control-panel.ts`'s 2s tracks poll was deliberately left ungated, per the plan's own
+recommendation: there is no `tracks`-shaped SSE topic to gate against or project from (`LiveEnvelope`
+carries `detections`, not track book/lock/duty-cycle stats), and the poll already self-limits its
+real cost independent of `LiveStore` — `pollTracks()` no-ops with zero HTTP calls unless the CV
+drawer is open **and** a stream is running, so an idle cockpit tab issues nothing from this poller
+regardless of live-connection state. Folding tracks into the `detections` payload was considered and
+rejected: different domain, and a wire-contract change is out of this frontend-only wave. The
+decision and its reasoning are recorded in that file's own doc comment, not just here.
+
+**Acceptance criterion verified by reasoning over the code, not by measurement** — no dev server or
+browser session was used to literally count network requests. With the three stores now gated,
+`isLiveAvailable('open') === true` unconditionally stops each poll's timer; `EventsStore`/
+`TelemetryStore`/`DetectionsStore` were already gated pre-existing (the pattern this task copied);
+and `cv-control-panel.ts`'s poller issues zero requests with the drawer closed regardless of gating.
+An idle cockpit tab with SSE open therefore issues no requests from any of the four named pollers.
+This is a claim about the code's structure, not a measured request count — stated plainly rather than
+presented as a measurement.
+
+**Dev-parity**: `isLiveAvailable('closed')` is always `false`, so with `vision.auth.enabled=false` or
+any session where `LiveStore` never opens (SSE unsupported, dev server without the live endpoint
+wired), all three gated pollers fall back to exactly their prior unconditional-polling behavior,
+byte-for-byte — the gate only ever *removes* polling, never adds a new failure mode. No role-gated
+surface, affordance, or wire contract changed; this is polling-cadence plumbing only.
+
+No new pure-logic files: this is a mechanical extension of `FleetStore`'s already-tested idiom, and
+this codebase has no precedent for dedicated `*-facade.spec.ts` files (checked across all ~26
+facades) — the two facades' new logic is covered by the full build/test pass and by mirroring
+`FleetStore`'s own already-tested pattern, not by a new spec file. The 4 store-level tests this wave
+wrote covered the geofence gate specifically, so they were reverted along with it.
+
+**Tests**: 2082 passing, 122/122 spec files, `tsc --noEmit` clean on both configs, production build
+green with only pre-existing budget warnings (not newly introduced). Bundle delta as originally
+measured (via a `git stash`/`stash pop` round trip around `ng build --configuration production`, not
+estimated) was initial ~+0.19 kB raw / +0.27 kB transfer, `cockpit` lazy chunk ~+0.58 kB raw, `command`
+lazy chunk ~+0.04 kB raw — slightly smaller now that the geofence half is out.
+
+### Files touched
+
+Modified: `features/fly/cockpit-facade.ts`, `features/fly/drone-picker-facade.ts`,
+`features/fly/cv-control-panel.ts` (doc comment only, no behavioral change),
+`core/geofence/geofence-store.ts` (doc comment only — the gate was reverted, see above),
+this file (`station/vision-web/MODULE.md`). No new
+files. Item 3 (backend rate-limit filter) is a separate agent's scope, not touched here. Not
+committed, per this task's own instruction.
