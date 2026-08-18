@@ -77,9 +77,17 @@ public class PersistenceWiringConfiguration {
         return new JpaAssetUsageRepository(entityManagerFactory);
     }
 
+    /**
+     * The one repository here with a tunable write path (docs/plans/active/SCALE-100-PLAN.md S4):
+     * telemetry is the only table written once per incoming sample, so it is the only one where a
+     * per-write flush is worth trading a bounded loss window for.
+     */
     @Bean
-    public TelemetryRepositoryPort telemetryRepositoryPort(EntityManagerFactory entityManagerFactory) {
-        return new JpaTelemetryRepository(entityManagerFactory);
+    public TelemetryRepositoryPort telemetryRepositoryPort(EntityManagerFactory entityManagerFactory,
+                                                            VisionPersistenceProperties properties) {
+        return new JpaTelemetryRepository(entityManagerFactory,
+                JpaTelemetryRepository.DEFAULT_RETENTION_LIMIT_PER_USAGE,
+                properties.telemetry().toTelemetrySettings());
     }
 
     @Bean

@@ -12,11 +12,20 @@ import com.drones.vision.adapter.persistence.repository.JpaMarkRepository;
 import com.drones.vision.adapter.persistence.repository.JpaSampleImageStore;
 import com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository;
 import com.drones.vision.adapter.persistence.repository.JpaTrainingSampleRepository;
+import com.drones.vision.adapter.persistence.repository.TelemetryBatchSettings;
+import com.drones.vision.app.config.properties.VisionPersistenceProperties;
+import com.drones.vision.perception.application.pipeline.UsageSummaryBatchSettings;
 
 import jakarta.persistence.EntityManagerFactory;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.Mockito.mock;
 
@@ -29,14 +38,24 @@ import static org.mockito.Mockito.mock;
  * <p>Before docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b these methods also took a {@code
  * VisionPersistenceProperties}/{@code ObjectProvider<EntityManagerFactory>} pair and branched on
  * {@code vision.persistence.enabled} to select between this and a devsupport in-memory fallback;
- * that flag had exactly one legal value after W4 and is gone entirely now, so every method below
- * is a plain one-argument constructor call with nothing left to branch on.
+ * that flag had exactly one legal value after W4 and is gone entirely now, so every method below is a
+ * plain one-argument constructor call with nothing left to branch on — except {@code
+ * telemetryRepositoryPort}, which reads the batching block SCALE-100 S4 added.
  */
 class PersistenceWiringConfigurationTest {
 
     private final PersistenceWiringConfiguration configuration = new PersistenceWiringConfiguration();
 
     private final EntityManagerFactory entityManagerFactory = mock(EntityManagerFactory.class);
+
+    /**
+     * Bound from an <em>empty</em> source rather than constructed, so what this test sees is exactly
+     * what a deployment with no {@code vision.persistence} block gets — the {@code @DefaultValue}
+     * annotations, not whatever a hand-written {@code new} call happens to pass.
+     */
+    private final VisionPersistenceProperties persistenceProperties =
+            new Binder(new MapConfigurationPropertySource(Map.of()))
+                    .bindOrCreate("vision.persistence", VisionPersistenceProperties.class);
 
     @Test
     void selectsJpaCategoryRepository() {
@@ -60,7 +79,24 @@ class PersistenceWiringConfigurationTest {
 
     @Test
     void selectsJpaTelemetryRepository() {
-        assertInstanceOf(JpaTelemetryRepository.class, configuration.telemetryRepositoryPort(entityManagerFactory));
+        assertInstanceOf(JpaTelemetryRepository.class,
+                configuration.telemetryRepositoryPort(entityManagerFactory, persistenceProperties));
+    }
+
+    /**
+     * The only bean here that reads configuration beyond the connection itself
+     * (docs/plans/active/SCALE-100-PLAN.md S4). Wiring it with immediate settings — or forgetting to
+     * pass them at all, which the one-argument constructor makes easy and silent — would leave the
+     * per-sample flush in place while every doc claims it is gone, so the *default* configuration is
+     * what this pins.
+     */
+    @Test
+    void wiresTheTelemetryRepositoryToBatchByDefaultRatherThanFlushPerSample() {
+        assertFalse(persistenceProperties.telemetry().toTelemetrySettings().isImmediate(),
+                "an unset vision.persistence.telemetry block must still mean batched writes");
+        assertEquals(TelemetryBatchSettings.defaults(), persistenceProperties.telemetry().toTelemetrySettings());
+        assertEquals(UsageSummaryBatchSettings.defaults(), persistenceProperties.telemetry().toSummarySettings(),
+                "both write paths take the same window -- one ingest decision, two settings types");
     }
 
     @Test

@@ -34,6 +34,7 @@ import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.config.properties.VisionLiveProperties;
+import com.drones.vision.app.config.properties.VisionPersistenceProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.config.properties.VisionSimulationProperties;
@@ -297,6 +298,11 @@ public class ApplicationServiceWiring {
      * Drives {@link com.drones.vision.warehouse.domain.model.AssetUsage} lifecycle and telemetry sampling
      * from {@link StreamService}'s start/stop notifications. {@code telemetryLiveUpdatePort} and
      * {@code geofenceMonitor} are threaded through unconditionally — both are always real beans.
+     *
+     * <p>Takes its summary-coalescing window from {@code vision.persistence.telemetry} — the same
+     * block {@code telemetryRepositoryPort} reads (docs/plans/active/SCALE-100-PLAN.md S4). The two
+     * writes this class makes per sample are one ingest decision, so they are configured by one
+     * number even though they need two settings types to cross the module boundary.
      */
     @Bean
     public UsageTracker usageTracker(AssetRepositoryPort assetRepositoryPort,
@@ -305,11 +311,13 @@ public class ApplicationServiceWiring {
                                       TelemetryRepositoryPort telemetryRepositoryPort,
                                       List<TelemetrySourcePort> telemetrySources,
                                       TelemetryLiveUpdatePort telemetryLiveUpdatePort,
-                                      GeofenceMonitor geofenceMonitor) {
+                                      GeofenceMonitor geofenceMonitor,
+                                      VisionPersistenceProperties persistenceProperties) {
         // geofenceMonitor::evaluate, not the monitor itself: UsageTracker (perception) takes a
         // BiConsumer seam so it never depends on the flight context — docs/plans/active/DOMAIN-SEPARATION-W1.md §5 C2
         return new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort,
-                telemetryRepositoryPort, telemetrySources, telemetryLiveUpdatePort, geofenceMonitor::evaluate);
+                telemetryRepositoryPort, telemetrySources, telemetryLiveUpdatePort, geofenceMonitor::evaluate,
+                persistenceProperties.telemetry().toSummarySettings());
     }
 
     /**

@@ -1,6 +1,8 @@
 package com.drones.vision.app.config.properties;
 
 import com.drones.vision.adapter.persistence.config.PersistencePoolSettings;
+import com.drones.vision.adapter.persistence.repository.TelemetryBatchSettings;
+import com.drones.vision.perception.application.pipeline.UsageSummaryBatchSettings;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -35,13 +37,17 @@ import java.time.Duration;
  *                      defaults to {@code PersistencePoolSettings.defaults()}, so an unset {@code
  *                      vision.persistence.pool} block is the same pool an explicit one describing
  *                      the defaults would build.
+ * @param telemetry     how the telemetry ingest path batches its writes
+ *                      (docs/plans/active/SCALE-100-PLAN.md S4) — one block governing both write
+ *                      paths, see {@link Telemetry}.
  */
 @ConfigurationProperties(prefix = "vision.persistence")
 public record VisionPersistenceProperties(@DefaultValue(VisionPersistenceProperties.DEFAULT_JDBC_URL) String jdbcUrl,
                                            @DefaultValue("vision") String username,
                                            @DefaultValue("vision") String password,
                                            @DefaultValue("false") boolean seedDevUsers,
-                                           @DefaultValue Pool pool) {
+                                           @DefaultValue Pool pool,
+                                           @DefaultValue Telemetry telemetry) {
 
     /**
      * Binds {@code vision.persistence.pool.*}. Separate from {@link PersistencePoolSettings} — which
@@ -67,6 +73,38 @@ public record VisionPersistenceProperties(@DefaultValue(VisionPersistencePropert
         public PersistencePoolSettings toSettings() {
             return new PersistencePoolSettings(maxSize, minIdle, connectionTimeout.toMillis(),
                     leakDetectionThreshold.toMillis());
+        }
+    }
+
+    /**
+     * Binds {@code vision.persistence.telemetry.*} (docs/plans/active/SCALE-100-PLAN.md S4) — how
+     * long, and how many samples deep, the ingest path may buffer before it writes.
+     *
+     * <p>One block, two bridges: the durable sample write lives in {@code adapter-persistence}
+     * ({@link TelemetryBatchSettings}) and the coalesced usage-summary write lives in {@code
+     * vision-perception} ({@link UsageSummaryBatchSettings}), which cannot share one Java type — a
+     * context module must not depend on an adapter. They are still one <em>decision</em>, so they
+     * are one property block here rather than two an operator could drift apart.
+     *
+     * <p>{@code batch-window: 0} is the explicit zero-loss opt-out: both settings read it as
+     * immediate mode and every write goes back to being synchronous.
+     *
+     * @param batchSize   samples buffered per usage before a flush is forced regardless of the
+     *                    window — a ceiling for an unusually fast source, not the usual trigger
+     * @param batchWindow how long a sample may sit in heap before it is written, and therefore the
+     *                    upper bound on what an unclean shutdown loses per open usage
+     */
+    public record Telemetry(@DefaultValue("" + TelemetryBatchSettings.DEFAULT_BATCH_SIZE_SAMPLES) int batchSize,
+                            @DefaultValue(TelemetryBatchSettings.DEFAULT_BATCH_WINDOW_MILLIS + "ms") Duration batchWindow) {
+
+        /** Bridges to {@code adapter-persistence}'s framework-free settings record. */
+        public TelemetryBatchSettings toTelemetrySettings() {
+            return new TelemetryBatchSettings(batchSize, batchWindow.toMillis());
+        }
+
+        /** Bridges to {@code vision-perception}'s own, from the same two numbers. */
+        public UsageSummaryBatchSettings toSummarySettings() {
+            return new UsageSummaryBatchSettings(batchSize, batchWindow.toMillis());
         }
     }
 

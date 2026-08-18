@@ -99,6 +99,28 @@ vision:
     #   min-idle: 5
     #   connection-timeout: 30s
     #   leak-detection-threshold: 30s
+    # How the telemetry ingest path batches its writes
+    # (docs/plans/active/SCALE-100-PLAN.md S4). Telemetry is the only table
+    # written once per incoming sample, and before S4 each of those samples cost
+    # a persist + flush() + retention prune, plus a second AssetUsage summary
+    # write right behind it -- the per-sample round trip that put a floor under
+    # ingest cost. Both writes now wait for whichever bound trips first.
+    #
+    # These two numbers govern BOTH write paths deliberately: the durable sample
+    # write (adapter-persistence's TelemetryBatchSettings) and the coalesced
+    # usage-summary write (vision-perception's UsageSummaryBatchSettings) are two
+    # Java types only because a context module must not depend on an adapter --
+    # they are one ingest decision, so they read one block.
+    #
+    # batch-window is the honest cost: a sample lives only in this JVM's heap
+    # until its batch flushes, so an unclean shutdown loses up to one window per
+    # open usage. Set it to 0 for the zero-loss opt-out (every write goes back to
+    # synchronous). batch-size is a ceiling for an unusually fast source, not the
+    # usual trigger -- at a typical ~1Hz telemetry rate the window is what fires.
+    # Commented out because it documents the defaults already in force.
+    # telemetry:
+    #   batch-size: 100
+    #   batch-window: 200ms
 
   # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3) ---
   auth:
