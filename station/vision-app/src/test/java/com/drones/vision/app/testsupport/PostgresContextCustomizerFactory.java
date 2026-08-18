@@ -44,6 +44,23 @@ public class PostgresContextCustomizerFactory implements ContextCustomizerFactor
      */
     private static final class PostgresContextCustomizer implements ContextCustomizer {
 
+        /**
+         * Production's pool defaults are sized for one long-lived JVM serving a hundred users; a test
+         * run is the opposite shape — many short-lived contexts, each doing almost nothing at once.
+         * Spring caches every distinct context configuration for the whole run rather than closing
+         * it, so {@code min-idle=5} (the production default) means every cached context parks five
+         * connections forever. Past ~20 cached contexts that reaches the container's stock
+         * {@code max_connections=100} and the next context to boot dies in Flyway with
+         * "FATAL: sorry, too many clients already" — a failure that lands on whichever test class
+         * happened to boot last, never on the one that caused it.
+         *
+         * <p>Kept here rather than in a test {@code application.yaml} so it travels with the same
+         * seam that already redirects the datasource: anything that owns "which database" should own
+         * "how many connections to it".
+         */
+        private static final int TEST_POOL_MAX_SIZE = 4;
+        private static final int TEST_POOL_MIN_IDLE = 1;
+
         @Override
         public void customizeContext(ConfigurableApplicationContext context,
                                       MergedContextConfiguration mergedConfig) {
@@ -51,7 +68,9 @@ public class PostgresContextCustomizerFactory implements ContextCustomizerFactor
             TestPropertyValues.of(
                     "vision.persistence.jdbc-url=" + postgres.getJdbcUrl(),
                     "vision.persistence.username=" + postgres.getUsername(),
-                    "vision.persistence.password=" + postgres.getPassword()
+                    "vision.persistence.password=" + postgres.getPassword(),
+                    "vision.persistence.pool.max-size=" + TEST_POOL_MAX_SIZE,
+                    "vision.persistence.pool.min-idle=" + TEST_POOL_MIN_IDLE
             ).applyTo(context);
         }
 

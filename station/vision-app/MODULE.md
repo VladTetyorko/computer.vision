@@ -472,6 +472,11 @@ docs/plans/done/ASSET-MODEL-PLAN.md §0.3/§4: until the identity phase (ARCHITE
 - **FIXED (docs/plans/done/REMOTE-CV-PLAN.md P0 item 1): a gRPC channel's graceful shutdown (GOAWAY) used to be able to throw `NoSuchMethodError` internally** — previously observed as `Caught Throwable from listener onGoAwayReceived` / `NoSuchMethodError: io.grpc.internal.ManagedClientTransport$Listener.transportShutdown` logged (at ERROR, by netty's own internal exception guard) during `CvDetectionE2ETest`'s teardown, when the in-test server's `Server#shutdownNow()` sends the client a GOAWAY. Root cause was the same `io.grpc:grpc-core` version skew documented in full in adapter-cv-grpc/MODULE.md's Gotchas: this repo's `dependencyManagement` pinned `io.grpc:grpc-netty-shaded`/`grpc-protobuf`/`grpc-stub` to `${grpc.version}`=1.64.0 but did not pin `io.grpc:grpc-core` itself, so `spring-boot-starter-parent`'s imported `grpc-bom` (which manages `grpc-core` to 1.80.0) won, and `grpc-netty-shaded`'s 1.64.0-compiled bytecode broke against the mismatched 1.80.0 `grpc-core` internal API on this one shutdown notification path. **Fixed at the root pom**: the root `pom.xml`'s `dependencyManagement` now imports `io.grpc:grpc-bom:${grpc.version}` (scope `import`) before the individual artifact pins, aligning the whole `io.grpc` family to `1.64.0` everywhere, including here — `vision-app` is the first module whose effective BOM chain includes both `spring-boot-dependencies`' `grpc-bom` *and* a real network `GrpcDetectionPort` channel in the same JVM, so it was the first place this specific GOAWAY-path manifestation was observed, but the fix lives at the root and applies to every module uniformly. **Verified** via `./mvnw -B -pl station/vision-app dependency:tree -Dverbose | grep grpc`: every `io.grpc:*` artifact (`grpc-core`, `grpc-netty-shaded`, `grpc-protobuf`, `grpc-stub`, `grpc-api`, `grpc-context`, …) resolves to `1.64.0` with no `(version managed from …)` skew, and the full `-pl station/vision-app test` suite (including `CvDetectionE2ETest`'s real-TCP-server teardown) stays green. Even before this fix, no test here actually *failed* because of it — the exception was caught by netty's own listener-invocation guard and logged, not propagated — but it was a latent correctness risk for a real `cv-service`'s graceful restart that is now closed.
 - **This module's locally-installed `adapter-cv-grpc` jar can be stale/empty** if it was ever `mvn install`ed before real classes existed in it (e.g. at module-skeleton-creation time) and never reinstalled afterward — `~/.m2/repository/com/drones/adapter-cv-grpc/<version>/adapter-cv-grpc-<version>.jar` can contain only `META-INF/` with zero compiled classes, which surfaces here as `package com.drones.vision.adapter.cvgrpc does not exist` / `cannot find symbol: class GrpcDetectionPort` when compiling `WiringConfiguration`/`DetectionSessionCleanupEventPublisher` — a confusing error since the source obviously exists and the dependency is declared correctly. Fix: `./mvnw -B -pl cv/grpc install` (scoped, not reactor-wide) to rebuild and reinstall it with its real classes before retrying `-pl station/vision-app`.
 
+- **FIXED: a `<scope>test</scope>` on an internal module dependency here silently stripped it from the *runtime* classpath.** `mavlink-core` was declared directly in this module's `pom.xml` at test scope, purely so `ArchitectureTest` could `importPackages("com.drones.mavlink")`. But `adapter-mavlink` also depends on `mavlink-core` at compile scope, and Maven's **nearest-wins** rule makes a depth-1 declaration beat a depth-2 transitive one — so the direct test-scoped edge won and `mavlink-core` never reached the boot classpath. Everything compiled and every test passed; the app then started and died at bean-creation time with `NoClassDefFoundError: com/drones/mavlink/session/TxScheduler` while building `mavlinkManualControlSender` (`TelemetryWiring:101`), because `adapter-mavlink`'s own classes reference `mavlink-core` types at runtime. Fixed by dropping the `<scope>` so the declaration is compile-scoped; the ArchUnit guard still works, since compile scope is on the test classpath too. **Verify with `./mvnw -pl station/vision-app dependency:tree | grep mavlink` — it must read `mavlink-core:...:compile`, not `:test`.** General rule for this module: never test-scope a `com.drones` module that any adapter needs at runtime; if a dependency exists only to make an ArchUnit rule importable, compile scope is the safe choice, because a test-scoped duplicate of a transitively required module is indistinguishable from an exclusion.
+
+- **FIXED (docs/plans/active/CV-RECONNECT-PLAN.md §3.3a item 1, wave R2): `vision.cv.plaintext=false` used to do nothing — a config lie with a security flavour.** `GrpcCvSettings` carried the field, `application.yaml` documented it as "whether the host/port channel skips TLS," and `GrpcDetectionPort#buildChannel` (adapter-cv-grpc) honoured it — but the channel this module actually builds and shares (`CvWiring#cvGrpcChannel`) called `.usePlaintext()` **unconditionally**, ignoring the property entirely. An operator setting `plaintext: false` believing they'd turned TLS on kept an unencrypted connection with no warning anywhere. Fixed: `.usePlaintext()` is now called only when `settings.plaintext()` is `true`; default stays `true` so the default path is byte-identical (proven by the unchanged 245-test baseline below). **Honest limit, not fixed here**: `plaintext: false` yields the JDK default trust chain, which will not validate a self-signed cv-service certificate — custom trust material is a separate concern. Proven behaviorally by `CvWiringPlaintextTest` (`config.wiring` package): a channel built with `plaintext=false` cannot complete a real RPC against a plaintext (h2c) in-test gRPC server, because it attempts a TLS handshake the server can't answer — `ManagedChannel` exposes no getter for its own negotiation mode, so this is the only honest way to prove the knob took effect. **If you ever need to test this again, remember `ManagedChannelBuilder<?> builder = ManagedChannelBuilder.forAddress(...)` then a separate `if (settings.plaintext()) builder.usePlaintext();` before chaining `.build()` — the single fluent-chain form from before this fix can't express a conditional call in the middle.**
+- **FIXED (docs/plans/active/CV-RECONNECT-PLAN.md §3.3a item 2, wave R2): sub-second keepalive values silently truncated to zero.** `CvWiring#cvGrpcChannel` passed `settings.keepAliveTime().toSeconds()`/`.keepAliveTimeout().toSeconds()` to `ManagedChannelBuilder`, while `GrpcDetectionPort#buildChannel` (adapter-cv-grpc, the sibling code path building the *same kind* of channel) passed `.toMillis()` — so `keepalive-time: 500ms` silently became `0` here (a channel pinging every 0 seconds — effectively continuously, or however grpc-java's builder happens to treat that edge value — rather than the intended half-second cadence), while the exact same property value worked correctly through the adapter's own constructor. Fixed by switching both calls to `.toMillis()`/`TimeUnit.MILLISECONDS`, matching the adapter. The shipped defaults (`20s`/`5s`) are whole seconds either way, so this was invisible at default config and would only bite a deployment that tuned keepalive below one second — exactly the kind of latent bug the "same tunable knob, two independently-written call sites" pattern invites; watch for it any time this module duplicates a `Duration`-to-primitive conversion an adapter already does correctly elsewhere.
+
 ## Status
 
 *Entries below predate docs/plans/active/DOMAIN-SEPARATION-W1.md §15's W1.6b and cite the god-port*
@@ -2188,3 +2193,123 @@ this agent's usual `vision-api`/`vision-app`/`storage/persistence` scope — bot
 now-gone `vision.persistence.enabled` gating in prose whose accuracy this wave's own change directly
 broke, and leaving a doc-only paragraph stale in a module this task's own change made inaccurate
 seemed worse than a small, clearly-scoped drive-by fix.
+
+## docs/plans/active/CV-RECONNECT-PLAN.md wave R2 done (bounded cv-service reconnect — wiring half)
+
+Closes the gap R1 (`cv/grpc`) left open: nobody owned "keep the shared cv-service channel connected
+at a bounded cadence," so a fail-fast RPC during an outage returned instantly without ever triggering
+gRPC's own reconnect, and recovery after cv-service came back was unbounded (observed up to and
+beyond 2 minutes) — see the plan's §1/§2 for the full root-cause story. R1 built `CvChannelSupervisor`/
+`CvUnavailableException` and the three new `GrpcCvSettings` fields (`cv/grpc`, not this module's
+scope). This wave wires the supervisor onto the shared channel and threads its five new `vision.cv.*`
+keys through `VisionCvProperties`, plus fixes two pre-existing, unrelated-but-adjacent defects the
+plan folded into the same six lines (§3.3a).
+
+**`VisionCvProperties` gained a fifth nested record, `Reconnect`** (`enabled`/`initialBackoff`/
+`maxBackoff`/`outageLogInterval` → `vision.cv.reconnect.*`, defaults `true`/`1s`/`10s`/`60s`) —
+exactly the same "defaulted as a whole when absent" shape `Upload`/`Registry`/`Pull` already have: a
+null-check in the outer compact constructor substitutes a `Reconnect` built from that record's own
+`static final DEFAULT_*` constants, so `application.yaml` never needs the block present to get the
+defaults. The pre-existing 4-arg convenience constructor (predating wave F4's extension, kept so
+`VisionCvPropertiesTest`'s original tests needed no rewrite) now passes a fourth `null` for the new
+trailing param, same treatment as the third (`pull`). `enabled` deliberately does **not** map onto
+`GrpcCvSettings` — it is a `vision-app`-only wiring decision (whether `CvWiring#cvChannelSupervisor`
+exists at all, and which `GrpcDetectionPort` constructor `detectionPort` uses), never read by
+`adapter-cv-grpc` itself; the other three fields map one-to-one onto `GrpcCvSettings`'
+`reconnectInitialBackoff`/`reconnectMaxBackoff`/`outageLogInterval` via `CvWiring#toGrpcCvSettings`
+(now a 17-arg `GrpcCvSettings` construction, up from 14).
+
+**`CvWiring#cvChannelSupervisor`** — new `@Bean(initMethod = "start", destroyMethod = "close")`,
+gated by `@ConditionalOnExpression("(${vision.cv.enabled:false} or ${vision.training.enabled:false}
+or '${vision.cv.frame-transport:push}' == 'pull') and ${vision.cv.reconnect.enabled:true}")`:
+deliberately the *same* property expression `cvGrpcChannel` already uses, repeated and ANDed with the
+new reconnect flag, rather than `@ConditionalOnBean(ManagedChannel.class)`. The task's own framing is
+worth preserving here: `@ConditionalOnBean` evaluates against bean *definitions* already processed at
+the point a `@Configuration` class is parsed, which inside one class makes it sensitive to
+`@Bean`-method declaration order — a conditional that can pass in a narrow test slice and silently
+fail to match in full production wiring (or the reverse) depending on scanning order, which is exactly
+the trap the plan warned this wave off. Repeating the literal expression is order-independent and
+states the real intent directly. **Lifecycle**: `initMethod = "start"` arms the watch loop as soon as
+Spring constructs the bean; `destroyMethod = "close"` stops only the supervisor's own watch loop and
+`cv-channel-supervisor` scheduler thread — confirmed against `cv/grpc/MODULE.md`'s "Reconnect / gate
+design" section that `CvChannelSupervisor#close()` never touches the channel, matching the module's
+existing convention for every port but `GrpcDetectionPort` itself. Channel shutdown ownership is
+unchanged: `cvGrpcChannel`'s own `destroyMethod = "shutdown"` stays the sole owner of that.
+
+**`CvWiring#detectionPort`** now takes a third parameter, `ObjectProvider<CvChannelSupervisor>
+cvChannelSupervisor`. When `cvProperties.enabled()`: if a supervisor resolves (`getIfAvailable()` —
+i.e. `vision.cv.reconnect.enabled=true`, the default), it builds `GrpcDetectionPort` via R1's new
+3-arg `(channel, settings, supervisor)` constructor, so `detect(...)` checks the gate before any
+encode/session work; otherwise it falls back to the pre-existing 2-arg constructor — no gate, and
+this fallback **is** the `vision.cv.reconnect.enabled=false` escape hatch the plan's §5 acceptance
+item 3 requires, reproducing pre-R2 behaviour exactly (proven by `CvReconnectDisabledWiringTest`).
+
+**Two fixed knobs in `cvGrpcChannel`** (plan §3.3a, folded into this wave's six rewritten lines) — see
+Gotchas above for the full detail on each: `.usePlaintext()` is now conditional on
+`settings.plaintext()` instead of unconditional (a real, if narrow, security-flavoured config-lie fix
+— `vision.cv.plaintext=false` previously did nothing); keepalive durations now use `.toMillis()`
+instead of `.toSeconds()`, matching `GrpcDetectionPort#buildChannel`, so a sub-second
+`keepalive-time`/`keepalive-timeout` no longer silently truncates to `0`. Both defaults are unchanged,
+so the default-config path is byte-identical — proven by the test counts below, not merely asserted.
+
+**`application.yaml`** documents the four new `vision.cv.reconnect.*` keys in the existing `vision.cv`
+block, matching that file's explanatory voice: it states the ~120s-uncapped gRPC escalation this loop
+bounds, the arithmetic behind the ~20s worst-case recovery figure (`reconnect.max-backoff` + one more
+`StreamPipeline` probe cycle, both capped at 10s), and what each key controls. The pre-existing
+`# plaintext: true` comment is corrected to note the knob is now actually honoured, with the same
+self-signed-certificate honesty note the bean's own javadoc carries.
+
+### Tests
+
+New: `VisionCvPropertiesTest` +2 (`reconnectDefaultsWhenAbsent`, `reconnectExplicitValueIsNotOverridden`
+— defaulted-when-absent and explicit-value-preserved, mirroring the sibling nested records' own
+coverage style). `CvWiringTest` +1 (`defaultConfigurationBuildsNoCvChannelSupervisor` — no supervisor
+at all with every property at its default, same shape as the pre-existing no-channel assertion).
+`CvEnabledWiringTest` +1 (`enabledConfigurationBuildsTheCvChannelSupervisorByDefault` — `vision.cv.enabled=true`
+alone is enough, since `reconnect.enabled` defaults `true`). `CvAndTrainingSharedChannelWiringTest` +1
+(`exactlyOneCvChannelSupervisorBeanExistsOverTheSharedChannel` — one supervisor over the one shared
+channel regardless of which enabling property triggered it). New file `CvReconnectDisabledWiringTest`
+(3 tests, `vision.cv.enabled=true` + `vision.cv.reconnect.enabled=false`): no supervisor bean, `detectionPort`
+still resolves to a real `GrpcDetectionPort` (via the 2-arg fallback), and the shared channel is still
+built — proving the reconnect flag gates only the supervisor/gate, not CV wiring itself. New file
+`CvWiringPlaintextTest` (`config.wiring` package, 2 tests, no Spring context — calls
+`new CvWiring().cvGrpcChannel(...)` directly, mirroring `SimulationResumeWiringConfigurationTest`'s
+"call the `@Bean` method directly" style): `plaintextTrueReachesAPlainHttp2Server` and
+`plaintextFalseCannotReachThatSamePlainHttp2Server` — a real in-test plaintext (h2c) gRPC server, a
+real bidi call driven through the channel `cvGrpcChannel` built. This is the honest seam for this
+proof: `ManagedChannel` exposes no getter for its own TLS/plaintext negotiation mode, so behavioral
+proof against a real socket is the only way to show the property changed what got built, not merely
+what was asserted. `CvDetectionResilienceSmokeTest`'s javadoc gained a note (no assertion change) that
+it still holds under the gate: its `GrpcDetectionPort` is now supervised too (`reconnect.enabled`
+defaults `true`), so its later `detect()` calls fail via a stackless `CvUnavailableException` instead
+of a fresh connection-refused attempt once the gate closes — `StreamPipeline`'s outage policy, and
+this test's own assertion, don't distinguish between the two failure shapes. `CvDetectionE2ETest`
+needed no change: its real in-test server is already listening before the context loads, so the gate
+never observes a `TRANSIENT_FAILURE` and stays open throughout.
+
+### Default-config bar (the acceptance gate), proven
+
+**Before this wave**: `vision-app` did not compile at all — R1 (`cv/grpc`, already merged/installed
+per this wave's own briefing) widened `GrpcCvSettings`' constructor from 14 to 17 args, and this
+module's `CvWiring#toGrpcCvSettings` still called the 14-arg form; confirmed directly by stashing this
+wave's `station/vision-app/src` changes and re-running `-pl station/vision-app test`, which failed at
+`default-compile` with exactly that arity mismatch. Zero tests could run, scoped or reactor-wide.
+**After**: `./mvnw -B -pl station/vision-app test -DskipWeb`: **245/245 green** (up by 10 net-new test
+methods across two new files and four extended ones, all listed above), including the docker-gated
+`RtspSimulationDockerE2ETest` (ran green in this environment, not skipped). Every default
+(`vision.cv.enabled=false`, `vision.cv.reconnect.enabled=true` but moot with no channel to supervise,
+`vision.cv.plaintext=true`) reproduces today's behaviour exactly — proven by the untouched, still-green
+pre-existing assertions in every extended test class, not merely argued. No pre-existing assertion was
+weakened, deleted, or changed; `CvDetectionResilienceSmokeTest`'s only edit was documentation.
+
+### Deferred / not this wave
+
+- **R3** — `GET /api/cv/status` + a live UI badge surfacing `CvChannelSupervisor`'s own read model
+  (`available()`/`state()`/`outageFor()`/`reconnectAttempts()`) — explicitly out of scope per the
+  plan's §3.4 (`station/vision-api`/`station/vision-web`, not this module).
+- No trust-material/custom-CA support for `vision.cv.plaintext=false` — the knob is now honest, not
+  complete; a self-signed cv-service certificate still won't validate. Not attempted here per the
+  plan's own explicit instruction not to build TLS/trust configuration in this wave.
+- `pullEnabled()`/`GrpcPulledDetectionPort` remain ungated by any supervisor — per `cv/grpc/MODULE.md`'s
+  own "Reconnect / gate design" section, the gate is push-only today; wiring one for pull mode (if
+  ever needed) is a later wave, not implied by anything built here.

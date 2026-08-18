@@ -92,4 +92,31 @@ class VisionCvPropertiesTest {
         assertEquals(Duration.ofSeconds(30), properties.demand().grace());
         assertEquals(Duration.ofSeconds(10), properties.demand().pollTtl());
     }
+
+    /**
+     * docs/plans/active/CV-RECONNECT-PLAN.md §3.3, wave R2: the four-arg convenience constructor
+     * passes {@code null} for {@link VisionCvProperties.Reconnect} same as it does for {@code
+     * Upload}/{@code Registry}/{@code Pull} -- the compact constructor must default it as a whole,
+     * matching every sibling nested record's "defaulted as a whole when absent" contract.
+     */
+    @Test
+    void reconnectDefaultsWhenAbsent() {
+        VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f);
+        assertTrue(properties.reconnect().enabled());
+        assertEquals(Duration.ofSeconds(1), properties.reconnect().initialBackoff());
+        assertEquals(Duration.ofSeconds(10), properties.reconnect().maxBackoff());
+        assertEquals(Duration.ofSeconds(60), properties.reconnect().outageLogInterval());
+    }
+
+    /** The canonical (compact) constructor accepts an explicit {@link VisionCvProperties.Reconnect} unchanged. */
+    @Test
+    void reconnectExplicitValueIsNotOverridden() {
+        VisionCvProperties.Reconnect reconnect =
+                new VisionCvProperties.Reconnect(false, Duration.ofMillis(200), Duration.ofSeconds(5),
+                        Duration.ofSeconds(30));
+        VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
+                Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true, Duration.ofSeconds(5),
+                true, null, null, null, false, null, reconnect);
+        assertEquals(reconnect, properties.reconnect());
+    }
 }

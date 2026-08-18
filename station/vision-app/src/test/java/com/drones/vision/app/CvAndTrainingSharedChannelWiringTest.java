@@ -1,5 +1,6 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.cvgrpc.CvChannelSupervisor;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.cvgrpc.GrpcModelRegistryPort;
 import com.drones.vision.adapter.cvgrpc.GrpcTrainingPort;
@@ -61,7 +62,23 @@ class CvAndTrainingSharedChannelWiringTest {
     private ManagedChannel cvGrpcChannel;
 
     @Autowired
+    private CvChannelSupervisor cvChannelSupervisor;
+
+    @Autowired
     private ApplicationContext applicationContext;
+
+    /**
+     * docs/plans/active/CV-RECONNECT-PLAN.md wave R2: the supervisor watches the one shared channel
+     * regardless of which of {@code vision.cv.enabled}/{@code vision.training.enabled} is what
+     * actually satisfied {@link CvWiring#cvGrpcChannel}'s condition — {@code
+     * vision.cv.reconnect.enabled} defaults to {@code true}, so both-flags-on still yields exactly
+     * one supervisor over the one shared channel, not a second one per consumer.
+     */
+    @Test
+    void exactlyOneCvChannelSupervisorBeanExistsOverTheSharedChannel() {
+        assertInstanceOf(CvChannelSupervisor.class, cvChannelSupervisor);
+        assertEquals(1, applicationContext.getBeansOfType(CvChannelSupervisor.class).size());
+    }
 
     @Test
     void exactlyOneSharedChannelBeanExists() {

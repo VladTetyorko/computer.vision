@@ -71,6 +71,9 @@ import java.time.Duration;
  * @param demand                 the system-derived detection-demand gate's own tunables
  *                               (docs/plans/active/CV-DEMAND-PLAN.md §2-3.7); defaulted as a whole
  *                               when absent
+ * @param reconnect              bounded reconnect-cadence config for the shared push/channel path
+ *                               (docs/plans/active/CV-RECONNECT-PLAN.md §3.3) — {@code
+ *                               CvChannelSupervisor}'s own knobs; defaulted as a whole when absent
  */
 @ConfigurationProperties(prefix = "vision.cv")
 public record VisionCvProperties(@DefaultValue("false") boolean enabled,
@@ -89,7 +92,8 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                   Registry registry,
                                   Pull pull,
                                   @DefaultValue("false") boolean detectionDefaultEnabled,
-                                  Demand demand) {
+                                  Demand demand,
+                                  Reconnect reconnect) {
 
     static final String DEFAULT_ENDPOINT = "localhost:50051";
     static final String DEFAULT_DETECT_WIDTH = "640";
@@ -134,15 +138,19 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
             demand = new Demand(Demand.DEFAULT_ENABLED, Demand.DEFAULT_POLL_INTERVAL, Demand.DEFAULT_GRACE,
                     Demand.DEFAULT_POLL_TTL);
         }
+        if (reconnect == null) {
+            reconnect = new Reconnect(true, Reconnect.DEFAULT_INITIAL_BACKOFF, Reconnect.DEFAULT_MAX_BACKOFF,
+                    Reconnect.DEFAULT_OUTAGE_LOG_INTERVAL);
+        }
     }
 
     /**
      * The canonical constructor before docs/plans/active/CV-DEMAND-PLAN.md wave D2 added {@code
-     * detectionDefaultEnabled}/{@code demand}, kept as a convenience constructor defaulting both —
-     * the first to {@code false} (the plan's own pinned default), the second to {@link
-     * Demand#DEFAULT_ENABLED}/{@link Demand#DEFAULT_POLL_INTERVAL}/{@link Demand#DEFAULT_GRACE}/
-     * {@link Demand#DEFAULT_POLL_TTL} — so every pre-existing call site compiles unchanged. Same
-     * "N-1-arg convenience ctor" idiom as every other addition to this record.
+     * detectionDefaultEnabled}/{@code demand} and docs/plans/active/CV-RECONNECT-PLAN.md added
+     * {@code reconnect}, kept as a convenience constructor defaulting all three — the first to
+     * {@code false} (that plan's own pinned default), the other two to their record defaults via the
+     * compact constructor's {@code null} handling — so every pre-existing call site compiles
+     * unchanged. Same "N-1-arg convenience ctor" idiom as every other addition to this record.
      */
     public VisionCvProperties(boolean enabled, String endpoint, int detectWidth, float jpegQuality,
                                String wireFormat, String frameTransport, Duration responseTimeout,
@@ -151,7 +159,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                Pull pull) {
         this(enabled, endpoint, detectWidth, jpegQuality, wireFormat, frameTransport, responseTimeout,
                 keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls, channelShutdownTimeout, plaintext, upload,
-                registry, pull, false, null);
+                registry, pull, false, null, null);
     }
 
     /**
@@ -278,5 +286,36 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
         static final Duration DEFAULT_POLL_INTERVAL = Duration.ofSeconds(2);
         static final Duration DEFAULT_GRACE = Duration.ofSeconds(30);
         static final Duration DEFAULT_POLL_TTL = Duration.ofSeconds(10);
+    }
+
+    /**
+     * Bounded reconnect-cadence config for the shared push/channel path (docs/plans/active/CV-RECONNECT-PLAN.md
+     * §2.1/§3.3) — {@code CvChannelSupervisor}'s own knobs, mapped onto {@code GrpcCvSettings}'
+     * {@code reconnectInitialBackoff}/{@code reconnectMaxBackoff}/{@code outageLogInterval} one-to-one
+     * (the same "this record maps onto that adapter settings object" shape {@link Upload}/{@link
+     * Registry}/{@link Pull} already have) — see {@code CvWiring#toGrpcCvSettings}. {@link #enabled()}
+     * is not one of those three: it is a {@code vision-app}-only wiring decision (whether {@code
+     * CvWiring#cvChannelSupervisor} exists at all and which {@code GrpcDetectionPort} constructor
+     * {@code CvWiring#detectionPort} uses), never read by {@code adapter-cv-grpc}.
+     *
+     * @param enabled           whether {@code CvWiring} wires a {@code CvChannelSupervisor} onto the
+     *                          shared channel and gates {@code GrpcDetectionPort} through it; default
+     *                          {@code true}. {@code false} is the escape hatch (docs/plans/active/CV-RECONNECT-PLAN.md
+     *                          §3.3/§5 item 3) restoring today's exact (pre-R2) behaviour: no gate, no
+     *                          forced reconnect, the channel's own escalating backoff only
+     * @param initialBackoff    how long the supervisor waits, while the channel is in {@code
+     *                          TRANSIENT_FAILURE}, before its first forced {@code
+     *                          resetConnectBackoff()} call; default 1s
+     * @param maxBackoff        cap the doubling forced-reconnect backoff never exceeds; default 10s
+     * @param outageLogInterval how often the supervisor logs an INFO heartbeat while an outage
+     *                          continues, instead of a WARN-with-stack-trace flood; default 60s
+     */
+    public record Reconnect(@DefaultValue("true") boolean enabled,
+                             @DefaultValue("1s") Duration initialBackoff,
+                             @DefaultValue("10s") Duration maxBackoff,
+                             @DefaultValue("60s") Duration outageLogInterval) {
+        static final Duration DEFAULT_INITIAL_BACKOFF = Duration.ofSeconds(1);
+        static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
+        static final Duration DEFAULT_OUTAGE_LOG_INTERVAL = Duration.ofSeconds(60);
     }
 }

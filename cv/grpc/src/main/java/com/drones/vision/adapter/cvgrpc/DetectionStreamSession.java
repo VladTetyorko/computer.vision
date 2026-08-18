@@ -5,6 +5,7 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.proto.v1.DetectionResponse;
 import com.drones.vision.proto.v1.FrameRequest;
 import com.drones.vision.proto.v1.InferenceGrpc;
+import io.grpc.Status;
 import io.grpc.stub.ClientCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 
@@ -147,9 +148,22 @@ final class DetectionStreamSession {
         }
     }
 
+    /**
+     * A connection-refused (or any other transport) failure looks identical every time it happens —
+     * same status code, same message, same stack — so a full stack trace at WARN on every teardown is
+     * pure noise once cv-service has been down for more than an instant (docs/plans/active/CV-RECONNECT-PLAN.md
+     * &sect;3.2). The one-line WARN carries the {@link Status} code and message, which is everything
+     * an operator needs to recognize "cv-service is down" at a glance; the full throwable (for anyone
+     * who does need the stack) still goes to DEBUG. "will retry with backoff" replaces the old "will
+     * reopen on next detect()" wording — with a {@link CvChannelSupervisor} gating {@link
+     * GrpcDetectionPort#detect}, backoff (not the next arbitrary probe) is what actually governs when
+     * a fresh call gets a chance to succeed.
+     */
     private void onTransportError(Throwable t) {
-        LOG.log(System.Logger.Level.WARNING,
-                () -> "Detection stream for " + streamId + " failed; will reopen on next detect()", t);
+        Status status = Status.fromThrowable(t);
+        LOG.log(System.Logger.Level.WARNING, () -> "Detection stream for " + streamId + " failed ("
+                + status.getCode() + "): " + t.getMessage() + "; will retry with backoff");
+        LOG.log(System.Logger.Level.DEBUG, () -> "Full failure detail for detection stream " + streamId, t);
         failAllAndDrop(t);
     }
 

@@ -46,6 +46,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Reuses {@link FileSimulationSmokeTest.RecordingPublisherConfig}/{@link
  * FileSimulationSmokeTest.RecordingStreamPublisher}, same as {@link CvDetectionE2ETest}.
+ *
+ * <p><b>Still holds under docs/plans/active/CV-RECONNECT-PLAN.md wave R2</b>: {@code
+ * vision.cv.reconnect.enabled} defaults to {@code true}, so this test's {@code GrpcDetectionPort} is
+ * now gated by a real {@code CvChannelSupervisor} too — after the first observed {@code
+ * TRANSIENT_FAILURE} the gate closes and later {@code detect()} calls fail fast with a stackless
+ * {@code CvUnavailableException} instead of a fresh connection-refused attempt. Either way {@code
+ * detect()} still fails, which is all {@code StreamPipeline}'s outage/backoff policy — and this
+ * test's own assertion — cares about; the assertion below needed no change.
  */
 @SpringBootTest(properties = "vision.publish.enabled=false")
 @Import(FileSimulationSmokeTest.RecordingPublisherConfig.class)

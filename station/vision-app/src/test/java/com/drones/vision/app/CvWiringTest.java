@@ -1,5 +1,6 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.cvgrpc.CvChannelSupervisor;
 import com.drones.vision.api.live.LiveAndPollDetectionDemand;
 import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
@@ -79,5 +80,17 @@ class CvWiringTest {
         assertEquals(1, applicationContext.getBeansOfType(LiveAndPollDetectionDemand.class).size());
         StreamDetectionSupport support = applicationContext.getBean(StreamDetectionSupport.class);
         assertNotNull(support.demand());
+    }
+
+    /**
+     * docs/plans/active/CV-RECONNECT-PLAN.md wave R2: with no {@code ManagedChannel} bean at all (see
+     * {@link #defaultConfigurationBuildsNoSharedCvGrpcChannel()}), {@link CvWiring#cvChannelSupervisor}
+     * can't exist either — its own {@code @ConditionalOnExpression} ANDs the same enabling properties
+     * {@link CvWiring#cvGrpcChannel} checks with {@code vision.cv.reconnect.enabled} (default {@code
+     * true}), so with every property at its default, the first half of that AND is already false.
+     */
+    @Test
+    void defaultConfigurationBuildsNoCvChannelSupervisor() {
+        assertTrue(applicationContext.getBeansOfType(CvChannelSupervisor.class).isEmpty());
     }
 }

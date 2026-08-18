@@ -51,6 +51,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * hundred KB, so net caller-thread cost versus the pre-existing fast path is roughly flat rather than
  * new added latency. A conversion failure fails only that one frame's returned stage — see {@link
  * DetectionFrameCodec}'s class javadoc.
+ *
+ * <h2>Connectivity gate</h2>
+ * When constructed with a {@link CvChannelSupervisor} (docs/plans/active/CV-RECONNECT-PLAN.md), {@link
+ * #detect} checks {@link CvChannelSupervisor#available()} before doing anything else — before {@link
+ * DetectionFrameCodec#encode} and before touching {@link #sessions} — and fails fast with a stackless
+ * {@link CvUnavailableException} while the gate is closed. Without a supervisor (the two-arg
+ * constructor), there is no gate at all: every existing call site and test keeps today's exact
+ * behaviour.
  */
 public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
 
@@ -58,6 +66,7 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
     private final InferenceGrpc.InferenceStub asyncStub;
     private final GrpcCvSettings settings;
     private final DetectionFrameCodec codec;
+    private final CvChannelSupervisor supervisor;
     private final ConcurrentHashMap<StreamId, DetectionStreamSession> sessions = new ConcurrentHashMap<>();
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -73,19 +82,36 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
     }
 
     /**
-     * Canonical constructor: bring your own channel (e.g. an in-process channel in tests, or a
-     * channel shared with {@code GrpcModelRegistryPort}/{@code GrpcTrainingPort}/{@code
-     * GrpcDatasetUploadPort}) plus the wire-tuning/timeout settings this port needs. {@link
-     * #close()} shuts this channel down regardless of who built it.
+     * Bring your own channel (e.g. an in-process channel in tests, or a channel shared with {@code
+     * GrpcModelRegistryPort}/{@code GrpcTrainingPort}/{@code GrpcDatasetUploadPort}) plus the
+     * wire-tuning/timeout settings this port needs. {@link #close()} shuts this channel down
+     * regardless of who built it. Delegates to the three-arg constructor with a {@code null}
+     * supervisor — <b>no connectivity gate</b>, so {@link #detect} behaves exactly as it always has;
+     * every existing test and call site keeps this constructor's behaviour byte-identical.
      *
      * @throws NullPointerException if {@code channel} or {@code settings} is {@code null}
      */
     public GrpcDetectionPort(ManagedChannel channel, GrpcCvSettings settings) {
+        this(channel, settings, null);
+    }
+
+    /**
+     * Same as the two-arg constructor, plus a {@link CvChannelSupervisor} that gates {@link #detect}
+     * (see this class's "Connectivity gate" section above). The supervisor is expected to watch the
+     * <em>same</em> {@code channel} passed here — {@code vision-app}'s wiring builds one supervisor
+     * per shared cv-service channel and hands it to every port constructed against that channel.
+     * This constructor does not call {@link CvChannelSupervisor#start()} — the caller owns that, the
+     * same way channel/supervisor lifecycle in general stays with whoever built them.
+     *
+     * @throws NullPointerException if {@code channel} or {@code settings} is {@code null}
+     */
+    public GrpcDetectionPort(ManagedChannel channel, GrpcCvSettings settings, CvChannelSupervisor supervisor) {
         this.channel = Objects.requireNonNull(channel, "channel must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
+        this.supervisor = supervisor; // nullable -- null means no gate, see two-arg constructor
         this.asyncStub = InferenceGrpc.newStub(channel);
-        // Resolved from the channel rather than from a host string so that BOTH constructors get the
-        // same answer, including the shared-channel one that never sees a host. An in-process
+        // Resolved from the channel rather than from a host string so that every constructor gets the
+        // same answer, including the shared-channel ones that never see a host. An in-process
         // channel (tests) has a non-loopback authority and so resolves to JPEG -- the behaviour
         // every existing test was written against.
         this.codec = new DetectionFrameCodec(settings.detectWidth(), settings.jpegQuality(),
@@ -117,6 +143,15 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
 
         if (closed.get()) {
             return CompletableFuture.failedFuture(new IllegalStateException("GrpcDetectionPort is closed"));
+        }
+
+        // Gate precedes everything else -- including encode() -- deliberately. Encoding is a
+        // downscale + JPEG re-encode per sampled frame (DetectionFrameCodec#encode); spending that
+        // CPU on a frame this call is about to reject anyway is pure waste. It also precedes
+        // sessions.computeIfAbsent() so no DetectionStreamSession/gRPC call is ever opened while
+        // cv-service is known to be unreachable.
+        if (supervisor != null && !supervisor.available()) {
+            return CompletableFuture.failedFuture(new CvUnavailableException(supervisor.describe()));
         }
 
         FrameRequest request;
