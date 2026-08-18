@@ -1,7 +1,9 @@
 package com.drones.vision.flight.domain.port;
 
+import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.flight.domain.model.VehicleProfile;
 import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.UsageId;
 
 import java.util.Optional;
 
@@ -28,4 +30,20 @@ public interface VehicleProfileRepositoryPort {
      *         never been probed
      */
     Optional<VehicleProfile> findLatest(DeviceId deviceId);
+
+    /**
+     * Appends one snapshot for {@code deviceId}, tagged as belonging to {@code usageId}'s {@code
+     * phase} -- the passport's attachment point (docs/plans/active/DRONE-ONBOARDING-PLAN.md O11).
+     * {@code phase} is meaningful only as {@link FlightPhase#PREFLIGHT} or {@link
+     * FlightPhase#POSTFLIGHT}; this port stores whatever it is given, and it is the application
+     * layer's job to restrict which phases may be captured. Never overwrites an earlier snapshot,
+     * same append-only contract as {@link #save(DeviceId, VehicleProfile)}.
+     */
+    void save(DeviceId deviceId, UsageId usageId, FlightPhase phase, VehicleProfile profile);
+
+    /**
+     * @return the most recently observed snapshot tagged with this {@code usageId} and {@code
+     *         phase}, or empty if none was ever captured
+     */
+    Optional<VehicleProfile> findByUsageAndPhase(UsageId usageId, FlightPhase phase);
 }
