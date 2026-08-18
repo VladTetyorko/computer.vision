@@ -10,18 +10,11 @@ import com.drones.vision.kernel.Telemetry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.io.IOException;
-import java.net.DatagramSocket;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
@@ -49,26 +42,20 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 class MavlinkSitlReturnHomeIntegrationTest {
 
-    /** Must match {@code infra/sitl/up.sh}'s own {@code IMAGE}. */
-    private static final String SITL_IMAGE = "vision-sitl:4.7.0";
+    /** Both tests here have to fly the aircraft somewhere first, so simulated time runs 5x. */
+    private static final int SITL_SPEEDUP = 5;
 
     @Test
     @Timeout(value = 330, unit = TimeUnit.SECONDS)
     void aFlyingArduPilotSitlAircraftAcceptsReturnToHomeAndSwitchesToRtl() throws Exception {
-        assumeTrue(MavlinkSitlSmokeIntegrationTest.dockerAvailable(),
-                "docker is not available in this environment -- skipping");
-        assumeTrue(sitlImagePresent(), SITL_IMAGE + " is not built locally -- run infra/sitl/up.sh once; skipping");
+        assumeTrue(SitlContainer.dockerAvailable(), SitlContainer.NO_DOCKER);
+        assumeTrue(SitlContainer.imagePresent(), SitlContainer.NO_IMAGE);
 
-        String containerName = "vision-sitl-rtl-" + UUID.randomUUID();
-        int port = freePort();
+        int port = SitlContainer.freePort();
         MavlinkTelemetrySource source = new MavlinkTelemetrySource();
         MavlinkFlightCommander commander = new MavlinkFlightCommander(source);
         DeviceId deviceId = DeviceId.random();
-        boolean containerStarted = false;
-        try {
-            startContainer(containerName, port);
-            containerStarted = true;
-
+        try (SitlContainer ignored = SitlContainer.start("rtl", port, 1, SITL_SPEEDUP)) {
             Device device = new Device(deviceId, "sitl-rtl-test", Set.of(Capability.TELEMETRY),
                     new StreamDescriptor("mavlink", URI.create("udp://0.0.0.0:" + port), Map.of()));
             LatestSampleCollector collector = LatestSampleCollector.subscribeTo(source.open(device));
@@ -105,9 +92,6 @@ class MavlinkSitlReturnHomeIntegrationTest {
                     "telemetry reporting mode=RTL after an ACCEPTED command");
         } finally {
             source.close(deviceId);
-            if (containerStarted) {
-                removeContainerQuietly(containerName);
-            }
         }
     }
 
@@ -123,20 +107,14 @@ class MavlinkSitlReturnHomeIntegrationTest {
     @Test
     @Timeout(value = 330, unit = TimeUnit.SECONDS)
     void aFlyingArduPilotSitlAircraftAcceptsAModeChangeToLoiter() throws Exception {
-        assumeTrue(MavlinkSitlSmokeIntegrationTest.dockerAvailable(),
-                "docker is not available in this environment -- skipping");
-        assumeTrue(sitlImagePresent(), SITL_IMAGE + " is not built locally -- run infra/sitl/up.sh once; skipping");
+        assumeTrue(SitlContainer.dockerAvailable(), SitlContainer.NO_DOCKER);
+        assumeTrue(SitlContainer.imagePresent(), SitlContainer.NO_IMAGE);
 
-        String containerName = "vision-sitl-mode-" + UUID.randomUUID();
-        int port = freePort();
+        int port = SitlContainer.freePort();
         MavlinkTelemetrySource source = new MavlinkTelemetrySource();
         MavlinkFlightCommander commander = new MavlinkFlightCommander(source);
         DeviceId deviceId = DeviceId.random();
-        boolean containerStarted = false;
-        try {
-            startContainer(containerName, port);
-            containerStarted = true;
-
+        try (SitlContainer ignored = SitlContainer.start("mode", port, 1, SITL_SPEEDUP)) {
             Device device = new Device(deviceId, "sitl-mode-test", Set.of(Capability.TELEMETRY),
                     new StreamDescriptor("mavlink", URI.create("udp://0.0.0.0:" + port), Map.of()));
             LatestSampleCollector collector = LatestSampleCollector.subscribeTo(source.open(device));
@@ -169,78 +147,9 @@ class MavlinkSitlReturnHomeIntegrationTest {
                     "telemetry reporting mode=Loiter after an ACCEPTED command");
         } finally {
             source.close(deviceId);
-            if (containerStarted) {
-                removeContainerQuietly(containerName);
-            }
         }
     }
 
-    private static boolean sitlImagePresent() {
-        try {
-            return run(Duration.ofSeconds(10), "docker", "image", "inspect", SITL_IMAGE).exitCode() == 0;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static void startContainer(String name, int port) throws IOException, InterruptedException {
-        ProcessResult result = run(Duration.ofSeconds(30),
-                "docker", "run", "-d", "--rm", "--name", name,
-                "--network", "host",
-                "-e", "SYSID_THISMAV=1",
-                "-e", "INSTANCE=0",
-                "-e", "MAVLINK_TARGET_HOST=127.0.0.1",
-                "-e", "MAVLINK_TARGET_PORT=" + port,
-                "-e", "SITL_SPEEDUP=5",
-                SITL_IMAGE);
-        if (result.exitCode() != 0) {
-            fail("failed to start SITL container: " + result.output());
-        }
-    }
-
-    private static void removeContainerQuietly(String name) {
-        try {
-            run(Duration.ofSeconds(15), "docker", "rm", "-f", name);
-        } catch (Exception ignored) {
-            // best-effort cleanup only
-        }
-    }
-
-    private static int freePort() throws Exception {
-        try (DatagramSocket socket = new DatagramSocket(0)) {
-            return socket.getLocalPort();
-        }
-    }
-
-    private static ProcessResult run(Duration timeout, String... command) throws IOException, InterruptedException {
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "docker-cli-output-reader");
-            t.setDaemon(true);
-            return t;
-        });
-        Future<String> outputFuture = executor.submit(
-                () -> new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
-        try {
-            boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                throw new IOException("Command timed out after " + timeout + ": " + String.join(" ", command));
-            }
-            String output;
-            try {
-                output = outputFuture.get(5, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                output = "";
-            }
-            return new ProcessResult(process.exitValue(), output);
-        } finally {
-            executor.shutdownNow();
-        }
-    }
-
-    private record ProcessResult(int exitCode, String output) {
-    }
 
     /** Tracks the freshest sample; callers await a {@code FlightState} predicate. */
     private static final class LatestSampleCollector implements Flow.Subscriber<Telemetry> {

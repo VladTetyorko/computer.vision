@@ -1,6 +1,7 @@
 package com.drones.vision.adapter.mavlink;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -34,7 +35,8 @@ public record MavlinkSettings(
         Scan scan,
         Transmit transmit,
         Rc rc,
-        Inventory inventory) {
+        Inventory inventory,
+        Onboarding onboarding) {
 
     public MavlinkSettings {
         Objects.requireNonNull(bindHost, "bindHost must not be null");
@@ -51,6 +53,7 @@ public record MavlinkSettings(
         Objects.requireNonNull(transmit, "transmit must not be null");
         Objects.requireNonNull(rc, "rc must not be null");
         Objects.requireNonNull(inventory, "inventory must not be null");
+        Objects.requireNonNull(onboarding, "onboarding must not be null");
     }
 
     /**
@@ -63,7 +66,18 @@ public record MavlinkSettings(
     public MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
                             Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc) {
         this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, scan, transmit, rc,
-                Inventory.defaults());
+                Inventory.defaults(), Onboarding.defaults());
+    }
+
+    /**
+     * Back-compat overload for callers built before {@link #onboarding()} existed (wave O4), on the
+     * same principle as the one above it.
+     */
+    public MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
+                            Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc,
+                            Inventory inventory) {
+        this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, scan, transmit, rc,
+                inventory, Onboarding.defaults());
     }
 
     /** Reproduces every literal this module's classes hardcode today. */
@@ -77,7 +91,8 @@ public record MavlinkSettings(
                 Scan.defaults(),
                 Transmit.defaults(),
                 Rc.defaults(),
-                Inventory.defaults());
+                Inventory.defaults(),
+                Onboarding.defaults());
     }
 
     /**
@@ -87,7 +102,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withSilenceWindow(Duration newSilenceWindow) {
         return new MavlinkSettings(bindHost, newSilenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, inventory);
+                scan, transmit, rc, inventory, onboarding);
     }
 
     /**
@@ -97,7 +112,16 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withInventory(Inventory newInventory) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, newInventory);
+                scan, transmit, rc, newInventory, onboarding);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #onboarding()} replaced — same test/tuning
+     * convenience as {@link #withInventory}.
+     */
+    public MavlinkSettings withOnboarding(Onboarding newOnboarding) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
+                scan, transmit, rc, inventory, newOnboarding);
     }
 
     /** {@code MavlinkHeartbeatScanner}'s hub-poll/self-bind-timeout budgets. */
@@ -233,6 +257,83 @@ public record MavlinkSettings(
 
         public static Inventory defaults() {
             return new Inventory(Duration.ofSeconds(10), Duration.ofSeconds(1), 64, 128);
+        }
+    }
+
+    /**
+     * {@code MavlinkVehicleConfigurator}'s probe budgets and the parameter set a probe reads
+     * (docs/plans/active/DRONE-ONBOARDING-PLAN.md wave O4).
+     *
+     * <p>{@link #probeParameters()} is configuration rather than a constant because <b>which</b>
+     * parameters are worth reading is a fleet-and-firmware decision, not a protocol fact: the
+     * default below is ArduPilot's stream-rate and identity block — the set the readiness table's
+     * own {@code requiredParameterName} rows are drawn from — and an operator flying PX4 or a
+     * differently-tuned airframe should be able to change it without a rebuild. Names longer than
+     * MAVLink's 16-character {@code param_id} are rejected at construction rather than silently
+     * truncated into a *different* parameter.
+     */
+    public record Onboarding(List<String> probeParameters, Duration capabilityTimeout, int capabilityRetries,
+                              Duration parameterTimeout, int parameterRetries) {
+
+        /** MAVLink's own {@code param_id} field width — a name longer than this cannot be addressed at all. */
+        private static final int PARAM_ID_MAX_CHARS = 16;
+
+        public Onboarding {
+            Objects.requireNonNull(probeParameters, "probeParameters must not be null");
+            probeParameters = List.copyOf(probeParameters);
+            for (String name : probeParameters) {
+                if (name == null || name.isBlank()) {
+                    throw new IllegalArgumentException("probeParameters must not contain a blank name");
+                }
+                if (name.length() > PARAM_ID_MAX_CHARS) {
+                    throw new IllegalArgumentException(
+                            "probeParameters entry \"" + name + "\" exceeds MAVLink's " + PARAM_ID_MAX_CHARS
+                                    + "-character param_id field");
+                }
+            }
+            Objects.requireNonNull(capabilityTimeout, "capabilityTimeout must not be null");
+            if (capabilityTimeout.isZero() || capabilityTimeout.isNegative()) {
+                throw new IllegalArgumentException("capabilityTimeout must be positive: " + capabilityTimeout);
+            }
+            if (capabilityRetries < 0) {
+                throw new IllegalArgumentException("capabilityRetries must be >= 0: " + capabilityRetries);
+            }
+            Objects.requireNonNull(parameterTimeout, "parameterTimeout must not be null");
+            if (parameterTimeout.isZero() || parameterTimeout.isNegative()) {
+                throw new IllegalArgumentException("parameterTimeout must be positive: " + parameterTimeout);
+            }
+            if (parameterRetries < 0) {
+                throw new IllegalArgumentException("parameterRetries must be >= 0: " + parameterRetries);
+            }
+        }
+
+        /**
+         * Twenty ArduPilot parameters — identity, airframe, battery, failsafe, GPS/EKF, geofence and
+         * the telemetry link itself. Timeouts follow the MAVLink parameter-protocol page's own advice
+         * (~1 s, retried a few times), widened once for {@code AUTOPILOT_VERSION} because a vehicle
+         * assembles that message from several subsystems.
+         *
+         * <p><b>Every name below was verified present on ArduPilot Copter 4.7.0</b> — the firmware
+         * {@code infra/sitl} ships — by reading it off a live instance, not from documentation. That
+         * mattered: the plan's original list named {@code SYSID_THISMAV}, {@code FS_BATT_ENABLE} and
+         * {@code GPS_TYPE}, all of which 4.7 has renamed ({@code MAV_SYSID}, {@code BATT_FS_LOW_ACT},
+         * {@code GPS1_TYPE}), and six {@code SR2_*} stream-rate parameters that <b>no longer exist at
+         * all</b> — see {@code MavlinkSitlOnboardingIntegrationTest} and this module's MODULE.md for
+         * what that costs. An unknown name is not an error the protocol can report; it is simply
+         * silence, so a stale list degrades into a slow probe that quietly reads less than it claims.
+         * That is the whole reason this is configuration: parameter names are firmware-version state,
+         * and no default compiled in today stays true for every airframe a fleet will fly.
+         */
+        public static Onboarding defaults() {
+            return new Onboarding(
+                    List.of("MAV_SYSID", "MAV_OPTIONS", "SERIAL0_PROTOCOL",
+                            "FRAME_CLASS", "FRAME_TYPE",
+                            "BATT_CAPACITY", "BATT_MONITOR", "BATT_LOW_VOLT", "BATT_CRT_VOLT", "BATT_ARM_VOLT",
+                            "BATT_FS_LOW_ACT", "FS_GCS_ENABLE", "FS_THR_ENABLE", "FS_OPTIONS",
+                            "GPS1_TYPE", "GPS_AUTO_SWITCH", "AHRS_EKF_TYPE", "EK3_ENABLE",
+                            "FENCE_ENABLE", "FENCE_ALT_MAX"),
+                    Duration.ofSeconds(3), 2,
+                    Duration.ofSeconds(1), 2);
         }
     }
 }

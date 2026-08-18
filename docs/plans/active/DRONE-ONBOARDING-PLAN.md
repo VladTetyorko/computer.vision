@@ -313,6 +313,37 @@ Today the repo can send exactly two commands (`MAV_CMD_DO_SET_MODE`,
 `MAV_CMD_COMPONENT_ARM_DISARM`) and has zero `PARAM_SET` references, so Mechanism B is entirely new
 code.
 
+> ### ⚠ Measured against ArduPilot Copter 4.7.0 in wave O4 — read before building O8/O9
+>
+> Wave O4 ran the probe and both mechanisms against the firmware `infra/sitl` actually ships. Two
+> results contradict assumptions this section and the tables below were written on:
+>
+> 1. **There are no `SRx_*` stream-rate parameters on 4.7.** `SR0_*`, `SR1_*` and `SR2_*` were each
+>    read off a live instance and every one is absent. So the Tier-A row's "`SRx_*` stream rates"
+>    example, §2.5's *"`VFR_HUD` not arriving (`SR2_EXTRA2 = 0`)"*, §3.2 VERIFY's *"escalate to
+>    Tier-A `SRx_*` write"*, O8's exit criterion *"connect with `SR2_EXTRA2=0`"*, and the §9 JSON
+>    example's `SR2_EXTRA2` reading are **not implementable on this firmware**. Mechanism A is not a
+>    cheaper alternative to a stream-rate write here — it is the only mechanism that exists.
+>    Rewriting those rows belongs to O8, which is the wave that has to act on them.
+>
+>    **O8's exit criterion becomes simpler, not impossible.** It was written as *"connect with
+>    `SR2_EXTRA2=0`"* because it assumed the starved link had to be manufactured. It does not: a stock
+>    SITL is **already** starved — measured at four message types over a UDP `--out` link (`HEARTBEAT`
+>    at 1 Hz plus three event-driven ones at ~0.1 Hz), against the dozen a connected GCS sees. So the
+>    test is *connect to a stock aircraft, observe the starved baseline, enable the flag, observe the
+>    requested messages begin arriving* — with **no parameter write at all**, which is the point
+>    Mechanism A was there to make.
+> 2. **Several named parameters have been renamed.** `SYSID_THISMAV` → `MAV_SYSID` (so O9's wizard
+>    and the §3.2 IDENTIFY conflict remedy both name a parameter that no longer exists),
+>    `FS_BATT_ENABLE` → `BATT_FS_LOW_ACT`, `GPS_TYPE` → `GPS1_TYPE`. `ARMING_CHECK`, `RTL_ALT`,
+>    `WPNAV_SPEED`, `LAND_SPEED`, `ANGLE_MAX` and `PILOT_SPEED_UP` are absent too.
+>
+> The general lesson, and the reason `probeParameters` is configuration: **MAVLink gives an autopilot
+> no way to report an unknown parameter name — it simply says nothing.** A stale list therefore does
+> not fail loudly; it degrades into a slow probe that quietly reads less than it claims. Any wave
+> that adds a parameter name must verify it against a live instance, and `MavlinkSitlOnboardingIntegrationTest`
+> asserts every configured name answers so a future drift fails the build rather than the flight.
+
 **Mechanism C — generated CLI diff.** Betaflight and INAV do not usefully expose the MAVLink
 parameter protocol. We generate the exact `set …` / `save` lines **from the probed state** — a diff,
 not a generic snippet — for paste into the configurator, then a `[Verify]` that re-probes. We write
@@ -600,7 +631,7 @@ stays green by construction**, because with the flag off the system behaves exac
 | **O1** | adapter-builder | `drone-link/mavlink/**` only: message inventory — a `Dispatcher` subscription on `MavlinkGateway` counting `(msgid → count, Hz)` per peer over a window, plus a bytes/s meter. **No library change, no write, no new port** | S | `./mvnw -B -pl drone-link/mavlink test` green ×3, all **155** existing tests unweakened; a new loopback test proves per-sysid isolation of the inventory | — |
 | **O2** | **Opus** | `drone-link/mavlink-core/**` only: the class→`MatchKey` table in `session` (MISSIONS **D6**), `ParameterService` (L4 — `PARAM_REQUEST_READ`/`PARAM_VALUE` correlated by param name, `PARAM_SET` + read-back, over `RequestResponse`), `AUTOPILOT_VERSION` correlation, `api` records, `API.md` amendment | **L** | `./mvnw -B -pl drone-link/mavlink-core test` green ×3, ≥ the **102** existing tests unweakened; new `FakeVehicle` suite: param read round-trip, a re-sent `PARAM_VALUE` answered without a duplicate-key race, `PARAM_SET` read-back mismatch surfaced as failure, `AUTOPILOT_VERSION` matched, timeout path terminal not retried | coordination with MISSIONS M1 (D14) |
 | **O3** | domain-modeler + application-service | `contexts/vision-flight/**` only: `VehicleProfile`/`ReadinessReport`/`FeatureRequirement`/`ParameterTier`/`FlightPhase`/`FlightPhaseRule`, the three ports, `Default*Service` with the scope+audit gate | **M–L** | `./mvnw -B -pl contexts/vision-flight test` green ×3; hand-fake tests incl.: 403+audit on out-of-scope probe, 404 on out-of-scope read, write refused while `armed==true` **and** while `armed==null`, Tier-C name rejected by the allowlist, incomplete profile yields `UNKNOWN` not `GO`; all **144** existing flight tests untouched | O2 (port shape only — can start in parallel against this doc) |
-| **O4** | **Opus** | `drone-link/mavlink/**` only: `MavlinkVehicleConfigurator implements VehicleConfigPort` (probe = O1's inventory + `AUTOPILOT_VERSION` + named param read; remediate = message-interval; write = Tier-A with snapshot/read-back) | **M** | `-pl drone-link/mavlink test` green ×3, 155 unweakened; **docker-gated SITL suite extended and run un-skipped (C10)**: probe a real ArduPilot SITL, assert ≥8 message types with plausible rates, read 20 named params, request `VFR_HUD` at 5 Hz and observe the rate change, write `SR2_EXTRA2` and read it back. **A skipped SITL run fails the wave** | O1, O2, O3 |
+| **O4** | **Opus** | `drone-link/mavlink/**` only: `MavlinkVehicleConfigurator implements VehicleConfigPort` (probe = O1's inventory + `AUTOPILOT_VERSION` + named param read; remediate = message-interval; write = Tier-A with snapshot/read-back) | **M** | `-pl drone-link/mavlink test` green ×3, 155 unweakened; **docker-gated SITL suite extended and run un-skipped (C10)**: probe a real ArduPilot SITL, assert ≥8 message types with plausible rates, read 20 named params, request `VFR_HUD` at 5 Hz and observe the rate change, write a parameter and read it back. **A skipped SITL run fails the wave** | O1, O2, O3 | **DONE** (`a1ea3bc`), 172/172 ×3, `Skipped: 0`. The ≥8-message-type assertion holds *after* Mechanism A, not before — default firmware streams four; and `SR2_EXTRA2` does not exist, so the write is `FENCE_ALT_MAX`. See the ⚠ box in §4a |
 | **O5** | spring-integrator | `station/vision-api/**`, `station/vision-app/**`, `storage/persistence/**`: the §8.1 wire contract, wiring behind the flag, JPA entities + Flyway for `vehicle_profile` / `feature_requirement` (seeded with today's thresholds) / `asset_usage.phase`. **Persistence shape per C14** — target whatever `POSTGRES-ONLY` leaves behind, not today's dual in-memory/JPA arrangement | **M** | scoped builds green ×3; wire contract byte-matches §8.1; **flag off ⇒ every pre-existing api/app test passes unchanged** (the guardrail, asserted); ArchUnit untouched-green | O3, **and `POSTGRES-ONLY` merged** (C14) |
 | **O6** | web-ui | `station/vision-web/**`: the readiness report screen, the wizard's new **verify** step between `test` and `create`, the fleet readiness board replacing `features/preflight`'s single card; `derivePreflight` demoted to a renderer and `BATTERY_LOW_PERCENT` sourced from the API | **L** | `npm test` + `tsc --noEmit` + prod build green; the existing cockpit checklist renders identically when the API is unavailable (fallback path tested) | O5 |
 | **O7** | application-service + adapter-builder | `contexts/vision-warehouse/**` (`AssetUsage.phase`, `createFromCandidate`, duplicate check) + `contexts/vision-perception/**` (`UsageTracker` drives the phase; a session opens on first telemetry, not only first stream) | **M** | `-pl contexts/vision-warehouse test` and `-pl contexts/vision-perception test` green ×3; new tests: armed→disarmed walks PREFLIGHT→IN_FLIGHT→POSTFLIGHT; `armed==null` never leaves PREFLIGHT; silence→LINK_LOST→re-heard→IN_FLIGHT; close-while-armed→ABANDONED; a telemetry-only asset gets a usage | O3 |

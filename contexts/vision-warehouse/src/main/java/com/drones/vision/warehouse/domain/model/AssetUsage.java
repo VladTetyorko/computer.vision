@@ -35,9 +35,11 @@ import java.time.Instant;
  * @param lastPosition  position at the most recently received sample, or {@code null} if none yet
  * @param sampleCount   number of telemetry samples received during this usage; must not be negative
  * @param streamId      the stream whose start opened this usage, or {@code null} for a legacy/streamless usage
+ * @param phase         this usage's aircraft-state phase (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3,
+ *                      Wave O7); driven by {@code UsageTracker} in vision-perception, see {@link UsagePhase}
  */
 public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
-                          GeoPosition lastPosition, long sampleCount, StreamId streamId) {
+                          GeoPosition lastPosition, long sampleCount, StreamId streamId, UsagePhase phase) {
 
     public AssetUsage {
         if (id == null) {
@@ -56,6 +58,20 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
         if (sampleCount < 0) {
             throw new IllegalArgumentException("AssetUsage sampleCount must not be negative: " + sampleCount);
         }
+        if (phase == null) {
+            throw new IllegalArgumentException("AssetUsage phase must not be null");
+        }
+    }
+
+    /**
+     * Convenience constructor for the pre-O7 shape — defaults {@link #phase()} to {@link
+     * UsagePhase#PREFLIGHT}, keeping every pre-existing call site (including the streamless 7-arg
+     * overload below, which routes through this one) compiling unchanged.
+     */
+    public AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
+                       GeoPosition lastPosition, long sampleCount, StreamId streamId) {
+        this(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
+                UsagePhase.PREFLIGHT);
     }
 
     /**
@@ -74,7 +90,8 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      * @return a new {@code AssetUsage} with {@code endedAt} set
      */
     public AssetUsage closed(Instant endedAt) {
-        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId);
+        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
+                phase);
     }
 
     /**
@@ -85,7 +102,8 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      * @return a new {@code AssetUsage} with the positions replaced
      */
     public AssetUsage withPositions(GeoPosition startPosition, GeoPosition lastPosition) {
-        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId);
+        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
+                phase);
     }
 
     /**
@@ -95,6 +113,18 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      * @return a new {@code AssetUsage} with {@code sampleCount} replaced
      */
     public AssetUsage withSampleCount(long sampleCount) {
-        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId);
+        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
+                phase);
+    }
+
+    /**
+     * Returns a copy of this usage with a different phase.
+     *
+     * @param phase the replacement phase
+     * @return a new {@code AssetUsage} with {@code phase} replaced
+     */
+    public AssetUsage withPhase(UsagePhase phase) {
+        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
+                phase);
     }
 }
