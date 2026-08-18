@@ -1,18 +1,39 @@
-/* Reuses `.page`/`.card`/`.label`/`.empty` from `src/styles.css` — no new colors.
-   `<vision-preflight-checklist>` keeps its own cockpit styling (`surface-hud-strong`, a fixed
-   15rem width) unmodified — this page just gives it a plain `.card` frame to sit in. */
+/* Reuses `.page`/`.card`/`.chip`/`.dot`/`.empty`/`.btn`/`.mono`/`.faint`/`.muted`/`.truncate`/`table`
+   from `src/styles.css` — no new colors (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1, wave O6's own
+   fleet readiness board). */
 
-.preflight-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-16);
+/* Stat-tile row (`vision-stat`) — mirrors `features/reports/reports.css`'s/`features/asset-detail/asset-detail.css`'s
+   identical `.kpi-tiles` grid exactly; each page keeps its own copy, no shared class exists for it
+   yet (CSS encapsulation, same precedent those two files already document). */
+.kpi-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
 }
 
-/* The `DRONE` select riding `<vision-page-bar>`'s own `[pageBarFilters]` slot
-   (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) — mirrors `features/wall/wall.css`'s own `.density` label:
-   `.row` (src/styles.css) already supplies the flex row + gap, this just sizes the control itself. */
-.preflight-picker select {
-  min-height: 40px;
-  min-width: 12rem;
+/* Horizontal scroll on a narrow viewport rather than crushing the columns (mirrors
+   `features/models/models.css`'s own copy of this rule — each page defines it locally). */
+.table-scroll {
+  overflow-x: auto;
+}
+
+td.actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Drone name column — `.truncate` (styles.css) only supplies overflow/ellipsis/white-space, not a
+   width or `display`; every existing usage in the app pairs it with a dedicated class that supplies
+   both (`reports.css`'s `.attention-name` is the precedent read directly). Applied straight to the
+   `<td>` (already `display: table-cell`) rather than a nested `<span>`, so no extra wrapper is needed. */
+.name-cell {
+  max-width: 14rem;
+}
+
+/* "Needs attention" column: a compact rollup sentence, not a data grid — capped so a long list of
+   missing features never forces the table wider than the drone/verdict columns need. Same pairing
+   as `.name-cell` above. */
+.attention-cell {
+  max-width: 22rem;
 }

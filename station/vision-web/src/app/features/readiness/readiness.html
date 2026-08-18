@@ -1,0 +1,96 @@
+<div class="page">
+  <vision-page-bar
+    [title]="facade.displayName() ?? assetId()"
+    icon="shield"
+    [crumb]="assetCrumb()"
+    hint="Whether this drone's last-observed link satisfies what this platform's own features need — video feed and the live cockpit checklist stay on Fly. Advisory only: a No-go never blocks flight, it just lists what's missing."
+  />
+
+  @if (facade.loading()) {
+    <p class="muted">Loading readiness report…</p>
+  } @else if (facade.error(); as error) {
+    <vision-empty title="Couldn't load readiness" [message]="error">
+      <button type="button" class="btn secondary" (click)="facade.load(assetId())">Try again</button>
+    </vision-empty>
+  } @else if (facade.report(); as report) {
+    <div class="card verdict-card">
+      <div class="verdict-row">
+        <span class="chip" [class.ok]="facade.verdictTone(report.verdict) === 'ok'" [class.danger]="facade.verdictTone(report.verdict) === 'danger'">
+          <span class="dot" [class.ok]="facade.verdictTone(report.verdict) === 'ok'" [class.danger]="facade.verdictTone(report.verdict) === 'danger'"></span>
+          {{ facade.verdictLabel(report.verdict) }}
+        </span>
+        <button type="button" class="btn secondary" (click)="onProbe()" [disabled]="facade.probing()">
+          {{ facade.probing() ? 'Observing…' : 'Probe now' }}
+        </button>
+      </div>
+
+      <dl class="facts">
+        <div class="fact"><dt>Evaluated</dt><dd>{{ formatDate(report.evaluatedAt) }}</dd></div>
+        <div class="fact"><dt>Last profiled</dt><dd>{{ formatDate(report.profileObservedAt) }}</dd></div>
+      </dl>
+
+      @if (facade.probeDisabled()) {
+        <vision-notice icon="help">
+          Vehicle probing isn't enabled on this deployment (<code class="mono">vision.onboarding.probe.enabled</code>). This report reflects the last time it was.
+        </vision-notice>
+      } @else if (facade.probeError(); as error) {
+        <vision-notice variant="warn">{{ error }}</vision-notice>
+      }
+
+      @if (facade.blockerLabels().length > 0) {
+        <vision-notice variant="danger" icon="alert">
+          Blocking: {{ facade.blockerLabels().join(', ') }}
+        </vision-notice>
+      }
+    </div>
+
+    @if (facade.remediateError(); as error) {
+      <vision-notice variant="warn">{{ error }}</vision-notice>
+    }
+    @if (facade.lastRemediation(); as remediation) {
+      <vision-notice [variant]="remediationVariant(remediation)">
+        @for (action of remediation.actions; track $index) {
+          <div>{{ facade.outcomeLabel(action.outcome) }} — {{ action.detail }}</div>
+        }
+      </vision-notice>
+    }
+
+    <div class="card">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>Status</th>
+              <th>Detail</th>
+              <th>Remedy</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of report.features; track row.feature) {
+              <tr>
+                <td>{{ facade.featureLabel(row.feature) }}</td>
+                <td>
+                  <span class="chip" [class.ok]="facade.featureStatusTone(row.status) === 'ok'" [class.warn]="facade.featureStatusTone(row.status) === 'warn'" [class.danger]="facade.featureStatusTone(row.status) === 'danger'">
+                    <span class="dot" [class.ok]="facade.featureStatusTone(row.status) === 'ok'" [class.warn]="facade.featureStatusTone(row.status) === 'warn'" [class.danger]="facade.featureStatusTone(row.status) === 'danger'"></span>
+                    {{ facade.featureStatusLabel(row.status) }}
+                  </span>
+                </td>
+                <td class="muted">{{ row.detail || '—' }}</td>
+                <td class="muted">{{ facade.remedyLabel(row.remedy) ?? '—' }}</td>
+                <td class="actions">
+                  @if (facade.isRemediable(row.remedy)) {
+                    <button type="button" class="btn secondary small" (click)="onRemediate(row.feature)" [disabled]="facade.remediatingFeature() !== null">
+                      {{ facade.remediatingFeature() === row.feature ? 'Remediating…' : 'Remediate' }}
+                    </button>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
+</div>

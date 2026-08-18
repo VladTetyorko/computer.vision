@@ -1,0 +1,36 @@
+/* Reuses `.page`/`.card`/`.chip`/`.dot`/`.empty`/`.btn`/`.mono`/`.faint`/`.muted`/`.facts`/`.fact`/
+   `.table-scroll`/`.row`/`table` from `src/styles.css` — no new colors
+   (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1, wave O6's per-asset readiness report). */
+
+.verdict-card {
+  margin-bottom: var(--space-16);
+}
+
+.verdict-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-8);
+}
+
+.verdict-card .facts {
+  margin-bottom: var(--space-8);
+}
+
+/* Every notice on this page (inside the verdict card or standing alone between it and the feature
+   table) gets the same block spacing — mirrors `features/fly/marks-panel.css`'s identical rule. */
+vision-notice {
+  display: block;
+  margin-bottom: var(--space-16);
+}
+
+.verdict-card vision-notice:last-child {
+  margin-bottom: 0;
+}
+
+td.actions {
+  text-align: right;
+  white-space: nowrap;
+}
