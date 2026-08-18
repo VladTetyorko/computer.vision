@@ -52,6 +52,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>a {@link MavlinkMessageInventory} (docs/plans/active/DRONE-ONBOARDING-PLAN.md O1) — a
  *       second, independent dispatcher subscription that passively counts every message type heard
  *       from every peer, claimed or not; see {@link #messageInventory()}.</li>
+ *   <li>optionally, a {@link MavlinkConnectRemediator} (docs/plans/active/DRONE-ONBOARDING-PLAN.md
+ *       O8) — a third, independent dispatcher subscription, constructed only when {@link
+ *       MavlinkSettings.Onboarding#requestMessagesOnConnect()} is {@code true}, that fires
+ *       Mechanism A ({@code MAV_CMD_SET_MESSAGE_INTERVAL}) the instant a peer is learned.</li>
  * </ul>
  * It subscribes to {@code session.dispatcher()} once, for every frame; each dispatched frame is
  * handed to {@link VehicleClaimPolicy#resolve} to find the owning registration (by sysid alone --
@@ -108,6 +112,7 @@ final class MavlinkGateway {
     private final VehicleClaimPolicy claimPolicy;
     private final Subscription subscription;
     private final MavlinkMessageInventory messageInventory;
+    private final MavlinkConnectRemediator connectRemediator;
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     /**
@@ -135,6 +140,12 @@ final class MavlinkGateway {
         // subscription above, so a bug in one can never affect the other, and so the inventory
         // keeps counting sysids nobody has claimed (see MavlinkMessageInventory's own javadoc).
         this.messageInventory = new MavlinkMessageInventory(session.dispatcher(), settings.inventory());
+        // Wave O8's Mechanism A: constructed -- and its own third subscription registered -- only
+        // when the flag is on. With it off, this field stays null and no subscription exists at
+        // all, so "flag off" is structurally "cannot send a command," not merely "chose not to."
+        this.connectRemediator = settings.onboarding().requestMessagesOnConnect()
+                ? new MavlinkConnectRemediator(session.dispatcher(), session.sink(), session.correlator(), settings)
+                : null;
     }
 
     /** Once closed (last registration released), never reused. */
@@ -259,6 +270,9 @@ final class MavlinkGateway {
         }
         subscription.close();
         messageInventory.close();
+        if (connectRemediator != null) {
+            connectRemediator.close();
+        }
         link.close();
         session.close();
     }

@@ -15,11 +15,12 @@ raw library type: `MavlinkTelemetryDecoder`'s message-type dispatch, `FlightMode
 `MavCmd`/`MavResult`, `SimulatedVehicleMessages`'s builders, `MavlinkHeartbeatScanner`'s `Heartbeat`) ·
 **Used by:** vision-app
 
-**Build/test:** `./mvnw -B -pl drone-link/mavlink test` — 164 tests across 15 classes.
-**164/164 green**, confirmed across three consecutive full `-pl drone-link/mavlink -am test` runs
-(docs/plans/active/DRONE-ONBOARDING-PLAN.md wave O1). The two SITL-gated tests ran un-skipped and passed
-every run (`vision-sitl:4.7.0` present on this machine): `MavlinkSitlSmokeIntegrationTest` 1/1 in
-~1.2s, `MavlinkSitlReturnHomeIntegrationTest` 2/2 in ~31s. Timing-sensitive cases in
+**Build/test:** `./mvnw -B -pl drone-link/mavlink test` — 189 tests across 19 classes.
+**189/189 green**, confirmed across three consecutive full `-pl drone-link/mavlink -am test` runs
+(docs/plans/active/DRONE-ONBOARDING-PLAN.md wave O8). Four SITL-gated tests now exist and all four ran
+un-skipped and passed every run (`vision-sitl:4.7.0` present on this machine): `MavlinkSitlSmokeIntegrationTest`
+1/1 in ~1.2s, `MavlinkSitlReturnHomeIntegrationTest` 2/2 in ~31s, `MavlinkSitlOnboardingIntegrationTest`
+(wave O4) 1/1 in ~13s, `MavlinkSitlOnConnectIntegrationTest` (wave O8, **new**) 1/1 in ~13s. Timing-sensitive cases in
 `MavlinkRoundTripIntegrationTest`/`MavlinkFleetGatewayIntegrationTest`/`MavlinkHeartbeatScannerTest`
 poll to their own timeout and can flake under a `-Dtest=` filtered run in a loaded sandbox — always
 verify via the full module build. **Note:** W4 documented one test (`MavlinkRoundTripIntegrationTest.anArdupilotmegaWindMessageSurvivesTheRealUdpPathIntoATelemetrySample`) as a deterministic failure. **It was fixed in `drone-link/mavlink-core` at the end of W4** — dialect is now learned per MAVLink *system id*, shared across every resync buffer on a link, rather than per source address. The test has passed on every run since. See the corrected Gotchas entry below.
@@ -72,7 +73,10 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   port class to build a `CommandService`/`ManualControlService` on). Also owns
   `MavlinkMessageInventory messageInventory()` (package-private, **new**, docs/plans/active/DRONE-ONBOARDING-PLAN.md
   wave O1 — see below); constructed alongside the session and closed in `close()`, between the frame
-  subscription and the link. Nested records
+  subscription and the link. Also owns an optional `MavlinkConnectRemediator` (wave O8, **new** — see
+  below), constructed **only** when `settings.onboarding().requestMessagesOnConnect()` is `true`; with
+  the flag `false` the field stays `null` and no third dispatcher subscription is ever registered, so
+  "flag off" is structurally "cannot send a command", not merely "chose not to send one". Nested records
   `UnclaimedVehicle(int sysid, String firmware, Integer mavType, Instant lastHeard)`,
   `ClaimedVehicle(int sysid, DeviceId deviceId, String firmware, Integer mavType, Instant lastHeard)`,
   `CommandTarget(int sysid, String firmware, Integer mavType, InetSocketAddress sourceAddress)` —
@@ -119,6 +123,21 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   and a new `withInventory(Inventory)` copy method. A back-compat 8-arg `MavlinkSettings` constructor
   (defaulting `inventory` to `Inventory.defaults()`) keeps `vision-app`'s existing `TelemetryWiring`
   call site compiling unchanged — out of this wave's file scope.
+- `final class MavlinkConnectRemediator` (package-private, **new**, docs/plans/active/DRONE-ONBOARDING-PLAN.md
+  wave O8) — Mechanism A **on connect**: its own third, independent `Dispatcher.subscribe(MessageFilter.any(), ...)`
+  fires `MAV_CMD_SET_MESSAGE_INTERVAL` (via a fresh `MessageIntervalService`/`CommandService` built on
+  the gateway's session `FrameSink`/`Correlator`) for every configured message the instant a system id
+  is newly learned. `MavlinkConnectRemediator(Dispatcher, FrameSink, Correlator, MavlinkSettings)`,
+  `close()`. No new port, no dependency on `vision-flight`'s requirement table — the message set is
+  pure configuration (`MavlinkSettings.Onboarding.onConnectMessageRequests()`), so this class stays as
+  ignorant of *why* a message matters as `MavlinkFeedTransmitter` is. **Idempotent per peer**: a system
+  id that keeps heartbeating is remediated exactly once; one that falls silent longer than
+  `MavlinkSettings.silenceWindow()` (the same threshold `VehicleClaimPolicy` already uses) is treated
+  as newly learned again next time it's heard — see O8 Gotchas for the reasoning and its real
+  consequence (a request re-sent to an aircraft that never actually rebooted). **Requests are chained
+  one at a time via `CompletableFuture.thenCompose`, never fired concurrently** — see O8 Gotchas for
+  why a naive fire-and-forget loop is an actual bug here, not a style choice. Every outcome is only
+  ever logged (INFO on accepted, WARNING otherwise); nothing here has a caller waiting on a result.
 - `final class MavlinkFlightCommander implements FlightCommandPort` — `setMode`/`returnToHome`/
   `arm`/`disarm`/`capabilities`, unchanged resolve/reject rules and wire bytes (see Gotchas for
   what's frozen). Delegates the actual send/await to a fresh, per-call `com.drones.mavlink.service.CommandService`
@@ -246,11 +265,24 @@ row above through `STATUSTEXT` has fired at least once for the decoder's lifetim
     `probe` alone; the other three reject a link key without it.
   - Rides the `MavlinkGateway` already bound to the address when there is one (closing nothing), and
     opens a temporary gateway when there is not (closing exactly that one). See Gotchas.
-- `MavlinkSettings.Onboarding` (new 10th `MavlinkSettings` component; back-compat 9-arg constructor
+- `MavlinkSettings.Onboarding` (10th `MavlinkSettings` component; back-compat 9-arg constructor
   kept, plus `withOnboarding(...)`) — `record Onboarding(List<String> probeParameters, Duration
-  capabilityTimeout, int capabilityRetries, Duration parameterTimeout, int parameterRetries)`.
-  Rejects a probe-parameter name longer than MAVLink's 16-character `param_id` at construction
-  rather than silently truncating it into a *different* parameter.
+  capabilityTimeout, int capabilityRetries, Duration parameterTimeout, int parameterRetries,
+  boolean requestMessagesOnConnect, List<MessageRequest> onConnectMessageRequests)`. Rejects a
+  probe-parameter name longer than MAVLink's 16-character `param_id` at construction rather than
+  silently truncating it into a *different* parameter.
+  - **Wave O8 addition:** `requestMessagesOnConnect` (**default `false`**) gates
+    `MavlinkConnectRemediator` entirely (see above); `onConnectMessageRequests` is the message set it
+    asks for, as `record MessageRequest(int messageId, Duration interval)` — a wire `messageId`, not a
+    name (this module carries no name→id table outside `MavlinkVehicleConfigurator`'s best-effort
+    dialect lookup), `interval` following `MessageIntervalService.setMessageInterval`'s own contract
+    (negative rejected, `Duration.ZERO` legal — "resume default rate", not "never"). A back-compat
+    5-arg `Onboarding` constructor keeps `MavlinkSitlOnboardingIntegrationTest`/
+    `MavlinkVehicleConfiguratorTest`'s existing call sites compiling, defaulting the flag `false` and
+    the message set to `defaults()`'s own nine-entry firmware-verified list (500ms/2Hz each:
+    `SYS_STATUS`, `ATTITUDE`, `GLOBAL_POSITION_INT`, `RC_CHANNELS`, `SERVO_OUTPUT_RAW`, `VFR_HUD`,
+    `GPS_RAW_INT`, `SCALED_IMU2`, `SYSTEM_TIME` — the same nine `MavlinkSitlOnboardingIntegrationTest`
+    proved ArduPilot 4.7 accepts) so flipping the flag alone still does something sensible.
 - `SitlContainer` (test-only, package-private, **new** in O4) — the one docker/SITL harness every SITL
   test in this module now shares (`dockerAvailable()`, `imagePresent()`, `start(purpose, port, sysid[,
   speedup])`, `AutoCloseable`, `freePort()`). `MavlinkSitlSmokeIntegrationTest` and
@@ -379,6 +411,48 @@ row above through `STATUSTEXT` has fired at least once for the decoder's lifetim
   `start()` verifies the container is still alive before returning, so this failure names itself.
   Verified by parking a foreign SITL on instance 0 and running the suite green around it.
 
+### O8 Gotchas (on-connect remediation)
+
+- **`COMMAND_ACK` correlates on `(origin sysid, command id)` only — never on which message id a
+  `MAV_CMD_SET_MESSAGE_INTERVAL` asked for.** `mavlink-core`'s `CorrelationKeys.forCommandAck` builds
+  one `MatchKey` per `(sysid, command)`, so every one of the nine default on-connect requests to the
+  same peer produces the *identical* key. A naive loop that fired all nine at once (the first draft of
+  `MavlinkConnectRemediator.remediate`, caught before any test was written against it) would have
+  registered a second live `Correlator.await` for a key the first request already occupies —
+  `DefaultCorrelator` throws `IllegalStateException` rather than silently orphan the first waiter. The
+  fix is real, not cosmetic: requests are chained via `CompletableFuture.thenCompose`, so request
+  `n+1` is sent only once request `n`'s exchange has resolved (acked or timed out) — serialised
+  without ever blocking the dispatcher's calling thread, since `thenCompose` on an incomplete future
+  only registers a continuation. Anyone adding a second on-connect command type in the future must
+  keep this serialisation; two independent command *types* to the same peer would use distinct
+  `MatchKey`s and could safely run concurrently, but two of the *same* type cannot.
+- **What "reconnect" means for idempotency is a judgement call, not a protocol fact.** MAVLink gives
+  an observer no boot counter and no session identifier, so there is no wire-level way to tell "same
+  aircraft, radio blipped for a second" apart from "fresh boot, back to starved defaults". This module
+  resolves that ambiguity toward the safe side: a system id is treated as newly learned again once
+  it has gone unheard for longer than `MavlinkSettings.silenceWindow()` (30s prod default) — reusing
+  `VehicleClaimPolicy`'s own threshold rather than inventing a second one. The real cost of resolving
+  it this way: an aircraft that merely had a 31-second radio dropout gets re-remediated for free
+  (cheap — ArduPilot just re-confirms a rate it already honours); the alternative (guessing "no
+  reboot happened") risks silently leaving a rebooted aircraft back in the exact starved state this
+  mechanism exists to close, which is the worse failure to risk.
+- **The plan's stated SITL exit criterion cannot be run, and the corrected one is what
+  `MavlinkSitlOnConnectIntegrationTest` proves.** The plan describes connecting with `SR2_EXTRA2=0`
+  and observing `VFR_HUD` arrive without a parameter write. Wave O4 already established that **no
+  `SRx_*` parameter exists on ArduPilot 4.7 at all** (see the O4 Gotchas block above) — there is no
+  parameter to set to `0`. The corrected, actually-run criterion: connect once with the flag off and
+  observe the same starved baseline O4 measured (a handful of message types, `VFR_HUD` absent);
+  connect a second time, to the same still-running SITL, with the flag on, and observe the configured
+  set begin arriving on the very first heartbeat of that connection — with `MavlinkVehicleConfigurator`
+  never even constructed in the test, so literally no parameter is read or written anywhere in it.
+- **The message-rate threshold in that SITL test has real headroom, deliberately.** VFR_HUD is
+  requested at a 500ms/2Hz nominal rate; the test's floor is 1.0 Hz (50%), not 2.0 (0%). The inventory
+  reads a decaying rolling-window rate off real wall-clock time, and a full-module test run has this
+  test's own SITL container competing with every other test's JVM/threads for CPU — an instantaneous
+  reading as low as 1.8 Hz was observed under that load even though the aircraft was honouring the
+  request exactly. A zero-headroom threshold is not a meaningful assertion of "streaming near what was
+  requested" under those conditions; it is a coin flip against scheduler noise.
+
 ## Test scaffolding changed in W4 (docs/plans/active/MAVLINK-CORE-PLAN.md §6.1 rule 3)
 
 Every existing assertion, expected value, and wire-level check is unchanged. Only how each test's
@@ -499,3 +573,35 @@ waves: ArduPilot 4.7 has **no `SRx_*` stream-rate parameters**, so O8/O11's reme
 be built on writing them; and the plan's original probe list named eleven parameters that do not
 exist on that firmware, now replaced with twenty verified ones. Both are written up in the O4 Gotchas
 block above.
+
+docs/plans/active/DRONE-ONBOARDING-PLAN.md **wave O8 done**: Mechanism A now also fires *automatically*
+the instant a gateway learns a peer, not only when `MavlinkVehicleConfigurator` is asked to. New:
+`MavlinkConnectRemediator` (package-private, one per `MavlinkGateway`, constructed only when the flag
+is on) and two new `MavlinkSettings.Onboarding` components, `requestMessagesOnConnect` (**default
+`false`**) and `onConnectMessageRequests` — a back-compat 5-arg `Onboarding` constructor keeps this
+wave's two existing call sites (`MavlinkSitlOnboardingIntegrationTest`, `MavlinkVehicleConfiguratorTest`)
+compiling unchanged. **No new port, no dependency on `vision-flight`'s requirement table** — the
+message set is pure configuration, per the task brief. `station/vision-app/**` (the `vision.onboarding.*`
+Spring property wiring for this flag) is explicitly out of this wave's file scope — a different wave
+(O5) owns it. See API surface and the O8 Gotchas block above for the correlation-collision fix,
+the silence-window idempotency-reset decision, and the corrected SITL exit criterion.
+
+**189/189 tests green** (172 pre-existing, none weakened, + 8 new `MavlinkSettingsTest` cases + 6 new
+`MavlinkConnectRemediatorTest` cases (fast hand-fake `Dispatcher`/`FrameSink`/`Correlator`, covering
+per-peer sequencing/idempotency/silence-reset/empty-set arithmetic) + 2 new
+`MavlinkConnectRemediationIntegrationTest` cases (real UDP loopback via a hand-rolled bidirectional
+`FakeVehicle`, proving both "the configured set arrives in order and is not resent on later
+heartbeats" and, as the task brief's requirement 3 demands, "the flag off means literally zero
+commands sent" — asserted, not assumed) + 1 new `MavlinkSitlOnConnectIntegrationTest` case), confirmed
+across three consecutive full `-pl drone-link/mavlink -am test` runs with **`Skipped: 0`** — all four
+SITL tests (including the pre-existing three) ran un-skipped against real ArduPilot Copter 4.7.0 every
+run.
+
+The SITL test proves, against firmware rather than this module's own simulator: a stock SITL connected
+with the flag off streams the same starved baseline wave O4 measured (`VFR_HUD` absent, a handful of
+message types); reconnecting with the flag on to the *same still-running* container makes the
+configured nine-message set begin arriving automatically on the very first heartbeat of that new
+connection, `VFR_HUD` observed near its requested 2 Hz — all without `MavlinkVehicleConfigurator` ever
+being constructed, i.e. without any parameter read or write anywhere in the test. That is the corrected
+form of the plan's own stated exit criterion (see O8 Gotchas for why the literal criterion, written
+around a parameter that does not exist on this firmware, could not be run as stated).
