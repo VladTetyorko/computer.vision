@@ -501,6 +501,18 @@ td.actions {
     font-variant-numeric: tabular-nums;
 }
 
+/* ---- Step 3.5: Verify (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1 stage 3/O6) — reuses
+   .test-result/.facts above verbatim for its own summary; only the message-inventory table below
+   is new to this step. */
+
+/* Horizontal scroll on a narrow viewport rather than crushing the columns (mirrors
+   `features/models/models.css`'s own copy of this rule — each page defines it locally, no shared
+   class exists for it yet). */
+.table-scroll {
+    overflow-x: auto;
+    margin-top: var(--space-8);
+}
+
 /* ---- Step 4: Create ------------------------------------------------------------------------- */
 
 .wizard-card .photo-preview {

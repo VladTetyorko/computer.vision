@@ -4,9 +4,11 @@ import {
   buildCreateAssetRequest,
   buildPostSimulationAssetEdit,
   buildProbeRequest,
+  buildVerifyRequest,
   canAdvanceFromConnect,
   canAdvanceFromProfile,
   canAdvanceFromTest,
+  canAdvanceFromVerify,
   creatorOwnershipGroup,
   defaultPilotSelection,
   nextStep,
@@ -44,8 +46,12 @@ describe('nextStep', () => {
     expect(nextStep('connect', 'simulate')).toBe('create');
   });
 
-  it('goes test -> create', () => {
-    expect(nextStep('test', 'register')).toBe('create');
+  it('goes test -> verify', () => {
+    expect(nextStep('test', 'register')).toBe('verify');
+  });
+
+  it('goes verify -> create', () => {
+    expect(nextStep('verify', 'register')).toBe('create');
   });
 
   it('is a no-op past create', () => {
@@ -70,9 +76,13 @@ describe('prevStep', () => {
     expect(prevStep('test', 'register')).toBe('connect');
   });
 
-  it('goes create -> test for register/discover', () => {
-    expect(prevStep('create', 'register')).toBe('test');
-    expect(prevStep('create', 'discover')).toBe('test');
+  it('goes verify -> test', () => {
+    expect(prevStep('verify', 'register')).toBe('test');
+  });
+
+  it('goes create -> verify for register/discover', () => {
+    expect(prevStep('create', 'register')).toBe('verify');
+    expect(prevStep('create', 'discover')).toBe('verify');
   });
 
   it('skips test entirely for simulate — create -> connect', () => {
@@ -88,12 +98,16 @@ describe('prevStep', () => {
     for (const method of ['register', 'discover', 'simulate', 'listen', 'drone'] as const) {
       let step = nextStep('profile', method);
       step = nextStep(step, method);
+      // simulate skips both test and verify (connect -> create directly); every other method
+      // passes through both.
       if (method !== 'simulate') {
+        step = nextStep(step, method);
         step = nextStep(step, method);
       }
       expect(step).toBe('create');
       let back = prevStep(step, method);
       if (method !== 'simulate') {
+        back = prevStep(back, method);
         back = prevStep(back, method);
       }
       back = prevStep(back, method);
@@ -204,6 +218,26 @@ describe('buildProbeRequest', () => {
     expect(
       buildProbeRequest({ protocol: 'rtsp', uri: 'rtsp://x', options: { rtsp_transport: 'tcp' } }),
     ).toEqual({ protocol: 'rtsp', uri: 'rtsp://x', options: { rtsp_transport: 'tcp' } });
+  });
+});
+
+describe('canAdvanceFromVerify', () => {
+  it('is always true, for every method — a vehicle-link observation may never strand the wizard (OQ3 resolved advisory-only, and probing defaults off)', () => {
+    expect(canAdvanceFromVerify('register')).toBe(true);
+    expect(canAdvanceFromVerify('simulate')).toBe(true);
+    expect(canAdvanceFromVerify(null)).toBe(true);
+  });
+});
+
+describe('buildVerifyRequest', () => {
+  it('builds the same trimmed {protocol, uri, options} shape as buildProbeRequest', () => {
+    expect(buildVerifyRequest({ protocol: '  mavlink  ', uri: '  udp://0.0.0.0:14550  ' })).toEqual({
+      protocol: 'mavlink',
+      uri: 'udp://0.0.0.0:14550',
+    });
+    expect(
+      buildVerifyRequest({ protocol: 'mavlink', uri: 'udp://0.0.0.0:14550', options: { sysid: '7' } }),
+    ).toEqual({ protocol: 'mavlink', uri: 'udp://0.0.0.0:14550', options: { sysid: '7' } });
   });
 });
 

@@ -50,6 +50,11 @@ const ROUTED_PAGES = [
   'models/models',
   'training-jobs/training-job',
   'system-status/system-status',
+  // Fleet readiness board + per-asset readiness report (docs/plans/active/DRONE-ONBOARDING-PLAN.md
+  // wave O6) — both went through the same facade sweep as everything else here from the start, so
+  // they're guarded from day one rather than grandfathered in later.
+  'preflight/preflight',
+  'readiness/readiness',
 ];
 
 // All feature .ts sources, inlined as raw strings at build time. Keys look like

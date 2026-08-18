@@ -12,6 +12,7 @@ import {
   buildTestDroneRequest,
   type SimulateMode,
 } from '../../core/fleet/simulation-logic';
+import { isProbeDisabledError } from '../../core/readiness/readiness-logic';
 import { buildMavlinkScanRequest, isClaimedVehicle } from './drone-scan-logic';
 import {
   buildDroneDeviceSpec,
@@ -26,10 +27,12 @@ import { buildTelemetryRequest, type FlightPlanForm } from '../../shared/map/fli
 import type {
   DiscoveredDevice,
   NetworkAddress,
+  ProbeCandidateRequest,
   ProbeDeviceRequest,
   ProbeDeviceResult,
   ScanResult,
   TelemetryPlanRequest,
+  VehicleProfile,
 } from '../../core/api/models';
 import {
   CUSTOM_PROTOCOL_OPTION,
@@ -42,9 +45,11 @@ import {
   buildCreateAssetRequest,
   buildPostSimulationAssetEdit,
   buildProbeRequest,
+  buildVerifyRequest,
   canAdvanceFromConnect,
   canAdvanceFromProfile,
   canAdvanceFromTest,
+  canAdvanceFromVerify,
   creatorOwnershipGroup,
   defaultPilotSelection,
   nextStep,
@@ -504,6 +509,75 @@ export class OnboardingStore {
     }
   }
 
+  // --- Step 3.5: Verify (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1 stage 3/O6) — a pre-registration
+  //     vehicle-link observation, distinct from Test's own video-frame probe above. Mirrors that
+  //     step's `probing`/`lastProbeRequest`/`lastProbeResult`/`lastProbeError`/`probeStillCurrent`
+  //     shape exactly (same "don't let a stale probe answer for edited fields" guard), plus one
+  //     addition Test doesn't need: `verifyDisabled`, first-class-state for the common
+  //     `vision.onboarding.probe.enabled=false` case (D17 default) — see `isProbeDisabledError`'s own
+  //     doc comment for why the identical `409` also covers "candidate unreachable", and why only the
+  //     message text (not the status) tells them apart. -----------------------------------------
+
+  /** `null` for `discover`/`listen`/`drone` (no candidate chosen yet — pivots to `register` first) and `simulate` (this step is skipped for it, see `WizardStep`'s own doc comment). */
+  private readonly currentVerifyRequest = computed<ProbeCandidateRequest | null>(() => {
+    if (this.connectMethod() !== 'register') {
+      return null;
+    }
+    return buildVerifyRequest({ protocol: this.protocol(), uri: this.uri(), options: this.collectOptions() });
+  });
+
+  readonly verifying = signal(false);
+  private readonly lastVerifyRequest = signal<ProbeCandidateRequest | null>(null);
+  readonly lastVerifyResult = signal<VehicleProfile | null>(null);
+  readonly lastVerifyError = signal<string | null>(null);
+  /** `true` once a {@link verify} attempt has confirmed `vision.onboarding.probe.enabled=false` on this deployment — read by `onboarding.html` to render the same honest "not enabled here" state `ModelsPage`/`DatasetsPage` use, never a generic error banner for the default, expected case. */
+  readonly verifyDisabled = signal(false);
+
+  /** Whether the last observed profile was for *these exact* connection fields, not a stale one — mirrors {@link probeStillCurrent}. */
+  readonly verifyStillCurrent = computed(() => {
+    const last = this.lastVerifyRequest();
+    const current = this.currentVerifyRequest();
+    return (
+      last !== null &&
+      current !== null &&
+      last.protocol === current.protocol &&
+      last.uri === current.uri &&
+      JSON.stringify(last.options ?? {}) === JSON.stringify(current.options ?? {})
+    );
+  });
+
+  readonly canAdvanceVerify = computed(() => canAdvanceFromVerify(this.connectMethod()));
+
+  /**
+   * Observes the candidate's own vehicle link (`POST /api/onboarding/probe`) — never persisted, no
+   * asset exists yet (D7). Unlike {@link probe}, a failure here never blocks {@link next} (see
+   * {@link canAdvanceVerify}/`canAdvanceFromVerify`'s own doc comment) — this is strictly informative.
+   */
+  async verify(): Promise<void> {
+    const request = this.currentVerifyRequest();
+    if (!request) {
+      return;
+    }
+    this.verifying.set(true);
+    this.lastVerifyError.set(null);
+    this.verifyDisabled.set(false);
+    try {
+      const result = await this.api.probeVehicleCandidate(request);
+      this.lastVerifyRequest.set(request);
+      this.lastVerifyResult.set(result);
+    } catch (error) {
+      this.lastVerifyRequest.set(request);
+      this.lastVerifyResult.set(null);
+      if (isProbeDisabledError(error)) {
+        this.verifyDisabled.set(true);
+      } else {
+        this.lastVerifyError.set(describeHttpError(error));
+      }
+    } finally {
+      this.verifying.set(false);
+    }
+  }
+
   // --- Step 4: Create ---------------------------------------------------------------------------
 
   readonly creating = signal(false);
@@ -722,6 +796,8 @@ export class OnboardingStore {
         return this.canAdvanceConnect();
       case 'test':
         return this.canAdvanceTest();
+      case 'verify':
+        return this.canAdvanceVerify();
       case 'create':
         return false; // the Create step has its own "Create asset" action, not a "Next"
       case 'assign':

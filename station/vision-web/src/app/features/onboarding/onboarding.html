@@ -750,6 +750,77 @@
         }
       }
 
+      <!-- ---- Step 3.5: Verify (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1 stage 3/O6) — observes
+           the candidate's own vehicle link before it becomes an asset. Distinct from Test above
+           (one decoded video frame): this listens for MAVLink telemetry and reports what it heard.
+           Advisory only — canAdvanceFromVerify is unconditionally true (see its own doc comment),
+           so nothing here ever blocks Next. vision.onboarding.probe.enabled defaults false (D17),
+           so "not enabled on this deployment" is the expected, common first-class state below, not
+           an error. -------------------------------------------------------------------------- -->
+      @case ('verify') {
+        <h2>Verify</h2>
+        <p class="muted hint">Optional — listens to the aircraft's own telemetry link and reports what it hears. You can continue either way.</p>
+
+        <div class="row">
+          <button type="button" class="btn" (click)="facade.store.verify()" [disabled]="facade.store.verifying()">
+            {{ facade.store.verifying() ? 'Listening…' : (facade.store.lastVerifyResult() || facade.store.lastVerifyError() || facade.store.verifyDisabled()) ? 'Retry' : 'Observe vehicle' }}
+          </button>
+        </div>
+
+        @if (facade.store.verifying()) {
+          <div class="empty"><p class="faint">Listening to the link…</p></div>
+        } @else if (facade.store.verifyDisabled()) {
+          <vision-notice icon="help">
+            Vehicle verification isn't enabled on this deployment (<code class="mono">vision.onboarding.probe.enabled</code>). You can still continue and register the asset.
+          </vision-notice>
+        } @else if (facade.store.lastVerifyError(); as error) {
+          <vision-notice variant="warn">{{ error }}</vision-notice>
+        } @else if (facade.store.lastVerifyResult(); as profile) {
+          <div class="test-result">
+            <dl class="facts">
+              @if (profile.sysid !== null) {
+                <div class="fact"><dt>System id</dt><dd class="mono">{{ profile.sysid }}</dd></div>
+              }
+              <div class="fact"><dt>Firmware</dt><dd>{{ profile.firmware ?? '—' }}</dd></div>
+              @if (profile.firmwareVersion) {
+                <div class="fact"><dt>Version</dt><dd class="mono">{{ profile.firmwareVersion }}</dd></div>
+              }
+              @if (profile.vehicleKind) {
+                <div class="fact"><dt>Vehicle kind</dt><dd>{{ profile.vehicleKind }}</dd></div>
+              }
+              <div class="fact"><dt>Messages seen</dt><dd class="mono">{{ profile.messages.length }}</dd></div>
+            </dl>
+
+            @if (profile.messages.length > 0) {
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>Message</th><th>Rate</th><th>Count</th></tr></thead>
+                  <tbody>
+                    @for (message of profile.messages; track message.messageId) {
+                      <tr>
+                        <td>{{ message.name }}</td>
+                        <td class="mono">{{ message.hz }} Hz</td>
+                        <td class="mono">{{ message.count }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+
+            @if (!profile.complete) {
+              <vision-notice variant="warn" icon="alert">
+                {{ profile.incompleteReason ?? 'The observation window ended before every signal arrived.' }}
+              </vision-notice>
+            }
+          </div>
+        } @else {
+          <div class="empty"><p class="faint">Not observed yet.</p></div>
+        }
+
+        <p class="faint">Advisory only — this never blocks continuing to Create.</p>
+      }
+
       <!-- ---- Step 4: Create ----------------------------------------------------------------- -->
       @case ('create') {
         <h2>Create</h2>

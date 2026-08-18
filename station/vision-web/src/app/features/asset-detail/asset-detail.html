@@ -118,6 +118,11 @@
             @if (facade.videoDevice(); as vd) {
               <button type="button" class="btn secondary" (click)="facade.watch()" title="Watch this stream on its own page">Watch live</button>
             }
+            <!-- Readiness report (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1, wave O6, `features/readiness`) —
+                 a different question than the cockpit band above ("does this vehicle's last-observed
+                 link satisfy what this platform's features need"), one click away rather than folded
+                 into this page's own overview. -->
+            <a class="btn secondary" [routerLink]="['/assets', assetId(), 'readiness']" title="Full per-feature readiness report">Readiness ›</a>
           </div>
         </section>
 
