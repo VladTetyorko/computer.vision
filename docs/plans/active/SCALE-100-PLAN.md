@@ -1,7 +1,9 @@
 # SCALE-100-PLAN — carrying 20–100 concurrent users on one JVM
 
-**Status:** proposed, nothing built. Owner: station (vision-api / vision-app / adapter-persistence),
-with one small vision-web wave.
+**Status:** **built — Band A (S0–S3) and Band B (S4–S7) are both on `feat/scale-100`, unmerged.**
+Band A is measured ([`SCALE-100-AFTER.md`](../../conclusions/SCALE-100-AFTER.md)); Band B is
+packaged-jar-verified but has not been re-run through the load rig. Owner: station (vision-api /
+vision-app / adapter-persistence), with one small vision-web wave.
 **Scope boundary:** this plan lifts the single-instance ceiling from *"one pilot, one manager, a small
 crew"* to *"20–100 concurrent users and 10–30 concurrent streams on one JVM"* — **without**
 rearchitecting anything. Every change here is local surgery or configuration. The moment the answer
@@ -78,7 +80,12 @@ the ceiling *after* the fix, holding everything else constant.
 > **Band A (S0–S3) is built and measured.** The headroom column below was an estimate; what it
 > actually bought is in [`SCALE-100-AFTER.md`](../../conclusions/SCALE-100-AFTER.md) — at 100 users,
 > 307 failed REST requests → 0, threads 376 → 143, HLS p99 −35%, SSE lag p99 −22%. The ranking held:
-> S3 first, S1 second, S2 smallest. Band B (S4–S7) is still estimates.
+> S3 first, S1 second, S2 smallest.
+>
+> **Band B (S4–S7) is built but its headroom column is still an estimate** — it has not been re-run
+> through the S0 rig. Two of its numbers are claims, not measurements: S4's "800+ samples/s" and S6's
+> "~0.2 req/s per idle tab" (the latter needs a browser, not the rig). Do not quote either as
+> measured. S6's rate limit additionally ships **disabled** — see §5.6.
 
 | Rank | Wave | Fixes | Effort | Headroom gained | Risk |
 |---|---|---|---|---|---|
@@ -96,6 +103,25 @@ S4/S5/S6/S7 in parallel. Two agents working the parallel bands finish in roughly
 
 If the budget only stretches to half of this: **S0 + S1 + S2 + S3** (~21 h) is the coherent subset —
 it lifts every one of the three plane-level ceilings and leaves the rest as tuning.
+
+**Where each wave landed** on `feat/scale-100` (branched from `fix/postgres-only-auth`, so one merge
+delivers both):
+
+| Wave | Commit(s) |
+|---|---|
+| S0 load rig | `4b13be6` |
+| S1 video out of the JVM | `73d3cc6`, fixed by `6e640d3` (cookie relay broke plain-http HLS) |
+| S2 SSE dispatcher | `02cb7d8` |
+| S3 connection pool | `5060686`, `cb99829` |
+| Band A measurement | `2cabd00` → [`SCALE-100-AFTER.md`](../../conclusions/SCALE-100-AFTER.md) |
+| S4 telemetry write path | `d8cc79f`, wired by `fd0b823` |
+| S5 fleet recompute | `9424064` |
+| S6a ungated polls | `a842d00` |
+| S6b rate limit | `0d07c91` (ships disabled — §5 S6) |
+| S7 properties extraction | `9d9bb4f` |
+
+Also on the branch and unrelated to this plan: `3756a0a` (test-scoped `flyway-core` made the packaged
+jar unbootable) — found only because the band check boots the jar, never the reactor classpath.
 
 ---
 
@@ -246,6 +272,14 @@ at the port boundary**.
 **Acceptance:** S0 rig sustains 800 samples/s with p99 ingest latency inside the existing budget;
 telemetry loss on a `kill -9` is bounded by the configured window and is covered by a test.
 
+> **Built; the loss-window half is tested, the 800 samples/s half is not measured.** Both the size
+> bound and the time bound *evict* their buffer (`compute` returning `null`), so the pending map does
+> not grow one entry per usage forever — a regression test in `PostgresDockerIntegrationTest` pins
+> both paths, because the first implementation leaked on the window path. `UsageTracker`'s coalesced
+> summary write persists `tracking.usage`, the freshest fold, rather than the calling thread's own
+> `updated` snapshot: two subscription threads can reach the size bound out of order, and CLAUDE.md
+> rule 9 says the newest wins.
+
 ---
 
 ### S5 — Stop recomputing the world on every write
@@ -262,6 +296,8 @@ composes with S2's serialize-once change for free.
 
 **Acceptance:** 50 rapid asset writes produce ≤ 2 recomputes; the SPA still converges to the correct
 fleet state.
+
+> **Built** (`9424064`), with the acceptance covered by test rather than by rig.
 
 ---
 
@@ -286,6 +322,18 @@ fleet state.
 **Acceptance:** an idle cockpit tab with SSE open issues ≤ 0.2 req/s; the bucket's limit is a property
 and a test proves 429 on breach.
 
+> **Built, with one decision this section did not anticipate: the limiter ships disabled.**
+> `RateLimitFilter` keys per principal, so when `vision.auth.enabled=false` — the default this app
+> runs in today — every caller in the deployment collapses into a single shared bucket. A budget that
+> is generous per user becomes an outage at this plan's own 100-user target. Enabling it is therefore
+> an *auth-enabled* decision, not a tuning decision, and `RateLimitWiring` is
+> `@ConditionalOnProperty(havingValue = "true")` so nothing registers until someone says so.
+> Verified in the packaged jar: off → 80 rapid `/api/assets` calls all 200; on at 10/min → exactly
+> 10×200 then 429 with `{"error":"TOO_MANY_REQUESTS"}`, `/api/live` exempt across 15 calls.
+>
+> The **≤ 0.2 req/s half of this acceptance is unverified** — it needs a browser with an open cockpit
+> tab, not the S0 rig. The four pollers are gated in code; the resulting rate is reasoned, not counted.
+
 ---
 
 ### S7 — Finish the properties extraction
@@ -305,24 +353,40 @@ timeouts and pool sizing from `application.yaml` alone.
 **Acceptance:** no literal timing/sizing constant remains in either class; `application.yaml`
 documents each new key in the file's established commented-default style.
 
+> **Built.** The sweep found two literals this scope did not list — the HLS proxy's error-body preview
+> length and its redirect-hop cap — and both became keys. `marks-buffer` was renamed `map-buffer` to
+> match the vocabulary [MAP-REWORK-PLAN.md](../done/MAP-REWORK-PLAN.md) left behind. See §6 for the
+> one key deliberately *not* added.
+
 ---
 
 ## 6. New configuration keys (all defaulted to today's effective behavior)
 
 ```
-vision.api.hls-proxy.connect-timeout / request-timeout   # already in the record; wire it up (S7)
-vision.api.live.coalesce / heartbeat / *-buffer          # already in the record; wire it up (S7)
-vision.api.live.dispatch-threads                         # S2, default 1 == today's behavior
-vision.api.live.send-timeout                             # S2
-vision.api.rate-limit.enabled / permits-per-minute       # S6, default off
+vision.api.hls-proxy.connect-timeout / request-timeout   # already in the record; wired up (S7)
+vision.api.hls-proxy.error-body-preview-max-chars
+        / max-redirect-hops                              # S7, not foreseen here — literals found in S1's proxy
+vision.api.live.coalesce / heartbeat / *-buffer          # already in the record; wired up (S7)
+vision.api.live.map-buffer                               # S7, renamed from marks-buffer (map-rework naming)
+vision.api.live.send-timeout / buffer-eviction           # S2 / S7
+vision.api.rate-limit.enabled / permits-per-minute       # S6, default off — and stays off, see below
 vision.persistence.pool.max-size / min-idle
         / connection-timeout / leak-detection-threshold  # S3
-vision.persistence.telemetry.batch-size / batch-window   # S4, window default 0 == today's behavior
+vision.persistence.telemetry.batch-size / batch-window   # S4, default 100 / 200ms — NOT today's behavior
 spring.threads.virtual.enabled                           # S1
 ```
 
-Every one defaults to current behavior, so the full set can land dark and be switched on per
-deployment.
+**Two deviations from this section's original promise, both deliberate:**
+
+- **`vision.api.live.dispatch-threads` was never added.** S2 dispatches on
+  `newVirtualThreadPerTaskExecutor()`, which has no thread-count concept — the key would have been
+  bound, stored, and silently ignored. A knob that reads as tuning but does nothing is worse than its
+  absence.
+- **`vision.persistence.telemetry.batch-window` defaults to 200 ms, not 0.** So S4 does *not* land
+  dark: batching is on out of the box, and a crash loses up to 200 ms of telemetry. That is the wave's
+  whole point, and shipping it off would have meant shipping nothing. A deployment that wants the old
+  per-sample durability sets `batch-window: 0` (`TelemetryBatchSettings.isImmediate()` is the path).
+  Every other key above does default to current behavior.
 
 ---
 
