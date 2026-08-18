@@ -2,8 +2,6 @@ package com.drones.mavlink.session;
 
 import com.drones.mavlink.codec.MavFrame;
 
-import io.dronefleet.mavlink.common.CommandAck;
-
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
@@ -21,19 +19,13 @@ import java.util.concurrent.TimeUnit;
  * forever (it would never be completed, since {@link #offer} only ever completes the one future
  * currently mapped to a key) — see this class's own {@link Correlator} javadoc.
  *
- * <h2>Extraction is per-message-type and, today, one case</h2>
- * {@link #offer} is how {@link MavlinkSession} feeds every decoded frame to this correlator. Only
- * {@code COMMAND_ACK} is wired up — the sole Family-A acknowledgement in scope before W6 (plan §4
- * non-goals: Mission/Parameter/FTP services are gated on the seam proving itself first). Matched on
- * {@code (origin sysid, command id)} only: {@code targetSystem}/{@code targetComponent} are wire
- * extension fields and are not reliably populated (plan §2.3), so they are never consulted.
- * Extending this to Mission/FTP/Parameter acks in W6 means adding a branch here — see this module's
- * MODULE.md for why that is an accepted, documented coupling rather than an oversight.
+ * <h2>Extraction lives elsewhere, and this class is closed to it</h2>
+ * {@link #offer} is how {@link MavlinkSession} feeds every decoded frame to this correlator, but
+ * <i>which</i> key a frame carries is {@link CorrelationKeys}' business (MISSIONS-PLAN.md D6).
+ * Supporting a new correlated message type is a row in that table; it is never an edit here. What
+ * this class owns is only the registry mechanics — exclusive registration, completion, self-cleanup.
  */
 public final class DefaultCorrelator implements Correlator {
-
-    /** {@code COMMAND_ACK}'s wire message id (MAVLink common.xml). */
-    private static final int COMMAND_ACK_MESSAGE_ID = 77;
 
     private final Map<MatchKey, CompletableFuture<MavFrame>> waiters = new ConcurrentHashMap<>();
 
@@ -71,7 +63,7 @@ public final class DefaultCorrelator implements Correlator {
      * miss a reply because a slow dispatcher handler ran first.
      */
     void offer(MavFrame frame) {
-        MatchKey key = extractKey(frame);
+        MatchKey key = CorrelationKeys.keyFor(frame);
         if (key == null) {
             return;
         }
@@ -79,12 +71,5 @@ public final class DefaultCorrelator implements Correlator {
         if (future != null) {
             future.complete(frame); // outside any lock -- ConcurrentHashMap#remove holds none across this call
         }
-    }
-
-    private static MatchKey extractKey(MavFrame frame) {
-        if (frame.payload() instanceof CommandAck ack) {
-            return new MatchKey(frame.header().system(), COMMAND_ACK_MESSAGE_ID, ack.command().value());
-        }
-        return null;
     }
 }

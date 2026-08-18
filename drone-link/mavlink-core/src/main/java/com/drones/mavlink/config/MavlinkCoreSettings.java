@@ -24,7 +24,8 @@ public record MavlinkCoreSettings(
         int maxResyncBuffers,
         int dispatchQueueCapacity,
         Mission mission,
-        Ftp ftp) {
+        Ftp ftp,
+        Parameter parameter) {
 
     public MavlinkCoreSettings {
         requirePositive(heartbeatPeriod, "heartbeatPeriod");
@@ -44,6 +45,7 @@ public record MavlinkCoreSettings(
         }
         Objects.requireNonNull(mission, "mission");
         Objects.requireNonNull(ftp, "ftp");
+        Objects.requireNonNull(parameter, "parameter");
     }
 
     /**
@@ -63,62 +65,88 @@ public record MavlinkCoreSettings(
                 64,
                 256,
                 Mission.defaults(),
-                Ftp.defaults());
+                Ftp.defaults(),
+                Parameter.defaults());
     }
 
     public MavlinkCoreSettings withHeartbeatPeriod(Duration heartbeatPeriod) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
     }
 
     public MavlinkCoreSettings withPeerTimeout(Duration peerTimeout) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
     }
 
     public MavlinkCoreSettings withCommandTimeout(Duration commandTimeout) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
     }
 
     public MavlinkCoreSettings withCommandRetries(int commandRetries) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
     }
 
     public MavlinkCoreSettings withCommandDedupeWindow(Duration commandDedupeWindow) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
     }
 
     public MavlinkCoreSettings withRc(Rc rc) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
     }
 
     public MavlinkCoreSettings withCloseJoinTimeout(Duration closeJoinTimeout) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
     }
 
     public MavlinkCoreSettings withMaxResyncBuffers(int maxResyncBuffers) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
     }
 
     public MavlinkCoreSettings withDispatchQueueCapacity(int dispatchQueueCapacity) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
     }
 
     public MavlinkCoreSettings withMission(Mission mission) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
+    }
+
+    public MavlinkCoreSettings withParameter(Parameter parameter) {
+        return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
     }
 
     public MavlinkCoreSettings withFtp(Ftp ftp) {
         return new MavlinkCoreSettings(heartbeatPeriod, peerTimeout, commandTimeout, commandRetries,
-                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp);
+                commandDedupeWindow, rc, closeJoinTimeout, maxResyncBuffers, dispatchQueueCapacity, mission, ftp, parameter);
+    }
+
+    /**
+     * Parameter read/write timing (ONBOARDING O2). The MAVLink parameter-protocol page is one of the
+     * few that states its own numbers: a targeted {@code PARAM_REQUEST_READ} should be retried on a
+     * ~1 s timeout, a small number of times — unlike a full parameter <i>download</i>, which this
+     * module deliberately does not implement (see {@code ParameterService}'s own non-goal note).
+     */
+    public record Parameter(Duration timeout, int retries) {
+
+        public Parameter {
+            requirePositive(timeout, "timeout");
+            if (retries < 0) {
+                throw new IllegalArgumentException("retries must be >= 0, got " + retries);
+            }
+        }
+
+        public static Parameter defaults() {
+            return new Parameter(Duration.ofSeconds(1), 3);
+        }
     }
 
     private static void requirePositive(Duration value, String name) {

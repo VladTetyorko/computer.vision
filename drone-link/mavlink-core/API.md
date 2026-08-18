@@ -115,6 +115,7 @@ Who is out there, what am I waiting for, what runs periodically.
 | `Dispatcher` | interface | `Subscription subscribe(MessageFilter, Consumer<MavFrame>)` |
 | `Subscription` | interface | `void close()` — idempotent |
 | `MatchKey` | record | `SysId system, int messageId, long discriminator` |
+| `CorrelationKeys` | class | the one place a correlated reply's key is defined, for **both** directions. Request side: `forCommandAck(SysId,int)` · `forParamValue(SysId,String)` · `forAutopilotVersion(SysId)`; reply side: a package-local class→`MatchKey` table. Also `normalizeParamId(String)` · `paramDiscriminator(String)` |
 | `Correlator` | interface | `CompletableFuture<MavFrame> await(MatchKey, Duration)` · `void cancel(MatchKey)` |
 | `TxScheduler` | interface | `Handle repeat(String name, Duration period, Runnable)` · `Handle` has `void close()` |
 | `LinkHealth` | interface | `Health of(PeerId)`; `record Health(boolean connected, Instant lastHeard, long received, long lost, double dropRate)` |
@@ -136,8 +137,17 @@ Who is out there, what am I waiting for, what runs periodically.
   via `cancel`. A waiter registered and never removed both leaks and permanently shadows future replies for
   the same key — this is a documented sharp edge of today's `CommandAckRegistry` and must not survive.
 - **`MatchKey.discriminator`** is the command id for `COMMAND_ACK`, the item seq for mission transfers, the
-  session/seq for FTP. `COMMAND_ACK` is matched on `(origin sysid, command id)` only — `targetSystem`/
-  `targetComponent` are wire extension fields and are **not** reliably populated; never match on them.
+  session/seq for FTP, and a hash of the `param_id` for `PARAM_VALUE`. `COMMAND_ACK` is matched on
+  `(origin sysid, command id)` only — `targetSystem`/`targetComponent` are wire extension fields and are
+  **not** reliably populated; never match on them.
+- **A new correlated message type is a row in `CorrelationKeys`, never an edit to `DefaultCorrelator`**
+  (MISSIONS-PLAN **D6**). The correlator owns registry mechanics only; key extraction is table-driven and
+  compiled in — not a runtime plugin registry, which nothing needs.
+- **`PARAM_VALUE` routes by hash and is verified by name.** A 16-character `param_id` does not fit in a
+  64-bit discriminator, so `CorrelationKeys.paramDiscriminator` (FNV-1a 64 over the normalised name) routes
+  the reply and `ParameterService` then compares the name exactly. **Both halves are required**: hashing
+  alone would silently accept a colliding parameter's value. FNV-1a specifically because its constants can
+  never drift, unlike `String#hashCode` (32-bit) or `Objects#hash` (no stability contract).
 - **`PeerDirectory` records protocol facts only.** Pin/claim/re-election is project policy and lives in
   `adapter-mavlink` (`VehicleClaimPolicy`), not here.
 - **Peer identity is `(sysid, compid)`, never the transport address.** One link multiplexes several compids
@@ -157,6 +167,8 @@ One class per MAVLink microservice. Adding one must touch nothing below.
 | `CommandService` | `COMMAND_LONG` **and** `COMMAND_INT`, `COMMAND_ACK` await, retry with `confirmation` increment, `IN_PROGRESS` extends the deadline, `correlationId` dedupe | A — request/response |
 | `ManualControlService` | fixed-rate `RC_CHANNELS_OVERRIDE` relay, latest-wins mailbox, release burst | B — streaming |
 | `MessageIntervalService` | `MAV_CMD_SET_MESSAGE_INTERVAL` (µs) / `MAV_CMD_REQUEST_MESSAGE`, over `CommandService` | A, via Command |
+| `ParameterService` | `read`/`readAll` by **name** (`PARAM_REQUEST_READ`, `param_index = -1`), `write` as `PARAM_SET` **plus a mandatory read-back**. Returns `ParameterOutcome(OK\|MISMATCH\|NO_REPLY, ParameterValue, detail)` | A — request/response |
+| `CapabilityService` | `MAV_CMD_REQUEST_MESSAGE(AUTOPILOT_VERSION)`, awaiting the **message**, not its ack. Returns `CapabilityReport(OK\|NO_REPLY, firmwareVersion, maturity, capabilities, …)` | A — request/response |
 
 Services depend on **small role interfaces only** — `FrameSink`, `Correlator`, `PeerDirectory`,
 `TxScheduler` — never on `MavlinkSession` as a whole, and never on `MavlinkConnection`. `ManualControlService`
@@ -165,6 +177,27 @@ must not even be able to *express* an ack wait: it gets `FrameSink` + `TxSchedul
 Family A's shared machine — *send X, expect Y matching key K within T, retry N times, duplicate response is
 idempotent* — is one class, `RequestResponse`, parameterised per service. It is what W6's `MissionService`
 (1500 ms / 250 ms / 5) and `FtpService` (50 ms / 6) will reuse.
+
+**L4 result records.** Every service returns a value for every protocol-level outcome; a thrown exception
+means a *send-level* fault only (unreachable target), never a "no" from the aircraft.
+
+| Type | Kind | Signature / fields |
+|---|---|---|
+| `ParameterValue` | record | `String name, float value, MavParamType type, int index, int count`; `boolean isNamed(String)`. `name` is normalised; `index` is informational — never correlate on it |
+| `ParameterOutcome` | record | `Status status, ParameterValue value, String detail`; `Status` = `OK \| MISMATCH \| NO_REPLY`; `boolean ok()` |
+| `CapabilityReport` | record | `Status status, String firmwareVersion, Maturity maturity, Set<MavProtocolCapability> capabilities, long boardVersion, int vendorId, int productId, AutopilotVersion raw`; `Status` = `OK \| NO_REPLY`; `Maturity` = `DEV \| ALPHA \| BETA \| RC \| OFFICIAL \| UNKNOWN`; `boolean supports(MavProtocolCapability)` |
+
+Three rules these records encode, so no caller re-derives them:
+
+- **`MISMATCH` is why a write is a read-back.** An autopilot clamps an out-of-range value and truncates a
+  float into the parameter's real integer width **without refusing the write**. The echoed `PARAM_VALUE` is
+  the only evidence of what it now holds, so the comparison is part of the exchange — exact float compare,
+  deliberately no epsilon (an epsilon hides exactly the small clamps that matter).
+- **`NO_REPLY` is also how "I have no such parameter" arrives.** The protocol gives an autopilot no way to
+  refuse a name it does not recognise. Unsupported and unreachable are one observation and are not guessed
+  apart here.
+- **`AUTOPILOT_VERSION` silence is a value, not a fault.** Betaflight and older firmware never implement it;
+  the platform's answer is an incomplete profile, never a fabricated one.
 
 ---
 
@@ -216,6 +249,7 @@ specify it** (plan §2.2), not because we were being cautious.
 | `dispatchQueueCapacity` | 256 | ours; `BoundedSubscriber` default |
 | `mission.timeout` / `itemTimeout` / `retries` | 1500 ms / 250 ms / 5 | **spec numbers** (W6) |
 | `ftp.timeout` / `retries` | 50 ms / 6 | **spec numbers** (W6) |
+| `parameter.timeout` / `retries` | 1 s / 3 | **spec numbers** — the parameter-protocol page states its own retry policy |
 
 No `System.getenv`, no `System.getProperty`, no Spring anywhere in this module. Callers construct the
 record; `vision-app` binds it from `application.yaml` exactly as it already does for `MavlinkSettings`.
@@ -226,4 +260,15 @@ record; `vision-app` binds it from `application.yaml` exactly as it already does
 
 Our own serializer (no CRC_EXTRA tables, no field reordering, no truncation logic — the library does it for
 ~500 messages). Message signing. A general MAVLink router. A DI framework. Own message DTOs (deferred,
-plan D3). Any broker client. Mission/Parameter/FTP services before W6.
+plan D3). Any broker client. Mission/FTP services before W6.
+
+Two more, added with the parameter service and deliberate:
+
+- **The full parameter download (`PARAM_REQUEST_LIST`)** — the stream-me-all-~1200 protocol with its own
+  missing-index gap detection and re-request loop. Everything this platform needs (probe, readiness,
+  Tier-A remediation) names its parameters in advance, and a full download costs minutes of airtime on a
+  2.4 kB/s link.
+- **An `api` broker gateway for parameters.** `CommandGateway` exists because commands genuinely arrive
+  from a broker (plan §5.1). Parameters do not: the onboarding flow reaches `ParameterService` through
+  `adapter-mavlink`'s `VehicleConfigPort` implementation, in-process. Adding `ParameterGateway` records
+  now would be an untested seam with no caller — it is a five-minute addition the day one exists.
