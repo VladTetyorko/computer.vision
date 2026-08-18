@@ -104,7 +104,9 @@ import java.util.Set;
  * per-request replacement for what a shared cookie jar would have done
  * unsafely. Every hop's {@code Set-Cookie} is also collected, oldest hop
  * first, and relayed back to the browser so it ends up pinned the same way
- * a direct client of mediamtx would be.
+ * a direct client of mediamtx would be — with the scheme rewrite {@link
+ * #relayableSetCookie} describes, without which that pinning only works over
+ * https.
  *
  * <h2>Failure handling</h2>
  * Only a failure to reach the upstream at all (connection refused, DNS
@@ -183,7 +185,7 @@ public class HlsProxyController {
                     ? upstreamBody
                     : new SequenceInputStream(new ByteArrayInputStream(errorPreview), upstreamBody);
 
-            HttpHeaders headers = responseHeaders(upstreamResponse, result.setCookies());
+            HttpHeaders headers = responseHeaders(upstreamResponse, result.setCookies(), request.isSecure());
             return ResponseEntity.status(status).headers(headers).body(new InputStreamResource(responseBody));
         } catch (IOException e) {
             throw new HlsUpstreamUnavailableException(
@@ -327,7 +329,8 @@ public class HlsProxyController {
         }
     }
 
-    private static HttpHeaders responseHeaders(HttpResponse<InputStream> upstreamResponse, List<String> setCookies) {
+    private static HttpHeaders responseHeaders(HttpResponse<InputStream> upstreamResponse, List<String> setCookies,
+                                                 boolean viewerRequestWasSecure) {
         HttpHeaders headers = new HttpHeaders();
         var upstream = upstreamResponse.headers();
         upstream.firstValue("content-type").ifPresent(v -> headers.add(HttpHeaders.CONTENT_TYPE, v));
@@ -348,8 +351,53 @@ public class HlsProxyController {
         upstream.firstValue("content-range").ifPresent(v -> headers.add(HttpHeaders.CONTENT_RANGE, v));
         upstream.firstValue("accept-ranges").ifPresent(v -> headers.add(HttpHeaders.ACCEPT_RANGES, v));
         upstream.firstValue("content-length").ifPresent(v -> headers.add(HttpHeaders.CONTENT_LENGTH, v));
-        setCookies.forEach(setCookie -> headers.add(HttpHeaders.SET_COOKIE, setCookie));
+        setCookies.forEach(setCookie ->
+                headers.add(HttpHeaders.SET_COOKIE, relayableSetCookie(setCookie, viewerRequestWasSecure)));
         return headers;
+    }
+
+    /**
+     * Rewrites one upstream {@code Set-Cookie} so it survives the scheme the viewer actually used.
+     *
+     * <p>mediamtx emits each HLS session cookie <em>twice</em> — once bare, once hardened with
+     * {@code Secure; SameSite=None; Partitioned} — and both copies share a name and path, so the
+     * hardened one replaces the usable one in the viewer's jar. Over https that is exactly right.
+     * Over plain http the browser drops it (and rejects {@code SameSite=None} without {@code Secure}
+     * outright), so the viewer never sends {@code hlsSession} back, and mediamtx answers the media
+     * playlist with {@code 401} — HLS playback is dead on any deployment that isn't behind TLS.
+     * Measured on 2026-08-18: every HLS request in a 100-viewer sweep failed this way, while the
+     * pre-{@code SCALE-100} proxy passed because its per-request cookie jar never echoed mediamtx's
+     * {@code cookieCheck} probe, so mediamtx fell back to putting the session in the playlist URLs.
+     *
+     * <p>Dropping the three attributes when the viewer is on http is what a reverse proxy is for
+     * (nginx spells it {@code proxy_cookie_flags}); the cookie is then stored and returned, and the
+     * session survives the next hop. Behind a TLS-terminating front proxy {@code isSecure()} reports
+     * this hop, not the viewer's — the cookie is relayed unhardened and the browser still receives
+     * it over https, which is weaker than end-to-end {@code Secure} but never broken. Configure
+     * {@code server.forward-headers-strategy} to make this hop report the viewer's scheme instead.
+     */
+    private static String relayableSetCookie(String setCookie, boolean viewerRequestWasSecure) {
+        if (viewerRequestWasSecure) {
+            return setCookie;
+        }
+        String[] parts = setCookie.split(";");
+        StringBuilder rewritten = new StringBuilder(parts[0].trim());
+        for (int i = 1; i < parts.length; i++) {
+            String attribute = parts[i].trim();
+            if (isHttpsOnlyCookieAttribute(attribute)) {
+                continue;
+            }
+            rewritten.append("; ").append(attribute);
+        }
+        return rewritten.toString();
+    }
+
+    /** {@code Partitioned} and {@code SameSite=None} are only honoured alongside {@code Secure}, so all three go together. */
+    private static boolean isHttpsOnlyCookieAttribute(String attribute) {
+        String normalized = attribute.toLowerCase(Locale.ROOT);
+        return normalized.equals("secure")
+                || normalized.equals("partitioned")
+                || normalized.replace(" ", "").equals("samesite=none");
     }
 
     private static String withoutTrailingSlash(String value) {

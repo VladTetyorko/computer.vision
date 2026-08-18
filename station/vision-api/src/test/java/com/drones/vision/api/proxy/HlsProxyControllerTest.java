@@ -166,6 +166,41 @@ class HlsProxyControllerTest {
                 "expected the browser's Cookie header to be forwarded upstream, got: " + receivedCookie.get());
     }
 
+    /**
+     * The failure this guards is silent and total: an http viewer that cannot store mediamtx's
+     * hardened duplicate never sends {@code hlsSession} back, and every media-playlist request after
+     * the first answers 401. It hid in local development because browsers treat {@code
+     * http://localhost} as a secure context and keep {@code Secure} cookies there.
+     */
+    @Test
+    void secureOnlyCookieAttributesAreStrippedForAPlainHttpViewerAndKeptForAnHttpsOne() throws Exception {
+        byte[] body = "#EXTM3U\n".getBytes(StandardCharsets.UTF_8);
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            // Exactly what mediamtx 1.19 emits: the same cookie twice, once bare and once hardened.
+            exchange.getResponseHeaders().add("Set-Cookie", "hlsSession=s1");
+            exchange.getResponseHeaders().add("Set-Cookie",
+                    "hlsSession=s1; HttpOnly; Secure; SameSite=None; Partitioned");
+            exchange.getResponseHeaders().add("Content-Type", "application/vnd.apple.mpegurl");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.start();
+        MockMvc mockMvc = mockMvcFor(upstream);
+
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", "stream-1"))
+                .andExpect(status().isOk())
+                .andExpect(header().stringValues("Set-Cookie", "hlsSession=s1", "hlsSession=s1; HttpOnly"));
+
+        // Attribute order is the JDK client's normalisation of what the upstream sent, not this
+        // controller's doing -- an https viewer gets the hardened cookie through untouched.
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", "stream-1").secure(true))
+                .andExpect(status().isOk())
+                .andExpect(header().stringValues("Set-Cookie", "hlsSession=s1",
+                        "hlsSession=s1; Secure; HttpOnly; Partitioned; SameSite=None"));
+    }
+
     @Test
     void serverSideFollowsUpstreamRedirectAndReturnsFinalBodyWith200() throws Exception {
         byte[] finalBody = "#EXTM3U\nfinal-node-playlist\n".getBytes(StandardCharsets.UTF_8);
