@@ -245,8 +245,15 @@ final class MavlinkGateway {
      * this module's close-the-socket-to-unblock-the-reader idiom) then the session (stops and
      * joins that thread, bounded by the settings' close-join timeout) — matching the pre-W4 hub's
      * own shutdown ordering.
+     *
+     * <p>Package-private rather than private for exactly one caller besides {@link #unregister}:
+     * {@code MavlinkVehicleConfigurator} opens its own registration-less gateway when it must probe
+     * an address no device is streaming from yet, and closes that one itself. The invariant this
+     * relaxes is only "gateways die when their last registration goes"; the invariant that matters —
+     * <b>never close a gateway you did not open</b> — is enforced by that class's lease, because a
+     * borrowed gateway backs a live device's telemetry.
      */
-    private void close() {
+    void close() {
         if (!closed.compareAndSet(false, true)) {
             return;
         }

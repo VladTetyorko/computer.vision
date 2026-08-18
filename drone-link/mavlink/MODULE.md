@@ -222,6 +222,40 @@ row above through `STATUSTEXT` has fired at least once for the decoder's lifetim
   unpinned). `route` is the one deliberate exception (fails fast).
 - Idempotent close via `AtomicBoolean` CAS; close-the-link-to-unblock-the-reader idiom, now
   delegated to `drone-link/mavlink-core`'s own links/session rather than hand-rolled per class.
+- `public final class MavlinkVehicleConfigurator implements VehicleConfigPort` (`vision-flight`,
+  docs/plans/active/DRONE-ONBOARDING-PLAN.md **wave O4**, **new**) — the MAVLink half of vehicle
+  onboarding. `MavlinkVehicleConfigurator(MavlinkTelemetrySource)` /
+  `MavlinkVehicleConfigurator(MavlinkTelemetrySource, MavlinkSettings)`. Public (not package-private
+  like this module's plumbing) because `vision-app` must construct it to satisfy the port.
+  - `boolean supports(Device)` — delegates to `MavlinkTelemetrySource.supports`, so one source of
+    truth decides what this module can carry.
+  - `VehicleProfile probe(String linkKey, Duration window)` — stage 3 of the plan's pipeline: O1's
+    passive `MavlinkMessageInventory` + one `AUTOPILOT_VERSION` (`CapabilityService`) + one batch of
+    named parameter reads (`ParameterService.readAll`), assembled into one snapshot. Never throws for
+    an incomplete answer.
+  - `MessageIntervalOutcome requestMessageInterval(String linkKey, int messageId, Duration interval)` —
+    **Mechanism A**, `MAV_CMD_SET_MESSAGE_INTERVAL` via `mavlink-core`'s `MessageIntervalService`.
+    Session-scoped; nothing persisted, so no snapshot and no restore.
+  - `List<ParameterReading> readParams(String linkKey, List<String> names)` — named reads only; a name
+    that goes unanswered has **no entry**, never a fabricated zero.
+  - `ParameterWriteOutcome writeParam(String linkKey, String name, double value)` — **Mechanism B**,
+    the only method here that changes persistent state. Snapshots first (a value that cannot be read
+    cannot be restored, so the write is refused), writes, and reports the aircraft's read-back.
+  - Addressed by `linkKey` (`"udp://host:port#sysid"`), not by `Device`, because the probe runs
+    *before* registration when no `DeviceId` exists (plan D7). The `#sysid` suffix is optional for
+    `probe` alone; the other three reject a link key without it.
+  - Rides the `MavlinkGateway` already bound to the address when there is one (closing nothing), and
+    opens a temporary gateway when there is not (closing exactly that one). See Gotchas.
+- `MavlinkSettings.Onboarding` (new 10th `MavlinkSettings` component; back-compat 9-arg constructor
+  kept, plus `withOnboarding(...)`) — `record Onboarding(List<String> probeParameters, Duration
+  capabilityTimeout, int capabilityRetries, Duration parameterTimeout, int parameterRetries)`.
+  Rejects a probe-parameter name longer than MAVLink's 16-character `param_id` at construction
+  rather than silently truncating it into a *different* parameter.
+- `SitlContainer` (test-only, package-private, **new** in O4) — the one docker/SITL harness every SITL
+  test in this module now shares (`dockerAvailable()`, `imagePresent()`, `start(purpose, port, sysid[,
+  speedup])`, `AutoCloseable`, `freePort()`). `MavlinkSitlSmokeIntegrationTest` and
+  `MavlinkSitlReturnHomeIntegrationTest` each carried their own copy before; a third was about to be
+  written.
 - `MavlinkGateway`/`VehicleClaimPolicy` are guarded by one private monitor each (`VehicleClaimPolicy`'s
   own lock protects claim state; `PeerDirectory` itself needs no external lock, it's independently
   thread-safe).
@@ -299,6 +333,41 @@ row above through `STATUSTEXT` has fired at least once for the decoder's lifetim
   transport-address identity rule the rest of that module follows — and is now held in one map shared
   across every buffer on the link. Guarded by `DialectIsLearnedPerSystemNotPerSourceTest` in
   `mavlink-core`, which was verified to fail without the fix.
+
+### O4 Gotchas (probe, remediation, parameter names)
+
+- **ArduPilot 4.7 has no `SRx_*` stream-rate parameters at all.** `SR0_*`, `SR1_*` and `SR2_*` were
+  each read off a live Copter 4.7.0 instance and every one is absent. Consequence: **Mechanism A
+  (`MAV_CMD_SET_MESSAGE_INTERVAL`) is not one of two ways to fix a starved link on this firmware, it
+  is the only way** — the plan's Tier-A "write `SR2_EXTRA2`" remediation cannot exist here. Whoever
+  writes the readiness/remediation table (O8/O11) needs this before designing around `SR2_*`.
+- **A vehicle pushing at a UDP `--out` channel streams almost nothing until asked.** Measured: four
+  message types — `HEARTBEAT` at 1 Hz plus three event-driven ones at ~0.1 Hz — not the dozen a
+  connected GCS sees. This is the concrete gap the whole onboarding plan exists to close, and it is
+  why `MavlinkSitlOnboardingIntegrationTest` is shaped probe → remediate → probe again.
+- **Parameter names are firmware-version state, not constants.** Copter 4.7 renamed
+  `SYSID_THISMAV`→`MAV_SYSID`, `FS_BATT_ENABLE`→`BATT_FS_LOW_ACT`, `GPS_TYPE`→`GPS1_TYPE`; `RTL_ALT`,
+  `WPNAV_SPEED`, `ARMING_CHECK`, `LAND_SPEED`, `ANGLE_MAX` and `PILOT_SPEED_UP` are all absent too.
+  Every name in `Onboarding.defaults()` was verified against a live instance, and the SITL test
+  asserts **all twenty** answer — because MAVLink gives an autopilot no way to report an unknown
+  name. It just says nothing, so a stale list degrades into a slow probe that quietly reads less than
+  it claims. Anyone changing the list must re-verify it, not reason about it.
+- **Never close a borrowed gateway.** `MavlinkGateway.close()` was widened from private to
+  package-private for `MavlinkVehicleConfigurator`'s registration-less probe gateway. The invariant
+  that still holds absolutely is *close only what you opened* — a borrowed gateway backs a registered
+  device's live telemetry, and closing it would tear that down. Enforced by the configurator's
+  `LinkLease`, which records which case it is.
+- **"Never heard from" is not "asked and got no answer".** `RoutingFrameSink` cannot address a peer
+  it has no link for, so a request to an unheard aircraft is *never sent*. The configurator checks
+  reachability before every send and says which happened; both are `NO_ACK` (nothing changed either
+  way), but only one is a fact about the aircraft. Reporting an unsent request as an unanswered one
+  would read as "this firmware does not support it".
+- **`readAll` fires every name at once, deliberately.** An absent name costs a full timeout, so
+  batching would serialise those waits instead of overlapping them. Twenty concurrent
+  `PARAM_REQUEST_READ`s against ArduPilot 4.7 lose nothing — every name that exists comes back.
+- **`MessageObservation.name` is best-effort.** Resolved through `ArdupilotmegaDialect` (a superset of
+  common) plus a CamelCase→SCREAMING_SNAKE transform (`VfrHud`→`VFR_HUD`), and `null` for an id the
+  dialect does not know. An unrecognised message still counts toward the inventory.
 
 ## Test scaffolding changed in W4 (docs/plans/active/MAVLINK-CORE-PLAN.md §6.1 rule 3)
 
@@ -389,3 +458,34 @@ un-skipped and passed every run. Production-robustness finding (not fixed, flagg
 wave's frozen-library rule): `MavFrame` carries no raw wire byte length, so `bytesPerSecond()` is a
 documented upper-bound estimate rather than a true measurement (see Gotchas). `drone-link/mavlink-core`
 was not touched (another wave's concurrent scope).
+
+docs/plans/active/DRONE-ONBOARDING-PLAN.md **wave O4 done**: `MavlinkVehicleConfigurator implements
+VehicleConfigPort` — the module now *asks* a vehicle what it is and *changes* what it streams, where
+before it only listened. Probe = O1's inventory + `AUTOPILOT_VERSION` + a named parameter batch
+(both new services from O2's `mavlink-core`); Mechanism A = `MAV_CMD_SET_MESSAGE_INTERVAL`;
+Mechanism B = snapshot → `PARAM_SET` → read-back, reported `DENIED` (never `ACCEPTED`) when the
+aircraft stored something other than what was asked for. New: `MavlinkVehicleConfigurator`,
+`MavlinkSettings.Onboarding` (10th component, back-compat 9-arg constructor kept for `vision-app`'s
+`TelemetryWiring`, untouched — out of this wave's file scope), and the shared test-only
+`SitlContainer`. `MavlinkGateway.close()` widened private→package-private (see Gotchas). See API
+surface and the O4 Gotchas block above.
+
+**172/172 tests green** (164 pre-existing, none weakened, + 7 new `MavlinkVehicleConfiguratorTest`
+cases + 1 new `MavlinkSitlOnboardingIntegrationTest` case), confirmed across three consecutive full
+`-pl drone-link/mavlink -am test` runs with **`Skipped: 0`** — all three SITL tests ran un-skipped
+against real ArduPilot Copter 4.7.0 every run, as this wave's brief requires.
+
+The SITL test proves, against firmware rather than our own simulator: 20/20 configured parameters
+read; `AUTOPILOT_VERSION` decoded to a `major.minor.patch` version and a capability set containing
+`MAV_PROTOCOL_CAPABILITY_MAVLINK2`; nine `MAV_CMD_SET_MESSAGE_INTERVAL` requests `ACCEPTED` and the
+requested streams then observed arriving (≥8 message types, `VFR_HUD` ≥3 Hz, up from four types
+before); and a `FENCE_ALT_MAX` write surviving an *independent* re-read plus a restore to the
+snapshot. `MavlinkVehicleConfiguratorTest` covers the half SITL cannot — what the configurator claims
+when a vehicle answers nothing — since a real aircraft that answers correctly can never demonstrate
+honest reporting of an aircraft that doesn't.
+
+Two findings that change work downstream, not deferred but recorded because they belong to later
+waves: ArduPilot 4.7 has **no `SRx_*` stream-rate parameters**, so O8/O11's remediation table cannot
+be built on writing them; and the plan's original probe list named eleven parameters that do not
+exist on that firmware, now replaced with twenty verified ones. Both are written up in the O4 Gotchas
+block above.
