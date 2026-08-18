@@ -113,8 +113,42 @@ with* the missing pool but this rig cannot separate that from GC and Tomcat thre
 items are marked not-measured with reasons (a full K=100 sim sweep, and the browser idle-tab polling
 spot-check that §7 of the plan flagged as its weakest claim — still unverified).
 
-**The "after" sweep has not been run.** Every headroom claim in the plan's §3 remains an estimate
-until someone re-runs `tools/loadrig` against this branch's tip.
+### The after-sweep — run 2026-08-18
+
+Results: [`docs/conclusions/SCALE-100-AFTER.md`](../../conclusions/SCALE-100-AFTER.md). Band A's
+headroom claims are no longer estimates.
+
+It was **not** run as a diff against the baseline above. That baseline came from an IntelliJ dev JVM
+(`TieredStopAtLevel=1` + debugger agent), so a packaged-jar "after" would have credited S1/S2/S3 with
+the C2 compiler. The baseline commit was rebuilt into its own jar and re-measured under identical
+conditions instead — jar vs jar, same script, same ambient load.
+
+Three things a re-runner needs to know:
+
+1. **Detection must be forced on, or the SSE-lag column is blank.** The rig times only payloads
+   carrying `at`, i.e. DETECTION events, and detection is opt-in *and* demand-gated (CV-DEMAND §3.5):
+   an SSE subscription alone creates no demand. A sidecar that PATCHes `detectionEnabled:true` and
+   polls `/detections` ran alongside both sides.
+2. **The baseline's 908 threads did not reproduce** (314 before / 168 after under a packaged JVM).
+   Direction and mechanism held; the magnitude was dev-JVM-specific. Do not quote "908 → 168".
+3. **`pkill -f <jar-name>` matches the driver script's own argv** and makes it kill itself. Cost two
+   silent no-op runs here. Kill by pid from `ss -ltnp` instead.
+
+### Two shipping bugs the sweep found (both now fixed on this branch)
+
+Neither is a scaling defect; both were invisible until someone ran the packaged jar over plain http.
+
+- **`3756a0a`** — `flyway-core` was declared at `test` scope in `vision-app`, which by Maven's
+  nearest-definition rule demoted the transitive compile dependency too and dropped it from the
+  repackaged jar. `java -jar` (i.e. `Dockerfile`) died at boot with `NoClassDefFoundError`.
+  Introduced by `74eab93`; passed every test, because tests have test scope.
+- **`6e640d3`** — S1's `Set-Cookie` relay broke HLS over plain http. mediamtx sends each session
+  cookie twice, bare and `Secure`-hardened; the hardened copy replaces the usable one, so an http
+  viewer can never return `hlsSession` and every media playlist 401s. 2592/2592 HLS requests failed
+  in the first after-run. Hidden in dev because browsers treat `http://localhost` as secure.
+
+**Lesson for Band B: run the packaged jar over a non-localhost origin at least once per band.** Both
+bugs were shipped-and-green under the reactor classpath and `http://localhost`.
 
 ### Orchestrator changes on top of the agents' work
 

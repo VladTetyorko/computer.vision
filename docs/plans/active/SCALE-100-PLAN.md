@@ -42,7 +42,7 @@ paying for themselves.
 | d | `broadcast()` re-serializes the same envelope once **per connection** | `LiveUpdateRegistry.java:526-537` |
 | e | `publishFleetChanged()` recomputes the **whole** fleet + devices snapshot (all assets, all devices, all streams) on every asset/device/stream write, then broadcasts to all | `LiveUpdateRegistry.java:400-410, 597-620` |
 | f | `telemetryBuffers` / `detectionBuffers` are keyed per asset and **never evicted** — memory grows with assets-seen-since-boot, never shrinks | `LiveUpdateRegistry.java:217-218, 581-583` |
-| g | There is **no connection pool.** Raw Hibernate `Configuration` with `jakarta.persistence.jdbc.*` and no provider → the built-in `DriverManagerConnectionProvider` ("not for production use") | `storage/persistence/.../config/PersistenceUnit.java:141-147` |
+| g | ~~There is **no connection pool.**~~ **Corrected by measurement 2026-08-18** — `DriverManagerConnectionProvider` does pool, up to 20. Its real defect is that it **fails instead of waiting** when saturated: `HibernateException: The internal connection pool has reached its maximum size`, 1100 times in a 100-user sweep, surfaced as 500s. S3's win is the wait, not the pool | `PersistenceUnit.java:141-147`; [`SCALE-100-AFTER.md`](../../conclusions/SCALE-100-AFTER.md) §3.1 |
 | g2 | That class's own javadoc claims HikariCP is *"already on the classpath transitively via Hibernate's own dependencies"* and that swapping it in is *"a config-only change"*. **Both are false** — `mvn dependency:list` on the module returns no pool library at all. S3 must add the dependency and correct the javadoc | `PersistenceUnit.java:39-41`, verified 2026-08-17 |
 | g3 | Since POSTGRES-ONLY landed (`74eab93`), the devsupport in-memory repositories are **gone** — there is no `vision.persistence.enabled` fallback any more. Every request now reaches Postgres through the unpooled provider | `application.yaml:38` (past-tense comment), `git log fix/postgres-only-auth` |
 | h | Every repository call opens its **own** `EntityManager` + transaction. A controller touching three repos = three connections, three transactions, no unit of work | `storage/persistence/.../config/JpaOperations.java:38,57` |
@@ -74,6 +74,11 @@ never touches a frame. Turning that on is an operational decision, not work this
 
 Estimates are focused implementation time for one delegated agent, excluding review. "Headroom" is
 the ceiling *after* the fix, holding everything else constant.
+
+> **Band A (S0–S3) is built and measured.** The headroom column below was an estimate; what it
+> actually bought is in [`SCALE-100-AFTER.md`](../../conclusions/SCALE-100-AFTER.md) — at 100 users,
+> 307 failed REST requests → 0, threads 376 → 143, HLS p99 −35%, SSE lag p99 −22%. The ranking held:
+> S3 first, S1 second, S2 smallest. Band B (S4–S7) is still estimates.
 
 | Rank | Wave | Fixes | Effort | Headroom gained | Risk |
 |---|---|---|---|---|---|

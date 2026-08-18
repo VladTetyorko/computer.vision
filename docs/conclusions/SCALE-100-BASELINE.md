@@ -1,5 +1,10 @@
 # SCALE-100 wave S0 — measured baseline
 
+> **Superseded as a comparison basis.** §4.1 below warns that this ran on a dev JVM. The Band A
+> after-sweep therefore rebuilt this commit as a packaged jar and re-measured it rather than diffing
+> against these numbers — see [`SCALE-100-AFTER.md`](SCALE-100-AFTER.md). This document is still the
+> reference for the rig's pitfalls and for what the pre-Band-A code did on a dev JVM.
+
 Baseline measurements for [`SCALE-100-PLAN.md`](../plans/active/SCALE-100-PLAN.md), taken with the
 rig at [`tools/loadrig/`](../../tools/loadrig/) against the code **as it stands before S1/S2/S3**, so
 their own before/after rows have something real to compare against. Read
