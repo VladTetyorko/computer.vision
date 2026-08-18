@@ -33,7 +33,8 @@ public record MavlinkSettings(
         Duration ackTimeout,
         Scan scan,
         Transmit transmit,
-        Rc rc) {
+        Rc rc,
+        Inventory inventory) {
 
     public MavlinkSettings {
         Objects.requireNonNull(bindHost, "bindHost must not be null");
@@ -49,6 +50,20 @@ public record MavlinkSettings(
         Objects.requireNonNull(scan, "scan must not be null");
         Objects.requireNonNull(transmit, "transmit must not be null");
         Objects.requireNonNull(rc, "rc must not be null");
+        Objects.requireNonNull(inventory, "inventory must not be null");
+    }
+
+    /**
+     * Back-compat overload for callers built before {@link #inventory()} existed — namely {@code
+     * vision-app}'s {@code TelemetryWiring#toMavlinkSettings} (out of this wave's file scope, per
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O1's brief: {@code drone-link/mavlink/**} only).
+     * Defaults {@link #inventory()} to {@link Inventory#defaults()}, exactly like every other field
+     * this record has ever added.
+     */
+    public MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
+                            Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc) {
+        this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, scan, transmit, rc,
+                Inventory.defaults());
     }
 
     /** Reproduces every literal this module's classes hardcode today. */
@@ -61,7 +76,8 @@ public record MavlinkSettings(
                 Duration.ofSeconds(2),
                 Scan.defaults(),
                 Transmit.defaults(),
-                Rc.defaults());
+                Rc.defaults(),
+                Inventory.defaults());
     }
 
     /**
@@ -71,7 +87,17 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withSilenceWindow(Duration newSilenceWindow) {
         return new MavlinkSettings(bindHost, newSilenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc);
+                scan, transmit, rc, inventory);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #inventory()} replaced — same test/tuning
+     * convenience as {@link #withSilenceWindow}; lets a test run {@code MavlinkMessageInventory}'s
+     * rolling window over a few seconds instead of the production default of ten.
+     */
+    public MavlinkSettings withInventory(Inventory newInventory) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
+                scan, transmit, rc, newInventory);
     }
 
     /** {@code MavlinkHeartbeatScanner}'s hub-poll/self-bind-timeout budgets. */
@@ -147,6 +173,66 @@ public record MavlinkSettings(
         /** Clamps {@link #overrideHz()} to {@code [minOverrideHz, maxOverrideHz]}, mirroring the env-var-era clamping. */
         int clampedOverrideHz() {
             return Math.max(minOverrideHz, Math.min(maxOverrideHz, overrideHz));
+        }
+    }
+
+    /**
+     * {@code MavlinkMessageInventory}'s rolling-window message/byte-rate accounting
+     * (docs/plans/active/DRONE-ONBOARDING-PLAN.md O1 — stage 1 of the onboarding probe pipeline,
+     * consumed later by O4's {@code VehicleConfigPort.probe}).
+     *
+     * @param window                       how far back a {@code count}/{@code hz} figure looks;
+     *                                     default matches this plan's own frozen
+     *                                     {@code vision.onboarding.probe.inventory-window} default
+     *                                     (§8.1) so O5's later wiring changes no observed behaviour.
+     * @param bucketWidth                  the granularity of the rolling window's ring buffer —
+     *                                     one counter per {@code bucketWidth} slice, aged out once
+     *                                     it falls outside {@code window}. A width of one second
+     *                                     matches MAVLink's own rate vocabulary (stream rates are
+     *                                     requested in whole/half Hz via {@code
+     *                                     MAV_CMD_SET_MESSAGE_INTERVAL}) and keeps each counter's
+     *                                     memory at exactly {@code window/bucketWidth} longs
+     *                                     regardless of how fast a peer actually sends.
+     * @param maxTrackedPeers              bounds the number of distinct system ids this inventory
+     *                                     will track per gateway (LRU-evicted), the same threat
+     *                                     model as {@code mavlink-core}'s own {@code
+     *                                     MavlinkCoreSettings#maxResyncBuffers()} (default 64) —
+     *                                     an unbounded number of distinct source system ids on one
+     *                                     link must not grow this module's memory without bound.
+     * @param maxTrackedMessageTypesPerPeer bounds the number of distinct message ids tracked per
+     *                                     peer (LRU-evicted); 128 comfortably covers every message
+     *                                     type a real ArduPilot/PX4 vehicle sends across the common
+     *                                     + ardupilotmega dialects (a few dozen) while still
+     *                                     bounding a flood of forged message ids from a hostile or
+     *                                     malfunctioning sender.
+     */
+    public record Inventory(Duration window, Duration bucketWidth, int maxTrackedPeers,
+                             int maxTrackedMessageTypesPerPeer) {
+
+        public Inventory {
+            Objects.requireNonNull(window, "window must not be null");
+            if (window.isZero() || window.isNegative()) {
+                throw new IllegalArgumentException("window must be positive: " + window);
+            }
+            Objects.requireNonNull(bucketWidth, "bucketWidth must not be null");
+            if (bucketWidth.isZero() || bucketWidth.isNegative()) {
+                throw new IllegalArgumentException("bucketWidth must be positive: " + bucketWidth);
+            }
+            if (bucketWidth.compareTo(window) > 0) {
+                throw new IllegalArgumentException(
+                        "bucketWidth must be <= window: " + bucketWidth + " > " + window);
+            }
+            if (maxTrackedPeers <= 0) {
+                throw new IllegalArgumentException("maxTrackedPeers must be > 0: " + maxTrackedPeers);
+            }
+            if (maxTrackedMessageTypesPerPeer <= 0) {
+                throw new IllegalArgumentException(
+                        "maxTrackedMessageTypesPerPeer must be > 0: " + maxTrackedMessageTypesPerPeer);
+            }
+        }
+
+        public static Inventory defaults() {
+            return new Inventory(Duration.ofSeconds(10), Duration.ofSeconds(1), 64, 128);
         }
     }
 }
