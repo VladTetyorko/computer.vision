@@ -1,6 +1,9 @@
 package com.drones.vision.flight.application;
 
+import com.drones.vision.flight.domain.model.FlightPassport;
+import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.flight.domain.model.MessageIntervalOutcome;
+import com.drones.vision.flight.domain.model.ParameterDrift;
 import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.flight.domain.model.ParameterWriteOutcome;
 import com.drones.vision.flight.domain.model.VehicleProfile;
@@ -13,6 +16,7 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.AuditEntry;
@@ -24,7 +28,9 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -47,9 +53,9 @@ import static org.mockito.Mockito.when;
 
 /**
  * {@code assetService} is a Mockito mock (mirrors {@code DefaultFlightCommandServiceTest} -- a large
- * warehouse interface this service only ever calls {@code details} on); {@link VehicleConfigPort}
- * and {@link AuditTrailPort} are hand-rolled in-memory fakes, matching {@code
- * DefaultManualControlServiceTest}'s own convention.
+ * warehouse interface this service only ever calls {@code details} on); {@link VehicleConfigPort},
+ * {@link AssetUsageRepositoryPort} and {@link AuditTrailPort} are hand-rolled in-memory fakes,
+ * matching {@code DefaultManualControlServiceTest}'s own convention.
  */
 class DefaultVehicleProfileServiceTest {
 
@@ -59,6 +65,7 @@ class DefaultVehicleProfileServiceTest {
     private AssetService assetService;
     private FakeVehicleConfigPort vehicleConfigPort;
     private FakeVehicleProfileRepositoryPort profileRepository;
+    private FakeAssetUsageRepositoryPort assetUsageRepository;
     private FakeAuditTrailPort auditTrail;
     private DefaultVehicleProfileService service;
 
@@ -71,8 +78,10 @@ class DefaultVehicleProfileServiceTest {
         assetService = mock(AssetService.class);
         vehicleConfigPort = new FakeVehicleConfigPort();
         profileRepository = new FakeVehicleProfileRepositoryPort();
+        assetUsageRepository = new FakeAssetUsageRepositoryPort();
         auditTrail = new FakeAuditTrailPort();
-        service = new DefaultVehicleProfileService(assetService, vehicleConfigPort, profileRepository, auditTrail);
+        service = new DefaultVehicleProfileService(assetService, vehicleConfigPort, profileRepository,
+                assetUsageRepository, auditTrail);
 
         Map<String, String> options = new HashMap<>();
         options.put("sysid", "7");
@@ -85,12 +94,26 @@ class DefaultVehicleProfileServiceTest {
     }
 
     private void stubDetailsWithOwnership(Ownership ownership, Device... devices) {
+        stubDetailsWithUsages(ownership, List.of(), devices);
+    }
+
+    /**
+     * Seeds both {@code AssetDetails#recentUsages()} (the capped list {@code
+     * driftFromPreviousFlight}'s own "find the previous flight" traversal reads) and {@link
+     * #assetUsageRepository} (the uncapped {@code findById} lookup {@code
+     * requireUsageBelongsToAsset} now reads) from the same {@code usages} list -- correct for every
+     * existing test here, since none of them exercises the two lists diverging. Tests that need a
+     * usage known to {@code assetUsageRepository} but absent from the capped list (the whole point
+     * of this wave's fix) seed {@link #assetUsageRepository} directly instead.
+     */
+    private void stubDetailsWithUsages(Ownership ownership, List<AssetUsage> usages, Device... devices) {
         Asset asset = new Asset(assetId, "Drone 1", DRONE, ownership, Set.of(devices[0].id()), Map.of());
         AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
-        AssetDetails details = new AssetDetails(summary, List.of(devices), List.of());
+        AssetDetails details = new AssetDetails(summary, List.of(devices), usages);
         when(assetService.details(assetId)).thenReturn(details);
         when(assetService.details(org.mockito.ArgumentMatchers.any(VisibilityScope.class),
                 org.mockito.ArgumentMatchers.eq(assetId))).thenReturn(details);
+        usages.forEach(assetUsageRepository::save);
     }
 
     private static VehicleProfile completeProfile() {
@@ -224,6 +247,208 @@ class DefaultVehicleProfileServiceTest {
         assertEquals(List.of("udp://0.0.0.0:14550#7"), vehicleConfigPort.probedLinkKeys);
     }
 
+    // -- captureSnapshot (O11, the passport) -----------------------------------------
+
+    @Test
+    void captureSnapshotStoresATaggedSnapshotAndAuditsSuccess() {
+        stubDetails(device);
+        UsageId usageId = UsageId.random();
+        VehicleProfile profile = completeProfile();
+        vehicleConfigPort.probeResult = profile;
+
+        VehicleProfile result =
+                service.captureSnapshot(assetId, usageId, FlightPhase.PREFLIGHT, WINDOW, actor, VisibilityScope.unbounded());
+
+        assertEquals(profile, result);
+        assertEquals(profile, profileRepository.findByUsageAndPhase(usageId, FlightPhase.PREFLIGHT).orElseThrow());
+        assertTrue(profileRepository.findByUsageAndPhase(usageId, FlightPhase.POSTFLIGHT).isEmpty());
+
+        assertEquals(1, auditTrail.recorded.size());
+        AuditEntry entry = auditTrail.recorded.get(0);
+        assertEquals("CAPTURE_SNAPSHOT", entry.details().get("command"));
+        assertEquals(usageId.value().toString(), entry.details().get("usageId"));
+        assertEquals("PREFLIGHT", entry.details().get("phase"));
+        assertEquals("COMPLETE", entry.details().get("result"));
+    }
+
+    @Test
+    void captureSnapshotRejectsAPhaseThatIsNeitherPreflightNorPostflight() {
+        assertThrows(IllegalArgumentException.class, () -> service.captureSnapshot(assetId, UsageId.random(),
+                FlightPhase.IN_FLIGHT, WINDOW, actor, VisibilityScope.unbounded()));
+
+        // Rejected before the asset is even resolved -- not an attempt, not audited.
+        assertTrue(vehicleConfigPort.probedLinkKeys.isEmpty());
+        assertTrue(auditTrail.recorded.isEmpty());
+    }
+
+    @Test
+    void captureSnapshotDeniedWhenAssetIsOutOfScopeAndAuditsTheDenialWithUsageAndPhase() {
+        stubDetails(device);
+        UsageId usageId = UsageId.random();
+
+        assertThrows(AccessDeniedException.class, () -> service.captureSnapshot(assetId, usageId,
+                FlightPhase.POSTFLIGHT, WINDOW, actor, VisibilityScope.groups(Set.of())));
+
+        assertTrue(vehicleConfigPort.probedLinkKeys.isEmpty());
+        assertEquals(1, auditTrail.recorded.size());
+        AuditEntry entry = auditTrail.recorded.get(0);
+        assertEquals("DENIED:out of scope", entry.details().get("result"));
+        assertEquals(usageId.value().toString(), entry.details().get("usageId"));
+        assertEquals("POSTFLIGHT", entry.details().get("phase"));
+    }
+
+    // -- passport (O11, scoped read) --------------------------------------------------
+
+    @Test
+    void passportReturnsBothSnapshotsOnceBothPhasesAreCaptured() {
+        UsageId usageId = UsageId.random();
+        AssetUsage usage = new AssetUsage(usageId, assetId, Instant.parse("2026-08-18T08:00:00Z"), null, null, null, 0);
+        stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(usage), device);
+
+        VehicleProfile preflight = completeProfile();
+        VehicleProfile postflight = new VehicleProfile("udp://127.0.0.1:14550#7",
+                Instant.parse("2026-08-18T08:30:00Z"), 7, "ardupilot", "4.5.7", "quadcopter", 12345L,
+                List.of("MAVLINK2"), List.of(), List.of(new ParameterReading("SR2_EXTRA2", 1.0, "REAL32")), 2300L,
+                true, null);
+        profileRepository.save(device.id(), usageId, FlightPhase.PREFLIGHT, preflight);
+        profileRepository.save(device.id(), usageId, FlightPhase.POSTFLIGHT, postflight);
+
+        FlightPassport passport = service.passport(assetId, usageId, VisibilityScope.unbounded());
+
+        assertEquals(new FlightPassport(usageId, assetId, preflight, postflight), passport);
+    }
+
+    @Test
+    void passportHasNullFieldsWhenNeitherPhaseWasCapturedYet() {
+        UsageId usageId = UsageId.random();
+        AssetUsage usage = new AssetUsage(usageId, assetId, Instant.parse("2026-08-18T08:00:00Z"), null, null, null, 0);
+        stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(usage), device);
+
+        FlightPassport passport = service.passport(assetId, usageId, VisibilityScope.unbounded());
+
+        assertEquals(new FlightPassport(usageId, assetId, null, null), passport);
+    }
+
+    @Test
+    void passportThrowsNoSuchElementWhenUsageIsUnknown() {
+        stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(), device);
+
+        assertThrows(NoSuchElementException.class,
+                () -> service.passport(assetId, UsageId.random(), VisibilityScope.unbounded()));
+    }
+
+    /**
+     * The bug this wave's fix closes: the old membership check went through {@code
+     * AssetDetails#recentUsages()}, capped to the 20 most recent -- a passport for the 21st-oldest
+     * flight 404'd even though it genuinely belonged to the asset. {@code requireUsageBelongsToAsset}
+     * now resolves {@code usageId} via {@code AssetUsageRepositoryPort#findById} directly, which has
+     * no such cap; this usage is deliberately absent from the {@code recentUsages()} list {@link
+     * #stubDetailsWithUsages} seeds, and present only in {@link #assetUsageRepository} directly, to
+     * prove the lookup no longer goes through the capped list at all.
+     */
+    @Test
+    void passportResolvesAUsageOlderThanTheRecentUsagesWindow() {
+        stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(), device); // empty "recent" list
+        UsageId oldUsageId = UsageId.random();
+        AssetUsage oldUsage = new AssetUsage(oldUsageId, assetId, Instant.parse("2020-01-01T00:00:00Z"), null, null,
+                null, 0);
+        assetUsageRepository.save(oldUsage); // known to the port, but not "recent"
+
+        VehicleProfile preflight = completeProfile();
+        profileRepository.save(device.id(), oldUsageId, FlightPhase.PREFLIGHT, preflight);
+
+        FlightPassport passport = service.passport(assetId, oldUsageId, VisibilityScope.unbounded());
+
+        assertEquals(new FlightPassport(oldUsageId, assetId, preflight, null), passport);
+    }
+
+    /**
+     * The property the fix must not weaken: {@code VehicleProfileRepositoryPort} keys purely by
+     * {@code usageId}, not by asset, so a caller scoped to {@code assetId} must not be able to read
+     * another asset's passport by guessing/reusing a {@code usageId} that happens to be known to
+     * {@code assetUsageRepository}.
+     */
+    @Test
+    void passportThrowsNoSuchElementWhenUsageBelongsToADifferentAsset() {
+        stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(), device);
+        AssetId otherAssetId = AssetId.random();
+        UsageId otherUsageId = UsageId.random();
+        AssetUsage otherAssetUsage = new AssetUsage(otherUsageId, otherAssetId,
+                Instant.parse("2026-08-18T08:00:00Z"), null, null, null, 0);
+        assetUsageRepository.save(otherAssetUsage);
+        profileRepository.save(device.id(), otherUsageId, FlightPhase.PREFLIGHT, completeProfile());
+
+        assertThrows(NoSuchElementException.class,
+                () -> service.passport(assetId, otherUsageId, VisibilityScope.unbounded()));
+    }
+
+    // -- driftFromPreviousFlight (O11, config-drift) -----------------------------------
+
+    /** The exit criterion, verbatim: one changed parameter, one drift row, both values, both timestamps. */
+    @Test
+    void driftFromPreviousFlightReportsExactlyOneRowForOneChangedParameter() {
+        Instant previousStart = Instant.parse("2026-08-18T08:00:00Z");
+        Instant currentStart = Instant.parse("2026-08-18T09:00:00Z");
+        UsageId previousUsageId = UsageId.random();
+        UsageId currentUsageId = UsageId.random();
+        AssetUsage previousUsage = new AssetUsage(previousUsageId, assetId, previousStart, null, null, null, 0);
+        AssetUsage currentUsage = new AssetUsage(currentUsageId, assetId, currentStart, null, null, null, 0);
+        // recentUsages is newest-first.
+        stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(currentUsage, previousUsage), device);
+
+        Instant previousObservedAt = previousStart.plusSeconds(1_800);
+        Instant currentObservedAt = currentStart.minusSeconds(60);
+        VehicleProfile previousPostflight = new VehicleProfile("udp://127.0.0.1:14550#7", previousObservedAt, 7,
+                "ardupilot", "4.5.7", "quadcopter", null, List.of(), List.of(),
+                List.of(new ParameterReading("SR2_EXTRA2", 0.0, "REAL32"),
+                        new ParameterReading("RTL_ALT", 1500.0, "REAL32")),
+                null, true, null);
+        VehicleProfile currentPreflight = new VehicleProfile("udp://127.0.0.1:14550#7", currentObservedAt, 7,
+                "ardupilot", "4.5.7", "quadcopter", null, List.of(), List.of(),
+                List.of(new ParameterReading("SR2_EXTRA2", 1.0, "REAL32"),
+                        new ParameterReading("RTL_ALT", 1500.0, "REAL32")),
+                null, true, null);
+        profileRepository.save(device.id(), previousUsageId, FlightPhase.POSTFLIGHT, previousPostflight);
+        profileRepository.save(device.id(), currentUsageId, FlightPhase.PREFLIGHT, currentPreflight);
+
+        List<ParameterDrift> drift =
+                service.driftFromPreviousFlight(assetId, currentUsageId, VisibilityScope.unbounded());
+
+        assertEquals(List.of(new ParameterDrift("SR2_EXTRA2", 0.0, 1.0, previousObservedAt, currentObservedAt)),
+                drift);
+    }
+
+    @Test
+    void driftFromPreviousFlightIsEmptyWhenThereIsNoPreviousFlight() {
+        UsageId usageId = UsageId.random();
+        AssetUsage usage = new AssetUsage(usageId, assetId, Instant.parse("2026-08-18T08:00:00Z"), null, null, null, 0);
+        stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(usage), device);
+
+        assertEquals(List.of(), service.driftFromPreviousFlight(assetId, usageId, VisibilityScope.unbounded()));
+    }
+
+    @Test
+    void driftFromPreviousFlightIsEmptyWhenEitherSnapshotWasNeverCaptured() {
+        Instant previousStart = Instant.parse("2026-08-18T08:00:00Z");
+        Instant currentStart = Instant.parse("2026-08-18T09:00:00Z");
+        UsageId previousUsageId = UsageId.random();
+        UsageId currentUsageId = UsageId.random();
+        AssetUsage previousUsage = new AssetUsage(previousUsageId, assetId, previousStart, null, null, null, 0);
+        AssetUsage currentUsage = new AssetUsage(currentUsageId, assetId, currentStart, null, null, null, 0);
+        stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(currentUsage, previousUsage), device);
+        // Neither the previous flight's POSTFLIGHT nor this flight's PREFLIGHT was ever captured.
+
+        assertEquals(List.of(), service.driftFromPreviousFlight(assetId, currentUsageId, VisibilityScope.unbounded()));
+    }
+
+    @Test
+    void driftFromPreviousFlightThrowsNoSuchElementWhenUsageIsUnknown() {
+        stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(), device);
+
+        assertThrows(NoSuchElementException.class,
+                () -> service.driftFromPreviousFlight(assetId, UsageId.random(), VisibilityScope.unbounded()));
+    }
+
     // -- test doubles ---------------------------------------------------------------
 
     private static final class FakeVehicleConfigPort implements VehicleConfigPort {
@@ -260,6 +485,7 @@ class DefaultVehicleProfileServiceTest {
 
     private static final class FakeVehicleProfileRepositoryPort implements VehicleProfileRepositoryPort {
         private final Map<DeviceId, VehicleProfile> latest = new HashMap<>();
+        private final Map<UsageId, Map<FlightPhase, VehicleProfile>> byUsage = new HashMap<>();
 
         @Override
         public void save(DeviceId deviceId, VehicleProfile profile) {
@@ -269,6 +495,47 @@ class DefaultVehicleProfileServiceTest {
         @Override
         public Optional<VehicleProfile> findLatest(DeviceId deviceId) {
             return Optional.ofNullable(latest.get(deviceId));
+        }
+
+        @Override
+        public void save(DeviceId deviceId, UsageId usageId, FlightPhase phase, VehicleProfile profile) {
+            latest.put(deviceId, profile);
+            byUsage.computeIfAbsent(usageId, key -> new HashMap<>()).put(phase, profile);
+        }
+
+        @Override
+        public Optional<VehicleProfile> findByUsageAndPhase(UsageId usageId, FlightPhase phase) {
+            return Optional.ofNullable(byUsage.getOrDefault(usageId, Map.of()).get(phase));
+        }
+    }
+
+    private static final class FakeAssetUsageRepositoryPort implements AssetUsageRepositoryPort {
+        private final Map<UsageId, AssetUsage> byId = new HashMap<>();
+
+        @Override
+        public AssetUsage save(AssetUsage usage) {
+            byId.put(usage.id(), usage);
+            return usage;
+        }
+
+        @Override
+        public Optional<AssetUsage> findById(UsageId id) {
+            return Optional.ofNullable(byId.get(id));
+        }
+
+        @Override
+        public List<AssetUsage> findRecentByAsset(AssetId assetId, int limit) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<AssetUsage> findRecent(int limit) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<AssetUsage> findOpenByAsset(AssetId assetId) {
+            throw new UnsupportedOperationException();
         }
     }
 

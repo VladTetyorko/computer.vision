@@ -1,10 +1,13 @@
 package com.drones.vision.adapter.persistence.entity;
 
+import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.flight.domain.model.MessageObservation;
 import com.drones.vision.flight.domain.model.ParameterReading;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
@@ -33,6 +36,16 @@ import java.util.UUID;
  * read back whole ({@code findLatest} returns one {@code VehicleProfile}), never queried into by
  * individual message/parameter, same "jsonb over a normalized child table" convention as {@code
  * DetectionResultEntity#detections}.
+ *
+ * <p>{@code usageId}/{@code phase} (docs/plans/active/DRONE-ONBOARDING-PLAN.md O11, {@code
+ * V20__vehicle_profile_usage_link.sql}) are both nullable — the flight passport's attachment point:
+ * a row saved through {@code save(DeviceId, VehicleProfile)} (readiness's own ad hoc probes, the
+ * pre-registration candidate probe) carries neither, while one saved through {@code save(DeviceId,
+ * UsageId, FlightPhase, VehicleProfile)} carries both together (there is no state where exactly one
+ * is set). {@code phase} reuses the domain {@link FlightPhase} enum directly ({@code
+ * @Enumerated(EnumType.STRING)}), same convention {@code AssetUsageEntity#phase} follows for {@code
+ * UsagePhase} — restricting it to {@code PREFLIGHT}/{@code POSTFLIGHT} is the application layer's
+ * job ({@code DefaultVehicleProfileService#captureSnapshot}), not this entity's or the schema's.
  */
 @Entity
 @Table(name = "vehicle_profiles")
@@ -87,6 +100,13 @@ public class VehicleProfileEntity {
     @Column(name = "incomplete_reason")
     private String incompleteReason;
 
+    @Column(name = "usage_id")
+    private UUID usageId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "phase", length = 20)
+    private FlightPhase phase;
+
     /** JPA only. */
     protected VehicleProfileEntity() {
     }
@@ -95,7 +115,8 @@ public class VehicleProfileEntity {
                                  String firmware, String firmwareVersion, String vehicleKind,
                                  Long capabilityBitmask, List<String> capabilityFlags,
                                  List<MessageObservation> messages, List<ParameterReading> parameters,
-                                 Long linkBytesPerSecond, boolean complete, String incompleteReason) {
+                                 Long linkBytesPerSecond, boolean complete, String incompleteReason,
+                                 UUID usageId, FlightPhase phase) {
         this.id = id;
         this.deviceId = deviceId;
         this.linkKey = linkKey;
@@ -111,6 +132,8 @@ public class VehicleProfileEntity {
         this.linkBytesPerSecond = linkBytesPerSecond;
         this.complete = complete;
         this.incompleteReason = incompleteReason;
+        this.usageId = usageId;
+        this.phase = phase;
     }
 
     public UUID id() {
@@ -171,5 +194,13 @@ public class VehicleProfileEntity {
 
     public String incompleteReason() {
         return incompleteReason;
+    }
+
+    public UUID usageId() {
+        return usageId;
+    }
+
+    public FlightPhase phase() {
+        return phase;
     }
 }

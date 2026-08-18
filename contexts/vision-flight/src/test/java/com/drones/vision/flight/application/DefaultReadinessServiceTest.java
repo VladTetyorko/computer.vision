@@ -2,6 +2,7 @@ package com.drones.vision.flight.application;
 
 import com.drones.vision.flight.domain.model.FeatureRequirement;
 import com.drones.vision.flight.domain.model.FeatureStatus;
+import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.flight.domain.model.MessageObservation;
 import com.drones.vision.flight.domain.model.ReadinessReport;
 import com.drones.vision.flight.domain.model.ReadinessVerdict;
@@ -15,6 +16,7 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
@@ -182,6 +184,16 @@ class DefaultReadinessServiceTest {
         @Override
         public Optional<VehicleProfile> findLatest(DeviceId deviceId) {
             return Optional.ofNullable(latest.get(deviceId));
+        }
+
+        @Override
+        public void save(DeviceId deviceId, UsageId usageId, FlightPhase phase, VehicleProfile profile) {
+            throw new UnsupportedOperationException("not exercised by DefaultReadinessServiceTest");
+        }
+
+        @Override
+        public Optional<VehicleProfile> findByUsageAndPhase(UsageId usageId, FlightPhase phase) {
+            throw new UnsupportedOperationException("not exercised by DefaultReadinessServiceTest");
         }
     }
 

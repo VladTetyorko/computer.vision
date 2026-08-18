@@ -26,6 +26,7 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.flight.domain.model.FeatureRequirement;
+import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.flight.domain.model.GeofenceZone;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.kernel.GroupId;
@@ -2555,6 +2556,85 @@ class PostgresDockerIntegrationTest {
             assertEquals(profileA, repository.findLatest(deviceA).orElseThrow());
             assertEquals(profileB, repository.findLatest(deviceB).orElseThrow());
         }
+
+        /**
+         * docs/plans/active/DRONE-ONBOARDING-PLAN.md O11 -- the tagged {@code save}/{@code
+         * findByUsageAndPhase} pair the flight passport is built on, round-tripped end to end through
+         * V20's new {@code usage_id}/{@code phase} columns.
+         */
+        @Test
+        void findByUsageAndPhaseReturnsEmptyWhenNeitherThisUsageNorPhaseWasCaptured() {
+            assertTrue(repository.findByUsageAndPhase(UsageId.random(), FlightPhase.PREFLIGHT).isEmpty());
+        }
+
+        @Test
+        void taggedSaveRoundTripsAndIsFoundByItsOwnUsageAndPhase() {
+            DeviceId deviceId = DeviceId.random();
+            UsageId usageId = UsageId.random();
+            VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.7",
+                    "quadcopter", 12345L, List.of("MAVLINK2"),
+                    List.of(new MessageObservation(33, "GLOBAL_POSITION_INT", 0.9, 9)),
+                    List.of(new ParameterReading("SR2_EXTRA2", 0.0, "REAL32")), 2300L, true, null);
+
+            repository.save(deviceId, usageId, FlightPhase.PREFLIGHT, profile);
+
+            Optional<VehicleProfile> found = repository.findByUsageAndPhase(usageId, FlightPhase.PREFLIGHT);
+            assertTrue(found.isPresent());
+            assertEquals(profile, found.get());
+        }
+
+        @Test
+        void taggedSaveIsNotFoundUnderADifferentPhaseOfTheSameUsage() {
+            DeviceId deviceId = DeviceId.random();
+            UsageId usageId = UsageId.random();
+            VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.7",
+                    "quadcopter", null, List.of(), List.of(), List.of(), null, true, null);
+
+            repository.save(deviceId, usageId, FlightPhase.PREFLIGHT, profile);
+
+            assertTrue(repository.findByUsageAndPhase(usageId, FlightPhase.POSTFLIGHT).isEmpty());
+        }
+
+        @Test
+        void taggedSaveIsNotFoundUnderADifferentUsageWithTheSamePhase() {
+            DeviceId deviceId = DeviceId.random();
+            VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.7",
+                    "quadcopter", null, List.of(), List.of(), List.of(), null, true, null);
+
+            repository.save(deviceId, UsageId.random(), FlightPhase.PREFLIGHT, profile);
+
+            assertTrue(repository.findByUsageAndPhase(UsageId.random(), FlightPhase.PREFLIGHT).isEmpty());
+        }
+
+        /**
+         * Two flights of the same asset each capture their own PREFLIGHT/POSTFLIGHT pair -- {@link
+         * VehicleProfileRepositoryPort#findByUsageAndPhase} must resolve each cell of that 2x2
+         * independently, the exact lookup {@code driftFromPreviousFlight} depends on.
+         */
+        @Test
+        void findByUsageAndPhaseDistinguishesAllFourCellsAcrossTwoFlights() {
+            DeviceId deviceId = DeviceId.random();
+            UsageId firstUsage = UsageId.random();
+            UsageId secondUsage = UsageId.random();
+            VehicleProfile firstPre = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.7",
+                    "quadcopter", null, List.of(), List.of(),
+                    List.of(new ParameterReading("SR2_EXTRA2", 0.0, "REAL32")), null, true, null);
+            VehicleProfile firstPost = new VehicleProfile("udp://0.0.0.0:14550#7", NOW.plusSeconds(600), 7,
+                    "ardupilot", "4.5.7", "quadcopter", null, List.of(), List.of(),
+                    List.of(new ParameterReading("SR2_EXTRA2", 1.0, "REAL32")), null, true, null);
+            VehicleProfile secondPre = new VehicleProfile("udp://0.0.0.0:14550#7", NOW.plusSeconds(1200), 7,
+                    "ardupilot", "4.5.7", "quadcopter", null, List.of(), List.of(),
+                    List.of(new ParameterReading("SR2_EXTRA2", 1.0, "REAL32")), null, true, null);
+
+            repository.save(deviceId, firstUsage, FlightPhase.PREFLIGHT, firstPre);
+            repository.save(deviceId, firstUsage, FlightPhase.POSTFLIGHT, firstPost);
+            repository.save(deviceId, secondUsage, FlightPhase.PREFLIGHT, secondPre);
+
+            assertEquals(firstPre, repository.findByUsageAndPhase(firstUsage, FlightPhase.PREFLIGHT).orElseThrow());
+            assertEquals(firstPost, repository.findByUsageAndPhase(firstUsage, FlightPhase.POSTFLIGHT).orElseThrow());
+            assertEquals(secondPre, repository.findByUsageAndPhase(secondUsage, FlightPhase.PREFLIGHT).orElseThrow());
+            assertTrue(repository.findByUsageAndPhase(secondUsage, FlightPhase.POSTFLIGHT).isEmpty());
+        }
     }
 
     /**
@@ -2790,6 +2870,34 @@ class PostgresDockerIntegrationTest {
                                     + "where table_name = 'asset_usages' and column_name = 'first_armed_at'")
                     .getSingleResult();
             assertEquals("YES", firstArmedNullable);
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O11 -- proves {@code V20__vehicle_profile_usage_link.sql}
+     * applied cleanly on top of V1-V19: {@code usage_id}/{@code phase} on {@code vehicle_profiles} are
+     * nullable, additive columns (every pre-existing row -- readiness's own ad hoc probes -- predates
+     * the passport concept and keeps both columns NULL). Schema-only on purpose, same "prove the
+     * migration, not the entity" split as {@link #v19MigrationAddsNullablePhaseColumnsOnTopOfV1ThroughV18};
+     * the entity/repository round trip is covered by {@link VehicleProfileRepositoryTests}.
+     */
+    @Test
+    void v20MigrationAddsUsageIdAndPhaseColumnsOnTopOfV1ThroughV19() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String usageIdNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'vehicle_profiles' and column_name = 'usage_id'")
+                    .getSingleResult();
+            assertEquals("YES", usageIdNullable, "usage_id is nullable -- no backfill for pre-existing rows");
+
+            String phaseNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'vehicle_profiles' and column_name = 'phase'")
+                    .getSingleResult();
+            assertEquals("YES", phaseNullable, "phase is nullable -- no backfill for pre-existing rows");
         } finally {
             em.close();
         }
