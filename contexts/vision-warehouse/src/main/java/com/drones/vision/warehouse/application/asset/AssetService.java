@@ -52,6 +52,35 @@ public interface AssetService {
     Asset create(AssetSpec spec, Ownership ownership, UserId actor);
 
     /**
+     * Creates an asset from a discovered/candidate registration
+     * (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1 stage 7, REGISTER), refusing a candidate that
+     * duplicates an already-registered device.
+     *
+     * <p>Same shape and rules as {@link #create}, with one rule added first: each of {@link
+     * AssetSpec#devices()}'s new registrations is checked against every active device's {@code
+     * (protocol, uri, sysid)} — {@code sysid} read from {@code
+     * com.drones.vision.kernel.StreamDescriptor#options()}'s {@code "sysid"} key — before anything
+     * is written. A match means this airframe is already registered under another asset; onboarding
+     * must name that asset rather than silently create a second registration for it. {@link
+     * AssetSpec#existingDeviceIds()} entries are exempt from this check on purpose: they name an
+     * already-registered device deliberately, and the same eligibility rules {@link #assignDevice}
+     * uses already refuse one that belongs to another asset.
+     *
+     * @param spec      what to create — same shape {@link #create} accepts
+     * @param ownership who will own it
+     * @param actor     the user performing the creation
+     * @return the created asset
+     * @throws IllegalArgumentException if the category does not exist, or an {@code
+     *                                   existingDeviceIds} entry is soft-deleted
+     * @throws java.util.NoSuchElementException if an {@code existingDeviceIds} entry is unknown
+     * @throws IllegalStateException            if an {@code existingDeviceIds} entry, or a new
+     *                                           device in {@code spec.devices()}, duplicates an
+     *                                           already-registered device — naming the asset that
+     *                                           already owns it
+     */
+    Asset createFromCandidate(AssetSpec spec, Ownership ownership, UserId actor);
+
+    /**
      * Lists assets that have not been soft-deleted, as summaries.
      *
      * @return an immutable snapshot
