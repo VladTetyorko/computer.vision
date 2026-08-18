@@ -65,7 +65,7 @@ com.drones.vision.app
 | `VisionV4l2Properties` | **new** | `vision.v4l2` | `V4l2VideoSource`'s 2-arg ctor directly (only 2 tunables, no dedicated adapter settings record — §1.3 rule 4) |
 | `VisionMavlinkProperties` | **new** | `vision.mavlink` | `adapter-mavlink`'s `MavlinkSettings` minus `Rc` (which is `vision.rc`, see above) |
 | `VisionOverlayProperties` | **new** | `vision.overlay` | `adapter-overlay`'s `OverlaySettings` |
-| `VisionApiProperties` (`com.drones.vision.app.config.properties`) | **new** | `vision.api` | maps across to `com.drones.vision.api.support.VisionApiProperties` (vision-api's own framework-free mirror) — the **only** consumer today is `PublishWiring#snapshotJpegEncoder`; `HlsProxyController`/`LiveUpdateRegistry`/`AssetImageController`/per-controller paging still read their own local constants, not this record's `hls-proxy`/`live`/`paging`/`upload` fields (a documented gap, not an oversight) |
+| `VisionApiProperties` (`com.drones.vision.app.config.properties`) | **new**; extended SCALE-100 S6 with `rateLimit` | `vision.api` | maps across to `com.drones.vision.api.support.VisionApiProperties` (vision-api's own framework-free mirror) — consumers are `PublishWiring#snapshotJpegEncoder` and (for `rateLimit` only) `RateLimitWiring`; `HlsProxyController`/`LiveUpdateRegistry`/`AssetImageController`/per-controller paging still read their own local constants, not this record's `hls-proxy`/`live`/`paging`/`upload` fields (a documented gap, not an oversight) |
 
 **Naming collision, deliberate**: `com.drones.vision.app.config.properties.VisionApiProperties` (Spring-bound, this module) and `com.drones.vision.api.support.VisionApiProperties` (plain, vision-api) are two distinct classes sharing a simple name in two different packages — see `PublishWiring#snapshotJpegEncoder`'s own javadoc and the vision-app-side `VisionApiProperties`'s own javadoc for why they stay separate (vision-api may not depend on Spring's `@ConfigurationProperties` machinery) and how the one file that needs both (`PublishWiring`) tells them apart (fully-qualifies the vision-api one, imports the Spring one plain).
 
@@ -151,6 +151,8 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 
 `vision.discovery.enabled` (plain `boolean`, no `@ConfigurationProperties` record — read directly via `@ConditionalOnProperty` in `DiscoveryWiringConfiguration`, default `true`).
 
+`RateLimitWiring` (`@ConditionalOnProperty(prefix="vision.api.rate-limit", name="enabled", havingValue="true")`, `@EnableConfigurationProperties(VisionApiProperties.class)`) — registers `vision-api`'s `RateLimitFilter` on `/api/*` via a `FilterRegistrationBean` (docs/plans/active/SCALE-100-PLAN.md S6 item 3). A whole-class condition rather than a `@Bean`-level one, same shape as `DiscoveryWiringConfiguration`: the limiter is either present or absent, never half-configured. **Default off** — see "Request rate limiting" below; the reason is the keying, not caution. `RateLimitWiringTest` (an `ApplicationContextRunner`, no Docker, no full context) pins both states.
+
 `PersistenceWiringConfiguration` (`@EnableConfigurationProperties(VisionPersistenceProperties.class)`) — wires the `EntityManagerFactory` bean and every `Jpa*Repository`/`JpaAuditTrail` port (docs/plans/done/MVP2-PLAN.md P-a + P-b, extended through docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b) straight-line, unconditionally; see "Persistence wiring" below for why it's still a separate `@Configuration` class rather than folded into `ApplicationServiceWiring` (one bean-graph seam per module boundary, not the old toggle mechanics — the `vision.persistence.enabled` flag and its in-memory branch are gone).
 
 ## devsupport (`com.drones.vision.app.devsupport`)
@@ -202,6 +204,15 @@ Every repository port's `Jpa*` implementation (adapter-persistence) is documente
 Two settings types rather than one only because a context module must not depend on an adapter (the ArchUnit dependency rule) — they are one decision, so an operator configures one block. `batch-size: 100` is a ceiling for an unusually fast source; `batch-window: 200ms` is the number that actually fires at typical telemetry rates, and is the honest cost: **an unclean shutdown loses up to one window per open usage.** `batch-window: 0` is the explicit zero-loss opt-out — both settings read it as immediate mode and every write goes back to synchronous, which is exactly what this app did before S4.
 
 Both keys are **commented out** in `application.yaml`, documenting defaults already in force rather than setting them. That makes forgetting to pass them silent — `JpaTelemetryRepository` still has a one-argument constructor that resolves to immediate mode and would compile fine — so `PersistenceWiringConfigurationTest#wiresTheTelemetryRepositoryToBatchByDefaultRatherThanFlushPerSample` binds the properties from an *empty* source and asserts the result is not immediate. See `storage/persistence/MODULE.md`'s "Batching" section for the mechanism and `contexts/vision-perception/MODULE.md` for why the summary write is the half that is safe to defer.
+
+## Request rate limiting (docs/plans/active/SCALE-100-PLAN.md S6 item 3)
+
+`vision.api.rate-limit.enabled` (default **`false`**) decides whether `RateLimitWiring` registers `vision-api`'s `RateLimitFilter` at all; `permits-per-minute` (default `600`, from the filter's own `public static final DEFAULT_PERMITS_PER_MINUTE`) is the per-principal budget. See `station/vision-api/MODULE.md` for the filter itself — keying, the `/api/live` exclusion, bucket eviction.
+
+**The default is off because of how buckets are keyed, not out of caution.** The filter keys on `CurrentUser#userId()`, which with `vision.auth.enabled=false` — this app's own default — is one fixed dev principal for the entire deployment. Enabling the limit there gives *every caller combined* a single 600/minute budget; at this plan's target of 100 concurrent users at roughly 1 req/s each, that is exhausted by legitimate traffic within seconds. The limiter is correct and useful **with auth on**, where each real user holds their own bucket, and that is the configuration to enable it in.
+
+This is the one SCALE-100 wave that ships inert, so "inert" is what `RateLimitWiringTest` pins: no `FilterRegistrationBean` when the property is unset or `false`, exactly one — on `/api/*`, wrapping a `RateLimitFilter` — when it is `true`. It uses an `ApplicationContextRunner` rather than `@SpringBootTest`: the question is about one `@Configuration`'s condition, and a full context would need Postgres and Docker to answer it.
+
 
 ## Test infrastructure (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4 — a shared Postgres for `@SpringBootTest`)
 

@@ -24,7 +24,9 @@ precisely so it can be deleted in one `rm -r` plus two lines), `security/` (`Cur
 (`HlsProxyController` — a pass-through edge owning no application service), `support/` (edge-local
 helpers: `SnapshotJpegEncoder`, `LocalNetworkAddresses`, `CapabilityParsing`, and the new
 `VisionApiProperties` settings record — see its own paragraph below), `live/` (the SSE registry +
-ring buffers, unchanged), `exception/` (renamed from `exceptions/` — `@RestControllerAdvice` +
+ring buffers, unchanged), `ratelimit/` (`RateLimitFilter`/`TokenBucket` — the per-principal
+`/api/**` request budget, docs/plans/active/SCALE-100-PLAN.md §5 S6 item 3, added this wave — see its
+own API surface section below), `exception/` (renamed from `exceptions/` — `@RestControllerAdvice` +
 api-local exceptions), `config/` (MVC/WS/SPA `@Configuration`). This was a pure repackaging: no
 route, JSON shape, or status code changed, and every extracted default is byte-identical to the
 literal it replaced (see `VisionApiProperties` below).
@@ -263,6 +265,59 @@ for exactly when that is.
 - **LL-HLS query strings (docs/plans/done/MVP2-PLAN.md V-a proxy audit)**: unchanged — `buildUpstreamUri` forwards the full raw query string untouched, so LL-HLS's blocking-reload protocol (`_HLS_msn`/`_HLS_part`/`_HLS_skip`) still rides through correctly. The controller's own `REQUEST_TIMEOUT`=15s still bounds how long a single hop (including a blocking LL-HLS reload) can take before surfacing a 502 — mediamtx's own blocking-wait has no independent timeout beyond an initial "too-far-ahead" 400 check.
 - **404 without `{streamId}`**: unchanged — `/hls` or `/hls/` simply doesn't match the `@GetMapping` pattern and falls through to Spring's ordinary unmapped-route 404 — no special-case code.
 - **`CONNECT_TIMEOUT`/`REQUEST_TIMEOUT` still local constants**: docs/plans/active/SCALE-100-PLAN.md §5 S1 task 4 says to leave them — they duplicate `VisionApiProperties.HlsProxy`'s values exactly, but wiring them up is explicitly S7's job (`VisionApiProperties.java` and `vision-app`'s wiring are reserved for that wave, not touched here).
+
+### `com.drones.vision.api.ratelimit` — `RateLimitFilter`, per-principal token bucket (docs/plans/active/SCALE-100-PLAN.md §5 S6 item 3)
+
+A plain `jakarta.servlet` `OncePerRequestFilter`, not a controller — a **blast-radius bound**, not
+security hardening or a DoS defence (the plan says this plainly): today one misbehaving browser tab
+can issue enough requests to degrade the app for every other user on the same JVM. One flat limit,
+one knob, no per-endpoint tiers, no auth-aware policy.
+
+- **`RateLimitFilter(CurrentUser)`** — the production constructor; `permitsPerMinute` defaults to
+  `DEFAULT_PERMITS_PER_MINUTE` (600/min, 10/s sustained, burstable to a full minute's allotment —
+  see the field's own javadoc for the sizing rationale against docs/plans/active/SCALE-100-PLAN.md
+  §2.1's ~1 req/s-per-idle-tab measurement). A second public constructor takes an explicit
+  `permitsPerMinute`. A package-private third constructor injects the `ScheduledExecutorService`
+  (bucket eviction) and the `LongSupplier` time source — the test seam, unused in production.
+- **Keying**: `CurrentUser#userId()` — the same identity every write on the request is already
+  attributed to, so it degrades exactly like the rest of the pipeline: one shared bucket for the
+  fixed dev principal when `vision.auth.enabled=false`, one bucket per real user when `true`.
+  `SecurityContextPrincipalResolver` throws `IllegalStateException` for a request with no
+  authenticated session (vision-app) — under the secured chain the only `/api/**` paths reachable
+  that way are the permit-all `/api/auth/login`/`/api/auth/logout` (`SecurityConfig`; every other
+  `/api/**` path is already rejected 401 before this filter runs — see "Ordering" below), and those
+  fall back to `request.getRemoteAddr()` instead of sharing one bucket with every anonymous caller.
+- **Path scope**: `shouldNotFilter` limits to `/api/**`, excluding `/api/live` and everything under
+  it (`/api/live/{connectionId}/topics`) — a token bucket in front of the long-lived SSE stream
+  would be a self-inflicted outage. `/hls/**` never matches the `/api/` prefix at all.
+- **Ordering**: registered with no explicit order, so it runs at Spring Boot's default
+  `LOWEST_PRECEDENCE` — after `springSecurityFilterChain` (order `-100`, whichever
+  `SecurityFilterChain` in `SecurityConfig` is active). That ordering is what makes the keying above
+  correct (see class javadoc "Ordering" for the full argument).
+- **Wiring, and why it ships off**: `vision-app`'s `RateLimitWiring` registers this behind
+  `@ConditionalOnProperty("vision.api.rate-limit.enabled")`, **default `false`**. Not caution — a
+  consequence of the keying two bullets up: with `vision.auth.enabled=false` every caller in the
+  deployment resolves to one fixed dev principal, so enabling the limit there hands *all* of them a
+  single `permits-per-minute` budget, which this plan's own target of 100 concurrent users (~1 req/s
+  each) exhausts on legitimate traffic alone. It belongs on together with auth, where each real user
+  gets their own bucket. `DEFAULT_PERMITS_PER_MINUTE` is `public` for that wiring to default from.
+- **`TokenBucket`** (package-private) — capacity and average refill rate both `permitsPerMinute`;
+  every method takes `now`/`cutoff` as an explicit `long` nanos parameter rather than reading
+  `System.nanoTime()` itself, so it stays a pure, directly-unit-testable function of its own state
+  and the given instant (`TokenBucketTest`). `synchronized` methods, pure in-memory arithmetic, no
+  I/O — same virtual-thread-safety reasoning `LiveRingBuffer`'s javadoc gives for its own
+  synchronized methods (docs/plans/active/SCALE-100-CONTEXT.md §7).
+- **Bounded memory**: `buckets` (`ConcurrentHashMap<Object, TokenBucket>`) would otherwise retain
+  one bucket per principal ever seen since boot — the same leak class docs/plans/active/SCALE-100-PLAN.md
+  §5 S2 fixed for `LiveUpdateRegistry`'s per-asset buffers. `evictIdleBuckets()` (package-private,
+  directly callable from a test) sweeps buckets idle past `BUCKET_IDLE_MILLIS` (10 min) on a daemon
+  scheduler ticking every `BUCKET_EVICTION_MILLIS` (10 min) — same shape as
+  `LiveUpdateRegistry#evictUnusedAssetBuffers`.
+- **429 body**: `ErrorResponse("TOO_MANY_REQUESTS", "rate limit exceeded, try again shortly")`,
+  hand-serialized via a locally-constructed `JsonMapper` (same idiom `LiveUpdateRegistry` uses) —
+  `ApiExceptionHandler` is unreachable from a servlet filter (it only sees exceptions thrown inside
+  `DispatcherServlet`-dispatched controller methods), so this filter writes the response itself,
+  reusing the existing `ErrorResponse` shape for consistency with every other `4xx`/`5xx` body.
 
 ### `com.drones.vision.api.support` — edge-local helpers + `VisionApiProperties`
 
@@ -1596,3 +1651,109 @@ window too, with no separate key needed.
 
 **Not touched, per scope**: `api/proxy/**`, `support/VisionApiProperties.java`, `application.yaml`,
 `config/wiring/**` (reserved), every other package under `com.drones.vision.api`.
+
+## docs/plans/active/SCALE-100-PLAN.md wave S6 done, backend half only (per-principal token-bucket rate limit)
+
+Item 3 of the plan's §5 S6 — a new `RateLimitFilter` (+ `TokenBucket`) in a new
+`com.drones.vision.api.ratelimit` package, full detail in that package's API surface section above.
+Items 1/2 (the frontend pollers, `station/vision-web/**`) belong to a different agent and were not
+touched here.
+
+**Design decisions**:
+- **Keying degrades with `CurrentUser`, not a second identity scheme**: reusing
+  `CurrentUser#userId()` rather than inventing a separate "who is this request" concept means the
+  filter automatically inherits the existing dev-mode-vs-real-auth split — one shared bucket for
+  every caller when `vision.auth.enabled=false` (matches today's single dev-admin identity exactly),
+  one bucket per real user when `true`. The one gap that identity doesn't cover — the two permit-all
+  `/api/auth/login`/`/api/auth/logout` endpoints, reachable with no session at all under the secured
+  chain — falls back to `request.getRemoteAddr()` (see `SecurityContextPrincipalResolver`'s
+  `IllegalStateException` contract, vision-app, and `SecurityConfig`'s `permitAll` rule for those two
+  paths).
+- **Filter, not an interceptor or a controller concern**: a `Filter` runs before Spring MVC's
+  handler-mapping/argument-resolution machinery, so an over-budget request never reaches a
+  controller method at all — cheaper, and keeps every controller free of rate-limit awareness.
+  `ApiExceptionHandler` is unreachable from here (it only sees `DispatcherServlet`-dispatched
+  exceptions), so the `429` body is hand-written, reusing the existing `ErrorResponse` shape.
+- **Time as a parameter, not a hidden `System.nanoTime()` call**: both `TokenBucket` and
+  `RateLimitFilter#evictIdleBuckets` take `now`/`cutoff` explicitly (`RateLimitFilter` owns one
+  `LongSupplier nanoClock`, real in production, fake in tests) — makes refill and eviction
+  deterministically testable without sleeping real time, and keeps `TokenBucket` a pure class with
+  no I/O of its own.
+- **Eviction sweep shape copied from `LiveUpdateRegistry#evictUnusedAssetBuffers`** (S2's fix for the
+  identical class of bug — a map that only ever grows): a single daemon
+  `ScheduledExecutorService`, package-private sweep method, injectable scheduler in tests so nothing
+  waits on a real timer.
+
+**Config keys, as requested here and as since wired** (`application.yaml` and
+`station/vision-app/.../config/wiring/**` were reserved this wave, per
+docs/plans/active/SCALE-100-CONTEXT.md §1; the orchestrator applied them — see `vision-app`'s
+MODULE.md for `RateLimitWiring`, its own `RateLimitWiringTest`, and the one deviation: the
+`@ConditionalOnProperty` moved from the `@Bean` to a dedicated `@Configuration` class, and the
+permits knob binds through `VisionApiProperties.RateLimit` rather than a raw `@Value`):
+
+```yaml
+vision:
+  api:
+    rate-limit:
+      # Master switch — RateLimitFilter is a blast-radius bound, not security hardening (see that
+      # class's javadoc). Off by default: docs/plans/active/SCALE-100-PLAN.md §6 pins this false so
+      # landing it changes no default-config behavior; an operator opts in per deployment.
+      enabled: false
+      # Bucket capacity and average refill rate, requests per rolling minute, per acting principal
+      # (docs/plans/active/SCALE-100-PLAN.md §5 S6 item 3). 600 (10/s sustained, burstable to a full
+      # minute's allotment) comfortably covers several browser tabs open under one identity — see
+      # RateLimitFilter.DEFAULT_PERMITS_PER_MINUTE's own javadoc for the sizing argument against
+      # §2.1's ~1 req/s-per-idle-tab measurement.
+      permits-per-minute: 600
+```
+
+Exact `@Bean` requested (mirrors `AuthWiringConfiguration`'s `@ConditionalOnProperty` shape for a
+seam that only sometimes exists):
+
+```java
+@Bean
+@ConditionalOnProperty(prefix = "vision.api.rate-limit", name = "enabled", havingValue = "true")
+public FilterRegistrationBean<RateLimitFilter> rateLimitFilter(
+        CurrentUser currentUser,
+        @Value("${vision.api.rate-limit.permits-per-minute:600}") int permitsPerMinute) {
+    FilterRegistrationBean<RateLimitFilter> registration =
+            new FilterRegistrationBean<>(new RateLimitFilter(currentUser, permitsPerMinute));
+    registration.addUrlPatterns("/api/*");
+    return registration;
+}
+```
+
+A plain `@Bean RateLimitFilter` (letting Spring Boot auto-register it at `LOWEST_PRECEDENCE` for
+every URL) works exactly as well — `shouldNotFilter` already scopes it to `/api/**` internally, so
+`addUrlPatterns("/api/*")` above is redundant belt-and-suspenders, not a requirement. Either shape
+satisfies the "runs after `springSecurityFilterChain`" ordering requirement documented on the class
+without any explicit `order(...)` call, since Boot's filter auto-registration default
+(`LOWEST_PRECEDENCE`) already sorts after Security's `-100`.
+
+**Named constants for S7** (`VisionApiProperties.java` reserved this wave — these are `static final`
+fields on `RateLimitFilter` today, ready to lift into a new `.rateLimit()` nested record):
+- `RateLimitFilter.DEFAULT_PERMITS_PER_MINUTE` = 600 → `vision.api.rate-limit.permits-per-minute`
+  **(done — the field was made `public` so `VisionApiProperties.RateLimit` defaults from it rather
+  than repeating the number)**
+- `RateLimitFilter.BUCKET_EVICTION_MILLIS` = 600_000 (10 min) — sweep cadence, no plan-listed key;
+  candidate `vision.api.rate-limit.bucket-eviction` if S7 wants it tunable
+- `RateLimitFilter.BUCKET_IDLE_MILLIS` = 600_000 (10 min) — idle-before-eviction threshold, same
+  candidate-key note as above
+
+**Before/after** (`./mvnw -B -pl station/vision-api test`, counts from Maven's own summary line):
+**602 → 614** (+12: 9 in the new `RateLimitFilterTest`, 3 in the new `TokenBucketTest`). Zero
+pre-existing files touched, zero assertions edited — confirmed by running the suite once with the
+new `ratelimit/` package stashed out (`git stash -u`) and once with it restored, both green.
+
+**Acceptance bar met**: `returns429OnBreach` proves a `429` on breach with the limit as a
+constructor parameter (the future `application.yaml`-bound property); `doesNotThrottleTheLiveStreamOrItsTopicsEndpoint`
+proves `/api/live`/`/api/live/{id}/topics` bypass the bucket entirely (a one-permit budget survives
+20 consecutive requests); `evictsOnlyBucketsIdlePastTheWindow` proves the eviction sweep is
+per-bucket-idle, not a blanket clear.
+
+**Docker**: not run — this wave is pure in-JVM unit tests (`MockHttpServletRequest`/
+`MockHttpServletResponse` + Mockito), no Postgres/Testcontainers dependency.
+
+**Deferred, out of this wave's exclusive scope**: the frontend pollers (§5 S6 items 1/2,
+`station/vision-web/**`, a different agent); wiring the `@Bean`/`application.yaml` keys above
+(orchestrator); lifting the three named constants into `VisionApiProperties` (S7).

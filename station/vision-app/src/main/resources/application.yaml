@@ -440,6 +440,32 @@ vision:
     # only way to observe fleet/telemetry/detections/event changes in that case.
     enabled: true
 
+  # --- vision-api: per-principal request rate limit (docs/plans/active/SCALE-100-PLAN.md S6) ---
+  # (the rest of vision.api.* is the commented tunables block further down; this
+  # one is a live toggle, so it is spelled out here rather than buried there.)
+  api:
+    rate-limit:
+      # A blast-radius bound, NOT security hardening: it stops one runaway client
+      # -- a retry loop, a poll that never backs off -- from degrading the app for
+      # every other user sharing this JVM. RateLimitFilter (vision-api) gives each
+      # principal an independent token bucket and answers 429 past it. /api/live
+      # and /hls/** are never limited: a token bucket in front of a long-lived
+      # stream is a self-inflicted outage.
+      #
+      # OFF by default, deliberately. Buckets are keyed on the acting principal,
+      # and with vision.auth.enabled=false that is ONE fixed dev principal for the
+      # whole deployment -- so turning this on there gives every caller combined a
+      # single budget, which 100 concurrent users would exhaust on legitimate
+      # traffic alone. Turn it on together with auth, where each real user gets
+      # their own bucket and the limit measures what it is meant to measure.
+      enabled: false
+      # Per-principal capacity and refill rate, permits per rolling minute. The
+      # bucket refills continuously rather than resetting on a clock tick, so a
+      # full minute's allotment may also be spent as one burst. 600 is roughly ten
+      # ungated cockpit tabs' worth of polling for one principal (SCALE-100 §2.1
+      # measures a tab at ~1 req/s). Commented out: it documents the default.
+      # permits-per-minute: 600
+
   # --- adapter-simulation: simulated feeds + resume-on-boot (SimulationService#resumeAll) ---
   simulation:
     # Whether SimulationResumeRunner calls SimulationService#resumeAll() once at
@@ -607,6 +633,9 @@ vision:
     #   AssetImageController's upload size cap, bytes (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3).
     #   upload:
     #     max-image-bytes: 2097152
+    #   RateLimitFilter's per-principal budget lives in the ACTIVE vision.api.rate-limit block above,
+    #   not here -- it gates whether a filter is registered at all, so it is a live toggle rather
+    #   than a documented default.
 
     # --- adapter-rtsp tunables (docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3/§2.2, Wave F1) ---
     # Every key below is commented out: each documents FfmpegSettings' default rather than overriding

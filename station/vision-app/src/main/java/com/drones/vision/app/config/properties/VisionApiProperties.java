@@ -1,5 +1,6 @@
 package com.drones.vision.app.config.properties;
 
+import com.drones.vision.api.ratelimit.RateLimitFilter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -24,9 +25,11 @@ import java.time.Duration;
  * @param live     the SSE data plane's coalescing/heartbeat cadence and per-topic ring-buffer capacities
  * @param paging   the shared default/max page size for list endpoints that accept a {@code limit}
  * @param upload   the asset-image upload size cap
+ * @param rateLimit {@code RateLimitFilter}'s per-principal request budget (off by default)
  */
 @ConfigurationProperties(prefix = "vision.api")
-public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live live, Paging paging, Upload upload) {
+public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live live, Paging paging, Upload upload,
+                                   RateLimit rateLimit) {
 
     public VisionApiProperties {
         if (snapshot == null) {
@@ -45,6 +48,9 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
         }
         if (upload == null) {
             upload = new Upload(Upload.DEFAULT_MAX_IMAGE_BYTES_INT);
+        }
+        if (rateLimit == null) {
+            rateLimit = new RateLimit(false, RateLimitFilter.DEFAULT_PERMITS_PER_MINUTE);
         }
     }
 
@@ -104,6 +110,26 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
         static final String DEFAULT_MAX_LIMIT = "500";
         static final int DEFAULT_DEFAULT_LIMIT_INT = 50;
         static final int DEFAULT_MAX_LIMIT_INT = 500;
+    }
+
+    /**
+     * {@code RateLimitFilter}'s budget (docs/plans/active/SCALE-100-PLAN.md S6) — a blast-radius
+     * bound, not security: it stops one runaway client from degrading the JVM for everyone else.
+     *
+     * <p><strong>Off by default, and that is a real decision, not caution.</strong> The filter keys
+     * buckets on {@code CurrentUser#userId()}, which with {@code vision.auth.enabled=false} is one
+     * fixed dev principal for the entire deployment — so enabling it there would give <em>all</em>
+     * callers combined a single {@code permits-per-minute} budget, and at this plan's own target of
+     * 100 concurrent users (~1 req/s each) the limit would trip immediately on legitimate traffic.
+     * Turn it on together with auth, where each real user gets their own bucket, and the limit
+     * measures what it is meant to measure.
+     *
+     * @param enabled          whether the filter is registered at all
+     * @param permitsPerMinute per-principal capacity and refill rate; default {@code 600} — roughly
+     *                         ten ungated cockpit tabs' worth of polling for one principal
+     */
+    public record RateLimit(@DefaultValue("false") boolean enabled,
+                             @DefaultValue("" + RateLimitFilter.DEFAULT_PERMITS_PER_MINUTE) int permitsPerMinute) {
     }
 
     /** @param maxImageBytes maximum accepted asset-image body size, bytes; default {@value #DEFAULT_MAX_IMAGE_BYTES} */
