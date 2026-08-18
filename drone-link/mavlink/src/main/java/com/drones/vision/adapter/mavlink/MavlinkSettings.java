@@ -262,7 +262,9 @@ public record MavlinkSettings(
 
     /**
      * {@code MavlinkVehicleConfigurator}'s probe budgets and the parameter set a probe reads
-     * (docs/plans/active/DRONE-ONBOARDING-PLAN.md wave O4).
+     * (docs/plans/active/DRONE-ONBOARDING-PLAN.md wave O4), plus wave O8's automatic on-connect
+     * Mechanism A: the message set requested via {@code MAV_CMD_SET_MESSAGE_INTERVAL} the instant a
+     * {@code MavlinkGateway} learns a peer, and the flag that gates it.
      *
      * <p>{@link #probeParameters()} is configuration rather than a constant because <b>which</b>
      * parameters are worth reading is a fleet-and-firmware decision, not a protocol fact: the
@@ -271,9 +273,23 @@ public record MavlinkSettings(
      * differently-tuned airframe should be able to change it without a rebuild. Names longer than
      * MAVLink's 16-character {@code param_id} are rejected at construction rather than silently
      * truncated into a *different* parameter.
+     *
+     * @param requestMessagesOnConnect gates wave O8's Mechanism A entirely — <b>default {@code
+     *                                 false}</b> (plan §6.2 rule 3: "Mechanism A on connect is the
+     *                                 one borderline case" of "nothing automatic from discovery").
+     *                                 {@link MavlinkGateway} only constructs its {@code
+     *                                 MavlinkConnectRemediator} when this is {@code true} — with it
+     *                                 {@code false} no such object exists, so no command can be sent,
+     *                                 not merely "isn't."
+     * @param onConnectMessageRequests the message set Mechanism A asks for, in wire {@code
+     *                                 messageId}/interval pairs — configuration, not a lookup into
+     *                                 {@code vision-flight}'s requirement table (this adapter stays
+     *                                 free of that coupling; see {@code MavlinkConnectRemediator}'s
+     *                                 own javadoc)
      */
     public record Onboarding(List<String> probeParameters, Duration capabilityTimeout, int capabilityRetries,
-                              Duration parameterTimeout, int parameterRetries) {
+                              Duration parameterTimeout, int parameterRetries,
+                              boolean requestMessagesOnConnect, List<MessageRequest> onConnectMessageRequests) {
 
         /** MAVLink's own {@code param_id} field width — a name longer than this cannot be addressed at all. */
         private static final int PARAM_ID_MAX_CHARS = 16;
@@ -305,6 +321,23 @@ public record MavlinkSettings(
             if (parameterRetries < 0) {
                 throw new IllegalArgumentException("parameterRetries must be >= 0: " + parameterRetries);
             }
+            Objects.requireNonNull(onConnectMessageRequests, "onConnectMessageRequests must not be null");
+            onConnectMessageRequests = List.copyOf(onConnectMessageRequests);
+        }
+
+        /**
+         * Back-compat overload for callers built before {@link #requestMessagesOnConnect()}/
+         * {@link #onConnectMessageRequests()} existed (wave O8), on the same principle as {@link
+         * MavlinkSettings}'s own back-compat constructors. Defaults the flag to {@code false} (this
+         * wave's own guardrail) and the message set to {@link #defaultOnConnectMessageRequests()} —
+         * so flipping the flag alone, later, on a settings object built this way still does something
+         * sensible, exactly like {@link #probeParameters()}'s default is meaningful the moment a
+         * caller starts probing.
+         */
+        public Onboarding(List<String> probeParameters, Duration capabilityTimeout, int capabilityRetries,
+                           Duration parameterTimeout, int parameterRetries) {
+            this(probeParameters, capabilityTimeout, capabilityRetries, parameterTimeout, parameterRetries,
+                    false, defaultOnConnectMessageRequests());
         }
 
         /**
@@ -323,6 +356,12 @@ public record MavlinkSettings(
          * silence, so a stale list degrades into a slow probe that quietly reads less than it claims.
          * That is the whole reason this is configuration: parameter names are firmware-version state,
          * and no default compiled in today stays true for every airframe a fleet will fly.
+         *
+         * <p>{@link #requestMessagesOnConnect()} defaults {@code false} — this wave's guardrail — but
+         * {@link #onConnectMessageRequests()} is still populated with a real, firmware-verified
+         * default, on the same reasoning as {@link #probeParameters()}: an operator who later flips
+         * the flag (O5's future {@code vision.onboarding.remediate.message-interval.enabled} property)
+         * should get sensible behaviour without also having to invent a message list from scratch.
          */
         public static Onboarding defaults() {
             return new Onboarding(
@@ -333,7 +372,55 @@ public record MavlinkSettings(
                             "GPS1_TYPE", "GPS_AUTO_SWITCH", "AHRS_EKF_TYPE", "EK3_ENABLE",
                             "FENCE_ENABLE", "FENCE_ALT_MAX"),
                     Duration.ofSeconds(3), 2,
-                    Duration.ofSeconds(1), 2);
+                    Duration.ofSeconds(1), 2,
+                    false, defaultOnConnectMessageRequests());
+        }
+
+        /**
+         * Nine message types spanning attitude, position, RC, servo output, airspeed/groundspeed,
+         * GPS, IMU and system time — one per stream group a fleet operator would actually look for,
+         * so a single group being silently ignored cannot hide behind the others. Wire {@code
+         * messageId}s and 2 Hz interval are the same nine {@code MavlinkSitlOnboardingIntegrationTest}
+         * (wave O4) proved ArduPilot Copter 4.7 accepts {@code MAV_CMD_SET_MESSAGE_INTERVAL} for —
+         * that test drove them at 5 Hz successfully, so 2 Hz leaves headroom for a slower telemetry
+         * radio than SITL's loopback link while still being enough to answer "is this aircraft
+         * streaming what we need."
+         */
+        private static List<MessageRequest> defaultOnConnectMessageRequests() {
+            Duration interval = Duration.ofMillis(500);
+            return List.of(
+                    new MessageRequest(1, interval),   // SYS_STATUS
+                    new MessageRequest(30, interval),  // ATTITUDE
+                    new MessageRequest(33, interval),  // GLOBAL_POSITION_INT
+                    new MessageRequest(65, interval),  // RC_CHANNELS
+                    new MessageRequest(36, interval),  // SERVO_OUTPUT_RAW
+                    new MessageRequest(74, interval),  // VFR_HUD
+                    new MessageRequest(24, interval),  // GPS_RAW_INT
+                    new MessageRequest(116, interval), // SCALED_IMU2
+                    new MessageRequest(2, interval));  // SYSTEM_TIME
+        }
+
+        /**
+         * One {@code MAV_CMD_SET_MESSAGE_INTERVAL} request: a wire message id (not a name — the
+         * platform does not carry a name→id table of its own outside {@code
+         * MavlinkVehicleConfigurator}'s best-effort dialect lookup, and the command itself is
+         * addressed by id) and the interval to request it at. {@code interval} follows {@link
+         * com.drones.mavlink.service.MessageIntervalService#setMessageInterval}'s own contract:
+         * negative is rejected here for the same reason it is rejected there, and {@link
+         * Duration#ZERO} is legal — it means "resume this message's default/recommended rate" ({@code
+         * MessageIntervalService#DEFAULT_RATE}), not "never".
+         */
+        public record MessageRequest(int messageId, Duration interval) {
+
+            public MessageRequest {
+                if (messageId < 0) {
+                    throw new IllegalArgumentException("messageId must be >= 0: " + messageId);
+                }
+                Objects.requireNonNull(interval, "interval must not be null");
+                if (interval.isNegative()) {
+                    throw new IllegalArgumentException("interval must not be negative: " + interval);
+                }
+            }
         }
     }
 }
