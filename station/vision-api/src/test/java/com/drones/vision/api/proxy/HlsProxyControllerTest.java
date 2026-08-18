@@ -1,6 +1,7 @@
 package com.drones.vision.api.proxy;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.support.VisionApiProperties;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -308,6 +309,38 @@ class HlsProxyControllerTest {
                 .andExpect(content().bytes(partialBody));
 
         assertEquals("bytes=4-7", receivedRange.get());
+    }
+
+    /**
+     * docs/plans/active/SCALE-100-PLAN.md §5 S7: {@code maxRedirectHops} is no longer the private
+     * {@code static final} constant it used to be — it comes from the {@link
+     * VisionApiProperties.HlsProxy} passed to the {@code @Autowired} constructor. This proves that
+     * value is actually enforced, not just stored: an upstream that redirects forever hits the
+     * *configured* bound (1 hop here, not the default 5) and the controller reports 502 exactly one
+     * hop sooner than {@link #serverSideFollowsUpstreamRedirectAndReturnsFinalBodyWith200} shows a
+     * single real hop succeeding.
+     */
+    @Test
+    void configuredMaxRedirectHopsBoundsTheHandFollowedRedirectLoop() throws Exception {
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/stream-1/index.m3u8");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        upstream.start();
+        URI base = URI.create("http://localhost:" + upstream.getAddress().getPort());
+        VisionApiProperties.HlsProxy oneHop = new VisionApiProperties.HlsProxy(
+                VisionApiProperties.HlsProxy.defaults().connectTimeout(),
+                VisionApiProperties.HlsProxy.defaults().requestTimeout(),
+                VisionApiProperties.HlsProxy.defaults().errorBodyPreviewMaxChars(), 1);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new HlsProxyController(base, oneHop))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", "stream-1"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.error").value("BAD_GATEWAY"));
     }
 
     @Test

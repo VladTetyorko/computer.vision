@@ -2,8 +2,10 @@ package com.drones.vision.api.proxy;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.exception.HlsUpstreamUnavailableException;
+import com.drones.vision.api.support.VisionApiProperties;
 import jakarta.annotation.PreDestroy;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -69,13 +71,14 @@ import java.util.Set;
  * buffering every one of them whole in heap was the single largest
  * allocation source in the app. The only body content this controller ever
  * holds in a Java array is the diagnostic preview of a non-2xx upstream
- * response (at most {@value #ERROR_BODY_PREVIEW_MAX_CHARS} bytes, see
- * {@link #logProxyOutcome}) — the remainder of even an error body still
- * streams through untouched, stitched back onto the preview with a {@link
+ * response (at most {@link #errorBodyPreviewMaxChars} bytes, default 200 —
+ * {@code vision.api.hls-proxy.error-body-preview-max-chars}, see {@link
+ * #logProxyOutcome}) — the remainder of even an error body still streams
+ * through untouched, stitched back onto the preview with a {@link
  * SequenceInputStream} so the browser still sees the whole thing.
  *
  * <h2>One shared client, no shared cookie jar</h2>
- * A single {@link HttpClient} is built once ({@link #HlsProxyController}
+ * A single {@link HttpClient} is built once (the {@code @Autowired}
  * constructor) and reused for every proxied request, replacing the
  * previous per-request client (which allocated a selector thread and a
  * connection pool per request and never closed either). The previous
@@ -110,8 +113,9 @@ import java.util.Set;
  *
  * <h2>Failure handling</h2>
  * Only a failure to reach the upstream at all (connection refused, DNS
- * failure, timeout, a redirect chain longer than {@value
- * #MAX_REDIRECT_HOPS} hops) is treated as an error, surfaced as {@link
+ * failure, timeout, a redirect chain longer than {@link #maxRedirectHops}
+ * hops, default 5 — {@code vision.api.hls-proxy.max-redirect-hops}) is
+ * treated as an error, surfaced as {@link
  * HlsUpstreamUnavailableException} and mapped to {@code 502} by {@link
  * ApiExceptionHandler}. A normal non-2xx response actually received from
  * upstream (e.g. {@code 404} for a not-yet-ready segment) is passed through
@@ -127,33 +131,52 @@ public class HlsProxyController {
 
     private static final System.Logger LOG = System.getLogger(HlsProxyController.class.getName());
     private static final String HLS_PREFIX = "/hls/";
-    // docs/plans/active/SCALE-100-PLAN.md §5 S1, task 4: these duplicate
-    // VisionApiProperties.HlsProxy's values exactly. Left as local constants
-    // deliberately -- wiring them up is S7's job (station/vision-app/.../support/VisionApiProperties.java
-    // is reserved for that wave), not this one.
-    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
-    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
-    /** How much of a non-2xx upstream error body to include in the WARN log line -- enough to identify the problem, not a full dump. The only body bytes this controller ever buffers (see class javadoc). */
-    private static final int ERROR_BODY_PREVIEW_MAX_CHARS = 200;
-    /** mediamtx's own node-pinning flow is exactly one hop (a 302, then a 200 from the pinned node); bounded higher only so a misbehaving or looping upstream fails fast instead of hanging this thread forever. */
-    private static final int MAX_REDIRECT_HOPS = 5;
     /** Statuses this proxy follows itself, matching the set {@link HttpClient.Redirect#NORMAL} follows. */
     private static final Set<Integer> REDIRECT_STATUS_CODES = Set.of(301, 302, 303, 307, 308);
 
     private final URI hlsUpstreamBase;
     private final HttpClient httpClient;
+    private final Duration requestTimeout;
+    private final int errorBodyPreviewMaxChars;
+    private final int maxRedirectHops;
 
     /**
+     * Test seam (docs/plans/active/SCALE-100-PLAN.md §5 S7): defaults every tunable to {@link
+     * VisionApiProperties.HlsProxy#defaults()} — today's exact pre-extraction values — so the
+     * existing test suite, which constructs this controller with only its upstream {@link URI},
+     * keeps compiling and behaving identically. Package-private: production wiring always supplies
+     * an explicit {@link VisionApiProperties.HlsProxy} via the constructor below.
+     *
      * @param hlsUpstreamBase base HTTP URL of the mediamtx sidecar's HLS egress that this
      *                        controller forwards to, e.g. {@code http://localhost:18888};
      *                        never exposed to browsers
      */
-    public HlsProxyController(URI hlsUpstreamBase) {
+    HlsProxyController(URI hlsUpstreamBase) {
+        this(hlsUpstreamBase, VisionApiProperties.HlsProxy.defaults());
+    }
+
+    /**
+     * {@code @Autowired} disambiguates this from the package-private test-seam constructor above —
+     * Spring cannot pick one of two candidate constructors on its own (same reasoning as {@code
+     * LiveUpdateRegistry}'s own production constructor).
+     *
+     * @param hlsUpstreamBase base HTTP URL of the mediamtx sidecar's HLS egress that this
+     *                        controller forwards to; never exposed to browsers
+     * @param hlsProxy        this controller's upstream {@code HttpClient} timeouts and
+     *                        buffer/redirect bounds ({@code vision.api.hls-proxy.*}), supplied by
+     *                        {@code vision-app}'s {@code PublishWiring#hlsProxySettings}
+     */
+    @Autowired
+    public HlsProxyController(URI hlsUpstreamBase, VisionApiProperties.HlsProxy hlsProxy) {
         this.hlsUpstreamBase = Objects.requireNonNull(hlsUpstreamBase, "hlsUpstreamBase must not be null");
+        Objects.requireNonNull(hlsProxy, "hlsProxy must not be null");
+        this.requestTimeout = hlsProxy.requestTimeout();
+        this.errorBodyPreviewMaxChars = hlsProxy.errorBodyPreviewMaxChars();
+        this.maxRedirectHops = hlsProxy.maxRedirectHops();
         this.httpClient = HttpClient.newBuilder()
                 // No cookieHandler: see class javadoc "One shared client, no shared cookie jar".
                 .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(CONNECT_TIMEOUT)
+                .connectTimeout(hlsProxy.connectTimeout())
                 .build();
     }
 
@@ -177,7 +200,7 @@ public class HlsProxyController {
                 // Only place this controller buffers anything: a bounded diagnostic preview,
                 // never the whole (possibly large) error body. Re-stitched onto the rest of the
                 // stream below so the browser still receives the complete body.
-                errorPreview = upstreamBody.readNBytes(ERROR_BODY_PREVIEW_MAX_CHARS);
+                errorPreview = upstreamBody.readNBytes(errorBodyPreviewMaxChars);
             }
             logProxyOutcome(request, upstreamResponse, errorPreview);
 
@@ -238,8 +261,8 @@ public class HlsProxyController {
     }
 
     /**
-     * Fetches {@code initialUri}, following redirects itself (see class javadoc) up to {@value
-     * #MAX_REDIRECT_HOPS} hops. {@code cookieHeader}/{@code rangeHeader} are the browser's own
+     * Fetches {@code initialUri}, following redirects itself (see class javadoc) up to {@link
+     * #maxRedirectHops} hops. {@code cookieHeader}/{@code rangeHeader} are the browser's own
      * request headers, forwarded on every hop; a redirect hop's {@code Set-Cookie} values are
      * folded into the {@code Cookie} header carried to the next hop ({@link #mergeCookies}) and
      * also accumulated, oldest first, into the result for relaying back to the browser.
@@ -249,8 +272,8 @@ public class HlsProxyController {
         String cookie = cookieHeader;
         List<String> setCookies = new ArrayList<>();
 
-        for (int attempt = 0; attempt <= MAX_REDIRECT_HOPS; attempt++) {
-            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri).timeout(REQUEST_TIMEOUT).GET();
+        for (int attempt = 0; attempt <= maxRedirectHops; attempt++) {
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri).timeout(requestTimeout).GET();
             if (cookie != null && !cookie.isBlank()) {
                 requestBuilder.header(HttpHeaders.COOKIE, cookie);
             }
@@ -271,7 +294,7 @@ public class HlsProxyController {
             cookie = mergeCookies(cookie, hopSetCookies);
             uri = redirectTarget.get();
         }
-        throw new IOException("Too many redirects (> " + MAX_REDIRECT_HOPS + ") fetching upstream HLS at " + initialUri);
+        throw new IOException("Too many redirects (> " + maxRedirectHops + ") fetching upstream HLS at " + initialUri);
     }
 
     private static Optional<URI> redirectLocation(HttpResponse<InputStream> response, URI requestUri) {

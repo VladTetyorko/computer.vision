@@ -21,16 +21,18 @@ import java.util.Objects;
  * {@code ...app.config.properties}) and maps it onto an instance of this one, exactly like every
  * adapter's own settings record.
  *
- * <p><b>Wiring status (this wave)</b>: only {@link SnapshotJpegEncoder} actually takes an instance
- * of this record today, per docs/plans/active/LAYERING-REFACTOR-PLAN.md §7 row B ("makes {@code
- * SnapshotJpegEncoder} an instance, not a static utility"). {@code HlsProxyController}'s timeouts,
- * {@code LiveUpdateRegistry}'s coalesce/heartbeat/buffer capacities, {@code
- * AssetImageController}'s upload cap, and the per-controller paging defaults still read their own
- * local constants — rewiring those to this record needs {@code vision-app}'s {@code
- * WiringConfiguration}/component-scanned bean graph to supply an instance, which is out of scope
- * for this wave (see this module's MODULE.md Gotchas). This record is nonetheless the single
- * documented source of truth for every one of those values' current defaults, ready for that wave
- * to wire through.
+ * <p><b>Wiring status</b>: {@link SnapshotJpegEncoder}, {@code HlsProxyController} and {@code
+ * LiveUpdateRegistry} each take an instance of the relevant nested record today — the last two as
+ * of docs/plans/active/SCALE-100-PLAN.md §5 S7, which finished the extraction
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md §7 row B deferred. Both take the nested record alone
+ * (not the whole top-level {@code VisionApiProperties}), matching {@code
+ * PublishWiring#snapshotJpegEncoder}'s established bridge shape: {@code vision-app}'s
+ * {@code @ConfigurationProperties}-bound mirror is mapped field-by-field onto an instance of this
+ * plain record in {@code vision-app}'s wiring, never referenced directly by either controller.
+ * {@code AssetImageController}'s upload cap and the per-controller paging defaults still read
+ * their own local constants — rewiring those needs a wiring change outside this wave's scope. This
+ * record is nonetheless the single documented source of truth for every one of those values'
+ * current defaults, ready for that wave to wire through.
  *
  * @param snapshot {@code GET /api/streams/{streamId}/snapshot}'s downscale/encode tunables
  * @param hlsProxy {@code HlsProxyController}'s upstream HTTP client timeouts
@@ -81,37 +83,53 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
     }
 
     /**
-     * {@code HlsProxyController}'s upstream {@code HttpClient} timeouts.
+     * {@code HlsProxyController}'s upstream {@code HttpClient} timeouts and its two bounded-buffer
+     * sizing knobs (docs/plans/active/SCALE-100-PLAN.md §5 S7).
      *
-     * @param connectTimeout bound on establishing the upstream TCP connection
-     * @param requestTimeout bound on the whole upstream request/response round trip
+     * @param connectTimeout           bound on establishing the upstream TCP connection
+     * @param requestTimeout           bound on the whole upstream request/response round trip
+     * @param errorBodyPreviewMaxChars how much of a non-2xx upstream error body to buffer for the
+     *                                 diagnostic WARN log line — the only body bytes this controller
+     *                                 ever holds in a Java array
+     * @param maxRedirectHops          bound on the hand-followed redirect chain (mediamtx's own
+     *                                 node-pinning flow is exactly one hop); higher only so a
+     *                                 misbehaving or looping upstream fails fast instead of hanging
      */
-    public record HlsProxy(Duration connectTimeout, Duration requestTimeout) {
+    public record HlsProxy(Duration connectTimeout, Duration requestTimeout, int errorBodyPreviewMaxChars,
+                            int maxRedirectHops) {
 
         public HlsProxy {
             requirePositive(connectTimeout, "connectTimeout");
             requirePositive(requestTimeout, "requestTimeout");
+            requirePositive(errorBodyPreviewMaxChars, "errorBodyPreviewMaxChars");
+            requirePositive(maxRedirectHops, "maxRedirectHops");
         }
 
         public static HlsProxy defaults() {
-            return new HlsProxy(Duration.ofSeconds(5), Duration.ofSeconds(15));
+            return new HlsProxy(Duration.ofSeconds(5), Duration.ofSeconds(15), 200, 5);
         }
     }
 
     /**
-     * The SSE data plane's coalescing/heartbeat cadence and per-topic ring-buffer capacities
-     * (docs/plans/done/REALTIME-PLAN.md §4).
+     * The SSE data plane's coalescing/heartbeat cadence, per-topic ring-buffer capacities, and
+     * {@code LiveUpdateRegistry}'s two per-connection dispatch bounds
+     * (docs/plans/done/REALTIME-PLAN.md §4; {@code sendTimeout}/{@code bufferEviction} added
+     * docs/plans/active/SCALE-100-PLAN.md §5 S2/S7).
      *
-     * @param coalesce         how often pending telemetry/detections are flushed into one envelope
-     *                         per topic
-     * @param heartbeat        how often an idle SSE connection gets a comment-line heartbeat
-     * @param telemetryBuffer  per-asset {@code telemetry} topic ring-buffer capacity (FIFO)
-     * @param eventBuffer      the {@code event} topic's ring-buffer capacity (FIFO)
-     * @param detectionBuffer  the {@code detection-events} topic's ring-buffer capacity (FIFO)
-     * @param marksBuffer      the {@code marks} topic's ring-buffer capacity (FIFO)
+     * @param coalesce        how often pending telemetry/detections/fleet-recompute are flushed
+     *                        into one envelope per topic
+     * @param heartbeat       how often an idle SSE connection gets a comment-line heartbeat
+     * @param telemetryBuffer per-asset {@code telemetry} topic ring-buffer capacity (FIFO)
+     * @param eventBuffer     the {@code event} topic's ring-buffer capacity (FIFO)
+     * @param detectionBuffer the {@code detection-events} topic's ring-buffer capacity (FIFO)
+     * @param mapBuffer       the {@code map} topic's ring-buffer capacity (FIFO)
+     * @param sendTimeout     how long a queued per-connection write may take before that
+     *                        connection is unregistered as stalled/dead
+     * @param bufferEviction  how often per-asset {@code telemetry}/{@code detections} buffers with
+     *                        no subscriber left are swept away
      */
     public record Live(Duration coalesce, Duration heartbeat, int telemetryBuffer, int eventBuffer,
-                        int detectionBuffer, int marksBuffer) {
+                        int detectionBuffer, int mapBuffer, Duration sendTimeout, Duration bufferEviction) {
 
         public Live {
             requirePositive(coalesce, "coalesce");
@@ -119,11 +137,14 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
             requirePositive(telemetryBuffer, "telemetryBuffer");
             requirePositive(eventBuffer, "eventBuffer");
             requirePositive(detectionBuffer, "detectionBuffer");
-            requirePositive(marksBuffer, "marksBuffer");
+            requirePositive(mapBuffer, "mapBuffer");
+            requirePositive(sendTimeout, "sendTimeout");
+            requirePositive(bufferEviction, "bufferEviction");
         }
 
         public static Live defaults() {
-            return new Live(Duration.ofMillis(150), Duration.ofSeconds(15), 50, 300, 300, 300);
+            return new Live(Duration.ofMillis(150), Duration.ofSeconds(15), 50, 300, 300, 300,
+                    Duration.ofSeconds(3), Duration.ofSeconds(60));
         }
     }
 

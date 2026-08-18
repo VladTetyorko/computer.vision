@@ -604,27 +604,37 @@ vision:
     # vision-api's own com.drones.vision.api.support.VisionApiProperties is the framework-free mirror
     # this binds onto (see that record's own "Wiring status" javadoc); this is the Spring-bound
     # com.drones.vision.app.config.properties.VisionApiProperties (wave D) that PublishWiring maps
-    # across to build a real SnapshotJpegEncoder bean. HlsProxyController, LiveUpdateRegistry,
-    # AssetImageController, and the per-controller paging defaults still read their own local constants
-    # (not yet threaded through this record's own hls-proxy/live/paging/upload fields below).
+    # across to build a real SnapshotJpegEncoder bean. HlsProxyController and LiveUpdateRegistry now
+    # read their own hls-proxy/live fields below too (docs/plans/active/SCALE-100-PLAN.md §5 S7,
+    # via PublishWiring#hlsProxySettings/#liveSettings) -- AssetImageController and the
+    # per-controller paging defaults are the only ones still reading their own local constants
+    # (not yet threaded through this record's own paging/upload fields below).
     # api:
     #   SnapshotJpegEncoder's downscale/encode tunables (docs/plans/done/MVP3-PLAN.md C-a).
     #   snapshot:
     #     max-width: 480
     #     jpeg-quality: 0.8
-    #   HlsProxyController's upstream HttpClient timeouts.
+    #   HlsProxyController's upstream HttpClient timeouts and buffer/redirect bounds.
     #   hls-proxy:
     #     connect-timeout: 5s
     #     request-timeout: 15s
-    #   The SSE data plane's coalescing/heartbeat cadence and per-topic ring-buffer capacities
-    #   (docs/plans/done/REALTIME-PLAN.md §4, LiveUpdateRegistry).
+    #     error-body-preview-max-chars: 200
+    #     max-redirect-hops: 5
+    #   The SSE data plane's coalescing/heartbeat cadence, per-topic ring-buffer capacities, and
+    #   LiveUpdateRegistry's per-connection dispatch bounds (docs/plans/done/REALTIME-PLAN.md §4;
+    #   send-timeout/buffer-eviction added docs/plans/active/SCALE-100-PLAN.md §5 S2/S7). No
+    #   dispatch-threads key: LiveUpdateRegistry dispatches connection writes on
+    #   Executors.newVirtualThreadPerTaskExecutor(), which has no pool-size/thread-count concept to
+    #   configure -- see that field's own javadoc for why this key is deliberately not offered.
     #   live:
     #     coalesce: 150ms
     #     heartbeat: 15s
     #     telemetry-buffer: 50
     #     event-buffer: 300
     #     detection-buffer: 300
-    #     marks-buffer: 300
+    #     map-buffer: 300
+    #     send-timeout: 3s
+    #     buffer-eviction: 60s
     #   Shared default/max page size for list endpoints that accept a limit query parameter (e.g.
     #   ActivityController's GET /api/me/activity).
     #   paging:

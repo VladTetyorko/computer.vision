@@ -3,6 +3,7 @@ package com.drones.vision.api.live;
 import com.drones.vision.api.dto.AssetSummaryResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.MapEventPayload;
+import com.drones.vision.api.support.VisionApiProperties;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
@@ -434,6 +435,33 @@ class LiveUpdateRegistryTest {
 
         assertEquals(1, registry.bufferFor(LiveTopic.telemetry(assetA)).snapshot().size());
         assertEquals(1, registry.bufferFor(LiveTopic.telemetry(assetB)).snapshot().size());
+    }
+
+    /**
+     * docs/plans/active/SCALE-100-PLAN.md §5 S7: {@code telemetryBuffer} is no longer the private
+     * {@code static final TELEMETRY_BUFFER_CAPACITY} constant it used to be — it comes from the
+     * {@link VisionApiProperties.Live} passed to the full constructor. This proves the value is
+     * actually enforced, not just stored: with a capacity of 2, a third coalesced flush must evict
+     * the oldest envelope rather than growing the buffer past what was configured.
+     */
+    @Test
+    void configuredTelemetryBufferCapacityActuallyBoundsTheRingBufferSize() {
+        VisionApiProperties.Live defaults = VisionApiProperties.Live.defaults();
+        VisionApiProperties.Live smallTelemetryBuffer = new VisionApiProperties.Live(defaults.coalesce(),
+                defaults.heartbeat(), 2, defaults.eventBuffer(), defaults.detectionBuffer(), defaults.mapBuffer(),
+                defaults.sendTimeout(), defaults.bufferEviction());
+        LiveUpdateRegistry registry = new LiveUpdateRegistry(provider(assetService), provider(deviceService),
+                provider(streamService), streamPublisherPort, provider(detectionEventRepositoryPort),
+                smallTelemetryBuffer, new ImmediateScheduledExecutorService());
+        AssetId assetId = AssetId.random();
+
+        for (double lat = 1.0; lat <= 3.0; lat++) {
+            registry.publishTelemetryAppended(assetId, telemetry(lat));
+            registry.flushPending();
+        }
+
+        assertEquals(2, registry.bufferFor(LiveTopic.telemetry(assetId)).snapshot().size(),
+                "the configured capacity of 2 must be enforced, not the old default of 50");
     }
 
     @Test
