@@ -325,6 +325,14 @@ code.
 >    example's `SR2_EXTRA2` reading are **not implementable on this firmware**. Mechanism A is not a
 >    cheaper alternative to a stream-rate write here — it is the only mechanism that exists.
 >    Rewriting those rows belongs to O8, which is the wave that has to act on them.
+>
+>    **O8's exit criterion becomes simpler, not impossible.** It was written as *"connect with
+>    `SR2_EXTRA2=0`"* because it assumed the starved link had to be manufactured. It does not: a stock
+>    SITL is **already** starved — measured at four message types over a UDP `--out` link (`HEARTBEAT`
+>    at 1 Hz plus three event-driven ones at ~0.1 Hz), against the dozen a connected GCS sees. So the
+>    test is *connect to a stock aircraft, observe the starved baseline, enable the flag, observe the
+>    requested messages begin arriving* — with **no parameter write at all**, which is the point
+>    Mechanism A was there to make.
 > 2. **Several named parameters have been renamed.** `SYSID_THISMAV` → `MAV_SYSID` (so O9's wizard
 >    and the §3.2 IDENTIFY conflict remedy both name a parameter that no longer exists),
 >    `FS_BATT_ENABLE` → `BATT_FS_LOW_ACT`, `GPS_TYPE` → `GPS1_TYPE`. `ARMING_CHECK`, `RTL_ALT`,
