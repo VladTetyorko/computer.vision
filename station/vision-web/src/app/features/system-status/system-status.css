@@ -1,0 +1,81 @@
+/* Reuses `.page`/`.card`/`.grid12`/`.col-*`/`.chip`/`.dot`/`.mono`/`.muted`/`.truncate` from
+   `src/styles.css` — no new colors, no bespoke elevation. `.subsystem-row`/`.subsystem-row-head`
+   mirror `features/reports/reports.css`'s own `.attention-row`/`.attention-row-head` layout
+   (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1's own anatomy: one `.chip` per row max, `detail` in body
+   text, `hint` as the next-action line, `since` in `.mono` — style law §5/§6). **`.hint` is not a
+   global primitive** (grep-confirmed — it only exists as a page-local class in `debug.css`), so the
+   next-action line here is this file's own `.subsystem-hint`/`.transport-note`, not a borrowed name. */
+
+.stale-note {
+  color: var(--color-warn-text);
+}
+
+.subsystem-list,
+.event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.event-list {
+  gap: var(--space-8);
+}
+
+.subsystem-row {
+  padding-bottom: var(--space-16);
+  border-bottom: 1px solid var(--border);
+}
+
+.subsystem-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.subsystem-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-bottom: var(--space-4);
+}
+
+.subsystem-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.subsystem-detail {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* The next-action line (`hint`) reads as quiet instruction, not a fault — same `--color-info-text`
+   this app already uses for informational, non-status text (`.chip.accent`'s own text color). */
+.subsystem-hint {
+  margin: var(--space-4) 0 0;
+  font-size: 0.8rem;
+  color: var(--color-info-text);
+}
+
+.subsystem-since {
+  margin: var(--space-4) 0 0;
+  font-size: 0.72rem;
+}
+
+.transport-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: var(--space-8);
+}
+
+.transport-note {
+  font-size: 0.8rem;
+  margin: 0;
+}

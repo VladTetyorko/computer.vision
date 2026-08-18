@@ -86,13 +86,6 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     }
   });
 
-  it('/monitor/replay resolves to the ComingSoon scaffold, not ReplayPage (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F8 — it no longer redirects through the bare /replay route)', async () => {
-    const route = findRouteByPath(routes, 'monitor/replay');
-    expect(route?.loadComponent, '/monitor/replay').toBeDefined();
-    const component = (await route!.loadComponent!()) as { name: string };
-    expect(component.name.endsWith('ComingSoon'), `/monitor/replay: got "${component.name}"`).toBe(true);
-  });
-
   it('the new /assets grid (split out of the old combined Devices page) resolves, as a sibling of /assets/:assetId', () => {
     expect(routeExists(flat, '/assets')).toBe(true);
     // Distinct segment counts — one does not shadow the other.
@@ -106,7 +99,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
   });
 
   it('every remaining pure-scaffold ComingSoon path resolves', () => {
-    const scaffolds = ['/operate/missions', '/monitor/replay', '/monitor/layouts', '/manage/health', '/manage/firmware'];
+    const scaffolds = ['/operate/missions', '/monitor/layouts', '/manage/health', '/manage/firmware'];
     for (const path of scaffolds) {
       expect(routeExists(flat, path), path).toBe(true);
     }

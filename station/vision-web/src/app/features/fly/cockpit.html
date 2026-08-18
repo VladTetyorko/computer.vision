@@ -320,19 +320,20 @@
     <!-- ---- Tool-rail (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D; grouped by job per
          docs/conclusions/UX-SIMPLIFY-REVIEW.md F4 — "7 glyph-only drawers is past the glance-and-know limit";
          `layers` folded into `cv` per direct user request — the detection-boxes rendering mode is
-         now a control inside the `cv` (Detection) drawer, not its own drawer/button, so the rail is
-         down to 6) — frozen ids (fly-logic.ts's own `ToolRailPanelId`): flight · rc · cv ·
-         detections · marks · help; unchanged gates/behavior, only visual grouping + order. Every
-         button stays always-visible (no "more" overflow — F4 explicitly rules that out on a
-         safety-of-flight screen); a thin `--hairline` divider between `.rail-group`s stands in for a
-         text label, which does not read clean at this rail's ~2.25rem button width (F4: "if it
-         crowds, use just the divider"). Every button already carries its own `title`/`aria-label`
-         via `vision-icon-button`'s required `label` input (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1 — see that
-         component's own doc comment). Groups, top to bottom:
+         now a control inside the `cv` (Detection) drawer, not its own drawer/button) — frozen ids
+         (fly-logic.ts's own `ToolRailPanelId`, matching cockpit.ts's own comment): flight · rc · cv ·
+         detections · marks · map · help, seven drawers; unchanged gates/behavior, only visual
+         grouping + order. Every button stays always-visible (no "more" overflow — F4 explicitly
+         rules that out on a safety-of-flight screen); a thin `--hairline` divider between
+         `.rail-group`s stands in for a text label, which does not read clean at this rail's ~2.25rem
+         button width (F4: "if it crowds, use just the divider"). Every button already carries its
+         own `title`/`aria-label` via `vision-icon-button`'s required `label` input
+         (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1 — see that component's own doc comment). Groups, top to bottom:
            Control      — flight, rc (what an operator commands the aircraft with)
            Vision       — cv, detections (what the aircraft sees / how it's rendered, including the
                            boxes rendering-mode control merged into the `cv` drawer)
-           Situational  — marks (the shared tactical picture)
+           Situational  — marks, map (the shared tactical picture: markers, plus map layers/drawing,
+                           docs/plans/done/MAP-REWORK-PLAN.md §5.2)
            Help         — pinned to the rail's bottom via `.rail-group-help`'s `margin-top: auto`,
                            deliberately last and separated — it's reference, not a flying tool. -->
     <div class="grid-rail">

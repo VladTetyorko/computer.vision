@@ -6,7 +6,9 @@ the second of the wave's two universal modules — a pure `git mv` of `com.drone
 package rename, no import changes anywhere in the repo.
 
 **Depends on:** `vision-kernel` only
-**Used by:** `vision-domain` (every one of the 8 bounded contexts), `vision-application`, `vision-api`, `vision-app`
+**Used by:** `vision-domain` (every one of the 8 bounded contexts), `vision-application`, `vision-api`, `vision-app`,
+and — since wave S2 (docs/plans/active/SYSTEM-STATUS-PLAN.md) added `SubsystemStatusPort` — the three
+adapters that implement it directly: `cv/grpc`, `drone-link/mavlink`, `video-output/publish-hls`
 **Build/test:** `./mvnw -B -pl core/vision-platform test`
 
 ## The rule
@@ -42,6 +44,9 @@ is user administration, not visibility.
 - `enum EventType` — DETECTION, DEVICE_ONLINE, DEVICE_OFFLINE, STREAM_STARTED, STREAM_STOPPED, PIPELINE_ERROR, TRAINING, GEOFENCE_BREACH (raised by `GeofenceMonitor`, `vision-application`, on a breach edge transition; attributes carry `{assetId, zoneId, zoneName, kind, direction}`, `streamId` always `null` since a breach is asset-scoped, not stream-scoped)
 - `record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assignedAssets)` — what a request may see, resolved once per request by `vision-application`'s `ScopeResolver` and threaded into user-facing reads/commands. Nested `enum Kind {UNBOUNDED, GROUPS, ASSIGNED_ASSETS}`; three static factories — `unbounded()` (ADMIN/auth-off), `groups(Set<GroupId>)` (MANAGER), `assignedAssets(Set<AssetId>)` (PILOT); both sets defensively copied, null→empty. `boolean includes(AssetId, Ownership)` — `UNBOUNDED`→true, `GROUPS`→`groups.contains(ownership.groupId())`, `ASSIGNED_ASSETS`→`assignedAssets.contains(assetId)`. `boolean canManageOrg()` — true iff `UNBOUNDED`/`GROUPS`. `boolean includesGroup(GroupId)` — the group half of `includes`
 - **Authority, not visibility (docs/plans/active/OPS-UX-PLAN.md §1, Wave C):** `includes`/`includesGroup`/`canManageOrg` all answer "what may this request see/reach" — two real call sites had been asking them an authority question instead (a PILOT could rename/delete their own assigned aircraft; `canManageOrg()` let a MANAGER promote the deployment's live CV model or start a training job, exactly as an ADMIN could). Two predicates answer "what may this request do": `boolean canAdminister()` — `true` iff `UNBOUNDED`; gates deployment-global actions with no group boundary (model promote, training start). `boolean canManage(Ownership)` — `true` for `UNBOUNDED`; for `GROUPS` iff `ownership.groupId()` is in `groups()` (a MANAGER's subtree is already a management boundary, so this agrees with `includes` for that one kind); always `false` for `ASSIGNED_ASSETS` — a PILOT's scope is built so they can see *and fly* exactly their assigned aircraft, and that is the whole of their authority, so `canManage` is `false` regardless of whether the asset is the very one assigned to them. With `vision.auth.enabled=false` every caller is `unbounded()`, so both predicates are always `true` and behavior is unchanged.
+- `enum Health` (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.1, wave S2) — `OK`, `DEGRADED`, `DOWN`, `DISABLED`, `UNKNOWN`. Declaration order is **not** severity order (see `SystemStatusController`'s javadoc, `vision-api`, for the ranking used to compute an overall rollup); `DISABLED` is deliberately excluded from that rollup so an intentionally-off subsystem never reads as a fault
+- `record SubsystemStatus(String id, String label, Health health, String detail, Instant since, String hint)` — one subsystem's self-reported health. `id` is a stable slug (`cv-service`, `mavlink-link`, `video-publish`, `live-updates`) — the wire contract a UI keys off, never the (potentially reworded) `label`. `detail` is the honest human sentence explaining the health; `hint` is the next actionable step, nullable when there's nothing useful to say; `since` (nullable) is when the current state began. Compact-constructor validation: `id`/`label`/`detail` must be non-blank, `health` non-null; `since`/`hint` are unvalidated (legitimately absent)
+- `interface SubsystemStatusPort { SubsystemStatus status(); }` — one per subsystem, implemented adapter-side (`cv/grpc`'s `CvStatusProvider`, `drone-link/mavlink`'s `MavlinkLinkStatusProvider`, `video-output/publish-hls`'s `PublishStatusProvider`, `vision-api`'s `LiveUpdateStatusProvider`), collected as a `List<SubsystemStatusPort>` by `vision-api`'s `SystemStatusController`. Filed here (not in a context) for the same reason `EventPublisherPort` is: every adapter that has a subsystem to report on needs it, and no one adapter may depend on another. `status()` must not throw for an ordinary "this subsystem happens to be down" condition — that **is** a normal answer (`Health.DOWN`), not an exception; a genuinely broken provider is still caught per-provider by the controller and downgraded to `Health.UNKNOWN` rather than failing the whole endpoint
 
 ## Conventions
 
@@ -66,5 +71,14 @@ the reactor after the split).
 
 **OPS-UX-PLAN Wave C (C1, docs/plans/active/OPS-UX-PLAN.md §4):** `VisibilityScope` gained
 `canAdminister()`/`canManage(Ownership)` — pure additions, no existing method's signature or
-behavior changed. `VisibilityScopeTest`: 9 → 12 (module total 17/17: `VisibilityScopeTest` 12 +
-`EventTest` 5). `./mvnw -B -pl core/vision-platform test` green.
+behavior changed. `VisibilityScopeTest`: 9 → 12. `./mvnw -B -pl core/vision-platform test` green.
+
+Wave S2 (docs/plans/active/SYSTEM-STATUS-PLAN.md, 2026-08-15) added the `Health`/`SubsystemStatus`/
+`SubsystemStatusPort` trio backing `GET /api/system/status` — the same "seam nobody's business logic
+owns" rationale as `EventPublisherPort`: every adapter with a subsystem to self-report on needs the
+port, and adapters may not depend on each other, so it lives here rather than in any one of them.
+The three new types have no independent test file — their behavior is exercised through
+`vision-api`'s `SystemStatusControllerTest` via fake `SubsystemStatusPort` implementations, and
+through each real provider's own module.
+
+Module total after both waves: 17/17 (`VisibilityScopeTest` 12 + `EventTest` 5).

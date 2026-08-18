@@ -62,11 +62,13 @@
   line-height: 1;
 }
 
-/* Applied directly to `<vision-events-rail>`'s own host tag (its `:host{display:block}` already
-   makes that meaningful) — mirrors `features/wall/wall.css`'s `.events-rail`/the pre-§U-c
-   `command.css`'s `.events-rail-embed`: "sizing/positioning stays each host's own concern",
-   `events-rail.ts`'s own doc comment. This host is a popover instead of an inline page section, so
-   it adds `position: absolute` + the true-overlay `box-shadow` those two hosts never needed. */
+/* A plain wrapper `<div>`, not applied directly to `<vision-events-rail>`'s own host tag the way it
+   used to be — docs/plans/active/SYSTEM-STATUS-PLAN.md §3.3 added a second card (`.system-events` below) as its
+   sibling, so the popover shell needed a home of its own. Positioning otherwise unchanged from
+   before this wave: mirrors `features/wall/wall.css`'s `.events-rail`/the pre-§U-c `command.css`'s
+   `.events-rail-embed` "sizing/positioning stays each host's own concern"
+   (`events-rail.ts`'s own doc comment) for the *first* card; this wrapper owns the true-overlay
+   shell (`position: absolute`, `box-shadow`) both cards share. */
 .bell-dropdown {
   position: absolute;
   top: 100%;
@@ -79,4 +81,14 @@
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
   z-index: 30;
+}
+
+/* The global `.card`'s own `margin-bottom` (`src/styles.css`) is meant for a card in normal document
+   flow with more content below it — inside this popover it would just add dead space before the
+   scroll boundary. `vision-events-rail`'s own template zeroes the identical margin on its *own*
+   `<aside class="card">` for the same reason (`events-rail.css`'s `:host .card` rule, scoped to that
+   component's own shadow host) — this rule is this card's equivalent, scoped here instead since
+   `.system-events` renders directly in this component's own template, not inside a child's. */
+.system-events {
+  margin-bottom: 0;
 }

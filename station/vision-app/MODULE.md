@@ -30,6 +30,8 @@ com.drones.vision.app
                                      build a GrpcCvSettings/Duration from VisionCvProperties instead of
                                      calling adapter constructors that no longer exist)
       AuthWiringConfiguration        unchanged name, moved here (no internal changes beyond imports)
+      SystemStatusWiring             new (docs/plans/active/SYSTEM-STATUS-PLAN.md wave S2): the four
+                                     SubsystemStatusPort beans backing GET /api/system/status
     SecurityConfig.java    the one cross-cutting @Configuration left directly under config/
   security/                BcryptPasswordHasher, VisionUserDetails, DevPrincipalResolver,
                             SecurityContextPrincipalResolver, SecuritySessionAuthenticator,
@@ -2313,3 +2315,110 @@ weakened, deleted, or changed; `CvDetectionResilienceSmokeTest`'s only edit was 
 - `pullEnabled()`/`GrpcPulledDetectionPort` remain ungated by any supervisor — per `cv/grpc/MODULE.md`'s
   own "Reconnect / gate design" section, the gate is push-only today; wiring one for pull mode (if
   ever needed) is a later wave, not implied by anything built here.
+
+## docs/plans/active/SYSTEM-STATUS-PLAN.md wave S2 done (subsystem status endpoint — wiring half)
+
+Closes the R3 item CV-RECONNECT-PLAN.md's own Deferred section flagged above (`GET /api/cv/status`),
+broadened per SYSTEM-STATUS-PLAN.md to all four subsystems rather than cv-service alone:
+`GET /api/system/status` (`station/vision-api`, `SystemStatusController`) rolls up a
+`List<SubsystemStatusPort>` — three adapter-side providers wired here plus `station/vision-api`'s own
+in-process `live-updates` pair, see that module's MODULE.md. This module's half is the four new
+`SubsystemStatusPort` `@Bean`s, an actuator liveness probe, and one small extraction inside
+`PublishWiring` needed to give the `video-publish` provider something to observe.
+
+**`SystemStatusWiring`** (new, `config/wiring/`) — five `@Bean` methods over `SubsystemStatusPort`
+(`core/vision-platform`'s new port, see that module's MODULE.md for the `Health`/`SubsystemStatus`
+shapes):
+- `cvServiceStatusDisabled` / `cvServiceStatus` — a mutually-exclusive pair gated on the exact negation/
+  assertion of `CvWiring#cvGrpcChannel`'s own `@ConditionalOnExpression`
+  (`vision.cv.enabled` / `vision.training.enabled` / `vision.cv.frame-transport=pull`), not
+  `@ConditionalOnBean` — repeating the literal property expression is the same order-independence
+  argument CV-RECONNECT-PLAN.md §3.3 already established for `cvChannelSupervisor` above, restated in
+  this class's own javadoc. `cvServiceStatus` wraps `CvChannelSupervisor` (`cv/grpc`,
+  `com.drones.vision.adapter.cvgrpc.CvStatusProvider`) via `ObjectProvider<CvChannelSupervisor>
+  ::getIfAvailable` — a JDK `Supplier`, not a Spring type, keeping `cv/grpc` itself Spring-free.
+- `mavlinkLinkStatus` — unconditional (no disabled twin): `MavlinkTelemetrySource` is always wired by
+  `TelemetryWiring`, so its status provider is always present too; "no claimed vehicle" is `UNKNOWN`,
+  not `DISABLED` (see `MavlinkLinkStatusProvider`'s own javadoc in `drone-link/mavlink/MODULE.md`).
+  Takes `MavlinkTelemetrySource::claimedVehicleHealth` — a new **public** method (deliberate exception
+  to that module's package-private convention) added solely so this method reference can cross the
+  package boundary.
+- `videoPublishStatusDisabled` / `videoPublishStatus` — the same mutually-exclusive-pair pattern,
+  mirroring `PublishWiring#mediamtxStreamPublisher`'s own `vision.publish.enabled` condition exactly.
+  `videoPublishStatus` takes the concrete `MediamtxStreamPublisher` bean (not the `StreamPublisherPort`
+  interface `streamPublisherPort` exposes), because `PublishStatusProvider` needs `streamsInOutage()`
+  — a method that lives on the concrete adapter class, not the port.
+
+**`PublishWiring#mediamtxStreamPublisher`** — new `@Bean`, extracted from what used to be a local
+variable inside `streamPublisherPort`, under that method's identical `@ConditionalOnProperty`. This is
+the seam that lets `videoPublishStatus` observe the *same* publisher instance traffic actually routes
+through (via `PublisherRouter`), rather than constructing a second, never-written-to one that would
+report nothing useful. `streamPublisherPort` now takes it via `ObjectProvider<MediamtxStreamPublisher>`
+and calls `.getObject()` only on the `properties.enabled()` branch, so the `NoopStreamPublisher` /
+`vision.publish.enabled=false` path is unchanged — it never resolves the provider at all.
+
+**Actuator liveness probe** (plan §4.4): `pom.xml` gained `spring-boot-starter-actuator`.
+`application.yaml` gained `management.endpoints.web.exposure.include: health` — deliberately *only*
+`health`; metrics/env/beans/configprops stay off, since this is a container healthcheck endpoint and
+the vision-web `/debug` page's Health card, not an operator metrics surface (env/beans could leak
+configuration over HTTP for no reason). `SecurityConfig#securedFilterChain` gained
+`.requestMatchers("/actuator/health").permitAll()`, listed explicitly ahead of the `/api/**` rule for
+clarity even though `/actuator/**` already falls through to `anyRequest().permitAll()` — a container
+healthcheck has no session to authenticate with, and nothing exposed here is a secret.
+`docker-compose.yml`'s `vision-app` service gained a matching `healthcheck:` block: no curl/wget in the
+`eclipse-temurin:21-jre` image, so it uses bash's own `/dev/tcp` pseudo-device for a raw HTTP/1.1 GET
+against `/actuator/health`, `CMD` (not `CMD-SHELL`) with an explicit `bash -c` argv so it doesn't
+depend on `/bin/sh` (dash) understanding `/dev/tcp` — it doesn't — and `grep -qw UP` (word-bounded, not
+a literal `"status":"UP"`) to avoid embedding a `"` inside an already twice-quoted YAML-then-bash
+string. Verified with `docker compose config` (non-destructive YAML resolution, no image build) rather
+than a live `docker compose up`, to avoid racing the concurrently-running S1 background agent, which
+was at that time actively rewriting `station/vision-web/**` — a live `up` would have rebuilt the whole
+`vision-app` Docker image, whose build context includes that tree.
+
+### Tests
+
+No new test file in `vision-app` itself for `SystemStatusWiring` — a deliberate choice, consistent
+with the "no dedicated unit test" reasoning `cv/grpc/MODULE.md`, `drone-link/mavlink/MODULE.md`, and
+`video-output/publish-hls/MODULE.md` each document for their own `SubsystemStatusPort` beans: every
+`@Bean` method here is a thin construction (wrap a collaborator, or return a fixed `DISABLED` lambda)
+over already-covered collaborators, and the aggregation/rollup logic those beans feed into is exercised
+independently by `station/vision-api`'s `SystemStatusControllerTest` (5 tests, against hand-written fake
+`SubsystemStatusPort`s, not this class). The one behaviour genuinely specific to this module —
+`PublishWiring`'s `mediamtxStreamPublisher` extraction not changing what `streamPublisherPort` builds —
+is covered indirectly: every pre-existing `PublishWiring`-touching test in this module's default-config
+bar below still asserts the same `StreamPublisherPort` shape it always did.
+
+### Default-config bar (the acceptance gate), proven
+
+**Before this wave** (this module's `src` changes stashed, adapter jars matching): 245/245, same as the
+CV-RECONNECT-PLAN R2 count above — this wave added no new test methods to `vision-app` itself.
+**After**: `./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` —
+**245/245 green** in `vision-app` (net-zero test-count change, by design — see "Tests" above),
+**569/569 green** in `vision-api` (567→569, +2, `SystemStatusControllerTest`'s share plus
+`LiveUpdateStatusProviderTest`, both documented in `vision-api`'s own MODULE.md), **115/115 green** in
+`adapter-persistence` (untouched by this wave). `ArchitectureTest` (14/14) and `ContextArchitectureTest`
+(4/4) both green — the new `SubsystemStatusPort` dependency `cv/grpc`, `drone-link/mavlink`, and
+`video-output/publish-hls` each gained on `core/vision-platform` doesn't violate the
+kernel←platform←contexts←adapters←app rule (platform is meant to be depended on by adapters), and
+`SystemStatusWiring`/`SystemStatusController` add no new context-to-context edge. One transient failure
+was diagnosed and fixed during this verification, not a wave defect: the first run after this session's
+edits failed every `@SpringBootTest`-based test in `vision-app` with
+`NoClassDefFoundError: com/drones/vision/adapter/mavlink/MavlinkLinkStatusProvider`, because the
+installed `~/.m2` jars for `core/vision-platform`, `cv/grpc`, `drone-link/mavlink`, and
+`video-output/publish-hls` predated this wave's source changes to those modules (a stale-artifact issue,
+not a wiring bug — `-pl`-scoped builds resolve everything not explicitly listed from the local
+repository). Reinstalling those four modules (`install -DskipTests`) before rerunning the scoped test
+command fixed it; all counts above are from the post-reinstall, fully green run. Every default
+(`vision.cv.enabled=false`, `vision.publish.enabled=true` i.e. `matchIfMissing`, `vision.auth.enabled=true`)
+reproduces today's behaviour exactly — no pre-existing assertion was weakened, deleted, or changed.
+
+### Deferred / not this wave
+
+- **S3** — a live status badge/page in `station/vision-web` consuming this endpoint, explicitly a
+  separate wave per the plan, and explicitly out of this task's file scope
+  (`station/vision-web/**` untouched).
+- Dedicated unit tests for the three adapter-side `SubsystemStatusPort` beans this class wires
+  (`CvStatusProvider`, `MavlinkLinkStatusProvider`, `PublishStatusProvider`) — see "Tests" above and
+  each adapter module's own MODULE.md for the reasoning.
+- No trust-material/TLS work here — out of scope for this wave, same as R2 above; the actuator endpoint
+  rides the same HTTP listener and security posture the rest of `/api/**` already has.

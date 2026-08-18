@@ -118,62 +118,123 @@
     }
   </section>
 
-  <!-- ---- Health ------------------------------------------------------------ -->
+  <!-- ---- Health (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.3 — repointed at GET /api/system/status) ------- -->
   <section class="card">
     <header>
       <h2>Health</h2>
       <button
         type="button"
         class="btn secondary"
-        (click)="loadHealth()"
-        [disabled]="healthLoading()"
+        (click)="refreshSystemStatus()"
+        [disabled]="systemStatusLoading()"
       >
-        {{ healthLoading() ? 'Checking…' : 'Refresh' }}
+        {{ systemStatusLoading() ? 'Checking…' : 'Refresh' }}
       </button>
     </header>
 
-    @if (healthProbe(); as probe) {
+    @if (systemStatus(); as status) {
       <p class="row">
         <span class="muted">Overall:</span>
-        <span class="chip" [class.ok]="probe.tone === 'ok'" [class.danger]="probe.tone === 'danger'">
-          {{ probe.label }}
+        <span
+          class="chip"
+          [class.ok]="healthSeverity(status.overall) === 'ok'"
+          [class.warn]="healthSeverity(status.overall) === 'warn'"
+          [class.danger]="healthSeverity(status.overall) === 'danger'"
+        >
+          {{ healthLabel(status.overall) }}
         </span>
+        <a routerLink="/manage/system" class="muted">Open full status page ›</a>
       </p>
 
-      @if (probe.kind === 'not-exposed') {
-        <p class="muted hint">
-          <span class="mono">GET /actuator/health</span> returns {{ healthResponse()?.status }} on this
-          deployment — Spring Boot Actuator isn't on the classpath here, so there is nothing to check.
-          This is a missing probe, not a failing system — see raw JSON below for exactly what came back.
-        </p>
-      } @else if (healthComponents().length > 0) {
+      @if (systemStatusError(); as error) {
+        <p class="muted hint">{{ error }} Showing the last-known status.</p>
+      }
+
+      @if (status.subsystems.length > 0) {
         <ul class="health-list">
-          @for (component of healthComponents(); track component.name) {
+          @for (subsystem of status.subsystems; track subsystem.id) {
             <li>
-              <span>{{ component.name }}</span>
+              <span>{{ subsystem.label }}</span>
               <span
                 class="chip"
-                [class.ok]="component.status === 'UP'"
-                [class.danger]="component.status !== 'UP'"
+                [class.ok]="healthSeverity(subsystem.health) === 'ok'"
+                [class.warn]="healthSeverity(subsystem.health) === 'warn'"
+                [class.danger]="healthSeverity(subsystem.health) === 'danger'"
               >
-                {{ component.status }}
+                {{ healthLabel(subsystem.health) }}
               </span>
             </li>
           }
         </ul>
       } @else {
-        <p class="muted hint">No component-level detail exposed by this backend — see raw JSON.</p>
+        <p class="muted hint">No subsystems reported by this backend.</p>
       }
-    } @else if (!healthLoading()) {
-      <p class="muted">No health data yet.</p>
+    } @else if (systemStatusLoading()) {
+      <p class="muted">Loading…</p>
+    } @else {
+      <p class="muted">Couldn't read system status.</p>
     }
 
-    @if (healthRaw(); as raw) {
-      <details>
-        <summary class="muted">Raw JSON</summary>
-        <pre class="mono response-body">{{ raw.text }}</pre>
-      </details>
-    }
+    <!-- The raw Actuator probe — a secondary, lower-level check now that §4.4 wires it for real;
+         kept byte-for-byte (`describeHealthProbe`'s verdict logic is unchanged) but demoted behind
+         a disclosure so the console's one canonical health source is the card above. -->
+    <details class="actuator-probe">
+      <summary class="muted">Actuator probe (secondary — raw GET /actuator/health)</summary>
+
+      <p class="row">
+        <button
+          type="button"
+          class="btn secondary"
+          (click)="loadHealth()"
+          [disabled]="healthLoading()"
+        >
+          {{ healthLoading() ? 'Checking…' : 'Refresh' }}
+        </button>
+      </p>
+
+      @if (healthProbe(); as probe) {
+        <p class="row">
+          <span class="muted">Overall:</span>
+          <span class="chip" [class.ok]="probe.tone === 'ok'" [class.danger]="probe.tone === 'danger'">
+            {{ probe.label }}
+          </span>
+        </p>
+
+        @if (probe.kind === 'not-exposed') {
+          <p class="muted hint">
+            <span class="mono">GET /actuator/health</span> returns {{ healthResponse()?.status }} on this
+            deployment — Spring Boot Actuator isn't on the classpath here, so there is nothing to check.
+            This is a missing probe, not a failing system — see raw JSON below for exactly what came back.
+          </p>
+        } @else if (healthComponents().length > 0) {
+          <ul class="health-list">
+            @for (component of healthComponents(); track component.name) {
+              <li>
+                <span>{{ component.name }}</span>
+                <span
+                  class="chip"
+                  [class.ok]="component.status === 'UP'"
+                  [class.danger]="component.status !== 'UP'"
+                >
+                  {{ component.status }}
+                </span>
+              </li>
+            }
+          </ul>
+        } @else {
+          <p class="muted hint">No component-level detail exposed by this backend — see raw JSON.</p>
+        }
+      } @else if (!healthLoading()) {
+        <p class="muted">No health data yet.</p>
+      }
+
+      @if (healthRaw(); as raw) {
+        <details>
+          <summary class="muted">Raw JSON</summary>
+          <pre class="mono response-body">{{ raw.text }}</pre>
+        </details>
+      }
+    </details>
   </section>
 
   <!-- ---- Last scan ----------------------------------------------------------- -->

@@ -2,9 +2,12 @@ import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, injec
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthStore } from '../../../core/auth/auth-store';
 import { FleetStore } from '../../../core/fleet/fleet-store';
+import { LiveStore } from '../../../core/live/live-store';
 import { canManageOrg } from '../../../core/org/org-logic';
 import { SidebarStore } from '../../../core/shell/sidebar-store';
 import { ThemeStore } from '../../../core/shell/theme-store';
+import { shellStatusLabel, shellStatusSeverity } from '../../../core/system-status/system-status-logic';
+import { SystemStatusStore } from '../../../core/system-status/system-status-store';
 import { GlobalOverlayStore } from '../../../core/ui/overlay-store';
 import { DemoButton } from '../../../features/demo/demo-button/demo-button';
 import { NAV_MODES, navTiers, type NavMode } from '../../../features/hubs/nav-entries';
@@ -134,6 +137,11 @@ export class AppSidebar {
    *  goes through `AccountSettingsFacade` instead for exactly that reason. */
   protected readonly theme = inject(ThemeStore);
   private readonly auth = inject(AuthStore);
+  private readonly liveStore = inject(LiveStore);
+  /** Backs the shell rollup dot below (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2) — the same "shared
+   *  shell component, not a routed page" carve-out `theme`'s own doc comment above explains; the
+   *  singleton store is already warm app-wide (see that store's own class doc), this just reads it. */
+  private readonly systemStatus = inject(SystemStatusStore);
   private readonly overlays = inject(GlobalOverlayStore);
   private readonly hostRef = inject(ElementRef<HTMLElement>);
   /** Optional — only present while the `@else` branch (closed) renders it; see class doc's mobile-sheet paragraph. */
@@ -172,7 +180,61 @@ export class AppSidebar {
 
   /** The header's old "N live" chip — same `FleetStore` read, same condition, just relocated. */
   protected readonly liveCount = computed(() => this.fleet.streams().length);
-  protected readonly offline = computed(() => this.fleet.reachable() === false);
+
+  /**
+   * The shell rollup dot (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2) — the direct fix for §1.2's
+   * finding that this dot answered only "did the last device poll succeed" (`FleetStore.reachable()`
+   * alone) and stayed green through a closed live-transport connection or a degraded platform
+   * subsystem. Now the worst of three independent axes — backend REST reachability, the SSE
+   * live-transport connection (the *same* signal {@link liveTransportSeverity} below reads, just
+   * folded into one combined verdict here rather than left as two dots a manager has to reconcile
+   * themselves), and `GET /api/system/status`'s own self-reported `overall` — via
+   * `system-status-logic.ts#shellStatusSeverity`. Replaces the old bare `offline` computed.
+   */
+  protected readonly shellSeverity = computed(() =>
+    shellStatusSeverity(this.fleet.reachable(), this.liveStore.connectionState(), this.systemStatus.overall()),
+  );
+
+  /** The rollup dot's `title`/`aria-label` — one honest sentence, never a bare colour. */
+  protected readonly shellLabel = computed(() => shellStatusLabel(this.shellSeverity()));
+
+  /**
+   * The foot's live-transport dot+text (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1) — a **different axis**
+   * than `offline`/`fleet.reachable()` above: that dot answers "can we reach the backend's REST API
+   * at all"; this one answers "is the SSE `/api/live` connection actually open right now", which is
+   * exactly the gap `SYSTEM-STATUS-PLAN.md §1` names — a closed SSE connection on a perfectly reachable
+   * backend silently degrades every "live" surface to `PollScheduler`'s 5s polling floor with no
+   * visible sign anywhere in the app. Deliberately a quiet `.dot` + plain text here, not a second
+   * `.chip` (`.claude/skills/frontend-style/SKILL.md` §5 "one chip per row max" — the sidebar foot is a
+   * row too) — the loud, actionable version of this same signal is `app.ts`'s own
+   * `<vision-notice variant="warn">` banner for the one case (`closed` + backend reachable) that is
+   * actually a silent-degradation problem worth interrupting for; this dot is the ambient, always-on
+   * status a manager can glance at, mirroring the backend-reachable dot right beside it.
+   */
+  protected readonly liveTransportLabel = computed(() => {
+    switch (this.liveStore.connectionState()) {
+      case 'open':
+        return 'Live';
+      case 'connecting':
+        return 'Connecting';
+      case 'closed':
+        return 'Polling';
+    }
+  });
+
+  /** `'ok'` → `.dot.ok`, `'warn'` → `.dot.warn`, `'neutral'` → the bare default `.dot` (already a
+   *  quiet `--text-faint` grey — `connecting` is a normal, brief, non-alarming transient, not a
+   *  problem worth colouring). */
+  protected readonly liveTransportSeverity = computed<'ok' | 'warn' | 'neutral'>(() => {
+    switch (this.liveStore.connectionState()) {
+      case 'open':
+        return 'ok';
+      case 'closed':
+        return 'warn';
+      case 'connecting':
+        return 'neutral';
+    }
+  });
 
   /** The <640px off-canvas sheet's own open state — `GlobalOverlayStore`-backed (see class doc), so
    *  it shares exclusivity/Escape/outside-click/close-on-navigation with the identity menu and

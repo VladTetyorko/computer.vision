@@ -25,24 +25,23 @@ import type { Routes } from '@angular/router';
  * arrays without a shadowing risk (see `app.routes.ts`'s own doc comment for the one ordering
  * constraint that *does* still matter, unrelated to this file).
  *
- * **2. Five `ComingSoon` scaffold routes** — the areas docs/plans/done/NAV-IA-REDESIGN-PLAN.md's Additions table
+ * **2. Four `ComingSoon` scaffold routes** — the areas docs/plans/done/NAV-IA-REDESIGN-PLAN.md's Additions table
  * (and each page's own `docs/extracts/design/*.md`) classifies as pure **SCAFFOLD**: `/operate/missions`,
- * `/monitor/replay`, `/monitor/layouts`, `/manage/health`, `/manage/firmware` — each a `data:` object
+ * `/monitor/layouts`, `/manage/health`, `/manage/firmware` — each a `data:` object
  * binding straight onto `ComingSoon`'s inputs via `withComponentInputBinding()` (see that component's
- * own class doc), never a new page file. `data: {preload: false}` on all five: a scaffold page is
+ * own class doc), never a new page file. `data: {preload: false}` on all four: a scaffold page is
  * exactly the kind of route not worth pre-fetching ahead of a real navigation (mirrors `**`'s own
  * `data: {preload: false}` in `app.routes.ts`).
  *
- * **`/monitor/replay` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F8, docs/extracts/design/10-replay.md) used to redirect to
- * the flat `/replay` route, which — with no `?asset=`/`?usage=` — rendered `ReplayPage`'s own honest
- * "No usage specified." empty state: a real page advertising a feature ("Replay library — scrub any
- * finished flight") that has never existed. That is F8's own definition of the worst kind of dead
- * end: it reads as a bug in a working feature, not an unbuilt one. This route now points directly at
- * `ComingSoon` instead of at that redirect, so the only navigation path that ever reached the empty
- * "No usage specified." state is closed. **The underlying flat `features/replay/replay.routes.ts`
- * `'replay'` route itself is intentionally NOT deleted** — see that file's own doc comment for why
- * (it is a real, working deep-link target with query params, unrelated to this nav entry; grep-
- * verified against three live call sites before deciding this).
+ * **`/monitor/replay` is gone (docs/plans/active/IA-TRUTH-PLAN.md §2, U1.2)** — it used to redirect to
+ * the flat `/replay` route, then (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F8) to this file's own `ComingSoon`
+ * scaffold advertising "a library listing every finished flight" as **coming**. It shipped:
+ * `/replay` (`features/replay/replay.routes.ts`'s bare `'replay'` route) has served `ReplayLibraryPage`
+ * since Wave 4 (docs/extracts/design/10-replay.md, F8) — the scaffold was a stale door to a feature that
+ * already existed behind a different one, and it carried no `NAV_MODES` entry of its own (`nav-entries.ts`'s
+ * "Replay library" tile always pointed straight at `/replay`), so removing it drops zero live links.
+ * **The flat `features/replay/replay.routes.ts` `'replay'` route itself is untouched** — see that
+ * file's own doc comment for why it can't be deleted (three live deep-link callers).
  */
 export const HUBS_ROUTES: Routes = [
   // --- Retired hub launchers — redirect to the mode's primaryRoute, never a page of their own ----
@@ -59,20 +58,6 @@ export const HUBS_ROUTES: Routes = [
       eyebrow: 'Operate',
       title: 'Flight plans / missions',
       description: "Saved, uploadable flight plans are coming — flight-controller mission upload isn't built yet either.",
-    },
-    loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
-  },
-  {
-    path: 'monitor/replay',
-    title: 'Replay library · Vision',
-    data: {
-      preload: false,
-      eyebrow: 'Monitor',
-      title: 'Replay library',
-      description:
-        'A library listing every finished flight — asset, start time, duration — is coming. Today, open a specific flight’s replay from its asset page.',
-      nearestLabel: 'Open Command',
-      nearestTo: '/command',
     },
     loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
   },

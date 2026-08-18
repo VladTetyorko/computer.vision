@@ -13,7 +13,7 @@ import { SidePanel } from '../../shared/ui/side-panel';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { FlyOsd } from './fly-osd';
 import { FailsafeBanner } from './failsafe-banner';
-import { PreflightChecklist } from './preflight-checklist';
+import { PreflightChecklist } from '../../shared/ui/preflight-checklist';
 import { DiagnosticsCard } from './diagnostics-card';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { FlightCommandPanel } from './flight-command-panel';

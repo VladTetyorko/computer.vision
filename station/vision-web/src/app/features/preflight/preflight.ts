@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Notice } from '../../shared/ui/notice';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
-import { PreflightChecklist } from '../fly/preflight-checklist';
+import { PreflightChecklist } from '../../shared/ui/preflight-checklist';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { PreflightFacade } from './preflight-facade';
 

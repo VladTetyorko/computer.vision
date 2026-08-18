@@ -69,7 +69,6 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
@@ -769,101 +768,6 @@ class LiveUpdateRegistryTest {
         }
     }
 
-    /**
-     * Runs every submitted/scheduled task synchronously, on the calling thread, the moment it's
-     * submitted — makes {@link LiveUpdateRegistry#publishFleetChanged()}/{@link
-     * LiveUpdateRegistry#publishEvent}/{@link LiveUpdateRegistry#publishDetectionEvent}
-     * deterministic in a pure unit test with no real waiting, and makes the constructor's own
-     * {@code scheduleAtFixedRate} calls (the periodic flush/heartbeat) a harmless no-op (this fake
-     * never actually re-invokes a periodic task on its own).
-     */
-    private static final class ImmediateScheduledExecutorService implements ScheduledExecutorService {
-        @Override
-        public void execute(Runnable command) {
-            command.run();
-        }
-
-        @Override
-        public ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay, long period, TimeUnit unit) {
-            return null; // never actually re-ticks -- tests call flushPending()/heartbeatAll() directly
-        }
-
-        @Override
-        public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
-            return null;
-        }
-
-        @Override
-        public <V> ScheduledFuture<V> schedule(java.util.concurrent.Callable<V> callable, long delay, TimeUnit unit) {
-            return null;
-        }
-
-        @Override
-        public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long delay, TimeUnit unit) {
-            return null;
-        }
-
-        @Override
-        public void shutdown() {
-        }
-
-        @Override
-        public List<Runnable> shutdownNow() {
-            return List.of();
-        }
-
-        @Override
-        public boolean isShutdown() {
-            return false;
-        }
-
-        @Override
-        public boolean isTerminated() {
-            return false;
-        }
-
-        @Override
-        public boolean awaitTermination(long timeout, TimeUnit unit) {
-            return true;
-        }
-
-        @Override
-        public <T> java.util.concurrent.Future<T> submit(java.util.concurrent.Callable<T> task) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public <T> java.util.concurrent.Future<T> submit(Runnable task, T result) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public java.util.concurrent.Future<?> submit(Runnable task) {
-            task.run();
-            return java.util.concurrent.CompletableFuture.completedFuture(null);
-        }
-
-        @Override
-        public <T> List<java.util.concurrent.Future<T>> invokeAll(
-                java.util.Collection<? extends java.util.concurrent.Callable<T>> tasks) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public <T> List<java.util.concurrent.Future<T>> invokeAll(
-                java.util.Collection<? extends java.util.concurrent.Callable<T>> tasks, long timeout, TimeUnit unit) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public <T> T invokeAny(java.util.Collection<? extends java.util.concurrent.Callable<T>> tasks) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public <T> T invokeAny(java.util.Collection<? extends java.util.concurrent.Callable<T>> tasks, long timeout,
-                                TimeUnit unit) {
-            throw new UnsupportedOperationException();
-        }
-    }
+    // ImmediateScheduledExecutorService moved to its own top-level file in this package (shared with
+    // LiveUpdateStatusProviderTest) -- see that class's javadoc.
 }

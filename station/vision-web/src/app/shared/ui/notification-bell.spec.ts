@@ -7,7 +7,7 @@ import { EventsStore } from '../../core/events/events-store';
 import { LiveStore } from '../../core/live/live-store';
 import { VisionApi } from '../../core/api/vision-api';
 import { GlobalOverlayStore } from '../../core/ui/overlay-store';
-import type { DetectionEvent } from '../../core/api/models';
+import type { DetectionEvent, LiveEvent } from '../../core/api/models';
 
 /**
  * `NotificationBell` pulls in `EventsStore`/`FleetStore`/`LiveStore`/`VisionApi` — every one faked
@@ -39,17 +39,28 @@ function fakeEventsStore(events: DetectionEvent[] = []) {
   return { activate: () => {}, release: () => {}, events: () => events };
 }
 
-function fakeLiveStore() {
-  return { liveEvents: () => [] as unknown[] };
+function liveEvent(partial: Partial<LiveEvent> = {}): LiveEvent {
+  return {
+    id: 'le-1',
+    at: '2026-01-01T00:00:00Z',
+    type: 'DEVICE_OFFLINE',
+    message: 'Camera went quiet',
+    attributes: {},
+    ...partial,
+  };
 }
 
-function render(events: DetectionEvent[] = []) {
+function fakeLiveStore(events: LiveEvent[] = []) {
+  return { liveEvents: () => events };
+}
+
+function render(events: DetectionEvent[] = [], liveEvents: LiveEvent[] = []) {
   TestBed.configureTestingModule({
     providers: [
       provideRouter([]),
       { provide: FleetStore, useValue: fakeFleetStore() },
       { provide: EventsStore, useValue: fakeEventsStore(events) },
-      { provide: LiveStore, useValue: fakeLiveStore() },
+      { provide: LiveStore, useValue: fakeLiveStore(liveEvents) },
       { provide: VisionApi, useValue: {} },
     ],
   });
@@ -149,5 +160,50 @@ describe('NotificationBell — dropdown state (docs/plans/done/UI-STATE-PLAN.md)
     fixture.detectChanges();
 
     expect(TestBed.inject(GlobalOverlayStore).isOpen('notification-bell')).toBe(false);
+  });
+});
+
+describe('NotificationBell — system events (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2-§3.3)', () => {
+  it('renders a durable system-events card, one row per non-DETECTION LiveEvent, with the empty state hidden', () => {
+    const fixture = render([], [liveEvent({ id: 'le-1', type: 'DEVICE_OFFLINE', message: 'Camera went quiet' })]);
+    trigger(fixture).click();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.system-events');
+    expect(card).not.toBeNull();
+    expect(card?.querySelectorAll('vision-system-event-row')).toHaveLength(1);
+    expect(card?.querySelector('.hint')).toBeNull();
+  });
+
+  it('excludes DETECTION from the system-events card — it already has its own card above', () => {
+    const fixture = render(
+      [],
+      [liveEvent({ id: 'le-1', type: 'DETECTION', message: 'person detected' }), liveEvent({ id: 'le-2', type: 'DEVICE_ONLINE' })],
+    );
+    trigger(fixture).click();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.system-events')?.querySelectorAll('vision-system-event-row')).toHaveLength(1);
+  });
+
+  it('shows the empty hint with no system events at all', () => {
+    const fixture = render([], []);
+    trigger(fixture).click();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.system-events');
+    expect(card?.querySelector('.hint')?.textContent).toContain('No system events yet');
+    expect(card?.querySelectorAll('vision-system-event-row')).toHaveLength(0);
+  });
+
+  it('closes with the rest of the dropdown', () => {
+    const fixture = render([], [liveEvent()]);
+    trigger(fixture).click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.system-events')).not.toBeNull();
+
+    trigger(fixture).click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.system-events')).toBeNull();
   });
 });

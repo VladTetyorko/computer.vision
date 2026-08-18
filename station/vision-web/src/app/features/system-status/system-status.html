@@ -1,0 +1,110 @@
+<div class="page">
+  <vision-page-bar
+    title="System status"
+    icon="signal"
+    [count]="facade.subsystems().length"
+    countNoun="subsystem"
+    hint="What the platform itself reports about its own health, separate from any single asset's status."
+  >
+    <button
+      pageBarActions
+      type="button"
+      class="btn secondary"
+      (click)="facade.refresh()"
+      [disabled]="facade.statusLoading()"
+    >
+      {{ facade.statusLoading() ? 'Checking…' : 'Refresh' }}
+    </button>
+  </vision-page-bar>
+
+  <vision-notice [variant]="facade.overallSeverity()">
+    <strong>{{ facade.overallMessage() }}</strong>
+    @if (facade.checkedAtRelative(); as checked) {
+      <span class="muted"> Checked {{ checked }}.</span>
+    }
+    @if (facade.statusError(); as error) {
+      <span class="stale-note"> {{ error }} Showing the last-known status.</span>
+    }
+  </vision-notice>
+
+  <div class="grid12">
+    <section class="card col-8">
+      <h2>Subsystems</h2>
+
+      @if (facade.subsystems().length > 0) {
+        <ul class="subsystem-list">
+          @for (row of facade.subsystems(); track trackSubsystem($index, row)) {
+            <li class="subsystem-row">
+              <div class="subsystem-row-head">
+                <span class="subsystem-label truncate" [title]="row.label">{{ row.label }}</span>
+                <span
+                  class="chip"
+                  [class.ok]="healthSeverity(row.health) === 'ok'"
+                  [class.warn]="healthSeverity(row.health) === 'warn'"
+                  [class.danger]="healthSeverity(row.health) === 'danger'"
+                >
+                  {{ healthLabel(row.health) }}
+                </span>
+              </div>
+              <p class="muted subsystem-detail">{{ row.detail }}</p>
+              @if (row.hint) {
+                <p class="subsystem-hint">{{ row.hint }}</p>
+              }
+              @if (row.since) {
+                <p class="muted mono subsystem-since">since {{ facade.sinceRelative(row.since) }}</p>
+              }
+            </li>
+          }
+        </ul>
+      } @else if (facade.statusLoading() && !facade.status()) {
+        <p class="muted">Loading…</p>
+      } @else {
+        <vision-empty
+          title="No subsystems reported"
+          message="This deployment has no subsystem providers wired up yet."
+          icon="signal"
+        />
+      }
+    </section>
+
+    <section class="card col-4">
+      <h2>Live transport</h2>
+      <div class="transport-row">
+        <span
+          class="dot"
+          [class.ok]="facade.connectionSeverity() === 'ok'"
+          [class.warn]="facade.connectionSeverity() === 'warn'"
+          aria-hidden="true"
+        ></span>
+        <span>{{ facade.connectionLabel() }}</span>
+      </div>
+      <p class="muted transport-note">
+        The real-time <span class="mono">/api/live</span> connection this app uses for instant updates.
+        While it's down, every live surface falls back to polling every few seconds instead.
+      </p>
+    </section>
+
+    <section class="card col-12">
+      <h2>System events</h2>
+      @if (facade.events().length > 0) {
+        <ul class="event-list">
+          @for (row of facade.events(); track trackEvent($index, row)) {
+            <li>
+              <vision-system-event-row
+                [event]="row"
+                [sourceLabel]="facade.eventSource(row)"
+                [relativeTime]="facade.eventRelativeTime(row)"
+              />
+            </li>
+          }
+        </ul>
+      } @else {
+        <vision-empty
+          title="No system events yet"
+          message="Device, stream and pipeline events will show up here as they happen."
+          icon="signal"
+        />
+      }
+    </section>
+  </div>
+</div>

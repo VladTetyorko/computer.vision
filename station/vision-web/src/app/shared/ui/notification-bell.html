@@ -19,6 +19,33 @@
   </button>
 
   @if (overlays.isOpen('notification-bell')) {
-    <vision-events-rail class="bell-dropdown" (open)="onRailOpen($event)" />
+    <div class="bell-dropdown">
+      <vision-events-rail (open)="onRailOpen($event)" />
+
+      <!-- System events (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2-§3.3) — a durable home for the seven
+           generic LiveEvent kinds (everything but DETECTION, which already has the card above). Same
+           card shape as the detections card so the two read as one family, not two competing feeds. -->
+      <aside class="card system-events">
+        <header>
+          <h3>System</h3>
+          <span class="muted">{{ systemEvents.rows().length }}</span>
+        </header>
+        @if (systemEvents.rows().length === 0) {
+          <p class="muted hint">No system events yet.</p>
+        } @else {
+          <ul class="event-list">
+            @for (row of systemEvents.rows(); track row.id) {
+              <li>
+                <vision-system-event-row
+                  [event]="row"
+                  [sourceLabel]="systemEventSource(row)"
+                  [relativeTime]="systemEventRelativeTime(row)"
+                />
+              </li>
+            }
+          </ul>
+        }
+      </aside>
+    </div>
   }
 </div>

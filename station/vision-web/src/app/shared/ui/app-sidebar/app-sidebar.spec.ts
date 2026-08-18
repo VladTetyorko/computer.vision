@@ -10,7 +10,9 @@ import { LiveStore } from '../../../core/live/live-store';
 import { VisionApi } from '../../../core/api/vision-api';
 import { SidebarStore } from '../../../core/shell/sidebar-store';
 import { ThemeStore } from '../../../core/shell/theme-store';
+import { SystemStatusStore } from '../../../core/system-status/system-status-store';
 import { NAV_MODES, navTiers } from '../../../features/hubs/nav-entries';
+import type { OverallHealth } from '../../../core/api/models';
 
 /**
  * `AppSidebar` mounts `<vision-identity-chip>`/`<vision-notification-bell>` in its foot, each with
@@ -29,8 +31,13 @@ function fakeEventsStore() {
   return { activate: () => {}, release: () => {}, events: () => [] as unknown[] };
 }
 
-function fakeLiveStore() {
-  return { liveEvents: () => [] as unknown[] };
+function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
+  return { liveEvents: () => [] as unknown[], connectionState: () => connectionState };
+}
+
+/** Only `overall` is read by `AppSidebar` (`system-status.overall()`). */
+function fakeSystemStatusStore(overall: OverallHealth | undefined) {
+  return { overall: () => overall };
 }
 
 function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
@@ -48,6 +55,8 @@ function render(options: {
   streams?: unknown[];
   reachable?: boolean;
   fullBleed?: boolean;
+  connectionState?: 'connecting' | 'open' | 'closed';
+  overall?: OverallHealth | undefined;
 } = {}) {
   TestBed.configureTestingModule({
     providers: [
@@ -55,11 +64,17 @@ function render(options: {
         { path: 'fly', component: StubPage },
         { path: 'command', component: StubPage },
         { path: 'assets', component: StubPage },
+        { path: 'manage/system', component: StubPage },
       ]),
       { provide: FleetStore, useValue: fakeFleetStore(options) },
       { provide: AuthStore, useValue: fakeAuthStore(options.topRole) },
       { provide: EventsStore, useValue: fakeEventsStore() },
-      { provide: LiveStore, useValue: fakeLiveStore() },
+      { provide: LiveStore, useValue: fakeLiveStore(options.connectionState) },
+      // `overall` defaults to `'OK'` — not `undefined` — so every pre-existing test in this file
+      // (written before the shell rollup dot read this third axis, docs/plans/active/SYSTEM-STATUS-PLAN.md
+      // §5.2) keeps its original "everything is fine" baseline unless a test explicitly opts into
+      // `overall: undefined` (the pre-first-fetch state) or a degraded/down value.
+      { provide: SystemStatusStore, useValue: fakeSystemStatusStore('overall' in options ? options.overall : 'OK') },
       { provide: VisionApi, useValue: {} },
     ],
   });
@@ -328,7 +343,7 @@ describe('AppSidebar — mobile off-canvas sheet + foot', () => {
     const onlineDot = root.querySelector('.status-row .dot.status-dot');
     expect(onlineDot).not.toBeNull();
     expect(onlineDot!.classList.contains('ok')).toBe(true);
-    expect(onlineDot!.getAttribute('aria-label')).toBe('Backend reachable');
+    expect(onlineDot!.getAttribute('aria-label')).toBe('System status: all clear');
   });
 
   it('shows the offline dot + label when the fleet is unreachable, with no live-count chip', () => {
@@ -336,7 +351,7 @@ describe('AppSidebar — mobile off-canvas sheet + foot', () => {
     const root = fixture.nativeElement as HTMLElement;
     const onlineDot = root.querySelector('.status-row .dot.status-dot');
     expect(onlineDot!.classList.contains('danger')).toBe(true);
-    expect(onlineDot!.getAttribute('aria-label')).toBe('Backend unreachable');
+    expect(onlineDot!.getAttribute('aria-label')).toBe('System status: down');
     expect(root.querySelector('.status-row .chip')).toBeNull();
   });
 
@@ -397,6 +412,102 @@ describe('AppSidebar — Advanced/Upcoming disclosures persist via SidebarStore'
     const manageIndex = NAV_MODES.findIndex((mode) => mode.id === 'manage');
     const advancedDetails = root.querySelectorAll('.nav-group')[manageIndex].querySelectorAll('details.disclosure')[0] as HTMLDetailsElement;
     expect(advancedDetails.open).toBe(true);
+  });
+});
+
+describe('AppSidebar — live-transport indicator (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1)', () => {
+  it('reads "Live" with an ok dot while the SSE connection is open', () => {
+    const fixture = render({ connectionState: 'open' });
+    const root = fixture.nativeElement as HTMLElement;
+    const indicator = root.querySelector('.status-row .live-transport')!;
+    expect(indicator.querySelector('.live-transport-text')?.textContent?.trim()).toBe('Live');
+    expect(indicator.querySelector('.dot')!.classList.contains('ok')).toBe(true);
+    expect(indicator.querySelector('.dot')!.classList.contains('warn')).toBe(false);
+  });
+
+  it('reads "Connecting" with a bare (neutral) dot mid-handshake', () => {
+    const fixture = render({ connectionState: 'connecting' });
+    const root = fixture.nativeElement as HTMLElement;
+    const indicator = root.querySelector('.status-row .live-transport')!;
+    expect(indicator.querySelector('.live-transport-text')?.textContent?.trim()).toBe('Connecting');
+    expect(indicator.querySelector('.dot')!.classList.contains('ok')).toBe(false);
+    expect(indicator.querySelector('.dot')!.classList.contains('warn')).toBe(false);
+  });
+
+  it('reads "Polling" with a warn dot once the SSE connection has closed', () => {
+    const fixture = render({ connectionState: 'closed' });
+    const root = fixture.nativeElement as HTMLElement;
+    const indicator = root.querySelector('.status-row .live-transport')!;
+    expect(indicator.querySelector('.live-transport-text')?.textContent?.trim()).toBe('Polling');
+    expect(indicator.querySelector('.dot')!.classList.contains('warn')).toBe(true);
+  });
+
+  it('is a quiet dot + plain text, never a second .chip (frontend-style §5 — one chip per row max)', () => {
+    const fixture = render({ connectionState: 'closed', streams: [{}] });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelectorAll('.status-row .chip')).toHaveLength(1); // only the pre-existing "N live" chip
+    expect(root.querySelector('.status-row .live-transport')?.classList.contains('chip')).toBe(false);
+  });
+});
+
+/**
+ * The shell rollup dot (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2) — the direct fix for §1.2's finding
+ * that this dot answered only "did the last device poll succeed" and stayed green through a closed
+ * live-transport connection or a degraded platform subsystem. These specs exercise the worst-of-three
+ * combination through the real rendered shell, complementing `system-status-logic.spec.ts`'s own
+ * unit coverage of `shellStatusSeverity` in isolation.
+ */
+describe('AppSidebar — shell rollup dot (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2)', () => {
+  function statusDot(root: HTMLElement): HTMLElement {
+    return root.querySelector('.status-row .dot.status-dot')!;
+  }
+
+  it('a closed live transport degrades the dot to warn even with a reachable backend and an OK overall', () => {
+    const fixture = render({ connectionState: 'closed', overall: 'OK' });
+    const root = fixture.nativeElement as HTMLElement;
+    const dot = statusDot(root);
+    expect(dot.classList.contains('warn')).toBe(true);
+    expect(dot.classList.contains('ok')).toBe(false);
+    expect(dot.getAttribute('aria-label')).toBe('System status: degraded');
+  });
+
+  it('a DOWN overall wins even when the backend is reachable and live is open', () => {
+    const fixture = render({ overall: 'DOWN' });
+    const root = fixture.nativeElement as HTMLElement;
+    const dot = statusDot(root);
+    expect(dot.classList.contains('danger')).toBe(true);
+    expect(dot.getAttribute('aria-label')).toBe('System status: down');
+  });
+
+  it('a DEGRADED overall alone reads as warn, not danger', () => {
+    const fixture = render({ overall: 'DEGRADED' });
+    const root = fixture.nativeElement as HTMLElement;
+    const dot = statusDot(root);
+    expect(dot.classList.contains('warn')).toBe(true);
+    expect(dot.classList.contains('danger')).toBe(false);
+  });
+
+  it('overall not yet loaded (undefined) never claims ok on its own — reads as the bare neutral dot', () => {
+    const fixture = render({ overall: undefined });
+    const root = fixture.nativeElement as HTMLElement;
+    const dot = statusDot(root);
+    expect(dot.classList.contains('ok')).toBe(false);
+    expect(dot.classList.contains('warn')).toBe(false);
+    expect(dot.classList.contains('danger')).toBe(false);
+    expect(dot.getAttribute('aria-label')).toBe('System status: checking…');
+  });
+
+  it('is a real routerLink to /manage/system, not a bare span with a click handler', async () => {
+    const fixture = render();
+    const root = fixture.nativeElement as HTMLElement;
+    const dot = statusDot(root);
+    expect(dot.tagName).toBe('A');
+
+    dot.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(TestBed.inject(Router).url).toBe('/manage/system');
   });
 });
 

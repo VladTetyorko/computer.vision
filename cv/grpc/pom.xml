@@ -20,6 +20,10 @@
         </dependency>
         <dependency>
             <groupId>com.drones</groupId>
+            <artifactId>vision-platform</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
             <artifactId>vision-perception</artifactId>
         </dependency>
         <dependency>

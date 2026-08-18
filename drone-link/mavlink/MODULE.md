@@ -8,7 +8,8 @@ onto `drone-link/mavlink-core`: it is now purely the **L5 translation layer** (v
 mavlink-core's L3/L4 services) plus two pieces of genuine project policy — vehicle claim/re-election
 and firmware mode-name tables — that a reusable library must not know about (plan §3.4).
 
-**Depends on:** vision-kernel, vision-warehouse, vision-flight, vision-perception, `drone-link/mavlink-core`,
+**Depends on:** vision-kernel, vision-warehouse, vision-flight, vision-perception, vision-platform
+(explicit, since wave S2 — for `SubsystemStatusPort`/`SubsystemStatus`/`Health`), `drone-link/mavlink-core`,
 `io.dronefleet.mavlink:mavlink:1.1.11` (used directly only where mavlink-core's own contract requires a
 raw library type: `MavlinkTelemetryDecoder`'s message-type dispatch, `FlightModes`'/`MavlinkFlightCommander`'s
 `MavCmd`/`MavResult`, `SimulatedVehicleMessages`'s builders, `MavlinkHeartbeatScanner`'s `Heartbeat`) ·
@@ -50,6 +51,13 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   `awaitAck`/`cancelAckWait` pass-throughs — TX port classes now depend on a real collaborator).
   Public constructors unchanged: `MavlinkTelemetrySource()`, `MavlinkTelemetrySource(MavlinkSettings)`;
   package-private `MavlinkTelemetrySource(long silenceWindowMillis)` test seam.
+  **`public List<com.drones.mavlink.session.LinkHealth.Health> claimedVehicleHealth()`** (docs/plans/active/SYSTEM-STATUS-PLAN.md
+  §4.2, wave S2) — flattens `claimedVehicleHealth()` (see `MavlinkGateway`, below) across every gateway
+  this source holds. **Public**, not package-private like this class's other accessors — a deliberate,
+  narrow exception, made specifically so `vision-app`'s `SystemStatusWiring` (a different package) can
+  take it as a method reference (`mavlinkTelemetrySource::claimedVehicleHealth`) for
+  `MavlinkLinkStatusProvider` (`vision-platform`'s `SubsystemStatusPort`, implemented in this module —
+  see below).
 - `final class MavlinkGateway` (package-private, **new**) — one per bind address, replaces the old
   `MavlinkSocketHub`. Owns a `com.drones.mavlink.transport.UdpListenLink` (binds in its own
   constructor — throws `IOException` on conflict, see Gotchas), a
@@ -66,6 +74,12 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   `ClaimedVehicle(int sysid, DeviceId deviceId, String firmware, Integer mavType, Instant lastHeard)`,
   `CommandTarget(int sysid, String firmware, Integer mavType, InetSocketAddress sourceAddress)` —
   field-for-field identical to the pre-W4 `MavlinkSocketHub`'s own.
+  **`List<com.drones.mavlink.session.LinkHealth.Health> claimedVehicleHealth()`** (package-private,
+  wave S2) — maps this gateway's `claimedVehicles()` to the underlying `session.health().of(PeerId)`
+  reading for each one's `(sysid, compid=MavlinkFlightCommander.TARGET_COMPONENT_AUTOPILOT)` identity
+  — the same peer-identity convention `VehicleClaimPolicy` already uses (see above). One entry per
+  claimed vehicle, no vehicle identity carried alongside it (`LinkHealth.Health` itself has none) —
+  `MavlinkLinkStatusProvider` (below) is the class that turns this list into a rollup.
 - `final class VehicleClaimPolicy` (package-private, **new**, replaces `VehicleClaimRegistry`) —
   project policy only: pinned-sysid claims, unpinned first-unclaimed-wins, 30s-silence re-election,
   the bounded (32) unclaimed registry. No longer parses `HEARTBEAT` itself — firmware/mavType/
@@ -103,6 +117,18 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   defaults/message content (`SimulatedVehicleMessages` untouched). `FeedRuntime`'s ephemeral send
   socket is now a `com.drones.mavlink.transport.UdpTargetLink` + `com.drones.mavlink.codec.FrameWriter`
   instead of a hand-rolled `DatagramSocket`/`MavlinkConnection` pair. Constructors unchanged.
+- `final class MavlinkLinkStatusProvider implements SubsystemStatusPort` (`vision-platform`,
+  docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2, **new**, wave S2) — `mavlink-link`'s health self-report
+  backing `GET /api/system/status`. Constructor takes `Supplier<List<LinkHealth.Health>>` (`vision-app`
+  passes `mavlinkTelemetrySource::claimedVehicleHealth`, see above) rather than the source directly —
+  matches `CvStatusProvider`'s (cv/grpc) supplier-based shape. No vehicle is claimed → `Health.UNKNOWN`
+  ("No MAVLink vehicle is currently claimed"). Otherwise this is a rollup across every claimed vehicle,
+  since `LinkHealth.Health` carries no vehicle identity to report per-vehicle: all `connected` →
+  `Health.OK` (`detail` states the connected count and an aggregate average `dropRate` as a percentage);
+  any vehicle whose `lastHeard()` has never been recorded at all → `Health.DOWN` (worst case, `since`
+  is the stalest non-null `lastHeard` if any vehicle has one); otherwise (every vehicle heard from at
+  least once, some just stale) → `Health.DEGRADED`, `detail` names the staleness age of the oldest
+  reading. `hint` is "Check the MAVLink radio/link and vehicle power" for both `DOWN`/`DEGRADED`.
 - `final class MavlinkTelemetryDecoder` (package-private) — state-holder split, now four-way as of
   docs/plans/active/GEO-POSE-PLAN.md wave V2 (`PositionAndPowerState`/`FlightStatusState`/
   `ArdupilotExtras`/`AttitudeState`); `accept`'s own dispatch/return-null/system-lock contract is
@@ -289,3 +315,21 @@ SITL streams `ATTITUDE` and `GLOBAL_POSITION_INT` (with a non-zero `relative_alt
 not run a simulated gimbal, so `GIMBAL_DEVICE_ATTITUDE_STATUS`/`MOUNT_ORIENTATION` were validated via
 golden-bytes tests only, not against a live SITL gimbal — flagged as untested against a real sender in
 the report for this wave.
+
+docs/plans/active/SYSTEM-STATUS-PLAN.md **§4.2, wave S2 done**: `mavlink-link`'s health self-report for
+`GET /api/system/status` (station/vision-api). Two small, additive changes to existing classes —
+`MavlinkGateway.claimedVehicleHealth()` (package-private) and `MavlinkTelemetrySource.claimedVehicleHealth()`
+(widened to **public**, a deliberate exception to this class's usual package-private-plumbing convention,
+made solely so `vision-app`'s `SystemStatusWiring` — a different package — can take it as a method
+reference) — plus one new class, `MavlinkLinkStatusProvider implements SubsystemStatusPort`. See API
+surface above for both. Module gained an explicit `vision-platform` dependency purely to compile
+against `SubsystemStatusPort`/`SubsystemStatus`/`Health` — no new runtime coupling beyond that one
+interface, and no change to this module's actual MAVLink transport/session behavior. `./mvnw -B -pl
+core/vision-platform,cv/grpc,drone-link/mavlink,video-output/publish-hls,station/vision-api,station/vision-app
+test -DskipWeb`: this module **155/155 green, unchanged count** — `MavlinkLinkStatusProvider` has no
+dedicated unit test of its own (deferred, same reasoning as `cv/grpc`'s `CvStatusProvider`: it is a
+thin mapping/rollup over `MavlinkTelemetrySourceTest`'s already-tested `claimedVehicleHealth` path and
+`vision-api`'s `SystemStatusControllerTest`, which exercises the endpoint's aggregation logic against
+fake `SubsystemStatusPort`s). Wired by `vision-app`'s `SystemStatusWiring` — unconditionally (unlike
+`cv-service`/`video-publish`, `mavlink-link` has no enable/disable flag of its own to gate a companion
+`Health.DISABLED` bean on).

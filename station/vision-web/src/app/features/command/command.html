@@ -141,7 +141,7 @@
             reports a position — or place a moving test drone right now, no hardware or file needed.
           </p>
           <div class="row empty-actions">
-            <a class="btn secondary" routerLink="/devices">Go to Devices</a>
+            <a class="btn secondary" routerLink="/assets">Go to Assets</a>
             <button type="button" class="btn" (click)="facade.addTestDrone()" [disabled]="facade.addingTestDrone()">
               {{ facade.addingTestDrone() ? 'Placing…' : 'Add a test drone' }}
             </button>

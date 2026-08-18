@@ -65,6 +65,7 @@ import type {
   StartTrainingJobRequest,
   StreamTracksResponse,
   SystemNetworkResponse,
+  SystemStatus,
   TelemetrySample,
   TrainingJobResponse,
   TrainingJobsResponse,
@@ -723,6 +724,21 @@ export class VisionApi {
    */
   systemNetwork(): Promise<SystemNetworkResponse> {
     return firstValueFrom(this.http.get<SystemNetworkResponse>('/api/system/network'));
+  }
+
+  // --- System status (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.3's frozen wire contract, S3) --------------
+
+  /**
+   * The platform's own live self-check — CV inference, MAVLink telemetry, video publish, live
+   * updates, and whatever else is wired conditionally (the subsystem list is not fixed, see
+   * `SystemStatus`'s own doc comment). Never 403s — readable by any authenticated user (§4.3's own
+   * deliberate call, `models.ts#SystemStatus`'s own doc comment) — and never partially fails: one
+   * misbehaving provider is reported as that one subsystem's own `'UNKNOWN'` row, not a rejected
+   * promise, so `core/system-status/system-status-store.ts` only ever needs to handle "the whole
+   * endpoint is unreachable" (network down, `vision.live` context gone) as its own failure case.
+   */
+  systemStatus(): Promise<SystemStatus> {
+    return firstValueFrom(this.http.get<SystemStatus>('/api/system/status'));
   }
 
   // --- Auth (docs/plans/done/U-AUTH-PLAN.md wave 3's frozen contract) --------------------------------------

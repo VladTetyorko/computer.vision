@@ -115,4 +115,14 @@ final class LiveRingBuffer {
     synchronized boolean canResumeFrom(long sinceSeq) {
         return !everDropped || entries.isEmpty() || sinceSeq >= entries.peekFirst().seq() - 1;
     }
+
+    /**
+     * Whether this buffer has ever dropped a retained envelope — {@code live-updates}'s {@code
+     * SubsystemStatusPort} plumbing (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2) surfaces this as
+     * an informational signal (a busy, healthy buffer drops routinely once past capacity; it is not
+     * itself a fault) rather than reading anything into it beyond "this deployment has seen traffic".
+     */
+    synchronized boolean everDropped() {
+        return everDropped;
+    }
 }

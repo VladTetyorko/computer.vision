@@ -1,0 +1,18 @@
+<div class="row">
+  <span
+    class="dot"
+    [class.danger]="event().severity === 'danger'"
+    [class.warn]="event().severity === 'warn'"
+    aria-hidden="true"
+  ></span>
+  <div class="body">
+    <div class="row-top">
+      <span class="title">{{ event().title }}</span>
+      <span class="time faint mono">{{ relativeTime() }}</span>
+    </div>
+    <div class="meta muted">
+      <span class="source truncate" [title]="sourceLabel()">{{ sourceLabel() }}</span>
+      <span class="detail truncate" [title]="event().detail">{{ event().detail }}</span>
+    </div>
+  </div>
+</div>

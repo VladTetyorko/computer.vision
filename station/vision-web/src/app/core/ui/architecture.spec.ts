@@ -49,6 +49,7 @@ const ROUTED_PAGES = [
   'labeling/sample-editor',
   'models/models',
   'training-jobs/training-job',
+  'system-status/system-status',
 ];
 
 // All feature .ts sources, inlined as raw strings at build time. Keys look like

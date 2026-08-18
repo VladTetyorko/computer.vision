@@ -10,10 +10,14 @@ import { attentionReasons, type AttentionReason } from '../../core/fleet/attenti
  *
  * `attentionReasons` is reused from `core/fleet/attention-logic.ts` (moved out of
  * `features/command/command-logic.ts` this same wave so this page could reuse it without importing
- * across feature folders — see that module's own doc comment) with neither optional parameter
- * (`gpsFixType`/`geofenceBreaches`) supplied: this dashboard has no live map marker or geofence feed
- * to draw either from, so those two reason kinds simply never fire here — an honest "not evaluated",
- * identical to how Command itself treats an asset with no marker.
+ * across feature folders — see that module's own doc comment) with `gpsFixType`/`geofenceBreaches`
+ * never supplied: this dashboard has no live map marker or geofence feed to draw either from, so
+ * those two reason kinds simply never fire here — an honest "not evaluated", identical to how
+ * Command itself treats an asset with no marker. `pipelineErrorMessagesByStreamId`
+ * (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4) *is* threaded through, optionally — `ReportsFacade` has a
+ * `LiveStore` to read (unlike a map marker or geofence feed, `LiveEvent`s cost this page nothing
+ * extra to read), so `pipeline-error` is the one live-derived reason this static dashboard can still
+ * show honestly.
  */
 
 export interface ReportKpis {
@@ -28,14 +32,25 @@ const EMPTY_KPIS: ReportKpis = { totalAssets: 0, streaming: 0, active: 0, deacti
 
 /** `undefined` (not yet loaded) degrades to all-zero — the page's own loading/error state is what
  *  tells the difference between "zero" and "unknown", never this function. */
-export function reportKpis(summary: FleetSummary | undefined): ReportKpis {
+export function reportKpis(
+  summary: FleetSummary | undefined,
+  pipelineErrorMessagesByStreamId?: ReadonlyMap<string, string>,
+): ReportKpis {
   if (!summary) {
     return EMPTY_KPIS;
   }
   const streaming = summary.assets.filter((asset) => asset.streaming).length;
   const active = summary.categories.reduce((sum, category) => sum + category.active, 0);
   const deactivated = summary.categories.reduce((sum, category) => sum + category.deactivated, 0);
-  const needsAttention = summary.assets.filter((asset) => attentionReasons(asset).length > 0).length;
+  const needsAttention = summary.assets.filter(
+    (asset) =>
+      attentionReasons(
+        asset,
+        undefined,
+        undefined,
+        asset.streamId ? pipelineErrorMessagesByStreamId?.get(asset.streamId) : undefined,
+      ).length > 0,
+  ).length;
   return { totalAssets: summary.totalAssets, streaming, active, deactivated, needsAttention };
 }
 
@@ -77,9 +92,22 @@ export interface AttentionRow {
  * looking at" punch list, not the full fleet (unlike Command's entity rail, which deliberately shows
  * every asset; this dashboard's attention section is specifically the flagged subset).
  */
-export function attentionRows(assets: readonly AssetAttention[]): readonly AttentionRow[] {
+export function attentionRows(
+  assets: readonly AssetAttention[],
+  pipelineErrorMessagesByStreamId?: ReadonlyMap<string, string>,
+): readonly AttentionRow[] {
   return assets
-    .map((asset): AttentionRow => ({ asset, reasons: attentionReasons(asset) }))
+    .map(
+      (asset): AttentionRow => ({
+        asset,
+        reasons: attentionReasons(
+          asset,
+          undefined,
+          undefined,
+          asset.streamId ? pipelineErrorMessagesByStreamId?.get(asset.streamId) : undefined,
+        ),
+      }),
+    )
     .filter((row) => row.reasons.length > 0)
     .sort(
       (a, b) =>

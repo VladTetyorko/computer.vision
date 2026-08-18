@@ -21,6 +21,8 @@ import com.drones.vision.app.devsupport.NoopStreamPublisher;
 import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.events.domain.port.ReplayFrameExtractionPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -69,11 +71,28 @@ public class PublishWiring {
     }
 
     /**
+     * The mediamtx-backed direct publisher itself — extracted into its own bean (docs/plans/active/
+     * SYSTEM-STATUS-PLAN.md §4.2) from what used to be a local variable inside {@link
+     * #streamPublisherPort}, so {@code SystemStatusWiring}'s {@code video-publish} {@code
+     * SubsystemStatusPort} bean can observe the exact same instance {@link #streamPublisherPort}
+     * routes traffic through, rather than constructing a second, never-written-to one that would
+     * report nothing useful. Present under the same condition {@link #streamPublisherPort} already
+     * uses to decide whether to build a real publisher at all.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "vision.publish", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public MediamtxStreamPublisher mediamtxStreamPublisher(VisionPublishProperties properties) {
+        VisionPublishProperties.Mediamtx mediamtx = properties.mediamtx();
+        return new MediamtxStreamPublisher(mediamtx.rtspBase(), properties.viewBase(), mediamtx.whepBase(),
+                mediamtx.playbackBase(), toPublishSettings(properties));
+    }
+
+    /**
      * Selects the {@link StreamPublisherPort} implementation per {@link
      * VisionPublishProperties#enabled()}: {@code false} falls back to the no-op publisher (e.g.
      * running or testing without mediamtx), exactly as before. {@code true} (the default) now builds a
-     * {@link PublisherRouter} (docs/plans/active/MEDIA-SOT-PLAN.md D3) wrapping {@code
-     * MediamtxStreamPublisher} (today's publisher, unchanged — {@code PublishSettings},
+     * {@link PublisherRouter} (docs/plans/active/MEDIA-SOT-PLAN.md D3) wrapping {@link
+     * #mediamtxStreamPublisher} (today's publisher, unchanged — {@code PublishSettings},
      * docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F3, still carries the encoder/resilience/cadence
      * tunables that used to be {@code H264RecorderFactory}/{@code PublishBackoff}/{@code
      * CadenceEstimator}'s own hardcoded constants) and {@link MediamtxProxyPublisher} — the router
@@ -88,14 +107,14 @@ public class PublishWiring {
      */
     @Bean
     public StreamPublisherPort streamPublisherPort(VisionPublishProperties properties,
-                                                    VisionCvProperties cvProperties) {
+                                                    VisionCvProperties cvProperties,
+                                                    ObjectProvider<MediamtxStreamPublisher> mediamtxStreamPublisher) {
         rejectProxyWithPushTransport(properties, cvProperties);
         if (!properties.enabled()) {
             return new NoopStreamPublisher();
         }
         VisionPublishProperties.Mediamtx mediamtx = properties.mediamtx();
-        StreamPublisherPort directPublisher = new MediamtxStreamPublisher(mediamtx.rtspBase(), properties.viewBase(),
-                mediamtx.whepBase(), mediamtx.playbackBase(), toPublishSettings(properties));
+        StreamPublisherPort directPublisher = mediamtxStreamPublisher.getObject();
         StreamPublisherPort proxyPublisher = new MediamtxProxyPublisher(mediamtx.apiBase(), properties.viewBase(),
                 mediamtx.whepBase(), mediamtx.playbackBase(), toProxySettings(properties));
         return new PublisherRouter(directPublisher, proxyPublisher, properties.sourceProxy().enabled());

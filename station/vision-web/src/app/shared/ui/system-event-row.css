@@ -1,0 +1,75 @@
+/* `.dot`/`.dot.warn`/`.dot.danger`/`.truncate`/`.mono`/`.faint`/`.muted` all come from the global
+   `src/styles.css` primitives — this stylesheet only owns this row's own layout, mirroring
+   `event-row.css`'s identical "global tokens, local layout" split.
+   `:host { display: contents }` so this component adds no layout box of its own — it participates
+   directly in whatever list the host (`notification-bell.html`'s `<li>`) already provides. */
+:host {
+  display: contents;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-8);
+  padding: var(--space-8);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* Fixed circle, aligned with the title's own cap-height rather than the two-line block's centre —
+   `margin-top` nudges it down from `flex-start` instead of centring the whole row, since a centred
+   dot drifts noticeably off the title once the meta line wraps to two lines of its own. `--space-4`
+   (not a bespoke value) approximates half the title line box's own leading, on-grid. */
+.dot {
+  margin-top: var(--space-4);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.row-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.time {
+  flex: none;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  min-width: 0;
+  font-size: 0.72rem;
+}
+
+.source {
+  flex: none;
+  max-width: 40%;
+}
+
+.detail {
+  flex: 1;
+  min-width: 0;
+}

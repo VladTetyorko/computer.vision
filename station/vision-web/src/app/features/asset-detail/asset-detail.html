@@ -9,7 +9,7 @@
           No asset with id <span class="mono">{{ assetId() }}</span> was found. It may have been
           archived, or the backend may be unreachable.
         </p>
-        <a class="btn" routerLink="/devices">Back to Devices</a>
+        <a class="btn" routerLink="/assets">Back to assets</a>
       </vision-empty>
     </div>
   } @else if (facade.asset(); as a) {
@@ -30,7 +30,7 @@
         }
       </div>
       <div pageBarActions class="row">
-        <a class="btn secondary" routerLink="/devices">All devices</a>
+        <a class="btn secondary" routerLink="/assets">All assets</a>
         @if (!isEditorOpen('asset') && !facade.archived()) {
           <button type="button" class="btn secondary" (click)="renameAsset()">Rename asset…</button>
         }

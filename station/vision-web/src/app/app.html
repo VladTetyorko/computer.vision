@@ -19,6 +19,19 @@
       <code>./mvnw spring-boot:run -pl vision-app</code>.
     </div>
   }
+
+  <!-- The silent-degradation case (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1) — mutually exclusive
+       with the banner above (`liveDegraded` requires `reachable() === true`, `offline` requires
+       `false`), so the two never stack. SYSTEM-STATUS asked for a `<vision-notice>` card above the
+       routed outlet; it renders here instead, because OPS-UX-PLAN §2 A6 rev.2 has since made this
+       stack the single place a station-wide notice may appear — a card floating above
+       `<router-outlet>` is exactly the in-flow sibling that comment forbids. Lowest severity, so it
+       sits last. -->
+  @if (liveDegraded()) {
+    <div class="shell-banner shell-banner--warn" role="status">
+      Live updates disconnected — falling back to a 5-second refresh. Retrying every 60 s.
+    </div>
+  }
 </div>
 
 @if (auth.user()) {

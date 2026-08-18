@@ -1,7 +1,7 @@
 <div class="page">
   @if (facade.device(); as d) {
     <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 — `page-head` becomes the bar; the protocol/capability
-         chips (real device facts, not prose) ride `[pageBarFilters]`, Start/Stop + "All devices"
+         chips (real device facts, not prose) ride `[pageBarFilters]`, Start/Stop + "All assets"
          ride `[pageBarActions]`. No description existed here to prune or turn into a `?` hint. -->
     <vision-page-bar [title]="d.name">
       <div pageBarFilters class="row device-chips">
@@ -11,7 +11,7 @@
         }
       </div>
       <div pageBarActions class="row">
-        <a class="btn secondary" routerLink="/devices">All devices</a>
+        <a class="btn secondary" routerLink="/assets">All assets</a>
         @if (facade.live()) {
           <button type="button" class="btn danger" (click)="facade.stop()" [disabled]="facade.busy()">Stop stream</button>
         } @else {
@@ -159,7 +159,7 @@
           No device with id <span class="mono">{{ deviceId() }}</span> is registered. It may have
           been removed, or the backend may be unreachable.
         </p>
-        <a class="btn" routerLink="/devices">Back to Devices</a>
+        <a class="btn" routerLink="/assets">Back to assets</a>
       </vision-empty>
     </div>
   }

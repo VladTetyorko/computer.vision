@@ -116,23 +116,37 @@ export function relativeTimeLabel(atIso: string, nowMs: number): string {
 }
 
 /**
+ * The minimal shape {@link describeEventSource} needs — satisfied structurally by both
+ * `DetectionEvent` (`streamId` always present) and `LiveEvent` (`streamId` optional, no `assetId`
+ * at all — docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2's system-event feed reuses this rather than
+ * duplicating the identical device-name resolution as a second copy in `core/system-events/**`).
+ */
+export interface EventSourceIdentifiers {
+  readonly streamId?: string;
+  readonly assetId?: string;
+}
+
+/**
  * A friendly name for the source behind an event — the device streaming it, when resolvable via
- * the fleet's currently-active streams, falling back to a short id fragment. `DetectionEvent`
- * itself carries only `streamId`/`assetId`, not a display name, so this always needs `FleetStore`'s
- * own `devices`/`streams` snapshots to do better than a raw id.
+ * the fleet's currently-active streams, falling back to a short id fragment. Neither `DetectionEvent`
+ * nor `LiveEvent` carries a display name of its own, so this always needs `FleetStore`'s own
+ * `devices`/`streams` snapshots to do better than a raw id. A device-level event with neither a
+ * `streamId` nor an `assetId` (e.g. `LiveEvent` for `DEVICE_ONLINE`/`DEVICE_OFFLINE` — see
+ * `Event.java`'s own "`streamId` nullable … device-level events" doc comment) degrades to `'—'`,
+ * never a crash on an absent fallback id.
  */
 export function describeEventSource(
-  event: DetectionEvent,
+  event: EventSourceIdentifiers,
   devices: readonly Device[],
   streams: readonly ActiveStream[],
 ): string {
-  const stream = streams.find((candidate) => candidate.streamId === event.streamId);
+  const stream = event.streamId ? streams.find((candidate) => candidate.streamId === event.streamId) : undefined;
   const device = stream ? devices.find((candidate) => candidate.id === stream.deviceId) : undefined;
   if (device) {
     return device.name;
   }
   const fallback = event.assetId ?? event.streamId;
-  return fallback.slice(0, 8);
+  return fallback ? fallback.slice(0, 8) : '—';
 }
 
 // --- Navigation target (Wall rail / map marker popup "open" action) ---------------------------

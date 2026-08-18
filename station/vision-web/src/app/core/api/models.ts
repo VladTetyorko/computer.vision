@@ -1637,6 +1637,59 @@ export interface SystemNetworkResponse {
   readonly mavlinkPort: number;
 }
 
+// --- System status (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.1/§4.3's frozen wire contract, S3) -----------
+// `GET /api/system/status` — the platform's own honest "is it working right now" surface
+// (`SubsystemStatusPort`/`SystemStatusController`, station/vision-api). Backs `core/system-status/**`
+// (the shell rollup dot + `/manage/system`) and `/debug`'s repointed Health card.
+
+/**
+ * Mirrors `platform.SubsystemStatusPort.Health` — one subsystem's own reading. `'DISABLED'` means
+ * "switched off by config" and **must render as neutral/off, never as a fault**
+ * (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.1's own explicit rule — a deliberately-disabled subsystem is not
+ * a problem); `'UNKNOWN'` covers both "a provider threw while answering" and ordinary "nothing to
+ * report yet" cases (e.g. `mavlink-link` before any vehicle is claimed, per the S2 outcome notes this
+ * type's own doc comment is transcribed from) — this app treats it the same honest, uncoloured way as
+ * `'DISABLED'` (see `core/system-status/system-status-logic.ts#healthSeverity`), rather than guessing
+ * which of the two it is. `Overall` below is the same four values minus `'DISABLED'` — the backend
+ * excludes disabled subsystems from the rollup entirely, so the top-level verdict can never carry it.
+ */
+export type SubsystemHealth = 'OK' | 'DEGRADED' | 'DOWN' | 'DISABLED' | 'UNKNOWN';
+
+/** Mirrors `SystemStatusResponse#overall` — the worst subsystem `SubsystemHealth`, `'DISABLED'` ignored, `'UNKNOWN'` for an empty subsystem list. */
+export type OverallHealth = 'OK' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
+
+/**
+ * Mirrors `dto.SubsystemStatusResponse` — one row of `SystemStatusResponse#subsystems`. `id` is a
+ * stable slug (`cv-service`/`mavlink-link`/`video-publish`/`live-updates` today, per §4.2's frozen
+ * table) the UI keys off but never hard-codes into layout — the backend wires providers
+ * conditionally, so the list itself is not fixed (§5.1's own instruction: render whatever arrives).
+ * `detail` is the backend's own honest human sentence; `since`/`hint` are each independently **absent,
+ * not `null`**, when there is nothing to say — same `@JsonInclude(NON_NULL)` convention as every other
+ * optional field in this file.
+ */
+export interface SubsystemStatus {
+  readonly id: string;
+  readonly label: string;
+  readonly health: SubsystemHealth;
+  readonly detail: string;
+  readonly since?: string;
+  readonly hint?: string;
+}
+
+/**
+ * Mirrors `dto.SystemStatusResponse`, the body of `GET /api/system/status` — **readable by any
+ * authenticated user, not `managerOnly`** (§4.3's own deliberate call: an operator whose CV died must
+ * be able to see why, and the response exposes no secrets, hostnames/states only). A provider that
+ * throws server-side still returns a `200` with that one subsystem reported `'UNKNOWN'` (§4.3: "one
+ * sick provider must not blind the page") — this app never needs to special-case a failed subsystem
+ * read the way it does a failed *endpoint* read.
+ */
+export interface SystemStatus {
+  readonly overall: OverallHealth;
+  readonly checkedAt: string;
+  readonly subsystems: readonly SubsystemStatus[];
+}
+
 // --- Auth (docs/plans/done/U-AUTH-PLAN.md wave 3's frozen contract; wave 4 is this app's own UI) -----------
 // `core/auth/auth-store.ts` is the only caller of the three `VisionApi` methods these types back —
 // no page/component talks to `/api/auth/**` directly, mirroring every other store in this app.

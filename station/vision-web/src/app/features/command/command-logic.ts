@@ -73,17 +73,26 @@ function rowRank(row: EntityRow): number {
  * `geofenceBreachesByAssetId` (docs/plans/done/OPS-CORE-PLAN.md §G-c, optional) is the identical shape for the
  * new top-rank `geofence-breach` reason — `CommandPage` builds this from
  * `core/geofence/geofence-logic.ts#groupBreachesByAsset(activeGeofenceBreaches(liveStore.liveEvents()))`.
+ *
+ * `pipelineErrorMessagesByStreamId` (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4, optional) is keyed by
+ * `streamId`, not `assetId` — a `PIPELINE_ERROR` event carries only the stream it happened on (see
+ * `core/system-events/system-events-logic.ts#activePipelineErrorMessagesByStreamId`'s own doc
+ * comment) — so each row resolves its own entry via `asset.streamId`, which is itself only present
+ * while `asset.streaming` is `true` (`AssetAttention.streamId`'s own doc comment); an asset that
+ * isn't streaming can never carry a stale pipeline-error reason as a result, with no extra code here.
  */
 export function buildEntityRows(
   assets: readonly AssetAttention[],
   gpsFixTypeByAssetId?: ReadonlyMap<string, number>,
   geofenceBreachesByAssetId?: ReadonlyMap<string, readonly GeofenceBreach[]>,
+  pipelineErrorMessagesByStreamId?: ReadonlyMap<string, string>,
 ): readonly EntityRow[] {
   const rows: EntityRow[] = assets.map((asset) => {
     const reasons = attentionReasons(
       asset,
       gpsFixTypeByAssetId?.get(asset.assetId),
       geofenceBreachesByAssetId?.get(asset.assetId),
+      asset.streamId ? pipelineErrorMessagesByStreamId?.get(asset.streamId) : undefined,
     );
     return { asset, reasons, severity: reasons[0]?.severity ?? 'ok' };
   });

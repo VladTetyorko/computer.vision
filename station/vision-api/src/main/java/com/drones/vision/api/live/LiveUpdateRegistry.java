@@ -574,6 +574,32 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     }
 
     /**
+     * How many SSE connections are currently open — {@code live-updates}'s {@code
+     * SubsystemStatusPort} plumbing (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2), read by {@code
+     * LiveUpdateStatusProvider} (same package). This class has no external dependency to fail
+     * against (it dispatches purely in-process), so its mere presence as a live bean already means
+     * SSE dispatch is running; this count is reported as informational detail, not itself a
+     * pass/fail signal.
+     */
+    int connectionCount() {
+        return connections.size();
+    }
+
+    /**
+     * Whether any topic buffer has ever dropped a retained envelope — informational, same reasoning
+     * as {@link #connectionCount()}: a busy, healthy deployment drops routinely once a buffer is
+     * past capacity, so this is surfaced as detail for an operator, never read as a fault.
+     */
+    boolean anyBufferEverDropped() {
+        if (fleetBuffer.everDropped() || eventBuffer.everDropped() || devicesBuffer.everDropped()
+                || detectionEventsBuffer.everDropped() || mapBuffer.everDropped()) {
+            return true;
+        }
+        return telemetryBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped)
+                || detectionBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped);
+    }
+
+    /**
      * {@inheritDoc}
      *
      * <p>Recomputes and broadcasts <em>both</em> the {@code fleet} (asset-centric) and {@code

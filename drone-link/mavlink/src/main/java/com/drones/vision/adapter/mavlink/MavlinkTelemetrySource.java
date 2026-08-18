@@ -1,5 +1,6 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.session.LinkHealth;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -190,6 +191,22 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     List<MavlinkGateway.ClaimedVehicle> claimedVehicles(String bindKey) {
         MavlinkGateway gateway = gateways.get(bindKey);
         return gateway == null ? List.of() : gateway.claimedVehicles();
+    }
+
+    /**
+     * {@link LinkHealth.Health} for every vehicle currently claimed across every open gateway
+     * (every bind address, not just one) — {@code mavlink-link}'s {@code SubsystemStatusPort}
+     * plumbing (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2). Public — unlike this class's other
+     * {@code MavlinkGateway}-plumbing accessors — because {@code vision-app}'s wiring passes {@code
+     * this::claimedVehicleHealth} as the {@code Supplier<List<LinkHealth.Health>>}
+     * {@link MavlinkLinkStatusProvider} takes; that wiring class lives in a different package and
+     * cannot reach a package-private method. Empty when no gateway is open, i.e. no MAVLink-protocol
+     * device has ever been opened — a genuinely different, more honest state than "the link is down".
+     */
+    public List<LinkHealth.Health> claimedVehicleHealth() {
+        return gateways.values().stream()
+                .flatMap(gateway -> gateway.claimedVehicleHealth().stream())
+                .toList();
     }
 
     /**

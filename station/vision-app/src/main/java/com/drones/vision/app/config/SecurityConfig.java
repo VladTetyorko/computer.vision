@@ -73,6 +73,12 @@ public class SecurityConfig {
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/api/auth/logout").permitAll()
+                        // Liveness probe (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.4): a container
+                        // healthcheck (docker-compose.yml) has no session to authenticate with, and
+                        // only `health` is ever exposed here (application.yaml) -- no secret to
+                        // protect. Listed explicitly ahead of the /api/** rule below for clarity, even
+                        // though /actuator/** would also fall through to anyRequest().permitAll().
+                        .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/api/**", "/ws/**").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(handling -> handling

@@ -28,8 +28,8 @@ function fakeEventsStore() {
   return { activate: () => {}, release: () => {}, events: () => [] as unknown[] };
 }
 
-function fakeLiveStore() {
-  return { liveEvents: () => [] as unknown[] };
+function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
+  return { liveEvents: () => [] as unknown[], connectionState: () => connectionState };
 }
 
 /** `authEnabled` defaults to `false` — this app's own real default (`vision.auth.enabled=false`),
@@ -46,7 +46,12 @@ function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT', authEnabled = fa
 class StubPage {}
 
 function render(
-  options: { topRole?: 'ADMIN' | 'MANAGER' | 'PILOT'; reachable?: boolean; authEnabled?: boolean } = {},
+  options: {
+    topRole?: 'ADMIN' | 'MANAGER' | 'PILOT';
+    reachable?: boolean;
+    authEnabled?: boolean;
+    connectionState?: 'connecting' | 'open' | 'closed';
+  } = {},
 ) {
   TestBed.configureTestingModule({
     providers: [
@@ -58,13 +63,25 @@ function render(
       { provide: LeafletWarmup, useValue: { schedule: () => {} } },
       { provide: AuthStore, useValue: fakeAuthStore(options.topRole, options.authEnabled) },
       { provide: EventsStore, useValue: fakeEventsStore() },
-      { provide: LiveStore, useValue: fakeLiveStore() },
+      { provide: LiveStore, useValue: fakeLiveStore(options.connectionState) },
       { provide: VisionApi, useValue: {} },
     ],
   });
   const fixture = TestBed.createComponent(App);
   fixture.detectChanges();
   return fixture;
+}
+
+/**
+ * Finds one banner in the shell stack by its own text. Banners are told apart by what they say
+ * rather than by a per-banner class because they deliberately share `.shell-banner--warn`
+ * (OPS-UX-PLAN §2 A6 rev.2: severity is the only distinction the stack makes), so a class-based
+ * query cannot tell "offline" from "live degraded" — and asserting on the first match would pass
+ * for the wrong banner.
+ */
+function bannerWith(fixture: { nativeElement: unknown }, text: string): Element | null {
+  const banners = (fixture.nativeElement as HTMLElement).querySelectorAll('.shell-banner');
+  return Array.from(banners).find((banner) => banner.textContent?.includes(text)) ?? null;
 }
 
 describe('routeTreeHasFullBleed (pure)', () => {
@@ -211,6 +228,27 @@ describe('App shell', () => {
       // `height: var(--shell-h)` in the app invalid-at-computed-value-time rather than merely wrong).
       expect(document.documentElement.style.getPropertyValue('--shell-banner-h')).toMatch(/^\d+px$/);
     });
+  });
+
+  it('shows the live-degraded banner only for the specific silent-degradation case: SSE closed + backend reachable (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1)', () => {
+    const degraded = bannerWith(render({ topRole: 'PILOT', reachable: true, connectionState: 'closed' }),
+      'Live updates disconnected');
+    expect(degraded).not.toBeNull();
+    expect(degraded?.textContent).toContain('5-second refresh');
+    expect(degraded?.textContent).toContain('Retrying every 60 s');
+
+    TestBed.resetTestingModule();
+    // Reachable but still connecting (not yet closed) — not the degraded case.
+    const connecting = render({ topRole: 'PILOT', reachable: true, connectionState: 'connecting' });
+    expect(bannerWith(connecting, 'Live updates disconnected')).toBeNull();
+
+    TestBed.resetTestingModule();
+    // Backend unreachable — the louder offline banner covers this, not the live-degraded one
+    // (they are mutually exclusive; a closed SSE connection is an expected consequence of the
+    // backend being down at all, not a second, separate problem).
+    const offline = render({ topRole: 'PILOT', reachable: false, connectionState: 'closed' });
+    expect(bannerWith(offline, 'Cannot reach the Vision backend')).not.toBeNull();
+    expect(bannerWith(offline, 'Live updates disconnected')).toBeNull();
   });
 
   it('preserves the toast host and undo toast', () => {
