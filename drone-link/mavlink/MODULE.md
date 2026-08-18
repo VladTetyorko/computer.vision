@@ -15,9 +15,9 @@ raw library type: `MavlinkTelemetryDecoder`'s message-type dispatch, `FlightMode
 `MavCmd`/`MavResult`, `SimulatedVehicleMessages`'s builders, `MavlinkHeartbeatScanner`'s `Heartbeat`) ·
 **Used by:** vision-app
 
-**Build/test:** `./mvnw -B -pl drone-link/mavlink test` — 155 tests across 13 classes.
-**155/155 green**, confirmed across three consecutive full `-pl drone-link/mavlink test` runs
-(docs/plans/active/GEO-POSE-PLAN.md wave V2). The two SITL-gated tests ran un-skipped and passed
+**Build/test:** `./mvnw -B -pl drone-link/mavlink test` — 164 tests across 15 classes.
+**164/164 green**, confirmed across three consecutive full `-pl drone-link/mavlink -am test` runs
+(docs/plans/active/DRONE-ONBOARDING-PLAN.md wave O1). The two SITL-gated tests ran un-skipped and passed
 every run (`vision-sitl:4.7.0` present on this machine): `MavlinkSitlSmokeIntegrationTest` 1/1 in
 ~1.2s, `MavlinkSitlReturnHomeIntegrationTest` 2/2 in ~31s. Timing-sensitive cases in
 `MavlinkRoundTripIntegrationTest`/`MavlinkFleetGatewayIntegrationTest`/`MavlinkHeartbeatScannerTest`
@@ -69,7 +69,10 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   `unregister(VehicleRegistration): boolean` (true = now empty → gateway closes itself),
   `isClosed()`, `unclaimedVehicles()`, `claimedVehicles()`, `commandTarget(DeviceId)`, and
   `sink()`/`correlator()`/`peers()` (the session's `FrameSink`/`Correlator`/`PeerDirectory`, for a TX
-  port class to build a `CommandService`/`ManualControlService` on). Nested records
+  port class to build a `CommandService`/`ManualControlService` on). Also owns
+  `MavlinkMessageInventory messageInventory()` (package-private, **new**, docs/plans/active/DRONE-ONBOARDING-PLAN.md
+  wave O1 — see below); constructed alongside the session and closed in `close()`, between the frame
+  subscription and the link. Nested records
   `UnclaimedVehicle(int sysid, String firmware, Integer mavType, Instant lastHeard)`,
   `ClaimedVehicle(int sysid, DeviceId deviceId, String firmware, Integer mavType, Instant lastHeard)`,
   `CommandTarget(int sysid, String firmware, Integer mavType, InetSocketAddress sourceAddress)` —
@@ -91,6 +94,31 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
 - `final class VehicleRegistration` (package-private) — one device's claim state: `deviceId`,
   `pinnedSysid`, `publisher`, mutable `claimedSysid`/`decoder`. Shrunk in W4 — firmware/mavType/
   last-heard/source-address moved to `PeerDirectory` (see above), no longer duplicated here.
+- `final class MavlinkMessageInventory` (package-private, **new**, docs/plans/active/DRONE-ONBOARDING-PLAN.md
+  wave O1 — stage 1 of the onboarding probe pipeline) — a passive, per-peer message inventory: its own
+  `Dispatcher.subscribe(MessageFilter.any(), ...)` counts every observed `(sysid, messageId)` pair's
+  count/Hz over a rolling window and estimates each peer's bytes/s. One `MavlinkMessageInventory` per
+  `MavlinkGateway` (constructed in its constructor, closed in its `close()`); observes every sysid on
+  the link, claimed or not, independent of `VehicleClaimPolicy`. `observedPeers(): List<Integer>`,
+  `snapshot(int sysid): PeerSnapshot` (`null` if never observed or LRU-evicted), `close()`. Nested
+  records `MessageRate(int messageId, long count, double hz)` and
+  `PeerSnapshot(int sysid, List<MessageRate> messages, long bytesPerSecond)`. **Rolling, not
+  cumulative**: `count`/`hz` describe only the trailing `MavlinkSettings.Inventory.window()` — ages
+  out to zero as real time passes even with no new frame arriving (query-time decay via a fixed-size
+  ring of per-`bucketWidth` sums, no eviction thread needed), matching the plan's own §2.4
+  never-a-frozen-live-value rule. **Per-sysid isolation** (one `PeerInventory` per observed system id,
+  never pooled) is proven by a real-loopback test, `MavlinkMessageInventoryIntegrationTest`. Bounded
+  memory against a flooding/malicious sender via LRU eviction on both tracked peers
+  (`maxTrackedPeers`) and tracked message types per peer (`maxTrackedMessageTypesPerPeer`), the same
+  `LinkedHashMap`+`removeEldestEntry` idiom `mavlink-core`'s own `FrameReader.buffers` already uses.
+  **`bytesPerSecond` is a documented upper-bound estimate, not a wire measurement** — see Gotchas.
+  Configured by the new `MavlinkSettings.Inventory(Duration window, Duration bucketWidth, int
+  maxTrackedPeers, int maxTrackedMessageTypesPerPeer)` record (defaults: 10s window, 1s bucket, 64
+  peers, 128 message types per peer — rationale for each is in that record's own javadoc), the 9th
+  component of `MavlinkSettings`, threaded through `MavlinkSettings.defaults()`/`withSilenceWindow()`
+  and a new `withInventory(Inventory)` copy method. A back-compat 8-arg `MavlinkSettings` constructor
+  (defaulting `inventory` to `Inventory.defaults()`) keeps `vision-app`'s existing `TelemetryWiring`
+  call site compiling unchanged — out of this wave's file scope.
 - `final class MavlinkFlightCommander implements FlightCommandPort` — `setMode`/`returnToHome`/
   `arm`/`disarm`/`capabilities`, unchanged resolve/reject rules and wire bytes (see Gotchas for
   what's frozen). Delegates the actual send/await to a fresh, per-call `com.drones.mavlink.service.CommandService`
@@ -236,6 +264,19 @@ row above through `STATUSTEXT` has fired at least once for the decoder's lifetim
   production-robustness regression and would need a `drone-link/mavlink-core` change (a link-failure
   callback on `MavlinkSession`, or an equivalent) to close — flagged, not fixed, per this wave's
   frozen-library rule.
+- **`MavFrame` carries no raw wire byte length, so `MavlinkMessageInventory.bytesPerSecond()` is an
+  upper-bound estimate, not a measurement — a real gap, flagged for a future `mavlink-core` wave.**
+  `FrameReader` reads a frame's raw bytes only transiently (to pull two flag bytes into `MavHeader`)
+  then discards the array; `MavFrame` (frozen by that module's own `API.md`) has nowhere to keep it.
+  Absent that field, this class estimates each frame's size as fixed protocol overhead
+  (version/signature-dependent: 8 bytes v1, 12 bytes v2 unsigned, +13 more for v2's signature block)
+  plus that message type's *maximum* payload length — the sum of every `@MavlinkFieldInfo` field's
+  `unitSize() * max(1, arraySize())`, exactly what `io.dronefleet.mavlink`'s own
+  `ReflectionPayloadSerializer` would allocate, computed once per payload class and cached (never
+  reflected on a per-frame basis). MAVLink 2 trims trailing all-zero bytes off the wire, so this
+  over-estimates whenever a v2 message's trailing fields happen to be zero — closing the gap for real
+  would need a `MavFrame.wireLength()`-shaped field added to `mavlink-core`, out of this wave's scope
+  (task brief: no library change).
 - **The ardupilotmega dialect is now learned per UDP source address, not per sysid — a
   `drone-link/mavlink-core` L2 design tradeoff, confirmed by a failing test.** Before W4, this module read
   every message off one long-lived `MavlinkConnection` per socket; that connection's own
@@ -333,3 +374,18 @@ thin mapping/rollup over `MavlinkTelemetrySourceTest`'s already-tested `claimedV
 fake `SubsystemStatusPort`s). Wired by `vision-app`'s `SystemStatusWiring` — unconditionally (unlike
 `cv-service`/`video-publish`, `mavlink-link` has no enable/disable flag of its own to gate a companion
 `Health.DISABLED` bean on).
+
+docs/plans/active/DRONE-ONBOARDING-PLAN.md **wave O1 done**: passive message inventory (msgid → Hz,
+bytes/s per peer), stage 1 of the probe pipeline O4 will later consume — no library change, no write,
+no new port, pure observation of what a connected vehicle already sends. New: `MavlinkMessageInventory`
+(package-private, one per `MavlinkGateway`) and `MavlinkSettings.Inventory` (new 9th `MavlinkSettings`
+component, back-compat 8-arg constructor kept for `vision-app`'s `TelemetryWiring`, untouched — out of
+this wave's file scope). See API surface and Gotchas above. 164/164 tests green (155 pre-existing +
+8 new `MavlinkMessageInventoryTest` cases covering the counting/windowing/eviction arithmetic against
+a hand-fake `Dispatcher` + 1 new `MavlinkMessageInventoryIntegrationTest` case — the task's mandated
+real-loopback proof that two genuine `MavlinkFeedTransmitter` feeds at distinct sysids on one socket
+never pool their counts), confirmed across three consecutive full-module runs; SITL tests ran
+un-skipped and passed every run. Production-robustness finding (not fixed, flagged only, per this
+wave's frozen-library rule): `MavFrame` carries no raw wire byte length, so `bytesPerSecond()` is a
+documented upper-bound estimate rather than a true measurement (see Gotchas). `drone-link/mavlink-core`
+was not touched (another wave's concurrent scope).

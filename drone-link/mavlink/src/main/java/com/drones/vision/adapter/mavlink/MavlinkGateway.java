@@ -48,7 +48,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       VehicleClaimPolicy} on every claim/re-election — a decoder's accumulated fields belong to
  *       one physical vehicle, and reusing one across a claim change would leak the old vehicle's
  *       stale values into the new one's first samples. This rule is load-bearing and unchanged
- *       from the pre-W4 design.</li>
+ *       from the pre-W4 design;</li>
+ *   <li>a {@link MavlinkMessageInventory} (docs/plans/active/DRONE-ONBOARDING-PLAN.md O1) — a
+ *       second, independent dispatcher subscription that passively counts every message type heard
+ *       from every peer, claimed or not; see {@link #messageInventory()}.</li>
  * </ul>
  * It subscribes to {@code session.dispatcher()} once, for every frame; each dispatched frame is
  * handed to {@link VehicleClaimPolicy#resolve} to find the owning registration (by sysid alone --
@@ -104,6 +107,7 @@ final class MavlinkGateway {
     private final MavlinkSession session;
     private final VehicleClaimPolicy claimPolicy;
     private final Subscription subscription;
+    private final MavlinkMessageInventory messageInventory;
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     /**
@@ -126,6 +130,11 @@ final class MavlinkGateway {
         this.claimPolicy = new VehicleClaimPolicy(
                 session.peers(), settings.silenceWindow().toMillis(), settings.maxUnclaimedVehicles());
         this.subscription = session.dispatcher().subscribe(MessageFilter.any(), this::onFrame);
+        // A second, independent subscription (docs/plans/active/DRONE-ONBOARDING-PLAN.md O1,
+        // §3.2's "passive inventory") -- deliberately not folded into onFrame's routing/decode
+        // subscription above, so a bug in one can never affect the other, and so the inventory
+        // keeps counting sysids nobody has claimed (see MavlinkMessageInventory's own javadoc).
+        this.messageInventory = new MavlinkMessageInventory(session.dispatcher(), settings.inventory());
     }
 
     /** Once closed (last registration released), never reused. */
@@ -210,6 +219,16 @@ final class MavlinkGateway {
         return session.peers();
     }
 
+    /**
+     * This gateway's passive per-sysid message inventory (docs/plans/active/DRONE-ONBOARDING-PLAN.md
+     * O1) — every message type heard on this socket, claimed or not, with a rolling count/Hz and a
+     * bytes/s estimate per peer. Never {@code null}: created alongside {@link #session} in the
+     * constructor and lives for this gateway's whole lifetime.
+     */
+    MavlinkMessageInventory messageInventory() {
+        return messageInventory;
+    }
+
     private void onFrame(MavFrame frame) {
         int sysid = frame.header().system().value();
         VehicleRegistration owner = claimPolicy.resolve(sysid);
@@ -232,6 +251,7 @@ final class MavlinkGateway {
             return;
         }
         subscription.close();
+        messageInventory.close();
         link.close();
         session.close();
     }
