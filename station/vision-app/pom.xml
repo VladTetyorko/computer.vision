@@ -165,13 +165,16 @@
             <artifactId>testcontainers-postgresql</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- PostgresResetTestExecutionListener's between-test-class clean()+migrate(): flyway-core
-             already reaches this module's runtime classpath transitively via adapter-persistence, but is
-             declared directly here too since testsupport code imports org.flywaydb.core.Flyway. -->
+        <!-- Declared directly because testsupport code (PostgresResetTestExecutionListener's
+             between-test-class clean()+migrate()) imports org.flywaydb.core.Flyway. Compile scope, NOT
+             test: a direct declaration wins over the transitive one from adapter-persistence (Maven's
+             nearest-definition rule), so declaring it test-scoped here demotes the whole module's
+             flyway-core to test and drops it out of the repackaged jar. Such a jar boots fine from the
+             reactor/IDE classpath and dies with NoClassDefFoundError: org/flywaydb/core/Flyway under
+             "java -jar", i.e. exactly how Dockerfile runs it. -->
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 
