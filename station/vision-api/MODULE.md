@@ -1949,11 +1949,15 @@ properties combination).
 matrix as seed data, D6 — eleven rows, `firmware='ardupilot'` only per D13; two plan-sourced
 thresholds, `map-position`≥2.0Hz and `visual-geolocation`≥5.0Hz, the other five message-bearing rows
 seeded at a **judgment-call** 1.0Hz floor with no plan-given number to draw from), `V19__asset_usage_phase.sql`
-(schema-only additive columns on `asset_usages` — `phase`/`first_armed_at`/`last_disarmed_at` — ahead
-of O7's domain wiring, deliberately not touching `AssetUsageEntity` itself since `contexts/vision-warehouse`
-was out of this wave's file scope). Full detail — every column, every seeded row, every judgment call
-and representation gap — lives in `storage/persistence/MODULE.md`'s own Schema section; not repeated
-here.
+(additive columns on `asset_usages` — `phase`/`first_armed_at`/`last_disarmed_at`). `phase` shipped
+schema-only at first, deliberately deferred to O7 (`contexts/vision-warehouse`, out of this wave's file
+scope) per the plan's module-placement table; O7 landed `AssetUsage#phase()` but reported that
+`AssetUsageEntity`/`AssetUsageMapper` mapped nothing to it, silently reverting every reload to
+`PREFLIGHT` — fixed in `storage/persistence` by this wave after all (entity field + both mapper
+directions + three round-trip tests). `first_armed_at`/`last_disarmed_at` remain unmapped — no
+`AssetUsage` field exists for either yet. Full detail — every column, every seeded row, every judgment
+call and representation gap — lives in `storage/persistence/MODULE.md`'s own Schema section and its
+"O5 done" narrative; not repeated here.
 
 **Before/after** (`./mvnw -B -pl station/vision-api -am test -DskipWeb`, Maven's own `Tests run:`
 summary line, three consecutive runs): **624 → 633 (+9, `OnboardingWireContractTest`)**, `Tests run: 633,

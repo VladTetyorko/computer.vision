@@ -66,6 +66,7 @@ import com.drones.vision.perception.domain.model.TrackingTelemetry;
 import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.flight.domain.model.VehicleProfile;
@@ -554,6 +555,71 @@ class PostgresDockerIntegrationTest {
             repository.save(new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0));
 
             assertTrue(repository.findOpenByAsset(assetId).isEmpty());
+        }
+
+        /**
+         * docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O5/O7 -- the regression this test
+         * guards against: {@code AssetUsageMapper} used to have no {@code phase} field at all, so a
+         * phase {@code UsageTracker} had actually computed and saved was silently discarded and every
+         * reload came back {@code PREFLIGHT} regardless of what was saved. Explicitly asserts a
+         * non-default phase (not {@code PREFLIGHT}, so a mapper that always wrote/read the default
+         * could not accidentally pass this test) survives save-then-reload exactly.
+         */
+        @Test
+        void savedUsageWithANonDefaultPhaseRoundTripsExactly() {
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.IN_FLIGHT);
+
+            repository.save(usage);
+
+            Optional<AssetUsage> found = repository.findById(usage.id());
+            assertTrue(found.isPresent());
+            assertEquals(UsagePhase.IN_FLIGHT, found.get().phase());
+            assertEquals(usage, found.get());
+        }
+
+        @Test
+        void saveIsAnUpsertThatCanTransitionPhase() {
+            UsageId id = UsageId.random();
+            AssetId assetId = AssetId.random();
+            repository.save(new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.PREFLIGHT));
+
+            repository.save(new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.IN_FLIGHT));
+
+            Optional<AssetUsage> found = repository.findById(id);
+            assertTrue(found.isPresent());
+            assertEquals(UsagePhase.IN_FLIGHT, found.get().phase(),
+                    "re-saving an existing usage must overwrite phase, not just insert-once");
+        }
+
+        /**
+         * Simulates a row written before {@code V19__asset_usage_phase.sql} existed (no backfill, so
+         * {@code phase} is {@code NULL} on disk) by nulling the column directly after a normal save,
+         * bypassing the mapper (which never writes {@code null} itself, since {@link
+         * AssetUsage#phase()} is non-null by construction) -- proves {@code AssetUsageMapper#toDomain}
+         * honestly defaults a legacy {@code NULL} column to {@link UsagePhase#PREFLIGHT} via {@link
+         * AssetUsage}'s own pre-O7 convenience constructor, per {@code AssetUsageEntity}'s javadoc.
+         */
+        @Test
+        void legacyRowWithNullPhaseColumnMapsToPreflightDefault() {
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.LINK_LOST);
+            repository.save(usage);
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                em.getTransaction().begin();
+                em.createNativeQuery("update asset_usages set phase = null where id = :id")
+                        .setParameter("id", usage.id().value())
+                        .executeUpdate();
+                em.getTransaction().commit();
+            } finally {
+                em.close();
+            }
+
+            Optional<AssetUsage> found = repository.findById(usage.id());
+
+            assertTrue(found.isPresent());
+            assertEquals(UsagePhase.PREFLIGHT, found.get().phase());
         }
     }
 

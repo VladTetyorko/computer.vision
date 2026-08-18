@@ -1,7 +1,11 @@
 package com.drones.vision.adapter.persistence.entity;
 
+import com.drones.vision.warehouse.domain.model.UsagePhase;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
@@ -23,7 +27,21 @@ import java.util.UUID;
  * null} (a legacy usage, honestly carrying no stream link — see {@link
  * com.drones.vision.warehouse.domain.model.AssetUsage}'s javadoc).
  *
- * <p>{@link com.drones.vision.adapter.persistence.JpaAssetUsageRepository} owns the mapping in
+ * <p>{@code phase} (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O5/O7, {@code
+ * V19__asset_usage_phase.sql}) reuses the domain {@link UsagePhase} enum directly in an {@code
+ * @Enumerated(EnumType.STRING)} field, same convention {@code GeofenceZoneEntity#kind}/{@code
+ * MarkEntity#kind} already follow — nullable, additive, no backfill: a row written before this
+ * column existed reads back {@code null} here, and {@code AssetUsageMapper#toDomain} maps that
+ * {@code null} onto {@link com.drones.vision.warehouse.domain.model.AssetUsage}'s own pre-O7
+ * convenience constructor (defaults to {@link UsagePhase#PREFLIGHT}), the same "unknown, not
+ * fabricated" honesty {@code streamId}/{@code flightState} already practice — never left unmapped,
+ * which previously meant a phase the tracker had actually computed was silently discarded and
+ * re-read as {@code PREFLIGHT} on every reload. {@code first_armed_at}/{@code last_disarmed_at}
+ * (the migration's other two additive columns) stay unmapped here — {@link
+ * com.drones.vision.warehouse.domain.model.AssetUsage} does not carry those two fields as of Wave
+ * O7, only {@code phase}; wiring them is deferred to whoever adds them to the domain record.
+ *
+ * <p>{@link com.drones.vision.adapter.persistence.mapper.AssetUsageMapper} owns the mapping in
  * both directions. No FK to {@code assets} — same no-cross-entity-FK convention as the P-a schema
  * (see {@code CategoryEntity}/{@code AssetEntity}'s javadoc); {@code asset_id} is indexed instead
  * (see {@code V3__history.sql}) for {@code findRecentByAsset}/{@code findOpenByAsset}.
@@ -69,13 +87,18 @@ public class AssetUsageEntity {
     @Column(name = "stream_id")
     private UUID streamId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "phase")
+    private UsagePhase phase;
+
     /** JPA only. */
     protected AssetUsageEntity() {
     }
 
     public AssetUsageEntity(UUID id, UUID assetId, Instant startedAt, Instant endedAt, Double startLatitude,
                              Double startLongitude, Double startAltitudeMeters, Double lastLatitude,
-                             Double lastLongitude, Double lastAltitudeMeters, long sampleCount, UUID streamId) {
+                             Double lastLongitude, Double lastAltitudeMeters, long sampleCount, UUID streamId,
+                             UsagePhase phase) {
         this.id = id;
         this.assetId = assetId;
         this.startedAt = startedAt;
@@ -88,6 +111,7 @@ public class AssetUsageEntity {
         this.lastAltitudeMeters = lastAltitudeMeters;
         this.sampleCount = sampleCount;
         this.streamId = streamId;
+        this.phase = phase;
     }
 
     public UUID id() {
@@ -136,5 +160,9 @@ public class AssetUsageEntity {
 
     public UUID streamId() {
         return streamId;
+    }
+
+    public UsagePhase phase() {
+        return phase;
     }
 }

@@ -4,15 +4,16 @@
 -- no backfill -- every existing row predates the phase concept and stays exactly as it is, same
 -- "unknown, not fabricated" discipline as V6__telemetry_flight_state.sql's flight_state column.
 --
--- Schema only, deliberately: AssetUsageEntity/AssetUsageMapper/JpaAssetUsageRepository are NOT
--- touched by this migration or by this wave. Wiring this column up needs the domain
--- AssetUsage#phase()/firstArmedAt()/lastDisarmedAt() fields, which O7 (contexts/vision-warehouse,
--- running concurrently in a separate worktree at the time this migration was written) owns per the
--- plan's own module-placement table (SS7) -- this wave's file scope is storage/persistence,
--- station/vision-api, station/vision-app only, and contexts/vision-warehouse is explicitly
--- out of bounds to avoid colliding with that concurrent work. The column exists ahead of its
--- reader/writer on purpose (additive, backward compatible, costs nothing idle) so O7 lands against
--- a schema that is already there instead of also needing a migration of its own.
+-- UPDATE (still Wave O5, after O7 merged): O7 (contexts/vision-warehouse/vision-perception, a
+-- concurrent worktree) landed AssetUsage's 9th component -- UsagePhase phase -- but did not add
+-- firstArmedAt()/lastDisarmedAt() fields to the domain record (see UsagePhase's own javadoc: it
+-- names only phase, not the other two). AssetUsageEntity/AssetUsageMapper are now wired for
+-- `phase` (@Enumerated(EnumType.STRING) reusing UsagePhase directly, same convention as
+-- GeofenceZoneEntity#kind), with a null column honestly defaulting to UsagePhase.PREFLIGHT via
+-- AssetUsage's own pre-O7 convenience constructor -- see AssetUsageEntity/AssetUsageMapper's own
+-- javadoc and PostgresDockerIntegrationTest.AssetUsageRepositoryTests' phase round-trip tests.
+-- `first_armed_at`/`last_disarmed_at` remain unmapped: no domain field exists yet to map them to
+-- or from, so wiring them stays deferred to whoever adds those two fields to AssetUsage next.
 ALTER TABLE asset_usages
     ADD COLUMN phase             VARCHAR(20),
     ADD COLUMN first_armed_at    TIMESTAMPTZ,

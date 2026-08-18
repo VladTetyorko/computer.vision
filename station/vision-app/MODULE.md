@@ -2485,3 +2485,14 @@ Postgres since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4; `OnboardingWiringT
 "true")` bean constructing the real `MavlinkVehicleConfigurator` (flagged in
 `OnboardingWiringConfiguration`'s own javadoc, for whoever wires that adapter in next); no UI wiring
 (`station/vision-web/**` untouched, a separate wave).
+
+**Post-merge update**: `feat/drone-onboarding` (the parent branch, carrying O4's and O7's completed
+waves) was merged into this wave's branch after the above was written — cleanly, no conflicts, since
+O4/O7 touched entirely disjoint files. O4's real `MavlinkVehicleConfigurator` now exists in-tree (see
+the deferred bullet above — still not wired into `OnboardingWiringConfiguration`, unchanged). O7 added
+`AssetUsage#phase()`/`UsagePhase` but reported `storage/persistence` never mapped it, silently reverting
+every reload to `PREFLIGHT`; that mapper bug was this wave's to fix (`AssetUsageEntity`/
+`AssetUsageMapper`, both directions, three new round-trip tests) since it lives in adapter-persistence,
+this wave's own file scope — see `storage/persistence/MODULE.md`'s own O5 done-section for the fix and
+`station/vision-api/MODULE.md`'s O5 persistence paragraph for the DTO-facing summary. All counts above
+(208/208 ×3) are from the post-merge, post-fix state.
