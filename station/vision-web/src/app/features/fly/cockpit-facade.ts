@@ -8,6 +8,8 @@ import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
+import { LiveStore } from '../../core/live/live-store';
+import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import { MarksStore } from '../../core/map-data/marks-store';
 import { LayersStore } from '../../core/map-data/layers-store';
 import { DrawingsStore } from '../../core/map-data/drawings-store';
@@ -98,6 +100,10 @@ const LOG_PREFIX = '[cockpit]';
 export class CockpitFacade {
   private readonly api = inject(VisionApi);
   private readonly router = inject(Router);
+  private readonly scheduler = inject(PollScheduler);
+  /** Named `liveStore`, not `live` — this class already has a public `live` computed (below,
+   * "stream() !== undefined"), unrelated to `LiveStore`'s own connection state. */
+  private readonly liveStore = inject(LiveStore);
 
   readonly fleet = inject(FleetStore);
   readonly settings = inject(SettingsStore);
@@ -148,6 +154,10 @@ export class CockpitFacade {
   private lastDetectionsStreamId: string | undefined = undefined;
   /** `${assetId} ${firmware}` — see the capabilities-tracking effect below (constructor). */
   private lastCapabilitiesKey: string | undefined = undefined;
+
+  /** `null` until the asset poll is actually paused/resumed for the first time — see
+   * `applyAssetPollTransport` (docs/plans/active/SCALE-100-PLAN.md §5 S6, item 1). */
+  private assetPollStopFn: (() => void) | null = null;
 
   // --- Video device selection ------------------------------------------------------------------
   readonly videoDevicesList = computed(() => videoDevices(this.asset()?.devices ?? []));
@@ -485,14 +495,64 @@ export class CockpitFacade {
     // Angular effects schedule, they don't run inline at declaration), so `refreshPoll`'s own
     // `loadAsset` half correctly no-ops here; only the switcher's list gets the early fetch.
     void this.refreshPoll();
+    this.assetPollStopFn = this.scheduleAssetPoll();
 
-    const scheduler = inject(PollScheduler);
-    const stopPoll = scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => this.refreshPoll());
+    // Pause/resume the asset poll against `LiveStore`'s own connection state
+    // (docs/plans/active/SCALE-100-PLAN.md §5 S6, item 1) — mirrors
+    // `core/fleet/fleet-store.ts#FleetStore`'s identical transport-switch effect: pause while live
+    // is open, resume and refetch immediately the moment it drops (the switcher list/active asset
+    // may be stale from however long the connection was up).
+    effect(() => {
+      this.applyAssetPollTransport(isLiveAvailable(this.liveStore.connectionState()));
+    });
+
+    // The `fleet` topic (`List<AssetSummaryResponse>`) is exactly `switcherAssets`' own domain —
+    // applied the moment one arrives, independent of whether the poll above is currently paused, so
+    // a snapshot that lands before the transport-switch effect above has paused polling is never
+    // dropped (mirrors `FleetStore`'s own `devices`-snapshot effect). This keeps the header
+    // switcher's own list exactly as fresh while live as the 5s poll kept it before — only
+    // `loadAsset(id)`'s own richer `AssetDetails` (`devices`/`recentUsages` — no matching live
+    // topic) actually goes stale for the length of the live connection, the same accepted
+    // trade-off `GeofenceStore` takes for its own near-static data.
+    effect(() => {
+      const snapshot = this.liveStore.fleet();
+      if (snapshot !== undefined) {
+        this.switcherAssets.set(snapshot);
+      }
+    });
 
     inject(DestroyRef).onDestroy(() => {
       this.events.release();
-      stopPoll();
+      this.stopAssetPolling();
     });
+  }
+
+  /**
+   * Switches whether the local 5s asset poll is running — mirrors `FleetStore#applyTransport`
+   * exactly (docs/plans/active/SCALE-100-PLAN.md §5 S6, item 1). `liveAvailable` pauses the poll;
+   * its absence resumes it, refetching immediately first (mirrors the reconnect-driven branch every
+   * other gated poller in this app takes). A no-op when the poll is already in the requested state
+   * (`assetPollStopFn`'s own nullness tracks that).
+   */
+  private applyAssetPollTransport(liveAvailable: boolean): void {
+    if (liveAvailable) {
+      this.stopAssetPolling();
+      return;
+    }
+    if (this.assetPollStopFn !== null) {
+      return; // already polling
+    }
+    void this.refreshPoll();
+    this.assetPollStopFn = this.scheduleAssetPoll();
+  }
+
+  private scheduleAssetPoll(): () => void {
+    return this.scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => this.refreshPoll());
+  }
+
+  private stopAssetPolling(): void {
+    this.assetPollStopFn?.();
+    this.assetPollStopFn = null;
   }
 
   // --- Asset selection (route-driven — see this class's own doc comment above) -----------------

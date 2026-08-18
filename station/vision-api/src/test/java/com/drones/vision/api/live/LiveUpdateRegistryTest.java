@@ -1,7 +1,9 @@
 package com.drones.vision.api.live;
 
+import com.drones.vision.api.dto.AssetSummaryResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.MapEventPayload;
+import com.drones.vision.api.support.VisionApiProperties;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
@@ -50,24 +52,34 @@ import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.MediaType;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter.DataWithMediaType;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -177,6 +189,66 @@ class LiveUpdateRegistryTest {
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.DEVICES).snapshot();
         assertEquals(1, buffered.size(), "one devices snapshot per publishFleetChanged() dispatch, same as fleet");
         assertEquals("devices", buffered.get(0).type());
+    }
+
+    /**
+     * docs/plans/active/SCALE-100-PLAN.md §5 S5 — {@link LiveUpdateRegistry#publishFleetChanged()} used to
+     * recompute the entire fleet+devices snapshot on every single call; it now coalesces leading+
+     * trailing, the same treatment {@link LiveUpdateRegistry#flushPending()} already gives telemetry/
+     * detections. These three tests exercise the coalescing itself, independently of the class's
+     * other tests above (which only ever call it once per registry and so never observe a window).
+     */
+    @Test
+    void aFlushWithNoCoalescedFleetChangeDoesNotTriggerAnExtraRecompute() {
+        when(assetService.assets()).thenReturn(List.of());
+        LiveUpdateRegistry registry = registry();
+
+        registry.publishFleetChanged(); // the lone, immediate leading-edge dispatch
+        registry.flushPending(); // must be a no-op here -- nothing was coalesced away to catch up on
+
+        verify(assetService, times(1)).assets();
+    }
+
+    @Test
+    void fiftyRapidPublishFleetChangedCallsCoalesceIntoAtMostTwoRecomputes() {
+        when(assetService.assets()).thenReturn(List.of());
+        LiveUpdateRegistry registry = registry();
+
+        for (int i = 0; i < 50; i++) {
+            registry.publishFleetChanged();
+        }
+        // All 50 calls land inside the same coalescing window (this tight loop lets no real time
+        // elapse) -- only the first opens the window and dispatches; the other 49 just mark it dirty.
+        verify(assetService, times(1)).assets();
+
+        registry.flushPending(); // simulates the window closing -- pays off the coalesced 49
+
+        verify(assetService, times(2)).assets();
+    }
+
+    @Test
+    void theTrailingRecomputeAfterACoalescedBurstReflectsTheNewestStateNotTheFirst() {
+        AssetId staleAssetId = AssetId.random();
+        AssetId freshAssetId = AssetId.random();
+        when(assetService.assets()).thenReturn(List.of(summary(staleAssetId)));
+        LiveUpdateRegistry registry = registry();
+
+        registry.publishFleetChanged(); // leading-edge dispatch -- captures the stale state immediately
+        // A further write commits to the underlying service before the coalescing window closes --
+        // CLAUDE.md rule 9 ("newest data wins"): the trailing recompute must pick this up, not
+        // silently keep serving what the leading dispatch already captured.
+        when(assetService.assets()).thenReturn(List.of(summary(freshAssetId)));
+        registry.publishFleetChanged(); // coalesced away -- only marks the change pending
+
+        registry.flushPending(); // the trailing catch-up
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.FLEET).snapshot();
+        assertEquals(1, buffered.size(), "fleet is latest-only -- the trailing recompute replaces the leading one");
+        @SuppressWarnings("unchecked")
+        List<AssetSummaryResponse> payload = (List<AssetSummaryResponse>) (List<?>) buffered.get(0).payload();
+        assertEquals(1, payload.size());
+        assertEquals(freshAssetId.value().toString(), payload.get(0).assetId(),
+                "the trailing recompute must reflect the newest write, never the one the leading dispatch captured");
     }
 
     @Test
@@ -365,6 +437,33 @@ class LiveUpdateRegistryTest {
         assertEquals(1, registry.bufferFor(LiveTopic.telemetry(assetB)).snapshot().size());
     }
 
+    /**
+     * docs/plans/active/SCALE-100-PLAN.md §5 S7: {@code telemetryBuffer} is no longer the private
+     * {@code static final TELEMETRY_BUFFER_CAPACITY} constant it used to be — it comes from the
+     * {@link VisionApiProperties.Live} passed to the full constructor. This proves the value is
+     * actually enforced, not just stored: with a capacity of 2, a third coalesced flush must evict
+     * the oldest envelope rather than growing the buffer past what was configured.
+     */
+    @Test
+    void configuredTelemetryBufferCapacityActuallyBoundsTheRingBufferSize() {
+        VisionApiProperties.Live defaults = VisionApiProperties.Live.defaults();
+        VisionApiProperties.Live smallTelemetryBuffer = new VisionApiProperties.Live(defaults.coalesce(),
+                defaults.heartbeat(), 2, defaults.eventBuffer(), defaults.detectionBuffer(), defaults.mapBuffer(),
+                defaults.sendTimeout(), defaults.bufferEviction());
+        LiveUpdateRegistry registry = new LiveUpdateRegistry(provider(assetService), provider(deviceService),
+                provider(streamService), streamPublisherPort, provider(detectionEventRepositoryPort),
+                smallTelemetryBuffer, new ImmediateScheduledExecutorService());
+        AssetId assetId = AssetId.random();
+
+        for (double lat = 1.0; lat <= 3.0; lat++) {
+            registry.publishTelemetryAppended(assetId, telemetry(lat));
+            registry.flushPending();
+        }
+
+        assertEquals(2, registry.bufferFor(LiveTopic.telemetry(assetId)).snapshot().size(),
+                "the configured capacity of 2 must be enforced, not the old default of 50");
+    }
+
     @Test
     void aFlushWithNothingPendingForAnAssetAppendsNothingNew() {
         AssetId assetId = AssetId.random();
@@ -457,6 +556,217 @@ class LiveUpdateRegistryTest {
 
         assertEquals(true, registry.watchingDetections(assetId));
         assertEquals(false, registry.watchingDetections(otherAssetId), "only the subscribed asset counts");
+    }
+
+    /**
+     * S2 (docs/plans/active/SCALE-100-PLAN.md §5) — {@link #register} plugs a test-double {@link SseEmitter}
+     * straight into the registry, so these tests can observe exactly what {@link
+     * LiveUpdateRegistry#broadcast}/{@link LiveUpdateRegistry#heartbeatAll} actually write, and with
+     * what timing, on {@link LiveUpdateRegistry#connectionWriteExecutor}'s real virtual threads —
+     * unlike every test above, {@code publishXxx}'s coalesce/broadcast decision still runs
+     * synchronously via {@link ImmediateScheduledExecutorService}, but the connection write itself
+     * is genuinely asynchronous here, exactly as it is in production.
+     */
+    @Test
+    void aBlockedConnectionDoesNotStopOthersFromReceivingEnvelopes() {
+        LiveUpdateRegistry registry = registry();
+        CountDownLatch neverReleased = new CountDownLatch(1);
+        registry.register(new BlockingSseEmitter(neverReleased), Set.of(LiveTopic.EVENT), layerId -> true);
+        RecordingSseEmitter first = new RecordingSseEmitter();
+        RecordingSseEmitter second = new RecordingSseEmitter();
+        registry.register(first, Set.of(LiveTopic.EVENT), layerId -> true);
+        registry.register(second, Set.of(LiveTopic.EVENT), layerId -> true);
+
+        registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STARTED, "started"));
+
+        try {
+            assertTrue(awaitTrue(Duration.ofSeconds(2), () -> first.received().size() == 1 && second.received().size() == 1),
+                    "the two healthy connections must receive the envelope despite the third connection's write being stuck");
+        } finally {
+            neverReleased.countDown(); // release the blocked virtual thread so it doesn't leak past this test
+        }
+    }
+
+    @Test
+    void aConnectionWhoseWriteStaysBlockedPastTheTimeoutIsUnregistered() {
+        LiveUpdateRegistry registry = registry();
+        CountDownLatch neverReleased = new CountDownLatch(1);
+        AssetId assetId = AssetId.random();
+        registry.register(new BlockingSseEmitter(neverReleased), Set.of(LiveTopic.EVENT, LiveTopic.detections(assetId)),
+                layerId -> true);
+        assertTrue(registry.watchingDetections(assetId), "sanity: the connection is registered and subscribed before anything blocks");
+
+        registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STARTED, "started"));
+
+        try {
+            assertTrue(awaitTrue(Duration.ofMillis(LiveUpdateRegistry.CONNECTION_WRITE_TIMEOUT_MILLIS + 2_000),
+                            () -> !registry.watchingDetections(assetId)),
+                    "a connection whose write never completes must be unregistered once the write timeout elapses");
+        } finally {
+            neverReleased.countDown();
+        }
+    }
+
+    @Test
+    void concurrentDispatchNeverReordersOneConnectionsOwnEnvelopes() {
+        LiveUpdateRegistry registry = registry();
+        int connectionCount = 20;
+        int envelopeCount = 15;
+        List<RecordingSseEmitter> emitters = new ArrayList<>();
+        for (int i = 0; i < connectionCount; i++) {
+            RecordingSseEmitter emitter = new RecordingSseEmitter();
+            emitters.add(emitter);
+            registry.register(emitter, Set.of(LiveTopic.EVENT), layerId -> true);
+        }
+
+        for (int i = 0; i < envelopeCount; i++) {
+            registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STARTED, "evt-" + i));
+        }
+
+        for (RecordingSseEmitter emitter : emitters) {
+            assertTrue(awaitTrue(Duration.ofSeconds(2), () -> emitter.received().size() == envelopeCount),
+                    "every connection must eventually receive every envelope");
+            List<Long> seqs = emitter.received().stream().map(LiveUpdateRegistryTest::seqOf).toList();
+            List<Long> sortedSeqs = seqs.stream().sorted().toList();
+            assertEquals(sortedSeqs, seqs,
+                    "one connection's own writes must never be reordered by concurrent dispatch, even under jitter");
+        }
+    }
+
+    @Test
+    void resumeStaysCorrectWhileAnotherConnectionsWriteIsStuckInFlight() {
+        LiveUpdateRegistry registry = registry();
+        CountDownLatch neverReleased = new CountDownLatch(1);
+        registry.register(new BlockingSseEmitter(neverReleased), Set.of(LiveTopic.EVENT), layerId -> true);
+
+        registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STARTED, "first"));
+        long firstSeq = registry.bufferFor(LiveTopic.EVENT).snapshot().get(0).seq();
+
+        try {
+            // The blocked connection's write for "first" is now queued on connectionWriteExecutor
+            // and will never complete -- exactly the risk docs/plans/active/SCALE-100-PLAN.md §9 calls out
+            // ("multi-threaded dispatch reorders envelopes within a topic"). Two more envelopes are
+            // published while that write is stuck in flight.
+            registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STOPPED, "second"));
+            registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STOPPED, "third"));
+
+            List<LiveEnvelopeResponse> resumed = registry.replayFor(LiveTopic.EVENT, firstSeq);
+            assertEquals(2, resumed.size(), "resume must see exactly what's newer, unaffected by the stuck write");
+            assertTrue(resumed.get(0).seq() < resumed.get(1).seq(), "resumed entries must stay in seq order");
+            assertEquals(firstSeq + 1, resumed.get(0).seq());
+            assertEquals(firstSeq + 2, resumed.get(1).seq());
+        } finally {
+            neverReleased.countDown();
+        }
+    }
+
+    @Test
+    void evictUnusedAssetBuffersRemovesABufferNoConnectionSubscribesToAnymore() {
+        AssetId assetId = AssetId.random();
+        LiveUpdateRegistry registry = registry();
+        registry.publishTelemetryAppended(assetId, telemetry(1.0));
+        registry.flushPending();
+        assertEquals(1, registry.bufferFor(LiveTopic.telemetry(assetId)).snapshot().size(),
+                "sanity: the buffer holds the flushed sample");
+
+        registry.evictUnusedAssetBuffers();
+
+        assertTrue(registry.bufferFor(LiveTopic.telemetry(assetId)).isEmpty(),
+                "bufferFor recreates an empty buffer on demand -- proof the evicted one (and its sample) is actually "
+                        + "gone, not merely still sitting in the map");
+    }
+
+    @Test
+    void evictUnusedAssetBuffersLeavesAnActivelySubscribedAssetsBufferAlone() {
+        AssetId assetId = AssetId.random();
+        when(assetService.assets()).thenReturn(List.of());
+        LiveUpdateRegistry registry = registry();
+        registry.connect("telemetry:" + assetId.value(), null, layerId -> true);
+        registry.publishTelemetryAppended(assetId, telemetry(1.0));
+        registry.flushPending();
+
+        registry.evictUnusedAssetBuffers();
+
+        assertEquals(1, registry.bufferFor(LiveTopic.telemetry(assetId)).snapshot().size(),
+                "an asset's buffer must survive eviction while a connection is still subscribed to it");
+    }
+
+    private static long seqOf(String json) {
+        return new JsonMapper().readTree(json).get("seq").asLong();
+    }
+
+    /** Polls {@code condition} every 20ms until it's {@code true} or {@code timeout} elapses; never sleeps past either. */
+    private static boolean awaitTrue(Duration timeout, BooleanSupplier condition) {
+        Instant deadline = Instant.now().plus(timeout);
+        while (Instant.now().isBefore(deadline)) {
+            if (condition.getAsBoolean()) {
+                return true;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return condition.getAsBoolean();
+    }
+
+    /**
+     * Intercepts {@link SseEmitter#send(SseEventBuilder)} instead of going through a real servlet
+     * response, capturing exactly the JSON {@code String} {@link LiveUpdateRegistry#broadcast}
+     * wrote for this connection (filtered to the {@code data:} payload itself — {@link
+     * SseEventBuilder#build()} also carries the raw {@code "id:...\n"} protocol text as its own,
+     * separate {@code TEXT_PLAIN} entry, which this double is not interested in). {@link
+     * #send(SseEventBuilder)} adds a random 0-3ms delay so several connections dispatched
+     * concurrently actually race on the way to {@link #received}, giving {@link
+     * #concurrentDispatchNeverReordersOneConnectionsOwnEnvelopes} something real to fail on if
+     * {@code LiveConnection}'s own per-connection write-ordering chain regressed.
+     */
+    private static final class RecordingSseEmitter extends SseEmitter {
+        private final List<String> received = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void send(SseEventBuilder builder) {
+            try {
+                Thread.sleep(java.util.concurrent.ThreadLocalRandom.current().nextInt(0, 4));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            for (DataWithMediaType entry : builder.build()) {
+                if (MediaType.APPLICATION_JSON.equals(entry.getMediaType()) && entry.getData() instanceof String text) {
+                    received.add(text);
+                }
+            }
+        }
+
+        List<String> received() {
+            return received;
+        }
+    }
+
+    /**
+     * Simulates a stalled/dead client: {@link #send(SseEventBuilder)} blocks on a caller-supplied
+     * {@link CountDownLatch} instead of ever completing, standing in for a real {@code
+     * SseEmitter.send} stuck on a slow/dead TCP write. A 30s ceiling on the {@code await} itself
+     * (not the latch this class's tests actually release explicitly once they're done asserting)
+     * exists purely so a bug in a test can never hang the whole suite.
+     */
+    private static final class BlockingSseEmitter extends SseEmitter {
+        private final CountDownLatch releaseLatch;
+
+        BlockingSseEmitter(CountDownLatch releaseLatch) {
+            this.releaseLatch = releaseLatch;
+        }
+
+        @Override
+        public void send(SseEventBuilder builder) {
+            try {
+                releaseLatch.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     /**

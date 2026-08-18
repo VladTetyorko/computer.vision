@@ -8,11 +8,45 @@ pilot→asset assignments (docs/plans/done/U-SCOPE-PLAN.md slice 2) — tactical
 operational picture (docs/plans/done/TACTICAL-MARKS-PLAN.md M2) — and the map's Common Operational Picture:
 layers with grantable access, and drawings (docs/plans/done/MAP-REWORK-PLAN.md Wave C).
 
-**Depends on:** vision-domain, `org.hibernate.orm:hibernate-core`, `org.postgresql:postgresql`,
+**Depends on:** vision-domain, `org.hibernate.orm:hibernate-core`, `org.hibernate.orm:hibernate-hikaricp`
+(docs/plans/active/SCALE-100-PLAN.md S3 — declared for its version pin only, see "Connection pool" below for why
+its own `HikariCPConnectionProvider` is not what's actually wired), `com.zaxxer:HikariCP` (S3, explicit compile-scope
+dependency — `hibernate-hikaricp` declares it `runtime`-scope only, which is not enough for `PersistenceUnit` to
+reference `HikariConfig`/`HikariDataSource` directly), `org.postgresql:postgresql`,
 `org.flywaydb:flyway-core`/`flyway-database-postgresql`, `tools.jackson.core:jackson-databind`
 (Jackson 3, for jsonb columns — see Conventions) · **Used by:** vision-app
-(`PersistenceWiringConfiguration`, opt-in via `vision.persistence.enabled`)
-**Build/test:** `./mvnw -B -pl storage/persistence test` — 115 tests (up from 113,
+(`PersistenceWiringConfiguration` — unconditional since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b;
+the `vision.persistence.enabled` flag is gone, Postgres is the only store)
+**Build/test:** `./mvnw -B -pl storage/persistence test` — 148 tests (up from 137 — measured directly
+via `./mvnw -B -pl storage/persistence clean test`, docker reachable, nothing skipped; docs/plans/active/SCALE-100-PLAN.md
+S3: a real HikariCP-backed connection pool, shared with Flyway, replaces Hibernate's built-in unpooled
+`DriverManagerConnectionProvider` — new `PersistencePoolSettingsTest` (7) + `ClosingDatasourceConnectionProviderTest`
+(2) + two new `PostgresDockerIntegrationTest$ConnectionPoolTests` cases = +11; see "Connection pool" below), up from 133 — measured directly
+via `./mvnw -B -pl storage/persistence clean test` immediately before this change; the "128" this
+entry previously read already undercounted `DevAccountSeedMigrationTest`'s own 5 W1 scenarios —
+docs/plans/active/POSTGRES-ONLY-CONTEXT.md **upgrade path**: this wave fixes the path for a database
+that already ran the now-deleted `AuthSeedRunner` (every pre-this-fix `docker-compose.yml` deployment,
+since it has always paired `VISION_PERSISTENCE_ENABLED=true` with `VISION_AUTH_ENABLED=true` against a
+persistent volume). Two defects, two fixes: (1) `V90001__dev_accounts.sql`'s `ON CONFLICT (id) DO
+NOTHING` didn't cover `users.username`'s own `UNIQUE` constraint, so migrating that seed against a
+database that already had an `admin`/`manager`/`pilot` row at a *different* id raised "duplicate key
+value violates unique constraint `users_username_key`" and aborted Flyway — reproduced against a real
+Postgres before the fix, see that file's own header; fixed by replacing the single `INSERT ... VALUES
+... ON CONFLICT (id)` with three `INSERT ... SELECT ... WHERE NOT EXISTS (id OR username)` statements,
+one per account, since `ON CONFLICT` takes only one target and this needs two. (2) even once that
+migration succeeds, a MANAGER whose membership still points at the *old* random root group still saw
+an empty fleet — `V13`'s fixed-id root group is a second, unrelated parentless group, not a merge; see
+`V16__adopt_fixed_root.sql` (Schema, below) for the non-destructive fix, adopting the fixed group as a
+*child* of the pre-existing root when there is exactly one. New `UpgradePathMigrationTest` (+4,
+sibling to `DevAccountSeedMigrationTest`) proves both fixes end-to-end against a real Postgres,
+including reproducing `DefaultScopeResolver`'s own subtree walk to prove a pre-existing manager's
+`VisibilityScope` now includes `DevPrincipal`'s group — see that class's own javadoc; up from 128,
+docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — the two ports that previously had no Postgres
+implementation at all, `AuditTrailPort`/`DetectionEventRepositoryPort`, now do: new
+`JpaAuditTrail`/`JpaDetectionEventRepository`, `V14__audit_trail.sql`/`V15__detection_events.sql`,
++4 `AuditTrailRepositoryTests` +7 `DetectionEventRepositoryTests` +2 schema tests; see that
+section below for the retention choice and both ports' wiring status (still unwired — a later
+wave's job); up from 113,
 docs/plans/done/TRACKING-PLAN.md wave T6 — **no migration, no entity change, no mapper change**: two new
 `DetectionRepositoryTests` cases covering the jsonb's forward/backward compatibility, see the
 tracks bullet under Conventions; up from 98,
@@ -44,8 +78,9 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 
 ## API surface
 
-**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (the 15
-`Jpa*Repository`/`Jpa*Store` port implementations), `mapper/` (14 entity↔domain mapper classes,
+**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (the 17
+`Jpa*Repository`/`Jpa*Store` port implementations, up from 15 — docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 added
+`JpaAuditTrail`/`JpaDetectionEventRepository`), `mapper/` (16 entity↔domain mapper classes,
 one per aggregate — extracted out of the repositories that used to inline `toEntity`/`toDomain` as
 private static methods), `config/` (`PersistenceUnit`, `JpaOperations`), `entity/` (unchanged, see
 below). This module gets no `controller/`, `dto/`, or `service/` package — it is a driven adapter.
@@ -55,19 +90,21 @@ below). This module gets no `controller/`, `dto/`, or `service/` package — it 
 - `final class JpaDeviceRepository implements DeviceRepositoryPort` — constructor `(EntityManagerFactory)`.
 - `final class JpaAssetRepository implements AssetRepositoryPort` — constructor `(EntityManagerFactory)`.
 - `final class JpaAssetUsageRepository implements AssetUsageRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/MVP2-PLAN.md P-b. `findRecent(int limit)` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8 — the fleet-wide "replay library" list) is `findRecentByAsset`'s cross-asset counterpart: the same `order by started_at desc` query with no `asset_id` predicate.
-- `final class JpaTelemetryRepository implements TelemetryRepositoryPort` — constructor `(EntityManagerFactory)` (production default retention cap, see Retention below) or `(EntityManagerFactory, int retentionLimitPerUsage)` (test/override seam). docs/plans/done/MVP2-PLAN.md P-b.
+- `final class JpaTelemetryRepository implements TelemetryRepositoryPort` — constructor `(EntityManagerFactory)` (production default retention cap, see Retention below), `(EntityManagerFactory, int retentionLimitPerUsage)` (test/override seam), or `(EntityManagerFactory, int retentionLimitPerUsage, TelemetryBatchSettings)` (docs/plans/active/SCALE-100-PLAN.md S4 — explicit batching; the two shorter constructors delegate to it with `TelemetryBatchSettings.immediate()`, so they keep every pre-S4 caller's synchronous-write behavior byte-identical). One method beyond the port: `int pendingBatchCount()` — usages currently holding buffered, not-yet-durable samples, `0` in immediate mode. docs/plans/done/MVP2-PLAN.md P-b; batching in "Batching (SCALE-100-PLAN S4)" below.
 - `final class JpaDetectionRepository implements DetectionRepositoryPort` — constructor `(EntityManagerFactory)` or `(EntityManagerFactory, int retentionLimitPerStream)`, same shape as `JpaTelemetryRepository`. docs/plans/done/MVP2-PLAN.md P-b.
 - `final class JpaAssetImageRepository implements AssetImageRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/UX-REWORK-PLAN.md §U-d item 3 — the asset image store (CONTRACT 2).
 - `final class JpaGeofenceRepository implements GeofenceRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/OPS-CORE-PLAN.md §G, G-b — geofence zones; `save` is merge-by-id (upsert), `deleteById` a real hard delete (zones have no soft-delete concept — a disabled zone is just `enabled=false`, not a lifecycle state).
 - `final class JpaUserRepository implements UserRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/U-AUTH-PLAN.md wave 3 — the identity aggregate; `save` is merge-by-id (upsert). `findByUsername` lower-cases its lookup key (`Locale.ROOT`) then exact-matches `users.username` (the domain already stores it lower-cased, so this *is* the case-insensitive lookup; a `NoResultException` from the single-result query maps to empty `Optional`). Memberships ride on the row as jsonb (see `UserEntity`).
 - `final class JpaGroupRepository implements GroupRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/U-AUTH-PLAN.md wave 3 — org-chart nodes; `save` is merge-by-id (upsert); `parentGroupId` maps straight through as a nullable `UUID`.
-- `final class JpaAssignmentRepository implements AssignmentRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/U-SCOPE-PLAN.md slice 2 — the pilot→asset join; `assign` is an idempotent upsert via `merge` on the composite (pilot, asset) key (no duplicate row, no error), `unassign` a delete-if-present (idempotent); `assetsForPilot`/`pilotsForAsset` are indexed JPQL queries returning `UUID`s mapped to `AssetId`/`UserId`, `isAssigned` a composite-PK `find`. Matches `InMemoryAssignmentRepository`'s set-semantics exactly. **No mapper class** (see `mapper` package note below) — there is no domain aggregate to map to/from, only inline `UUID`↔id-wrapper conversions.
+- `final class JpaAssignmentRepository implements AssignmentRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/U-SCOPE-PLAN.md slice 2 — the pilot→asset join; `assign` is an idempotent upsert via `merge` on the composite (pilot, asset) key (no duplicate row, no error), `unassign` a delete-if-present (idempotent); `assetsForPilot`/`pilotsForAsset` are indexed JPQL queries returning `UUID`s mapped to `AssetId`/`UserId`, `isAssigned` a composite-PK `find`. Matches the port's set-semantics contract exactly (idempotent assign/unassign, no duplicates). **No mapper class** (see `mapper` package note below) — there is no domain aggregate to map to/from, only inline `UUID`↔id-wrapper conversions.
 - `final class JpaMarkRepository implements MarkRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/TACTICAL-MARKS-PLAN.md §3/M2 — tactical marks (the shared operational picture); `save` is merge-by-id (upsert), `deleteById` a real hard delete (idempotent) — same shape as `JpaGeofenceRepository`, `Mark`'s own template.
-- `final class JpaMapLayerRepository implements MapLayerRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — the access-controlled surfaces marks/drawings live on; `save` is merge-by-id (upsert), which also **replaces the layer's grant list wholesale** (the `map_layer_grants` element collection rides on the aggregate), matching `MapLayerService#setGrants`'s own "wholesale, not a delta" contract and `InMemoryMapLayerRepository`'s single-`put`. `deleteById` is a real hard delete, idempotent — and deliberately **non-cascading** to marks/drawings: that cascade is `DefaultMapLayerService#delete`'s job, since each removed row must also publish its own `MapEvent`.
+- `final class JpaMapLayerRepository implements MapLayerRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — the access-controlled surfaces marks/drawings live on; `save` is merge-by-id (upsert), which also **replaces the layer's grant list wholesale** (the `map_layer_grants` element collection rides on the aggregate), matching `MapLayerService#setGrants`'s own "wholesale, not a delta" contract. `deleteById` is a real hard delete, idempotent — and deliberately **non-cascading** to marks/drawings: that cascade is `DefaultMapLayerService#delete`'s job, since each removed row must also publish its own `MapEvent`.
 - `final class JpaDrawingRepository implements DrawingRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — lines/polygons/arrows/text; `save` is merge-by-id (a drawing mutates in place as its geometry is dragged), `deleteById` a real hard delete, idempotent — same shape as `JpaMarkRepository`.
 - `final class JpaDatasetRepository implements DatasetRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — training datasets; `save` is merge-by-id (upsert), `delete` a real hard delete (idempotent), same shape as `JpaGeofenceRepository`/`JpaMarkRepository`. `targetCategory` maps a nullable `CategoryId` to/from a plain nullable varchar.
 - `final class JpaTrainingSampleRepository implements TrainingSampleRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — captured frames + their evolving annotations; `save` is merge-by-id (upsert — a sample mutates over its own review lifecycle, unlike `JpaDetectionRepository`'s append-only rows). `findByDataset`/`countByDataset` share one JPQL-with-optional-clause shape for the `(datasetId, statusOrNull)` filter `idx_training_samples_dataset_status` indexes; `findByDataset` orders newest-captured-first before bounding to `limit`.
 - `final class JpaSampleImageStore implements SampleImageStorePort` — constructor `(EntityManagerFactory)`. docs/plans/done/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the `JpaAssetImageRepository` shape, verbatim, reused for training-sample frames; `save` is merge-by-`sampleId` (upsert).
+- `final class JpaAuditTrail implements AuditTrailPort` — constructor `(EntityManagerFactory)`. docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — the durable audit trail; `record` always `persist`s a brand-new row (never `merge`s — entries are immutable historical facts per the port's own contract, and `id` is the domain's own `AuditId`, not synthetic). `findRecent`/`findByTarget`/`findByActor` share one JPQL shape (an optional `WHERE`, `order by occurredAt desc`, bounded by `limit`). No retention pruning — see Retention below. **Wired into `vision-app` since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b**: `ApplicationServiceWiring#auditTrailPort` builds this unconditionally (there is no `vision.persistence.enabled` branch left, and no `InMemoryAuditTrail` left to fall back to), wrapped in `LiveUpdateAuditTrail` when `vision.live.enabled=true`.
+- `final class JpaDetectionEventRepository implements DetectionEventRepositoryPort` — constructor `(EntityManagerFactory)` or `(EntityManagerFactory, int retentionLimitPerStream)`, same shape as `JpaDetectionRepository`. docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — debounced detection events (docs/plans/done/MVP2-PLAN.md §E, E-a); unlike `JpaDetectionRepository`'s always-`persist` rows, `save` is a genuine upsert (`merge`-by-id) — a `DetectionEvent` mutates over its own open lifetime, matching the deleted `InMemoryDetectionEventRepository`'s remove-then-re-add-by-id semantics. **Wired into `vision-app` since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b**: `ApplicationServiceWiring#detectionEventRepositoryPort` builds this unconditionally, wrapped in `LiveUpdateDetectionEventRepository` when `vision.live.enabled=true` — same deferred-then-closed wiring status as `JpaAuditTrail` above.
 
 Every repository above composes a `com.drones.vision.adapter.persistence.config.JpaOperations`
 (one constructor argument, the module's `EntityManagerFactory`) and, except
@@ -89,13 +126,14 @@ JPA/transaction plumbing that stayed in `repository`).
 `CategoryMapper`, `DeviceMapper`, `AssetMapper`, `AssetUsageMapper`, `TelemetryMapper`,
 `DetectionResultMapper`, `AssetImageMapper`, `GeofenceZoneMapper`, `UserMapper`, `GroupMapper`,
 `MarkMapper`, `DatasetMapper`, `TrainingSampleMapper`, `SampleImageMapper`, `MapLayerMapper`,
-`DrawingMapper` — 16 mappers, one per aggregate the module's 17 repositories cover. `TelemetryMapper#toEntity`/`DetectionResultMapper#toEntity`
+`DrawingMapper`, `AuditEntryMapper`, `DetectionEventMapper` — 18 mappers (up from 16,
+docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3), one per aggregate the module's 19 repositories cover. `TelemetryMapper#toEntity`/`DetectionResultMapper#toEntity`
 take the extra argument (`UsageId`, or none) their entities' synthetic id generation needs;
 `AssetImageMapper#toEntity`/`SampleImageMapper#toEntity` each take the owning id (`AssetId`/
 `TrainingSampleId`) plus the domain value object, matching the shape `JpaAssetImageRepository`/
 `JpaSampleImageStore`'s `save(id, value)` port methods already have.
 
-**No `AssignmentMapper`** — the fifteenth repository, `JpaAssignmentRepository`, is deliberately
+**No `AssignmentMapper`** — `JpaAssignmentRepository`, is deliberately
 excluded. `AssignmentEntity` is a bare join row with no corresponding domain aggregate (there is no
 `Assignment` record — the port deals directly in `UserId`/`AssetId` sets and booleans), so every
 conversion is already a one-line `UUID`↔id-wrapper wrap inlined at its call site (e.g. `AssetId::new`
@@ -104,11 +142,13 @@ no logic behind them — exactly the "empty ceremony" the plan's own guardrail w
 creating. Flagged here rather than silently decided, per this wave's brief.
 
 ### `com.drones.vision.adapter.persistence.config`
-- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password)`: migrates the schema with Flyway (`classpath:db/migration`) then opens a Hibernate-native `EntityManagerFactory` mapping all seventeen entities below (see "Bootstrap" below). The one public entry point vision-app's wiring needs.
+- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password[, boolean seedDevUsers[, PersistencePoolSettings poolSettings]])`: builds one pooled `HikariDataSource` (docs/plans/active/SCALE-100-PLAN.md S3), migrates the schema through it with Flyway (`classpath:db/migration`, plus `classpath:db/seed/dev` when `seedDevUsers` is `true` — see the `db/seed/dev` schema entry below), then opens a Hibernate-native `EntityManagerFactory` over that same `DataSource` mapping all nineteen entities below (see "Connection pool" below and the "W1 done" narrative section near the end of this file for the `ignoreMigrationPatterns` story). The 3-arg and 4-arg overloads (`seedDevUsers` implicitly `false`, and/or `poolSettings` implicitly `PersistencePoolSettings.defaults()`) are kept so pre-existing callers (e.g. `PostgresDockerIntegrationTest`) don't need to change. The 5-arg overload is the one vision-app's wiring should move to, once it can bind `vision.persistence.pool.*` — see "Connection pool" below for the exact keys.
 - `public final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas). **Public, not package-private** (widened from the pre-refactor package-private): the `repository` package it now serves lives in a sibling package, so cross-package visibility is required — see Gotchas for the full visibility-widening note.
+- `record PersistencePoolSettings(int maximumPoolSize, int minimumIdle, long connectionTimeoutMillis, long leakDetectionThresholdMillis)` (docs/plans/active/SCALE-100-PLAN.md S3) — the four HikariCP knobs `PersistenceUnit` needs, pulled out as a framework-free record so no magic number lives inline in `PersistenceUnit` itself (CLAUDE.md rule 1). Compact constructor validates `maximumPoolSize >= 1`, `0 <= minimumIdle <= maximumPoolSize`, `connectionTimeoutMillis > 0`, `leakDetectionThresholdMillis >= 0` (`0` means "disabled", Hikari's own convention). `static PersistencePoolSettings defaults()` returns `maximumPoolSize=20, minimumIdle=5, connectionTimeoutMillis=30_000, leakDetectionThresholdMillis=30_000` — sized for ~100 concurrent users on one instance, not a placeholder; each default's justification is on its own `DEFAULT_*` constant's javadoc. vision-app's `VisionPersistenceProperties` is the intended source of a non-default instance, via `vision.persistence.pool.*` (see "Connection pool" below) — this module never reads Spring config itself.
+- `final class ClosingDatasourceConnectionProvider extends org.hibernate.engine.jdbc.connections.internal.DatasourceConnectionProviderImpl` (docs/plans/active/SCALE-100-PLAN.md S3) — the one behavior it adds over its base class: overriding `stop()` to also close the configured `DataSource` if it is `Closeable` (which `HikariDataSource` is). The base class assumes a container-managed `DataSource` Hibernate never owns and must never close (its `stop()` is a no-op); that assumption is wrong here, since `PersistenceUnit.start` builds and *owns* the pool. Hibernate instantiates it via `hibernate.connection.provider_class` (a bare class name, reflection, no-arg constructor) and calls `configure(Map)` — never constructed directly by this module's own code outside tests.
 
 ### `com.drones.vision.adapter.persistence.entity`
-- `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity`, `AssetImageEntity`, `GeofenceZoneEntity`, `UserEntity`, `GroupEntity`, `AssignmentEntity`, `MarkEntity`, `DatasetEntity`, `TrainingSampleEntity`, `SampleImageEntity`, `MapLayerEntity`, `MapDrawingEntity` (+ the `@Embeddable` `LayerGrantEmbeddable`) — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module. Entity↔domain mapping now lives one package over, in `mapper` (see above) — not inlined per repository as it was before docs/plans/active/LAYERING-REFACTOR-PLAN.md Wave C.
+- `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity`, `AssetImageEntity`, `GeofenceZoneEntity`, `UserEntity`, `GroupEntity`, `AssignmentEntity`, `MarkEntity`, `DatasetEntity`, `TrainingSampleEntity`, `SampleImageEntity`, `MapLayerEntity`, `MapDrawingEntity`, `AuditEntryEntity`, `DetectionEventEntity` (+ the `@Embeddable` `LayerGrantEmbeddable`) — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module. Entity↔domain mapping now lives one package over, in `mapper` (see above) — not inlined per repository as it was before docs/plans/active/LAYERING-REFACTOR-PLAN.md Wave C.
 - `TelemetrySampleEntity`/`DetectionResultEntity` have a synthetic UUID `id` the adapter invents at save time (`UUID.randomUUID()` in each repository's `toEntity`) — `Telemetry`/`DetectionResult` themselves carry no identity of their own (append-only samples/results, not aggregates), so there is nothing domain-side to derive a primary key from; the id never surfaces back through the ports.
 - `TelemetrySampleEntity#flightState` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b, `V6__telemetry_flight_state.sql`) is a nullable `FlightState` field, `@JdbcTypeCode(SqlTypes.JSON)`/`columnDefinition = "jsonb"` — the domain record stored **directly**, exactly the `DetectionResultEntity#detections` precedent noted in Conventions below (a plain immutable record tree, no persistence-local wrapper type needed). `null` covers both "sample pre-dates this column" and "device reported no flight-controller state at all"; both round-trip as `Telemetry#flightState() == null`, the same nullable-9th-component contract the domain record itself defines — there is no way to tell the two cases apart from this column alone, and nothing needs to.
 - `AssetUsageEntity#streamId` (docs/plans/done/MVP2-PLAN.md R-a2, `V4__usage_stream_id.sql`) is a nullable `UUID` column, mapped straight through by `JpaAssetUsageRepository` (`streamId == null ? null : streamId.value()` / `new StreamId(...)`) exactly like every other nullable field on this entity — no special-casing beyond the null check.
@@ -123,11 +163,13 @@ creating. Flagged here rather than silently decided, per this wave's brief.
 - `LayerGrantEmbeddable` (docs/plans/done/MAP-REWORK-PLAN.md §4.4) — **the module's only persistence-local mirror of a domain record**, and unavoidably so: a JPA `@Embeddable` must be a mutable class with a no-arg constructor, which the `LayerGrant` record cannot satisfy (JPA 3.2 §2.5). Everywhere else this module references the domain record directly (jsonb via Hibernate's Jackson `FormatMapper`); this is the one place the element-collection choice forces a 1:1 adapter-local twin, converted in `MapLayerMapper`. Defines `equals`/`hashCode` deliberately — Hibernate needs them for element-collection change detection, and without them the whole grant list would be deleted and re-inserted on every save.
 - `MapDrawingEntity` (docs/plans/done/MAP-REWORK-PLAN.md §2.1/§4.4, `V12__map_layers.sql`) mirrors `Drawing` field-for-field: `points` stores the whole ordered `List<GeoPosition>` as one jsonb column — same mechanism/rationale as `GeofenceZoneEntity#polygon`, and the deliberate opposite of `MarkEntity`, whose single `GeoPosition` is flattened into columns. `kind` reuses the domain `DrawKind` enum; `label`/`color_token` are nullable (a `TEXT` drawing's label is required by the domain, not the schema). `layer_id` carries **no FK** (see the Conventions note below) but is indexed, since listing a layer's drawings is the access path.
 - `UserEntity`/`GroupEntity` (docs/plans/done/U-AUTH-PLAN.md wave 3, `V8__users_groups.sql`) mirror `User`/`Group` field-for-field. `UserEntity#id` is the domain's own `UserId` (not synthetic — a user has real identity); `username` carries a `UNIQUE` constraint and is stored already-lower-cased (the domain `User` normalizes it), so `findByUsername` is an exact match on the stored value after lower-casing the lookup key. **`UserEntity#memberships` stores the whole `List<Membership>` as one jsonb column** (`@JdbcTypeCode(SqlTypes.JSON)`) — same mechanism/rationale as `GeofenceZoneEntity#polygon`/`DetectionResultEntity#detections`: `Membership` (with its nested `GroupId`/`Role`) is a plain immutable record Jackson 3 serializes natively, and memberships are only ever read back whole with the aggregate, so no normalized join table (docs/plans/done/U-AUTH-PLAN.md picked jsonb over a join table for exactly this "saved whole with the User" reason). `GroupEntity#parentId` is a nullable `UUID` (null = root group). No FK on either table (not `groups.parent_id`, not any user→group link) — same "no cross-entity foreign keys" convention as every other table here, keeping parity with the in-memory reference repos that do no referential checks.
+- `AuditEntryEntity` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3, `V14__audit_trail.sql`) mirrors `AuditEntry` field-for-field: `id` is the domain's own `AuditId` (not synthetic — every entry has real identity); `action`/`targetType` reuse the domain `AuditAction`/`AuditTargetType` enums directly (`@Enumerated(EnumType.STRING)`, same convention as `GeofenceZoneEntity#kind`); `details` stores the whole free-form `Map<String,String>` as jsonb, same mechanism as `CategoryEntity#attributeHints`. No FK to `users` or to any target table — more than convention here: an entry must stay resolvable even after its actor's account or its target row is gone (see the migration's own header comment).
+- `DetectionEventEntity` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3, `V15__detection_events.sql`) mirrors `DetectionEvent` field-for-field: `id` is the domain's own `DetectionEventId` (not synthetic — unlike `DetectionResultEntity`, an event mutates over its own open lifetime and needs a stable key to upsert by). `position` is a single, entirely-optional `GeoPosition`, flattened to nullable `position_latitude`/`position_longitude`/`position_altitude_meters` columns exactly like `AssetUsageEntity#startPosition`/`#lastPosition` (a lat/lon pair is null together iff the position itself is null) — the deliberate opposite of `GeofenceZoneEntity#polygon`'s jsonb choice for a whole vertex list. `state` reuses the domain `DetectionEventState` enum directly. No FK to any other table; `(stream_id, last_seen)` and `last_seen` alone are both indexed (`findByStream`/the retention prune query, and `findRecent`, respectively).
 
 ## Schema (`src/main/resources/db/migration`)
 
 - `V1__baseline.sql` — `categories` (`id` varchar PK — the `CategoryId` slug, not a UUID, matching the domain's one non-UUID id type; `parent_id` self-referencing FK, nullable; `attribute_hints` jsonb), `devices` (`id` UUID PK; `stream_protocol`/`stream_uri`/`stream_options` — `StreamDescriptor` flattened; `state` varchar), `device_capabilities` (element-collection join table, PK `(device_id, capability)`), `assets` (`id` UUID PK; `category_id` varchar — no FK, see Gotchas; `owner_id`/`group_id` UUID — `Ownership` flattened; `attributes` jsonb; `state` varchar), `asset_devices` (element-collection join table, PK `(asset_id, device_id)`, indexed on `device_id` for `findByDeviceId`).
-- `V2__seed_categories.sql` — the same default category set `InMemoryCategoryRepository` seeds in its constructor (`drone`, `ip-camera`, `usb-camera`, `robot`, `simulated`, then `fpv-drone`→`drone`, `esp32-cam`→`ip-camera` in a second batch so the self-referencing FK is satisfied), `ON CONFLICT (id) DO NOTHING` so re-running is a no-op. Keeps a persistence-enabled app's out-of-the-box category list identical to the in-memory fallback's.
+- `V2__seed_categories.sql` — the default category set (`drone`, `ip-camera`, `usb-camera`, `robot`, `simulated`, then `fpv-drone`→`drone`, `esp32-cam`→`ip-camera` in a second batch so the self-referencing FK is satisfied), `ON CONFLICT (id) DO NOTHING` so re-running is a no-op — the same set the deleted `InMemoryCategoryRepository` (vision-app devsupport, removed docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b) used to seed at construction, kept identical so removing the in-memory fallback changed no out-of-the-box category list.
 - `V3__history.sql` (docs/plans/done/MVP2-PLAN.md P-b) — `asset_usages` (`id` UUID PK; `asset_id` UUID, indexed, no FK; `started_at`/`ended_at` timestamptz, the latter nullable; `start_latitude`/`start_longitude`/`start_altitude_meters` and the `last_*` triple — `GeoPosition` flattened to columns rather than jsonb, same "flatten a small value type" choice `AssetEntity` makes for `Ownership`; `sample_count` bigint), `telemetry_samples` (`id` UUID PK, synthetic; `usage_id` UUID + `at` timestamptz, **indexed together** as `(usage_id, at)`; `device_id` UUID; `latitude`/`longitude`/`altitude_meters`/`heading_degrees`/`battery_percent` all nullable doubles; `extra` jsonb), `detection_results` (`id` UUID PK, synthetic; `stream_id` UUID + `captured_at` timestamptz, **indexed together** as `(stream_id, captured_at)`; `frame_sequence` bigint; `detections` jsonb — the whole `List<Detection>`, see Conventions; `inference_latency_nanos` bigint). No FKs, same rationale as V1's tables (see Conventions).
 - `V4__usage_stream_id.sql` (docs/plans/done/MVP2-PLAN.md R-a2) — `ALTER TABLE asset_usages ADD COLUMN stream_id UUID` (nullable, no FK, no backfill — a stream's id was never recorded anywhere before this migration, so pre-existing rows simply read back `null`, matching `AssetUsage#streamId`'s own honest "legacy usage" nullability). Purely additive on top of V1-V3; no other table changes.
 - `V5__asset_images.sql` (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) — `asset_images` (`asset_id` UUID PK — no FK, same convention as every other table; `content_type` varchar; `data` bytea; `updated_at` timestamptz default `now()`). New table, no changes to any existing one.
@@ -141,24 +183,173 @@ creating. Flagged here rather than silently decided, per this wave's brief.
   - **The COP layer is seeded by the migration itself**, at the fixed id `00000000-0000-0000-0000-000000000002`, owned by the system principal `UUID(0,0)`/`UUID(0,1)` — the exact pair `LayerResolver.SYSTEM_USER_ID`/`SYSTEM_GROUP_ID` and `DevPrincipal` stamp. A fixed (not random) id keeps the migration deterministic and re-readable; `...0002` simply follows the system user (`...0000`) and group (`...0001`). `ON CONFLICT DO NOTHING`, so re-running is a no-op. `LayerResolver#copLayerId()` then *finds* this row instead of lazily creating one — which is how the Postgres and in-memory modes converge on exactly one COP layer.
   - **Backfill order is load-bearing.** Existing marks are pointed at that COP layer, then `affiliation` is derived **from the old `kind`** per docs/plans/done/MAP-REWORK-PLAN.md §2.2's frozen table (`TARGET→HOSTILE`, `HAZARD→UNKNOWN`, `POI→NEUTRAL`, `FRIENDLY→FRIENDLY`), and only *then* is `kind = 'FRIENDLY'` rewritten to `'UNIT'` — running the rename first would destroy the information the affiliation is derived from. `layer_id`/`affiliation` are set `NOT NULL` after the backfill, not before.
   - **FK policy, a deliberate deviation from the plan's parenthetical** ("layer_id (FK…)" on all three): only `map_layer_grants` gets one. That table is an element collection of the `map_layers` aggregate — Hibernate owns both sides and never inserts a grant without its layer — so the FK is free correctness. `marks.layer_id` and `map_drawings.layer_id` get **no** FK, matching this schema's standing convention (see Conventions): a real constraint there would reject writes the in-memory reference repositories (what the default-config app actually runs) happily accept, breaking the round-trip parity this module is judged against. The layer→marks/drawings cascade is already performed in application code by `DefaultMapLayerService#delete`, which also has to emit one `MapEvent` per cascaded row — something `ON DELETE CASCADE` could not do anyway.
+- `V13__identity_baseline.sql` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1) — seeds the root group at the
+  **fixed** id `00000000-0000-0000-0000-000000000001`, matching `DevPrincipal.GROUP_ID`
+  (`UUID(0,1)`) exactly, `ON CONFLICT (id) DO NOTHING`. This is a bug fix, not a feature: the
+  now-deleted `AuthSeedRunner` used to create the root group with `GroupId.random()` at
+  application-startup time, so every asset created while `vision.auth.enabled=false` (the default) was
+  owned by the *fixed* `DevPrincipal.GROUP_ID`, while the seeded root group a persistence-enabled app
+  actually had in its `groups` table was a *different*, random id — a MANAGER scoped to that random
+  root group saw an empty fleet. Pinning the seed to the same fixed id `DevPrincipal` already hardcodes
+  closes the gap from the schema side; `DevPrincipal` itself was not touched (this migration adapts to
+  it, not the reverse). Safe to apply against a database that already has a randomly-seeded root group
+  from a pre-W1 `AuthSeedRunner` run — `ON CONFLICT (id) DO NOTHING` only skips if id
+  `...0001` itself already exists, so a stale random-id row would coexist rather than block the insert;
+  a genuinely clean pre-W1 install has no such row and gets the fixed one immediately. No FK, same
+  convention as every other table here.
+- `V14__audit_trail.sql` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3) — `audit_entries` (`id` UUID PK — the entry's own `AuditId`, not synthetic; `occurred_at` timestamptz; `actor_id` UUID; `action`/`target_type` varchar(16); `target_id` varchar(255); `summary` text; `details` jsonb `NOT NULL DEFAULT '{}'::jsonb` — the whole free-form `Map<String,String>`). New table, purely additive over V1-V12 (the next free migration number — V13 was claimed concurrently by docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1's `V13__identity_baseline.sql`, a parallel wave). No FK to `users` or to any target table, deliberately: an audit entry must stay resolvable even after its actor's account or its target row is gone, which a referential constraint would actively break, not just diverge from parity with. Three indexes, one per read access path: `occurred_at` alone (`findRecent`), `(target_type, target_id, occurred_at)` (`findByTarget`), `(actor_id, occurred_at)` (`findByActor`) — each with `occurred_at` trailing so the newest-first `ORDER BY` can use the index directly.
+- `V15__detection_events.sql` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3) — `detection_events` (`id` UUID PK — the event's own `DetectionEventId`, not synthetic; `stream_id` UUID; `asset_id` UUID nullable; `label` varchar(255); `peak_confidence` double precision; `first_seen`/`last_seen` timestamptz; `state` varchar(16); `position_latitude`/`position_longitude`/`position_altitude_meters` double precision, all nullable together). New table, purely additive over V1-V14, no FK — same convention as the rest of this schema. Two indexes: `(stream_id, last_seen)` (`findByStream`'s newest-first query and the retention prune query both use it) and `last_seen` alone (`findRecent`'s cross-stream newest-first query).
+- `V16__adopt_fixed_root.sql` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md upgrade path, defect 2) —
+  **data-only**, no DDL: a `DO $$ ... $$` block, the first PL/pgSQL in this schema (every earlier
+  migration is plain SQL) — needed because the branch ("adopt, or don't") depends on a count read at
+  migration time, not a fixed condition `WHERE`/`ON CONFLICT` can express. Counts groups where
+  `parent_id IS NULL AND id <> '...0001'` (the fixed root `V13__identity_baseline.sql` seeds).
+  Exactly one such "other" parentless group → `UPDATE groups SET parent_id = <that group's id>, name
+  = 'Dev-Mode Assets' WHERE id = '...0001'`: this is the actual upgrade case — a database that ran
+  the deleted `AuthSeedRunner` before `V13` existed has its own random-id "Root" as a second,
+  unrelated parentless group once `V13` adds the fixed one. Adopting the *fixed* group as a *child*
+  of the *pre-existing* one (never the reverse — reparenting the old root under the fixed group would
+  not touch the subtree `DefaultScopeResolver` walks from a manager's existing, unmoved membership)
+  puts `UUID(0,1)` inside that subtree, so a manager whose membership already points at the old root
+  starts seeing `DevPrincipal`-owned assets — see this migration's own header, and
+  `UpgradePathMigrationTest` (Tests, below) for the real Postgres proof, including the subtree walk
+  itself. Renamed to **"Dev-Mode Assets"** on adoption (not left as "Root", which would be wrong two
+  levels deep in an org chart): the honest description of what the group holds once it is no longer
+  the root — everything `DevPrincipal` stamped while `vision.auth.enabled=false`. Zero other
+  parentless groups (fresh install — `V13` is the only root there is) or two-or-more (ambiguous, no
+  principled pick) → no-op either way, the first required so a plain fresh install is never touched,
+  the second flagged in the migration's own header as needing an operator's manual reconciliation
+  rather than a migration's guess. `max(uuid)`/`min(uuid)` do not exist in Postgres (measured, not
+  assumed — an early draft using `max(id)` failed with "function max(uuid) does not exist"), so the
+  "which one" lookup is a plain `SELECT id ... INTO`, safe because the branch already guarantees
+  exactly one row. Touches only `groups.parent_id`/`groups.name` for the single fixed-id row —
+  rewrites no `users` row, no `memberships` jsonb, no asset/mark/layer ownership column, deletes
+  nothing.
 
-## Bootstrap (no Spring, no connection pool)
+### `src/main/resources/db/seed/dev` — a second, conditional Flyway location
+
+- `V90001__dev_accounts.sql` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1) — the DEV-ONLY
+  `admin`/`admin` (ADMIN), `manager`/`manager` (MANAGER), `pilot`/`pilot` (PILOT) accounts, moved out
+  of Java entirely (the deleted `AuthSeedRunner`, see station/vision-app/MODULE.md) and into a Flyway
+  seed gated by `vision.persistence.seed-dev-users` (default `false`). `admin` reuses
+  `DevPrincipal.USER_ID` (`UUID(0,0)`); `manager`/`pilot` get fixed, readable ids `UUID(0,2)`/`UUID(0,3)`
+  chosen only for readability (a PK is scoped to its own table, so no collision risk with e.g.
+  `map_layers`' own `UUID(0,2)` COP layer). All three join `V13`'s fixed root group. Password hashes
+  are real BCrypt output from the app's own `BcryptPasswordHasher`/`BCryptPasswordEncoder` (default
+  strength), generated once and pasted in literally — `DevAccountSeedMigrationTest` asserts each one
+  verifies against its plaintext, so a hash that silently stopped matching could not hide here.
+  `memberships` is `[{"groupId":{"value":"<uuid>"},"role":"<ROLE>"}]` — a single-element jsonb array —
+  because `GroupId` is itself a one-component record and Hibernate's Jackson-3-backed `FormatMapper`
+  nests a one-component record as `{"value":...}`, not a bare string; verified empirically against a
+  real round trip through `JpaUserRepository`, not assumed by inspection.
+  **Guard shape (docs/plans/active/POSTGRES-ONLY-CONTEXT.md upgrade path, defect 1):** each account is
+  a separate `INSERT INTO users (...) SELECT ... WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = ...
+  OR username = ...)`, not the single multi-row `INSERT ... VALUES ... ON CONFLICT (id) DO NOTHING`
+  this migration originally shipped with. `ON CONFLICT` accepts exactly one conflict target, and
+  `users.username` carries its own `UNIQUE` constraint (`V8__users_groups.sql`) independent of `id` —
+  a database that already ran the deleted `AuthSeedRunner` (every pre-this-fix `docker-compose.yml`
+  deployment) has `admin`/`manager`/`pilot` rows at *different*, random ids, so `ON CONFLICT (id)`
+  alone did not see them as conflicts and the `INSERT` raised "duplicate key value violates unique
+  constraint `users_username_key`" — reproduced against a real Postgres with V8's exact DDL before
+  this fix landed, not assumed. Three `WHERE NOT EXISTS` guards (id OR username) replace the one
+  `ON CONFLICT`, and are the only change — ids, hashes, and the `memberships` jsonb are byte-for-byte
+  the same literals as before.
+- **This location is not `db/migration` because it must be entirely absent from Flyway's
+  `locations` list when `seedDevUsers` is `false`** (`PersistenceUnit.start` only adds
+  `classpath:db/seed/dev` conditionally) — a flag-gated `WHERE`/`CASE` inside an unconditionally-run
+  migration cannot make a whole *migration* not exist, only make its effects conditional, and the
+  W1 brief required the flag-off path to have **no trace** of these rows ever being considered, not
+  just no rows.
+- **Version `90001`, a deliberately reserved-high band, not "next free slot after V13".** A `V13.1`
+  scheme (sorting right after `V13__identity_baseline.sql`) was tried first and **measured to fail**
+  against a real Postgres: `classpath:db/migration` reaches V15 in the same working tree (W3's
+  concurrent wave), so by the time an operator actually flips `seedDevUsers` on, applying a
+  lower-versioned migration than the highest already-applied one is out-of-order, and Flyway refuses
+  that by default (`-outOfOrder=true` was rejected as the fix — a global setting that would also let a
+  genuinely-misordered `db/migration` change slip through silently, not something to trade for one
+  seed migration's convenience). A reserved high band sidesteps the problem entirely: this migration's
+  version is always the highest resolved one, so it always applies next regardless of how far
+  `db/migration` has moved, no out-of-order behavior needed anywhere.
+- **That same high-band choice is exactly why suppressing Flyway's validation on flag on→off needs
+  `ignoreMigrationPatterns("*:future", "*:missing")`, not just `"*:missing"`.** Once `db/seed/dev`
+  drops out of `locations`, Flyway must classify the now-orphaned `V90001` row in
+  `flyway_schema_history` as either `MISSING_SUCCESS` (orphaned version *below* the highest still-
+  resolvable one) or `FUTURE_SUCCESS` (orphaned version *at or above* it) —
+  `BaseAppliedMigration#getMissingState` branches on exactly that comparison, confirmed by decompiling
+  `flyway-core-12.4.0.jar` with `javap`, not assumed from the method's name. Because `V90001` is
+  chosen to always sort above `db/migration`'s own highest version, the state it lands in once orphaned
+  is *always* `FUTURE_SUCCESS`, never `MISSING_SUCCESS` — a bare `ignoreMigrationPatterns("*:missing")`
+  (this migration's own first-reading guess) compiled cleanly and looked reasonable but silently
+  matched nothing, and only failed loudly once tested against a live database rather than reasoned
+  about. `"*:future"` is also Flyway's **own built-in default** ignore pattern (`FlywayModel`'s
+  constructor sets it before any caller-supplied value; confirmed via `javap`, not the changelog) —
+  calling `ignoreMigrationPatterns(...)` at all replaces that default outright, so it has to be
+  restated explicitly here rather than assumed to still apply. See `PersistenceUnit`'s own javadoc and
+  `DevAccountSeedMigrationTest` for the full account.
+
+## Bootstrap and connection pool
 
 `PersistenceUnit.start` uses Hibernate's **native** bootstrap API (`org.hibernate.cfg.Configuration`) rather than JPA's `Persistence.createEntityManagerFactory` (which needs a `META-INF/persistence.xml` or a hand-built `PersistenceUnitInfo`) or Spring Data JPA (`@EnableJpaRepositories`, Spring Boot's `HibernateJpaAutoConfiguration`, etc.). `Configuration#buildSessionFactory()` returns `org.hibernate.SessionFactory`, which **implements `jakarta.persistence.EntityManagerFactory` directly** (same for `Session`/`EntityManager`) — so every `Jpa*Repository` still only ever calls plain `jakarta.persistence` API, and callers (vision-app) hold a completely standard `EntityManagerFactory` reference with no Hibernate-specific type leaking across the module boundary.
 
-This was a deliberate choice over Spring Data JPA: this codebase's adapters are plain classes constructed via `new` in `WiringConfiguration`/`PersistenceWiringConfiguration` (see vision-app's Bean inventory), never Spring-component-scanned — Spring Data repository interfaces are proxies the Spring Data repository factory generates at runtime and cannot be `new`'d, which would have forced `@EnableJpaRepositories` + Spring Boot's JPA autoconfiguration into the picture, and those autoconfigurations activate purely from classpath presence (`@ConditionalOnClass(DataSource.class)`, etc.) — meaning they would have needed to be **unconditionally excluded** from vision-app's `@SpringBootApplication` and then *conditionally re-enabled* per `vision.persistence.enabled`, a materially more complex (and more fragile) wiring story than the `@ConditionalOnProperty`-gated single bean this module's plain-JPA approach allows (see station/vision-app/MODULE.md's `PersistenceWiringConfiguration` entry).
+This was a deliberate choice over Spring Data JPA: this codebase's adapters are plain classes constructed via `new` in `ApplicationServiceWiring`/`PersistenceWiringConfiguration` (see vision-app's Bean inventory), never Spring-component-scanned — Spring Data repository interfaces are proxies the Spring Data repository factory generates at runtime and cannot be `new`'d, which would have forced `@EnableJpaRepositories` + Spring Boot's JPA autoconfiguration into the picture, and those autoconfigurations activate purely from classpath presence (`@ConditionalOnClass(DataSource.class)`, etc.) — meaning they would have needed to be pulled unconditionally into vision-app's `@SpringBootApplication`, a materially more complex (and more fragile) wiring story than the plain, straight-line `new Jpa*Repository(entityManagerFactory)` this module's plain-JPA approach allows (see station/vision-app/MODULE.md's `PersistenceWiringConfiguration` entry — unconditional since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b, so this argument no longer even turns on a toggle).
 
-No connection pool: Hibernate's default `DriverManagerConnectionProvider` (one physical JDBC connection per `EntityManager`, opened/closed by `JpaOperations` per call — see Gotchas) is what's wired, logging `HHH10001002: Using built-in connection pool (not intended for production use)` at startup — an accepted, documented tradeoff at this platform's single-instance/friends-demo scale, not a placeholder. Swapping in a pooled provider (e.g. HikariCP, `org.hibernate.orm:hibernate-hikaricp`, itself a Spring-Boot-managed dependency so no version pin would be needed) is a config-only change in `PersistenceUnit.start` if concurrency ever demands it — no repository or entity code would change.
+**Connection pool (docs/plans/active/SCALE-100-PLAN.md S3), correcting this section's own earlier claim.** This
+section used to say the swap to a pooled provider was "a config-only change" whenever "concurrency
+ever demands it" — verified false on 2026-08-17 (`mvn dependency:list` showed `com.zaxxer:HikariCP`
+was never on this module's classpath, transitively or otherwise) and superseded by this wave: `start`
+now builds one `HikariDataSource` (via `HikariConfig`, sized from `PersistencePoolSettings`, see API
+surface above) and **shares it between Flyway and Hibernate** — `Flyway.configure().dataSource(...)`
+migrates through it, then it is handed to Hibernate as the live `hibernate.connection.datasource`
+object (not a JNDI name — `Configuration#getProperties()` is a raw `Hashtable`, so `.put(Object,
+Object)` accepts a `DataSource` directly, bypassing `Properties#setProperty`'s String-only signature)
+with `hibernate.connection.provider_class` pointed at `ClosingDatasourceConnectionProvider`. Two
+things this rules out as *the* mechanism, deliberately: (1) Hibernate's own `HikariCPConnectionProvider`
+(from `hibernate-hikaricp`, `hibernate.hikari.*` properties) was **not** used to build the pool, because
+it always builds its own second, independent `HikariDataSource` internally — there would be no way to
+hand that same instance to Flyway first, and Flyway must finish migrating before the
+`EntityManagerFactory` (and therefore Hibernate's internal pool) exists at all; `hibernate-hikaricp` is
+still a declared dependency (see "Depends on" above) purely for its Hibernate-version-matched
+`com.zaxxer:HikariCP` version pin. (2) Hibernate's built-in `DriverManagerConnectionProvider` — the
+actual pre-S3 default, one physical JDBC connection per `EntityManager`, logging `HHH10001002: Using
+built-in connection pool (not intended for production use)` at startup — is gone; that warning no
+longer appears (grepped a full `-pl storage/persistence test` log: zero occurrences, vs. 19
+occurrences of `ClosingDatasourceConnectionProvider` being wired in its place, once per
+`EntityManagerFactory` the suite builds). The pool closes when the caller closes the
+`EntityManagerFactory` it came from (`entityManagerFactory.close()` → Hibernate's service registry
+`stop()`s every `Stoppable` service, including the connection provider) — `ClosingDatasourceConnectionProvider#stop()`
+closes the underlying `HikariDataSource` there, extending (not changing) the pre-existing "caller owns
+the `EntityManagerFactory` lifecycle" contract to also mean "and therefore the pool." `PostgresDockerIntegrationTest$ConnectionPoolTests`
+proves both halves: the wired-provider-class assertion, and a tiny two-connection pool actually
+refusing a third concurrent `EntityManager` (via `HibernateException`, inside the pool's own
+`connectionTimeout`, not a hang) — see Tests below. `JpaOperations`'s per-call `EntityManager` open/close
+pattern (Gotchas, below) is unchanged by this wave and remains the residual concurrency cost the pool
+now merely *bounds* rather than eliminates.
+
+**The four `PersistencePoolSettings` values vision-app's wiring needs to expose**, none of them chosen by
+this module (it only defines and validates the shape — see API surface above) — the orchestrator-owned
+`VisionPersistenceProperties`/`PersistenceWiringConfiguration` binds `application.yaml` keys under
+`vision.persistence.pool.*` (naming matches docs/plans/active/SCALE-100-PLAN.md §6) and constructs the record:
+
+| YAML key | Default | Record field |
+|---|---|---|
+| `vision.persistence.pool.max-size` | `20` | `maximumPoolSize` |
+| `vision.persistence.pool.min-idle` | `5` | `minimumIdle` |
+| `vision.persistence.pool.connection-timeout-ms` | `30000` | `connectionTimeoutMillis` |
+| `vision.persistence.pool.leak-detection-threshold-ms` | `30000` | `leakDetectionThresholdMillis` |
+
+Every default above is `PersistencePoolSettings.defaults()`, so an app that does not set any of these
+keys behaves exactly as it did before this wave (opt-in guardrail: unset config is a no-behavior-change
+default, only the unpooled-vs-pooled connection mechanics change underneath it).
 
 `hibernate.hbm2ddl.auto=validate`: Flyway owns schema creation/evolution end to end; Hibernate only ever validates its entity mapping matches what Flyway already created, never generates or alters DDL itself.
 
 ## Conventions
 
-- **jsonb via Hibernate's native JSON support, not a hand-rolled converter.** `attribute_hints`/`stream_options`/`attributes`/`extra`/`detections`/`flight_state`/`polygon`/`memberships`/`points` are `@JdbcTypeCode(SqlTypes.JSON)` fields with `columnDefinition = "jsonb"` — Hibernate 7.4 auto-detects a Jackson `ObjectMapper` on the classpath via its `FormatMapper` SPI and ships `org.hibernate.type.format.jackson.Jackson3JsonFormatMapper` specifically for Jackson 3 (`tools.jackson.*`, this house's Jackson generation under Spring Boot 4) — confirmed present in the `hibernate-core-7.4.1.Final` jar. No `AttributeConverter`, no `PGobject` juggling, no `stringtype=unspecified` JDBC-URL trick.
+- **jsonb via Hibernate's native JSON support, not a hand-rolled converter.** `attribute_hints`/`stream_options`/`attributes`/`extra`/`detections`/`flight_state`/`polygon`/`memberships`/`points`/`details` (`audit_entries`, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3) are `@JdbcTypeCode(SqlTypes.JSON)` fields with `columnDefinition = "jsonb"` — Hibernate 7.4 auto-detects a Jackson `ObjectMapper` on the classpath via its `FormatMapper` SPI and ships `org.hibernate.type.format.jackson.Jackson3JsonFormatMapper` specifically for Jackson 3 (`tools.jackson.*`, this house's Jackson generation under Spring Boot 4) — confirmed present in the `hibernate-core-7.4.1.Final` jar. No `AttributeConverter`, no `PGobject` juggling, no `stringtype=unspecified` JDBC-URL trick.
 - **Tracks ride the existing `detections` jsonb — there is no `tracks` table and no migration for them** (docs/plans/done/TRACKING-PLAN.md §4.C). `Detection` gained a nullable `TrackRef` component (track id, lifecycle state, source, velocities, age), and because the column already stores the whole record tree, it round-trips for free. **Consequences, stated rather than discovered later:** (1) tracks are **not SQL-queryable** — you cannot ask "where was track #7" without scanning and deserializing blobs, exactly as label filtering already scans in Java; a durable, indexed trajectory table is deferred to S2 (docs/main/TWO-TARGETS-PLAN.md), which is the first thing that would actually issue that query, and building the index now would be building it for nobody. (2) Rows written **before** the tracking wave still deserialize with `track` reading `null` — verified against a hand-written pre-tracking jsonb literal inserted through native SQL, not assumed (`preTrackingJsonbRowsStillDeserializeWithTrackReadingNull`). (3) `DetectionResult#tracking()` — the **per-frame** duty-cycle telemetry, as opposed to the per-detection `TrackRef` — has no column and is **deliberately not persisted**; it reads back `null`. That is a documented drop rather than the silent kind docs/extracts/TRACKING-ORCHESTRATION.md §6 rule 6 warns about: the counters it feeds are a live read model (`TrackingStatsWindow`, vision-application), and persisting them belongs with S2's trajectory table.
 - **`DetectionResultEntity#detections`/`TelemetrySampleEntity#flightState` store the domain `Detection`/`FlightState` record trees directly** (`List<Detection>` with nested `BoundingBox`/`ModelRef`; a single nullable `FlightState` with its own `List<String> armingBlockers`, docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) rather than a parallel adapter-local DTO shape — Jackson 3 serializes/deserializes Java records natively (canonical-constructor + component-name introspection, no annotations needed), proven by this module's own round-trip tests. Referencing a plain, framework-annotation-free domain record from an entity field is the same kind of "adapter depends on domain types" the enum reuse below already establishes; it's storage-format coupling to the domain's shape, not a framework leaking into the domain.
-- **No cross-entity foreign keys beyond the join tables' own PKs**, deliberately: `categories.parent_id` is the one exception (self-referencing, satisfiable because `V2__seed_categories.sql` controls insert order), but `assets.category_id` has **no** FK to `categories.id`, `asset_devices.device_id` has **no** FK to `devices.id`, and none of `asset_usages`/`telemetry_samples`/`detection_results` (V3) has any FK at all. The in-memory reference repositories this adapter must stay behavior-compatible with (`InMemory*Repository`, vision-app devsupport) perform zero referential checks — a real constraint here would reject operations (e.g. saving an `Asset` whose category was never separately saved) that the in-memory port happily allows, breaking parity for exactly the "round-trip every port method the same way the in-memory impl does" contract this module is judged against.
-- **`save()` is upsert-by-id** (`EntityManager#merge`) on the three P-a ports and `JpaAssetUsageRepository`, matching each in-memory repository's `Map#put` exactly. **`JpaTelemetryRepository#save`/`JpaDetectionRepository#save` always `persist` a brand-new row** instead (never `merge`) — samples/results are immutable historical records per their ports' contracts, and neither `Telemetry` nor `DetectionResult` carries an id to merge by. **`deleteById()` is a real hard delete, idempotent** (missing id ⇒ no-op) on `Device`/`Asset`, matching `Map#remove` exactly — soft-delete (`LifecycleState.DELETED`) is just a column value round-tripped like any other field; nothing in this module treats it specially, the same as the in-memory fallbacks.
+- **No cross-entity foreign keys beyond the join tables' own PKs**, deliberately: `categories.parent_id` is the one exception (self-referencing, satisfiable because `V2__seed_categories.sql` controls insert order), but `assets.category_id` has **no** FK to `categories.id`, `asset_devices.device_id` has **no** FK to `devices.id`, and none of `asset_usages`/`telemetry_samples`/`detection_results` (V3) has any FK at all. This traces back to a now-closed constraint: the in-memory reference repositories this adapter had to stay behavior-compatible with (`InMemory*Repository`, vision-app devsupport, deleted docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b) performed zero referential checks, and a real FK here would have rejected operations (e.g. saving an `Asset` whose category was never separately saved) that the in-memory port happily allowed. The in-memory parity target is gone, but the schema itself is frozen (no `V17+` migrations without a dedicated task) — so the permissive shape stands as today's actual contract regardless of why it was first chosen.
+- **`save()` is upsert-by-id** (`EntityManager#merge`) on the three P-a ports and `JpaAssetUsageRepository`, matching each repository port's upsert-by-id contract exactly. **`JpaTelemetryRepository#save`/`JpaDetectionRepository#save` always `persist` a brand-new row** instead (never `merge`) — samples/results are immutable historical records per their ports' contracts, and neither `Telemetry` nor `DetectionResult` carries an id to merge by. `JpaAuditTrail#record` follows the same always-`persist` rule for the same reason (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — entries are immutable historical facts). `JpaDetectionEventRepository#save` is the one exception on the history side: it `merge`s (upsert-by-id), because unlike a `DetectionResult`/`AuditEntry`, a `DetectionEvent` genuinely mutates over its own open lifetime (`lastSeen`/`peakConfidence` advance, then it closes) and carries a stable id to upsert by. **`deleteById()` is a real hard delete, idempotent** (missing id ⇒ no-op) on `Device`/`Asset` — soft-delete (`LifecycleState.DELETED`) is just a column value round-tripped like any other field; nothing in this module treats it specially.
 - **Domain enums (`Capability`, `LifecycleState`) are reused directly** in `@Enumerated(EnumType.STRING)` entity fields rather than duplicated as adapter-local enums kept in sync by hand — the framework annotation lives on the entity's *field*, not on the domain enum's *declaration*, so `vision-domain` stays annotation-free (`ArchitectureTest#domainAndApplicationAreSpringAnnotationFree` — note: JPA's `jakarta.persistence`/`org.hibernate.*` annotations aren't `org.springframework..` either way, but the same "domain must not import framework code" principle applies and is respected).
 
 ## Retention (docs/plans/done/MVP2-PLAN.md P-b)
@@ -170,9 +361,26 @@ No connection pool: Hibernate's default `DriverManagerConnectionProvider` (one p
 
 The explicit `flush()` between `persist` and the native delete is required, not decorative: Hibernate has no way to know a hand-written native query touches `telemetry_samples`/`detection_results`, so without it the delete would run against the connection's pre-insert view of the table — once a usage/stream is already at capacity, that would prune the row just being appended instead of an older one.
 
-`JpaTelemetryRepository`'s key is `usage_id` (matching `AssetUsageRepositoryPort`'s grouping); `JpaDetectionRepository`'s key is `stream_id` — the only grouping key `DetectionResult`/`DetectionQuery` actually carry (there is no `usageId` on a detection). Both default to **100,000 rows** (`DEFAULT_RETENTION_LIMIT_PER_USAGE`/`DEFAULT_RETENTION_LIMIT_PER_STREAM`) — generous (≈27h of continuous 1Hz telemetry for one usage; ≈2.75h of continuous 10fps detections for one stream) but finite, so a usage/stream nobody ever stops (e.g. a forgotten dev-mode stream) cannot grow either table unboundedly. Each repository also has a two-argument constructor (`EntityManagerFactory, int`) for overriding the cap — used by this module's own retention tests to exercise pruning without inserting six figures of rows first; **not currently wired to a `vision.persistence.*` Spring property** (see Status's honest gaps for why).
+`JpaTelemetryRepository`'s key is `usage_id` (matching `AssetUsageRepositoryPort`'s grouping); `JpaDetectionRepository`'s key is `stream_id` — the only grouping key `DetectionResult`/`DetectionQuery` actually carry (there is no `usageId` on a detection). Both default to **100,000 rows** (`DEFAULT_RETENTION_LIMIT_PER_USAGE`/`DEFAULT_RETENTION_LIMIT_PER_STREAM`) — generous (≈27h of continuous 1Hz telemetry for one usage; ≈2.75h of continuous 10fps detections for one stream) but finite, so a usage/stream nobody ever stops (e.g. a forgotten dev-mode stream) cannot grow either table unboundedly. Each repository also has a two-argument constructor (`EntityManagerFactory, int`) for overriding the cap — used by this module's own retention tests to exercise pruning without inserting six figures of rows first; **not currently wired to a `vision.persistence.*` Spring property** (see Status's honest gaps for why). `JpaTelemetryRepository`'s prune-per-write mechanism above describes its **immediate**-mode behavior; docs/plans/active/SCALE-100-PLAN.md S4's batching (below) changes "every write" to "every flushed batch" — see "Batching (SCALE-100-PLAN S4)".
 
 `JpaAssetUsageRepository` has **no** retention pruning: a usage row is written once per start/stop plus a handful of position/sample-count updates in between, not once per incoming sample — it is not the "append-heavy" table docs/plans/done/MVP2-PLAN.md P-b's retention guard targets.
+
+**`JpaDetectionEventRepository`** (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3) follows the identical mechanism and shape as `JpaDetectionRepository` above — same `stream_id` grouping key (the only one `DetectionEvent` carries), same `DEFAULT_RETENTION_LIMIT_PER_STREAM = 100_000`, same two-argument test-override constructor, same `merge` → `flush()` → native-delete-ordered-by-`last_seen`-desc sequence, one difference: the write being flushed is a `merge` (upsert), not a `persist`, since `save` here can be replacing an existing row rather than always adding one. **Deliberately not the in-memory ring's 500-per-stream cap** the now-deleted `InMemoryDetectionEventRepository` (vision-app devsupport, removed docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b) used — that cap existed to bound heap in a devsupport fallback, not to express a real retention policy; reproducing it verbatim in a durable table would evict events far sooner than the platform actually needs to. This was a choice between the two existing "constructor-argument row cap" patterns this module already has (`JpaDetectionRepository`/`JpaTelemetryRepository`) rather than a third mechanism — `JpaDetectionRepository`'s `stream_id` key is the closer match (detection events group by stream, not by usage), so that is the one followed.
+
+**`JpaAuditTrail` has no retention pruning at all** — see its own entry above in "API surface": an audit trail that evicts its own oldest rows on a timer is not the durability guarantee the port exists to provide (`AuditTrailPort`'s own javadoc: "an audit trail that can be edited is not an audit trail" — the same reasoning extends to one that quietly forgets). Unbounded growth here is an accepted tradeoff at this platform's scale, the same posture `JpaAssetUsageRepository` already takes for its own low-write-volume table.
+
+## Batching (docs/plans/active/SCALE-100-PLAN.md S4)
+
+`JpaTelemetryRepository#save` no longer necessarily does one `persist` + `flush()` + prune per sample — the hot ingest path's per-sample round trip this wave targets. A new `repository.TelemetryBatchSettings(int batchSizeSamples, long batchWindowMillis)` record (compact-constructor-validated, `defaults()`/`immediate()` factories, same shape as `config.PersistencePoolSettings`) governs it:
+
+- **Immediate mode** (`TelemetryBatchSettings.immediate()` → `(1, 0)`, `isImmediate()` true when `batchWindowMillis == 0`) reproduces the pre-S4 behavior exactly: every `save` persists, flushes, and prunes before returning. The one- and two-argument constructors both resolve to this, so **every pre-S4 caller and test keeps its synchronous read-after-write behavior byte-identical** — this wave changes nothing observable in default configuration.
+- **Batched mode** (the three-argument constructor, non-immediate settings) buffers samples per `usage_id` in a `ConcurrentHashMap<UUID, PendingBatch>` and flushes (one `persist` per buffered sample, one `flush()`, one prune — the whole point) the instant `batchSizeSamples` accumulate for a usage, or `batchWindowMillis` have elapsed since the first still-buffered one for that usage, whichever comes first. The time bound is armed via a dedicated single-thread daemon `ScheduledExecutorService` (`"telemetry-batch-flush"`), created only when the settings are non-immediate — an immediate-mode instance starts none.
+- **Both flush paths *evict* their map entry, they do not merely empty it.** Buffer mutation only ever happens inside a `ConcurrentHashMap#compute` on the usage key — which is what makes `PendingBatch`'s fields safe without their own lock (compute serializes every writer and the flusher on one key, so a batch cannot be appended to mid-drain) and what makes draining a *removal*: the lambda returns `null`. Leaving drained-but-present entries behind would grow this map for the life of the JVM, one per flight ever flown — the same unbounded-map defect SCALE-100 fact 2f describes in `LiveUpdateRegistry`, reintroduced by the change meant to relieve that pressure. `int pendingBatchCount()` exposes the map's size so that invariant is testable rather than assumed (`bothFlushPathsEvictTheirBufferSoTheMapDoesNotGrowPerUsage`); it doubles as the honest "how much would a `kill -9` lose right now" number, and is always `0` in immediate mode. The DB write itself deliberately runs *outside* the lambda — `compute` holds a bin lock, and a JDBC round trip under it would serialize unrelated usages.
+- **The trade-off, stated plainly:** a sample buffered but not yet flushed exists only in that repository instance's heap. A crash (`kill -9`, OOM, unclean restart) loses whatever is still buffered per open usage, bounded to at most one `batchWindowMillis` window's worth. `findByUsage` only ever sees flushed rows, so a read shortly after a still-buffered write can also lag by up to the same window — a documented consequence of the same trade-off, not a bug. CLAUDE.md rule 9 ("newest data wins, even if previous is still available") is why `DEFAULT_BATCH_WINDOW_MILLIS` is a small non-zero number rather than defaulting to zero-loss: a deployment that wants zero loss over ingest throughput sets the window to `0` explicitly (which reads as `isImmediate()`).
+- **Tunable constants** (both in `TelemetryBatchSettings`, `repository` package) — not yet wired to a Spring property, flagged for S7 to lift into `vision.persistence.telemetry.*`:
+  - `DEFAULT_BATCH_SIZE_SAMPLES = 100` — safety ceiling for an unusually high-rate source; a typical ~1Hz flight-controller feed produces far fewer samples than this within one window, so in practice the time bound is what decides when a batch actually flushes.
+  - `DEFAULT_BATCH_WINDOW_MILLIS = 200L` — comfortably under docs/plans/active/SCALE-100-PLAN.md S4's 250ms crash-loss ceiling.
+- **Not wired into production by this wave**: `PersistenceWiringConfiguration`'s `JpaTelemetryRepository` bean still uses the one-argument (implicitly-immediate) constructor — batching only takes effect once a caller explicitly passes non-immediate `TelemetryBatchSettings`, e.g. via the new three-argument constructor. `UsageTracker` (`contexts/vision-perception`) has a structurally parallel `UsageSummaryBatchSettings` for its own coalesced `AssetUsage` summary write (docs/plans/active/SCALE-100-PLAN.md S4 item 3) — a separate type in a separate module (this module cannot depend on a context module), meant to be wired from the *same* `vision.persistence.telemetry.batch-size`/`batch-window` property values so one number governs both write paths; see that module's own MODULE.md.
 
 ## Tests
 
@@ -196,7 +404,7 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   exactly, upsert-that-closes-an-open-usage (now also asserting the recorded `streamId` survives
   the close/upsert), `findRecentByAsset` newest-first + bounded by limit, `findOpenByAsset`
   found/not-found.
-- `@Nested TelemetryRepositoryTests` (7, up from 5 — docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) — round trip
+- `@Nested TelemetryRepositoryTests` (10, up from 7 — docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) — round trip
   with every field populated and with only the required fields, per-usage isolation,
   `findByUsageReturnsEarliestSamplesFirstUpToLimit` — proves `findByUsage`'s limit selects the
   *earliest* samples (mirroring `InMemoryTelemetryRepository`'s actual behavior, see
@@ -204,7 +412,16 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   a full `FlightState` (including nested nullable sub-fields and a non-empty `armingBlockers`) round
   trips exactly, and a sample built via `Telemetry`'s 8-arg convenience ctor (no `flightState` at
   all) reads back with `flightState() == null`, the same honest-null contract a real pre-V6 row
-  would also satisfy.
+  would also satisfy — plus two new docs/plans/active/SCALE-100-PLAN.md S4 batching cases:
+  `batchedSaveDefersWritesUntilTheSizeBoundThenFlushesTogether` (a 3-sample size bound against a huge
+  window: `findByUsage` sees nothing after two saves, all three together after the third trips the
+  bound) and `batchedSaveIsDurableWithinTheConfiguredWindowEvenBelowTheSizeBound` (a below-size-bound
+  save is invisible immediately, then durable after sleeping past a 100ms window) — the loss-bound
+  proof the S4 brief requires, using the new three-argument constructor with explicit
+  `TelemetryBatchSettings` — and `bothFlushPathsEvictTheirBufferSoTheMapDoesNotGrowPerUsage`, which
+  pins the map-eviction invariant via `pendingBatchCount()` on *both* drain paths (the size bound,
+  which drains inline on the caller thread, and the window, which drains on the scheduler) because
+  they evict independently.
 - `@Nested DetectionRepositoryTests` (8, up from 6 — docs/plans/done/TRACKING-PLAN.md wave T6) — round trip of
   detections + inference latency, `streamId`
   filter, `queryTimeRangeIsInclusiveOnBothEndsMatchingInMemoryBehavior` (proves `to` is treated as
@@ -319,7 +536,116 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   row exists at its fixed id with `kind='COP'` and the system `UUID(0,0)`/`UUID(0,1)` ownership —
   the row every pre-existing mark was backfilled onto, and the one `LayerResolver#copLayerId()`
   must find rather than duplicate.
-113 tests total, all green in this environment (`docker info` reachable) — up from 98
+- `@Nested AuditTrailRepositoryTests` (4, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3) — a recorded entry
+  round trips every field (including jsonb `details`) via `findByTarget`, `findRecent` spans every
+  target newest-first bounded by limit (own-rows-within-a-large-fetch technique, same as
+  `AssetUsageRepositoryTests#findRecentReturnsNewestFirstAcrossEveryAssetBoundedByLimit`),
+  `findByTarget` returns only that target's entries newest-first bounded by limit (an unrelated
+  target's entry is excluded), `findByActor` returns only that actor's entries newest-first (another
+  actor's entry on the same targets is excluded).
+- `@Nested DetectionEventRepositoryTests` (7, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3) — an open event
+  with a position round trips every field via `findByStream`, an event with no asset and no position
+  round trips both as `null`, **`save` is a genuine upsert**
+  (`saveIsAnUpsertThatAdvancesLastSeenAndPeakConfidenceThenCloses` — the same id saved three times
+  as it advances then closes leaves exactly one row, with the final closed values), `findByStream`
+  on an unknown stream is empty, `findByStream` is newest-first bounded by limit, `findRecent` spans
+  every stream newest-first bounded by limit (same own-rows technique as `AuditTrailRepositoryTests`
+  above), and `findRecent`'s `sinceInclusive` excludes strictly-before events while including the
+  boundary instant itself.
+- `v14MigrationCreatesTheAuditEntriesTableOnTopOfV1ThroughV13` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3) —
+  same `information_schema` shape as the V7-V12 schema tests: `audit_entries.details` is a required
+  `jsonb` column, `target_id` is required, proving `V14__audit_trail.sql` applied cleanly.
+- `v15MigrationCreatesTheDetectionEventsTableOnTopOfV1ThroughV14` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md
+  W3) — same shape as the V14 test above: `detection_events.asset_id`/`position_latitude` stay
+  nullable while `last_seen` is required, proving `V15__detection_events.sql` applied cleanly.
+
+`DevAccountSeedMigrationTest` (5, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1) — its own `@Testcontainers`
+class, deliberately **not** a `@Nested` class inside `PostgresDockerIntegrationTest`: a **non-static**
+`@Container` field (a fresh `PostgreSQLContainer` per test method, not one shared across the class)
+because several scenarios need to observe Flyway's `flyway_schema_history` transition through specific
+states (unmigrated → flag-off → flag-on, flag-on → flag-off) that a container already carrying every
+other test's migration history cannot give cleanly. One method per contract clause from the W1 brief:
+`flagFalseSeedsNoDevAccountsButStillSeedsTheRootGroupAndMigrationSucceeds`,
+`flagTrueSeedsAllThreeAccountsWithVerifiedBcryptHashesAndTheReadableMembershipShape` (each hash
+verified via `BCryptPasswordEncoder.matches` against its own username as plaintext, and each
+`memberships` value equals the exact `List.of(new Membership(rootGroupId, role))` the port returns —
+not just "some jsonb landed"), `applyingTwiceIsANoOp` (a second, independent
+`PersistenceUnit.start(..., true)` call against the same database — a fresh `Flyway.migrate()` call,
+not just re-reading the same `EntityManagerFactory` — confirms Flyway's own history table is what
+makes re-application a no-op, not merely the migration's own `ON CONFLICT`),
+`flippingFalseThenTrueOnAnAlreadyMigratedDatabaseStillSeedsTheAccountsRetroactively`, and
+`flippingTrueThenFalseDoesNotBreakSubsequentMigrationsAndLeavesTheSeededAccountsInPlace` (the one that
+required decompiling `flyway-core` to get green — see the "W1 done" narrative section near the end of
+this file).
+
+`UpgradePathMigrationTest` (4, docs/plans/active/POSTGRES-ONLY-CONTEXT.md upgrade path) — sibling to
+`DevAccountSeedMigrationTest`, same non-static-`@Container`-per-test-method shape, but a materially
+different setup: each test first drives a real `Flyway` handle directly (not `PersistenceUnit.start`,
+which always migrates to the latest resolvable version) with `.target("12")`, then hand-inserts a
+group + three users via plain JDBC shaped exactly like the deleted `AuthSeedRunner` used to leave them
+— a `"Legacy Root"` group at a random id, `admin`/`manager`/`pilot` at random ids whose `memberships`
+point at it — before finally calling `PersistenceUnit.start(..., true)`, the real upgrade path an
+operator's next `docker compose up` actually takes. `upgradeSucceedsAndLeavesPreExistingAccountsUntouched`
+— migration completes (defect 1 fixed) and the three hand-inserted accounts keep their original ids
+*and* their original (deliberately distinguishable, `"legacy-*-hash"`) password hashes — `V90001`'s
+guard skipped all three inserts on the username check, not the id check, and did not silently replace
+anyone. `upgradeRestoresManagerVisibilityOfDevPrincipalOwnedAssets` — **the assertion that proves
+defect 2 is actually fixed**: asserts the fixed group's `parentGroupId()` is the legacy root's id and
+its name is now `"Dev-Mode Assets"`, then builds a `VisibilityScope` for the legacy `manager` user
+through a real `DefaultScopeResolver` wired to `JpaGroupRepository`/`JpaAssignmentRepository` (the
+actual subtree walk, not a hand-simulated approximation) and asserts it `includes` an `Ownership`
+whose group is `UUID(0,1)` — restated locally as a constant (see the test's own javadoc) since this
+module must not depend on `vision-app`'s `DevPrincipal`. `freshInstallLeavesFixedGroupParentlessWithV13NameAndSeedsTheThreeDevAccounts`
+— `V16` must be a genuine no-op with zero other parentless groups: the fixed group stays root, keeps
+the `"Root"` name `V13` gave it, and all three dev accounts still land at their fixed ids.
+`runningTheFullMigrationSetTwiceChangesNothing` — a second, independent `PersistenceUnit.start(...,
+true)` call (a fresh `Flyway.migrate()`, same idiom as `DevAccountSeedMigrationTest#applyingTwiceIsANoOp`)
+against an already-fully-migrated fresh-install database settles into the same fixed point: still one
+parentless `"Root"` group, still exactly 3 users.
+
+`@Nested ConnectionPoolTests` inside `PostgresDockerIntegrationTest` (2, docs/plans/active/SCALE-100-PLAN.md
+S3) — `hibernateUsesTheSharedClosingProviderNotTheBuiltInUnpooledOne` unwraps the shared
+`EntityManagerFactory`'s `ConnectionProvider` service and asserts it is a
+`ClosingDatasourceConnectionProvider`, not Hibernate's built-in `DriverManagerConnectionProvider`.
+`poolCapsConcurrentPhysicalConnectionsAtItsConfiguredMaximum` opens a second, independent
+`EntityManagerFactory` via the new 5-arg `PersistenceUnit.start(..., PersistencePoolSettings)` overload
+with a tiny 2-connection pool, holds both connections open across live transactions, then asserts a
+third concurrent `EntityManager#getTransaction().begin()` is refused with a `HibernateException` inside
+the pool's own `connectionTimeout` (not a hang) — the end-to-end, real-Postgres proof that the pool is
+actually bounding concurrency, not just configured and unused.
+
+`PersistencePoolSettingsTest` (7, docs/plans/active/SCALE-100-PLAN.md S3, docker-free) — `defaults()` matches
+its own documented `DEFAULT_*` constants, plus one rejection case per compact-constructor invariant
+(`maximumPoolSize < 1`, `minimumIdle` negative or above `maximumPoolSize`, `connectionTimeoutMillis <=
+0`, `leakDetectionThresholdMillis < 0`) and one case confirming `leakDetectionThresholdMillis == 0` is
+accepted as "disabled," not rejected.
+
+`ClosingDatasourceConnectionProviderTest` (2, docs/plans/active/SCALE-100-PLAN.md S3, docker-free) — hand-rolled
+fake `DataSource`s (no HikariCP, no container) prove `stop()` closes a `Closeable` `DataSource` and
+tolerates one that is not `Closeable`, isolating the narrow shutdown-doesn't-leak claim from
+`ConnectionPoolTests`' end-to-end proof above.
+
+148 tests total (up from 137, docs/plans/active/SCALE-100-PLAN.md S3: new `PersistencePoolSettingsTest` (7) +
+`ClosingDatasourceConnectionProviderTest` (2) + `ConnectionPoolTests` (2) = +11), run against a real
+`postgres:16` Testcontainers instance, docker reachable in this environment (`docker --version` →
+`Docker version 28.3.3`) — every new case actually ran, none skipped.
+
+137 tests total (up from 133, docs/plans/active/POSTGRES-ONLY-CONTEXT.md upgrade path: new
+`UpgradePathMigrationTest` = +4), run against a real `postgres:16` Testcontainers instance, docker
+reachable in this environment — every new case actually ran, none skipped.
+
+133 tests total (up from 128, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1: new
+`DevAccountSeedMigrationTest` = +5), run against a real `postgres:16` Testcontainers instance, docker
+reachable in this environment — every new case actually ran, none skipped.
+
+128 tests total (up from 115, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3: the two ports with no Postgres
+implementation at all now have one — `AuditTrailRepositoryTests` (4) + `DetectionEventRepositoryTests`
+(7) + the V14/V15 schema tests (2) = +13), run against a real `postgres:16` Testcontainers instance,
+docker reachable in this environment — every new case actually ran, none skipped. Older history below
+was accurate as of its own wave but the running "up from N" chain was not kept in sync every wave in
+between (this module's own T6 entry further down independently confirms 115/115 immediately prior to
+this one); treat the itemized per-wave sections as the source of truth over this summary line's older
+links. All green in this environment (`docker info` reachable) — up from 98
 (docs/plans/done/MAP-REWORK-PLAN.md Wave C: new `MapLayerRepositoryTests` (7) + `DrawingRepositoryTests` (6) +
 the V12 schema test (1) + one more `MarkRepositoryTests` case (1), = +15); up from 97 at the
 NAV-IA/F8 entry; down from 101
@@ -335,10 +661,12 @@ filesystem) deleted — dataset delivery to the training host is now a gRPC uplo
 
 - **`org.testcontainers.postgresql.PostgreSQLContainer` (Testcontainers 2.x's package — note: distinct from the legacy `org.testcontainers.containers.PostgreSQLContainer` shim, both present in the jar) is a concrete, non-generic class**, not `PostgreSQLContainer<SELF extends PostgreSQLContainer<SELF>>` like Testcontainers 1.x — `new PostgreSQLContainer<>("postgres:16")` does not compile here; it's `new PostgreSQLContainer("postgres:16")` (raw type, no diamond).
 - **Testcontainers 2.x renamed its Maven artifacts** with a `testcontainers-` prefix: it's `org.testcontainers:testcontainers-postgresql` and `org.testcontainers:testcontainers-junit-jupiter`, not `org.testcontainers:postgresql`/`org.testcontainers:junit-jupiter` (which don't exist at `testcontainers-bom` 2.0.5 — resolving them fails with a plain "could not find artifact" error that gives no hint the fix is just the artifact name). The un-prefixed core artifact (`org.testcontainers:testcontainers`, for `GenericContainer`/`DockerClientFactory`) did **not** get renamed — only the per-database/per-technology modules did.
-- **`JpaOperations` opens a fresh `EntityManager` (and therefore a fresh physical JDBC connection, given the unpooled connection provider — see "Bootstrap" above) per `write`/`read` call.** No request-scoped or thread-bound `EntityManager`, because there is no Spring/servlet request here to scope one to. Fine at this platform's call volume; would need revisiting (most likely: adding the pooled connection provider first) before this adapter could serve meaningfully concurrent load.
-- **Hibernate logs two startup warnings that are expected, not bugs**: `HHH10001002: Using built-in connection pool (not intended for production use)` (see "Bootstrap") and `HHH90000025: PostgreSQLDialect does not need to be specified explicitly` (this module sets `hibernate.dialect` explicitly anyway, to skip Hibernate's own connection-metadata-based auto-detection round trip at startup — a minor, deliberate speed/explicitness tradeoff, not an oversight).
+- **`JpaOperations` still opens a fresh `EntityManager` per `write`/`read` call — docs/plans/active/SCALE-100-PLAN.md S3 deliberately did not touch this.** Before S3, each such open/close pair also opened/closed its own unpooled physical JDBC connection; since S3 (see "Bootstrap and connection pool" above) that connection now comes from a real, bounded pool, so concurrent calls are capped at `PersistencePoolSettings.maximumPoolSize()` instead of each spawning an unbounded new physical connection. The pool **bounds** the cost, it does not **remove** it: every `write`/`read` still pays a full borrow-from-pool/begin-transaction/commit/return-to-pool cycle per call rather than reusing one `EntityManager` across a logical unit of work (e.g. one HTTP request). No request-scoped or thread-bound `EntityManager`, because there is no Spring/servlet request here to scope one to. Turning that into a real request-scoped (or otherwise batched) unit of work is a separate, larger refactor touching all 19 `Jpa*Repository` classes' call sites — out of scope for S3, flagged here as the next thing to revisit if this pattern shows up in latency/throughput measurements.
+- **Hibernate's `HHH10001002: Using built-in connection pool (not intended for production use)` startup warning is gone as of docs/plans/active/SCALE-100-PLAN.md S3** — it only ever came from the unpooled `DriverManagerConnectionProvider` S3 replaced (see "Bootstrap and connection pool" above); verified absent via a full-suite log grep (0 occurrences), not just inferred from the code change. `HHH90000025: PostgreSQLDialect does not need to be specified explicitly` is unrelated and still expected: this module sets `hibernate.dialect` explicitly anyway, to skip Hibernate's own connection-metadata-based auto-detection round trip at startup — a minor, deliberate speed/explicitness tradeoff, not an oversight.
+- **`EntityManager#getTransaction().begin()` eagerly acquires the physical JDBC connection for a resource-local transaction — it does not defer to the first query**, contrary to a common assumption (docs/plans/active/SCALE-100-PLAN.md S3, discovered empirically while writing `ConnectionPoolTests#poolCapsConcurrentPhysicalConnectionsAtItsConfiguredMaximum`: the pool-exhaustion `HibernateException` was thrown from `begin()` itself, not from the subsequent `createNativeQuery(...)` call the test originally expected to be the trigger). Relevant to anyone writing a similar concurrency-bound test against this module later.
 - **A native query's `?N` positional parameters must be re-supplied per occurrence, not per distinct value** — `JpaTelemetryRepository`/`JpaDetectionRepository`'s prune queries reference `?1` (the grouping key) twice in the SQL text (once in the outer `WHERE`, once in the subquery's `WHERE`) but call `setParameter(1, value)` only **once**; Hibernate's native-query parameter binder resolves every occurrence of a given positional index from the same single `setParameter` call (unlike raw JDBC `?` placeholders, which are positional *per occurrence* and would need the value bound twice) — this is standard JPA `Query#setParameter(int, Object)` behavior, not something either class over-thinks with parameter-index bookkeeping.
 - **`EntityManager#setParameter(int, UUID)` on a native query binds correctly as `uuid`, not `varchar`/`bytea`**, with no `stringtype=unspecified` JDBC-URL trick and no `PGobject` wrapping needed — Hibernate infers the correct JDBC type from the Java parameter's runtime class (`UUID.class` → `StandardBasicTypes.UUID` → Postgres `uuid`) the same way it does for typed JPQL/Criteria parameters, even though the query text itself is opaque native SQL to Hibernate.
+- **`org.springframework.security:spring-security-crypto` (test scope only, added docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1) marks its own `spring-core` dependency `optional`, and has zero other transitive dependencies** — `new BCryptPasswordEncoder()` (used by `DevAccountSeedMigrationTest` to verify `db/seed/dev`'s hardcoded hashes against their plaintexts, the same class production `BcryptPasswordHasher` in vision-app wraps) throws `NoClassDefFoundError: org/apache/commons/logging/LogFactory` unless `org.springframework:spring-core` is *also* added as a test dependency (it bundles its own `spring-jcl` commons-logging bridge). This does **not** create a runtime Spring dependency for this module — both are `<scope>test</scope>`, and the module's own production code never imports either.
 - **Two unavoidable visibility widenings from docs/plans/active/LAYERING-REFACTOR-PLAN.md Wave C's package split**, both mechanical consequences of `repository`/`config` being sibling packages rather than one flat package (§1.4's "package-private wherever the split allows it" — this split doesn't allow it here): `JpaOperations` and its `write`/`read` methods went from package-private to `public` (every `Jpa*Repository` composing it now lives one package over); every mapper's `toEntity`/`toDomain` went from `private static` (on the repository itself) to `public static` (on its own class in `mapper`), for the same cross-package reason. Nothing else in the module widened — `JpaOperations`'s constructor and the mapper classes' own constructors stay `private`/package-scoped where nothing outside needs them.
 
 ## Status
@@ -516,7 +844,12 @@ involvement for this one port). See contexts/vision-learning/MODULE.md for the f
 (single-zip-file vs. loose-directory-then-zip) is called out above.
 
 **Honest gaps / explicitly out of scope:**
-- **`AuditTrailPort` has no JPA implementation.** It was never in either P-a's or P-b's scope (docs/plans/done/MVP2-PLAN.md doesn't mention it); `InMemoryAuditTrail` still backs it unconditionally in vision-app regardless of `vision.persistence.enabled` — the fleet-change audit trail does not survive a restart.
+- **`AuditTrailPort` now has a JPA implementation** (`JpaAuditTrail`, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — see that
+  section further down) — this was the original gap noted here; it is closed on the adapter side.
+  **Not yet wired**: `vision-app`'s `ApplicationServiceWiring#auditTrailPort` still constructs
+  `InMemoryAuditTrail` unconditionally, with no `vision.persistence.enabled` branch for this port at
+  all (same for `DetectionEventRepositoryPort`/`InMemoryDetectionEventRepository`) — wiring both in
+  is explicitly a later wave's job per W3's own brief, not an oversight of this one.
 - **`findByUsage`'s `limit` selects the earliest samples, not the most recent** — inherited unchanged from `InMemoryTelemetryRepository`'s actual behavior (`list.stream().limit(n)` over an append-ordered list) per this task's "match the reference implementation's exact semantics" brief, not fixed here. For a long flight with more samples than `AssetController`'s `GET /api/usages/{id}/telemetry?limit=100` default, this returns the flight's *first* 100 seconds, not its most recent — worth a deliberate look (newest-first-then-reverse, or a proper time-window parameter) whenever R-a's replay API design settles, since replay is the actual consumer this ordering matters for.
 - **`DetectionQuery#to` is treated as inclusive, not exclusive** — same "match the in-memory implementation's real behavior over its javadoc" call, mirroring `InMemoryDetectionRepository`'s `!capturedAt.isAfter(to)`. The domain javadoc and the only two implementations of the port now disagree; worth reconciling (fix the javadoc, or fix both implementations) in whichever future task next touches `DetectionQuery`.
 - **Retention caps are constructor arguments, not a `vision.persistence.*` Spring property** — see Retention above; `PersistenceWiringConfiguration` uses each `Jpa*Repository`'s one-argument (default-cap) constructor. No UI/ops surface has asked for a tunable cap yet; wiring one through is a small, isolated follow-up whenever one does.
@@ -696,3 +1029,383 @@ which is the honest size of it.
 See the tracks bullet under Conventions for the three consequences that are now written down: tracks
 are not SQL-queryable (deferred to S2, which is the first query that needs them), pre-tracking rows
 read back untracked, and per-frame `TrackingTelemetry` is deliberately not persisted.
+
+## docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 done (the auth fix, standalone)
+
+**The bug**: the now-deleted `AuthSeedRunner` (station/vision-app) created the root group at
+application-startup with `GroupId.random()`, while `DevPrincipal.GROUP_ID` — the fixed group every
+asset gets stamped with while `vision.auth.enabled=false` (the default) — is the fixed
+`UUID(0,1)`. Every asset created under the default config was owned by the fixed group; the group a
+persistence-enabled app's `AuthSeedRunner` actually seeded was a *different*, random one. A MANAGER
+scoped to that random root group saw an empty fleet. `V13__identity_baseline.sql` (see Schema above)
+fixes this at the schema level — the root group is now always seeded at `DevPrincipal.GROUP_ID`
+itself, `ON CONFLICT (id) DO NOTHING` so a database already carrying a stale random-id row from a
+pre-W1 run is not blocked, just left with an extra (now-orphaned, ownerless) group row alongside the
+correct fixed one. `DevPrincipal` was not touched — the migration adapts to it, per the brief.
+
+**Dev accounts moved out of Java entirely.** The three DEV-ONLY accounts (`admin`/`admin` ADMIN,
+`manager`/`manager` MANAGER, `pilot`/`pilot` PILOT) that `AuthSeedRunner` used to create
+unconditionally on every startup now live in `V90001__dev_accounts.sql`, a Flyway migration in a
+*second*, conditional location (`classpath:db/seed/dev`) that only ever joins Flyway's `locations`
+when the new `vision.persistence.seed-dev-users` property (`VisionPersistenceProperties#seedDevUsers`,
+default `false`) is `true` — see the `db/seed/dev` schema entry above for the full account of why a
+second location, why version `90001`, and why `ignoreMigrationPatterns("*:future", "*:missing")`
+rather than the `"*:missing"` a first reading suggests. `AuthSeedRunner.java`/`AuthSeedRunnerTest.java`
+are deleted; station/vision-app/MODULE.md documents the replacement on that side (`DevAccountSeeder`,
+a test-only helper four `@SpringBootTest` classes now call from `@BeforeEach`, since those tests still
+need the accounts to exist and there is no in-memory equivalent of a Flyway seed).
+
+**The `ignoreMigrationPatterns` bug, found empirically, not reasoned about** — the brief's own explicit
+demand ("verify which actually holds against a real Postgres — do not reason about it, test it") paid
+off here. A first-reading guess, `ignoreMigrationPatterns("*:missing")`, compiled, read plausibly in
+review, and **silently failed to suppress Flyway's validation error** in the flag-on→off integration
+test, with no indication why. Decompiling `flyway-core-12.4.0.jar` (`javap` on `MigrationState`,
+`ValidatePatternUtils`, `MigrationInfoImpl`, and `BaseAppliedMigration`, none of them public API) showed
+the actual mechanism: an applied migration whose location has disappeared is classified `MISSING_SUCCESS`
+only if its version is *below* the highest version Flyway can still resolve, and `FUTURE_SUCCESS`
+if it's *at or above* it (`BaseAppliedMigration#getMissingState`) — and `V90001`'s whole reason for
+existing (see the `db/seed/dev` schema entry) is to always sort above `db/migration`'s real versions,
+which means it is *always* `FUTURE_SUCCESS` once orphaned, never `MISSING_SUCCESS`. The fix,
+`ignoreMigrationPatterns("*:future", "*:missing")`, also turned up a second fact worth recording:
+`"*:future"` is Flyway's **own built-in default** ignore pattern (`FlywayModel`'s constructor sets it
+before any caller-supplied value — confirmed by decompiling, not the changelog); calling
+`ignoreMigrationPatterns(...)` at all replaces that default outright rather than adding to it, so a
+caller that only wanted to *add* a pattern for its own case (as this one initially believed it was
+doing) had in fact also silently dropped a default protection. Full bytecode-level account left in
+`PersistenceUnit`'s javadoc and `DevAccountSeedMigrationTest`'s own comments, not just in this file.
+
+`./mvnw -B -pl storage/persistence clean test`: **133/133 green** (was 128 immediately before this
+wave — see the Tests section above for the breakdown), run against a real `postgres:16`
+Testcontainers instance, **docker reachable in this environment — every new case, including all five
+`DevAccountSeedMigrationTest` scenarios, actually ran, none skipped.** `clean test`, not plain `test`,
+matters here: a stale `target/classes/db/seed/dev/V13.1__dev_accounts.sql` left over from an earlier,
+abandoned version-numbering attempt (see the `db/seed/dev` schema entry's "reserved-high band" bullet)
+sat on the classpath alongside the renamed `V90001__dev_accounts.sql` and reproduced exactly the
+out-of-order failure the rename was meant to fix, until a clean rebuild removed it — a reminder that a
+green run after a mid-task file rename should be re-verified with `clean test` before being trusted.
+
+`./mvnw -B -pl station/vision-app test -DskipWeb`: **238/238 green** (was 240 — `AuthSeedRunnerTest`'s
+2 `@Test` methods deleted with the class; no other test method was added or removed, only `@BeforeEach`
+seeding calls and constructor-argument fixups — see station/vision-app/MODULE.md for the full list of
+touched test classes).
+
+**Deviations from the brief, and the empirically-discovered facts to flag**: the brief asked for the
+Flyway-mechanism choice (second location vs. placeholder-guarded statement) to be *tested*, not
+reasoned about, and it was — the second-location route was chosen, and it did trip validation on
+removal exactly as the brief anticipated, requiring `ignoreMigrationPatterns` — but the specific
+pattern the brief's own phrasing implied (`"*:missing"`, since the scenario is "the migration is
+missing") was wrong, for the version-numbering reason above; `"*:future"` is the pattern that actually
+fires, discovered only by decompiling Flyway's internals rather than its public Javadoc, which does not
+document this branch. A `V13.1`-style "next free slot" version scheme was also tried first, per the
+brief's implicit assumption that dev-seed content would sit right after `V13`, and was abandoned only
+after it measured out-of-order against the concurrently-landing W3 wave's `V14`/`V15` — a genuine,
+not hypothetical, interaction between two waves running in the same working tree at once. No other
+deviation: `DevPrincipal` untouched, no cross-entity FKs added, `PostgresDockerIntegrationTest`'s
+existing content untouched (only `PersistenceUnit`'s 4-arg overload and the two new files below it),
+scope held to the files listed in the brief plus the minimum ripple a growing
+`VisionPersistenceProperties` record and a deleted `AuthSeedRunner` forced elsewhere (2 test files'
+positional-constructor calls, `DemoPeople.java`'s javadoc, `storage/persistence/pom.xml`'s two new test
+dependencies) — all disclosed here and in station/vision-app/MODULE.md rather than left implicit.
+
+## docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 done (the two missing adapters)
+
+Of 17 `Jpa*Repository` classes against 19 `InMemory*` classes, two ports had **no Postgres
+implementation at all**, wired unconditionally to RAM in `vision-app`'s `ApplicationServiceWiring`
+regardless of `vision.persistence.enabled`: `AuditTrailPort` and `DetectionEventRepositoryPort`. A
+later wave (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2) deletes every `InMemory*` class and cannot delete these
+two until their replacements exist — that is the whole of this wave's job, and only that: **the
+adapters exist, are registered with the persistence unit, and are proven to round-trip.** Neither
+is wired into `vision-app` here (see "Honest gaps" above) — that is explicitly a later wave's task
+per this wave's own brief, not an oversight.
+
+- `AuditEntryEntity`/`JpaAuditTrail` (`AuditTrailPort`) — `audit_entries`, `V14__audit_trail.sql`.
+  `id` is the domain's own `AuditId` (real identity, not synthetic); `record` always `persist`s
+  (never `merge`s — entries are immutable historical facts per the port's own contract);
+  `findRecent`/`findByTarget`/`findByActor` are one JPQL shape each (optional `WHERE`, `order by
+  occurredAt desc`, `setMaxResults(limit)`). **No retention pruning at all** — see Retention above
+  for why an audit trail that evicts its own oldest rows defeats the point of the port.
+- `DetectionEventEntity`/`JpaDetectionEventRepository` (`DetectionEventRepositoryPort`) —
+  `detection_events`, `V15__detection_events.sql`. `id` is the domain's own `DetectionEventId`
+  (real identity — an event mutates over its own open lifetime, so it needs a stable key to upsert
+  by); `save` is a genuine `merge`-by-id upsert, matching `InMemoryDetectionEventRepository`'s
+  remove-then-re-add-by-id semantics exactly — the one repository in this module's history-table
+  family that upserts rather than always `persist`s. `position` (a single, entirely-optional
+  `GeoPosition`) is flattened to nullable `position_latitude`/`position_longitude`/
+  `position_altitude_meters` columns, the `AssetUsageEntity#startPosition`/`#lastPosition` pattern.
+
+**Retention decision** (the brief's one open design question): reuse the JPA-established
+"constructor-argument row cap, prune-on-write" pattern `JpaDetectionRepository`/
+`JpaTelemetryRepository` already use, keyed by `stream_id` (the closer of the two — detection
+events group by stream, matching `JpaDetectionRepository` exactly, not by usage), default
+100,000 rows per stream — **not** the in-memory ring's 500-per-stream cap, which is a
+devsupport-heap-bounding number, not a real retention policy. No third mechanism invented. Full
+reasoning in the Retention section above.
+
+**Schema convention followed as-is**: no cross-entity foreign keys on either new table (C2/OQ1 —
+the open question about adding them is explicitly not this wave's to resolve), matching every
+other table in this schema. For `audit_entries` this is more than convention: an entry must stay
+resolvable even after its actor's account or its target row is gone, so a referential constraint
+here would be actively wrong, not merely inconsistent with the in-memory reference repository.
+
+**`PersistenceUnit`**: only the `addAnnotatedClass` block was touched, adding
+`AuditEntryEntity.class`/`DetectionEventEntity.class` — per this wave's explicit instruction not to
+touch the method signature or Flyway configuration, both owned by a parallel wave
+(docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1, which landed concurrently in the same working tree while this task ran:
+it added the `seedDevUsers` overload, `V13__identity_baseline.sql`, and `db/seed/dev`). No
+conflict arose — both waves' changes compile and test together (see the test run below, executed
+*after* W1's concurrent edit landed).
+
+`./mvnw -B -pl storage/persistence test`: **128/128 green** (up from 115), run against a real
+`postgres:16` Testcontainers instance — **docker was reachable in this environment, so every new
+case actually ran, none skipped**. New: `AuditTrailRepositoryTests` (4) + `DetectionEventRepositoryTests`
+(7) + `v14MigrationCreatesTheAuditEntriesTableOnTopOfV1ThroughV13` +
+`v15MigrationCreatesTheDetectionEventsTableOnTopOfV1ThroughV14` (2 schema tests) = +13. Re-run a
+second time after W1's concurrent `PersistenceUnit`/migration changes landed, confirming both waves'
+work is compatible: still 128/128 green.
+
+`./mvnw -B -pl station/vision-app -am -DskipTests compile`: **BUILD SUCCESS**, all 26 reactor
+modules — proves this wave did not break `vision-app`'s compile, including after W1's concurrent
+changes to that module landed mid-task.
+
+**Deviations from the brief**: none. `PostgresDockerIntegrationTest`'s existing content was not
+modified, only appended to, per the brief's "a parallel agent owns that file's existing content"
+note (that note in fact describes `V13__identity_baseline.sql`/`db/seed/**`, owned by W1, not this
+file — this file is this wave's own to extend, and was).
+
+## docs/plans/active/POSTGRES-ONLY-CONTEXT.md upgrade path done (fixing W1 for a database that already ran `AuthSeedRunner`)
+
+W1 (above) is correct for a fresh database. This wave fixes the path for a database that is not
+fresh — every `docker-compose.yml` deployment that existed before W1 landed, since Compose has
+always paired `VISION_PERSISTENCE_ENABLED=true` with `VISION_AUTH_ENABLED=true` against a
+persistent `postgres-data` volume, so every one of them already ran the now-deleted
+`AuthSeedRunner` and has a "Root" group at a random id plus `admin`/`manager`/`pilot` at random
+ids pointing at it.
+
+**Defect 1 (proven, fixed first): the seed migration aborted startup on any upgraded database.**
+`V90001__dev_accounts.sql`'s `ON CONFLICT (id) DO NOTHING` only covers a conflict on `id`;
+`users.username` carries its own, independent `UNIQUE` constraint (`V8__users_groups.sql`), and
+Postgres allows exactly one conflict target per `INSERT`. Reproduced directly against a real
+`postgres:16` with V8's exact DDL and one pre-existing `admin` row at a random id before the fix:
+`ERROR: duplicate key value violates unique constraint "users_username_key"` — a failed migration
+aborts `PersistenceUnit.start`, so the application does not boot at all. Fixed by replacing the
+single multi-row `INSERT ... VALUES ... ON CONFLICT (id)` with three `INSERT ... SELECT ... WHERE
+NOT EXISTS (id OR username)` statements, one per account (see the `db/seed/dev` schema entry
+above) — this was strictly worse than the bug the whole plan set out to fix, since it would have
+fired on every operator's very next `docker compose up`.
+
+**Defect 2: an upgraded database still had the original bug even once the migration succeeded.**
+`V13`'s `ON CONFLICT (id) DO NOTHING` adds the fixed-id root group *alongside* a pre-existing
+random-id one, not merged with it — a MANAGER whose membership still points at the old random root
+(nothing rewrites `memberships` jsonb, deliberately — see below) still has a `VisibilityScope`
+built from that root's subtree, which does not contain the fixed group `DevPrincipal`-owned assets
+are stamped with. Fixed by `V16__adopt_fixed_root.sql` (see Schema above): when there is exactly
+one *other* parentless group, the fixed group is adopted as its *child* (never the reverse — see
+that migration's own header for why direction is load-bearing) and renamed from `"Root"` to
+`"Dev-Mode Assets"`, an honest label for a non-root node that now holds everything stamped by
+`DevPrincipal` before the database had real identity. Zero or 2+ other parentless groups are both
+no-ops (fresh install; ambiguous multi-root state respectively), each stated in the migration's own
+header rather than silently decided.
+
+**Verification, against a real Postgres, not reasoned about**: `UpgradePathMigrationTest` (new,
+sibling to `DevAccountSeedMigrationTest` — see Tests above) migrates a container to `V12` with a
+raw `Flyway` handle, hand-inserts an `AuthSeedRunner`-shaped state via plain JDBC, then runs the
+real `PersistenceUnit.start(..., true)` upgrade path an operator's Compose restart actually takes.
+Its `upgradeRestoresManagerVisibilityOfDevPrincipalOwnedAssets` scenario is the one that matters:
+it reproduces `DefaultScopeResolver#scopeFor`'s own subtree walk (via a real `JpaGroupRepository`
++ `DefaultScopeResolver`, not a hand-simulated approximation) for the legacy `manager` user and
+asserts the resulting `VisibilityScope.includes(...)` an `Ownership` in `DevPrincipal`'s group
+(`UUID(0,1)`, restated as a local constant — this module must not depend on `vision-app`). This
+is the first end-to-end check of the bug described in POSTGRES-ONLY-CONTEXT.md §2.1/§2.2 for an
+*upgraded* database (as opposed to a fresh one, which W1's own tests already covered) — it
+confirmed the analysis in the plan without contradiction; nothing here needed to be reported back
+as a surprise.
+
+`./mvnw -B -pl storage/persistence clean test`: **137/137 green** (was 133 immediately before this
+task — see the Tests section above; that in turn corrects this file's own previously-stale "128"
+summary line, which had not accounted for `DevAccountSeedMigrationTest`'s 5 pre-existing W1
+scenarios), run against a real `postgres:16` Testcontainers instance, docker reachable in this
+environment — every new case, all four `UpgradePathMigrationTest` scenarios included, actually
+ran, none skipped.
+
+`./mvnw -B -pl station/vision-app test -DskipWeb`: **238/238 green**, unchanged — this task touched
+no file in `vision-app` (its scope was `storage/persistence` only), so the default-config bar was
+never at risk; re-run anyway per the exit criteria, not assumed from "no files changed there."
+
+**Deviations from the brief, and one thing worth flagging**: none of substance. `V16` needed a
+`DO $$ ... $$` PL/pgSQL block rather than a plain `UPDATE ... WHERE` — the earliest draft tried
+`SELECT count(*), max(id) INTO ...` to get both the count and the candidate parent id in one
+query, which fails against a real Postgres (`function max(uuid) does not exist` — `uuid` has no
+default aggregate ordering); replaced with a plain `SELECT id INTO ...` guarded by the count check,
+safe because the branch already guarantees exactly one row. No `V17` created, `V13`/`V14`/`V15`/
+`PersistenceUnit` untouched, per the brief's file-ownership constraint.
+
+## docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b done (JpaAuditTrail/JpaDetectionEventRepository wired; documentation catch-up — no source change in this module)
+
+W3 (above) built `JpaAuditTrail`/`JpaDetectionEventRepository` but left both unwired, "a later wave's
+job." This wave is that later wave, but the work happened entirely in `vision-app`
+(`ApplicationServiceWiring#auditTrailPort`/`#detectionEventRepositoryPort` now build both classes
+unconditionally, wrapped in their `LiveUpdate*` decorators exactly as before — see that module's own
+MODULE.md for the wiring) and in `vision-app`'s `PersistenceWiringConfiguration` (collapsed to
+straight-line — no `vision.persistence.enabled`, no `@ConditionalOnProperty`, no `ObjectProvider`).
+**No file under `storage/persistence/src/main/**` changed for this wave** — every `Jpa*Repository`,
+entity, and migration was already correct; only the caller changed. This module's own doc entries
+that had gone stale as a side effect of the wiring change were corrected here: the "**Not yet wired
+into `vision-app`**" notes on `JpaAuditTrail`/`JpaDetectionEventRepository` (API surface, above) now
+say wired-and-unconditional; the top summary line's "opt-in via `vision.persistence.enabled`" now
+says unconditional; a handful of Conventions/Retention/Schema paragraphs that justified a design
+choice by pointing at a now-deleted `InMemory*Repository` (vision-app devsupport, 19 classes removed
+this same wave) were reworded to describe the choice on its own terms rather than by parity with code
+that no longer exists.
+
+**Left alone, deliberately:** the `Build/test` line's own historical count narrative (the "up from
+133"/"up from 128" chain, including its one mention of `VISION_PERSISTENCE_ENABLED=true` describing
+a pre-W1-fix `docker-compose.yml` deployment shape) and every dated `## docs/plans/...` section above
+this one — both are this file's established append-only history, accurate for what was true when
+written, not a live description of today's config surface. Two test-method identifiers
+(`queryTimeRangeIsInclusiveOnBothEndsMatchingInMemoryBehavior` in `PostgresDockerIntegrationTest`,
+and its neighboring prose about mirroring `InMemoryTelemetryRepository`/`InMemoryDetectionRepository`
+behavior) were also left as-is: they name real, unmodified, still-passing test code in this module
+that this task's brief did not ask to be touched, and renaming the doc's prose without renaming the
+actual `@Test` method would just trade one inconsistency for another.
+
+**Tests:** `./mvnw -B -pl storage/persistence clean test` — **137/137 green**, unchanged from W3
+(re-measured directly, not assumed unaffected). Docker reachable throughout; `PostgresDockerIntegrationTest`
+and `UpgradePathMigrationTest` both ran, none skipped.
+
+**Deviations from the brief:** none. `db/migration/**` was not touched (frozen, no `V17+`, per this
+task's own constraint) — every fix here is `vision-app` wiring plus this module's own documentation.
+
+## docs/plans/active/SCALE-100-PLAN.md S3 done (a real HikariCP connection pool, shared with Flyway)
+
+Every `Jpa*Repository` call before this wave opened its own physical JDBC connection through
+Hibernate's built-in, explicitly-not-for-production `DriverManagerConnectionProvider` — accepted at
+this platform's earlier single-instance/friends-demo scale, wrong once SCALE-100-PLAN.md's ~100
+concurrent users become the target. This wave gives `PersistenceUnit` a real pool: `start` now builds
+one `HikariDataSource` (sized from a new `PersistencePoolSettings` record, `config` package, four
+fields — `maximumPoolSize`/`minimumIdle`/`connectionTimeoutMillis`/`leakDetectionThresholdMillis` —
+each with a documented, ~100-concurrent-user-justified default, no magic numbers inline per CLAUDE.md
+rule 1) and hands that same `DataSource` to **both** Flyway (`Flyway.configure().dataSource(...)`,
+replacing the old URL/username/password overload) and Hibernate (`hibernate.connection.datasource`
+plus a new `hibernate.connection.provider_class`: `ClosingDatasourceConnectionProvider`, a thin
+subclass of Hibernate's own `DatasourceConnectionProviderImpl` that also closes the pool on `stop()`).
+See "Bootstrap and connection pool" above for the full mechanism, including why Hibernate's own
+`HikariCPConnectionProvider`/`hibernate.hikari.*` route was deliberately **not** used — it always
+builds a second, unshareable pool, which is incompatible with "Flyway migrates before the EMF exists."
+
+**Corrected, not just added:** the "Bootstrap" section (renamed "Bootstrap and connection pool") used
+to claim HikariCP was "already on the classpath transitively via Hibernate's own dependencies" and that
+wiring it in was "a config-only change" — both checked and found false on 2026-08-17 (`mvn
+dependency:list` showed no `com.zaxxer:HikariCP` anywhere in this module's classpath before this wave),
+now corrected in place with the real mechanism and an explicit pointer to this section as the
+correction's source. `JpaOperations`'s per-call `EntityManager` pattern (Gotchas, above) was
+deliberately **not** touched — task 4 of this wave's brief scoped that out as a separate,
+19-repository-wide refactor; the pool now bounds the concurrent cost of that pattern (a hard cap at
+`maximumPoolSize`) without eliminating the per-call open/close overhead itself.
+
+**New dependencies:** `org.hibernate.orm:hibernate-hikaricp` (declared for its Hibernate-version-matched
+`com.zaxxer:HikariCP` version pin only — its own `HikariCPConnectionProvider` is not what's wired, see
+above) and `com.zaxxer:HikariCP` itself at explicit compile scope (`hibernate-hikaricp`'s own `pom.xml`
+declares it `runtime`-scope, which is not enough for `PersistenceUnit` to reference `HikariConfig`/
+`HikariDataSource` directly). Both versions resolve from `spring-boot-dependencies` (this module's
+grandparent POM), no root-pom `<dependencyManagement>` pin needed, same as every other dependency here.
+
+**Tests:** `./mvnw -B -pl storage/persistence test` — **148/148 green** (up from 137: new
+`PersistencePoolSettingsTest` (7, docker-free compact-constructor validation) +
+`ClosingDatasourceConnectionProviderTest` (2, docker-free, hand-rolled fake `DataSource`s) +
+`PostgresDockerIntegrationTest$ConnectionPoolTests` (2, real Postgres — wired-provider-class assertion
++ a 2-connection pool actually refusing a third concurrent `EntityManager`) — see Tests above for each
+class's own breakdown). Docker confirmed available and used throughout (`docker --version` → `Docker
+version 28.3.3, build 980b856`); every `PostgresDockerIntegrationTest` nested class, including the two
+new ones, actually ran — nothing skipped. Verified via log grep, not just code inspection, that
+Hibernate's `HHH10001002: Using built-in connection pool (not intended for production use)` warning no
+longer appears anywhere in a full test-suite run (0 occurrences), while `ClosingDatasourceConnectionProvider`
+being wired in its place appears 19 times — once per `EntityManagerFactory` the suite builds.
+
+**Deviations from the brief:** one real design deviation, called out rather than silently decided. The
+brief named `hibernate.hikari.*` properties (i.e. Hibernate's own `HikariCPConnectionProvider`) as the
+configuration surface; that provider was not used as-is because it cannot share a `DataSource` with
+Flyway (see above) — `PersistencePoolSettings`' fields still map onto the same conceptual knobs the
+brief asked for (`maximumPoolSize`, `minimumIdle`, `connectionTimeout`, `leakDetectionThreshold`), just
+applied to a hand-built `HikariConfig`/`HikariDataSource` instead. Nothing else deviated: `JpaOperations`
+untouched (task 4, explicitly out of scope), no `db/migration/**` change (this wave adds a pool, not a
+schema change), no file outside `storage/persistence/**` touched — `station/vision-app/src/main/resources/application.yaml`,
+every file under `.../config/wiring/`, `station/vision-api/**`, and `VisionPersistenceProperties.java`
+were all left alone per the brief's exclusive-scope constraint. The exact `vision.persistence.pool.*`
+keys, defaults, and the `PersistenceWiringConfiguration`/`VisionPersistenceProperties` changes needed to
+actually bind them are reported to the orchestrator, not applied here — see "Bootstrap and connection
+pool" above for the table.
+
+## docs/plans/active/SCALE-100-PLAN.md S4 done (telemetry write path — batching)
+
+Three items from the brief: (1) drop `JpaTelemetryRepository`'s per-`save` `em.flush()` where the
+retention delete doesn't need it, (2) batch samples per usage behind a size-or-time bound, both
+configurable, (3) coalesce `UsageTracker`'s second write (the `AssetUsage` summary-counter update,
+`contexts/vision-perception`) onto the same batch boundary. See "Batching (SCALE-100-PLAN S4)" above
+for the full `JpaTelemetryRepository`/`TelemetryBatchSettings` mechanism; `contexts/vision-perception`'s
+own MODULE.md documents `UsageTracker`/`UsageSummaryBatchSettings`'s structurally parallel side.
+
+**Design constraint that shaped everything:** no existing constructor signature could change (an
+existing 9-argument `UsageTracker` test-seam constructor is called positionally by
+`UsageTrackerTest`, and `JpaTelemetryRepository`'s existing two constructors are called throughout
+this module's own tests) and no existing assertion could be edited. Every new capability therefore
+arrived as a **new trailing-argument constructor overload** that the shorter, pre-existing ones now
+delegate into with an explicit `.immediate()`/synchronous default — so production behavior does not
+change until something actually calls the new overload with non-immediate settings. Concretely:
+`JpaTelemetryRepository` gained a third constructor `(EntityManagerFactory, int, TelemetryBatchSettings)`;
+`UsageTracker` gained a new 8-argument public constructor (the 7-argument one's params plus
+`UsageSummaryBatchSettings`) and a new 10-argument package-private test-seam constructor (the
+9-argument one's params plus the same) — full detail in that module's MODULE.md.
+
+**The durability window:** `TelemetryBatchSettings`/`UsageSummaryBatchSettings` both default
+`batchWindowMillis` to **200ms** (`DEFAULT_BATCH_WINDOW_MILLIS`), comfortably under the brief's 250ms
+crash-loss ceiling, rather than defaulting to 0 (zero loss). CLAUDE.md rule 9 ("newest data wins, even
+if previous is still available") is why: the brief's own acceptance criterion — "telemetry loss on a
+`kill -9` is bounded by the configured window and is covered by a test" — only makes sense as a
+requirement if loss is actually possible by default. `0` remains a fully supported, explicit opt-out
+(`isImmediate()` reads `true`) for a deployment that wants zero loss over ingest throughput; both
+settings records validate `batchWindowMillis >= 0` and `batchSizeSamples >= 1` in their compact
+constructors, matching this module's usual validation idiom.
+
+**Not wired into production by this task** — deliberately, since wiring is reserved to the
+orchestrator/S7, not this task's file scope (`station/vision-app/src/main/resources/application.yaml`,
+anything under `.../config/wiring/`, and `station/vision-api/**` were not touched):
+
+- `PersistenceWiringConfiguration`'s `JpaTelemetryRepository` bean (currently the one-argument
+  constructor) needs to move to the three-argument constructor with a `TelemetryBatchSettings`
+  bound from a new `vision.persistence.telemetry.batch-size`/`batch-window` property pair (defaulted
+  to `TelemetryBatchSettings.defaults()`'s own numbers, per the "opt-in guardrail" — though here the
+  *code* default is already non-immediate, so no config default swap is actually needed to preserve
+  today's default-config behavior, since nothing calls the new constructor yet).
+- `ApplicationServiceWiring`'s `UsageTracker` bean (currently the 7-argument constructor) needs to
+  move to the new 8-argument one with a `UsageSummaryBatchSettings` bound from the **same** property
+  pair — the plan's intent is one number governing both write paths, even though they are two
+  separate settings types in two separate modules (a context module cannot depend on the adapter
+  module to share one type).
+- A new `VisionPersistenceProperties` field (or nested record) for the two numbers, following this
+  module's existing property-binding precedent for `PersistencePoolSettings`.
+
+**Tunable constants for S7** (name — value — meaning):
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `TelemetryBatchSettings.DEFAULT_BATCH_SIZE_SAMPLES` | `100` | Samples buffered per usage before a flush is forced regardless of the time bound — a safety ceiling, rarely the binding constraint at typical telemetry rates. |
+| `TelemetryBatchSettings.DEFAULT_BATCH_WINDOW_MILLIS` | `200L` | Max crash-loss window per open usage for the telemetry write path; under the plan's 250ms ceiling. |
+| `UsageSummaryBatchSettings.DEFAULT_BATCH_SIZE_SAMPLES` | `100` | Same role as above, for the coalesced `AssetUsage` summary write (`contexts/vision-perception`). |
+| `UsageSummaryBatchSettings.DEFAULT_BATCH_WINDOW_MILLIS` | `200L` | Same role as above; meant to be wired from the same property as the telemetry one so the two stay in lockstep. |
+
+**Tests:** `./mvnw -B -pl storage/persistence test` — **157/157 green** (up from 148: new
+`TelemetryBatchSettingsTest`, 6, docker-free compact-constructor/`defaults()`/`immediate()` validation,
+mirroring `PersistencePoolSettingsTest`'s own shape; `TelemetryRepositoryTests` 7→10, +3 — see Tests
+above for all three). Docker confirmed available (real `postgres:16` Testcontainers instance, not
+skipped); every nested class, including the three new batching cases, actually ran.
+`contexts/vision-perception` side: `./mvnw -B -pl contexts/vision-perception test` — **494/494 green**
+(up from 492) — `UsageTrackerTest` 20→22, +2 (see that module's own MODULE.md).
+
+> Count these from Maven's own summary line, never by summing `target/surefire-reports/TEST-*.xml`.
+> That sum is wrong in both directions: reports for renamed or deleted classes linger and inflate it,
+> and `PostgresDockerIntegrationTest`'s `@Nested` classes — which Maven counts one by one — land in a
+> single aggregate XML that undercounts them (138 by that sum, 157 by Maven, for this same run).
+
+**Deferred / left for the orchestrator:** the wiring bullets above (`PersistenceWiringConfiguration`,
+`ApplicationServiceWiring`, `VisionPersistenceProperties`), all outside this task's file scope. Nothing
+else from the S4 brief was left undone.

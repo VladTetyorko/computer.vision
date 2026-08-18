@@ -1,5 +1,7 @@
 package com.drones.vision.app;
 
+import com.drones.vision.identity.application.GroupService;
+import com.drones.vision.identity.application.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,7 +20,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * docs/plans/done/U-SCOPE-PLAN.md U-e slice 2 — deferred slice-2 cleanup, with {@code vision.auth.enabled=true}:
  * proves the ADMIN/MANAGER management gate and the ≤-own-scope grant rule actually bite once auth is
  * on. Uses the seeded {@code admin}/{@code manager}/{@code pilot} accounts (all members of the seeded
- * {@code Root} group — {@code AuthSeedRunner}). The security filter chain is applied to MockMvc
+ * {@code Root} group — {@link DevAccountSeeder}, this suite's stand-in for the production Flyway
+ * seed, see that class's own javadoc). The security filter chain is applied to MockMvc
  * exactly as {@link ScopedAssetReadAuthEnabledTest} does; the session from login is carried forward
  * via {@link MockHttpSession}.
  */
@@ -31,10 +34,17 @@ class OrgManagementAuthEnabledTest {
     @Autowired
     private FilterChainProxy springSecurityFilterChain;
 
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private GroupService groupService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
+        DevAccountSeeder.seedIfAbsent(userService, groupService);
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .addFilters(springSecurityFilterChain)
                 .build();

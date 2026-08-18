@@ -21,25 +21,106 @@
 spring:
   application:
     name: vision
+  # threads.virtual.enabled is deliberately NOT set here, reversing
+  # docs/plans/active/SCALE-100-PLAN.md §4 decision 2, which pinned it "on".
+  # This project targets Java 21 (root pom java.version), where a virtual thread
+  # that blocks inside a `synchronized` block PINS its carrier thread -- JEP 491
+  # removes that only from Java 24. Blocking I/O held under `synchronized` is
+  # therefore a per-site hazard that has to be surveyed, not assumed away.
+  #
+  # SCALE-100 S2 already fixed the worst site: LiveConnection#sendLock is now a
+  # ReentrantLock (which parks instead of pinning) precisely so the SSE write
+  # path is virtual-thread-safe. Others remain reachable from a request thread
+  # and have NOT been audited or fixed -- ManualControlWebSocketHandler's
+  # `synchronized (state.sendLock)` around a blocking WebSocket send, and
+  # MediamtxStreamPublisher, which a stream start/stop request calls directly.
+  # LiveRingBuffer's `synchronized` methods are pure in-memory work and are not
+  # a concern.
+  #
+  # So this stays off until those sites are surveyed AND the S0 rig
+  # (tools/loadrig) shows a measured win -- not on reasoning alone. The rig and
+  # a pre-change baseline both exist now (docs/conclusions/SCALE-100-BASELINE.md),
+  # so this is a measurable question rather than an argued one.
+  #
+  # server.tomcat.max-connections is likewise unpinned: the same baseline should
+  # choose it. The S0 numbers show thread count, not connection count, as the
+  # binding constraint at 100 viewers.
 
 vision:
 
   # --- adapter-persistence: fleet persistence (see docs/plans/done/MVP2-PLAN.md P-a) ---
   persistence:
-    # Whether PersistenceWiringConfiguration wires CategoryRepositoryPort/
-    # DeviceRepositoryPort/AssetRepositoryPort to adapter-persistence's JPA/
-    # Postgres implementations (migrated with Flyway on first use). When false
-    # (default), those ports stay the devsupport in-memory fallbacks -- today's
-    # behavior, no database required to run this app or its tests.
-    enabled: false
-    # JDBC URL/credentials of the Postgres database. Only read when
-    # vision.persistence.enabled=true. Defaults match docker-compose.yml's
-    # postgres service on its host-mapped port; docker-compose overrides these
-    # for vision-app's own container to address the compose-internal hostname
-    # instead (see VISION_PERSISTENCE_JDBC_URL there).
+    # PersistenceWiringConfiguration wires CategoryRepositoryPort/
+    # DeviceRepositoryPort/AssetRepositoryPort (and the rest of the seventeen
+    # repository ports it selects, see vision-app's MODULE.md) to
+    # adapter-persistence's JPA/Postgres implementations (migrated with Flyway
+    # on first use), unconditionally -- a reachable Postgres is required to run
+    # this app, and to run vision-app's own @SpringBootTest suite, which gets
+    # one from a shared Testcontainers container (see that module's MODULE.md
+    # "Test infrastructure" section); a Docker-less environment skips those
+    # tests cleanly rather than failing with a connection error. There used to
+    # be a vision.persistence.enabled flag selecting a devsupport in-memory
+    # fallback instead; docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b removed it --
+    # a flag with exactly one legal value (true, since W4) was a lie.
+    #
+    # JDBC URL/credentials of the Postgres database. Defaults match
+    # docker-compose.yml's postgres service on its host-mapped port;
+    # docker-compose overrides these for vision-app's own container to address
+    # the compose-internal hostname instead (see VISION_PERSISTENCE_JDBC_URL
+    # there).
     jdbc-url: jdbc:postgresql://localhost:5432/vision
     username: vision
     password: vision
+    # Whether PersistenceUnit also applies classpath:db/seed/dev -- three DEV-ONLY
+    # accounts (admin/admin, manager/manager, pilot/pilot -- password equal to
+    # username) plus the fixed root group they join; there is no in-memory
+    # equivalent (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 deleted the old
+    # code-based AuthSeedRunner, which used to seed unconditionally into
+    # whichever repositories were wired). ANY DATABASE WITH THIS ON IS UNSECURED
+    # -- docker-compose.yml sets it true for the friends-demo stack; nothing
+    # else should.
+    seed-dev-users: false
+    # HikariCP sizing for the ONE pool PersistenceUnit shares between Flyway and
+    # Hibernate (docs/plans/active/SCALE-100-PLAN.md S3). Before S3 there was no
+    # pool at all -- Hibernate's built-in DriverManager provider opened a
+    # connection per EntityManager and said "not intended for production use" at
+    # every startup. Every key below is commented out because it DOCUMENTS the
+    # default PersistencePoolSettings.defaults() already declares; uncommenting
+    # one changes nothing until you edit it.
+    #
+    # max-size is the real concurrency ceiling of this app's write path:
+    # JpaOperations opens an EntityManager (and therefore takes a connection) per
+    # repository call, so a request touching three repositories holds three in
+    # sequence. Raise it with Postgres's own max_connections in mind, not in
+    # isolation -- the database is the shared resource, and several app instances
+    # would each carry a pool of this size.
+    # pool:
+    #   max-size: 20
+    #   min-idle: 5
+    #   connection-timeout: 30s
+    #   leak-detection-threshold: 30s
+    # How the telemetry ingest path batches its writes
+    # (docs/plans/active/SCALE-100-PLAN.md S4). Telemetry is the only table
+    # written once per incoming sample, and before S4 each of those samples cost
+    # a persist + flush() + retention prune, plus a second AssetUsage summary
+    # write right behind it -- the per-sample round trip that put a floor under
+    # ingest cost. Both writes now wait for whichever bound trips first.
+    #
+    # These two numbers govern BOTH write paths deliberately: the durable sample
+    # write (adapter-persistence's TelemetryBatchSettings) and the coalesced
+    # usage-summary write (vision-perception's UsageSummaryBatchSettings) are two
+    # Java types only because a context module must not depend on an adapter --
+    # they are one ingest decision, so they read one block.
+    #
+    # batch-window is the honest cost: a sample lives only in this JVM's heap
+    # until its batch flushes, so an unclean shutdown loses up to one window per
+    # open usage. Set it to 0 for the zero-loss opt-out (every write goes back to
+    # synchronous). batch-size is a ceiling for an unusually fast source, not the
+    # usual trigger -- at a typical ~1Hz telemetry rate the window is what fires.
+    # Commented out because it documents the defaults already in force.
+    # telemetry:
+    #   batch-size: 100
+    #   batch-window: 200ms
 
   # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3) ---
   auth:
@@ -48,10 +129,9 @@ vision:
     # exactly as before auth existed; CurrentUser returns the fixed dev principal
     # (auto-admin) and /api/auth/* report that dev admin with authEnabled=false.
     # true: a session is required for /api/** except /api/auth/login|logout and
-    # static/SPA routes; the three seeded users (admin/admin, manager/manager,
-    # pilot/pilot -- DEV-ONLY passwords, see AuthSeedRunner) can log in. Seeding
-    # runs regardless of this flag (so flipping it on has accounts to use), but is
-    # a no-op once any user exists.
+    # static/SPA routes -- but a session only has someone to log in as if
+    # vision.persistence.seed-dev-users is also true (see above), or real users
+    # were created through UserService.
     enabled: false
 
   # --- adapter-publish-hls: stream egress (Phase 1, see docs/plans/done/PHASE1-PLAN.md Task U5) ---
@@ -360,15 +440,38 @@ vision:
     # only way to observe fleet/telemetry/detections/event changes in that case.
     enabled: true
 
+  # --- vision-api: per-principal request rate limit (docs/plans/active/SCALE-100-PLAN.md S6) ---
+  # (the rest of vision.api.* is the commented tunables block further down; this
+  # one is a live toggle, so it is spelled out here rather than buried there.)
+  api:
+    rate-limit:
+      # A blast-radius bound, NOT security hardening: it stops one runaway client
+      # -- a retry loop, a poll that never backs off -- from degrading the app for
+      # every other user sharing this JVM. RateLimitFilter (vision-api) gives each
+      # principal an independent token bucket and answers 429 past it. /api/live
+      # and /hls/** are never limited: a token bucket in front of a long-lived
+      # stream is a self-inflicted outage.
+      #
+      # OFF by default, deliberately. Buckets are keyed on the acting principal,
+      # and with vision.auth.enabled=false that is ONE fixed dev principal for the
+      # whole deployment -- so turning this on there gives every caller combined a
+      # single budget, which 100 concurrent users would exhaust on legitimate
+      # traffic alone. Turn it on together with auth, where each real user gets
+      # their own bucket and the limit measures what it is meant to measure.
+      enabled: false
+      # Per-principal capacity and refill rate, permits per rolling minute. The
+      # bucket refills continuously rather than resetting on a clock tick, so a
+      # full minute's allotment may also be spent as one burst. 600 is roughly ten
+      # ungated cockpit tabs' worth of polling for one principal (SCALE-100 §2.1
+      # measures a tab at ~1 req/s). Commented out: it documents the default.
+      # permits-per-minute: 600
+
   # --- adapter-simulation: simulated feeds + resume-on-boot (SimulationService#resumeAll) ---
   simulation:
     # Whether SimulationResumeRunner calls SimulationService#resumeAll() once at
     # boot, restarting the TX feed for every persisted simulated asset whose rtsp
     # video device is one of this app's own TX-fed feeds (fixes "frozen video"
     # after a restart -- see DefaultSimulationService#resumeAll's own javadoc).
-    # Only takes effect when vision.persistence.enabled=true too -- the
-    # in-memory profile has nothing to resume after a restart either, since its
-    # assets are gone at the same restart.
     resume-on-boot: true
     # SimulatedVideoSource's default frame width/height/fps (docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2, wave F4).
     # video:
@@ -501,27 +604,37 @@ vision:
     # vision-api's own com.drones.vision.api.support.VisionApiProperties is the framework-free mirror
     # this binds onto (see that record's own "Wiring status" javadoc); this is the Spring-bound
     # com.drones.vision.app.config.properties.VisionApiProperties (wave D) that PublishWiring maps
-    # across to build a real SnapshotJpegEncoder bean. HlsProxyController, LiveUpdateRegistry,
-    # AssetImageController, and the per-controller paging defaults still read their own local constants
-    # (not yet threaded through this record's own hls-proxy/live/paging/upload fields below).
+    # across to build a real SnapshotJpegEncoder bean. HlsProxyController and LiveUpdateRegistry now
+    # read their own hls-proxy/live fields below too (docs/plans/active/SCALE-100-PLAN.md §5 S7,
+    # via PublishWiring#hlsProxySettings/#liveSettings) -- AssetImageController and the
+    # per-controller paging defaults are the only ones still reading their own local constants
+    # (not yet threaded through this record's own paging/upload fields below).
     # api:
     #   SnapshotJpegEncoder's downscale/encode tunables (docs/plans/done/MVP3-PLAN.md C-a).
     #   snapshot:
     #     max-width: 480
     #     jpeg-quality: 0.8
-    #   HlsProxyController's upstream HttpClient timeouts.
+    #   HlsProxyController's upstream HttpClient timeouts and buffer/redirect bounds.
     #   hls-proxy:
     #     connect-timeout: 5s
     #     request-timeout: 15s
-    #   The SSE data plane's coalescing/heartbeat cadence and per-topic ring-buffer capacities
-    #   (docs/plans/done/REALTIME-PLAN.md §4, LiveUpdateRegistry).
+    #     error-body-preview-max-chars: 200
+    #     max-redirect-hops: 5
+    #   The SSE data plane's coalescing/heartbeat cadence, per-topic ring-buffer capacities, and
+    #   LiveUpdateRegistry's per-connection dispatch bounds (docs/plans/done/REALTIME-PLAN.md §4;
+    #   send-timeout/buffer-eviction added docs/plans/active/SCALE-100-PLAN.md §5 S2/S7). No
+    #   dispatch-threads key: LiveUpdateRegistry dispatches connection writes on
+    #   Executors.newVirtualThreadPerTaskExecutor(), which has no pool-size/thread-count concept to
+    #   configure -- see that field's own javadoc for why this key is deliberately not offered.
     #   live:
     #     coalesce: 150ms
     #     heartbeat: 15s
     #     telemetry-buffer: 50
     #     event-buffer: 300
     #     detection-buffer: 300
-    #     marks-buffer: 300
+    #     map-buffer: 300
+    #     send-timeout: 3s
+    #     buffer-eviction: 60s
     #   Shared default/max page size for list endpoints that accept a limit query parameter (e.g.
     #   ActivityController's GET /api/me/activity).
     #   paging:
@@ -530,6 +643,9 @@ vision:
     #   AssetImageController's upload size cap, bytes (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3).
     #   upload:
     #     max-image-bytes: 2097152
+    #   RateLimitFilter's per-principal budget lives in the ACTIVE vision.api.rate-limit block above,
+    #   not here -- it gates whether a filter is registered at all, so it is a live toggle rather
+    #   than a documented default.
 
     # --- adapter-rtsp tunables (docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3/§2.2, Wave F1) ---
     # Every key below is commented out: each documents FfmpegSettings' default rather than overriding

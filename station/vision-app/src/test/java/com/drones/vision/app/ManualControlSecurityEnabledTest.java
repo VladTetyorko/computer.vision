@@ -1,5 +1,7 @@
 package com.drones.vision.app;
 
+import com.drones.vision.identity.application.GroupService;
+import com.drones.vision.identity.application.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,7 +23,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * see {@code SecurityConfig#securedFilterChain}), so an unauthenticated handshake attempt at {@code
  * /ws/manual-control} is rejected with {@code 401} before it ever reaches {@code
  * ManualControlHandshakeInterceptor}/the WebSocket upgrade machinery — mirroring {@link
- * AuthEnabledFlowTest}'s own login-session-carried style for {@code /api/**}.
+ * AuthEnabledFlowTest}'s own login-session-carried style for {@code /api/**}. Uses the seeded
+ * {@code admin}/{@code admin} account, seeded here by {@link DevAccountSeeder} (see that class's own
+ * javadoc for why this suite can't rely on the production Flyway seed).
  */
 @SpringBootTest(properties = {"vision.auth.enabled=true", "vision.publish.enabled=false"})
 class ManualControlSecurityEnabledTest {
@@ -32,10 +36,17 @@ class ManualControlSecurityEnabledTest {
     @Autowired
     private FilterChainProxy springSecurityFilterChain;
 
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private GroupService groupService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
+        DevAccountSeeder.seedIfAbsent(userService, groupService);
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .addFilters(springSecurityFilterChain)
                 .build();

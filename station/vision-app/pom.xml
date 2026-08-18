@@ -152,6 +152,30 @@
             <artifactId>archunit-junit5</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+          docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4: vision.persistence.enabled now defaults to true, so
+          every @SpringBootTest in this module needs a real Postgres, see
+          com.drones.vision.app.testsupport (PostgresContextCustomizerFactory / SharedPostgresContainer /
+          PostgresResetTestExecutionListener / DockerGatedExecutionCondition) for the one-container-per-JVM
+          wiring. Versions come from spring-boot-dependencies (this module's grandparent POM), no root-pom
+          pin needed, same convention adapter-persistence's own pom.xml uses for these two.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Declared directly because testsupport code (PostgresResetTestExecutionListener's
+             between-test-class clean()+migrate()) imports org.flywaydb.core.Flyway. Compile scope, NOT
+             test: a direct declaration wins over the transitive one from adapter-persistence (Maven's
+             nearest-definition rule), so declaring it test-scoped here demotes the whole module's
+             flyway-core to test and drops it out of the repackaged jar. Such a jar boots fine from the
+             reactor/IDE classpath and dies with NoClassDefFoundError: org/flywaydb/core/Flyway under
+             "java -jar", i.e. exactly how Dockerfile runs it. -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

@@ -27,9 +27,11 @@ import java.util.stream.Collectors;
  * would create them — no repository is touched directly.
  *
  * <p><strong>Dev-only credentials.</strong> Every demo user is created with the same well-known
- * password ({@link #PASSWORD}), the same stance {@code AuthSeedRunner}'s {@code admin}/{@code
- * admin} seeds take: fine behind {@code vision.auth.enabled=false} on a laptop, never acceptable in
- * a real deployment — which is why the whole demo package is removable with one property.
+ * password ({@link #PASSWORD}), the same stance the {@code admin}/{@code admin} account seeded by
+ * {@code storage/persistence}'s {@code db/seed/dev} migration takes (docs/plans/active/POSTGRES-ONLY-CONTEXT.md
+ * W1, when {@code vision.persistence.seed-dev-users=true}): fine behind {@code
+ * vision.auth.enabled=false} on a laptop, never acceptable in a real deployment — which is why the
+ * whole demo package is removable with one property.
  *
  * <p>Re-runnable: usernames are de-duplicated against the users that already exist (a second press
  * of the button creates {@code demo.falcon2}, not a 409), and the squad group is reused rather than
@@ -114,7 +116,8 @@ public class DemoPeople {
         return existing.stream()
                 .filter(group -> GROUP_NAME.equalsIgnoreCase(group.name()))
                 .findFirst()
-                // Parent it under whichever root group already exists (AuthSeedRunner's "Root"), so a
+                // Parent it under whichever root group already exists (the fixed-id "Root" seeded by
+                // storage/persistence's V13__identity_baseline.sql, or created by hand), so a
                 // MANAGER-scoped press — which may not create a root group at all — still succeeds.
                 .orElseGet(() -> groups.create(new GroupSpec(GROUP_NAME, rootOf(existing)), acting));
     }

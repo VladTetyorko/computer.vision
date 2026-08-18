@@ -13,6 +13,7 @@ import com.drones.vision.api.dto.LiveSubscriptionResponse;
 import com.drones.vision.api.dto.MapEventPayload;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
+import com.drones.vision.api.support.VisionApiProperties;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.perception.application.stream.StreamService;
@@ -35,6 +36,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.net.URI;
@@ -45,13 +47,17 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import com.drones.vision.api.controller.AssetController;
 import com.drones.vision.api.controller.EventController;
 import com.drones.vision.api.controller.StreamController;
@@ -135,19 +141,30 @@ import com.drones.vision.api.controller.StreamController;
  * <h2>Coalescing</h2>
  * {@link #publishTelemetryAppended}/{@link #publishDetections} never touch a connection directly —
  * they only enqueue into a small pending map, cheap and non-blocking for the calling stream-
- * pipeline/telemetry thread. A shared scheduler drains it roughly every {@value
- * #COALESCE_MILLIS}ms ({@link #flushPending()}): telemetry batches every sample appended since the
+ * pipeline/telemetry thread. A shared scheduler drains it roughly every {@link #coalesceMillis}ms
+ * ({@link #flushPending()}): telemetry batches every sample appended since the
  * last flush into one {@code List<TelemetrySampleResponse>} envelope per asset; detections keep
  * only the latest result per asset (the pending map itself is a plain overwrite) — matching the
- * plan's "detections emit latest-frame-only" exactly. {@link #publishFleetChanged}/{@link
- * #publishEvent}/{@link #publishDetectionEvent} are not coalesced (all three are comparatively
- * rare) but are still dispatched onto the shared scheduler rather than run on the caller's thread,
- * keeping every method here equally fire-and-forget.
+ * plan's "detections emit latest-frame-only" exactly. {@link #publishEvent}/{@link
+ * #publishDetectionEvent} are not coalesced (both are comparatively rare) but are still dispatched
+ * onto the shared scheduler rather than run on the caller's thread, keeping every method here
+ * equally fire-and-forget.
+ *
+ * <p><b>{@link #publishFleetChanged()} is coalesced leading+trailing</b> (docs/plans/active/SCALE-100-PLAN.md
+ * §5 S5): every asset/device/stream lifecycle write used to trigger its own full fleet+devices
+ * recompute, so a bulk import of N assets recomputed the whole fleet N times. The first call after a
+ * quiet period still dispatches immediately — a lone write is delivered with no added latency — but
+ * any call landing within {@link #coalesceMillis}ms of that dispatch only marks the change as
+ * pending rather than triggering a second recompute; {@link #flushPending()}'s own already-scheduled
+ * tick performs one trailing recompute once the window closes, so the burst's true final state is
+ * still delivered rather than silently dropped (CLAUDE.md rule 9 — newest data wins). A sustained
+ * write storm therefore recomputes at most once per {@link #coalesceMillis}ms, the same cadence
+ * telemetry/detections already get, instead of once per write.
  *
  * <p><b>Simplification, deliberate and documented</b>: coalescing runs once per topic, shared
  * across every connection subscribed to it, rather than genuinely independently per connection —
  * the plan's "per connection" framing is satisfied in effect (delivery is still batched to roughly
- * one envelope per {@value #COALESCE_MILLIS}ms per topic), while keeping exactly one canonical,
+ * one envelope per {@link #coalesceMillis}ms per topic), while keeping exactly one canonical,
  * resumable sequence per topic instead of a connection-specific one, which would have made {@code
  * Last-Event-ID} resume ambiguous across two connections subscribed to the same topic.
  *
@@ -160,44 +177,49 @@ import com.drones.vision.api.controller.StreamController;
  * snapshots in the same dispatch, instead of {@code vision-app} needing a second call site (and
  * {@link FleetLiveUpdatePort} a second, near-duplicate method) for what is, at every call site
  * that matters, the same fact: "fleet-level state changed, re-derive your own snapshot(s)".
+ *
+ * <h2>Connection writes</h2>
+ * Everything above — sequencing ({@link #sequencer}), coalescing, and deciding which connections a
+ * topic reaches — still happens on {@link #scheduler}'s single thread, so envelope ordering within
+ * a topic is exactly the order {@link #scheduler} ran the code that appended/broadcast them.
+ * What's off that thread (docs/plans/active/SCALE-100-PLAN.md §5 S2) is the actual write: {@link #broadcast}
+ * serializes an envelope to JSON exactly once ({@link #serialize}) and hands that one {@code
+ * String} to every subscribed {@link LiveConnection}, each of which queues its own write onto
+ * {@link #connectionWriteExecutor} (one virtual thread per write) instead of blocking {@link
+ * #scheduler} on {@code SseEmitter.send()} once per connection — a single slow/stalled client used
+ * to hold up delivery to every other connection, and delay the next coalesce/heartbeat tick
+ * besides. {@link LiveConnection#enqueueSend}/{@link LiveConnection#enqueueHeartbeat} still
+ * guarantee one connection's own writes run in the order they were queued (see that class's
+ * "Ordering under concurrent dispatch" javadoc), so no client ever sees its own stream reordered
+ * even though many connections now write concurrently. {@link #dispatchWrite} bounds each write at
+ * {@link #connectionWriteTimeoutMillis}ms; past that — whether the write itself stalled or an
+ * earlier write still ahead of it in that connection's own chain is stuck — the connection is
+ * unregistered, the same outcome an {@link IOException} from a dead client always produced.
  */
 @Component
 @ConditionalOnProperty(prefix = "vision.live", name = "enabled", matchIfMissing = true)
 public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryLiveUpdatePort,
         DetectionLiveUpdatePort, MapLiveUpdatePort, EventLiveUpdatePort {
 
-    /** How often {@link #flushPending()} drains coalesced telemetry/detections (docs/plans/done/REALTIME-PLAN.md §4, item 3). */
-    static final long COALESCE_MILLIS = 150L;
-
-    /** How often {@link #heartbeatAll()} sends a keepalive comment (docs/plans/done/REALTIME-PLAN.md §4, item 3). */
-    static final long HEARTBEAT_MILLIS = 15_000L;
-
-    /** Retained samples per asset's {@code telemetry} topic (FIFO — see {@link LiveRingBuffer}). */
-    static final int TELEMETRY_BUFFER_CAPACITY = 50;
-
-    /** Retained events on the shared {@code event} topic (FIFO — see {@link LiveRingBuffer}). */
-    static final int EVENT_BUFFER_CAPACITY = 300;
+    private static final System.Logger LOG = System.getLogger(LiveUpdateRegistry.class.getName());
 
     /**
-     * Retained entries on the shared {@code detection-events} topic (FIFO — see {@link
-     * LiveRingBuffer}), and the {@code limit} used to seed it from {@link
-     * DetectionEventRepositoryPort#findRecent} when empty. Matches {@link #EVENT_BUFFER_CAPACITY}
-     * for the same reason: generous resume slack for a cross-stream, comparatively low-rate feed
-     * (debounced occurrences, not raw per-frame results).
+     * Package-private compile-time default kept only because {@link LiveUpdateRegistryTest} (same
+     * package) needs a static value to stub {@link DetectionEventRepositoryPort#findRecent}'s
+     * {@code limit} argument against — derived from {@link VisionApiProperties.Live#defaults()}
+     * rather than a second literal, so it can never drift from the real default. The bound a running
+     * instance actually enforces is the property-driven {@link #detectionEventBufferCapacity}
+     * instance field below, not this constant (the two are equal for any instance built with {@link
+     * VisionApiProperties.Live#defaults()}, which is every test that references this field).
      */
-    static final int DETECTION_EVENT_BUFFER_CAPACITY = 300;
+    static final int DETECTION_EVENT_BUFFER_CAPACITY = VisionApiProperties.Live.defaults().detectionBuffer();
 
     /**
-     * Retained entries on the shared {@code map} topic (FIFO — see {@link LiveRingBuffer}) — same
-     * capacity as {@link #EVENT_BUFFER_CAPACITY}/{@link #DETECTION_EVENT_BUFFER_CAPACITY} for the
-     * same reason (generous resume slack for a comparatively low-rate, individually-meaningful feed).
-     *
-     * <p>The buffer is shared across every connection and holds <em>unfiltered</em> envelopes; the
-     * per-connection {@link LiveConnection#mayReceive} check is applied on the way out, on both the
-     * broadcast and the replay path, so one canonical resumable sequence serves viewers at different
-     * access levels without ever handing one of them another's event.
+     * Same reasoning as {@link #DETECTION_EVENT_BUFFER_CAPACITY} — kept for {@link
+     * LiveUpdateRegistryTest}'s write-timeout test, which needs a compile-time bound to wait past.
+     * The real, property-driven bound is {@link #connectionWriteTimeoutMillis}.
      */
-    static final int MAP_BUFFER_CAPACITY = 300;
+    static final long CONNECTION_WRITE_TIMEOUT_MILLIS = VisionApiProperties.Live.defaults().sendTimeout().toMillis();
 
     private final ObjectProvider<AssetService> assetService;
     private final ObjectProvider<DeviceService> deviceService;
@@ -206,20 +228,98 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     private final ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort;
     private final ScheduledExecutorService scheduler;
 
+    /**
+     * The cadence/sizing knobs {@code vision.api.live.*} controls (docs/plans/active/SCALE-100-PLAN.md
+     * §5 S7, finishing the extraction {@code VisionApiProperties.Live} already described but neither
+     * this class nor {@code HlsProxyController} actually read). Millis/int rather than the {@link
+     * VisionApiProperties.Live} record's own {@code Duration}s — every call site below predates this
+     * wiring and is already expressed in millis ({@link #scheduler}'s {@code scheduleAtFixedRate},
+     * {@link CompletableFuture#orTimeout}), so converting once here (in the constructor) keeps every
+     * one of those call sites unchanged instead of threading {@code Duration} through them.
+     */
+    private final long coalesceMillis;
+    private final long heartbeatMillis;
+    private final long connectionWriteTimeoutMillis;
+    private final long bufferEvictionMillis;
+    private final int telemetryBufferCapacity;
+    private final int eventBufferCapacity;
+    private final int detectionEventBufferCapacity;
+    private final int mapBufferCapacity;
+
+    /** One JSON encode per envelope, not one per connection — see the class javadoc's "Connection writes" section. */
+    private final JsonMapper jsonMapper = new JsonMapper();
+
+    /**
+     * Where a connection's own write actually runs, off {@link #scheduler} — a virtual thread per
+     * write, unconditionally instantiated (not constructor-injected: this class's production
+     * constructor is already at the five-parameter ceiling before counting this, see {@code
+     * .claude/skills/java-clean-code/SKILL.md} §3 — its one settings-bundle parameter added for
+     * docs/plans/active/SCALE-100-PLAN.md §5 S7 groups eight scalars rather than adding a sixth
+     * loose one, the same precedent {@code MediamtxStreamPublisher}'s {@code PublishSettings}
+     * bundle sets — and unlike {@link #scheduler} nothing here needs deterministic single-step test
+     * control, only real concurrency to exercise).
+     *
+     * <p><b>{@code vision.api.live.dispatch-threads} — surveyed for S7, deliberately not added</b>:
+     * {@link Executors#newVirtualThreadPerTaskExecutor()} spawns one platform-scheduled virtual
+     * thread per submitted task and has no pool-size/thread-count concept to configure — there is no
+     * bound a "thread count" setting could mean here, so a knob by that name would be read, stored,
+     * and silently ignored, which is worse than no knob at all. The key stays a documented
+     * non-decision: if this executor is ever swapped for a bounded platform {@link
+     * java.util.concurrent.ThreadPoolExecutor} (the only circumstance under which a thread count
+     * becomes a real, honest bound), that change is what should introduce {@code dispatch-threads},
+     * not this wave.
+     */
+    private final ExecutorService connectionWriteExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
     private final AtomicLong sequencer = new AtomicLong(0L);
     private final ConcurrentHashMap<String, LiveConnection> connections = new ConcurrentHashMap<>();
 
     private final LiveRingBuffer fleetBuffer = new LiveRingBuffer(1, true);
-    private final LiveRingBuffer eventBuffer = new LiveRingBuffer(EVENT_BUFFER_CAPACITY, false);
+    private final LiveRingBuffer eventBuffer;
     private final LiveRingBuffer devicesBuffer = new LiveRingBuffer(1, true);
-    private final LiveRingBuffer detectionEventsBuffer = new LiveRingBuffer(DETECTION_EVENT_BUFFER_CAPACITY, false);
-    private final LiveRingBuffer mapBuffer = new LiveRingBuffer(MAP_BUFFER_CAPACITY, false);
+    private final LiveRingBuffer detectionEventsBuffer;
+    private final LiveRingBuffer mapBuffer;
+
+    /**
+     * Per-asset buffers for {@code telemetry:<assetId>}/{@code detections:<assetId>} — {@link
+     * #bufferFor} only ever adds an entry here ({@code computeIfAbsent}); {@link
+     * #evictUnusedAssetBuffers()} is what keeps these two maps from retaining one buffer per asset
+     * ever watched for the life of the process (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 4).
+     */
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> telemetryBuffers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> detectionBuffers = new ConcurrentHashMap<>();
 
     private final ConcurrentHashMap<AssetId, ConcurrentLinkedQueue<Telemetry>> pendingTelemetry =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, DetectionResult> pendingDetections = new ConcurrentHashMap<>();
+
+    /**
+     * {@link #publishFleetChanged()}'s coalescing window, in nanoseconds ({@link System#nanoTime()}
+     * is monotonic and immune to wall-clock adjustment, unlike {@link System#currentTimeMillis()}) —
+     * derived from {@link #coalesceMillis} rather than a second, independently-tunable field
+     * (docs/plans/active/SCALE-100-PLAN.md §5 S5): a fleet/devices recompute is exactly as expensive
+     * to run too often as a telemetry flush, so it shares that same window.
+     */
+    private final long fleetCoalesceWindowNanos;
+
+    /**
+     * The nanoTime at which {@link #publishFleetChanged()}'s current coalescing window closes.
+     * {@code Long.MIN_VALUE} so the very first call always finds itself past the (nonexistent) prior
+     * window and dispatches immediately, regardless of this JVM's {@link System#nanoTime()} origin
+     * (which is arbitrary and not guaranteed positive). A caller only ever advances this via the
+     * compare-and-set in {@link #publishFleetChanged()} — exactly one racing caller "wins" and opens
+     * the next window, so at most one immediate recompute is dispatched per window.
+     */
+    private final AtomicLong fleetRecomputeWindowUntilNanos = new AtomicLong(Long.MIN_VALUE);
+
+    /**
+     * Set by {@link #publishFleetChanged()} whenever a call is coalesced away (landed inside an
+     * already-open window) instead of dispatching its own recompute; {@link #flushPending()} checks
+     * this on every tick and performs exactly one trailing recompute if it is set, guaranteeing the
+     * window's last write is never silently dropped even if nothing calls {@link
+     * #publishFleetChanged()} again (docs/plans/active/SCALE-100-PLAN.md §5 S5's "must not lose the last state").
+     */
+    private final AtomicBoolean fleetChangedDuringWindow = new AtomicBoolean(false);
 
     /**
      * {@code @Autowired} disambiguates this from the package-private test-seam constructor below
@@ -243,23 +343,70 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * depends on any of this class's five ports), so it stays a plain constructor parameter. See
      * vision-app/MODULE.md's own Gotcha for the full chain and the exact {@code
      * UnsatisfiedDependencyException} this pattern resolves.
+     *
+     * <p>{@code live} is the one addition docs/plans/active/SCALE-100-PLAN.md §5 S7 makes to this
+     * list — a settings bundle, not a collaborator, so it does not participate in any of the cycles
+     * above and needs no {@link ObjectProvider} wrapper.
      */
     @Autowired
     public LiveUpdateRegistry(ObjectProvider<AssetService> assetService,
                               ObjectProvider<DeviceService> deviceService,
                               ObjectProvider<StreamService> streamService,
                               StreamPublisherPort streamPublisherPort,
-                              ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort) {
-        this(assetService, deviceService, streamService, streamPublisherPort, detectionEventRepositoryPort,
+                              ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort,
+                              VisionApiProperties.Live live) {
+        this(assetService, deviceService, streamService, streamPublisherPort, detectionEventRepositoryPort, live,
                 defaultScheduler());
     }
 
-    /** Test seam: an injectable scheduler so tests can trigger {@link #flushPending()}/{@link #heartbeatAll()} directly instead of waiting on real timer ticks. */
+    /**
+     * Legacy 5-collaborator overload, defaulted to {@link VisionApiProperties.Live#defaults()} —
+     * kept because {@code LiveControllerTest}/{@code LiveMapScopingTest} (package {@code
+     * com.drones.vision.api.controller}, so only a {@code public} constructor is reachable there)
+     * construct this class directly rather than through Spring, and predate docs/plans/active/SCALE-100-PLAN.md
+     * §5 S7's properties wiring. Not {@code @Autowired}: Spring must have exactly one candidate
+     * constructor to autowire, and the six-parameter overload above is the real production entry
+     * point.
+     */
+    public LiveUpdateRegistry(ObjectProvider<AssetService> assetService,
+                              ObjectProvider<DeviceService> deviceService,
+                              ObjectProvider<StreamService> streamService,
+                              StreamPublisherPort streamPublisherPort,
+                              ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort) {
+        this(assetService, deviceService, streamService, streamPublisherPort, detectionEventRepositoryPort,
+                VisionApiProperties.Live.defaults());
+    }
+
+    /**
+     * Test seam: an injectable scheduler so tests can trigger {@link #flushPending()}/{@link
+     * #heartbeatAll()} directly instead of waiting on real timer ticks — defaulted to {@link
+     * VisionApiProperties.Live#defaults()} since every existing caller of this constructor
+     * (same-package {@link LiveUpdateRegistryTest}) predates the {@code live} parameter and asserts
+     * against those defaults.
+     */
     LiveUpdateRegistry(ObjectProvider<AssetService> assetService,
                         ObjectProvider<DeviceService> deviceService,
                         ObjectProvider<StreamService> streamService,
                         StreamPublisherPort streamPublisherPort,
                         ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort,
+                        ScheduledExecutorService scheduler) {
+        this(assetService, deviceService, streamService, streamPublisherPort, detectionEventRepositoryPort,
+                VisionApiProperties.Live.defaults(), scheduler);
+    }
+
+    /**
+     * The full constructor every other overload above ultimately delegates to — the one place
+     * fields are actually assigned and {@link #scheduler}'s three fixed-rate tasks are scheduled.
+     * Package-private test seam (both new parameters together): no test needs an injectable
+     * scheduler with non-default {@code live} settings today, but the seam costs nothing to keep
+     * available for one that later does.
+     */
+    LiveUpdateRegistry(ObjectProvider<AssetService> assetService,
+                        ObjectProvider<DeviceService> deviceService,
+                        ObjectProvider<StreamService> streamService,
+                        StreamPublisherPort streamPublisherPort,
+                        ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort,
+                        VisionApiProperties.Live live,
                         ScheduledExecutorService scheduler) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.deviceService = Objects.requireNonNull(deviceService, "deviceService must not be null");
@@ -268,9 +415,24 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
                 Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
         this.detectionEventRepositoryPort =
                 Objects.requireNonNull(detectionEventRepositoryPort, "detectionEventRepositoryPort must not be null");
+        Objects.requireNonNull(live, "live must not be null");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
-        this.scheduler.scheduleAtFixedRate(this::flushPending, COALESCE_MILLIS, COALESCE_MILLIS, TimeUnit.MILLISECONDS);
-        this.scheduler.scheduleAtFixedRate(this::heartbeatAll, HEARTBEAT_MILLIS, HEARTBEAT_MILLIS, TimeUnit.MILLISECONDS);
+        this.coalesceMillis = live.coalesce().toMillis();
+        this.heartbeatMillis = live.heartbeat().toMillis();
+        this.connectionWriteTimeoutMillis = live.sendTimeout().toMillis();
+        this.bufferEvictionMillis = live.bufferEviction().toMillis();
+        this.telemetryBufferCapacity = live.telemetryBuffer();
+        this.eventBufferCapacity = live.eventBuffer();
+        this.detectionEventBufferCapacity = live.detectionBuffer();
+        this.mapBufferCapacity = live.mapBuffer();
+        this.eventBuffer = new LiveRingBuffer(eventBufferCapacity, false);
+        this.detectionEventsBuffer = new LiveRingBuffer(detectionEventBufferCapacity, false);
+        this.mapBuffer = new LiveRingBuffer(mapBufferCapacity, false);
+        this.fleetCoalesceWindowNanos = TimeUnit.MILLISECONDS.toNanos(coalesceMillis);
+        this.scheduler.scheduleAtFixedRate(this::flushPending, coalesceMillis, coalesceMillis, TimeUnit.MILLISECONDS);
+        this.scheduler.scheduleAtFixedRate(this::heartbeatAll, heartbeatMillis, heartbeatMillis, TimeUnit.MILLISECONDS);
+        this.scheduler.scheduleAtFixedRate(this::evictUnusedAssetBuffers, bufferEvictionMillis, bufferEvictionMillis,
+                TimeUnit.MILLISECONDS);
     }
 
     private static ScheduledExecutorService defaultScheduler() {
@@ -325,7 +487,10 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             for (LiveTopic topic : connection.topics()) {
                 for (LiveEnvelopeResponse envelope : replayFor(topic, lastEventId)) {
                     if (connection.mayReceive(envelope)) {
-                        connection.send(envelope);
+                        String json = serialize(envelope);
+                        if (json != null) {
+                            connection.send(envelope.seq(), json);
+                        }
                     }
                 }
             }
@@ -333,6 +498,22 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             connections.remove(connectionId);
         }
         return emitter;
+    }
+
+    /**
+     * Test seam: registers a connection around an already-constructed {@link SseEmitter} — a test
+     * double that records or deliberately blocks on {@code send}, typically — bypassing the real
+     * {@link #connect} handshake and snapshot burst, so a test can observe exactly what {@link
+     * #broadcast}/{@link #heartbeatAll} write without a real servlet request/response round trip.
+     *
+     * @return the new connection's id
+     */
+    String register(SseEmitter emitter, Set<LiveTopic> topics, Predicate<String> mapVisibility) {
+        String connectionId = UUID.randomUUID().toString();
+        LiveConnection connection = new LiveConnection(connectionId, emitter, mapVisibility);
+        connection.topics().addAll(topics);
+        connections.put(connectionId, connection);
+        return connectionId;
     }
 
     /**
@@ -363,7 +544,10 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
                 if (connection.topics().add(topic)) {
                     for (LiveEnvelopeResponse envelope : bufferFor(topic).snapshot()) {
                         if (connection.mayReceive(envelope)) {
-                            connection.send(envelope);
+                            String json = serialize(envelope);
+                            if (json != null) {
+                                connection.send(envelope.seq(), json);
+                            }
                         }
                     }
                 }
@@ -395,18 +579,40 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * <p>Recomputes and broadcasts <em>both</em> the {@code fleet} (asset-centric) and {@code
      * devices} (device-list + active-stream-list) snapshots in one dispatch — see this class's own
      * javadoc for why {@code devices} extends this method rather than needing a second port call.
+     *
+     * <p><b>Coalesced leading+trailing</b> (docs/plans/active/SCALE-100-PLAN.md §5 S5 — see the class javadoc's
+     * "Coalescing" section for the full reasoning): a call past the current window's close wins a
+     * compare-and-set on {@link #fleetRecomputeWindowUntilNanos}, opens the next window, and
+     * dispatches {@link #recomputeFleetAndDevices()} immediately, exactly as this method always did.
+     * A call inside an already-open window (including one that lost the compare-and-set race to
+     * another concurrent caller) only sets {@link #fleetChangedDuringWindow} — {@link
+     * #flushPending()} owns the one trailing recompute that catches it.
      */
     @Override
     public void publishFleetChanged() {
-        scheduler.execute(() -> {
-            LiveEnvelopeResponse fleetEnvelope = freshFleetEnvelope();
-            fleetBuffer.append(fleetEnvelope);
-            broadcast(LiveTopic.FLEET, fleetEnvelope);
+        long now = System.nanoTime();
+        long windowUntil = fleetRecomputeWindowUntilNanos.get();
+        if (now >= windowUntil
+                && fleetRecomputeWindowUntilNanos.compareAndSet(windowUntil, now + fleetCoalesceWindowNanos)) {
+            scheduler.execute(this::recomputeFleetAndDevices);
+        } else {
+            fleetChangedDuringWindow.set(true);
+        }
+    }
 
-            LiveEnvelopeResponse devicesEnvelope = freshDevicesEnvelope();
-            devicesBuffer.append(devicesEnvelope);
-            broadcast(LiveTopic.DEVICES, devicesEnvelope);
-        });
+    /**
+     * The actual fleet+devices recompute-and-broadcast — the body {@link #publishFleetChanged()}
+     * used to run unconditionally on every call; now shared with {@link #flushPending()}'s trailing
+     * catch-up so both dispatch paths do exactly the same work.
+     */
+    private void recomputeFleetAndDevices() {
+        LiveEnvelopeResponse fleetEnvelope = freshFleetEnvelope();
+        fleetBuffer.append(fleetEnvelope);
+        broadcast(LiveTopic.FLEET, fleetEnvelope);
+
+        LiveEnvelopeResponse devicesEnvelope = freshDevicesEnvelope();
+        devicesBuffer.append(devicesEnvelope);
+        broadcast(LiveTopic.DEVICES, devicesEnvelope);
     }
 
     @Override
@@ -469,10 +675,15 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
 
     /**
      * Drains {@link #pendingTelemetry}/{@link #pendingDetections} and emits one coalesced envelope
-     * per asset that had something pending — see the class javadoc's "Coalescing" section. Package-
-     * private so a test can call it directly/deterministically instead of waiting on the real timer.
+     * per asset that had something pending, then performs {@link #publishFleetChanged()}'s trailing
+     * recompute if a call was coalesced away during the current/previous window ({@link
+     * #fleetChangedDuringWindow}) — see the class javadoc's "Coalescing" section. Package-private so
+     * a test can call it directly/deterministically instead of waiting on the real timer.
      */
     void flushPending() {
+        if (fleetChangedDuringWindow.compareAndSet(true, false)) {
+            recomputeFleetAndDevices();
+        }
         for (AssetId assetId : List.copyOf(pendingTelemetry.keySet())) {
             List<Telemetry> drained = drain(pendingTelemetry.get(assetId));
             if (drained.isEmpty()) {
@@ -498,14 +709,16 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         }
     }
 
-    /** Package-private so a test can trigger a heartbeat deterministically instead of waiting on the real timer. */
+    /**
+     * Package-private so a test can trigger a heartbeat deterministically instead of waiting on the
+     * real timer. Each connection's write is queued/dispatched exactly like {@link #broadcast}'s —
+     * see the class javadoc's "Connection writes" section — so one connection with a stalled write
+     * already queued ahead of its heartbeat never delays this method's return, nor any other
+     * connection's heartbeat.
+     */
     void heartbeatAll() {
         for (LiveConnection connection : connections.values()) {
-            try {
-                connection.heartbeat();
-            } catch (IOException e) {
-                unregister(connection.id(), e);
-            }
+            dispatchWrite(connection, connection.enqueueHeartbeat(connectionWriteExecutor));
         }
     }
 
@@ -522,18 +735,59 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * Sends {@code envelope} to every connection subscribed to {@code topic} <em>and</em> permitted
      * to receive it — the second condition only ever excludes anything on the {@code map} topic (see
      * {@link LiveConnection#mayReceive}); every other topic's payload passes unconditionally.
+     *
+     * <p>Serializes {@code envelope} exactly once and dispatches one write per matching connection
+     * onto {@link #connectionWriteExecutor} — see the class javadoc's "Connection writes" section.
+     * This method itself never blocks on a connection's write, so a stalled client cannot delay
+     * delivery to any other connection subscribed to the same topic, nor the next scheduled tick.
      */
     private void broadcast(LiveTopic topic, LiveEnvelopeResponse envelope) {
+        String json = serialize(envelope);
+        if (json == null) {
+            return; // already logged in serialize() -- nothing valid to send to anyone
+        }
         for (LiveConnection connection : connections.values()) {
             if (!connection.topics().contains(topic) || !connection.mayReceive(envelope)) {
                 continue;
             }
-            try {
-                connection.send(envelope);
-            } catch (IOException e) {
-                unregister(connection.id(), e);
-            }
+            dispatchWrite(connection, connection.enqueueSend(envelope.seq(), json, connectionWriteExecutor));
         }
+    }
+
+    /**
+     * Serializes {@code envelope} to JSON exactly once (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 1) so
+     * {@link #broadcast} can hand the same {@code String} to every subscribed connection instead of
+     * each one re-encoding the same object — {@code broadcast}'s cost used to grow with both the
+     * number of connections and the size of the envelope; now only with the number of connections.
+     *
+     * @return the serialized envelope, or {@code null} if serialization failed (logged here; the
+     *         caller treats {@code null} as "nothing valid to send" rather than propagating — an
+     *         uncaught exception here would otherwise permanently kill {@link #flushPending}'s own
+     *         {@code scheduleAtFixedRate} tick, taking every future topic down with it)
+     */
+    private String serialize(LiveEnvelopeResponse envelope) {
+        try {
+            return jsonMapper.writeValueAsString(envelope);
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING, "failed to serialize live envelope, type=" + envelope.type(), e);
+            return null;
+        }
+    }
+
+    /**
+     * Bounds one already-queued connection write (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 3): if it has
+     * not completed within {@link #connectionWriteTimeoutMillis} — whether because the write
+     * itself stalled or because an earlier write still ahead of it in {@link LiveConnection}'s own
+     * chain is stuck — this connection is unregistered so a slow/dead client can never hold up
+     * anyone else's delivery. {@link CompletableFuture#orTimeout} schedules its own timer rather
+     * than blocking, so nothing here blocks the caller (always {@link #scheduler}'s thread).
+     */
+    private void dispatchWrite(LiveConnection connection, CompletableFuture<Void> write) {
+        write.orTimeout(connectionWriteTimeoutMillis, TimeUnit.MILLISECONDS)
+                .exceptionally(cause -> {
+                    unregister(connection.id(), cause);
+                    return null;
+                });
     }
 
     private void unregister(String connectionId, Throwable cause) {
@@ -541,6 +795,25 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         if (removed != null) {
             removed.completeWithError(cause);
         }
+    }
+
+    /**
+     * Removes any {@link #telemetryBuffers}/{@link #detectionBuffers} entry for an asset no
+     * currently-open connection subscribes to anymore (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 4) — see
+     * those fields' own javadoc for why this sweep exists. Package-private so a test can trigger it
+     * directly instead of waiting on the real {@link #bufferEvictionMillis}ms timer.
+     */
+    void evictUnusedAssetBuffers() {
+        telemetryBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.TELEMETRY));
+        detectionBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.DETECTIONS));
+    }
+
+    private Set<AssetId> subscribedAssetIds(LiveTopicKind kind) {
+        return connections.values().stream()
+                .flatMap(connection -> connection.topics().stream())
+                .filter(topic -> topic.kind() == kind)
+                .map(LiveTopic::assetId)
+                .collect(Collectors.toSet());
     }
 
     /** Package-private (rather than {@code private}) purely so a pure unit test in this package can exercise the resume-vs-snapshot decision directly, without going through a real {@code SseEmitter}. */
@@ -579,15 +852,16 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             case DETECTION_EVENTS -> detectionEventsBuffer;
             case MAP -> mapBuffer;
             case TELEMETRY -> telemetryBuffers.computeIfAbsent(topic.assetId(),
-                    id -> new LiveRingBuffer(TELEMETRY_BUFFER_CAPACITY, false));
+                    id -> new LiveRingBuffer(telemetryBufferCapacity, false));
             case DETECTIONS -> detectionBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
         };
     }
 
     /**
      * {@code hasImage} is always {@code false} on this live snapshot — deliberately, not an
-     * oversight (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2): this class already sits at the
-     * five-constructor-parameter ceiling (see {@code .claude/skills/java-clean-code/SKILL.md} §3),
+     * oversight (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2): this class's production
+     * constructor is already at the five-parameter ceiling (see {@code
+     * .claude/skills/java-clean-code/SKILL.md} §3) before adding a sixth collaborator just for this,
      * and {@code AssetImageRepositoryPort} carries no per-asset lifecycle event of its own to
      * announce a change through anyway (unlike {@code AuditTrailPort}/{@code EventPublisherPort},
      * both already decorated for exactly this purpose in {@code vision-app}). A viewer relying on
@@ -628,7 +902,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      */
     private void seedDetectionEventsIfEmpty(LiveRingBuffer buffer) {
         List<DetectionEvent> newestFirst =
-                detectionEventRepositoryPort.getObject().findRecent(null, DETECTION_EVENT_BUFFER_CAPACITY);
+                detectionEventRepositoryPort.getObject().findRecent(null, detectionEventBufferCapacity);
         List<DetectionEvent> oldestFirst = new ArrayList<>(newestFirst);
         Collections.reverse(oldestFirst);
         for (DetectionEvent event : oldestFirst) {

@@ -8,7 +8,6 @@ import com.drones.vision.identity.domain.port.UserRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.api.security.SessionAuthenticator;
-import com.drones.vision.app.bootstrap.AuthSeedRunner;
 import com.drones.vision.app.security.BcryptPasswordHasher;
 import com.drones.vision.app.security.DevPrincipalResolver;
 import com.drones.vision.app.security.NoopSessionAuthenticator;
@@ -17,7 +16,6 @@ import com.drones.vision.app.security.SecuritySessionAuthenticator;
 import com.drones.vision.identity.application.*;
 import com.drones.vision.identity.application.scope.*;
 
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -34,8 +32,14 @@ import org.springframework.security.web.context.SecurityContextRepository;
  *
  * <p>The application services ({@link AuthService}/{@link UserService}/{@link GroupService}) and the
  * one {@link PasswordHasherPort} (BCrypt) are wired unconditionally — they exist and behave the
- * same whether or not auth is enabled (the seed runner and the login endpoint use them either way).
- * Only the two request-facing seams are gated on {@code vision.auth.enabled}:
+ * same whether or not auth is enabled (the login endpoint uses them either way). Dev-account
+ * seeding is no longer part of this wiring at all: docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 deleted the
+ * code-based {@code AuthSeedRunner} (which used to mint a random root group id here — the root cause
+ * of an empty-fleet bug once a MANAGER's scope no longer matched it) in favor of a Flyway migration
+ * (`db/seed/dev`, `storage/persistence`) that seeds the fixed-id root group and three DEV-ONLY
+ * accounts only when {@code vision.persistence.seed-dev-users=true} — see
+ * {@code VisionPersistenceProperties}/{@code PersistenceUnit}. Only the two request-facing seams
+ * below are gated on {@code vision.auth.enabled}:
  *
  * <ul>
  *   <li>{@link PrincipalResolver} — {@link DevPrincipalResolver} (fixed dev principal) when
@@ -47,8 +51,9 @@ import org.springframework.security.web.context.SecurityContextRepository;
  * </ul>
  *
  * <p>The repository ports themselves ({@link UserRepositoryPort}/{@link GroupRepositoryPort}) are
- * wired in {@link PersistenceWiringConfiguration} alongside every other port, gated by {@code
- * vision.persistence.enabled} — orthogonal to {@code vision.auth.enabled}.
+ * wired unconditionally in {@link PersistenceWiringConfiguration} alongside every other port
+ * (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b removed the {@code vision.persistence.enabled} flag
+ * that used to gate them) — orthogonal to {@code vision.auth.enabled}.
  */
 @Configuration
 public class AuthWiringConfiguration {
@@ -98,12 +103,6 @@ public class AuthWiringConfiguration {
     @Bean
     public ActivityService activityService(AuditTrailPort auditTrailPort) {
         return new DefaultActivityService(auditTrailPort);
-    }
-
-    /** First-boot seed of a root group + dev users; a no-op once any user exists (see the class). */
-    @Bean
-    public ApplicationRunner authSeedRunner(UserService userService, GroupService groupService) {
-        return new AuthSeedRunner(userService, groupService);
     }
 
     /** Dev principal for every request when auth is off (default) — pre-auth behavior unchanged. */

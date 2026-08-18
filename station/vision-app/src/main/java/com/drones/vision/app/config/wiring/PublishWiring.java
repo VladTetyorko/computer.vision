@@ -9,6 +9,8 @@ import com.drones.vision.adapter.publishhls.MediamtxReplayFrameExtractor;
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
 import com.drones.vision.adapter.publishhls.PublishSettings;
 import com.drones.vision.adapter.publishhls.PublisherRouter;
+import com.drones.vision.api.live.LiveUpdateRegistry;
+import com.drones.vision.api.proxy.HlsProxyController;
 import com.drones.vision.api.support.SnapshotJpegEncoder;
 import com.drones.vision.app.config.properties.VisionApiProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
@@ -36,7 +38,10 @@ import java.net.URI;
  * replaced. {@link #snapshotJpegEncoder} (wave D/B closeout) makes {@code
  * com.drones.vision.api.support.SnapshotJpegEncoder} a real, property-bound bean instead of {@code
  * StreamController}/{@code DeviceProbeController} each self-constructing one from {@code
- * com.drones.vision.api.support.VisionApiProperties.defaults()}.
+ * com.drones.vision.api.support.VisionApiProperties.defaults()}. {@link #hlsProxySettings}/{@link
+ * #liveSettings} (docs/plans/active/SCALE-100-PLAN.md §5 S7) finish that same extraction for {@link
+ * HlsProxyController}/{@link LiveUpdateRegistry} — the two classes whose settings the S1/S2 waves
+ * deliberately left as local constants, reserving this file's bridge for this wave.
  *
  * <h2>Two {@code VisionApiProperties} types — deliberately, see {@link VisionApiProperties}'s own
  * javadoc</h2>
@@ -202,6 +207,28 @@ public class PublishWiring {
         return new SnapshotJpegEncoder(toApiSupportProperties(properties));
     }
 
+    /**
+     * {@link HlsProxyController}'s upstream {@code HttpClient} timeouts and buffer/redirect bounds
+     * (docs/plans/active/SCALE-100-PLAN.md §5 S7) — mapped from {@link VisionApiProperties#hlsProxy()}
+     * the same way {@link #snapshotJpegEncoder} maps {@code snapshot}. A plain nested-record bean
+     * (not the whole bridged {@code com.drones.vision.api.support.VisionApiProperties}) since that is
+     * all the controller's own {@code @Autowired} constructor declares.
+     */
+    @Bean
+    public com.drones.vision.api.support.VisionApiProperties.HlsProxy hlsProxySettings(VisionApiProperties properties) {
+        return toApiSupportProperties(properties).hlsProxy();
+    }
+
+    /**
+     * {@link LiveUpdateRegistry}'s coalesce/heartbeat cadence, per-topic ring-buffer capacities, and
+     * per-connection dispatch bounds (docs/plans/active/SCALE-100-PLAN.md §5 S7) — mapped from {@link
+     * VisionApiProperties#live()}, same shape as {@link #hlsProxySettings}.
+     */
+    @Bean
+    public com.drones.vision.api.support.VisionApiProperties.Live liveSettings(VisionApiProperties properties) {
+        return toApiSupportProperties(properties).live();
+    }
+
     private static com.drones.vision.api.support.VisionApiProperties toApiSupportProperties(
             VisionApiProperties properties) {
         VisionApiProperties.Snapshot snapshot = properties.snapshot();
@@ -212,9 +239,10 @@ public class PublishWiring {
         return new com.drones.vision.api.support.VisionApiProperties(
                 new com.drones.vision.api.support.VisionApiProperties.Snapshot(snapshot.maxWidth(), snapshot.jpegQuality()),
                 new com.drones.vision.api.support.VisionApiProperties.HlsProxy(hlsProxy.connectTimeout(),
-                        hlsProxy.requestTimeout()),
+                        hlsProxy.requestTimeout(), hlsProxy.errorBodyPreviewMaxChars(), hlsProxy.maxRedirectHops()),
                 new com.drones.vision.api.support.VisionApiProperties.Live(live.coalesce(), live.heartbeat(),
-                        live.telemetryBuffer(), live.eventBuffer(), live.detectionBuffer(), live.marksBuffer()),
+                        live.telemetryBuffer(), live.eventBuffer(), live.detectionBuffer(), live.mapBuffer(),
+                        live.sendTimeout(), live.bufferEviction()),
                 new com.drones.vision.api.support.VisionApiProperties.Paging(paging.defaultLimit(), paging.maxLimit()),
                 new com.drones.vision.api.support.VisionApiProperties.Upload(upload.maxImageBytes()));
     }

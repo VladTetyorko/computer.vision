@@ -64,6 +64,19 @@ const HOT_KNOB_DEBOUNCE_MS = 400;
  * the "Following #N" chip is allowed to confirm from (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty
  * rule). Mirrors `DetectionsStore`'s own poll cadence (`POLL_INTERVAL_MS`) — fast enough that the
  * chip/flow-strip feel live, slow enough to be a background read, never a user-facing spinner.
+ *
+ * **Deliberately left ungated on `LiveStore` (docs/plans/active/SCALE-100-PLAN.md §5 S6, item 2, the
+ * plan's own recommendation).** There is no `tracks:<streamId>`/matching topic on `GET /api/live` to
+ * project instead — `LiveEnvelope`'s union (`core/api/models.ts`) carries `detections`, not track
+ * book/lock/duty-cycle stats, so gating this against `isLiveAvailable()` would just mean "poll
+ * nothing and show nothing" rather than "poll nothing and stay fresh via live data" the way
+ * `cockpit-facade.ts`/`drone-picker-facade.ts`/`core/geofence/geofence-store.ts` do. The actual
+ * request-rate cost is already bounded without gating: {@link pollTracks} itself no-ops (no HTTP
+ * call at all) unless the drawer is open **and** a stream is running — an idle cockpit tab with this
+ * drawer closed issues zero requests from this poller regardless of `LiveStore`'s own state, so
+ * there is nothing here for an idle-tab budget to spend. Folding tracks into the `detections:<assetId>`
+ * payload instead was considered and rejected: it's a different domain (track book/lock/duty-cycle,
+ * not detection boxes) and a wire-contract change is out of this wave's frontend-only scope.
  */
 const TRACKS_POLL_INTERVAL_MS = 2_000;
 

@@ -11,6 +11,13 @@ import { PollScheduler } from '../poll-scheduler';
  * mutation this store itself makes, and lightly in the background so a second manager's edit (or
  * this same operator's own Command tab open twice) eventually shows up on `/fly`'s read-only layer
  * too, without needing FleetStore's 5s cadence.
+ *
+ * Deliberately **not** gated on `isLiveAvailable()` the way the fly pollers are (SCALE-100 §5 S6):
+ * gating trades correctness for almost nothing here. `LiveEnvelope` has no zone topic to project
+ * while the poll is paused (zone *breaches* ride the generic `event` topic and are a different
+ * signal), so pausing would leave a second operator's newly drawn no-fly zone invisible for the
+ * whole session — on a safety-adjacent layer — to save 0.033 req/s against a 0.2 req/s budget.
+ * Adding a zones topic to the live stream is the fix that would make gating this correct.
  */
 const ZONES_POLL_INTERVAL_MS = 30_000;
 

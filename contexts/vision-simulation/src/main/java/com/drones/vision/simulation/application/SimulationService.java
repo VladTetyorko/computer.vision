@@ -58,14 +58,12 @@ public interface SimulationService {
      * TX-fed simulation feeds" from "a real external RTSP camera" any other way.
      *
      * <p>A feed's TX side (the transmit thread pushing a local file to mediamtx) is pure in-process
-     * runtime state — nothing durable backs it, so it never survives a JVM restart on its own, even
-     * with persistence enabled: the asset/device rows come back exactly as they were, but their
-     * {@code rtsp} URI points at a path mediamtx has no publisher for anymore, 404-ing forever.
-     * Intended to be called once, at boot, after the fleet has been restored from storage but
-     * before real traffic (see {@code vision-app}'s {@code ApplicationRunner}, gated on {@code
-     * vision.persistence.enabled} and {@code vision.simulation.resume-on-boot}) — calling it
-     * against the in-memory profile is harmless but pointless, since that profile has nothing to
-     * resume after a restart either (its assets are gone too).
+     * runtime state — nothing durable backs it, so it never survives a JVM restart on its own: the
+     * asset/device rows come back exactly as they were (Postgres-backed, unconditionally — see
+     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b), but their {@code rtsp} URI points at a path
+     * mediamtx has no publisher for anymore, 404-ing forever. Intended to be called once, at boot,
+     * after the fleet has been restored from storage but before real traffic (see {@code
+     * vision-app}'s {@code ApplicationRunner}, gated on {@code vision.simulation.resume-on-boot}).
      *
      * <p><b>{@code transport=MJPEG} is never a candidate</b>: its TX side serves its own ephemeral
      * HTTP port, freshly randomized on every JVM start, so a persisted {@code mjpeg} device's URI

@@ -192,7 +192,8 @@ vision-app/           (assembly — NO controllers, NO DTOs)
   config/             cross-cutting @Configuration (SecurityConfig)
   security/           BcryptPasswordHasher, VisionUserDetails, resolvers/authenticators
   events/             outbound event/audit port bridges  [directory already exists, empty]
-  bootstrap/          ApplicationRunners (AuthSeedRunner, SimulationResumeRunner)
+  bootstrap/          ApplicationRunners (SimulationResumeRunner) [AuthSeedRunner deleted,
+                      docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 — seeding moved to a Flyway migration]
   devsupport/         in-memory fallback repositories (unchanged)
 
 adapter-persistence/  (driven adapter — NO controllers, NO DTOs)

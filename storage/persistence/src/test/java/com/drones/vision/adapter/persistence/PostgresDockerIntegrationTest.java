@@ -15,6 +15,9 @@ import com.drones.vision.learning.domain.model.Dataset;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.DatasetStatus;
 import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionEvent;
+import com.drones.vision.perception.domain.model.DetectionEventId;
+import com.drones.vision.perception.domain.model.DetectionEventState;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.warehouse.domain.model.Device;
@@ -41,6 +44,11 @@ import com.drones.vision.map.domain.model.MarkStatus;
 import com.drones.vision.identity.domain.model.Membership;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.platform.AuditAction;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditId;
+import com.drones.vision.platform.AuditTargetType;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.learning.domain.model.SampleImage;
 import com.drones.vision.learning.domain.model.SampleStatus;
@@ -67,6 +75,7 @@ import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
@@ -79,13 +88,17 @@ import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
 
+import com.drones.vision.adapter.persistence.config.ClosingDatasourceConnectionProvider;
+import com.drones.vision.adapter.persistence.config.PersistencePoolSettings;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
 import com.drones.vision.adapter.persistence.repository.JpaAssetImageRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssetRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssetUsageRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssignmentRepository;
+import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
 import com.drones.vision.adapter.persistence.repository.JpaCategoryRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDatasetRepository;
+import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDeviceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDrawingRepository;
@@ -95,12 +108,16 @@ import com.drones.vision.adapter.persistence.repository.JpaMapLayerRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMarkRepository;
 import com.drones.vision.adapter.persistence.repository.JpaSampleImageStore;
 import com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository;
+import com.drones.vision.adapter.persistence.repository.TelemetryBatchSettings;
 import com.drones.vision.adapter.persistence.repository.JpaTrainingSampleRepository;
 import com.drones.vision.adapter.persistence.repository.JpaUserRepository;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 
+import org.hibernate.HibernateException;
+import org.hibernate.engine.jdbc.connections.spi.ConnectionProvider;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
@@ -126,6 +143,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -633,6 +651,88 @@ class PostgresDockerIntegrationTest {
 
             List<Telemetry> found = repository.findByUsage(usageId, 10);
             assertNull(found.get(0).flightState());
+        }
+
+        /**
+         * docs/plans/active/SCALE-100-PLAN.md S4, item 2: below the size bound and nowhere near the
+         * (deliberately huge) time bound, a batching repository must not have written anything yet
+         * -- proving {@link #save} genuinely defers the write rather than writing through and
+         * merely pretending to batch. The size bound then flushes every buffered sample together in
+         * one transaction.
+         */
+        @Test
+        void batchedSaveDefersWritesUntilTheSizeBoundThenFlushesTogether() {
+            TelemetryRepositoryPort repository = new JpaTelemetryRepository(entityManagerFactory,
+                    JpaTelemetryRepository.DEFAULT_RETENTION_LIMIT_PER_USAGE, new TelemetryBatchSettings(3, 60_000));
+            UsageId usageId = UsageId.random();
+            DeviceId deviceId = DeviceId.random();
+
+            repository.save(usageId, new Telemetry(deviceId, NOW, null, null, null, null, null, Map.of()));
+            repository.save(usageId, new Telemetry(deviceId, NOW.plusSeconds(1), null, null, null, null, null, Map.of()));
+            assertTrue(repository.findByUsage(usageId, 10).isEmpty(),
+                    "below the size bound and far from the huge window, nothing should be durable yet");
+
+            repository.save(usageId, new Telemetry(deviceId, NOW.plusSeconds(2), null, null, null, null, null, Map.of()));
+
+            assertEquals(3, repository.findByUsage(usageId, 10).size(),
+                    "the third save trips the size bound and flushes all three together");
+        }
+
+        /**
+         * docs/plans/active/SCALE-100-PLAN.md S4's stated trade-off, proven rather than asserted by
+         * inspection: a sample below the size bound sits only in heap -- exactly what a crash right
+         * now would lose -- but the configured window bounds that loss, flushing it on its own once
+         * the deadline passes even though nothing else ever arrived to trip the size bound.
+         */
+        @Test
+        void batchedSaveIsDurableWithinTheConfiguredWindowEvenBelowTheSizeBound() throws InterruptedException {
+            long windowMillis = 100;
+            TelemetryRepositoryPort repository = new JpaTelemetryRepository(entityManagerFactory,
+                    JpaTelemetryRepository.DEFAULT_RETENTION_LIMIT_PER_USAGE,
+                    new TelemetryBatchSettings(1000, windowMillis));
+            UsageId usageId = UsageId.random();
+            DeviceId deviceId = DeviceId.random();
+
+            repository.save(usageId, new Telemetry(deviceId, NOW, null, null, null, null, null, Map.of()));
+            assertTrue(repository.findByUsage(usageId, 10).isEmpty(),
+                    "immediately after a below-size-bound save the sample is only buffered in memory");
+
+            Thread.sleep(windowMillis * 3);
+
+            assertEquals(1, repository.findByUsage(usageId, 10).size(),
+                    "the batch window bounds how long a sample can stay undurable -- it must flush on its own");
+        }
+
+        /**
+         * The buffer map is keyed by usage and sits on the telemetry hot path, so a drained batch
+         * that is not *removed* leaks one entry per flight for the life of the JVM -- the same
+         * unbounded-map defect (docs/plans/active/SCALE-100-PLAN.md fact 2f) S2 had to fix in {@code
+         * LiveUpdateRegistry}, reintroduced by the change meant to relieve that pressure. Both
+         * flush paths are covered because they evict independently: the size bound drains inline on
+         * a caller thread, the window drains on the scheduler.
+         */
+        @Test
+        void bothFlushPathsEvictTheirBufferSoTheMapDoesNotGrowPerUsage() throws InterruptedException {
+            long windowMillis = 100;
+            JpaTelemetryRepository repository = new JpaTelemetryRepository(entityManagerFactory,
+                    JpaTelemetryRepository.DEFAULT_RETENTION_LIMIT_PER_USAGE,
+                    new TelemetryBatchSettings(2, windowMillis));
+            DeviceId deviceId = DeviceId.random();
+
+            UsageId flushedBySize = UsageId.random();
+            repository.save(flushedBySize, new Telemetry(deviceId, NOW, null, null, null, null, null, Map.of()));
+            assertEquals(1, repository.pendingBatchCount(), "a buffered sample must be visible as pending");
+            repository.save(flushedBySize, new Telemetry(deviceId, NOW.plusSeconds(1), null, null, null, null, null, Map.of()));
+            assertEquals(0, repository.pendingBatchCount(),
+                    "the size bound drained this usage, so its entry must be gone -- not left behind empty");
+
+            UsageId flushedByWindow = UsageId.random();
+            repository.save(flushedByWindow, new Telemetry(deviceId, NOW, null, null, null, null, null, Map.of()));
+            Thread.sleep(windowMillis * 3);
+            assertEquals(0, repository.pendingBatchCount(),
+                    "the window flush must evict too, or a usage that never trips the size bound leaks forever");
+            assertEquals(1, repository.findByUsage(flushedByWindow, 10).size(),
+                    "eviction must mean flushed-then-removed, never dropped");
         }
     }
 
@@ -2088,6 +2188,346 @@ class PostgresDockerIntegrationTest {
             assertEquals(new UUID(0, 1), copLayer[2]);
         } finally {
             em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — the durable audit trail: append-only record, plus
+     * newest-first {@code findRecent}/{@code findByTarget}/{@code findByActor}.
+     */
+    @Nested
+    class AuditTrailRepositoryTests {
+
+        private final AuditTrailPort repository = new JpaAuditTrail(entityManagerFactory);
+
+        @Test
+        void recordedEntryRoundTripsEveryField() {
+            String targetId = UUID.randomUUID().toString();
+            AuditEntry entry = new AuditEntry(AuditId.random(), NOW, UserId.random(), AuditAction.UPDATED,
+                    AuditTargetType.ASSET, targetId, "renamed the asset",
+                    Map.of("before", "Old Name", "after", "New Name"));
+
+            repository.record(entry);
+
+            assertEquals(List.of(entry), repository.findByTarget(AuditTargetType.ASSET, targetId, 10));
+        }
+
+        @Test
+        void findRecentReturnsNewestFirstAcrossEveryTargetBoundedByLimit() {
+            // Table-wide (unlike findByTarget/findByActor), so this also holds rows from every
+            // other test in this class -- assert relative order among *this test's own* rows
+            // (identified by id) within a large-enough fetch, same technique as
+            // AssetUsageRepositoryTests#findRecentReturnsNewestFirstAcrossEveryAssetBoundedByLimit.
+            UserId actor = UserId.random();
+            AuditEntry oldest = new AuditEntry(AuditId.random(), NOW, actor, AuditAction.CREATED,
+                    AuditTargetType.ASSET, UUID.randomUUID().toString(), "created", Map.of());
+            AuditEntry middle = new AuditEntry(AuditId.random(), NOW.plusSeconds(10), actor, AuditAction.UPDATED,
+                    AuditTargetType.ASSET, UUID.randomUUID().toString(), "updated", Map.of());
+            AuditEntry newest = new AuditEntry(AuditId.random(), NOW.plusSeconds(20), actor, AuditAction.DELETED,
+                    AuditTargetType.ASSET, UUID.randomUUID().toString(), "deleted", Map.of());
+            repository.record(oldest);
+            repository.record(newest);
+            repository.record(middle);
+            Set<AuditId> ours = Set.of(oldest.id(), middle.id(), newest.id());
+
+            List<AuditId> ourOrder = repository.findRecent(10_000).stream()
+                    .map(AuditEntry::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newest.id(), middle.id(), oldest.id()), ourOrder,
+                    "findRecent must span every target (not just one) and stay newest-first");
+        }
+
+        @Test
+        void findByTargetReturnsOnlyThatTargetsEntriesNewestFirstBoundedByLimit() {
+            AuditTargetType targetType = AuditTargetType.DEVICE;
+            String targetId = UUID.randomUUID().toString();
+            String otherTargetId = UUID.randomUUID().toString();
+            AuditEntry oldest = new AuditEntry(AuditId.random(), NOW, UserId.random(), AuditAction.CREATED,
+                    targetType, targetId, "created", Map.of());
+            AuditEntry middle = new AuditEntry(AuditId.random(), NOW.plusSeconds(10), UserId.random(),
+                    AuditAction.UPDATED, targetType, targetId, "updated", Map.of());
+            AuditEntry newest = new AuditEntry(AuditId.random(), NOW.plusSeconds(20), UserId.random(),
+                    AuditAction.DEACTIVATED, targetType, targetId, "deactivated", Map.of());
+            AuditEntry unrelated = new AuditEntry(AuditId.random(), NOW.plusSeconds(30), UserId.random(),
+                    AuditAction.CREATED, targetType, otherTargetId, "unrelated", Map.of());
+            repository.record(oldest);
+            repository.record(newest);
+            repository.record(middle);
+            repository.record(unrelated);
+
+            List<AuditEntry> found = repository.findByTarget(targetType, targetId, 2);
+
+            assertEquals(List.of(newest.id(), middle.id()), found.stream().map(AuditEntry::id).toList());
+        }
+
+        @Test
+        void findByActorReturnsOnlyThatActorsEntriesNewestFirst() {
+            UserId actor = UserId.random();
+            UserId otherActor = UserId.random();
+            AuditEntry oldest = new AuditEntry(AuditId.random(), NOW, actor, AuditAction.CREATED,
+                    AuditTargetType.MODEL, UUID.randomUUID().toString(), "created", Map.of());
+            AuditEntry newest = new AuditEntry(AuditId.random(), NOW.plusSeconds(10), actor, AuditAction.UPDATED,
+                    AuditTargetType.MODEL, UUID.randomUUID().toString(), "updated", Map.of());
+            AuditEntry others = new AuditEntry(AuditId.random(), NOW.plusSeconds(5), otherActor,
+                    AuditAction.CREATED, AuditTargetType.MODEL, UUID.randomUUID().toString(), "created", Map.of());
+            repository.record(oldest);
+            repository.record(newest);
+            repository.record(others);
+
+            List<AuditEntry> found = repository.findByActor(actor, 10);
+
+            assertEquals(List.of(newest.id(), oldest.id()), found.stream().map(AuditEntry::id).toList());
+        }
+    }
+
+    /**
+     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — {@link DetectionEventRepositoryPort}'s genuine
+     * upsert-by-id semantics (unlike {@code DetectionRepositoryPort}'s append-only rows),
+     * newest-first {@code findRecent}/{@code findByStream} ordering by {@code lastSeen}, and the
+     * {@code sinceInclusive} lower bound.
+     */
+    @Nested
+    class DetectionEventRepositoryTests {
+
+        private final DetectionEventRepositoryPort repository = new JpaDetectionEventRepository(entityManagerFactory);
+
+        private DetectionEvent detectionEvent(StreamId streamId, String label, Instant lastSeen) {
+            return new DetectionEvent(DetectionEventId.random(), streamId, null, label, 0.5, lastSeen, lastSeen,
+                    DetectionEventState.OPEN, null);
+        }
+
+        @Test
+        void savedOpenEventWithPositionRoundTripsEveryField() {
+            StreamId streamId = StreamId.random();
+            AssetId assetId = AssetId.random();
+            DetectionEvent event = new DetectionEvent(DetectionEventId.random(), streamId, assetId, "person", 0.87,
+                    NOW, NOW.plusSeconds(2), DetectionEventState.OPEN, new GeoPosition(10.0, 20.0, 30.0));
+
+            repository.save(event);
+
+            assertEquals(List.of(event), repository.findByStream(streamId, 10));
+        }
+
+        @Test
+        void savedEventWithNoAssetAndNoPositionRoundTripsBothAsNull() {
+            StreamId streamId = StreamId.random();
+            DetectionEvent event = new DetectionEvent(DetectionEventId.random(), streamId, null, "car", 0.5, NOW,
+                    NOW, DetectionEventState.OPEN, null);
+
+            repository.save(event);
+
+            List<DetectionEvent> found = repository.findByStream(streamId, 10);
+            assertEquals(1, found.size());
+            assertNull(found.get(0).assetId());
+            assertNull(found.get(0).position());
+        }
+
+        @Test
+        void saveIsAnUpsertThatAdvancesLastSeenAndPeakConfidenceThenCloses() {
+            StreamId streamId = StreamId.random();
+            DetectionEventId id = DetectionEventId.random();
+            DetectionEvent opened = new DetectionEvent(id, streamId, null, "person", 0.6, NOW, NOW,
+                    DetectionEventState.OPEN, null);
+            repository.save(opened);
+
+            DetectionEvent advanced = opened.withObservation(NOW.plusSeconds(5), 0.9);
+            repository.save(advanced);
+
+            DetectionEvent closed = advanced.closed();
+            repository.save(closed);
+
+            List<DetectionEvent> found = repository.findByStream(streamId, 10);
+            assertEquals(1, found.size(), "an id seen before must replace the row in place, not append");
+            assertEquals(closed, found.get(0));
+        }
+
+        @Test
+        void findByStreamReturnsEmptyForAnUnknownStream() {
+            assertTrue(repository.findByStream(StreamId.random(), 10).isEmpty());
+        }
+
+        @Test
+        void findByStreamReturnsNewestFirstBoundedByLimit() {
+            StreamId streamId = StreamId.random();
+            DetectionEvent oldest = detectionEvent(streamId, "a", NOW);
+            DetectionEvent middle = detectionEvent(streamId, "b", NOW.plusSeconds(10));
+            DetectionEvent newest = detectionEvent(streamId, "c", NOW.plusSeconds(20));
+            repository.save(oldest);
+            repository.save(newest);
+            repository.save(middle);
+
+            List<DetectionEvent> found = repository.findByStream(streamId, 2);
+
+            assertEquals(List.of(newest.id(), middle.id()), found.stream().map(DetectionEvent::id).toList());
+        }
+
+        @Test
+        void findRecentReturnsNewestFirstAcrossEveryStreamBoundedByLimit() {
+            // Table-wide (unlike findByStream), so this also holds rows from every other test in
+            // this class -- assert relative order among *this test's own* rows (identified by
+            // id) within a large-enough fetch, same technique as
+            // AssetUsageRepositoryTests#findRecentReturnsNewestFirstAcrossEveryAssetBoundedByLimit.
+            DetectionEvent oldest = detectionEvent(StreamId.random(), "a", NOW);
+            DetectionEvent middle = detectionEvent(StreamId.random(), "b", NOW.plusSeconds(10));
+            DetectionEvent newest = detectionEvent(StreamId.random(), "c", NOW.plusSeconds(20));
+            repository.save(oldest);
+            repository.save(newest);
+            repository.save(middle);
+            Set<DetectionEventId> ours = Set.of(oldest.id(), middle.id(), newest.id());
+
+            List<DetectionEventId> ourOrder = repository.findRecent(null, 10_000).stream()
+                    .map(DetectionEvent::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newest.id(), middle.id(), oldest.id()), ourOrder,
+                    "findRecent must span every stream (not just one) and stay newest-first");
+        }
+
+        @Test
+        void findRecentExcludesEventsWithLastSeenStrictlyBeforeSinceInclusive() {
+            StreamId streamId = StreamId.random();
+            Instant cursor = NOW.plusSeconds(100);
+            DetectionEvent before = detectionEvent(streamId, "before", cursor.minusSeconds(1));
+            DetectionEvent atCursor = detectionEvent(streamId, "at", cursor);
+            DetectionEvent after = detectionEvent(streamId, "after", cursor.plusSeconds(1));
+            repository.save(before);
+            repository.save(atCursor);
+            repository.save(after);
+            Set<DetectionEventId> candidates = Set.of(before.id(), atCursor.id(), after.id());
+
+            List<DetectionEventId> found = repository.findRecent(cursor, 10_000).stream()
+                    .map(DetectionEvent::id)
+                    .filter(candidates::contains)
+                    .toList();
+
+            assertEquals(List.of(after.id(), atCursor.id()), found,
+                    "sinceInclusive excludes strictly-before events but includes the boundary");
+        }
+    }
+
+    /**
+     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — same {@code information_schema} shape as the V7-V12
+     * schema tests, for the brand-new {@code audit_entries} table: asserts {@code details} is a
+     * required {@code jsonb} column and the primary key is exactly {@code id}, proving {@code
+     * V14__audit_trail.sql} applied cleanly on top of V1-V13.
+     */
+    @Test
+    void v14MigrationCreatesTheAuditEntriesTableOnTopOfV1ThroughV13() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            Object[] detailsColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'audit_entries' and column_name = 'details'")
+                    .getSingleResult();
+            assertEquals("NO", detailsColumn[0], "details is required");
+            assertEquals("jsonb", detailsColumn[1]);
+
+            String targetIdNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'audit_entries' and column_name = 'target_id'")
+                    .getSingleResult();
+            assertEquals("NO", targetIdNullable, "target_id is required");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — same shape as the V14 schema test above, for the
+     * brand-new {@code detection_events} table: asserts {@code asset_id}/{@code position_latitude}
+     * stay nullable (an event may be assetless and positionless) while {@code last_seen} is
+     * required, proving {@code V15__detection_events.sql} applied cleanly on top of V1-V14.
+     */
+    @Test
+    void v15MigrationCreatesTheDetectionEventsTableOnTopOfV1ThroughV14() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String assetIdNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'detection_events' and column_name = 'asset_id'")
+                    .getSingleResult();
+            assertEquals("YES", assetIdNullable, "asset_id is optional -- a stream may not belong to an asset");
+
+            String positionLatitudeNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'detection_events' and column_name = 'position_latitude'")
+                    .getSingleResult();
+            assertEquals("YES", positionLatitudeNullable, "position is optional");
+
+            String lastSeenNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'detection_events' and column_name = 'last_seen'")
+                    .getSingleResult();
+            assertEquals("NO", lastSeenNullable, "last_seen is required");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/SCALE-100-PLAN.md S3 -- proves the pool is real, not merely configured. Two
+     * independent, mutually-reinforcing proofs: the {@link ConnectionProvider} Hibernate actually
+     * runs against is {@link ClosingDatasourceConnectionProvider} (not the built-in unpooled
+     * provider that used to serve every request here), and a deliberately tiny pool genuinely caps
+     * concurrent physical connections -- if the old unpooled provider were still wired in, the
+     * over-limit acquisition below would succeed immediately instead of timing out.
+     */
+    @Nested
+    class ConnectionPoolTests {
+
+        @Test
+        void hibernateUsesTheSharedClosingProviderNotTheBuiltInUnpooledOne() {
+            ConnectionProvider provider = entityManagerFactory.unwrap(SessionFactoryImplementor.class)
+                    .getServiceRegistry().getService(ConnectionProvider.class);
+
+            assertTrue(provider instanceof ClosingDatasourceConnectionProvider,
+                    "must use the shared, closeable Hikari-backed provider, not Hibernate's built-in "
+                            + "DriverManagerConnectionProvider (the one that logs \"not for production use\")");
+        }
+
+        @Test
+        void poolCapsConcurrentPhysicalConnectionsAtItsConfiguredMaximum() {
+            PersistencePoolSettings tinyPool = new PersistencePoolSettings(2, 0, 500, 0);
+            EntityManagerFactory smallPoolContext = PersistenceUnit.start(POSTGRES.getJdbcUrl(),
+                    POSTGRES.getUsername(), POSTGRES.getPassword(), false, tinyPool);
+            List<EntityManager> holdingTheWholePool = new ArrayList<>();
+            try {
+                for (int i = 0; i < tinyPool.maximumPoolSize(); i++) {
+                    EntityManager em = smallPoolContext.createEntityManager();
+                    em.getTransaction().begin();
+                    em.createNativeQuery("select 1").getSingleResult(); // forces the physical borrow
+                    holdingTheWholePool.add(em);
+                }
+
+                EntityManager overLimit = smallPoolContext.createEntityManager();
+                try {
+                    long startNanos = System.nanoTime();
+                    // begin() itself acquires the physical connection for a resource-local
+                    // transaction (confirmed by running this test: the exception below actually
+                    // comes from here, not from the first query), so the pool is exhausted before
+                    // any SQL is even sent.
+                    assertThrows(HibernateException.class, () -> overLimit.getTransaction().begin(),
+                            "a third connection must be refused once the pool of "
+                                    + tinyPool.maximumPoolSize() + " is exhausted");
+                    long elapsedMillis = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
+                    assertTrue(elapsedMillis < 5_000,
+                            "must fail via the pool's own connectionTimeout (" + tinyPool.connectionTimeoutMillis()
+                                    + "ms), not hang indefinitely");
+                } finally {
+                    overLimit.close();
+                }
+            } finally {
+                for (EntityManager em : holdingTheWholePool) {
+                    if (em.getTransaction().isActive()) {
+                        em.getTransaction().rollback();
+                    }
+                    em.close();
+                }
+                smallPoolContext.close();
+            }
         }
     }
 }

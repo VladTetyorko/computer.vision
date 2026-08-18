@@ -1,6 +1,7 @@
 package com.drones.vision.api.proxy;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.support.VisionApiProperties;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -165,6 +167,41 @@ class HlsProxyControllerTest {
                 "expected the browser's Cookie header to be forwarded upstream, got: " + receivedCookie.get());
     }
 
+    /**
+     * The failure this guards is silent and total: an http viewer that cannot store mediamtx's
+     * hardened duplicate never sends {@code hlsSession} back, and every media-playlist request after
+     * the first answers 401. It hid in local development because browsers treat {@code
+     * http://localhost} as a secure context and keep {@code Secure} cookies there.
+     */
+    @Test
+    void secureOnlyCookieAttributesAreStrippedForAPlainHttpViewerAndKeptForAnHttpsOne() throws Exception {
+        byte[] body = "#EXTM3U\n".getBytes(StandardCharsets.UTF_8);
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            // Exactly what mediamtx 1.19 emits: the same cookie twice, once bare and once hardened.
+            exchange.getResponseHeaders().add("Set-Cookie", "hlsSession=s1");
+            exchange.getResponseHeaders().add("Set-Cookie",
+                    "hlsSession=s1; HttpOnly; Secure; SameSite=None; Partitioned");
+            exchange.getResponseHeaders().add("Content-Type", "application/vnd.apple.mpegurl");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.start();
+        MockMvc mockMvc = mockMvcFor(upstream);
+
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", "stream-1"))
+                .andExpect(status().isOk())
+                .andExpect(header().stringValues("Set-Cookie", "hlsSession=s1", "hlsSession=s1; HttpOnly"));
+
+        // Attribute order is the JDK client's normalisation of what the upstream sent, not this
+        // controller's doing -- an https viewer gets the hardened cookie through untouched.
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", "stream-1").secure(true))
+                .andExpect(status().isOk())
+                .andExpect(header().stringValues("Set-Cookie", "hlsSession=s1",
+                        "hlsSession=s1; Secure; HttpOnly; Partitioned; SameSite=None"));
+    }
+
     @Test
     void serverSideFollowsUpstreamRedirectAndReturnsFinalBodyWith200() throws Exception {
         byte[] finalBody = "#EXTM3U\nfinal-node-playlist\n".getBytes(StandardCharsets.UTF_8);
@@ -188,6 +225,122 @@ class HlsProxyControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().bytes(finalBody))
                 .andExpect(header().string("Set-Cookie", "mtx-session=pinned; Path=/"));
+    }
+
+    /**
+     * The wave's acceptance gate (docs/plans/active/SCALE-100-PLAN.md §5 S1): the per-request
+     * {@code HttpClient} was replaced with one shared client that has no {@link
+     * java.net.CookieHandler}. A shared {@code CookieHandler} would remember whichever cookie it
+     * last saw for the upstream host and hand it to the *next* request through that same client --
+     * exactly the leak this test rules out, using one shared controller instance (one shared
+     * client) across two "viewers" with different cookies.
+     */
+    @Test
+    void sharedClientDoesNotLeakOneViewersCookieToAnother() throws Exception {
+        byte[] body = "segment-bytes".getBytes(StandardCharsets.UTF_8);
+        AtomicReference<String> cookieSeenForStreamA = new AtomicReference<>();
+        AtomicReference<String> cookieSeenForStreamB = new AtomicReference<>();
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/stream-a/seg.mp4", exchange -> {
+            cookieSeenForStreamA.set(exchange.getRequestHeaders().getFirst("Cookie"));
+            // Simulates mediamtx pinning viewer A to a session -- this Set-Cookie must never be
+            // replayed on any *other* viewer's request through the shared client.
+            exchange.getResponseHeaders().add("Set-Cookie", "mtx-session=alice-session; Path=/");
+            exchange.getResponseHeaders().add("Content-Type", "video/mp4");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.createContext("/stream-b/seg.mp4", exchange -> {
+            cookieSeenForStreamB.set(exchange.getRequestHeaders().getFirst("Cookie"));
+            exchange.getResponseHeaders().add("Content-Type", "video/mp4");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.start();
+        // One shared controller instance == one shared HttpClient, exactly like the real bean.
+        MockMvc mockMvc = mockMvcFor(upstream);
+
+        mockMvc.perform(get("/hls/{streamId}/seg.mp4", "stream-a").header("Cookie", "viewer=alice"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/hls/{streamId}/seg.mp4", "stream-b").header("Cookie", "viewer=bob"))
+                .andExpect(status().isOk());
+
+        assertNotNull(cookieSeenForStreamA.get());
+        assertTrue(cookieSeenForStreamA.get().contains("viewer=alice"),
+                "viewer A's own cookie must reach upstream, got: " + cookieSeenForStreamA.get());
+
+        assertNotNull(cookieSeenForStreamB.get());
+        assertTrue(cookieSeenForStreamB.get().contains("viewer=bob"),
+                "viewer B's own cookie must reach upstream, got: " + cookieSeenForStreamB.get());
+        assertFalse(cookieSeenForStreamB.get().contains("viewer=alice"),
+                "viewer A's cookie must never reach viewer B's upstream request, got: " + cookieSeenForStreamB.get());
+        assertFalse(cookieSeenForStreamB.get().contains("mtx-session=alice-session"),
+                "the session cookie mediamtx set for viewer A must never reach viewer B's upstream request, got: "
+                        + cookieSeenForStreamB.get());
+    }
+
+    /**
+     * Byte-range requests are dropped today (harmless for live HLS, which never sends one) but
+     * wrong for the recording playback path (docs/plans/active/SCALE-100-PLAN.md §5 S1, task 3).
+     */
+    @Test
+    void rangeHeaderIsForwardedUpstreamAndContentRangeAcceptRangesArePassedBack() throws Exception {
+        byte[] partialBody = new byte[]{5, 6, 7, 8};
+        AtomicReference<String> receivedRange = new AtomicReference<>();
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            receivedRange.set(exchange.getRequestHeaders().getFirst("Range"));
+            exchange.getResponseHeaders().add("Content-Type", "video/mp4");
+            exchange.getResponseHeaders().add("Content-Range", "bytes 4-7/20");
+            exchange.getResponseHeaders().add("Accept-Ranges", "bytes");
+            exchange.sendResponseHeaders(206, partialBody.length);
+            exchange.getResponseBody().write(partialBody);
+            exchange.close();
+        });
+        upstream.start();
+        MockMvc mockMvc = mockMvcFor(upstream);
+
+        mockMvc.perform(get("/hls/{streamId}/recording.mp4", "stream-1").header("Range", "bytes=4-7"))
+                .andExpect(status().isPartialContent())
+                .andExpect(header().string("Content-Range", "bytes 4-7/20"))
+                .andExpect(header().string("Accept-Ranges", "bytes"))
+                .andExpect(content().bytes(partialBody));
+
+        assertEquals("bytes=4-7", receivedRange.get());
+    }
+
+    /**
+     * docs/plans/active/SCALE-100-PLAN.md §5 S7: {@code maxRedirectHops} is no longer the private
+     * {@code static final} constant it used to be — it comes from the {@link
+     * VisionApiProperties.HlsProxy} passed to the {@code @Autowired} constructor. This proves that
+     * value is actually enforced, not just stored: an upstream that redirects forever hits the
+     * *configured* bound (1 hop here, not the default 5) and the controller reports 502 exactly one
+     * hop sooner than {@link #serverSideFollowsUpstreamRedirectAndReturnsFinalBodyWith200} shows a
+     * single real hop succeeding.
+     */
+    @Test
+    void configuredMaxRedirectHopsBoundsTheHandFollowedRedirectLoop() throws Exception {
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/stream-1/index.m3u8");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        upstream.start();
+        URI base = URI.create("http://localhost:" + upstream.getAddress().getPort());
+        VisionApiProperties.HlsProxy oneHop = new VisionApiProperties.HlsProxy(
+                VisionApiProperties.HlsProxy.defaults().connectTimeout(),
+                VisionApiProperties.HlsProxy.defaults().requestTimeout(),
+                VisionApiProperties.HlsProxy.defaults().errorBodyPreviewMaxChars(), 1);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new HlsProxyController(base, oneHop))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", "stream-1"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.error").value("BAD_GATEWAY"));
     }
 
     @Test

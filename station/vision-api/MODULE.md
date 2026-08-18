@@ -24,7 +24,9 @@ precisely so it can be deleted in one `rm -r` plus two lines), `security/` (`Cur
 (`HlsProxyController` — a pass-through edge owning no application service), `support/` (edge-local
 helpers: `SnapshotJpegEncoder`, `LocalNetworkAddresses`, `CapabilityParsing`, and the new
 `VisionApiProperties` settings record — see its own paragraph below), `live/` (the SSE registry +
-ring buffers, unchanged), `exception/` (renamed from `exceptions/` — `@RestControllerAdvice` +
+ring buffers, unchanged), `ratelimit/` (`RateLimitFilter`/`TokenBucket` — the per-principal
+`/api/**` request budget, docs/plans/active/SCALE-100-PLAN.md §5 S6 item 3, added this wave — see its
+own API surface section below), `exception/` (renamed from `exceptions/` — `@RestControllerAdvice` +
 api-local exceptions), `config/` (MVC/WS/SPA `@Configuration`). This was a pure repackaging: no
 route, JSON shape, or status code changed, and every extracted default is byte-identical to the
 literal it replaced (see `VisionApiProperties` below).
@@ -86,7 +88,7 @@ literal it replaced (see `VisionApiProperties` below).
 | SimulationController | POST | `/api/simulations` | 201 `SimulationResponse` (absent/blank `videoPath` with the default `direct` transport is a fully synthetic simulation, docs/main/CYCLES-PLAN.md §9, CU-a — not an error) | 400 a non-null `videoPath` failing `SimulationService`'s filesystem checks, unrecognized `transport`, (docs/main/CYCLES-PLAN.md §9, CU-a) a `null`/blank `videoPath` combined with `transport=rtsp`/`mjpeg`, (docs/main/CYCLES-PLAN.md §3, §5) a `transport=rtsp`/`mjpeg` spec no registered `FeedTransmitterPort` supports, or (docs/main/CYCLES-PLAN.md §7) an invalid `telemetry` object (fewer than 2 waypoints, an out-of-range coordinate, a non-positive `speedMps`, or an unrecognized `routeMode`); 409 `simulated` category not seeded |
 | SimulationController | DELETE | `/api/simulations/{assetId}` | 204 | idempotent no-op (unknown/already-stopped asset); 400 bad UUID |
 | DiscoveryController | POST | `/api/discovery/scan` | 200 `ScanResultResponse` | 400 unknown method name |
-| HlsProxyController | GET | `/hls/{streamId}/**` | proxied upstream status (typically 200), `Content-Type`/`Cache-Control`/`Set-Cookie` passed through (docs/plans/done/MVP2-PLAN.md V-a: `Cache-Control` forwarding added, was previously dropped) | 502 upstream unreachable; 404 if no `{streamId}` segment (unmapped, Spring's default) |
+| HlsProxyController | GET | `/hls/{streamId}/**` | proxied upstream status (typically 200 or 206 for a `Range` request), `Content-Type`/`Cache-Control`/`Set-Cookie`/`Content-Range`/`Accept-Ranges`/`Content-Length` passed through (docs/plans/done/MVP2-PLAN.md V-a: `Cache-Control` forwarding added, was previously dropped; docs/plans/active/SCALE-100-PLAN.md §5 S1: streamed rather than buffered, `Range` forwarded) | 502 upstream unreachable or a redirect chain longer than `maxRedirectHops` (default 5, `vision.api.hls-proxy.max-redirect-hops` as of §5 S7); 404 if no `{streamId}` segment (unmapped, Spring's default) |
 | AuthController | POST | `/api/auth/login` | 200 `MeResponse` (+ session cookie when auth enabled) | 401 bad credentials (auth enabled); with auth **disabled** always 200 dev admin, no-op (docs/plans/done/U-AUTH-PLAN.md wave 3) |
 | AuthController | POST | `/api/auth/logout` | 204 (invalidates session) | — (idempotent; no-op when auth disabled) |
 | AuthController | GET | `/api/auth/me` | 200 `MeResponse` | 401 when auth enabled + unauthenticated (Spring Security answers it — `/api/auth/me` is not in the enabled chain's permit-list); with auth disabled always 200 dev admin (`authEnabled=false`) (docs/plans/done/U-AUTH-PLAN.md wave 3) |
@@ -152,17 +154,21 @@ literal it replaced (see `VisionApiProperties` below).
 The one implementation of all five live-update ports (`FleetLiveUpdatePort`, `TelemetryLiveUpdatePort`, `DetectionLiveUpdatePort`, `MapLiveUpdatePort`, `EventLiveUpdatePort` — vision-domain; the ports the former god-port `LiveUpdatePublisherPort` split into, docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b), plus the SSE connection/topic/replay/coalescing machinery `LiveController` sits on top of. Everything here is process-local, single-instance (per the plan's own explicit scope — multi-instance fan-out is out of scope until a second backend instance exists). Implementing all five on one class is exactly what an adapter is for — every context's application code still only ever holds the one narrow port it actually calls; only this driving adapter needs to depend on all of them at once.
 
 - **`LiveUpdateRegistry`** (`@Component`, `@ConditionalOnProperty(vision.live.enabled, default true)`) — implements `FleetLiveUpdatePort`, `TelemetryLiveUpdatePort`, `DetectionLiveUpdatePort`, `MapLiveUpdatePort`, `EventLiveUpdatePort` and owns every connection.
-  - `LiveUpdateRegistry(ObjectProvider<AssetService> assetService, ObjectProvider<DeviceService> deviceService, ObjectProvider<StreamService> streamService, StreamPublisherPort streamPublisherPort, ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort)` — production ctor (`@Autowired`, disambiguating it from the package-private test-seam ctor below, since Spring cannot pick between two candidate constructors on its own; backend follow-up batch grew this from a 1-arg ctor to 5, adding the last four collaborators for the `devices`/`detection-events` topics — see below). **`assetService`/`deviceService`/`streamService`/`detectionEventRepositoryPort` are each an `ObjectProvider`, not the plain type, to break a genuine circular bean dependency**: `DefaultAssetService`/`DefaultDeviceService` depend on `AuditTrailPort`, which (when `vision.live.enabled=true`) `vision-app` wraps in `LiveUpdateAuditTrail`, which depends on `FleetLiveUpdatePort`, which resolves to this class; `DefaultStreamService` depends on `DetectionLiveUpdatePort` directly; and the `detectionEventRepositoryPort` bean is itself wrapped in `LiveUpdateDetectionEventRepository`, which depends on `DetectionLiveUpdatePort` too — the four ports are distinct interfaces now (W1.6b), but every one of them still resolves to this same class, so a plain constructor-injected dependency on any of the four here would still deadlock Spring's bean graph at startup; deferring the actual lookup to `freshFleetEnvelope()`/`freshDevicesEnvelope()`/`seedDetectionEventsIfEmpty()` (only ever called once the whole context has finished starting) breaks every one of these cycles. `streamPublisherPort` carries no such risk (neither `MediamtxStreamPublisher` nor `NoopStreamPublisher` depends on any of this class's five ports), so it stays a plain constructor parameter, used only to resolve `viewUrl`/`whepUrl` for the `devices` topic's active-stream list, mirroring `StreamController#list`. See station/vision-app/MODULE.md's own Gotcha for the full circular-dependency chain and the exact `UnsatisfiedDependencyException` this pattern resolves.
-  - `LiveUpdateRegistry(ObjectProvider<AssetService>, ObjectProvider<DeviceService>, ObjectProvider<StreamService>, StreamPublisherPort, ObjectProvider<DetectionEventRepositoryPort>, ScheduledExecutorService)` — package-private test seam: an injectable scheduler so a pure unit test can call `flushPending()`/`heartbeatAll()` directly and deterministically instead of waiting on the real ~150ms/15s timer ticks the production ctor schedules.
+  - `LiveUpdateRegistry(ObjectProvider<AssetService> assetService, ObjectProvider<DeviceService> deviceService, ObjectProvider<StreamService> streamService, StreamPublisherPort streamPublisherPort, ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort, VisionApiProperties.Live live)` — production ctor (`@Autowired`, disambiguating it from the other three overloads below, since Spring cannot pick between multiple candidate constructors on its own; backend follow-up batch grew this from a 1-arg ctor to 5, then docs/plans/active/SCALE-100-PLAN.md §5 S7 added `live`, a settings bundle rather than a sixth collaborator — see below). **`assetService`/`deviceService`/`streamService`/`detectionEventRepositoryPort` are each an `ObjectProvider`, not the plain type, to break a genuine circular bean dependency**: `DefaultAssetService`/`DefaultDeviceService` depend on `AuditTrailPort`, which (when `vision.live.enabled=true`) `vision-app` wraps in `LiveUpdateAuditTrail`, which depends on `FleetLiveUpdatePort`, which resolves to this class; `DefaultStreamService` depends on `DetectionLiveUpdatePort` directly; and the `detectionEventRepositoryPort` bean is itself wrapped in `LiveUpdateDetectionEventRepository`, which depends on `DetectionLiveUpdatePort` too — the four ports are distinct interfaces now (W1.6b), but every one of them still resolves to this same class, so a plain constructor-injected dependency on any of the four here would still deadlock Spring's bean graph at startup; deferring the actual lookup to `freshFleetEnvelope()`/`freshDevicesEnvelope()`/`seedDetectionEventsIfEmpty()` (only ever called once the whole context has finished starting) breaks every one of these cycles. `streamPublisherPort` carries no such risk (neither `MediamtxStreamPublisher` nor `NoopStreamPublisher` depends on any of this class's five ports), so it stays a plain constructor parameter, used only to resolve `viewUrl`/`whepUrl` for the `devices` topic's active-stream list, mirroring `StreamController#list`. See station/vision-app/MODULE.md's own Gotcha for the full circular-dependency chain and the exact `UnsatisfiedDependencyException` this pattern resolves. `live` is supplied by `PublishWiring#liveSettings` (vision-app), mapped from `VisionApiProperties#live()`.
+  - Three more constructor overloads, all delegating to the one above (or to the full 7-arg constructor below) with a default: a **public 5-collaborator legacy overload** (no `live` — defaults to `VisionApiProperties.Live.defaults()`; kept because `LiveControllerTest`/`LiveMapScopingTest`, in package `com.drones.vision.api.controller`, construct this class directly and can only reach a `public` constructor), the **package-private 6-arg test seam** (`..., ScheduledExecutorService`, unchanged signature — defaults `live` too, kept for `LiveUpdateRegistryTest`'s `registry()` helper), and the **package-private 7-arg full constructor** (`..., VisionApiProperties.Live live, ScheduledExecutorService scheduler`) — the one place fields are actually assigned and `scheduler`'s three fixed-rate tasks are scheduled; every other overload delegates here.
   - `SseEmitter connect(String topicsParam, Long lastEventId)` (public — called cross-package from `LiveController`) — registers a new connection (always subscribed to the implicit `fleet`/`event`/`devices`/`detection-events`/`marks` topics — the last three added by the backend follow-up batch and docs/plans/done/TACTICAL-MARKS-PLAN.md M4 respectively, see `LiveTopicKind` below — plus whatever `topicsParam` parses to), then **synchronously, on the calling thread**, sends the `connection` handshake event followed by a snapshot-or-resume burst per subscribed topic, before returning the emitter. Deliberately synchronous (unlike every `publish*` method below) — a one-time connect burst is cheap and bounded, and `ResponseBodyEmitter`'s own early-send buffering (sends before the framework attaches its handler are queued internally, not dropped or rejected) makes this both correct and exactly what makes `LiveControllerTest` deterministic without polling for the *initial* burst.
   - `LiveSubscriptionResponse updateTopics(String connectionId, UpdateLiveTopicsRequest)` (public) — adds/removes topics on an already-open connection; a newly-added topic immediately gets its own snapshot burst (whatever's currently buffered, no resume concept since it's new to this connection); `fleet`/`event`/`devices`/`detection-events` are never actually removed even if named in `request.remove()`. Throws `NoSuchElementException` for an unknown `connectionId` (404 via `ApiExceptionHandler`).
-  - `publishFleetChanged()`/`publishEvent(Event)`/`publishDetectionEvent(DetectionEvent)` — dispatched onto the shared scheduler (`Executor#execute`, fire-and-forget from the caller's perspective), not coalesced (all three are comparatively rare): compute/serialize the envelope, append to the topic's `LiveRingBuffer`, broadcast to every subscribed connection. **`publishFleetChanged()` (backend follow-up batch) now refreshes *both* the `fleet` (asset-centric) and `devices` (device-list + active-stream-list) buffers/broadcasts in the one dispatch** — every seam that already called it (asset/device CRUD via `LiveUpdateAuditTrail`, stream start/stop via `LiveUpdateEventPublisher`, both `vision-app`) is exactly the set that should refresh `devices` too, so the existing no-payload port method was extended rather than adding a second, near-duplicate one. `publishDetectionEvent` (also new) backs the `detection-events` topic — see below.
+  - `publishEvent(Event)`/`publishDetectionEvent(DetectionEvent)` — dispatched onto the shared scheduler (`Executor#execute`, fire-and-forget from the caller's perspective), not coalesced (both are comparatively rare): compute/serialize the envelope, append to the topic's `LiveRingBuffer`, broadcast to every subscribed connection. `publishDetectionEvent` backs the `detection-events` topic — see below.
+  - `publishFleetChanged()` — refreshes *both* the `fleet` (asset-centric) and `devices` (device-list + active-stream-list) buffers/broadcasts in the one dispatch — every seam that already called it (asset/device CRUD via `LiveUpdateAuditTrail`, stream start/stop via `LiveUpdateEventPublisher`, both `vision-app`) is exactly the set that should refresh `devices` too, so the existing no-payload port method was extended rather than adding a second, near-duplicate one. **As of docs/plans/active/SCALE-100-PLAN.md §5 S5, coalesced leading+trailing**, the same treatment telemetry/detections already get: a call past the current window's close (`fleetRecomputeWindowUntilNanos`, an `AtomicLong` nanoTime deadline) wins a compare-and-set and dispatches the recompute immediately — so a lone write is still delivered with no added latency — while any call landing inside an already-open window only sets `fleetChangedDuringWindow` (an `AtomicBoolean`); `flushPending()` checks that flag on every tick and performs exactly one trailing recompute if it is set, so the window's true final state is always delivered (CLAUDE.md rule 9), never silently dropped. A sustained fleet/device write storm therefore recomputes at most once per `coalesceMillis` (default 150ms, `vision.api.live.coalesce` as of docs/plans/active/SCALE-100-PLAN.md §5 S7 — an instance field derived from `VisionApiProperties.Live` in the constructor, not a `static final` constant) — `fleetCoalesceWindowNanos` reuses it rather than a second, independently-tunable field — instead of once per write. The recompute body itself (`freshFleetEnvelope()`+`freshDevicesEnvelope()`+append+broadcast, both topics) is factored into a private `recomputeFleetAndDevices()`, shared by both the leading dispatch and `flushPending()`'s trailing catch-up.
   - `publishTelemetryAppended(AssetId, Telemetry)`/`publishDetections(AssetId, DetectionResult)` — the genuinely hot-path methods (called once per appended sample / once per completed inference): each just enqueues into a small pending map (a `ConcurrentLinkedQueue<Telemetry>` per asset for telemetry — every sample kept; a plain `ConcurrentHashMap<AssetId, DetectionResult>` for detections — a later `put` simply overwrites, giving "latest-frame-only" for free) and returns immediately, no I/O, no synchronization beyond the concurrent map's own.
-  - `void flushPending()` (package-private) — drains both pending maps roughly every `COALESCE_MILLIS`ms (150, the shared scheduler's own repeating task calls this; a pure unit test calls it directly instead of waiting): one coalesced `List<TelemetrySampleResponse>` envelope per asset with anything pending, one latest-only `DetectionResultResponse` envelope per asset with anything pending — each appended to its topic's buffer and broadcast.
-  - `void heartbeatAll()` (package-private, same test-seam reasoning) — sends an SSE **comment** line (`SseEmitter.event().comment(...)`, never reaches `EventSource.onmessage`) to every connection roughly every `HEARTBEAT_MILLIS`ms (15,000) so proxies don't kill an idle stream.
+  - `void flushPending()` (package-private) — drains both pending maps roughly every `coalesceMillis`ms (default 150, the shared scheduler's own repeating task calls this; a pure unit test calls it directly instead of waiting): one coalesced `List<TelemetrySampleResponse>` envelope per asset with anything pending, one latest-only `DetectionResultResponse` envelope per asset with anything pending — each appended to its topic's buffer and broadcast.
+  - `void heartbeatAll()` (package-private, same test-seam reasoning) — dispatches an SSE **comment** line (`SseEmitter.event().comment(...)`, never reaches `EventSource.onmessage`) to every connection roughly every `heartbeatMillis`ms (default 15,000, `vision.api.live.heartbeat`) so proxies don't kill an idle stream — as of docs/plans/active/SCALE-100-PLAN.md §5 S2, each connection's heartbeat write goes through the same `dispatchWrite`/`connectionWriteExecutor` path `broadcast` uses (see "Connection writes" below), not a direct blocking `connection.heartbeat()` call.
   - `List<LiveEnvelopeResponse> replayFor(LiveTopic, Long lastEventId)` / `LiveRingBuffer bufferFor(LiveTopic)` (package-private, purely a test seam for pure, `SseEmitter`-free unit tests in this same package) — the resume-vs-snapshot decision: if `lastEventId` is given and the topic's buffer `canResumeFrom` it (no gap), replay only what's newer; otherwise fall back to "snapshot" via the private `seedIfEmpty` — which, for **`fleet`, `devices`, and `detection-events` specifically** (the latter two added by the backend follow-up batch), means computing one real, live query first if the buffer is still empty (nothing has ever changed since this process started, so there's nothing better buffered yet): `AssetService#assets()` (fleet), `DeviceService#devices()` + `StreamService#streams()` (devices), `DetectionEventRepositoryPort#findRecent` — the exact same source `EventController` reads for `GET /api/events` (detection-events, seeded oldest-first since the port returns newest-first) — every other topic's "snapshot" is honestly just "whatever this process has buffered since it started" (a documented, deliberate limitation: a viewer's first-ever subscription to an asset's `telemetry`/`detections` topic sees nothing until the next sample/result arrives, even if that asset has been streaming the whole time this process has been up; `event` is the one always-on topic that stays in this "honestly limited" bucket too, since `EventPublisherPort` has no read side to query).
   - **Coalescing runs once per topic, shared across every subscribed connection — not independently per connection.** The plan's own "batch...per connection" framing is satisfied in effect (delivery is still batched to roughly one envelope per `COALESCE_MILLIS`ms per topic) while keeping exactly one canonical, resumable sequence number per topic; a genuinely independent per-connection coalescing buffer would have made `Last-Event-ID` resume ambiguous the moment two connections shared a topic. Documented here as a deliberate simplification, not an oversight.
-- **`LiveConnection`** (package-private) — one open connection's `SseEmitter` plus its live, mutable `Set<LiveTopic>` (a `ConcurrentHashMap.newKeySet()`, safe to read/mutate from the connecting thread, a later `PATCH` thread, and the shared broadcast thread all at once); every `send*`/`heartbeat` call serializes on one per-connection lock, since `SseEmitter#send` is not safe to call concurrently for the same emitter.
+  - **Connection writes (docs/plans/active/SCALE-100-PLAN.md §5 S2)** — sequencing (`sequencer`), coalescing, and the broadcast fan-out decision all still run on the single `scheduler` thread (`live-update-dispatcher`), exactly as before; what moved off it is the actual per-connection write. `private String serialize(LiveEnvelopeResponse)` (`JsonMapper`, `tools.jackson.databind.json`) encodes an envelope to JSON **exactly once** per `broadcast` call — the prior design re-serialized the same object once per subscribed connection; a `RuntimeException` from serialization is caught, logged (`System.Logger`), and treated as "nothing valid to send" rather than propagated, since letting it escape would have permanently killed `flushPending`'s own `scheduleAtFixedRate` tick. `broadcast`/`heartbeatAll` then dispatch one write per matching connection via `LiveConnection#enqueueSend`/`enqueueHeartbeat` onto a field, `private final ExecutorService connectionWriteExecutor = Executors.newVirtualThreadPerTaskExecutor()` — one virtual thread per write, unconditionally instantiated rather than constructor-injected (this class's production constructor is already at the five-parameter ceiling before the one settings-bundle exception docs/plans/active/SCALE-100-PLAN.md §5 S7 added; nothing about this field needs the deterministic single-step test control `scheduler`'s injectable-seam constructor exists for, only real concurrency to exercise). `private void dispatchWrite(LiveConnection, CompletableFuture<Void> write)` bounds each queued write with `write.orTimeout(connectionWriteTimeoutMillis, MILLISECONDS).exceptionally(cause -> { unregister(...); return null; })` — `connectionWriteTimeoutMillis` (default 3,000ms) is now `vision.api.live.send-timeout` (docs/plans/active/SCALE-100-PLAN.md §5 S7 finishes what S2 introduced as `CONNECTION_WRITE_TIMEOUT_MILLIS`; two `static final` compatibility constants of the same name/`DETECTION_EVENT_BUFFER_CAPACITY` remain, derived from `VisionApiProperties.Live.defaults()` rather than a second literal, kept only because `LiveUpdateRegistryTest` needs a compile-time value to reference). A connection whose write is still pending past the timeout — whether its own write stalled or an earlier write still ahead of it in its own per-connection order is stuck — is unregistered, the same outcome a direct `IOException` always produced. **`vision.api.live.dispatch-threads` was surveyed for S7 and deliberately not added**: `connectionWriteExecutor` is `Executors.newVirtualThreadPerTaskExecutor()`, which has no pool-size/thread-count concept to configure at all — there is no bound a "thread count" setting could mean here, so offering the key would mean reading, storing, and silently ignoring it. The key stays a documented non-decision (see the field's own javadoc): it becomes relevant only if this executor is ever swapped for a bounded platform `ThreadPoolExecutor`, and that swap — not this wave — is what should introduce it.
+  - **Per-asset buffer eviction (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 4)** — `telemetryBuffers`/`detectionBuffers` (`ConcurrentHashMap<AssetId, LiveRingBuffer>`) only ever grow via `bufferFor`'s `computeIfAbsent`; nothing previously removed an entry once every connection watching that asset disconnected, so a fleet that has ever had N distinct assets watched kept N buffers for the life of the process. `void evictUnusedAssetBuffers()` (package-private, same test-seam reasoning as `flushPending`/`heartbeatAll`) sweeps both maps, retaining only asset ids at least one open connection currently subscribes to (`subscribedAssetIds(LiveTopicKind)`, a stream over every connection's topic set); the production constructor schedules it via `scheduler.scheduleAtFixedRate` every `bufferEvictionMillis` (default 60,000ms, `vision.api.live.buffer-eviction` as of docs/plans/active/SCALE-100-PLAN.md §5 S7).
+  - `String register(SseEmitter, Set<LiveTopic>, Predicate<String> mapVisibility)` (package-private, new S2 test seam) — registers a connection around an already-constructed `SseEmitter` (typically a test double that records or deliberately blocks on `send`), bypassing `connect`'s handshake/snapshot burst entirely. Exists because S2's new concurrency behavior (a stuck connection not blocking others, the write timeout, per-connection ordering under concurrent dispatch) can only be observed by inspecting what a connection's emitter actually received and when — `connect()` always constructs its own bare `new SseEmitter(0L)`, giving a test no hook to intercept writes with.
+- **`LiveConnection`** (package-private) — one open connection's `SseEmitter` plus its live, mutable `Set<LiveTopic>` (a `ConcurrentHashMap.newKeySet()`, safe to read/mutate from the connecting thread, a later `PATCH` thread, and the shared broadcast thread all at once). As of docs/plans/active/SCALE-100-PLAN.md §5 S2: `sendLock` is a `ReentrantLock`, not `synchronized` — a `synchronized` block held across a blocking I/O call pins a virtual thread's carrier for the whole blocked duration regardless of contention (the JDK 21 pinning caveat this repo is on; fixed only in JDK 24+/JEP 491), which is exactly the failure mode this wave removes; `ReentrantLock` parks instead. `send(LiveEnvelopeResponse)` was replaced by `send(long seq, String json)` — the caller (`LiveUpdateRegistry#serialize`) now serializes once and passes the same JSON `String` to every connection, rather than each connection re-encoding the same envelope. New `enqueueSend(long seq, String json, Executor)`/`enqueueHeartbeat(Executor)` queue a write onto `writeChain`, a per-connection `AtomicReference<CompletableFuture<Void>>` chain (`previous.thenRunAsync(write, executor)`) — **the ordering guarantee a lock alone cannot give** once dispatch runs on a virtual-thread-per-task executor with no shared, ordered work queue: two writes submitted A-then-B could otherwise race to acquire `sendLock` B-then-A. Chaining means a later write cannot even *start* until the earlier one has finished, so one connection's own writes stay in submission order regardless of which virtual thread happens to run first. `sendConnected` (the `connect()` handshake burst) is deliberately **not** chained — it still runs synchronously, once, before the connection is reachable by any concurrent dispatch for a topic it has not yet subscribed to.
 - **`LiveTopic`** (package-private record: `kind: LiveTopicKind`, `assetId: AssetId` nullable) — `FLEET`/`EVENT`/`DEVICES`/`DETECTION_EVENTS`/`MAP` (the last three added by the backend follow-up batch and docs/plans/done/MAP-REWORK-PLAN.md §4.3 respectively; `MAP` **replaces** the `MARKS` topic docs/plans/done/TACTICAL-MARKS-PLAN.md M4 added) are shared constants (`assetId=null`); `telemetry(AssetId)`/`detections(AssetId)` build the per-asset ones. `wire()` renders e.g. `"telemetry:<assetId>"`; `parse(String)`/`parseTopicsParam(String)` (comma-separated) do the reverse, throwing `IllegalArgumentException` for an unknown kind or a missing/malformed asset id (→ 400 via `ApiExceptionHandler`, same as every other id-parsing spot in this module) — `"fleet"`/`"event"`/`"devices"`/`"detection-events"`/`"map"` with no asset id parse as harmless, redundant aliases for the already-implicit topics of the same kind. **`"marks"` no longer parses at all** and is now a 400: the topic is gone, and failing loudly beats silently subscribing an un-migrated client to nothing.
 - **`LiveTopicKind`** (package-private enum: `FLEET`, `EVENT`, `TELEMETRY`, `DETECTIONS`, `DEVICES`, `DETECTION_EVENTS`, `MARKS` — the last three added by the backend follow-up batch and docs/plans/done/TACTICAL-MARKS-PLAN.md M4 respectively, extending the R-c channel for the fleet/warehouse, events, and tactical-marks UIs) — each constant now carries its own explicit wire string (rather than deriving it from `name()`) so `DETECTION_EVENTS` can use the hyphenated `"detection-events"` (matching `GET /api/events`'s own naming) rather than the underscore a lower-cased enum name would produce; `wire()` doubles as both the topic-string prefix and the `LiveEnvelopeResponse#type()` value for envelopes of that kind, since the plan deliberately uses the same vocabulary for both. **`DEVICES`**: the device-list + active-stream-list snapshot `FleetStore` (vision-web) otherwise polls via `GET /api/devices`+`GET /api/streams` every 5s — deliberately its *own* topic, not folded into `fleet`, since `fleet`'s payload is asset-centric (`AssetSummaryResponse`) and shares nothing with `FleetStore`'s domain (raw `Device`/`ActiveStream`); both lists travel in one envelope (`DevicesSnapshotResponse`) under the channel's one shared `seq`, so a viewer can never see a device list and an active-stream list snapshotted at different moments. **`DETECTION_EVENTS`**: the debounced `DetectionEvent` occurrences (open/advance/close) `GET /api/events` serves — deliberately its own topic, not folded into `event` (the unrelated generic domain `Event`), reusing `DetectionEventResponse` (the exact DTO `EventController` already returns) so `EventsStore` (vision-web) can convert trivially. **`MAP`** (docs/plans/done/MAP-REWORK-PLAN.md §4.3, **replacing `MARKS` outright** — removed, not deprecated: the SPA is the only client and migrates in Wave E): the whole Common Operational Picture — marks, drawings *and* layers — as one always-on topic carrying `entity` (`mark`/`drawing`/`layer`) and `action` (`created`/`updated`/`cleared`/`deleted`) as fields inside `MapEventPayload`, rather than twelve topic kinds, mirroring exactly how `DETECTION_EVENTS` carries OPEN/CLOSED in one topic instead of two. **It is the one topic whose delivery is filtered per connection** — see "Scoped SSE delivery" below. **Deliberately has no live-query seed** (unlike `FLEET`/`DEVICES`/`DETECTION_EVENTS`): seeding it would need two more `ObjectProvider` constructor parameters on `LiveUpdateRegistry` (past the five-parameter ceiling it is already at) **and** a shared seeded snapshot could not be re-scoped per recipient anyway. A viewer's first connection relies on its own `GET /api/map/layers`+`/marks`+`/drawings` reads, each already scoped correctly, before layering live deltas on top.
 - **Scoped SSE delivery — `map` only** (docs/plans/done/MAP-REWORK-PLAN.md §4.3, the security-critical half of the rework). Every other topic broadcasts one envelope to every subscribed connection; `map` does not, because visibility is a property of the data. Three pieces, deliberately split so the registry never resolves an identity:
@@ -244,16 +250,74 @@ for exactly when that is.
 
 ### `com.drones.vision.api.proxy` — `HlsProxyController`, HLS reverse proxy
 
-`HlsProxyController(URI hlsUpstreamBase)` (constructor-injected raw `URI`, wired by `vision-app`'s `WiringConfiguration` from `VisionPublishProperties.Mediamtx#hlsBase()` — see Conventions for why this one controller deviates from the "ports only" rule). `GET /hls/{streamId}/**` forwards the request to `hlsUpstreamBase + "/" + <raw remainder after "/hls/">`, so browsers never talk to the mediamtx sidecar directly — see `StreamPublisherPort#viewUrl`'s new app-relative contract below.
+`HlsProxyController(URI hlsUpstreamBase, VisionApiProperties.HlsProxy hlsProxy)` (`@Autowired`; `hlsUpstreamBase` wired by `vision-app`'s `PublishWiring#hlsProxyUpstreamBase` from `VisionPublishProperties.Mediamtx#hlsBase()`, `hlsProxy` by `PublishWiring#hlsProxySettings` from `VisionApiProperties#hlsProxy()` as of docs/plans/active/SCALE-100-PLAN.md §5 S7 — see Conventions for why this one controller deviates from the "ports only" rule). A package-private 1-arg overload (`HlsProxyController(URI hlsUpstreamBase)`, defaulting to `VisionApiProperties.HlsProxy.defaults()`) is the test seam every existing `HlsProxyControllerTest` case still uses. `GET /hls/{streamId}/**` forwards the request to `hlsUpstreamBase + "/" + <raw remainder after "/hls/">`, so browsers never talk to the mediamtx sidecar directly — see `StreamPublisherPort#viewUrl`'s new app-relative contract below.
 
-- **Raw pass-through**: the forwarded path/segment name comes from `HttpServletRequest#getRequestURI()` (servlet-spec-guaranteed undecoded), not the decoded `@PathVariable`, so percent-encoded segment names are never decoded-then-re-encoded.
-- **Redirects**: followed server-side via `java.net.http.HttpClient` (`Redirect.NORMAL`) — the browser only ever sees this app's origin and a final status, never mediamtx's own `302`.
-- **Cookies**: a fresh `CookieManager`/`CookieStore` per incoming request (not shared across browser requests) is seeded from the incoming `Cookie` header and installed as the `HttpClient`'s cookie handler, so a `Set-Cookie` mid-chain (mediamtx's viewer-pinning cookie) rides along to the next redirect hop; every `Set-Cookie` seen across the whole chain (via `HttpResponse#previousResponse()`) is relayed back to the browser, oldest hop first. **Gotcha**: seeded cookies must be built with `HttpCookie#setVersion(0)` — the `HttpCookie(name, value)` constructor defaults to RFC 2965 version 1, which `CookieManager` then re-serializes as the legacy `$Version="1"; name="value";$Path="/"` header instead of the plain `name=value` a real server expects; found by an actual failing test, not by inspection.
-- **Body**: buffered fully as `byte[]` (`HttpResponse.BodyHandlers.ofByteArray()`) — no true streaming; acceptable at this scale (playlists tiny, fMP4 segments at most a few MB, and post-docs/plans/done/MVP2-PLAN.md-V-a's 1s GOP even smaller than before) per KISS. Re-audited for docs/plans/done/MVP2-PLAN.md V-a's latency work and left unchanged: buffering these payload sizes costs single-digit milliseconds, nowhere near the multi-second problem V-a solves elsewhere (encoder GOP, mediamtx LL-HLS config) — not "broken," so not rewritten into a true streaming proxy.
-- **Failure**: only a failure to reach upstream at all (`IOException`/interrupted) throws `HlsUpstreamUnavailableException` → 502; a normal non-2xx actually received from upstream (e.g. a segment not ready yet) passes through verbatim, same as `Content-Type`/`Cache-Control`/status on success.
-- **Caching (docs/plans/done/MVP2-PLAN.md V-a proxy audit)**: this controller never *sets* a `Cache-Control` header of its own — but as of V-a it now *forwards* whatever value upstream (mediamtx) sent, rather than silently dropping it as before. mediamtx marks every LL-HLS live media playlist response `no-cache` (verified against `gohlslib`'s `muxerStream.mediaPlaylistMaxAge()`, the library mediamtx's HLS server is built on); dropping that header entirely relied on the *accidental* fact that a browser with zero cache/validator headers to go on usually won't cache — not a guarantee, and exactly the kind of gap that would silently freeze a stock (pre-`lowLatencyMode`) `hls.js` player's live edge if a browser ever did decide to serve a stale cached copy of the repeatedly-polled `index.m3u8`. See `cacheControlIsForwardedFromUpstreamNotAddedOrDropped` in `HlsProxyControllerTest`.
-- **LL-HLS query strings (docs/plans/done/MVP2-PLAN.md V-a proxy audit)**: `buildUpstreamUri` already forwarded the full raw query string (`request.getQueryString()`) untouched before V-a — LL-HLS's blocking-reload protocol (`_HLS_msn`/`_HLS_part`/`_HLS_skip`) rides on exactly that, so blocking requests already worked correctly; V-a added `llHlsBlockingReloadQueryParametersAreForwardedUntouched` as a regression test since nothing previously asserted it explicitly. Also audited: the controller's own `REQUEST_TIMEOUT`=15s bounds how long a single proxied fetch (including a blocking LL-HLS reload) can take before this controller gives up and surfaces a 502 — mediamtx's own blocking-wait has no independent timeout beyond an initial "too-far-ahead" 400 check, so a genuinely stalled stream could in principle hold a request open that long; a 502 rather than an indefinite hang is a reasonable failure mode, left as-is. Not yet exercised by real traffic — today's shipped player doesn't send `_HLS_msn` at all (stock `hls.js`, not `lowLatencyMode`); relevant once docs/plans/done/MVP2-PLAN.md V-b turns that on.
-- **404 without `{streamId}`**: `/hls` or `/hls/` simply doesn't match the `@GetMapping` pattern and falls through to Spring's ordinary unmapped-route 404 — no special-case code.
+**Rewritten for docs/plans/active/SCALE-100-PLAN.md §5 S1** (video out of the JVM byte path — the app's hardest concurrency ceiling per that plan's §2a/b): streaming instead of buffering, one shared `HttpClient` instead of one per request, `Range` forwarding. Full detail lives in the class's own javadoc; summary below.
+
+- **Raw pass-through**: unchanged — the forwarded path/segment name comes from `HttpServletRequest#getRequestURI()` (servlet-spec-guaranteed undecoded), not the decoded `@PathVariable`, so percent-encoded segment names are never decoded-then-re-encoded.
+- **Body — streamed, not buffered**: `proxy` now returns `ResponseEntity<InputStreamResource>` wrapping `HttpResponse.BodyHandlers.ofInputStream()`, and Spring's `ResourceHttpMessageConverter` copies it to the servlet output stream in fixed-size chunks — no full-segment `byte[]` allocation per request any more. The **only** body content this controller ever buffers is a bounded diagnostic preview (`errorBodyPreviewMaxChars`, default 200 bytes, `vision.api.hls-proxy.error-body-preview-max-chars` as of §5 S7) of a **non-2xx** upstream response, read via `InputStream#readNBytes` and stitched back onto the rest of the (still-streamed) body with a `SequenceInputStream` so the browser still receives the complete error body. `Content-Length` is forwarded from upstream unchanged in both cases, since re-splitting an unchanged body into two `InputStream`s doesn't change its total size.
+- **One shared `HttpClient`, no shared cookie jar**: built once in the constructor (`Redirect.NEVER`, `connectTimeout` only — deliberately **no** `cookieHandler`) and reused for every request, replacing the old per-request client that leaked a selector thread + connection pool on every call (never closed). `@PreDestroy` closes it (`HttpClient` is `AutoCloseable` since Java 21) when the bean is destroyed. **Why no cookie handler**: mediamtx issues per-viewer session cookies; a `java.net.CookieHandler` attached to a *shared* client would remember viewer A's cookie and hand it to viewer B's request to the same upstream host — a cross-viewer session leak. Cookies are instead handled entirely as request/response headers, scoped to the one servlet request each call belongs to. Proven by `sharedClientDoesNotLeakOneViewersCookieToAnother` (`HlsProxyControllerTest`) — this wave's acceptance gate: two sequential requests through the *same* controller instance (same shared client) with different `Cookie` headers each reach upstream carrying only their own cookie, and the `Set-Cookie` mediamtx issues for viewer A never reaches viewer B's request.
+- **Redirects — followed by hand, not by the client**: with no cookie handler, `HttpClient.Redirect.NORMAL` can't be trusted to carry a cookie set on hop 1's response onto hop 2's request (that carry-over is exactly what a `CookieHandler` would otherwise supply). So `fetch` loops itself (`Redirect.NEVER` on the client, bounded at `maxRedirectHops`, default 5, `vision.api.hls-proxy.max-redirect-hops` as of §5 S7 — mediamtx's own pinning flow is exactly one hop, more than the bound throws `IOException` → 502, proven with a 1-hop bound by `configuredMaxRedirectHopsBoundsTheHandFollowedRedirectLoop`), resolving each hop's `Location` against the previous URI and folding each hop's `Set-Cookie` values into the `Cookie` header sent on the next hop by hand (`mergeCookies` — parses just the `name=value` pair, attributes like `Path`/`Max-Age` are dropped since an outgoing `Cookie` header can't carry them anyway). Every hop's `Set-Cookie` is still collected, oldest hop first, and relayed back to the browser exactly as before.
+- **`Set-Cookie` is rewritten to the viewer's scheme** (`relayableSetCookie`, fix `6e640d3`): when the incoming request is **not** HTTPS, `Secure`, `Partitioned` and `SameSite=None` are stripped from each relayed cookie. mediamtx emits every HLS session cookie twice — bare, then hardened with all three — and both copies share a name and path, so the hardened one *replaces* the usable one in the viewer's jar. Over https that is correct and it passes through untouched; over plain http the browser drops it, the viewer can never return `hlsSession`, and mediamtx answers the media playlist with **401** — every HLS request in a 100-viewer sweep failed this way before the fix ([`SCALE-100-AFTER.md`](../../docs/conclusions/SCALE-100-AFTER.md) §4). This is the reverse-proxy job nginx spells `proxy_cookie_flags`. Behind a TLS-terminating front proxy, `isSecure()` reports *this* hop unless `server.forward-headers-strategy` is configured. Covered by `secureOnlyCookieAttributesAreStrippedForAPlainHttpViewerAndKeptForAnHttpsOne`. **Note this only became reachable with the shared client**: the old per-request cookie jar never echoed mediamtx's `cookieCheck` probe, so mediamtx put the session in the playlist URL and no cookie was needed at all.
+- **`Range` forwarded**: the incoming `Range` header (byte-range requests — the recording playback path; live HLS never sends one) is forwarded on every hop, and the upstream's `Content-Range`/`Accept-Ranges` are passed back alongside `Content-Type`/`Cache-Control`. Covered by `rangeHeaderIsForwardedUpstreamAndContentRangeAcceptRangesArePassedBack`.
+- **Failure**: unchanged in shape — only a failure to reach upstream at all (`IOException`/interrupted/too many redirects) throws `HlsUpstreamUnavailableException` → 502; a normal non-2xx actually received from upstream (e.g. a segment not ready yet) passes through verbatim, same as `Content-Type`/`Cache-Control`/status on success.
+- **Caching (docs/plans/done/MVP2-PLAN.md V-a proxy audit)**: unchanged — this controller never *sets* a `Cache-Control` header of its own, only *forwards* whatever value upstream sent (mediamtx marks every LL-HLS live media playlist `no-cache`). See `cacheControlIsForwardedFromUpstreamNotAddedOrDropped` in `HlsProxyControllerTest`.
+- **LL-HLS query strings (docs/plans/done/MVP2-PLAN.md V-a proxy audit)**: unchanged — `buildUpstreamUri` forwards the full raw query string untouched, so LL-HLS's blocking-reload protocol (`_HLS_msn`/`_HLS_part`/`_HLS_skip`) still rides through correctly. `requestTimeout` (default 15s, `vision.api.hls-proxy.request-timeout`) still bounds how long a single hop (including a blocking LL-HLS reload) can take before surfacing a 502 — mediamtx's own blocking-wait has no independent timeout beyond an initial "too-far-ahead" 400 check.
+- **404 without `{streamId}`**: unchanged — `/hls` or `/hls/` simply doesn't match the `@GetMapping` pattern and falls through to Spring's ordinary unmapped-route 404 — no special-case code.
+- **No more local constants (docs/plans/active/SCALE-100-PLAN.md §5 S7)**: `connectTimeout`/`requestTimeout`/`errorBodyPreviewMaxChars`/`maxRedirectHops` are all instance fields now, sourced from the `VisionApiProperties.HlsProxy` the `@Autowired` constructor receives (`PublishWiring#hlsProxySettings`, mapped from `VisionApiProperties#hlsProxy()`) — finishing what S1 task 4 deliberately deferred. No literal timing/sizing constant remains in this class.
+
+### `com.drones.vision.api.ratelimit` — `RateLimitFilter`, per-principal token bucket (docs/plans/active/SCALE-100-PLAN.md §5 S6 item 3)
+
+A plain `jakarta.servlet` `OncePerRequestFilter`, not a controller — a **blast-radius bound**, not
+security hardening or a DoS defence (the plan says this plainly): today one misbehaving browser tab
+can issue enough requests to degrade the app for every other user on the same JVM. One flat limit,
+one knob, no per-endpoint tiers, no auth-aware policy.
+
+- **`RateLimitFilter(CurrentUser)`** — the production constructor; `permitsPerMinute` defaults to
+  `DEFAULT_PERMITS_PER_MINUTE` (600/min, 10/s sustained, burstable to a full minute's allotment —
+  see the field's own javadoc for the sizing rationale against docs/plans/active/SCALE-100-PLAN.md
+  §2.1's ~1 req/s-per-idle-tab measurement). A second public constructor takes an explicit
+  `permitsPerMinute`. A package-private third constructor injects the `ScheduledExecutorService`
+  (bucket eviction) and the `LongSupplier` time source — the test seam, unused in production.
+- **Keying**: `CurrentUser#userId()` — the same identity every write on the request is already
+  attributed to, so it degrades exactly like the rest of the pipeline: one shared bucket for the
+  fixed dev principal when `vision.auth.enabled=false`, one bucket per real user when `true`.
+  `SecurityContextPrincipalResolver` throws `IllegalStateException` for a request with no
+  authenticated session (vision-app) — under the secured chain the only `/api/**` paths reachable
+  that way are the permit-all `/api/auth/login`/`/api/auth/logout` (`SecurityConfig`; every other
+  `/api/**` path is already rejected 401 before this filter runs — see "Ordering" below), and those
+  fall back to `request.getRemoteAddr()` instead of sharing one bucket with every anonymous caller.
+- **Path scope**: `shouldNotFilter` limits to `/api/**`, excluding `/api/live` and everything under
+  it (`/api/live/{connectionId}/topics`) — a token bucket in front of the long-lived SSE stream
+  would be a self-inflicted outage. `/hls/**` never matches the `/api/` prefix at all.
+- **Ordering**: registered with no explicit order, so it runs at Spring Boot's default
+  `LOWEST_PRECEDENCE` — after `springSecurityFilterChain` (order `-100`, whichever
+  `SecurityFilterChain` in `SecurityConfig` is active). That ordering is what makes the keying above
+  correct (see class javadoc "Ordering" for the full argument).
+- **Wiring, and why it ships off**: `vision-app`'s `RateLimitWiring` registers this behind
+  `@ConditionalOnProperty("vision.api.rate-limit.enabled")`, **default `false`**. Not caution — a
+  consequence of the keying two bullets up: with `vision.auth.enabled=false` every caller in the
+  deployment resolves to one fixed dev principal, so enabling the limit there hands *all* of them a
+  single `permits-per-minute` budget, which this plan's own target of 100 concurrent users (~1 req/s
+  each) exhausts on legitimate traffic alone. It belongs on together with auth, where each real user
+  gets their own bucket. `DEFAULT_PERMITS_PER_MINUTE` is `public` for that wiring to default from.
+- **`TokenBucket`** (package-private) — capacity and average refill rate both `permitsPerMinute`;
+  every method takes `now`/`cutoff` as an explicit `long` nanos parameter rather than reading
+  `System.nanoTime()` itself, so it stays a pure, directly-unit-testable function of its own state
+  and the given instant (`TokenBucketTest`). `synchronized` methods, pure in-memory arithmetic, no
+  I/O — same virtual-thread-safety reasoning `LiveRingBuffer`'s javadoc gives for its own
+  synchronized methods (docs/plans/active/SCALE-100-CONTEXT.md §7).
+- **Bounded memory**: `buckets` (`ConcurrentHashMap<Object, TokenBucket>`) would otherwise retain
+  one bucket per principal ever seen since boot — the same leak class docs/plans/active/SCALE-100-PLAN.md
+  §5 S2 fixed for `LiveUpdateRegistry`'s per-asset buffers. `evictIdleBuckets()` (package-private,
+  directly callable from a test) sweeps buckets idle past `BUCKET_IDLE_MILLIS` (10 min) on a daemon
+  scheduler ticking every `BUCKET_EVICTION_MILLIS` (10 min) — same shape as
+  `LiveUpdateRegistry#evictUnusedAssetBuffers`.
+- **429 body**: `ErrorResponse("TOO_MANY_REQUESTS", "rate limit exceeded, try again shortly")`,
+  hand-serialized via a locally-constructed `JsonMapper` (same idiom `LiveUpdateRegistry` uses) —
+  `ApiExceptionHandler` is unreachable from a servlet filter (it only sees exceptions thrown inside
+  `DispatcherServlet`-dispatched controller methods), so this filter writes the response itself,
+  reusing the existing `ErrorResponse` shape for consistency with every other `4xx`/`5xx` body.
 
 ### `com.drones.vision.api.support` — edge-local helpers + `VisionApiProperties`
 
@@ -274,12 +338,12 @@ for exactly when that is.
 | Nested record | Fields (default) |
 |---|---|
 | `Snapshot` | `maxWidth` (480), `jpegQuality` (0.8) — `SnapshotJpegEncoder`'s tunables |
-| `HlsProxy` | `connectTimeout` (5s), `requestTimeout` (15s) — `HlsProxyController`'s upstream `HttpClient` timeouts |
-| `Live` | `coalesce` (150ms), `heartbeat` (15s), `telemetryBuffer` (50), `eventBuffer` (300), `detectionBuffer` (300), `marksBuffer` (300) — `LiveUpdateRegistry`'s cadence + per-topic ring-buffer capacities |
+| `HlsProxy` | `connectTimeout` (5s), `requestTimeout` (15s), `errorBodyPreviewMaxChars` (200), `maxRedirectHops` (5) — `HlsProxyController`'s upstream `HttpClient` timeouts and buffer/redirect bounds (the last two added docs/plans/active/SCALE-100-PLAN.md §5 S7) |
+| `Live` | `coalesce` (150ms), `heartbeat` (15s), `telemetryBuffer` (50), `eventBuffer` (300), `detectionBuffer` (300), `mapBuffer` (300), `sendTimeout` (3s), `bufferEviction` (60s) — `LiveUpdateRegistry`'s cadence, per-topic ring-buffer capacities, and per-connection dispatch bounds (`mapBuffer` renamed from `marksBuffer` to match the `marks`→`map` topic rename docs/plans/done/MAP-REWORK-PLAN.md §4.3 already made everywhere else; `sendTimeout`/`bufferEviction` added §5 S7) |
 | `Paging` | `defaultLimit` (50), `maxLimit` (500) — the shared page-size shape several list endpoints use (e.g. `ActivityController`) |
 | `Upload` | `maxImageBytes` (2097152) — `AssetImageController`'s upload cap |
 
-**`SnapshotJpegEncoder` is now wired to a real, property-bound instance** (see the wiring-gap-CLOSED bullet above — `vision-app`'s `PublishWiring#snapshotJpegEncoder`). `HlsProxyController`'s timeouts, `LiveUpdateRegistry`'s coalesce/heartbeat/buffer capacities, `AssetImageController`'s upload cap, and the per-controller paging defaults (e.g. `ActivityController.DEFAULT_LIMIT`) still read their own local `private static final` constants — rewiring those to this record's `hlsProxy`/`live`/`paging`/`upload` fields is a documented gap, not done by this wave (only `snapshot` is consumed today). New `vision.api.*` keys are documented, commented out, in `vision-app`'s `application.yaml`.
+**`SnapshotJpegEncoder`, `HlsProxyController` and `LiveUpdateRegistry` are all wired to a real, property-bound instance** (see the wiring-gap-CLOSED bullet above for `SnapshotJpegEncoder`; `HlsProxyController`/`LiveUpdateRegistry` as of docs/plans/active/SCALE-100-PLAN.md §5 S7 — `vision-app`'s `PublishWiring#snapshotJpegEncoder`/`#hlsProxySettings`/`#liveSettings`, each mapping the Spring-bound `...app.config.properties.VisionApiProperties` field-by-field onto this plain record's matching nested record). `AssetImageController`'s upload cap and the per-controller paging defaults (e.g. `ActivityController.DEFAULT_LIMIT`) are the only ones still reading their own local `private static final` constants — rewiring those to this record's `paging`/`upload` fields remains a documented gap, out of S7's scope. No `dispatch-threads` key exists for `LiveUpdateRegistry`'s per-connection write dispatch — surveyed for S7 and deliberately not added, since that executor is `Executors.newVirtualThreadPerTaskExecutor()`, which has no pool-size/thread-count concept a knob by that name could honestly govern (see that class's own `connectionWriteExecutor` field javadoc). New `vision.api.*` keys are documented, commented out, in `vision-app`'s `application.yaml`.
 
 ### `CvModelsController` — detection-model roster (docs/plans/done/CV-CONTROL-PLAN.md §4)
 
@@ -335,7 +399,7 @@ services, exactly as the corresponding page would; nothing here touches a reposi
 | Type | Collaborators | What it does |
 |---|---|---|
 | `DemoScenario` | `DemoPeople`, `DemoFleet`, `DemoOperations`, `AssignmentService`, `CurrentUser` (5, at the ceiling) | The orchestrator `DemoController` calls. Resolves the acting user once (ownership/actor/scope), runs the five passes, and assigns each asset to a pilot round-robin — plus a second pilot on every third asset, so the roster shows both 1:1 and shared assignments. |
-| `DemoPeople` | `UserService`, `GroupService` | One reused `Demo Squad` group (parented under whatever root group already exists, so a MANAGER-scoped press works) + N users, call-signed `demo.falcon`…, every fourth a MANAGER. **DEV-ONLY**: all share the password `demo`, the same stance `AuthSeedRunner`'s `admin`/`admin` takes. Usernames are de-duplicated against existing ones (`demo.falcon2` on a second press), never a 409. |
+| `DemoPeople` | `UserService`, `GroupService` | One reused `Demo Squad` group (parented under whatever root group already exists, so a MANAGER-scoped press works) + N users, call-signed `demo.falcon`…, every fourth a MANAGER. **DEV-ONLY**: all share the password `demo`, the same stance the `admin`/`admin` dev account takes (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1: seeded by `storage/persistence`'s `V90001__dev_accounts.sql` Flyway migration now, not the deleted `AuthSeedRunner`). Usernames are de-duplicated against existing ones (`demo.falcon2` on a second press), never a 409. |
 | `DemoFleet` | `SimulationService`, `AssetService`, `AssetStreamService` (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e — split off `AssetService`; `AssetService` still backs `registeredNames`), `DemoVideoLibrary` | N simulated assets via `SimulationService#simulate` — each on its own home point around a ~1.1km ring at `50.45/30.52`, each flying its own 4-point LOOP route at its own speed/altitude, each backed by the next video in the library (round-robin; fully synthetic when the folder holds none). Call signs come from a fixed roster of real airframes (`FPV Pis-UN`, `FPV Vyriy`, `Skyfall Vampire`, `Bayraktar TB2`, `Leleka-100`, …) rather than `Demo NN`, so a demo reads like a fleet someone actually flies. Each candidate is checked against the names already registered (`includeDeleted`, so the archive view never shows two of one name) and the roster laps with a numeric suffix (`Furia 2`) once exhausted — a second press extends the fleet instead of minting duplicates. **Creation and streaming are two passes** — `simulate(autoStart=true)` aborts the whole call on a stream failure and orphans the asset it just created, so `startStreams` starts only the requested prefix through `AssetStreamService#startStream` and reports each failure instead. |
 | `DemoOperations` | `GeofenceService`, `MarkService` | A `KEEP_IN` operating area + a `KEEP_OUT` no-fly box, and five marks (2 TARGET, HAZARD, FRIENDLY, POI). Both passes are name-idempotent — a second press adds neither a duplicate zone nor a duplicate mark. |
 | `DemoVideoLibrary` | `@Value("${vision.demo.videos-dir:}")` | A **flat, non-recursive** listing of `$HOME/Videos` (override with the property): regular, readable files with a known video extension, sorted by name, sub-directories skipped rather than descended. A missing/unreadable folder yields an empty list, not an error. Its production constructor carries `@Autowired` because a package-private `Path` test-seam constructor is a second candidate — the same disambiguation `LiveUpdateRegistry` needs. |
@@ -923,6 +987,13 @@ supplied by `vision-app`'s `PublishWiring#snapshotJpegEncoder` bean (mapped from
 `VisionApiProperties` in `...app.config.properties` — a distinct class, same simple name, see that
 class's own javadoc). See the `support/` subsection above, "Wiring gap CLOSED", for the current state.
 
+**Further superseded by docs/plans/active/SCALE-100-PLAN.md §5 S7**: `HlsProxyController`'s timeouts
+and `LiveUpdateRegistry`'s coalesce/heartbeat/buffer capacities — called out just above as still
+reading their own local constants — are wired the same way `snapshot` already was, via
+`PublishWiring#hlsProxySettings`/`#liveSettings`. Only `AssetImageController`'s upload cap and the
+per-controller paging defaults remain unwired. See the `support/` subsection's `VisionApiProperties`
+table above for the current, accurate field list.
+
 **`UsageTimelineController`'s own duplicate `DEFAULT_MAX_POINTS=500` constant is deleted** (the
 plan's own §2.3 duplicate-defaults table entry) — it now reads
 `com.drones.vision.application.replay.DefaultReplayService.DEFAULT_MAX_POINTS` directly, a field
@@ -1385,3 +1456,339 @@ storage/persistence,station/vision-api,station/vision-app test -DskipWeb`: `adap
 wiring change was needed — no new constructor parameter or bean was introduced, `AssetController`'s
 constructor shape is unchanged (still `AssetService, CurrentUser, TelemetryRepositoryPort,
 AssetImageRepositoryPort`).
+
+## docs/plans/active/SCALE-100-PLAN.md §5 S1 done (video out of the JVM byte path — `HlsProxyController` rewrite)
+
+Rewrote `HlsProxyController` per the plan's three ranked tasks: stream instead of buffer, one shared
+`HttpClient` with no shared cookie handler, forward `Range`. Full mechanism documented in the class's
+own javadoc and summarized in the `com.drones.vision.api.proxy` section above; not repeated here.
+
+**Decisions**:
+- **Streaming**: `ResponseEntity<InputStreamResource>` (Spring's `ResourceHttpMessageConverter`,
+  which copies in fixed-size chunks synchronously on the request thread) chosen over
+  `StreamingResponseBody` specifically because the latter triggers Spring MVC's async request
+  processing, which would have forced every existing `MockMvc` test in `HlsProxyControllerTest` to
+  add explicit `asyncDispatch` plumbing — a test-shape change the wave's acceptance bar ("no
+  assertion edited") ruled out. `InputStreamResource` needed none of that: it's a normal synchronous
+  return type, so every pre-existing test still passes unmodified.
+- **Redirects**: `HttpClient.Redirect.NEVER` + a bounded manual hop loop (`fetch`, `MAX_REDIRECT_HOPS`
+  = 5), not `Redirect.NORMAL`. With the cookie handler removed (see below), whether the JDK client's
+  own `NORMAL` redirect logic replays a manually-set `Cookie` header from hop 1 onto hop 2 is
+  undocumented internal behavior — not something to build mediamtx's viewer-pinning flow on top of.
+  Manual hop-following makes the cookie carry-over explicit and testable (`mergeCookies`) instead of
+  relying on it.
+- **Cookie isolation**: no `cookieHandler` on the shared client at all; cookies flow only as
+  request/response headers scoped to one servlet request. This is the wave's stated security trap and
+  its acceptance gate — `sharedClientDoesNotLeakOneViewersCookieToAnother` proves two sequential
+  requests through the same shared client with different `Cookie` headers never cross-contaminate,
+  including the `Set-Cookie` mediamtx issues mid-chain.
+- **`CONNECT_TIMEOUT`/`REQUEST_TIMEOUT`**: left as local constants exactly as instructed (plan §5 S1
+  task 4) — they duplicate `VisionApiProperties.HlsProxy` already, but wiring them up belongs to S7,
+  which also owns `VisionApiProperties.java` and `vision-app`'s wiring (both reserved, untouched here).
+
+**Config keys for the orchestrator** (not added here — `application.yaml` and
+`station/vision-app/.../config/wiring/**` are reserved for Band A, per
+docs/plans/active/SCALE-100-CONTEXT.md §1): none *new* were introduced by this wave — no constructor
+parameter or bean changed shape (`HlsProxyController(URI hlsUpstreamBase)` is unchanged), so no wiring
+edit is required for this wave to function. The plan's own §5 S1 task 4 and §6 additionally ask for
+`spring.threads.virtual.enabled=true` and a pinned `server.tomcat.max-connections` — those are plain
+`application.yaml` lines with no code-side dependency on anything in this wave's diff, left for the
+orchestrator to apply alongside S2/S3's reserved-file keys.
+
+**Before/after** (`./mvnw -B -pl station/vision-api test -DskipWeb`): `HlsProxyControllerTest`
+**8 → 10** (2 new: the cookie-isolation acceptance gate, and `Range`/`Content-Range`/`Accept-Ranges`
+forwarding). All 8 pre-existing tests pass with **zero assertions edited**. Module total: **592/592**
+green, no other test file touched or affected (`git diff --stat` for this task: only
+`HlsProxyController.java` and `HlsProxyControllerTest.java`).
+
+**Follow-up 2026-08-18** (`6e640d3`): `HlsProxyControllerTest` **10 → 11**, module total **599/599**
+green. (Count taken from Maven's own summary line. Summing `target/surefire-reports/TEST-*.xml`
+overstates it — that directory keeps reports for renamed/removed test classes until a `clean`.) The added test is the scheme-rewrite regression above — the cookie-isolation gate this wave
+shipped was necessary but not sufficient, since it only ever exercised `http://localhost`, where
+browsers keep `Secure` cookies.
+
+**Not done, deferred to later waves**: `spring.threads.virtual.enabled` / `server.tomcat.max-connections`
+(application.yaml, reserved); wiring `CONNECT_TIMEOUT`/`REQUEST_TIMEOUT` to `VisionApiProperties.HlsProxy`
+(S7, `VisionApiProperties.java` reserved); the S0 load-rig numbers this wave's acceptance criteria are
+ultimately measured against (heap allocation rate, thread count under 100 concurrent viewers,
+byte-identical segment hashes) — those are S0's rig's job, not exercised by this module's unit tests.
+
+## docs/plans/active/SCALE-100-PLAN.md wave S2 done (SSE dispatch: serialize once, bounded async per-connection writes, per-asset buffer eviction)
+
+`live-update-dispatcher` — the single `scheduler` thread — previously did four things: assign every
+envelope's `seq`, run coalescing, decide fan-out, **and** block on `SseEmitter#send` once per
+subscribed connection. One slow/stalled client stalled delivery to everyone else on that thread, and
+every connection re-serialized the same envelope independently. This wave (`com.drones.vision.api.live`
+only, per the plan's disjointness contract) keeps the first three on `scheduler` — envelope ordering
+within a topic is unchanged — and moves only the fourth off it. See the "API surface" subsection above
+for the full mechanics (`LiveUpdateRegistry#serialize`/`connectionWriteExecutor`/`dispatchWrite`/
+`evictUnusedAssetBuffers`, `LiveConnection#enqueueSend`/`enqueueHeartbeat`/`writeChain`); summary:
+
+1. **Serialize once, write N times** — `broadcast` now JSON-encodes an envelope exactly once
+   (`serialize`) and hands the same `String` to every subscribed connection, instead of each one
+   re-encoding the same object.
+2. **Split the executor** — `connectionWriteExecutor` (`Executors.newVirtualThreadPerTaskExecutor()`,
+   an unconditional field, not a sixth constructor parameter) runs the actual per-connection write;
+   `scheduler` never blocks on one. `LiveConnection`'s new `writeChain` (a per-connection
+   `CompletableFuture` chain) guarantees one connection's own writes still run in submission order
+   despite the executor having no shared FIFO queue — proven by
+   `concurrentDispatchNeverReordersOneConnectionsOwnEnvelopes` (20 connections, jittered test-double
+   `send()`, asserts every connection's received `seq`s come back strictly increasing).
+3. **Bound the write** — `dispatchWrite` wraps each queued write in
+   `orTimeout(CONNECTION_WRITE_TIMEOUT_MILLIS, MILLISECONDS).exceptionally(...)`; past the timeout the
+   connection is unregistered, same outcome an `IOException` always produced. Proven by
+   `aBlockedConnectionDoesNotStopOthersFromReceivingEnvelopes` (a stuck connection alongside two
+   healthy ones — both healthy ones receive their envelope well inside the poll window) and
+   `aConnectionWhoseWriteStaysBlockedPastTheTimeoutIsUnregistered` (`watchingDetections` flips to
+   `false` once `CONNECTION_WRITE_TIMEOUT_MILLIS` elapses).
+4. **Evict per-asset buffers** — `evictUnusedAssetBuffers()`, scheduled every `BUFFER_EVICTION_MILLIS`
+   (60s), sweeps `telemetryBuffers`/`detectionBuffers` down to only the asset ids some open connection
+   still subscribes to. Proven by two tests: an unwatched asset's buffer comes back empty after
+   eviction (`bufferFor` recreates a fresh one via `computeIfAbsent`, which is the observable proof the
+   old one — and its data — is actually gone), and an actively-subscribed asset's buffer survives.
+
+**Resume under concurrent dispatch** — `resumeStaysCorrectWhileAnotherConnectionsWriteIsStuckInFlight`:
+with one connection's write parked indefinitely (mid-flight on `connectionWriteExecutor`, exactly the
+risk the plan's §9 risk table calls out — "multi-threaded dispatch reorders envelopes within a topic"),
+two more envelopes are published and `replayFor(topic, firstSeq)` still returns exactly the two newer
+ones in order. This holds by construction (sequencing/buffer-append never left `scheduler`), not by
+timing luck.
+
+**Test seams added** (`api/live/**` only): `LiveUpdateRegistry#register(SseEmitter, Set<LiveTopic>,
+Predicate<String>)` (package-private) plugs a test-double `SseEmitter` into the registry, bypassing
+`connect()`'s synchronous handshake — needed because none of this wave's new behavior is observable
+through the pre-existing `bufferFor`/`replayFor` seams alone. `LiveUpdateRegistryTest` gained two
+private nested `SseEmitter` subclasses: `RecordingSseEmitter` (captures each JSON `data:` payload,
+filtered by `MediaType.APPLICATION_JSON` since `SseEventBuilder#build()` also carries the raw
+`"id:...\n"` protocol prefix as its own `TEXT_PLAIN` entry) and `BlockingSseEmitter` (parks on a
+caller-supplied `CountDownLatch`, released explicitly at the end of each test that uses it so no
+virtual thread leaks past the test).
+
+**Before/after**: `LiveUpdateRegistryTest` **22 → 28** (+6, all additive — `git diff --numstat` on the
+test file: `219 insertions(+), 0 deletions(-)`; no pre-existing assertion touched). Module total
+(`./mvnw -B -pl station/vision-api test`): **590 → 596**, all green.
+
+**Config keys needed, not added (reserved files)**: `CONNECTION_WRITE_TIMEOUT_MILLIS` (3,000ms) and
+`BUFFER_EVICTION_MILLIS` (60,000ms) are `static final` constants in `LiveUpdateRegistry`, not yet
+backed by a config key — `vision.api.live.send-timeout` (for the first) and `vision.api.live
+.dispatch-threads` (governing whether `connectionWriteExecutor` stays one-virtual-thread-per-write or
+becomes a bounded platform pool) are already named as S2 candidates in the plan's own §6 table.
+`VisionApiProperties.java`/`application.yaml`/`config/wiring/**` are reserved to a different agent this
+wave — wiring either key up is deferred to whichever wave owns those files next.
+
+**Docker**: not applicable — nothing in `com.drones.vision.api.live` or its tests uses Testcontainers
+or the `docker` CLI; this module's Postgres/docker-gated tests (if any) live elsewhere
+(`storage/persistence`).
+
+**New endpoint shapes**: none. This wave is entirely internal dispatch machinery behind the existing
+`GET /api/live`/`PATCH /api/live/{connectionId}/topics` surface — no request/response DTO changed.
+
+**Not touched, per scope**: `api/proxy/**` (a concurrent S1 wave), `support/VisionApiProperties.java`,
+`application.yaml`, `config/wiring/**` (reserved files — needed config keys reported above instead of
+edited directly), every other package under `com.drones.vision.api`.
+
+## docs/plans/active/SCALE-100-PLAN.md wave S5 done (fleet snapshot recompute debounced leading+trailing)
+
+`publishFleetChanged()` used to recompute the *entire* fleet+devices snapshot (all assets, all
+devices, all streams) on every single asset/device/stream lifecycle write — a bulk import of N assets
+recomputed the whole fleet N times, and the cost grows with total asset count, not with how many
+actually changed. This wave (`LiveUpdateRegistry`'s `freshFleetEnvelope`/`freshDevicesEnvelope`/
+`publishFleetChanged` path only, per the plan's disjointness contract, sequenced after S2 since both
+touch this file) debounces it the same way `flushPending()` already debounces telemetry/detections,
+composing with S2's serialize-once/async-write path for free — nothing about *how* an envelope
+reaches a connection changed, only how often the fleet/devices envelopes get recomputed in the first
+place.
+
+**Leading+trailing, not pure trailing** — a pure "wait `COALESCE_MILLIS` then recompute" debounce
+would have added latency to the common case (a single, isolated write) and, worse, is indistinguishable
+from a bug when a test calls `publishFleetChanged()` once and expects a synchronous result (every
+pre-existing test in this file does exactly that — see below). Two new fields carry the state:
+`fleetRecomputeWindowUntilNanos` (`AtomicLong`, the nanoTime a coalescing window closes; `Long.MIN_VALUE`
+initially so the first call on a fresh registry always dispatches) and `fleetChangedDuringWindow`
+(`AtomicBoolean`, set whenever a call is coalesced away). `publishFleetChanged()`: a call past the
+window's close wins a compare-and-set on `fleetRecomputeWindowUntilNanos`, opens the next window, and
+dispatches `recomputeFleetAndDevices()` (the extracted former body of this method) via `scheduler.execute`
+exactly as before; a call inside an open window (or one that lost the compare-and-set race to a
+concurrent caller) only sets `fleetChangedDuringWindow`. `flushPending()` — already ticking every
+`COALESCE_MILLIS` on the real scheduler, already directly callable in tests — gained one line at the
+top: `if (fleetChangedDuringWindow.compareAndSet(true, false)) recomputeFleetAndDevices();`, which is
+the trailing recompute that guarantees the window's last write is never silently dropped.
+
+**Why this preserves every pre-existing test unchanged**: a lone `publishFleetChanged()` call on a
+fresh registry always finds `now >= windowUntil` (nothing has opened a window yet), so it dispatches
+immediately via `scheduler.execute` — under the test module's `ImmediateScheduledExecutorService` that
+runs synchronously on the calling thread, exactly as the un-debounced version always did. Every
+existing test that calls `publishFleetChanged()` (in this file, `LiveControllerTest`,
+`LiveMapScopingTest`) does so exactly once per freshly-constructed registry, so none of them ever
+observes a window — confirmed by re-running the suite before this change (**599** tests) and after
+(**602**, +3, purely additive: `git diff --numstat` on the test file shows `63 insertions(+), 0
+deletions(-)`, no pre-existing assertion touched).
+
+**Sequencing** (hard constraint from the plan): the compare-and-set bookkeeping runs on the calling
+thread (whichever thread committed the write — the same shape `publishTelemetryAppended`'s
+`pendingTelemetry.computeIfAbsent(...).add(...)` already uses), but `sequencer.incrementAndGet()`,
+`fleetBuffer`/`devicesBuffer.append`, and `broadcast` only ever run inside `recomputeFleetAndDevices()`,
+which only ever runs on `scheduler`'s single thread (dispatched via `scheduler.execute` for the leading
+call, inline for `flushPending()`'s trailing call, since `flushPending` itself only ever runs on that
+thread). `seq` ordering and `Last-Event-ID` resume are therefore unaffected — proven by the full
+pre-existing SSE/resume test suite passing unchanged, including every `LiveControllerTest`/
+`LiveMapScopingTest` resume test.
+
+**Three new tests, `LiveUpdateRegistryTest`** (`aFlushWithNoCoalescedFleetChangeDoesNotTriggerAnExtraRecompute`/
+`fiftyRapidPublishFleetChangedCallsCoalesceIntoAtMostTwoRecomputes`/
+`theTrailingRecomputeAfterACoalescedBurstReflectsTheNewestStateNotTheFirst`) prove, respectively: a
+single call plus an idle `flushPending()` tick does not manufacture a phantom second recompute
+(`verify(assetService, times(1)).assets()`); 50 back-to-back calls in a tight loop (no real time
+elapses) produce exactly one immediate recompute, and exactly one more once `flushPending()` simulates
+the window closing (`times(1)` then `times(2)` — the plan's own "≤2 recomputes" acceptance bar, hit at
+its tightest); and the trailing recompute reflects the *last* write inside the window, not the first —
+the mock is reconfigured to a different asset id between the leading and the coalesced call, and the
+buffered fleet payload after `flushPending()` carries the second id, proving CLAUDE.md rule 9 rather
+than assuming it.
+
+**No new tunable config key** — `FLEET_COALESCE_WINDOW_NANOS` is `TimeUnit.MILLISECONDS.toNanos(COALESCE_MILLIS)`,
+derived from the existing constant rather than a second literal, so S7 wiring `COALESCE_MILLIS` to
+`VisionApiProperties.Live`'s already-named `coalesce` key (docs/plans/active/SCALE-100-PLAN.md §6) covers this
+window too, with no separate key needed.
+
+**Docker**: not applicable — same reasoning as S2's entry above.
+
+**New endpoint shapes**: none — internal dispatch machinery only, same `GET /api/live`/`PATCH
+/api/live/{connectionId}/topics` surface, no DTO changed.
+
+**Not touched, per scope**: `api/proxy/**`, `support/VisionApiProperties.java`, `application.yaml`,
+`config/wiring/**` (reserved), every other package under `com.drones.vision.api`.
+
+## docs/plans/active/SCALE-100-PLAN.md wave S6 done, backend half only (per-principal token-bucket rate limit)
+
+Item 3 of the plan's §5 S6 — a new `RateLimitFilter` (+ `TokenBucket`) in a new
+`com.drones.vision.api.ratelimit` package, full detail in that package's API surface section above.
+Items 1/2 (the frontend pollers, `station/vision-web/**`) belong to a different agent and were not
+touched here.
+
+**Design decisions**:
+- **Keying degrades with `CurrentUser`, not a second identity scheme**: reusing
+  `CurrentUser#userId()` rather than inventing a separate "who is this request" concept means the
+  filter automatically inherits the existing dev-mode-vs-real-auth split — one shared bucket for
+  every caller when `vision.auth.enabled=false` (matches today's single dev-admin identity exactly),
+  one bucket per real user when `true`. The one gap that identity doesn't cover — the two permit-all
+  `/api/auth/login`/`/api/auth/logout` endpoints, reachable with no session at all under the secured
+  chain — falls back to `request.getRemoteAddr()` (see `SecurityContextPrincipalResolver`'s
+  `IllegalStateException` contract, vision-app, and `SecurityConfig`'s `permitAll` rule for those two
+  paths).
+- **Filter, not an interceptor or a controller concern**: a `Filter` runs before Spring MVC's
+  handler-mapping/argument-resolution machinery, so an over-budget request never reaches a
+  controller method at all — cheaper, and keeps every controller free of rate-limit awareness.
+  `ApiExceptionHandler` is unreachable from here (it only sees `DispatcherServlet`-dispatched
+  exceptions), so the `429` body is hand-written, reusing the existing `ErrorResponse` shape.
+- **Time as a parameter, not a hidden `System.nanoTime()` call**: both `TokenBucket` and
+  `RateLimitFilter#evictIdleBuckets` take `now`/`cutoff` explicitly (`RateLimitFilter` owns one
+  `LongSupplier nanoClock`, real in production, fake in tests) — makes refill and eviction
+  deterministically testable without sleeping real time, and keeps `TokenBucket` a pure class with
+  no I/O of its own.
+- **Eviction sweep shape copied from `LiveUpdateRegistry#evictUnusedAssetBuffers`** (S2's fix for the
+  identical class of bug — a map that only ever grows): a single daemon
+  `ScheduledExecutorService`, package-private sweep method, injectable scheduler in tests so nothing
+  waits on a real timer.
+
+**Config keys, as requested here and as since wired** (`application.yaml` and
+`station/vision-app/.../config/wiring/**` were reserved this wave, per
+docs/plans/active/SCALE-100-CONTEXT.md §1; the orchestrator applied them — see `vision-app`'s
+MODULE.md for `RateLimitWiring`, its own `RateLimitWiringTest`, and the one deviation: the
+`@ConditionalOnProperty` moved from the `@Bean` to a dedicated `@Configuration` class, and the
+permits knob binds through `VisionApiProperties.RateLimit` rather than a raw `@Value`):
+
+```yaml
+vision:
+  api:
+    rate-limit:
+      # Master switch — RateLimitFilter is a blast-radius bound, not security hardening (see that
+      # class's javadoc). Off by default: docs/plans/active/SCALE-100-PLAN.md §6 pins this false so
+      # landing it changes no default-config behavior; an operator opts in per deployment.
+      enabled: false
+      # Bucket capacity and average refill rate, requests per rolling minute, per acting principal
+      # (docs/plans/active/SCALE-100-PLAN.md §5 S6 item 3). 600 (10/s sustained, burstable to a full
+      # minute's allotment) comfortably covers several browser tabs open under one identity — see
+      # RateLimitFilter.DEFAULT_PERMITS_PER_MINUTE's own javadoc for the sizing argument against
+      # §2.1's ~1 req/s-per-idle-tab measurement.
+      permits-per-minute: 600
+```
+
+Exact `@Bean` requested (mirrors `AuthWiringConfiguration`'s `@ConditionalOnProperty` shape for a
+seam that only sometimes exists):
+
+```java
+@Bean
+@ConditionalOnProperty(prefix = "vision.api.rate-limit", name = "enabled", havingValue = "true")
+public FilterRegistrationBean<RateLimitFilter> rateLimitFilter(
+        CurrentUser currentUser,
+        @Value("${vision.api.rate-limit.permits-per-minute:600}") int permitsPerMinute) {
+    FilterRegistrationBean<RateLimitFilter> registration =
+            new FilterRegistrationBean<>(new RateLimitFilter(currentUser, permitsPerMinute));
+    registration.addUrlPatterns("/api/*");
+    return registration;
+}
+```
+
+A plain `@Bean RateLimitFilter` (letting Spring Boot auto-register it at `LOWEST_PRECEDENCE` for
+every URL) works exactly as well — `shouldNotFilter` already scopes it to `/api/**` internally, so
+`addUrlPatterns("/api/*")` above is redundant belt-and-suspenders, not a requirement. Either shape
+satisfies the "runs after `springSecurityFilterChain`" ordering requirement documented on the class
+without any explicit `order(...)` call, since Boot's filter auto-registration default
+(`LOWEST_PRECEDENCE`) already sorts after Security's `-100`.
+
+**Named constants for S7** (`VisionApiProperties.java` reserved this wave — these are `static final`
+fields on `RateLimitFilter` today, ready to lift into a new `.rateLimit()` nested record):
+- `RateLimitFilter.DEFAULT_PERMITS_PER_MINUTE` = 600 → `vision.api.rate-limit.permits-per-minute`
+  **(done — the field was made `public` so `VisionApiProperties.RateLimit` defaults from it rather
+  than repeating the number)**
+- `RateLimitFilter.BUCKET_EVICTION_MILLIS` = 600_000 (10 min) — sweep cadence, no plan-listed key;
+  candidate `vision.api.rate-limit.bucket-eviction` if S7 wants it tunable
+- `RateLimitFilter.BUCKET_IDLE_MILLIS` = 600_000 (10 min) — idle-before-eviction threshold, same
+  candidate-key note as above
+
+**Before/after** (`./mvnw -B -pl station/vision-api test`, counts from Maven's own summary line):
+**602 → 614** (+12: 9 in the new `RateLimitFilterTest`, 3 in the new `TokenBucketTest`). Zero
+pre-existing files touched, zero assertions edited — confirmed by running the suite once with the
+new `ratelimit/` package stashed out (`git stash -u`) and once with it restored, both green.
+
+**Acceptance bar met**: `returns429OnBreach` proves a `429` on breach with the limit as a
+constructor parameter (the future `application.yaml`-bound property); `doesNotThrottleTheLiveStreamOrItsTopicsEndpoint`
+proves `/api/live`/`/api/live/{id}/topics` bypass the bucket entirely (a one-permit budget survives
+20 consecutive requests); `evictsOnlyBucketsIdlePastTheWindow` proves the eviction sweep is
+per-bucket-idle, not a blanket clear.
+
+**Docker**: not run — this wave is pure in-JVM unit tests (`MockHttpServletRequest`/
+`MockHttpServletResponse` + Mockito), no Postgres/Testcontainers dependency.
+
+**Deferred, out of this wave's exclusive scope**: the frontend pollers (§5 S6 items 1/2,
+`station/vision-web/**`, a different agent); wiring the `@Bean`/`application.yaml` keys above
+(orchestrator); lifting the three named constants into `VisionApiProperties` (S7).
+
+## docs/plans/active/SCALE-100-PLAN.md §5 S7 done (finishing the properties extraction)
+
+`HlsProxyController` and `LiveUpdateRegistry` both already had a same-shaped `VisionApiProperties.HlsProxy`/`.Live` nested record sitting in `support/VisionApiProperties.java` since Wave B (docs/plans/active/LAYERING-REFACTOR-PLAN.md) — but neither class had actually been rewired to read it; both still carried their own `private static final` timing/sizing constants. This wave finishes that extraction, plus wires two new S2/S5-introduced knobs (`send-timeout`, and a `map-buffer` rename from the stale `marks-buffer`) that never got a config key. `com.drones.vision.api.support.VisionApiProperties` itself was mid-migration when this wave started (the `HlsProxy`/`Live` records already carried `errorBodyPreviewMaxChars`/`maxRedirectHops` and `mapBuffer`/`sendTimeout`/`bufferEviction`) — this wave's own work was entirely the two controllers' constructors, `PublishWiring`'s two new `@Bean` methods, and `application.yaml`.
+
+**`HlsProxyController`**: `CONNECT_TIMEOUT`/`REQUEST_TIMEOUT`/`ERROR_BODY_PREVIEW_MAX_CHARS`/`MAX_REDIRECT_HOPS` (S1's own deferred task 4) all became instance fields (`connectTimeout` folds into the constructed `HttpClient`'s own builder rather than being stored, since nothing reads it back after `build()`). New `@Autowired` 2-arg constructor (`URI`, `VisionApiProperties.HlsProxy`); the existing 1-arg constructor became a package-private test seam defaulting to `VisionApiProperties.HlsProxy.defaults()`, so all 11 pre-existing `HlsProxyControllerTest` cases needed zero changes.
+
+**`LiveUpdateRegistry`**: `COALESCE_MILLIS`/`HEARTBEAT_MILLIS`/`TELEMETRY_BUFFER_CAPACITY`/`EVENT_BUFFER_CAPACITY`/`MAP_BUFFER_CAPACITY` map straight onto `Live`'s matching fields; `CONNECTION_WRITE_TIMEOUT_MILLIS` (S2) → `Live.sendTimeout()`; a new `Live.bufferEviction()` field replaces `BUFFER_EVICTION_MILLIS` (S2, previously undocumented as a config candidate); `DETECTION_EVENT_BUFFER_CAPACITY` → `Live.detectionBuffer()`. Two of those eight names stayed `static final` — `DETECTION_EVENT_BUFFER_CAPACITY` and `CONNECTION_WRITE_TIMEOUT_MILLIS` — because `LiveUpdateRegistryTest` (same package) references them by name outside any instance; both are now derived (`VisionApiProperties.Live.defaults().detectionBuffer()`/`.sendTimeout().toMillis()`) rather than a second hand-copied literal, so they cannot drift from the real default. The five `LiveRingBuffer` fields whose capacity now comes from a constructor parameter (`eventBuffer`/`detectionEventsBuffer`/`mapBuffer`) moved from field initializers to constructor-body assignment — a field initializer runs before any constructor-body assignment, so a capacity sourced from `live.eventBuffer()` couldn't be read from one; `fleetBuffer`/`devicesBuffer` (fixed `capacity=1`, latest-only, never configurable) kept their inline initializers. `FLEET_COALESCE_WINDOW_NANOS` (derived from `COALESCE_MILLIS`) became an instance field `fleetCoalesceWindowNanos`, computed once in the constructor from `coalesceMillis`, for the same reason.
+
+Constructor shape grew from two overloads to four, all funneling into one real implementation:
+- `LiveUpdateRegistry(5 collaborators, VisionApiProperties.Live live)` — new `@Autowired` production constructor. `live` is a settings bundle, not a collaborator, so it carries none of the other five parameters' circular-bean-dependency risk and needs no `ObjectProvider` wrapper.
+- `LiveUpdateRegistry(5 collaborators)` — the old public production constructor, kept as a legacy overload defaulting to `VisionApiProperties.Live.defaults()`. Necessary because `LiveControllerTest`/`LiveMapScopingTest` (package `com.drones.vision.api.controller`, a different package) construct this class directly and can only reach a `public` constructor — not a candidate for a package-private test seam.
+- `LiveUpdateRegistry(5 collaborators, ScheduledExecutorService scheduler)` — the pre-existing package-private test seam, **signature unchanged**, now defaulting `live` too. `LiveUpdateRegistryTest`'s `registry()` helper (the one call site) needed zero changes.
+- `LiveUpdateRegistry(5 collaborators, VisionApiProperties.Live live, ScheduledExecutorService scheduler)` — new package-private "full" constructor every other overload delegates to; the one place fields are actually assigned and the three `scheduleAtFixedRate` calls happen.
+
+**The `dispatch-threads` decision (surveyed before implementing, per the task brief's explicit instruction)**: `connectionWriteExecutor` is `Executors.newVirtualThreadPerTaskExecutor()` (S2) — one platform-scheduled virtual thread per submitted write, with no pool-size/thread-count concept to configure at all. There is no bound a `dispatch-threads` setting could honestly mean against that executor type; offering the key would mean reading, storing, and silently ignoring it, which is worse than no knob. **Not implemented.** The reasoning is documented in three places that will stay in sync with the code: the field's own javadoc in `LiveUpdateRegistry.java`, this file's `com.drones.vision.api.live` API-surface subsection above, and `application.yaml`'s own comment block. The key becomes honest, and should be added, only if this executor is ever swapped for a bounded platform `ThreadPoolExecutor` — a decision for whichever wave makes that swap, not this one.
+
+**`marks-buffer` → `map-buffer` rename**: the config field name was never updated when `LiveTopicKind.MARKS`/`LiveTopic.MARKS` were renamed to `MAP` and re-scoped (docs/plans/done/MAP-REWORK-PLAN.md §4.3, Wave C) — `VisionApiProperties.Live` still carried `marksBuffer` until this wave. Verified safe to rename (no test or production reference to the old field/key name existed outside `support/VisionApiProperties.java`/`app.config.properties.VisionApiProperties`/`application.yaml` themselves) before renaming.
+
+**New endpoint shapes**: none — this wave adds zero wire-visible surface. Every change is internal wiring; `HlsProxyController`'s HTTP contract and every `LiveUpdateRegistry`-backed SSE envelope shape are byte-identical to before.
+
+**New tests** (both additive, proving the wiring is live, not just stored): `HlsProxyControllerTest#configuredMaxRedirectHopsBoundsTheHandFollowedRedirectLoop` — an upstream that redirects forever, constructed with `maxRedirectHops=1`, still gets a 502 (rather than following the old hardcoded 5). `LiveUpdateRegistryTest#configuredTelemetryBufferCapacityActuallyBoundsTheRingBufferSize` — constructed via the new full constructor with `telemetryBuffer=2`, three separate coalesced flushes for one asset leave exactly 2 envelopes buffered, not the old default of 50.
+
+**Before/after** (`./mvnw -B -pl storage/persistence,contexts/vision-perception,station/vision-api,station/vision-app -DskipWeb test`, counts from Maven's own `Tests run:` summary line, never summed from surefire XML reports — that directory keeps stale reports for renamed/removed classes until a `clean`): `storage/persistence` **157 → 157** (unchanged), `contexts/vision-perception` **494 → 494** (unchanged), `station/vision-api` **614 → 616** (+2, the two new tests above; zero pre-existing assertions edited), `station/vision-app` **195 → 195** (unchanged) — the default-config acceptance bar this wave's task brief pins ("the default-config suites stay 100% green") is met exactly: identical counts everywhere except the two new tests that were added on purpose, and the whole scoped build is green end to end.
+
+**Docker**: ran, not skipped — `storage/persistence`'s `PostgresDockerIntegrationTest` (157 tests, every nested `@Nested` nested class) executed against a real Testcontainers Postgres, not the docker-unavailable skip path.
+
+**Deferred, out of this wave's scope**: `AssetImageController`'s upload cap and the per-controller paging defaults (e.g. `ActivityController.DEFAULT_LIMIT`) remain unwired to `VisionApiProperties.Paging`/`.Upload` — those two records were never part of this wave's named-constants list and needed no new field additions, so leaving them was a scope decision, not an oversight; `support/VisionApiProperties.java`'s own "Wiring status" javadoc paragraph already flagged this gap correctly.

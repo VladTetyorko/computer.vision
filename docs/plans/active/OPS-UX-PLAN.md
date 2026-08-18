@@ -142,6 +142,22 @@ Wave D writes **no product code and no tests.**
 
 ## 5b. Wave E — the synthetic dev group  *(proposal, not yet approved)*
 
+> **Item (1) below is done, via a different mechanism than proposed — flag before picking this wave
+> back up.** docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 (station/vision-app + storage/persistence,
+> merged to `fix/postgres-only-auth`) independently found this exact bug and fixed it: `AuthSeedRunner`
+> is **deleted** (not given a `GroupService` explicit-id parameter — Option A's outcome, a different
+> route to it), and `storage/persistence`'s `V13__identity_baseline.sql` now seeds the root group at
+> the well-known `DevPrincipal.GROUP_ID` directly via a Flyway migration (`ON CONFLICT (id) DO
+> NOTHING`), which sidesteps Option B's rejected boot-ordering dependency for free — the seed is data,
+> not something wiring waits on. **Items (2)–(4) are still open**: nothing in W1 reconciles a station
+> whose Postgres already carries a stale random-id root group from a pre-W1 run (that row and its
+> orphaned assets are simply left alongside the new fixed-id one — `ON CONFLICT` only prevents a
+> *second* problem, it does not repair the first one), no regression test asserts "an asset created
+> with auth off is visible to a MANAGER of root after auth is enabled" end-to-end, and
+> `contexts/vision-identity/MODULE.md` was not touched (the fix lived entirely in the schema/seed
+> layer, not identity's domain code). See storage/persistence/MODULE.md's and station/vision-app/MODULE.md's
+> own "POSTGRES-ONLY-CONTEXT.md W1 done" sections for the full account.
+
 Wave A surfaced this as a cosmetic annoyance: with auth off, the new "Who flies this?" step finds
 zero pilot candidates. The cause is worse than the symptom.
 
