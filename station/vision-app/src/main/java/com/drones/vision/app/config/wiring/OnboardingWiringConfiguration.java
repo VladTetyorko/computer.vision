@@ -20,6 +20,7 @@ import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -85,13 +86,19 @@ public class OnboardingWiringConfiguration {
                 TelemetryWiring.toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties));
     }
 
-    /** The PROBE stage (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1) — behind {@code OnboardingController}. */
+    /**
+     * The PROBE stage (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1) — behind {@code
+     * OnboardingController}. Takes {@link AssetUsageRepositoryPort} (O11) because a flight passport
+     * must resolve for an <em>old</em> flight: membership is proven from the usage's own
+     * {@code assetId} rather than from the asset's capped recent-usages window.
+     */
     @Bean
     public VehicleProfileService vehicleProfileService(AssetService assetService, VehicleConfigPort vehicleConfigPort,
                                                          VehicleProfileRepositoryPort vehicleProfileRepositoryPort,
+                                                         AssetUsageRepositoryPort assetUsageRepositoryPort,
                                                          AuditTrailPort auditTrailPort) {
         return new DefaultVehicleProfileService(assetService, vehicleConfigPort, vehicleProfileRepositoryPort,
-                auditTrailPort);
+                assetUsageRepositoryPort, auditTrailPort);
     }
 
     /**
