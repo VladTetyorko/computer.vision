@@ -78,9 +78,9 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 
 ## API surface
 
-**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (the 17
-`Jpa*Repository`/`Jpa*Store` port implementations, up from 15 — docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 added
-`JpaAuditTrail`/`JpaDetectionEventRepository`), `mapper/` (16 entity↔domain mapper classes,
+**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (21
+`Jpa*Repository`/`Jpa*Store` port implementations, up from 19 — docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 added
+`JpaVehicleProfileRepository`/`JpaFeatureRequirementRepository`), `mapper/` (20 entity↔domain mapper classes,
 one per aggregate — extracted out of the repositories that used to inline `toEntity`/`toDomain` as
 private static methods), `config/` (`PersistenceUnit`, `JpaOperations`), `entity/` (unchanged, see
 below). This module gets no `controller/`, `dto/`, or `service/` package — it is a driven adapter.
@@ -105,6 +105,8 @@ below). This module gets no `controller/`, `dto/`, or `service/` package — it 
 - `final class JpaSampleImageStore implements SampleImageStorePort` — constructor `(EntityManagerFactory)`. docs/plans/done/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the `JpaAssetImageRepository` shape, verbatim, reused for training-sample frames; `save` is merge-by-`sampleId` (upsert).
 - `final class JpaAuditTrail implements AuditTrailPort` — constructor `(EntityManagerFactory)`. docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — the durable audit trail; `record` always `persist`s a brand-new row (never `merge`s — entries are immutable historical facts per the port's own contract, and `id` is the domain's own `AuditId`, not synthetic). `findRecent`/`findByTarget`/`findByActor` share one JPQL shape (an optional `WHERE`, `order by occurredAt desc`, bounded by `limit`). No retention pruning — see Retention below. **Wired into `vision-app` since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b**: `ApplicationServiceWiring#auditTrailPort` builds this unconditionally (there is no `vision.persistence.enabled` branch left, and no `InMemoryAuditTrail` left to fall back to), wrapped in `LiveUpdateAuditTrail` when `vision.live.enabled=true`.
 - `final class JpaDetectionEventRepository implements DetectionEventRepositoryPort` — constructor `(EntityManagerFactory)` or `(EntityManagerFactory, int retentionLimitPerStream)`, same shape as `JpaDetectionRepository`. docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — debounced detection events (docs/plans/done/MVP2-PLAN.md §E, E-a); unlike `JpaDetectionRepository`'s always-`persist` rows, `save` is a genuine upsert (`merge`-by-id) — a `DetectionEvent` mutates over its own open lifetime, matching the deleted `InMemoryDetectionEventRepository`'s remove-then-re-add-by-id semantics. **Wired into `vision-app` since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b**: `ApplicationServiceWiring#detectionEventRepositoryPort` builds this unconditionally, wrapped in `LiveUpdateDetectionEventRepository` when `vision.live.enabled=true` — same deferred-then-closed wiring status as `JpaAuditTrail` above.
+- `final class JpaVehicleProfileRepository implements VehicleProfileRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 — `save` always `persist`s a brand-new row (append-only, `VehicleProfile` carries no id to merge by — see `VehicleProfileEntity`'s own javadoc); `findLatest(DeviceId)` is `order by observedAt desc` + `setMaxResults(1)`, same "newest row" shape as `JpaAssetRepository`/`JpaAssetUsageRepository`'s own single-row-latest queries.
+- `final class JpaFeatureRequirementRepository implements FeatureRequirementRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6 — **read-only**: the port has no `save` method at all, every row is Flyway seed data (`V18__feature_requirements.sql`), never written by application code. `findByFirmware`/`findAll` are plain JPQL selects.
 
 Every repository above composes a `com.drones.vision.adapter.persistence.config.JpaOperations`
 (one constructor argument, the module's `EntityManagerFactory`) and, except
@@ -126,12 +128,16 @@ JPA/transaction plumbing that stayed in `repository`).
 `CategoryMapper`, `DeviceMapper`, `AssetMapper`, `AssetUsageMapper`, `TelemetryMapper`,
 `DetectionResultMapper`, `AssetImageMapper`, `GeofenceZoneMapper`, `UserMapper`, `GroupMapper`,
 `MarkMapper`, `DatasetMapper`, `TrainingSampleMapper`, `SampleImageMapper`, `MapLayerMapper`,
-`DrawingMapper`, `AuditEntryMapper`, `DetectionEventMapper` — 18 mappers (up from 16,
-docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3), one per aggregate the module's 19 repositories cover. `TelemetryMapper#toEntity`/`DetectionResultMapper#toEntity`
+`DrawingMapper`, `AuditEntryMapper`, `DetectionEventMapper`, `VehicleProfileMapper`,
+`FeatureRequirementMapper` — 20 mappers (up from 18, docs/plans/active/DRONE-ONBOARDING-PLAN.md O5),
+one per aggregate the module's 21 repositories cover. `TelemetryMapper#toEntity`/`DetectionResultMapper#toEntity`
 take the extra argument (`UsageId`, or none) their entities' synthetic id generation needs;
 `AssetImageMapper#toEntity`/`SampleImageMapper#toEntity` each take the owning id (`AssetId`/
 `TrainingSampleId`) plus the domain value object, matching the shape `JpaAssetImageRepository`/
-`JpaSampleImageStore`'s `save(id, value)` port methods already have.
+`JpaSampleImageStore`'s `save(id, value)` port methods already have. `VehicleProfileMapper#toEntity`
+takes the extra `DeviceId` argument its entity's FK column needs (same shape as `TelemetryMapper`);
+`FeatureRequirementMapper#toEntity` derives the synthetic `"<firmware>:<featureKey>"` id inline, no
+extra argument needed since both halves already live on the domain record.
 
 **No `AssignmentMapper`** — `JpaAssignmentRepository`, is deliberately
 excluded. `AssignmentEntity` is a bare join row with no corresponding domain aggregate (there is no
@@ -152,6 +158,7 @@ creating. Flagged here rather than silently decided, per this wave's brief.
 - `TelemetrySampleEntity`/`DetectionResultEntity` have a synthetic UUID `id` the adapter invents at save time (`UUID.randomUUID()` in each repository's `toEntity`) — `Telemetry`/`DetectionResult` themselves carry no identity of their own (append-only samples/results, not aggregates), so there is nothing domain-side to derive a primary key from; the id never surfaces back through the ports.
 - `TelemetrySampleEntity#flightState` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b, `V6__telemetry_flight_state.sql`) is a nullable `FlightState` field, `@JdbcTypeCode(SqlTypes.JSON)`/`columnDefinition = "jsonb"` — the domain record stored **directly**, exactly the `DetectionResultEntity#detections` precedent noted in Conventions below (a plain immutable record tree, no persistence-local wrapper type needed). `null` covers both "sample pre-dates this column" and "device reported no flight-controller state at all"; both round-trip as `Telemetry#flightState() == null`, the same nullable-9th-component contract the domain record itself defines — there is no way to tell the two cases apart from this column alone, and nothing needs to.
 - `AssetUsageEntity#streamId` (docs/plans/done/MVP2-PLAN.md R-a2, `V4__usage_stream_id.sql`) is a nullable `UUID` column, mapped straight through by `JpaAssetUsageRepository` (`streamId == null ? null : streamId.value()` / `new StreamId(...)`) exactly like every other nullable field on this entity — no special-casing beyond the null check.
+- `AssetUsageEntity#phase` (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O5/O7, `V19__asset_usage_phase.sql`) reuses the domain `UsagePhase` enum directly in an `@Enumerated(EnumType.STRING)` field, same convention `GeofenceZoneEntity#kind`/`MarkEntity#kind` follow. `AssetUsageMapper` always writes a real value on `toEntity` (`AssetUsage#phase()` is non-null by construction) and, on `toDomain`, maps a `null` column (a row saved before this column existed) onto `AssetUsage`'s own pre-O7 8-arg convenience constructor, which defaults to `UsagePhase.PREFLIGHT` — the same "unknown, not fabricated" honesty `streamId` above already practices. **Fixed a real bug during this wave**: the column shipped schema-only in V19 with no entity field at all, so a phase `UsageTracker` (vision-perception) had actually computed and saved was silently discarded on every reload, always reading back `PREFLIGHT` regardless of what was saved — caught before merge by a cross-wave report from O7, not by this wave's own original test suite (see `AssetUsageRepositoryTests#savedUsageWithANonDefaultPhaseRoundTripsExactly`/`#saveIsAnUpsertThatCanTransitionPhase`/`#legacyRowWithNullPhaseColumnMapsToPreflightDefault`, Tests below). `first_armed_at`/`last_disarmed_at` (V19's other two additive columns) stay unmapped — `AssetUsage` does not carry those two fields as of Wave O7, only `phase`.
 - `AssetImageEntity` (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, `V5__asset_images.sql`) is keyed by `assetId` itself, **not** a synthetic id like `TelemetrySampleEntity`/`DetectionResultEntity` above — there is at most one image per asset and `save` is always an upsert, so the primary key doubles as the "one row per asset" constraint with no separate unique index needed. `data` is a plain `byte[]` field (Hibernate's default mapping to Postgres `bytea`, no `@Lob`/converter needed) — the first non-jsonb, non-text binary column in this module's schema.
 - `GeofenceZoneEntity` (docs/plans/done/OPS-CORE-PLAN.md §G, G-b, `V7__geofence_zones.sql`) mirrors `GeofenceZone` field-for-field: `id` is the domain's own `ZoneId` (not synthetic — a zone has real identity, unlike `Telemetry`/`DetectionResult`), `kind` reuses the domain `ZoneKind` enum directly in an `@Enumerated(EnumType.STRING)` field (same "domain enums reused directly" convention `Capability`/`LifecycleState` already follow), `polygon` stores the whole `List<GeoPosition>` as one jsonb column (same mechanism/rationale as `DetectionResultEntity#detections` — a plain immutable record list Jackson serializes natively, only ever read back whole), `maxAltitudeMeters` a nullable `Double`, `enabled` a plain `boolean`. No FK to any other table — zones are global reference data with no relationship to assets/devices.
 - `AssignmentEntity` (docs/plans/done/U-SCOPE-PLAN.md slice 2, `V9__pilot_assignments.sql`) is a plain join row — a pilot→asset link with **no synthetic id**: its primary key is the composite (`pilot_user_id`, `asset_id`) via `@IdClass(AssignmentId.class)`. `AssignmentId` is a plain mutable class with a public no-arg ctor + matching field names (JPA's `@IdClass` contract — a record cannot satisfy it). The composite PK doubles as the uniqueness constraint that makes `assign` an idempotent upsert with no duplicate rows. The table also has an unmapped `assigned_at` bookkeeping column (Hibernate `validate` tolerates DB columns the entity does not map). No FK to `users`/`assets`, same convention as every other table here.
@@ -165,6 +172,8 @@ creating. Flagged here rather than silently decided, per this wave's brief.
 - `UserEntity`/`GroupEntity` (docs/plans/done/U-AUTH-PLAN.md wave 3, `V8__users_groups.sql`) mirror `User`/`Group` field-for-field. `UserEntity#id` is the domain's own `UserId` (not synthetic — a user has real identity); `username` carries a `UNIQUE` constraint and is stored already-lower-cased (the domain `User` normalizes it), so `findByUsername` is an exact match on the stored value after lower-casing the lookup key. **`UserEntity#memberships` stores the whole `List<Membership>` as one jsonb column** (`@JdbcTypeCode(SqlTypes.JSON)`) — same mechanism/rationale as `GeofenceZoneEntity#polygon`/`DetectionResultEntity#detections`: `Membership` (with its nested `GroupId`/`Role`) is a plain immutable record Jackson 3 serializes natively, and memberships are only ever read back whole with the aggregate, so no normalized join table (docs/plans/done/U-AUTH-PLAN.md picked jsonb over a join table for exactly this "saved whole with the User" reason). `GroupEntity#parentId` is a nullable `UUID` (null = root group). No FK on either table (not `groups.parent_id`, not any user→group link) — same "no cross-entity foreign keys" convention as every other table here, keeping parity with the in-memory reference repos that do no referential checks.
 - `AuditEntryEntity` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3, `V14__audit_trail.sql`) mirrors `AuditEntry` field-for-field: `id` is the domain's own `AuditId` (not synthetic — every entry has real identity); `action`/`targetType` reuse the domain `AuditAction`/`AuditTargetType` enums directly (`@Enumerated(EnumType.STRING)`, same convention as `GeofenceZoneEntity#kind`); `details` stores the whole free-form `Map<String,String>` as jsonb, same mechanism as `CategoryEntity#attributeHints`. No FK to `users` or to any target table — more than convention here: an entry must stay resolvable even after its actor's account or its target row is gone (see the migration's own header comment).
 - `DetectionEventEntity` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3, `V15__detection_events.sql`) mirrors `DetectionEvent` field-for-field: `id` is the domain's own `DetectionEventId` (not synthetic — unlike `DetectionResultEntity`, an event mutates over its own open lifetime and needs a stable key to upsert by). `position` is a single, entirely-optional `GeoPosition`, flattened to nullable `position_latitude`/`position_longitude`/`position_altitude_meters` columns exactly like `AssetUsageEntity#startPosition`/`#lastPosition` (a lat/lon pair is null together iff the position itself is null) — the deliberate opposite of `GeofenceZoneEntity#polygon`'s jsonb choice for a whole vertex list. `state` reuses the domain `DetectionEventState` enum directly. No FK to any other table; `(stream_id, last_seen)` and `last_seen` alone are both indexed (`findByStream`/the retention prune query, and `findRecent`, respectively).
+- `VehicleProfileEntity` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5, `V17__vehicle_profiles.sql`) mirrors `VehicleProfile` field-for-field: `id` is a synthetic UUID (append-only observation, no domain identity — same rationale as `DetectionResultEntity`/`TelemetrySampleEntity`); `deviceId` is the FK the port's own `save(DeviceId, VehicleProfile)`/`findLatest(DeviceId)` key on, same "key lives in the port call, not a domain field" idiom as `TelemetrySampleEntity#usageId`. `capabilityFlags`/`messages`/`parameters` are jsonb — each row is only ever read back whole, never queried into by individual message/parameter, same convention as `DetectionResultEntity#detections`. Indexed on `(device_id, observed_at DESC)` for `findLatest`'s "newest row for this device" query.
+- `FeatureRequirementEntity` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6, `V18__feature_requirements.sql`) mirrors `FeatureRequirement` field-for-field: `id` is a synthetic `"<firmware>:<featureKey>"` natural key this entity invents purely for a JPA primary key — the domain record carries no id field, but unlike `DetectionResultEntity`'s random-UUID precedent (a genuinely identity-less append-only record), a requirement row is reference data addressed by its own natural composite key, so a stable human-readable id lets the seed migration use `ON CONFLICT (id) DO NOTHING`, the same role `CategoryEntity`'s natural string id plays for `categories`. **Read-only**: the port has no `save` method — every row is seed data written by Flyway (`V18`), never by application code. No FK to any other table (reference/global data, same convention as `geofence_zones`/`categories`); indexed on `firmware` (`findByFirmware`'s access path).
 
 ## Schema (`src/main/resources/db/migration`)
 
@@ -225,6 +234,10 @@ creating. Flagged here rather than silently decided, per this wave's brief.
   exactly one row. Touches only `groups.parent_id`/`groups.name` for the single fixed-id row —
   rewrites no `users` row, no `memberships` jsonb, no asset/mark/layer ownership column, deletes
   nothing.
+
+- `V17__vehicle_profiles.sql` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5) — `vehicle_profiles` (`id` UUID PK, synthetic; `device_id` UUID `NOT NULL` — the FK `save(DeviceId, VehicleProfile)`/`findLatest(DeviceId)` key on, no actual foreign-key constraint, same convention as every other table here; `link_key` varchar `NOT NULL`; `observed_at` timestamptz `NOT NULL`; `sysid` nullable integer; `firmware`/`firmware_version`/`vehicle_kind` nullable varchar; `capability_bitmask` nullable bigint; `capability_flags`/`messages`/`parameters` jsonb `NOT NULL DEFAULT '[]'`; `link_bytes_per_second` nullable bigint; `complete` boolean `NOT NULL`; `incomplete_reason` nullable varchar(500)). New table, purely additive over V1-V16, no FK. Indexed on `(device_id, observed_at DESC)` for the "newest row for this device" query `findLatest` runs.
+- `V18__feature_requirements.sql` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6) — `feature_requirements` (`id` varchar(160) PK — the synthetic `"<firmware>:<featureKey>"` natural key; `feature_key`/`label`/`firmware` varchar `NOT NULL`; `required_message_id` nullable integer; `required_message_name` nullable varchar(64); `minimum_hz` nullable double precision; `required_parameter_name` nullable varchar(64)). New table, purely additive over V1-V17, no FK — reference/global data, same convention as `geofence_zones`/`categories`. Indexed on `firmware`. **Seeds eleven rows, `firmware='ardupilot'` only** (D13: PX4 is "generic MAVLink, unverified" until a PX4 SITL run proves otherwise — a firmware with zero rows is a correct answer, not an omission bug, per O3's own `ReadinessService` contract). Message ids verified against pymavlink's `common.xml`, not memory (`HEARTBEAT=0`, `SYS_STATUS=1`, `GPS_RAW_INT=24`, `ATTITUDE=30`, `GLOBAL_POSITION_INT=33`, `RC_CHANNELS=65`, `VFR_HUD=74`). Only two of the eleven rows carry a plan-given threshold (docs/conclusions/ANY-DRONE-PLAN.md §S1.2): `map-position` (`GLOBAL_POSITION_INT >= 2.0 Hz`) and `visual-geolocation` (`ATTITUDE >= 5.0 Hz`); the other five message-bearing rows (`preflight-checks`, `ground-speed`, `link-quality`, `failsafe-banners`, `battery`) got **no** plan-given number and were seeded at a **judgment-call 1.0 Hz floor** (the MAVLink stream-rate convention a healthy link clears easily; ArduPilot's own `SRx_*` defaults sit at or above it) — flagged here for whoever tunes it later. `fleet-identity` is parameter-only (`SYSID_THISMAV`); `command-tx`/`rc-relay`/`video-ingest` are "neither" rows (capability-bitmask- or non-MAVLink-driven, trivially satisfied once they exist, per `FeatureRequirement`'s own javadoc). **Two known representation gaps, deliberately left as gaps rather than smuggled into an existing column**: ANY-DRONE §S1.2 also lists `STATUSTEXT` as required for `preflight-checks` alongside `GPS_RAW_INT`, but this table models exactly one message per row (and the wire's own `{featureKey: status}` map has no room for two rows under one key either) — `GPS_RAW_INT` was kept as the modeled signal, `STATUSTEXT` is not independently checked. And the battery row only expresses "is `SYS_STATUS` arriving at all", not the 45%-low-battery bar ANY-DRONE §S8.1 also names — `FeatureRequirement` has no field to carry a percentage threshold (only `minimumHz`/`requiredParameterName`), so that number cannot be represented in this table as it stands today.
+- `V19__asset_usage_phase.sql` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5, D1/D2) — `ALTER TABLE asset_usages ADD COLUMN phase VARCHAR(20), ADD COLUMN first_armed_at TIMESTAMPTZ, ADD COLUMN last_disarmed_at TIMESTAMPTZ` — all three nullable, no backfill, same "unknown, not fabricated" discipline as `V6__telemetry_flight_state.sql`'s `flight_state` column. **Updated after O7 merged**: the migration originally shipped schema-only, deferring `phase` to O7 (`contexts/vision-warehouse`, running concurrently in a separate worktree) per the plan's module-placement table. O7 landed `AssetUsage`'s 9th component — `UsagePhase phase()` — but not `firstArmedAt()`/`lastDisarmedAt()`; those two fields don't exist on the domain record yet. This wave (O5) ended up owning the wiring after all: `AssetUsageEntity#phase`/`AssetUsageMapper` now map `phase` in both directions (see the entity's own field-bullet above and Tests below) — a cross-wave report caught that the column had gone live with no reader/writer, silently reverting every reload to `PREFLIGHT`. `first_armed_at`/`last_disarmed_at` remain schema-only, deliberately, still waiting on their domain fields.
 
 ### `src/main/resources/db/seed/dev` — a second, conditional Flyway location
 
@@ -398,12 +411,21 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   incl. ownership/attributes/devices round trip, `findByDeviceId` found/not-found, idempotent
   delete, lifecycle-state-preserving upsert) — every P-a port method, upsert semantics,
   empty-`Optional` contract for unknown ids.
-- `@Nested AssetUsageRepositoryTests` (9, up from 7 — docs/plans/done/MVP2-PLAN.md R-a2) — open/closed usage
+- `@Nested AssetUsageRepositoryTests` (12, up from 9 — docs/plans/done/MVP2-PLAN.md R-a2,
+  docs/plans/active/DRONE-ONBOARDING-PLAN.md O5) — open/closed usage
   round trip (incl. null-position open usage and full-position closed usage), a
   `null`-`streamId` usage round-tripping as `null` and a `streamId`-carrying usage round-tripping
   exactly, upsert-that-closes-an-open-usage (now also asserting the recorded `streamId` survives
   the close/upsert), `findRecentByAsset` newest-first + bounded by limit, `findOpenByAsset`
-  found/not-found.
+  found/not-found — plus three new `phase` cases:
+  `savedUsageWithANonDefaultPhaseRoundTripsExactly` (`UsagePhase.IN_FLIGHT` round trip end to end),
+  `saveIsAnUpsertThatCanTransitionPhase` (re-saving the same id with a different phase overwrites
+  it, proving the upsert covers `phase` too, not just the fields P-a already had), and
+  `legacyRowWithNullPhaseColumnMapsToPreflightDefault` (native SQL forces the `phase` column back
+  to `null` — the mapper itself can never write `null` since `AssetUsage#phase()` is non-null by
+  construction — then reloads through the repository port and asserts the fallback is
+  `UsagePhase.PREFLIGHT`, guarding against the exact regression this wave shipped and then fixed:
+  a phase `UsageTracker` had actually computed and saved being silently discarded on reload).
 - `@Nested TelemetryRepositoryTests` (10, up from 7 — docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) — round trip
   with every field populated and with only the required fields, per-usage isolation,
   `findByUsageReturnsEarliestSamplesFirstUpToLimit` — proves `findByUsage`'s limit selects the
@@ -1409,3 +1431,57 @@ skipped); every nested class, including the three new batching cases, actually r
 **Deferred / left for the orchestrator:** the wiring bullets above (`PersistenceWiringConfiguration`,
 `ApplicationServiceWiring`, `VisionPersistenceProperties`), all outside this task's file scope. Nothing
 else from the S4 brief was left undone.
+
+## docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 done (vehicle profile, readiness, remediation — persistence half)
+
+Two brand-new repository ports (thirteenth/fourteenth): `VehicleProfileEntity`/`JpaVehicleProfileRepository`
+(`VehicleProfileRepositoryPort`, append-only, `V17__vehicle_profiles.sql`) and `FeatureRequirementEntity`/
+`JpaFeatureRequirementRepository` (`FeatureRequirementRepositoryPort`, read-only reference data seeded by
+`V18__feature_requirements.sql`), plus `V19__asset_usage_phase.sql` adding `phase`/`first_armed_at`/
+`last_disarmed_at` to `asset_usages` (see the Schema section entries above for all three migrations'
+full column-level detail, and the `entity`/`Tests` sections above for `VehicleProfileEntity`/
+`FeatureRequirementEntity`'s own bullets and `VehicleProfileRepositoryTests`/`FeatureRequirementRepositoryTests`).
+Registered in `PersistenceUnit`; wired into vision-app behind `vision.persistence.enabled` exactly like
+every other port here (see station/vision-app/MODULE.md for `PersistenceWiringConfiguration#vehicleProfileRepositoryPort`/
+`#featureRequirementRepositoryPort` and station/vision-api/MODULE.md for the REST surface).
+
+**A real bug caught and fixed mid-wave, not by this wave's own original tests**: `V19` originally
+shipped schema-only, on the (correct at the time) assumption that O7 (`contexts/vision-warehouse`,
+a concurrent worktree) would land `AssetUsage#phase()`/`#firstArmedAt()`/`#lastDisarmedAt()` and own
+wiring the column. O7 landed `phase` only, then reported that `AssetUsageEntity`/`AssetUsageMapper`
+mapped nothing to it — every reload silently reverted a `UsageTracker`-computed phase back to
+`PREFLIGHT`. Fixed in this module: `AssetUsageEntity` gained an `@Enumerated(EnumType.STRING) phase`
+field reusing the domain `UsagePhase` enum directly (`GeofenceZoneEntity#kind` convention);
+`AssetUsageMapper` now writes it on `toEntity` and reads it on `toDomain`, falling back through
+`AssetUsage`'s pre-O7 8-arg constructor (defaults to `PREFLIGHT`) only for a genuinely `null` column
+(a pre-V19 row) — never for a value the mapper itself wrote. Three new tests prove the round trip,
+the upsert-transitions-phase case, and the legacy-null-defaults-to-PREFLIGHT fallback (see
+`AssetUsageRepositoryTests`, Tests above, for all three names). `first_armed_at`/`last_disarmed_at`
+stay unmapped — no domain field exists for either yet.
+
+`./mvnw -B -pl storage/persistence -am test`: **176/176 green**, run three consecutive times in the
+foreground (not backgrounded — a backgrounded run from earlier in this task died when the invoking
+turn ended, taking its result with it) against a real `postgres:16` Testcontainers instance every
+time, docker confirmed available, zero `[ERROR]`-prefixed lines in any of the three logs. `./mvnw -B
+-pl station/vision-api -am test`: **633/633 green** ×3. `./mvnw -B -pl station/vision-app -am test
+-DskipWeb`: **208/208 green** ×3, including `ArchitectureTest` 14/14, `ContextArchitectureTest` 4/4,
+and `OnboardingWiringTest` 3/3 — the flag-off guardrail: every pre-existing api/app test still passes
+unchanged with `vision.onboarding.probe.enabled` at its default `false`, and no bean of the real
+`VehicleConfigPort` shape exists when the flag flips `true` (a deliberate fail-fast until O4's
+implementation is wired — see station/vision-app/MODULE.md).
+
+**Plan defects found**: the frozen wire contract (§8.1) names `firstArmedAt`/`lastDisarmedAt` as
+`AssetUsage` fields; O7's actual implementation added only `phase`. The two DB columns exist
+(additive, harmless idle) but have no domain field to map to/from yet — deferred, not a bug in this
+wave's own scope. Also: the plan's module-placement table assigned `AssetUsage#phase` wiring to O7;
+in practice O5 (this wave) ended up owning the entity/mapper fix after O7 flagged the gap — worth
+correcting in the plan doc for future readers reconstructing wave ownership.
+
+**Also present post-merge, deliberately not wired by this wave**: `git merge feat/drone-onboarding`
+brought O4's `MavlinkVehicleConfigurator` (a real `VehicleConfigPort` implementation,
+`drone-link/mavlink`) into this worktree's tree. `OnboardingWiringConfiguration`'s
+`@ConditionalOnProperty(havingValue = "true")` branch still has no bean — wiring O4's real
+implementation in was outside this wave's ask and is flagged here as a follow-up, not silently done.
+
+**Deviations from the brief**: none, beyond the phase-mapper fix and merge described above, both
+explicitly requested mid-task.

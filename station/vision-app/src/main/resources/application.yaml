@@ -546,6 +546,25 @@ vision:
   #   max-override-hz: 50
   #   release-frames: 3
 
+  # --- Vehicle onboarding: probe / readiness / remediation (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1, Wave O5) ---
+  onboarding:
+    probe:
+      # false (default, D17): VehicleConfigPort has no real implementation wired
+      # (OnboardingWiringConfiguration falls back to NoopVehicleConfigPort) -- POST
+      # /api/onboarding/probe and every /api/assets/{id}/probe|remediate call 409 naming this flag,
+      # and readiness still answers from whatever was already probed (or UNKNOWN if never). true:
+      # requires adapter-mavlink's MavlinkVehicleConfigurator (O4) to actually be wired -- flipping
+      # this on before O4 lands fails application startup, deliberately (see
+      # OnboardingWiringConfiguration's own javadoc), rather than silently doing nothing.
+      enabled: false
+      # How long a PROBE listens to the link before summarizing the passive message inventory
+      # (VehicleConfigPort#probe's window argument). Commented out here to document the default
+      # rather than override it.
+      # inventory-window: 10s
+      # Per-request timeout for one REQUEST_MESSAGE/parameter read during a probe. Not yet threaded
+      # into any constructor in this module -- see VisionOnboardingProperties' own javadoc.
+      # request-timeout: 3s
+
   # --- CV model-improvement training loop (docs/plans/done/CV-TRAINING-PLAN.md, Wave T4; delta docs/plans/done/CV-TRAINING-V2-PLAN.md) ---
   training:
     # false (default): DatasetController/LabelingController/TrainingJobController and every training
