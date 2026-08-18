@@ -156,7 +156,8 @@ The one implementation of all five live-update ports (`FleetLiveUpdatePort`, `Te
   - `LiveUpdateRegistry(ObjectProvider<AssetService>, ObjectProvider<DeviceService>, ObjectProvider<StreamService>, StreamPublisherPort, ObjectProvider<DetectionEventRepositoryPort>, ScheduledExecutorService)` — package-private test seam: an injectable scheduler so a pure unit test can call `flushPending()`/`heartbeatAll()` directly and deterministically instead of waiting on the real ~150ms/15s timer ticks the production ctor schedules.
   - `SseEmitter connect(String topicsParam, Long lastEventId)` (public — called cross-package from `LiveController`) — registers a new connection (always subscribed to the implicit `fleet`/`event`/`devices`/`detection-events`/`marks` topics — the last three added by the backend follow-up batch and docs/plans/done/TACTICAL-MARKS-PLAN.md M4 respectively, see `LiveTopicKind` below — plus whatever `topicsParam` parses to), then **synchronously, on the calling thread**, sends the `connection` handshake event followed by a snapshot-or-resume burst per subscribed topic, before returning the emitter. Deliberately synchronous (unlike every `publish*` method below) — a one-time connect burst is cheap and bounded, and `ResponseBodyEmitter`'s own early-send buffering (sends before the framework attaches its handler are queued internally, not dropped or rejected) makes this both correct and exactly what makes `LiveControllerTest` deterministic without polling for the *initial* burst.
   - `LiveSubscriptionResponse updateTopics(String connectionId, UpdateLiveTopicsRequest)` (public) — adds/removes topics on an already-open connection; a newly-added topic immediately gets its own snapshot burst (whatever's currently buffered, no resume concept since it's new to this connection); `fleet`/`event`/`devices`/`detection-events` are never actually removed even if named in `request.remove()`. Throws `NoSuchElementException` for an unknown `connectionId` (404 via `ApiExceptionHandler`).
-  - `publishFleetChanged()`/`publishEvent(Event)`/`publishDetectionEvent(DetectionEvent)` — dispatched onto the shared scheduler (`Executor#execute`, fire-and-forget from the caller's perspective), not coalesced (all three are comparatively rare): compute/serialize the envelope, append to the topic's `LiveRingBuffer`, broadcast to every subscribed connection. **`publishFleetChanged()` (backend follow-up batch) now refreshes *both* the `fleet` (asset-centric) and `devices` (device-list + active-stream-list) buffers/broadcasts in the one dispatch** — every seam that already called it (asset/device CRUD via `LiveUpdateAuditTrail`, stream start/stop via `LiveUpdateEventPublisher`, both `vision-app`) is exactly the set that should refresh `devices` too, so the existing no-payload port method was extended rather than adding a second, near-duplicate one. `publishDetectionEvent` (also new) backs the `detection-events` topic — see below.
+  - `publishEvent(Event)`/`publishDetectionEvent(DetectionEvent)` — dispatched onto the shared scheduler (`Executor#execute`, fire-and-forget from the caller's perspective), not coalesced (both are comparatively rare): compute/serialize the envelope, append to the topic's `LiveRingBuffer`, broadcast to every subscribed connection. `publishDetectionEvent` backs the `detection-events` topic — see below.
+  - `publishFleetChanged()` — refreshes *both* the `fleet` (asset-centric) and `devices` (device-list + active-stream-list) buffers/broadcasts in the one dispatch — every seam that already called it (asset/device CRUD via `LiveUpdateAuditTrail`, stream start/stop via `LiveUpdateEventPublisher`, both `vision-app`) is exactly the set that should refresh `devices` too, so the existing no-payload port method was extended rather than adding a second, near-duplicate one. **As of docs/plans/active/SCALE-100-PLAN.md §5 S5, coalesced leading+trailing**, the same treatment telemetry/detections already get: a call past the current window's close (`fleetRecomputeWindowUntilNanos`, an `AtomicLong` nanoTime deadline) wins a compare-and-set and dispatches the recompute immediately — so a lone write is still delivered with no added latency — while any call landing inside an already-open window only sets `fleetChangedDuringWindow` (an `AtomicBoolean`); `flushPending()` checks that flag on every tick and performs exactly one trailing recompute if it is set, so the window's true final state is always delivered (CLAUDE.md rule 9), never silently dropped. A sustained fleet/device write storm therefore recomputes at most once per `COALESCE_MILLIS` (150ms) — reused, not a second literal — instead of once per write. The recompute body itself (`freshFleetEnvelope()`+`freshDevicesEnvelope()`+append+broadcast, both topics) is factored into a private `recomputeFleetAndDevices()`, shared by both the leading dispatch and `flushPending()`'s trailing catch-up.
   - `publishTelemetryAppended(AssetId, Telemetry)`/`publishDetections(AssetId, DetectionResult)` — the genuinely hot-path methods (called once per appended sample / once per completed inference): each just enqueues into a small pending map (a `ConcurrentLinkedQueue<Telemetry>` per asset for telemetry — every sample kept; a plain `ConcurrentHashMap<AssetId, DetectionResult>` for detections — a later `put` simply overwrites, giving "latest-frame-only" for free) and returns immediately, no I/O, no synchronization beyond the concurrent map's own.
   - `void flushPending()` (package-private) — drains both pending maps roughly every `COALESCE_MILLIS`ms (150, the shared scheduler's own repeating task calls this; a pure unit test calls it directly instead of waiting): one coalesced `List<TelemetrySampleResponse>` envelope per asset with anything pending, one latest-only `DetectionResultResponse` envelope per asset with anything pending — each appended to its topic's buffer and broadcast.
   - `void heartbeatAll()` (package-private, same test-seam reasoning) — dispatches an SSE **comment** line (`SseEmitter.event().comment(...)`, never reaches `EventSource.onmessage`) to every connection roughly every `HEARTBEAT_MILLIS`ms (15,000) so proxies don't kill an idle stream — as of docs/plans/active/SCALE-100-PLAN.md §5 S2, each connection's heartbeat write goes through the same `dispatchWrite`/`connectionWriteExecutor` path `broadcast` uses (see "Connection writes" below), not a direct blocking `connection.heartbeat()` call.
@@ -1438,8 +1439,9 @@ forwarding). All 8 pre-existing tests pass with **zero assertions edited**. Modu
 green, no other test file touched or affected (`git diff --stat` for this task: only
 `HlsProxyController.java` and `HlsProxyControllerTest.java`).
 
-**Follow-up 2026-08-18** (`6e640d3`): `HlsProxyControllerTest` **10 → 11**, module total **607/607**
-green. The added test is the scheme-rewrite regression above — the cookie-isolation gate this wave
+**Follow-up 2026-08-18** (`6e640d3`): `HlsProxyControllerTest` **10 → 11**, module total **599/599**
+green. (Count taken from Maven's own summary line. Summing `target/surefire-reports/TEST-*.xml`
+overstates it — that directory keeps reports for renamed/removed test classes until a `clean`.) The added test is the scheme-rewrite regression above — the cookie-isolation gate this wave
 shipped was necessary but not sufficient, since it only ever exercised `http://localhost`, where
 browsers keep `Secure` cookies.
 
@@ -1522,3 +1524,75 @@ or the `docker` CLI; this module's Postgres/docker-gated tests (if any) live els
 **Not touched, per scope**: `api/proxy/**` (a concurrent S1 wave), `support/VisionApiProperties.java`,
 `application.yaml`, `config/wiring/**` (reserved files — needed config keys reported above instead of
 edited directly), every other package under `com.drones.vision.api`.
+
+## docs/plans/active/SCALE-100-PLAN.md wave S5 done (fleet snapshot recompute debounced leading+trailing)
+
+`publishFleetChanged()` used to recompute the *entire* fleet+devices snapshot (all assets, all
+devices, all streams) on every single asset/device/stream lifecycle write — a bulk import of N assets
+recomputed the whole fleet N times, and the cost grows with total asset count, not with how many
+actually changed. This wave (`LiveUpdateRegistry`'s `freshFleetEnvelope`/`freshDevicesEnvelope`/
+`publishFleetChanged` path only, per the plan's disjointness contract, sequenced after S2 since both
+touch this file) debounces it the same way `flushPending()` already debounces telemetry/detections,
+composing with S2's serialize-once/async-write path for free — nothing about *how* an envelope
+reaches a connection changed, only how often the fleet/devices envelopes get recomputed in the first
+place.
+
+**Leading+trailing, not pure trailing** — a pure "wait `COALESCE_MILLIS` then recompute" debounce
+would have added latency to the common case (a single, isolated write) and, worse, is indistinguishable
+from a bug when a test calls `publishFleetChanged()` once and expects a synchronous result (every
+pre-existing test in this file does exactly that — see below). Two new fields carry the state:
+`fleetRecomputeWindowUntilNanos` (`AtomicLong`, the nanoTime a coalescing window closes; `Long.MIN_VALUE`
+initially so the first call on a fresh registry always dispatches) and `fleetChangedDuringWindow`
+(`AtomicBoolean`, set whenever a call is coalesced away). `publishFleetChanged()`: a call past the
+window's close wins a compare-and-set on `fleetRecomputeWindowUntilNanos`, opens the next window, and
+dispatches `recomputeFleetAndDevices()` (the extracted former body of this method) via `scheduler.execute`
+exactly as before; a call inside an open window (or one that lost the compare-and-set race to a
+concurrent caller) only sets `fleetChangedDuringWindow`. `flushPending()` — already ticking every
+`COALESCE_MILLIS` on the real scheduler, already directly callable in tests — gained one line at the
+top: `if (fleetChangedDuringWindow.compareAndSet(true, false)) recomputeFleetAndDevices();`, which is
+the trailing recompute that guarantees the window's last write is never silently dropped.
+
+**Why this preserves every pre-existing test unchanged**: a lone `publishFleetChanged()` call on a
+fresh registry always finds `now >= windowUntil` (nothing has opened a window yet), so it dispatches
+immediately via `scheduler.execute` — under the test module's `ImmediateScheduledExecutorService` that
+runs synchronously on the calling thread, exactly as the un-debounced version always did. Every
+existing test that calls `publishFleetChanged()` (in this file, `LiveControllerTest`,
+`LiveMapScopingTest`) does so exactly once per freshly-constructed registry, so none of them ever
+observes a window — confirmed by re-running the suite before this change (**599** tests) and after
+(**602**, +3, purely additive: `git diff --numstat` on the test file shows `63 insertions(+), 0
+deletions(-)`, no pre-existing assertion touched).
+
+**Sequencing** (hard constraint from the plan): the compare-and-set bookkeeping runs on the calling
+thread (whichever thread committed the write — the same shape `publishTelemetryAppended`'s
+`pendingTelemetry.computeIfAbsent(...).add(...)` already uses), but `sequencer.incrementAndGet()`,
+`fleetBuffer`/`devicesBuffer.append`, and `broadcast` only ever run inside `recomputeFleetAndDevices()`,
+which only ever runs on `scheduler`'s single thread (dispatched via `scheduler.execute` for the leading
+call, inline for `flushPending()`'s trailing call, since `flushPending` itself only ever runs on that
+thread). `seq` ordering and `Last-Event-ID` resume are therefore unaffected — proven by the full
+pre-existing SSE/resume test suite passing unchanged, including every `LiveControllerTest`/
+`LiveMapScopingTest` resume test.
+
+**Three new tests, `LiveUpdateRegistryTest`** (`aFlushWithNoCoalescedFleetChangeDoesNotTriggerAnExtraRecompute`/
+`fiftyRapidPublishFleetChangedCallsCoalesceIntoAtMostTwoRecomputes`/
+`theTrailingRecomputeAfterACoalescedBurstReflectsTheNewestStateNotTheFirst`) prove, respectively: a
+single call plus an idle `flushPending()` tick does not manufacture a phantom second recompute
+(`verify(assetService, times(1)).assets()`); 50 back-to-back calls in a tight loop (no real time
+elapses) produce exactly one immediate recompute, and exactly one more once `flushPending()` simulates
+the window closing (`times(1)` then `times(2)` — the plan's own "≤2 recomputes" acceptance bar, hit at
+its tightest); and the trailing recompute reflects the *last* write inside the window, not the first —
+the mock is reconfigured to a different asset id between the leading and the coalesced call, and the
+buffered fleet payload after `flushPending()` carries the second id, proving CLAUDE.md rule 9 rather
+than assuming it.
+
+**No new tunable config key** — `FLEET_COALESCE_WINDOW_NANOS` is `TimeUnit.MILLISECONDS.toNanos(COALESCE_MILLIS)`,
+derived from the existing constant rather than a second literal, so S7 wiring `COALESCE_MILLIS` to
+`VisionApiProperties.Live`'s already-named `coalesce` key (docs/plans/active/SCALE-100-PLAN.md §6) covers this
+window too, with no separate key needed.
+
+**Docker**: not applicable — same reasoning as S2's entry above.
+
+**New endpoint shapes**: none — internal dispatch machinery only, same `GET /api/live`/`PATCH
+/api/live/{connectionId}/topics` surface, no DTO changed.
+
+**Not touched, per scope**: `api/proxy/**`, `support/VisionApiProperties.java`, `application.yaml`,
+`config/wiring/**` (reserved), every other package under `com.drones.vision.api`.

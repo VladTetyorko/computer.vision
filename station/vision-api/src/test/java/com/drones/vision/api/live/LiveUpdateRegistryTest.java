@@ -1,5 +1,6 @@
 package com.drones.vision.api.live;
 
+import com.drones.vision.api.dto.AssetSummaryResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.MapEventPayload;
 import com.drones.vision.perception.application.stream.ActiveStream;
@@ -76,6 +77,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -185,6 +188,66 @@ class LiveUpdateRegistryTest {
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.DEVICES).snapshot();
         assertEquals(1, buffered.size(), "one devices snapshot per publishFleetChanged() dispatch, same as fleet");
         assertEquals("devices", buffered.get(0).type());
+    }
+
+    /**
+     * docs/plans/active/SCALE-100-PLAN.md §5 S5 — {@link LiveUpdateRegistry#publishFleetChanged()} used to
+     * recompute the entire fleet+devices snapshot on every single call; it now coalesces leading+
+     * trailing, the same treatment {@link LiveUpdateRegistry#flushPending()} already gives telemetry/
+     * detections. These three tests exercise the coalescing itself, independently of the class's
+     * other tests above (which only ever call it once per registry and so never observe a window).
+     */
+    @Test
+    void aFlushWithNoCoalescedFleetChangeDoesNotTriggerAnExtraRecompute() {
+        when(assetService.assets()).thenReturn(List.of());
+        LiveUpdateRegistry registry = registry();
+
+        registry.publishFleetChanged(); // the lone, immediate leading-edge dispatch
+        registry.flushPending(); // must be a no-op here -- nothing was coalesced away to catch up on
+
+        verify(assetService, times(1)).assets();
+    }
+
+    @Test
+    void fiftyRapidPublishFleetChangedCallsCoalesceIntoAtMostTwoRecomputes() {
+        when(assetService.assets()).thenReturn(List.of());
+        LiveUpdateRegistry registry = registry();
+
+        for (int i = 0; i < 50; i++) {
+            registry.publishFleetChanged();
+        }
+        // All 50 calls land inside the same coalescing window (this tight loop lets no real time
+        // elapse) -- only the first opens the window and dispatches; the other 49 just mark it dirty.
+        verify(assetService, times(1)).assets();
+
+        registry.flushPending(); // simulates the window closing -- pays off the coalesced 49
+
+        verify(assetService, times(2)).assets();
+    }
+
+    @Test
+    void theTrailingRecomputeAfterACoalescedBurstReflectsTheNewestStateNotTheFirst() {
+        AssetId staleAssetId = AssetId.random();
+        AssetId freshAssetId = AssetId.random();
+        when(assetService.assets()).thenReturn(List.of(summary(staleAssetId)));
+        LiveUpdateRegistry registry = registry();
+
+        registry.publishFleetChanged(); // leading-edge dispatch -- captures the stale state immediately
+        // A further write commits to the underlying service before the coalescing window closes --
+        // CLAUDE.md rule 9 ("newest data wins"): the trailing recompute must pick this up, not
+        // silently keep serving what the leading dispatch already captured.
+        when(assetService.assets()).thenReturn(List.of(summary(freshAssetId)));
+        registry.publishFleetChanged(); // coalesced away -- only marks the change pending
+
+        registry.flushPending(); // the trailing catch-up
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.FLEET).snapshot();
+        assertEquals(1, buffered.size(), "fleet is latest-only -- the trailing recompute replaces the leading one");
+        @SuppressWarnings("unchecked")
+        List<AssetSummaryResponse> payload = (List<AssetSummaryResponse>) (List<?>) buffered.get(0).payload();
+        assertEquals(1, payload.size());
+        assertEquals(freshAssetId.value().toString(), payload.get(0).assetId(),
+                "the trailing recompute must reflect the newest write, never the one the leading dispatch captured");
     }
 
     @Test

@@ -53,6 +53,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -143,10 +144,21 @@ import com.drones.vision.api.controller.StreamController;
  * #COALESCE_MILLIS}ms ({@link #flushPending()}): telemetry batches every sample appended since the
  * last flush into one {@code List<TelemetrySampleResponse>} envelope per asset; detections keep
  * only the latest result per asset (the pending map itself is a plain overwrite) — matching the
- * plan's "detections emit latest-frame-only" exactly. {@link #publishFleetChanged}/{@link
- * #publishEvent}/{@link #publishDetectionEvent} are not coalesced (all three are comparatively
- * rare) but are still dispatched onto the shared scheduler rather than run on the caller's thread,
- * keeping every method here equally fire-and-forget.
+ * plan's "detections emit latest-frame-only" exactly. {@link #publishEvent}/{@link
+ * #publishDetectionEvent} are not coalesced (both are comparatively rare) but are still dispatched
+ * onto the shared scheduler rather than run on the caller's thread, keeping every method here
+ * equally fire-and-forget.
+ *
+ * <p><b>{@link #publishFleetChanged()} is coalesced leading+trailing</b> (docs/plans/active/SCALE-100-PLAN.md
+ * §5 S5): every asset/device/stream lifecycle write used to trigger its own full fleet+devices
+ * recompute, so a bulk import of N assets recomputed the whole fleet N times. The first call after a
+ * quiet period still dispatches immediately — a lone write is delivered with no added latency — but
+ * any call landing within {@value #COALESCE_MILLIS}ms of that dispatch only marks the change as
+ * pending rather than triggering a second recompute; {@link #flushPending()}'s own already-scheduled
+ * tick performs one trailing recompute once the window closes, so the burst's true final state is
+ * still delivered rather than silently dropped (CLAUDE.md rule 9 — newest data wins). A sustained
+ * write storm therefore recomputes at most once per {@value #COALESCE_MILLIS}ms, the same cadence
+ * telemetry/detections already get, instead of once per write.
  *
  * <p><b>Simplification, deliberate and documented</b>: coalescing runs once per topic, shared
  * across every connection subscribed to it, rather than genuinely independently per connection —
@@ -282,6 +294,34 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     private final ConcurrentHashMap<AssetId, ConcurrentLinkedQueue<Telemetry>> pendingTelemetry =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, DetectionResult> pendingDetections = new ConcurrentHashMap<>();
+
+    /**
+     * {@link #publishFleetChanged()}'s coalescing window, in nanoseconds ({@link System#nanoTime()}
+     * is monotonic and immune to wall-clock adjustment, unlike {@link System#currentTimeMillis()}) —
+     * derived from {@link #COALESCE_MILLIS} rather than a second literal (docs/plans/active/SCALE-100-PLAN.md
+     * §5 S5): a fleet/devices recompute is exactly as expensive to run too often as a telemetry
+     * flush, so it shares that window rather than getting an independently-tunable one.
+     */
+    private static final long FLEET_COALESCE_WINDOW_NANOS = TimeUnit.MILLISECONDS.toNanos(COALESCE_MILLIS);
+
+    /**
+     * The nanoTime at which {@link #publishFleetChanged()}'s current coalescing window closes.
+     * {@code Long.MIN_VALUE} so the very first call always finds itself past the (nonexistent) prior
+     * window and dispatches immediately, regardless of this JVM's {@link System#nanoTime()} origin
+     * (which is arbitrary and not guaranteed positive). A caller only ever advances this via the
+     * compare-and-set in {@link #publishFleetChanged()} — exactly one racing caller "wins" and opens
+     * the next window, so at most one immediate recompute is dispatched per window.
+     */
+    private final AtomicLong fleetRecomputeWindowUntilNanos = new AtomicLong(Long.MIN_VALUE);
+
+    /**
+     * Set by {@link #publishFleetChanged()} whenever a call is coalesced away (landed inside an
+     * already-open window) instead of dispatching its own recompute; {@link #flushPending()} checks
+     * this on every tick and performs exactly one trailing recompute if it is set, guaranteeing the
+     * window's last write is never silently dropped even if nothing calls {@link
+     * #publishFleetChanged()} again (docs/plans/active/SCALE-100-PLAN.md §5 S5's "must not lose the last state").
+     */
+    private final AtomicBoolean fleetChangedDuringWindow = new AtomicBoolean(false);
 
     /**
      * {@code @Autowired} disambiguates this from the package-private test-seam constructor below
@@ -481,18 +521,40 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * <p>Recomputes and broadcasts <em>both</em> the {@code fleet} (asset-centric) and {@code
      * devices} (device-list + active-stream-list) snapshots in one dispatch — see this class's own
      * javadoc for why {@code devices} extends this method rather than needing a second port call.
+     *
+     * <p><b>Coalesced leading+trailing</b> (docs/plans/active/SCALE-100-PLAN.md §5 S5 — see the class javadoc's
+     * "Coalescing" section for the full reasoning): a call past the current window's close wins a
+     * compare-and-set on {@link #fleetRecomputeWindowUntilNanos}, opens the next window, and
+     * dispatches {@link #recomputeFleetAndDevices()} immediately, exactly as this method always did.
+     * A call inside an already-open window (including one that lost the compare-and-set race to
+     * another concurrent caller) only sets {@link #fleetChangedDuringWindow} — {@link
+     * #flushPending()} owns the one trailing recompute that catches it.
      */
     @Override
     public void publishFleetChanged() {
-        scheduler.execute(() -> {
-            LiveEnvelopeResponse fleetEnvelope = freshFleetEnvelope();
-            fleetBuffer.append(fleetEnvelope);
-            broadcast(LiveTopic.FLEET, fleetEnvelope);
+        long now = System.nanoTime();
+        long windowUntil = fleetRecomputeWindowUntilNanos.get();
+        if (now >= windowUntil
+                && fleetRecomputeWindowUntilNanos.compareAndSet(windowUntil, now + FLEET_COALESCE_WINDOW_NANOS)) {
+            scheduler.execute(this::recomputeFleetAndDevices);
+        } else {
+            fleetChangedDuringWindow.set(true);
+        }
+    }
 
-            LiveEnvelopeResponse devicesEnvelope = freshDevicesEnvelope();
-            devicesBuffer.append(devicesEnvelope);
-            broadcast(LiveTopic.DEVICES, devicesEnvelope);
-        });
+    /**
+     * The actual fleet+devices recompute-and-broadcast — the body {@link #publishFleetChanged()}
+     * used to run unconditionally on every call; now shared with {@link #flushPending()}'s trailing
+     * catch-up so both dispatch paths do exactly the same work.
+     */
+    private void recomputeFleetAndDevices() {
+        LiveEnvelopeResponse fleetEnvelope = freshFleetEnvelope();
+        fleetBuffer.append(fleetEnvelope);
+        broadcast(LiveTopic.FLEET, fleetEnvelope);
+
+        LiveEnvelopeResponse devicesEnvelope = freshDevicesEnvelope();
+        devicesBuffer.append(devicesEnvelope);
+        broadcast(LiveTopic.DEVICES, devicesEnvelope);
     }
 
     @Override
@@ -555,10 +617,15 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
 
     /**
      * Drains {@link #pendingTelemetry}/{@link #pendingDetections} and emits one coalesced envelope
-     * per asset that had something pending — see the class javadoc's "Coalescing" section. Package-
-     * private so a test can call it directly/deterministically instead of waiting on the real timer.
+     * per asset that had something pending, then performs {@link #publishFleetChanged()}'s trailing
+     * recompute if a call was coalesced away during the current/previous window ({@link
+     * #fleetChangedDuringWindow}) — see the class javadoc's "Coalescing" section. Package-private so
+     * a test can call it directly/deterministically instead of waiting on the real timer.
      */
     void flushPending() {
+        if (fleetChangedDuringWindow.compareAndSet(true, false)) {
+            recomputeFleetAndDevices();
+        }
         for (AssetId assetId : List.copyOf(pendingTelemetry.keySet())) {
             List<Telemetry> drained = drain(pendingTelemetry.get(assetId));
             if (drained.isEmpty()) {
