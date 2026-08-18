@@ -108,6 +108,7 @@ import com.drones.vision.adapter.persistence.repository.JpaMapLayerRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMarkRepository;
 import com.drones.vision.adapter.persistence.repository.JpaSampleImageStore;
 import com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository;
+import com.drones.vision.adapter.persistence.repository.TelemetryBatchSettings;
 import com.drones.vision.adapter.persistence.repository.JpaTrainingSampleRepository;
 import com.drones.vision.adapter.persistence.repository.JpaUserRepository;
 
@@ -650,6 +651,88 @@ class PostgresDockerIntegrationTest {
 
             List<Telemetry> found = repository.findByUsage(usageId, 10);
             assertNull(found.get(0).flightState());
+        }
+
+        /**
+         * docs/plans/active/SCALE-100-PLAN.md S4, item 2: below the size bound and nowhere near the
+         * (deliberately huge) time bound, a batching repository must not have written anything yet
+         * -- proving {@link #save} genuinely defers the write rather than writing through and
+         * merely pretending to batch. The size bound then flushes every buffered sample together in
+         * one transaction.
+         */
+        @Test
+        void batchedSaveDefersWritesUntilTheSizeBoundThenFlushesTogether() {
+            TelemetryRepositoryPort repository = new JpaTelemetryRepository(entityManagerFactory,
+                    JpaTelemetryRepository.DEFAULT_RETENTION_LIMIT_PER_USAGE, new TelemetryBatchSettings(3, 60_000));
+            UsageId usageId = UsageId.random();
+            DeviceId deviceId = DeviceId.random();
+
+            repository.save(usageId, new Telemetry(deviceId, NOW, null, null, null, null, null, Map.of()));
+            repository.save(usageId, new Telemetry(deviceId, NOW.plusSeconds(1), null, null, null, null, null, Map.of()));
+            assertTrue(repository.findByUsage(usageId, 10).isEmpty(),
+                    "below the size bound and far from the huge window, nothing should be durable yet");
+
+            repository.save(usageId, new Telemetry(deviceId, NOW.plusSeconds(2), null, null, null, null, null, Map.of()));
+
+            assertEquals(3, repository.findByUsage(usageId, 10).size(),
+                    "the third save trips the size bound and flushes all three together");
+        }
+
+        /**
+         * docs/plans/active/SCALE-100-PLAN.md S4's stated trade-off, proven rather than asserted by
+         * inspection: a sample below the size bound sits only in heap -- exactly what a crash right
+         * now would lose -- but the configured window bounds that loss, flushing it on its own once
+         * the deadline passes even though nothing else ever arrived to trip the size bound.
+         */
+        @Test
+        void batchedSaveIsDurableWithinTheConfiguredWindowEvenBelowTheSizeBound() throws InterruptedException {
+            long windowMillis = 100;
+            TelemetryRepositoryPort repository = new JpaTelemetryRepository(entityManagerFactory,
+                    JpaTelemetryRepository.DEFAULT_RETENTION_LIMIT_PER_USAGE,
+                    new TelemetryBatchSettings(1000, windowMillis));
+            UsageId usageId = UsageId.random();
+            DeviceId deviceId = DeviceId.random();
+
+            repository.save(usageId, new Telemetry(deviceId, NOW, null, null, null, null, null, Map.of()));
+            assertTrue(repository.findByUsage(usageId, 10).isEmpty(),
+                    "immediately after a below-size-bound save the sample is only buffered in memory");
+
+            Thread.sleep(windowMillis * 3);
+
+            assertEquals(1, repository.findByUsage(usageId, 10).size(),
+                    "the batch window bounds how long a sample can stay undurable -- it must flush on its own");
+        }
+
+        /**
+         * The buffer map is keyed by usage and sits on the telemetry hot path, so a drained batch
+         * that is not *removed* leaks one entry per flight for the life of the JVM -- the same
+         * unbounded-map defect (docs/plans/active/SCALE-100-PLAN.md fact 2f) S2 had to fix in {@code
+         * LiveUpdateRegistry}, reintroduced by the change meant to relieve that pressure. Both
+         * flush paths are covered because they evict independently: the size bound drains inline on
+         * a caller thread, the window drains on the scheduler.
+         */
+        @Test
+        void bothFlushPathsEvictTheirBufferSoTheMapDoesNotGrowPerUsage() throws InterruptedException {
+            long windowMillis = 100;
+            JpaTelemetryRepository repository = new JpaTelemetryRepository(entityManagerFactory,
+                    JpaTelemetryRepository.DEFAULT_RETENTION_LIMIT_PER_USAGE,
+                    new TelemetryBatchSettings(2, windowMillis));
+            DeviceId deviceId = DeviceId.random();
+
+            UsageId flushedBySize = UsageId.random();
+            repository.save(flushedBySize, new Telemetry(deviceId, NOW, null, null, null, null, null, Map.of()));
+            assertEquals(1, repository.pendingBatchCount(), "a buffered sample must be visible as pending");
+            repository.save(flushedBySize, new Telemetry(deviceId, NOW.plusSeconds(1), null, null, null, null, null, Map.of()));
+            assertEquals(0, repository.pendingBatchCount(),
+                    "the size bound drained this usage, so its entry must be gone -- not left behind empty");
+
+            UsageId flushedByWindow = UsageId.random();
+            repository.save(flushedByWindow, new Telemetry(deviceId, NOW, null, null, null, null, null, Map.of()));
+            Thread.sleep(windowMillis * 3);
+            assertEquals(0, repository.pendingBatchCount(),
+                    "the window flush must evict too, or a usage that never trips the size bound leaks forever");
+            assertEquals(1, repository.findByUsage(flushedByWindow, 10).size(),
+                    "eviction must mean flushed-then-removed, never dropped");
         }
     }
 

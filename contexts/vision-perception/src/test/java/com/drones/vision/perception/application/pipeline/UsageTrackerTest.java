@@ -100,6 +100,18 @@ class UsageTrackerTest {
                 null, null, TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
     }
 
+    /**
+     * docs/plans/active/SCALE-100-PLAN.md S4: same as {@link #tracker}, but with explicit {@link
+     * UsageSummaryBatchSettings} via the package-private test-seam constructor, so coalescing tests
+     * can use a tiny batch window instead of waiting out production's default.
+     */
+    private UsageTracker trackerWithSummaryBatching(List<TelemetrySourcePort> sources,
+                                                     UsageSummaryBatchSettings summaryBatchSettings) {
+        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+                null, null, SupervisedPublisher.INITIAL_BACKOFF_NANOS, SupervisedPublisher.MAX_BACKOFF_NANOS,
+                summaryBatchSettings);
+    }
+
     @Test
     void unownedDeviceIsTrackedAsANoOp() {
         DeviceId deviceId = DeviceId.random();
@@ -214,6 +226,63 @@ class UsageTrackerTest {
         // awaited rather than checked synchronously right after onStreamStopped returns.
         assertTrue(source.closeLatch.await(1, TimeUnit.SECONDS), "telemetry must be unsubscribed/closed on usage close");
         assertTrue(source.closedDevices.contains(telemetryDevice.id()));
+    }
+
+    @Test
+    void coalescedSummaryWriteDefersUntilTheSizeBoundThenFlushesTogether() {
+        // docs/plans/active/SCALE-100-PLAN.md S4 item 3: the durable telemetryRepository.save call
+        // still happens per-sample (asserted below); only the usageRepository summary write is
+        // coalesced, onto a huge window so only the size bound can trip it here.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = trackerWithSummaryBatching(List.of(source), new UsageSummaryBatchSettings(3, 60_000));
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        verify(usageRepository, times(1)).save(any()); // the open
+
+        Telemetry sample1 = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
+        source.emit(telemetryDevice.id(), sample1);
+        verify(telemetryRepository).save(any(), org.mockito.ArgumentMatchers.eq(sample1));
+        verify(usageRepository, times(1)).save(any());
+        Telemetry sample2 = telemetry(telemetryDevice.id(), 50.001, 30.001, 94.9);
+        source.emit(telemetryDevice.id(), sample2);
+        verify(usageRepository, times(1)).save(any());
+
+        Telemetry sample3 = telemetry(telemetryDevice.id(), 50.002, 30.002, 94.8);
+        source.emit(telemetryDevice.id(), sample3);
+
+        ArgumentCaptor<AssetUsage> captor = ArgumentCaptor.forClass(AssetUsage.class);
+        verify(usageRepository, times(2)).save(captor.capture());
+        assertEquals(3, captor.getValue().sampleCount(),
+                "the third fold trips the size bound and the coalesced write carries all three");
+    }
+
+    @Test
+    void coalescedSummaryWriteIsDurableWithinTheConfiguredWindowEvenBelowTheSizeBound() throws InterruptedException {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        long windowMillis = 60;
+        UsageTracker tracker =
+                trackerWithSummaryBatching(List.of(source), new UsageSummaryBatchSettings(1000, windowMillis));
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        verify(usageRepository, times(1)).save(any()); // the open
+
+        Telemetry sample = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
+        source.emit(telemetryDevice.id(), sample);
+        verify(usageRepository, times(1)).save(any());
+        Thread.sleep(windowMillis * 3);
+
+        ArgumentCaptor<AssetUsage> captor = ArgumentCaptor.forClass(AssetUsage.class);
+        verify(usageRepository, times(2)).save(captor.capture());
+        assertEquals(1, captor.getValue().sampleCount(),
+                "the batch window bounds how long the summary can lag -- it must flush on its own");
     }
 
     @Test

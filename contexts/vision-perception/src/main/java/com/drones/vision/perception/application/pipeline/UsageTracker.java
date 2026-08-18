@@ -26,6 +26,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import com.drones.vision.perception.application.stream.DefaultStreamService;
 import com.drones.vision.perception.application.stream.StreamService;
@@ -58,10 +60,13 @@ import com.drones.vision.perception.application.stream.StreamService;
  *       summary — {@code startPosition} (the first sample carrying a
  *       position), {@code lastPosition} (the most recent one), and {@code
  *       sampleCount} — via {@link #applySample}, kept in one method per the
- *       port's "single write path" note so it can be batched later. The same
- *       method also hands the sample to the configured {@code telemetryObserver}
- *       (docs/plans/done/OPS-CORE-PLAN.md §G — geofence evaluation in practice), right
- *       alongside the existing persist/live-update steps.</li>
+ *       port's "single write path" note. The durable {@link TelemetryRepositoryPort#save} call
+ *       always happens on the sample's own thread; the summary write is coalesced onto {@link
+ *       UsageSummaryBatchSettings}'s size-or-time bound (docs/plans/active/SCALE-100-PLAN.md S4) —
+ *       see {@link #registerSummaryUpdate} for why that split is safe (the summary is a
+ *       recomputable counter, not a historical record). The same method also hands the sample to
+ *       the configured {@code telemetryObserver} (docs/plans/done/OPS-CORE-PLAN.md §G — geofence
+ *       evaluation in practice), right alongside the existing persist/live-update steps.</li>
  *   <li>{@link #onStreamStopped(DeviceId)} — if this was the asset's
  *       <b>last</b> currently-active device, closes the open usage ({@link
  *       AssetUsage#closed(Instant)}) and unsubscribes/closes every telemetry
@@ -106,6 +111,7 @@ public final class UsageTracker {
     private final BiConsumer<AssetId, Telemetry> telemetryObserver;
     private final long sourceInitialBackoffNanos;
     private final long sourceMaxBackoffNanos;
+    private final UsageSummaryBatchSettings summaryBatchSettings;
 
     /** One dedicated daemon thread scheduling every telemetry subscription's reopen retries; see {@code DefaultStreamService}'s own field of the same shape for why this is shared rather than per-subscription. */
     private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -160,8 +166,28 @@ public final class UsageTracker {
                          List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
                          BiConsumer<AssetId, Telemetry> telemetryObserver) {
         this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
+                liveUpdatePublisherPort, telemetryObserver, UsageSummaryBatchSettings.immediate());
+    }
+
+    /**
+     * Same as the 7-argument constructor, plus how {@link #applySample} coalesces its usage-summary
+     * write — see {@link UsageSummaryBatchSettings}'s own javadoc (docs/plans/active/SCALE-100-PLAN.md
+     * S4). {@link UsageSummaryBatchSettings#immediate()} reproduces the 7-argument constructor's own
+     * one-save-per-sample behavior exactly (what every pre-S4 caller, and this class's own tests,
+     * still get); production wiring is meant to move to {@link UsageSummaryBatchSettings#defaults()}
+     * once {@code vision-app} binds {@code vision.persistence.telemetry.*} to it.
+     *
+     * @param summaryBatchSettings how {@link #applySample} coalesces the summary write; never
+     *                             {@code null}
+     */
+    public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
+                         AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
+                         List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
+                         BiConsumer<AssetId, Telemetry> telemetryObserver,
+                         UsageSummaryBatchSettings summaryBatchSettings) {
+        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
                 liveUpdatePublisherPort, telemetryObserver, SupervisedPublisher.INITIAL_BACKOFF_NANOS,
-                SupervisedPublisher.MAX_BACKOFF_NANOS);
+                SupervisedPublisher.MAX_BACKOFF_NANOS, summaryBatchSettings);
     }
 
     /**
@@ -174,6 +200,21 @@ public final class UsageTracker {
                  List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
                  BiConsumer<AssetId, Telemetry> telemetryObserver, long sourceInitialBackoffNanos,
                  long sourceMaxBackoffNanos) {
+        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
+                liveUpdatePublisherPort, telemetryObserver, sourceInitialBackoffNanos, sourceMaxBackoffNanos,
+                UsageSummaryBatchSettings.immediate());
+    }
+
+    /**
+     * Test seam: same as the 9-argument constructor, plus explicit {@link UsageSummaryBatchSettings}
+     * — the canonical constructor every other one ultimately delegates to. Lets summary-coalescing
+     * tests use a tiny batch window without waiting out production's default.
+     */
+    UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
+                 AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
+                 List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
+                 BiConsumer<AssetId, Telemetry> telemetryObserver, long sourceInitialBackoffNanos,
+                 long sourceMaxBackoffNanos, UsageSummaryBatchSettings summaryBatchSettings) {
         this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.usageRepository = Objects.requireNonNull(usageRepository, "usageRepository must not be null");
@@ -184,6 +225,7 @@ public final class UsageTracker {
         this.telemetryObserver = telemetryObserver; // nullable: samples are merely persisted/announced when absent
         this.sourceInitialBackoffNanos = sourceInitialBackoffNanos;
         this.sourceMaxBackoffNanos = sourceMaxBackoffNanos;
+        this.summaryBatchSettings = Objects.requireNonNull(summaryBatchSettings, "summaryBatchSettings must not be null");
     }
 
     /**
@@ -302,6 +344,10 @@ public final class UsageTracker {
             if (tracking.activeDevices == 0 && tracking.usage != null) {
                 closedUsage = tracking.usage.closed(Instant.now());
                 tracking.usage = null;
+                // the close below is written synchronously; nothing scheduled for the coalesced
+                // summary write should still fire against a now-null tracking.usage afterwards.
+                tracking.unflushedSummaryUpdates = 0;
+                cancelPendingSummaryFlush(tracking);
             }
         }
         if (closedUsage != null) {
@@ -400,12 +446,89 @@ public final class UsageTracker {
             tracking.lastSample = sample; // docs/plans/done/MVP3-PLAN.md C-a: outlives the usage, see latestTelemetry's javadoc
         }
         telemetryRepository.save(usageId, sample);
-        usageRepository.save(updated);
+        registerSummaryUpdate(assetId, tracking, updated);
         if (liveUpdatePublisherPort != null) { // docs/plans/done/REALTIME-PLAN.md §4
             liveUpdatePublisherPort.publishTelemetryAppended(assetId, sample);
         }
         if (telemetryObserver != null) { // docs/plans/done/OPS-CORE-PLAN.md §G — geofence, wired in vision-app
             telemetryObserver.accept(assetId, sample);
+        }
+    }
+
+    /**
+     * Writes (or defers) the folded {@code updated} summary per {@link #summaryBatchSettings}
+     * (docs/plans/active/SCALE-100-PLAN.md S4 item 3). Safe to defer, unlike the durable {@link
+     * TelemetryRepositoryPort#save} call right before it: this write is a recomputable running
+     * counter on {@link AssetUsage}, not a historical record, so losing an unflushed one to a crash
+     * only leaves the summary briefly stale — the very next sample folds a fresh one from the same
+     * in-memory {@link Tracking#usage}, not from whatever was last durably written.
+     *
+     * @param assetId  the tracked asset, to key the scheduled flush by
+     * @param tracking {@code assetId}'s tracking state; must already be the one {@code updated} was
+     *                 folded into
+     * @param updated  the just-folded summary; written as-is only in {@linkplain
+     *                 UsageSummaryBatchSettings#isImmediate() immediate} mode, where it is by
+     *                 definition also the freshest. Every batched path writes {@link
+     *                 Tracking#usage} instead — see below and {@link #flushUsageSummary}.
+     */
+    private void registerSummaryUpdate(AssetId assetId, Tracking tracking, AssetUsage updated) {
+        if (summaryBatchSettings.isImmediate()) {
+            usageRepository.save(updated);
+            return;
+        }
+        AssetUsage toWrite = null;
+        synchronized (tracking) {
+            tracking.unflushedSummaryUpdates++;
+            if (tracking.pendingSummaryFlush == null) {
+                // first unflushed fold since the last write: arm the time bound so the summary
+                // catches up on its own even if no further sample ever arrives for this usage.
+                tracking.pendingSummaryFlush = retryScheduler.schedule(() -> flushUsageSummary(assetId),
+                        summaryBatchSettings.batchWindowMillis(), TimeUnit.MILLISECONDS);
+            }
+            if (tracking.unflushedSummaryUpdates >= summaryBatchSettings.batchSizeSamples()) {
+                tracking.unflushedSummaryUpdates = 0;
+                cancelPendingSummaryFlush(tracking);
+                // the freshest fold, not this thread's `updated` — two subscription threads can
+                // reach the size bound out of order, and CLAUDE.md rule 9 says the newest wins.
+                toWrite = tracking.usage;
+            }
+        }
+        if (toWrite != null) {
+            usageRepository.save(toWrite);
+        }
+    }
+
+    /**
+     * Fired by {@link #retryScheduler} once {@link UsageSummaryBatchSettings#batchWindowMillis()}
+     * elapses. Reads {@link Tracking#usage} fresh rather than closing over the snapshot that armed
+     * the timer (CLAUDE.md rule 9: the newest fold wins, not whichever one happened to schedule
+     * this) — and no-ops if the size bound already flushed everything, or the usage has since
+     * closed, in either case leaving nothing for this run to do.
+     */
+    private void flushUsageSummary(AssetId assetId) {
+        Tracking tracking = trackingByAsset.get(assetId);
+        if (tracking == null) {
+            return;
+        }
+        AssetUsage toWrite;
+        synchronized (tracking) {
+            tracking.pendingSummaryFlush = null;
+            if (tracking.unflushedSummaryUpdates == 0) {
+                return;
+            }
+            tracking.unflushedSummaryUpdates = 0;
+            toWrite = tracking.usage;
+        }
+        if (toWrite != null) {
+            usageRepository.save(toWrite);
+        }
+    }
+
+    /** Caller must hold {@code tracking}'s monitor. */
+    private static void cancelPendingSummaryFlush(Tracking tracking) {
+        if (tracking.pendingSummaryFlush != null) {
+            tracking.pendingSummaryFlush.cancel(false);
+            tracking.pendingSummaryFlush = null;
         }
     }
 
@@ -423,6 +546,10 @@ public final class UsageTracker {
         /** docs/plans/done/MVP3-PLAN.md C-a: the freshest sample ever seen, kept even once {@link #usage} closes — see {@link #latestTelemetry(AssetId)}. */
         private Telemetry lastSample;
         private final List<TelemetrySubscription> telemetrySubscriptions = new ArrayList<>();
+        /** docs/plans/active/SCALE-100-PLAN.md S4: folds into {@link #usage} not yet written via {@code usageRepository.save}. */
+        private int unflushedSummaryUpdates;
+        /** docs/plans/active/SCALE-100-PLAN.md S4: the armed time-bound summary flush, if any — see {@code UsageTracker#registerSummaryUpdate}. */
+        private ScheduledFuture<?> pendingSummaryFlush;
     }
 
     private record TelemetrySubscription(TelemetrySourcePort source, DeviceId deviceId,

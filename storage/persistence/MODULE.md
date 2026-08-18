@@ -90,7 +90,7 @@ below). This module gets no `controller/`, `dto/`, or `service/` package — it 
 - `final class JpaDeviceRepository implements DeviceRepositoryPort` — constructor `(EntityManagerFactory)`.
 - `final class JpaAssetRepository implements AssetRepositoryPort` — constructor `(EntityManagerFactory)`.
 - `final class JpaAssetUsageRepository implements AssetUsageRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/MVP2-PLAN.md P-b. `findRecent(int limit)` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8 — the fleet-wide "replay library" list) is `findRecentByAsset`'s cross-asset counterpart: the same `order by started_at desc` query with no `asset_id` predicate.
-- `final class JpaTelemetryRepository implements TelemetryRepositoryPort` — constructor `(EntityManagerFactory)` (production default retention cap, see Retention below) or `(EntityManagerFactory, int retentionLimitPerUsage)` (test/override seam). docs/plans/done/MVP2-PLAN.md P-b.
+- `final class JpaTelemetryRepository implements TelemetryRepositoryPort` — constructor `(EntityManagerFactory)` (production default retention cap, see Retention below), `(EntityManagerFactory, int retentionLimitPerUsage)` (test/override seam), or `(EntityManagerFactory, int retentionLimitPerUsage, TelemetryBatchSettings)` (docs/plans/active/SCALE-100-PLAN.md S4 — explicit batching; the two shorter constructors delegate to it with `TelemetryBatchSettings.immediate()`, so they keep every pre-S4 caller's synchronous-write behavior byte-identical). One method beyond the port: `int pendingBatchCount()` — usages currently holding buffered, not-yet-durable samples, `0` in immediate mode. docs/plans/done/MVP2-PLAN.md P-b; batching in "Batching (SCALE-100-PLAN S4)" below.
 - `final class JpaDetectionRepository implements DetectionRepositoryPort` — constructor `(EntityManagerFactory)` or `(EntityManagerFactory, int retentionLimitPerStream)`, same shape as `JpaTelemetryRepository`. docs/plans/done/MVP2-PLAN.md P-b.
 - `final class JpaAssetImageRepository implements AssetImageRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/UX-REWORK-PLAN.md §U-d item 3 — the asset image store (CONTRACT 2).
 - `final class JpaGeofenceRepository implements GeofenceRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/done/OPS-CORE-PLAN.md §G, G-b — geofence zones; `save` is merge-by-id (upsert), `deleteById` a real hard delete (zones have no soft-delete concept — a disabled zone is just `enabled=false`, not a lifecycle state).
@@ -361,13 +361,26 @@ default, only the unpooled-vs-pooled connection mechanics change underneath it).
 
 The explicit `flush()` between `persist` and the native delete is required, not decorative: Hibernate has no way to know a hand-written native query touches `telemetry_samples`/`detection_results`, so without it the delete would run against the connection's pre-insert view of the table — once a usage/stream is already at capacity, that would prune the row just being appended instead of an older one.
 
-`JpaTelemetryRepository`'s key is `usage_id` (matching `AssetUsageRepositoryPort`'s grouping); `JpaDetectionRepository`'s key is `stream_id` — the only grouping key `DetectionResult`/`DetectionQuery` actually carry (there is no `usageId` on a detection). Both default to **100,000 rows** (`DEFAULT_RETENTION_LIMIT_PER_USAGE`/`DEFAULT_RETENTION_LIMIT_PER_STREAM`) — generous (≈27h of continuous 1Hz telemetry for one usage; ≈2.75h of continuous 10fps detections for one stream) but finite, so a usage/stream nobody ever stops (e.g. a forgotten dev-mode stream) cannot grow either table unboundedly. Each repository also has a two-argument constructor (`EntityManagerFactory, int`) for overriding the cap — used by this module's own retention tests to exercise pruning without inserting six figures of rows first; **not currently wired to a `vision.persistence.*` Spring property** (see Status's honest gaps for why).
+`JpaTelemetryRepository`'s key is `usage_id` (matching `AssetUsageRepositoryPort`'s grouping); `JpaDetectionRepository`'s key is `stream_id` — the only grouping key `DetectionResult`/`DetectionQuery` actually carry (there is no `usageId` on a detection). Both default to **100,000 rows** (`DEFAULT_RETENTION_LIMIT_PER_USAGE`/`DEFAULT_RETENTION_LIMIT_PER_STREAM`) — generous (≈27h of continuous 1Hz telemetry for one usage; ≈2.75h of continuous 10fps detections for one stream) but finite, so a usage/stream nobody ever stops (e.g. a forgotten dev-mode stream) cannot grow either table unboundedly. Each repository also has a two-argument constructor (`EntityManagerFactory, int`) for overriding the cap — used by this module's own retention tests to exercise pruning without inserting six figures of rows first; **not currently wired to a `vision.persistence.*` Spring property** (see Status's honest gaps for why). `JpaTelemetryRepository`'s prune-per-write mechanism above describes its **immediate**-mode behavior; docs/plans/active/SCALE-100-PLAN.md S4's batching (below) changes "every write" to "every flushed batch" — see "Batching (SCALE-100-PLAN S4)".
 
 `JpaAssetUsageRepository` has **no** retention pruning: a usage row is written once per start/stop plus a handful of position/sample-count updates in between, not once per incoming sample — it is not the "append-heavy" table docs/plans/done/MVP2-PLAN.md P-b's retention guard targets.
 
 **`JpaDetectionEventRepository`** (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3) follows the identical mechanism and shape as `JpaDetectionRepository` above — same `stream_id` grouping key (the only one `DetectionEvent` carries), same `DEFAULT_RETENTION_LIMIT_PER_STREAM = 100_000`, same two-argument test-override constructor, same `merge` → `flush()` → native-delete-ordered-by-`last_seen`-desc sequence, one difference: the write being flushed is a `merge` (upsert), not a `persist`, since `save` here can be replacing an existing row rather than always adding one. **Deliberately not the in-memory ring's 500-per-stream cap** the now-deleted `InMemoryDetectionEventRepository` (vision-app devsupport, removed docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b) used — that cap existed to bound heap in a devsupport fallback, not to express a real retention policy; reproducing it verbatim in a durable table would evict events far sooner than the platform actually needs to. This was a choice between the two existing "constructor-argument row cap" patterns this module already has (`JpaDetectionRepository`/`JpaTelemetryRepository`) rather than a third mechanism — `JpaDetectionRepository`'s `stream_id` key is the closer match (detection events group by stream, not by usage), so that is the one followed.
 
 **`JpaAuditTrail` has no retention pruning at all** — see its own entry above in "API surface": an audit trail that evicts its own oldest rows on a timer is not the durability guarantee the port exists to provide (`AuditTrailPort`'s own javadoc: "an audit trail that can be edited is not an audit trail" — the same reasoning extends to one that quietly forgets). Unbounded growth here is an accepted tradeoff at this platform's scale, the same posture `JpaAssetUsageRepository` already takes for its own low-write-volume table.
+
+## Batching (docs/plans/active/SCALE-100-PLAN.md S4)
+
+`JpaTelemetryRepository#save` no longer necessarily does one `persist` + `flush()` + prune per sample — the hot ingest path's per-sample round trip this wave targets. A new `repository.TelemetryBatchSettings(int batchSizeSamples, long batchWindowMillis)` record (compact-constructor-validated, `defaults()`/`immediate()` factories, same shape as `config.PersistencePoolSettings`) governs it:
+
+- **Immediate mode** (`TelemetryBatchSettings.immediate()` → `(1, 0)`, `isImmediate()` true when `batchWindowMillis == 0`) reproduces the pre-S4 behavior exactly: every `save` persists, flushes, and prunes before returning. The one- and two-argument constructors both resolve to this, so **every pre-S4 caller and test keeps its synchronous read-after-write behavior byte-identical** — this wave changes nothing observable in default configuration.
+- **Batched mode** (the three-argument constructor, non-immediate settings) buffers samples per `usage_id` in a `ConcurrentHashMap<UUID, PendingBatch>` and flushes (one `persist` per buffered sample, one `flush()`, one prune — the whole point) the instant `batchSizeSamples` accumulate for a usage, or `batchWindowMillis` have elapsed since the first still-buffered one for that usage, whichever comes first. The time bound is armed via a dedicated single-thread daemon `ScheduledExecutorService` (`"telemetry-batch-flush"`), created only when the settings are non-immediate — an immediate-mode instance starts none.
+- **Both flush paths *evict* their map entry, they do not merely empty it.** Buffer mutation only ever happens inside a `ConcurrentHashMap#compute` on the usage key — which is what makes `PendingBatch`'s fields safe without their own lock (compute serializes every writer and the flusher on one key, so a batch cannot be appended to mid-drain) and what makes draining a *removal*: the lambda returns `null`. Leaving drained-but-present entries behind would grow this map for the life of the JVM, one per flight ever flown — the same unbounded-map defect SCALE-100 fact 2f describes in `LiveUpdateRegistry`, reintroduced by the change meant to relieve that pressure. `int pendingBatchCount()` exposes the map's size so that invariant is testable rather than assumed (`bothFlushPathsEvictTheirBufferSoTheMapDoesNotGrowPerUsage`); it doubles as the honest "how much would a `kill -9` lose right now" number, and is always `0` in immediate mode. The DB write itself deliberately runs *outside* the lambda — `compute` holds a bin lock, and a JDBC round trip under it would serialize unrelated usages.
+- **The trade-off, stated plainly:** a sample buffered but not yet flushed exists only in that repository instance's heap. A crash (`kill -9`, OOM, unclean restart) loses whatever is still buffered per open usage, bounded to at most one `batchWindowMillis` window's worth. `findByUsage` only ever sees flushed rows, so a read shortly after a still-buffered write can also lag by up to the same window — a documented consequence of the same trade-off, not a bug. CLAUDE.md rule 9 ("newest data wins, even if previous is still available") is why `DEFAULT_BATCH_WINDOW_MILLIS` is a small non-zero number rather than defaulting to zero-loss: a deployment that wants zero loss over ingest throughput sets the window to `0` explicitly (which reads as `isImmediate()`).
+- **Tunable constants** (both in `TelemetryBatchSettings`, `repository` package) — not yet wired to a Spring property, flagged for S7 to lift into `vision.persistence.telemetry.*`:
+  - `DEFAULT_BATCH_SIZE_SAMPLES = 100` — safety ceiling for an unusually high-rate source; a typical ~1Hz flight-controller feed produces far fewer samples than this within one window, so in practice the time bound is what decides when a batch actually flushes.
+  - `DEFAULT_BATCH_WINDOW_MILLIS = 200L` — comfortably under docs/plans/active/SCALE-100-PLAN.md S4's 250ms crash-loss ceiling.
+- **Not wired into production by this wave**: `PersistenceWiringConfiguration`'s `JpaTelemetryRepository` bean still uses the one-argument (implicitly-immediate) constructor — batching only takes effect once a caller explicitly passes non-immediate `TelemetryBatchSettings`, e.g. via the new three-argument constructor. `UsageTracker` (`contexts/vision-perception`) has a structurally parallel `UsageSummaryBatchSettings` for its own coalesced `AssetUsage` summary write (docs/plans/active/SCALE-100-PLAN.md S4 item 3) — a separate type in a separate module (this module cannot depend on a context module), meant to be wired from the *same* `vision.persistence.telemetry.batch-size`/`batch-window` property values so one number governs both write paths; see that module's own MODULE.md.
 
 ## Tests
 
@@ -391,7 +404,7 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   exactly, upsert-that-closes-an-open-usage (now also asserting the recorded `streamId` survives
   the close/upsert), `findRecentByAsset` newest-first + bounded by limit, `findOpenByAsset`
   found/not-found.
-- `@Nested TelemetryRepositoryTests` (7, up from 5 — docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) — round trip
+- `@Nested TelemetryRepositoryTests` (10, up from 7 — docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) — round trip
   with every field populated and with only the required fields, per-usage isolation,
   `findByUsageReturnsEarliestSamplesFirstUpToLimit` — proves `findByUsage`'s limit selects the
   *earliest* samples (mirroring `InMemoryTelemetryRepository`'s actual behavior, see
@@ -399,7 +412,16 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   a full `FlightState` (including nested nullable sub-fields and a non-empty `armingBlockers`) round
   trips exactly, and a sample built via `Telemetry`'s 8-arg convenience ctor (no `flightState` at
   all) reads back with `flightState() == null`, the same honest-null contract a real pre-V6 row
-  would also satisfy.
+  would also satisfy — plus two new docs/plans/active/SCALE-100-PLAN.md S4 batching cases:
+  `batchedSaveDefersWritesUntilTheSizeBoundThenFlushesTogether` (a 3-sample size bound against a huge
+  window: `findByUsage` sees nothing after two saves, all three together after the third trips the
+  bound) and `batchedSaveIsDurableWithinTheConfiguredWindowEvenBelowTheSizeBound` (a below-size-bound
+  save is invisible immediately, then durable after sleeping past a 100ms window) — the loss-bound
+  proof the S4 brief requires, using the new three-argument constructor with explicit
+  `TelemetryBatchSettings` — and `bothFlushPathsEvictTheirBufferSoTheMapDoesNotGrowPerUsage`, which
+  pins the map-eviction invariant via `pendingBatchCount()` on *both* drain paths (the size bound,
+  which drains inline on the caller thread, and the window, which drains on the scheduler) because
+  they evict independently.
 - `@Nested DetectionRepositoryTests` (8, up from 6 — docs/plans/done/TRACKING-PLAN.md wave T6) — round trip of
   detections + inference latency, `streamId`
   filter, `queryTimeRangeIsInclusiveOnBothEndsMatchingInMemoryBehavior` (proves `to` is treated as
@@ -1312,3 +1334,78 @@ were all left alone per the brief's exclusive-scope constraint. The exact `visio
 keys, defaults, and the `PersistenceWiringConfiguration`/`VisionPersistenceProperties` changes needed to
 actually bind them are reported to the orchestrator, not applied here — see "Bootstrap and connection
 pool" above for the table.
+
+## docs/plans/active/SCALE-100-PLAN.md S4 done (telemetry write path — batching)
+
+Three items from the brief: (1) drop `JpaTelemetryRepository`'s per-`save` `em.flush()` where the
+retention delete doesn't need it, (2) batch samples per usage behind a size-or-time bound, both
+configurable, (3) coalesce `UsageTracker`'s second write (the `AssetUsage` summary-counter update,
+`contexts/vision-perception`) onto the same batch boundary. See "Batching (SCALE-100-PLAN S4)" above
+for the full `JpaTelemetryRepository`/`TelemetryBatchSettings` mechanism; `contexts/vision-perception`'s
+own MODULE.md documents `UsageTracker`/`UsageSummaryBatchSettings`'s structurally parallel side.
+
+**Design constraint that shaped everything:** no existing constructor signature could change (an
+existing 9-argument `UsageTracker` test-seam constructor is called positionally by
+`UsageTrackerTest`, and `JpaTelemetryRepository`'s existing two constructors are called throughout
+this module's own tests) and no existing assertion could be edited. Every new capability therefore
+arrived as a **new trailing-argument constructor overload** that the shorter, pre-existing ones now
+delegate into with an explicit `.immediate()`/synchronous default — so production behavior does not
+change until something actually calls the new overload with non-immediate settings. Concretely:
+`JpaTelemetryRepository` gained a third constructor `(EntityManagerFactory, int, TelemetryBatchSettings)`;
+`UsageTracker` gained a new 8-argument public constructor (the 7-argument one's params plus
+`UsageSummaryBatchSettings`) and a new 10-argument package-private test-seam constructor (the
+9-argument one's params plus the same) — full detail in that module's MODULE.md.
+
+**The durability window:** `TelemetryBatchSettings`/`UsageSummaryBatchSettings` both default
+`batchWindowMillis` to **200ms** (`DEFAULT_BATCH_WINDOW_MILLIS`), comfortably under the brief's 250ms
+crash-loss ceiling, rather than defaulting to 0 (zero loss). CLAUDE.md rule 9 ("newest data wins, even
+if previous is still available") is why: the brief's own acceptance criterion — "telemetry loss on a
+`kill -9` is bounded by the configured window and is covered by a test" — only makes sense as a
+requirement if loss is actually possible by default. `0` remains a fully supported, explicit opt-out
+(`isImmediate()` reads `true`) for a deployment that wants zero loss over ingest throughput; both
+settings records validate `batchWindowMillis >= 0` and `batchSizeSamples >= 1` in their compact
+constructors, matching this module's usual validation idiom.
+
+**Not wired into production by this task** — deliberately, since wiring is reserved to the
+orchestrator/S7, not this task's file scope (`station/vision-app/src/main/resources/application.yaml`,
+anything under `.../config/wiring/`, and `station/vision-api/**` were not touched):
+
+- `PersistenceWiringConfiguration`'s `JpaTelemetryRepository` bean (currently the one-argument
+  constructor) needs to move to the three-argument constructor with a `TelemetryBatchSettings`
+  bound from a new `vision.persistence.telemetry.batch-size`/`batch-window` property pair (defaulted
+  to `TelemetryBatchSettings.defaults()`'s own numbers, per the "opt-in guardrail" — though here the
+  *code* default is already non-immediate, so no config default swap is actually needed to preserve
+  today's default-config behavior, since nothing calls the new constructor yet).
+- `ApplicationServiceWiring`'s `UsageTracker` bean (currently the 7-argument constructor) needs to
+  move to the new 8-argument one with a `UsageSummaryBatchSettings` bound from the **same** property
+  pair — the plan's intent is one number governing both write paths, even though they are two
+  separate settings types in two separate modules (a context module cannot depend on the adapter
+  module to share one type).
+- A new `VisionPersistenceProperties` field (or nested record) for the two numbers, following this
+  module's existing property-binding precedent for `PersistencePoolSettings`.
+
+**Tunable constants for S7** (name — value — meaning):
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `TelemetryBatchSettings.DEFAULT_BATCH_SIZE_SAMPLES` | `100` | Samples buffered per usage before a flush is forced regardless of the time bound — a safety ceiling, rarely the binding constraint at typical telemetry rates. |
+| `TelemetryBatchSettings.DEFAULT_BATCH_WINDOW_MILLIS` | `200L` | Max crash-loss window per open usage for the telemetry write path; under the plan's 250ms ceiling. |
+| `UsageSummaryBatchSettings.DEFAULT_BATCH_SIZE_SAMPLES` | `100` | Same role as above, for the coalesced `AssetUsage` summary write (`contexts/vision-perception`). |
+| `UsageSummaryBatchSettings.DEFAULT_BATCH_WINDOW_MILLIS` | `200L` | Same role as above; meant to be wired from the same property as the telemetry one so the two stay in lockstep. |
+
+**Tests:** `./mvnw -B -pl storage/persistence test` — **157/157 green** (up from 148: new
+`TelemetryBatchSettingsTest`, 6, docker-free compact-constructor/`defaults()`/`immediate()` validation,
+mirroring `PersistencePoolSettingsTest`'s own shape; `TelemetryRepositoryTests` 7→10, +3 — see Tests
+above for all three). Docker confirmed available (real `postgres:16` Testcontainers instance, not
+skipped); every nested class, including the three new batching cases, actually ran.
+`contexts/vision-perception` side: `./mvnw -B -pl contexts/vision-perception test` — **494/494 green**
+(up from 492) — `UsageTrackerTest` 20→22, +2 (see that module's own MODULE.md).
+
+> Count these from Maven's own summary line, never by summing `target/surefire-reports/TEST-*.xml`.
+> That sum is wrong in both directions: reports for renamed or deleted classes linger and inflate it,
+> and `PostgresDockerIntegrationTest`'s `@Nested` classes — which Maven counts one by one — land in a
+> single aggregate XML that undercounts them (138 by that sum, 157 by Maven, for this same run).
+
+**Deferred / left for the orchestrator:** the wiring bullets above (`PersistenceWiringConfiguration`,
+`ApplicationServiceWiring`, `VisionPersistenceProperties`), all outside this task's file scope. Nothing
+else from the S4 brief was left undone.
