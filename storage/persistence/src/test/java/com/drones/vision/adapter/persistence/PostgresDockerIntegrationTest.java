@@ -25,6 +25,7 @@ import com.drones.vision.warehouse.domain.model.DeviceCategory;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.flight.domain.model.FeatureRequirement;
 import com.drones.vision.flight.domain.model.GeofenceZone;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.kernel.GroupId;
@@ -42,7 +43,9 @@ import com.drones.vision.map.domain.model.MarkKind;
 import com.drones.vision.map.domain.model.MarkSource;
 import com.drones.vision.map.domain.model.MarkStatus;
 import com.drones.vision.identity.domain.model.Membership;
+import com.drones.vision.flight.domain.model.MessageObservation;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
@@ -65,6 +68,7 @@ import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.flight.domain.model.VehicleProfile;
 import com.drones.vision.flight.domain.model.ZoneId;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.map.domain.model.Verification.VerificationState;
@@ -78,6 +82,7 @@ import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
+import com.drones.vision.flight.domain.port.FeatureRequirementRepositoryPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
@@ -87,10 +92,12 @@ import com.drones.vision.learning.domain.port.SampleImageStorePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
+import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 
 import com.drones.vision.adapter.persistence.config.ClosingDatasourceConnectionProvider;
 import com.drones.vision.adapter.persistence.config.PersistencePoolSettings;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
+import com.drones.vision.adapter.persistence.mapper.FeatureRequirementMapper;
 import com.drones.vision.adapter.persistence.repository.JpaAssetImageRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssetRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssetUsageRepository;
@@ -102,6 +109,7 @@ import com.drones.vision.adapter.persistence.repository.JpaDetectionEventReposit
 import com.drones.vision.adapter.persistence.repository.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDeviceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDrawingRepository;
+import com.drones.vision.adapter.persistence.repository.JpaFeatureRequirementRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGeofenceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGroupRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMapLayerRepository;
@@ -111,6 +119,7 @@ import com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository;
 import com.drones.vision.adapter.persistence.repository.TelemetryBatchSettings;
 import com.drones.vision.adapter.persistence.repository.JpaTrainingSampleRepository;
 import com.drones.vision.adapter.persistence.repository.JpaUserRepository;
+import com.drones.vision.adapter.persistence.repository.JpaVehicleProfileRepository;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
@@ -2408,6 +2417,186 @@ class PostgresDockerIntegrationTest {
         }
     }
 
+    @Nested
+    class VehicleProfileRepositoryTests {
+
+        private final VehicleProfileRepositoryPort repository = new JpaVehicleProfileRepository(entityManagerFactory);
+
+        @Test
+        void findLatestReturnsEmptyForUnknownDevice() {
+            assertTrue(repository.findLatest(DeviceId.random()).isEmpty());
+        }
+
+        @Test
+        void savedCompleteProfileRoundTripsEveryField() {
+            DeviceId deviceId = DeviceId.random();
+            VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.7",
+                    "quadcopter", 12345L, List.of("MAVLINK2", "MISSION_INT"),
+                    List.of(new MessageObservation(33, "GLOBAL_POSITION_INT", 0.9, 9)),
+                    List.of(new ParameterReading("SR2_EXTRA2", 0.0, "REAL32")), 2300L, true, null);
+
+            repository.save(deviceId, profile);
+
+            Optional<VehicleProfile> found = repository.findLatest(deviceId);
+            assertTrue(found.isPresent());
+            assertEquals(profile, found.get());
+        }
+
+        @Test
+        void savedIncompleteProfileRoundTripsIncompleteReasonAndNullFields() {
+            DeviceId deviceId = DeviceId.random();
+            VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#3", NOW, null, null, null, null, null,
+                    List.of(), List.of(), List.of(), null, false, "AUTOPILOT_VERSION not answered within 3s");
+
+            repository.save(deviceId, profile);
+
+            Optional<VehicleProfile> found = repository.findLatest(deviceId);
+            assertTrue(found.isPresent());
+            assertEquals(profile, found.get());
+        }
+
+        /** {@link com.drones.vision.adapter.persistence.repository.JpaVehicleProfileRepository#save}
+         * always inserts a new row (O3's "append-only, never overwrites" contract) — {@link
+         * com.drones.vision.adapter.persistence.repository.JpaVehicleProfileRepository#findLatest}
+         * must still resolve to the newest one. */
+        @Test
+        void saveIsAppendOnlyAndFindLatestReturnsTheNewestObservation() {
+            DeviceId deviceId = DeviceId.random();
+            VehicleProfile older = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.6",
+                    "quadcopter", null, List.of(), List.of(), List.of(), null, true, null);
+            VehicleProfile newer = new VehicleProfile("udp://0.0.0.0:14550#7", NOW.plusSeconds(60), 7, "ardupilot",
+                    "4.5.7", "quadcopter", null, List.of(), List.of(), List.of(), null, true, null);
+
+            repository.save(deviceId, older);
+            repository.save(deviceId, newer);
+
+            Optional<VehicleProfile> found = repository.findLatest(deviceId);
+            assertTrue(found.isPresent());
+            assertEquals(newer, found.get());
+        }
+
+        @Test
+        void findLatestIsolatesProfilesPerDevice() {
+            DeviceId deviceA = DeviceId.random();
+            DeviceId deviceB = DeviceId.random();
+            VehicleProfile profileA = new VehicleProfile("udp://a#1", NOW, 1, "ardupilot", null, null, null,
+                    List.of(), List.of(), List.of(), null, false, "incomplete");
+            VehicleProfile profileB = new VehicleProfile("udp://b#2", NOW, 2, "px4", null, null, null,
+                    List.of(), List.of(), List.of(), null, false, "incomplete");
+            repository.save(deviceA, profileA);
+            repository.save(deviceB, profileB);
+
+            assertEquals(profileA, repository.findLatest(deviceA).orElseThrow());
+            assertEquals(profileB, repository.findLatest(deviceB).orElseThrow());
+        }
+    }
+
+    /**
+     * {@link FeatureRequirementRepositoryPort} has no {@code save} — every production row is Flyway
+     * seed data ({@code V18__feature_requirements.sql}, D6), so most of these assert against that
+     * real seeded data directly rather than against fixtures this test invents, proving the
+     * migration's eleven rows are actually reachable through the port. The one exception ({@link
+     * #mapperRoundTripsAnEntityNotFromSeedData}) inserts a throwaway row via {@link
+     * FeatureRequirementMapper} directly (the port itself has no write method to call) to keep the
+     * mapper's round trip under test, per that class's own javadoc.
+     */
+    @Nested
+    class FeatureRequirementRepositoryTests {
+
+        private final FeatureRequirementRepositoryPort repository =
+                new JpaFeatureRequirementRepository(entityManagerFactory);
+
+        @Test
+        void findByFirmwareReturnsEveryFrozenFeatureKeyForArdupilot() {
+            Set<String> found = repository.findByFirmware("ardupilot").stream()
+                    .map(FeatureRequirement::featureKey)
+                    .collect(java.util.stream.Collectors.toSet());
+
+            assertEquals(FeatureRequirement.FEATURE_KEYS, found);
+        }
+
+        /**
+         * D13: PX4 stays "generic MAVLink, unverified" until a PX4 SITL run proves otherwise — zero
+         * seeded rows is the honest v1 state, not an omission bug (ReadinessService reports every
+         * feature {@code UNKNOWN} for a firmware with no rows, per O3 MODULE.md).
+         */
+        @Test
+        void findByFirmwareReturnsEmptyForAnUnseededFirmware() {
+            assertTrue(repository.findByFirmware("px4").isEmpty());
+        }
+
+        @Test
+        void mapPositionRowCarriesThePlanGivenTwoHertzThreshold() {
+            FeatureRequirement row = repository.findByFirmware("ardupilot").stream()
+                    .filter(r -> r.featureKey().equals("map-position"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertEquals(33, row.requiredMessageId(), "GLOBAL_POSITION_INT");
+            assertEquals("GLOBAL_POSITION_INT", row.requiredMessageName());
+            assertEquals(2.0, row.minimumHz());
+        }
+
+        @Test
+        void visualGeolocationRowCarriesThePlanGivenFiveHertzThreshold() {
+            FeatureRequirement row = repository.findByFirmware("ardupilot").stream()
+                    .filter(r -> r.featureKey().equals("visual-geolocation"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertEquals(30, row.requiredMessageId(), "ATTITUDE");
+            assertEquals(5.0, row.minimumHz());
+        }
+
+        @Test
+        void fleetIdentityRowIsParameterOnly() {
+            FeatureRequirement row = repository.findByFirmware("ardupilot").stream()
+                    .filter(r -> r.featureKey().equals("fleet-identity"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertNull(row.requiredMessageId());
+            assertEquals("SYSID_THISMAV", row.requiredParameterName());
+        }
+
+        @Test
+        void commandTxRowRequiresNeitherMessageNorParameter() {
+            FeatureRequirement row = repository.findByFirmware("ardupilot").stream()
+                    .filter(r -> r.featureKey().equals("command-tx"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertNull(row.requiredMessageId());
+            assertNull(row.requiredParameterName());
+        }
+
+        @Test
+        void findAllIncludesEverySeededRow() {
+            List<FeatureRequirement> all = repository.findAll();
+            assertTrue(all.size() >= FeatureRequirement.FEATURE_KEYS.size());
+        }
+
+        @Test
+        void mapperRoundTripsAnEntityNotFromSeedData() {
+            // firmware is varchar(32); keep the throwaway id short, just unique enough not to
+            // collide with a seeded row or another run of this same test.
+            String firmware = "test-" + UUID.randomUUID().toString().substring(0, 8);
+            FeatureRequirement custom =
+                    new FeatureRequirement("battery", "Battery", firmware, 1, "SYS_STATUS", 1.0, null);
+
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                em.getTransaction().begin();
+                em.persist(FeatureRequirementMapper.toEntity(custom));
+                em.getTransaction().commit();
+            } finally {
+                em.close();
+            }
+
+            assertEquals(List.of(custom), repository.findByFirmware(firmware));
+        }
+    }
+
     /**
      * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — same {@code information_schema} shape as the V7-V12
      * schema tests, for the brand-new {@code audit_entries} table: asserts {@code details} is a
@@ -2462,6 +2651,79 @@ class PostgresDockerIntegrationTest {
                                     + "where table_name = 'detection_events' and column_name = 'last_seen'")
                     .getSingleResult();
             assertEquals("NO", lastSeenNullable, "last_seen is required");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 — same {@code information_schema} shape as the
+     * V14/V15 schema tests above, for the brand-new {@code vehicle_profiles} table: {@code messages}
+     * defaults to {@code '[]'::jsonb} so it is required, while {@code sysid} stays optional (a link
+     * key may carry no sysid), proving {@code V17__vehicle_profiles.sql} applied cleanly on top of
+     * V1-V16.
+     */
+    @Test
+    void v17MigrationCreatesTheVehicleProfilesTableOnTopOfV1ThroughV16() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String messagesNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'vehicle_profiles' and column_name = 'messages'")
+                    .getSingleResult();
+            assertEquals("NO", messagesNullable, "messages is required (defaults to '[]')");
+
+            String sysidNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'vehicle_profiles' and column_name = 'sysid'")
+                    .getSingleResult();
+            assertEquals("YES", sysidNullable, "sysid is optional -- a link key may carry no sysid");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6 — proves {@code V18__feature_requirements.sql}
+     * actually seeded one row per frozen v1 feature key (SS8.1) for {@code firmware = 'ardupilot'},
+     * on top of V1-V17; {@link FeatureRequirementRepositoryTests} exercises the same data through the
+     * port, this asserts the raw row count landed at all.
+     */
+    @Test
+    void v18MigrationSeedsElevenArdupilotFeatureRequirementRows() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            long count = ((Number) em.createNativeQuery(
+                            "select count(*) from feature_requirements where firmware = 'ardupilot'")
+                    .getSingleResult()).longValue();
+            assertEquals(11, count, "one seeded row per frozen v1 feature key (SS8.1)");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 — proves {@code V19__asset_usage_phase.sql}
+     * applied cleanly on top of V1-V18: {@code phase}/{@code first_armed_at}/{@code last_disarmed_at}
+     * are nullable, additive columns with no backfill (every pre-existing row predates the phase
+     * concept). Schema-only on purpose — see that migration's own header for why
+     * {@code AssetUsageEntity} is not wired to these columns by this wave.
+     */
+    @Test
+    void v19MigrationAddsNullablePhaseColumnsOnTopOfV1ThroughV18() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String phaseNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'asset_usages' and column_name = 'phase'")
+                    .getSingleResult();
+            assertEquals("YES", phaseNullable, "phase is nullable -- no backfill for pre-existing rows");
+
+            String firstArmedNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'asset_usages' and column_name = 'first_armed_at'")
+                    .getSingleResult();
+            assertEquals("YES", firstArmedNullable);
         } finally {
             em.close();
         }

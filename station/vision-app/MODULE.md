@@ -32,6 +32,10 @@ com.drones.vision.app
       AuthWiringConfiguration        unchanged name, moved here (no internal changes beyond imports)
       SystemStatusWiring             new (docs/plans/active/SYSTEM-STATUS-PLAN.md wave S2): the four
                                      SubsystemStatusPort beans backing GET /api/system/status
+      OnboardingWiringConfiguration   new (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5): vehicle-
+                                     onboarding pipeline — VehicleProfileService/RemediationService/
+                                     ReadinessService (unconditional) + the flag-gated NoopVehicleConfigPort
+                                     — see the wave's own done-section near the end of this file
     SecurityConfig.java    the one cross-cutting @Configuration left directly under config/
   security/                BcryptPasswordHasher, VisionUserDetails, DevPrincipalResolver,
                             SecurityContextPrincipalResolver, SecuritySessionAuthenticator,
@@ -41,7 +45,8 @@ com.drones.vision.app
   bootstrap/               SimulationResumeRunner (the one remaining ApplicationRunner —
                            AuthSeedRunner deleted docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1, see
                            "Auth / session security" and the W1 narrative section below)
-  devsupport/              unchanged, no sub-structuring (deferred, §8 of the plan)
+  devsupport/              unchanged, no sub-structuring (deferred, §8 of the plan) — plus
+                           NoopVehicleConfigPort (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5)
 ```
 
 **Why split this way, not some other grouping**: the plan named six illustrative buckets (`VideoSourceWiring`/`TelemetryWiring`/`PublishWiring`/`CvWiring`/`ApplicationServiceWiring`/`FeedTransmitterWiring`) and left exact assignment to judgment; the mapping above followed the adapter/protocol boundary each bean's *type* belongs to (a `VideoSourcePort` bean → `VideoSourceWiring`, a `vision-application` service bean → `ApplicationServiceWiring`, regardless of which adapter it happens to depend on). `DiscoveryWiringConfiguration`/`PersistenceWiringConfiguration`/`TrainingWiringConfiguration`/`AuthWiringConfiguration` kept their existing names rather than being renamed to match the new `*Wiring` convention — a deliberate, bounded call: renaming them would have touched ~20 test files' `@SpringBootTest`/javadoc references for zero behavioral gain (Spring resolves beans by type, not by which file declares them, and `@SpringBootTest` in this module boots the whole component-scanned context rather than naming explicit `classes = {...}`), so only the *package* move (mechanical import-path fix) was made, not a name churn.
@@ -69,6 +74,7 @@ com.drones.vision.app
 | `VisionMavlinkProperties` | **new** | `vision.mavlink` | `adapter-mavlink`'s `MavlinkSettings` minus `Rc` (which is `vision.rc`, see above) |
 | `VisionOverlayProperties` | **new** | `vision.overlay` | `adapter-overlay`'s `OverlaySettings` |
 | `VisionApiProperties` (`com.drones.vision.app.config.properties`) | **new**; extended SCALE-100 S6 with `rateLimit`, S7 with `hlsProxy`'s `errorBodyPreviewMaxChars`/`maxRedirectHops` and `live`'s `sendTimeout`/`bufferEviction` (+ `marksBuffer`→`mapBuffer` rename) | `vision.api` | maps across to `com.drones.vision.api.support.VisionApiProperties` (vision-api's own framework-free mirror) — consumers are `PublishWiring#snapshotJpegEncoder`/`#hlsProxySettings`/`#liveSettings` and (for `rateLimit` only) `RateLimitWiring`; `AssetImageController`/per-controller paging are the only ones still reading their own local constants, not this record's `paging`/`upload` fields (a documented gap, not an oversight) |
+| `VisionOnboardingProperties` | **new** (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5) | `vision.onboarding` | only `probe` (`enabled`/`inventoryWindow`/`requestTimeout`) is bound — §8.1's other two `vision.onboarding.*` keys (`remediate.message-interval.enabled` O8, `installer.enabled` O10) have no consumer in this module yet, deliberately not bound until their owning wave wires one; maps across to `com.drones.vision.api.support.OnboardingProperties` (vision-api's own framework-free mirror, same split as `VisionApiProperties` above) via `OnboardingWiringConfiguration#onboardingApiProperties` |
 
 **Naming collision, deliberate**: `com.drones.vision.app.config.properties.VisionApiProperties` (Spring-bound, this module) and `com.drones.vision.api.support.VisionApiProperties` (plain, vision-api) are two distinct classes sharing a simple name in two different packages — see `PublishWiring#snapshotJpegEncoder`'s own javadoc and the vision-app-side `VisionApiProperties`'s own javadoc for why they stay separate (vision-api may not depend on Spring's `@ConfigurationProperties` machinery) and how the one file that needs both (`PublishWiring`) tells them apart (fully-qualifies the vision-api one, imports the Spring one plain).
 
@@ -193,7 +199,7 @@ Every repository port's `Jpa*` implementation (adapter-persistence) is documente
 
 **Since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b, there is no toggle: Postgres is the only store.** `VisionPersistenceProperties` (`@ConfigurationProperties(prefix="vision.persistence")`) is now just `jdbcUrl`/`username`/`password` (all always read) and `seedDevUsers` (`@DefaultValue("false")`, added W1, see the W1 Status entry below); the `enabled` field is gone.
 
-`PersistenceWiringConfiguration` is still a **separate `@Configuration` class** from `ApplicationServiceWiring` — same split-out-by-concern precedent as `DiscoveryWiringConfiguration` — but is now straight-line: the `EntityManagerFactory` bean (`adapter-persistence`'s `PersistenceUnit.start`, `@Bean(destroyMethod="close")`) is an ordinary unconditional bean, and every port bean is a one-line `new Jpa*Repository(entityManagerFactory)` taking the concrete `EntityManagerFactory` directly — no `@ConditionalOnProperty`, no `ObjectProvider`, no if/else. It wires `categoryRepositoryPort`, `deviceRepositoryPort`, `assetRepositoryPort`, `assetUsageRepositoryPort`, `telemetryRepositoryPort`, `detectionRepositoryPort`, `assetImageRepositoryPort`, `geofenceRepositoryPort`, `userRepositoryPort`, `groupRepositoryPort`, `assignmentRepositoryPort`, `markRepositoryPort`, `mapLayerRepositoryPort`, `drawingRepositoryPort`, `datasetRepositoryPort`, `trainingSampleRepositoryPort`, `sampleImageStorePort` — seventeen repository ports, same set as before W2b, just without the branch. `auditTrailPort` and `detectionEventRepositoryPort` are **not** here — those two are assembled in `ApplicationServiceWiring` because they need to be wrapped in their `LiveUpdate*` decorator when `vision.live.enabled=true` (see the Bean inventory above and "Server-push data plane" below); `ApplicationServiceWiring` now also takes `EntityManagerFactory` as a bean parameter for that reason. Two of the three P-b beans (`assetUsageRepositoryPort`/`detectionRepositoryPort`) still use each `Jpa*Repository`'s one-argument constructor (its generous default retention cap — see adapter-persistence/MODULE.md's Retention section) rather than the two-argument override; no `vision.persistence.*` property surfaces the cap yet. **`telemetryRepositoryPort` is the exception** (docs/plans/active/SCALE-100-PLAN.md S4): it takes the three-argument constructor — default retention cap, plus `vision.persistence.telemetry`'s batching settings — because telemetry is the only table written once per incoming sample, and therefore the only one where a per-write `flush()` is worth trading a bounded loss window for. The same block also reaches `ApplicationServiceWiring`'s `usageTracker` bean (`toSummarySettings()`), so one number governs both writes that a sample causes; see "Telemetry write batching" below. `DatasetUploadPort` (adapter-cv-grpc's `GrpcDatasetUploadPort`) is still wired in `TrainingWiringConfiguration`, not here — it needs the shared `cvGrpcChannel` (gated by `vision.training.enabled`, an orthogonal flag) — see "CV training loop wiring" below.
+`PersistenceWiringConfiguration` is still a **separate `@Configuration` class** from `ApplicationServiceWiring` — same split-out-by-concern precedent as `DiscoveryWiringConfiguration` — but is now straight-line: the `EntityManagerFactory` bean (`adapter-persistence`'s `PersistenceUnit.start`, `@Bean(destroyMethod="close")`) is an ordinary unconditional bean, and every port bean is a one-line `new Jpa*Repository(entityManagerFactory)` taking the concrete `EntityManagerFactory` directly — no `@ConditionalOnProperty`, no `ObjectProvider`, no if/else. It wires `categoryRepositoryPort`, `deviceRepositoryPort`, `assetRepositoryPort`, `assetUsageRepositoryPort`, `telemetryRepositoryPort`, `detectionRepositoryPort`, `assetImageRepositoryPort`, `geofenceRepositoryPort`, `userRepositoryPort`, `groupRepositoryPort`, `assignmentRepositoryPort`, `markRepositoryPort`, `mapLayerRepositoryPort`, `drawingRepositoryPort`, `datasetRepositoryPort`, `trainingSampleRepositoryPort`, `sampleImageStorePort`, `vehicleProfileRepositoryPort`, `featureRequirementRepositoryPort` — nineteen repository ports (seventeen pre-existing, plus two added by docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 — see the wave's own done-section near the end of this file), same unconditional shape throughout: `vision.onboarding.probe.enabled` gates only whether anything ever *calls* `VehicleConfigPort` (see `OnboardingWiringConfiguration`), not whether these two repositories/tables exist. `auditTrailPort` and `detectionEventRepositoryPort` are **not** here — those two are assembled in `ApplicationServiceWiring` because they need to be wrapped in their `LiveUpdate*` decorator when `vision.live.enabled=true` (see the Bean inventory above and "Server-push data plane" below); `ApplicationServiceWiring` now also takes `EntityManagerFactory` as a bean parameter for that reason. Two of the three P-b beans (`assetUsageRepositoryPort`/`detectionRepositoryPort`) still use each `Jpa*Repository`'s one-argument constructor (its generous default retention cap — see adapter-persistence/MODULE.md's Retention section) rather than the two-argument override; no `vision.persistence.*` property surfaces the cap yet. **`telemetryRepositoryPort` is the exception** (docs/plans/active/SCALE-100-PLAN.md S4): it takes the three-argument constructor — default retention cap, plus `vision.persistence.telemetry`'s batching settings — because telemetry is the only table written once per incoming sample, and therefore the only one where a per-write `flush()` is worth trading a bounded loss window for. The same block also reaches `ApplicationServiceWiring`'s `usageTracker` bean (`toSummarySettings()`), so one number governs both writes that a sample causes; see "Telemetry write batching" below. `DatasetUploadPort` (adapter-cv-grpc's `GrpcDatasetUploadPort`) is still wired in `TrainingWiringConfiguration`, not here — it needs the shared `cvGrpcChannel` (gated by `vision.training.enabled`, an orthogonal flag) — see "CV training loop wiring" below.
 
 **docker-compose.yml**: the `vision-app` service depends on `postgres` (`condition: service_healthy`, alongside its existing `mediamtx`/`cv-service` dependencies) and sets `VISION_PERSISTENCE_JDBC_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB}` (compose-internal hostname/port — mirrors the existing `VISION_PUBLISH_MEDIAMTX_*_BASE` container-vs-host addressing split), `VISION_PERSISTENCE_USERNAME`/`VISION_PERSISTENCE_PASSWORD` from the same `.env`-sourced `${POSTGRES_USER}`/`${POSTGRES_PASSWORD}` the `postgres` service itself already uses — `VISION_PERSISTENCE_ENABLED` is gone (W2b), there is nothing left to toggle. A host-run `./mvnw spring-boot:run` (or any other non-compose run) needs a reachable Postgres at `jdbc-url`'s default (`localhost:5432/vision`) to start at all — there is no in-memory escape hatch for an environment with no database.
 
@@ -2422,3 +2428,60 @@ reproduces today's behaviour exactly — no pre-existing assertion was weakened,
   each adapter module's own MODULE.md for the reasoning.
 - No trust-material/TLS work here — out of scope for this wave, same as R2 above; the actuator endpoint
   rides the same HTTP listener and security posture the rest of `/api/**` already has.
+
+## docs/plans/active/DRONE-ONBOARDING-PLAN.md Wave O5 done (vehicle onboarding, vision-app wiring half)
+
+`OnboardingWiringConfiguration` (new, split-out-by-concern like `SystemStatusWiring`/
+`DiscoveryWiringConfiguration` before it — see "Package shape" above) wires the vehicle-onboarding
+control plane (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1/§8.1). `VehicleProfileService`
+(PROBE)/`RemediationService` (CONFIGURE)/`ReadinessService` (NEGOTIATE) are wired **unconditionally**
+— same "core services always exist, only the port varies" shape `AuthWiringConfiguration` already
+established for `AuthService`/`UserService`. Only `VehicleConfigPort` is flag-gated
+(`vision.onboarding.probe.enabled`, default `false`, D17): `NoopVehicleConfigPort` (new,
+`devsupport/`) when off/absent, refusing every call with §8.1's frozen 409 body
+(`"vehicle probing is disabled (vision.onboarding.probe.enabled)"`); **no bean at all** when the flag
+is `true` — this wave's file scope cannot construct `adapter-mavlink`'s real
+`MavlinkVehicleConfigurator` (O4, a separate concurrent wave), so flipping the flag on ahead of O4
+landing fails application startup rather than silently degrading to a no-op that looks like it's
+working. `PersistenceWiringConfiguration` gained two more unconditional repository-port beans,
+`vehicleProfileRepositoryPort`/`featureRequirementRepositoryPort` (same straight-line shape as the
+other seventeen — see "Persistence wiring" above), and `VisionOnboardingProperties` (new
+`@ConfigurationProperties`, `vision.onboarding.probe.*`) is mapped onto `vision-api`'s own
+framework-free `OnboardingProperties` by a new `OnboardingWiringConfiguration#onboardingApiProperties`
+bean method — the same "Spring-bound record here, plain mirror in vision-api" bridge
+`PublishWiring#snapshotJpegEncoder` already established for `VisionApiProperties`.
+`OnboardingWiringConfiguration#remediationOrchestrator` also assembles `vision-api`'s
+`RemediationOrchestrator` (see that class's own javadoc, and vision-api/MODULE.md's O5 section, for
+why the `{features,actions}`→dispatch→reprobe composition lives in vision-api rather than as a fourth
+`vision-flight` service — a plan gap, not this wiring class's decision).
+
+**`OnboardingWiringTest`** (new, `@SpringBootTest(properties = "vision.publish.enabled=false")`) —
+deliberately reuses the exact properties shape 15+ existing vision-app test classes already share
+(`PersistenceWiringTest`/`OverlayWiringTest`/etc.), rather than introducing a new distinct
+`@SpringBootTest` configuration, to avoid growing `PostgresContextCustomizerFactory`'s cached-context
+count (see that class's own javadoc: each distinct properties combination parks its own pooled
+connections against the shared Testcontainers Postgres, and `max_connections=100` bounds how many the
+whole module can afford). Three tests: every onboarding bean (services, orchestrator, both new
+controllers) resolves regardless of the flag; `VehicleConfigPort` resolves to
+`NoopVehicleConfigPort` at the default; and a probe attempt at the default throws with the exact
+frozen 409 message text (`assertEquals`, not a bare `assert` — the latter is silently disabled without
+`-ea`).
+
+**Before/after** (`./mvnw -B -pl station/vision-app -am test -DskipWeb`, Maven's own `Tests run:`
+summary line, three consecutive runs): **205 → 208 (+3, `OnboardingWiringTest`)**, `Tests run: 208,
+Failures: 0, Errors: 0, Skipped: 0`, `BUILD SUCCESS`, all three times. `ArchitectureTest`/
+`ContextArchitectureTest` both green and untouched — `vision-api`'s two new controllers depend only on
+`vision-flight`/`vision-warehouse` application/domain types plus `CurrentUser`, never on
+`org.springframework.security` or an adapter, so no new dependency-rule edge was created.
+**Flag-off guardrail proven**: every pre-existing vision-app test passes unchanged with
+`vision.onboarding.probe.enabled` at its default (`false`, never set explicitly in any pre-existing
+test's properties) — the acceptance bar ("the default-config suites stay 100% green") is met exactly,
+identical counts everywhere except the three new tests added on purpose.
+
+**Docker**: ran, not skipped — every `@SpringBootTest` in this module needs a real Testcontainers
+Postgres since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4; `OnboardingWiringTest` included.
+
+**Deferred, out of this wave's scope**: O4's mirror-image `@ConditionalOnProperty(havingValue =
+"true")` bean constructing the real `MavlinkVehicleConfigurator` (flagged in
+`OnboardingWiringConfiguration`'s own javadoc, for whoever wires that adapter in next); no UI wiring
+(`station/vision-web/**` untouched, a separate wave).

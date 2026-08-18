@@ -10,6 +10,7 @@ import com.drones.vision.adapter.persistence.entity.DatasetEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionEventEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
 import com.drones.vision.adapter.persistence.entity.DeviceEntity;
+import com.drones.vision.adapter.persistence.entity.FeatureRequirementEntity;
 import com.drones.vision.adapter.persistence.entity.GeofenceZoneEntity;
 import com.drones.vision.adapter.persistence.entity.GroupEntity;
 import com.drones.vision.adapter.persistence.entity.MapDrawingEntity;
@@ -19,6 +20,7 @@ import com.drones.vision.adapter.persistence.entity.SampleImageEntity;
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
 import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
+import com.drones.vision.adapter.persistence.entity.VehicleProfileEntity;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -225,6 +227,9 @@ public final class PersistenceUnit {
         // docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 (V14__audit_trail.sql, V15__detection_events.sql).
         configuration.addAnnotatedClass(AuditEntryEntity.class);
         configuration.addAnnotatedClass(DetectionEventEntity.class);
+        // docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 (V17__vehicle_profiles.sql, V18__feature_requirements.sql).
+        configuration.addAnnotatedClass(VehicleProfileEntity.class);
+        configuration.addAnnotatedClass(FeatureRequirementEntity.class);
         return configuration.buildSessionFactory();
     }
 

@@ -135,6 +135,12 @@ literal it replaced (see `VisionApiProperties` below).
 | DemoController | GET | `/api/demo` | 200 `DemoStatusResponse` (`{enabled:true, videosDirectory, videos:[…]}`) | — (the console's demo-button availability probe; gated by `vision.demo.enabled`, default **on** — `false` removes this controller and every `…api.demo` bean, so both routes 404 like any unmapped path) |
 | DemoController | POST | `/api/demo/seed` | 201 `DemoSeedResponse` | — (fault-tolerant by design: a step that fails lands in the response's `problems` list, never in an error status; body `DemoSeedRequest` optional in whole and in every field, absent means `DemoPlan.DEFAULT` = 10 assets / 10 users / 3 streams, each count clamped to `DemoPlan.MAX`=50) |
 | SystemStatusController | GET | `/api/system/status` | 200 `SystemStatusResponse` (`{overall, checkedAt, subsystems:[{id, label, health, detail, since?, hint?}]}}`) | never errors — a throwing `SubsystemStatusPort` is caught per-provider and reported as that one subsystem's `health:"UNKNOWN"` with the exception's message as `detail`, rather than failing the whole response (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.3, wave S2; UX-DESIGN §7.2's "honest status over optimistic status" doctrine. `overall` is the worst `health` across every subsystem, `DISABLED` excluded from that comparison so an intentionally-off subsystem never reads as a fault; `UNKNOWN` when the provider list is empty or every subsystem is `DISABLED`. Readable by **any authenticated user, not manager-only** — a deliberate call, no secrets are exposed here. Providers are collected as `List<SubsystemStatusPort>` (`vision-platform`), type-collected by Spring — see station/vision-app/MODULE.md's `SystemStatusWiring` for which four beans populate it) |
+| OnboardingController | POST | `/api/onboarding/probe` | 200 `VehicleProfileResponse` | 409 `{"detail":"vehicle probing is disabled (vision.onboarding.probe.enabled)"}` when the flag is off (default) — the frozen 409 body, via `NoopVehicleConfigPort` — or an unreachable candidate (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1/O5; pre-registration probe, not scoped/audited — nothing yet exists to scope or audit against, D7) |
+| OnboardingController | GET | `/api/assets/{assetId}/profile` | 200 `VehicleProfileResponse` | 404 unknown, out-of-scope, or never-probed asset (a scoped read, all three collapse identically — `VehicleProfileService#latestProfile`) |
+| OnboardingController | POST | `/api/assets/{assetId}/probe` | 200 `VehicleProfileResponse` | 403 `!scope.canManage(ownership)`, audited (D8 — probing puts traffic on the aircraft's own link); 404 unknown asset; 409 no probeable device, or probing disabled |
+| OnboardingController | POST | `/api/assets/{assetId}/remediate` | 200 `RemediationResultResponse` | 403 `!scope.canManage(ownership)`, audited; 409 armed / arming unknown / probing disabled — every status code comes from `RemediationService`'s own gates, propagated unchanged through `RemediationOrchestrator` (see its own javadoc, `support/`, for why a request that dispatches nothing — e.g. the asset was never probed — answers 200 with every action `UNSUPPORTED` rather than 404) |
+| ReadinessController | GET | `/api/assets/{assetId}/readiness` | 200 `ReadinessReportResponse` | 404 unknown or out-of-scope asset (a scoped read) |
+| ReadinessController | GET | `/api/fleet/readiness` | 200 `FleetReadinessResponse` (`{assets:[ReadinessRow]}`) | — (thin composition of `AssetService#assets(scope,false)` + one `ReadinessService#evaluate` per asset; never 404s itself) |
 
 `ApiExceptionHandler` (`@RestControllerAdvice`) mapping table (body `{"error","message"}`):
 
@@ -254,6 +260,37 @@ for exactly when that is.
 
 **System status** (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.3, wave S2, body of `GET /api/system/status`): `SubsystemStatusResponse(id, label, health, detail, since?, hint?)` (`@JsonInclude(NON_NULL)` — `since`/`hint` genuinely absent, mirroring `vision-platform`'s `SubsystemStatus` field-for-field), `static from(SubsystemStatus)`. `SystemStatusResponse(overall, checkedAt, subsystems:List<SubsystemStatusResponse>)` (no `NON_NULL` — every field always present, `subsystems` copied defensively in the compact constructor via `List.copyOf`). `health`/`overall` serialize as `Health`'s enum name verbatim (`OK`/`DEGRADED`/`DOWN`/`DISABLED`/`UNKNOWN`) — Jackson 3's default enum handling, no custom serializer needed.
 
+**Onboarding** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1's frozen wire contract, wave O5 — see
+the done-wave section at the end of this file for the full report): no `@JsonInclude(NON_NULL)` on
+any of these — §8.1's own examples show literal `null`s (`"incompleteReason": null`,
+`"previousValue": null`) that must serialize, never be omitted, per C7. `VehicleProfileResponse(linkKey,
+observedAt, sysid?, firmware?, firmwareVersion?, vehicleKind?, capabilityBitmask?,
+capabilityFlags:List<String>, messages:List<MessageObservationResponse>,
+parameters:List<ParameterReadingResponse>, linkBytesPerSecond?, complete, incompleteReason?)` + nested
+`MessageObservationResponse(messageId, name?, hz, count)`/`ParameterReadingResponse(name, value, type)`,
+`static from(VehicleProfile)` — body of `POST /api/onboarding/probe`,
+`GET/POST /api/assets/{assetId}/profile|probe`. `ProbeCandidateRequest(protocol, uri, options?)` →
+`requireProtocol()`/`toLinkKey()` (folds `options["sysid"]` into `"<uri>#<sysid>"`, mirroring
+`ProbeDeviceRequest`'s shape deliberately). `ReadinessReportResponse(assetId, verdict, evaluatedAt,
+profileObservedAt?, features:List<FeatureReadinessResponse>, blockers:List<String>)` + nested
+`FeatureReadinessResponse(feature, label, status, detail, remedy?)` — **`feature`, not `featureKey`**,
+the one wire rename off the domain `FeatureReadiness` type — `static from(ReadinessReport)`; body of
+`GET /api/assets/{assetId}/readiness` and `RemediationResultResponse#reprobe`.
+`ReadinessRowResponse(assetId, displayName, verdict, features:Map<String,String>)`,
+`static from(Asset, ReadinessReport)` — one `GET /api/fleet/readiness` row, deliberately flatter than
+the full report (no `detail`/`remedy` text). `FleetReadinessResponse(assets:List<ReadinessRowResponse>)`
+— its wrapper. `RemediationRequest(features?:List<String>, actions?:List<String>)` — request body of
+`POST /api/assets/{assetId}/remediate`; `null` lists treated as empty via `featuresOrEmpty()`/
+`actionsOrEmpty()`. `RemediationResultResponse(requestedAt, verifiedAt?, actions:List<RemediationActionResponse>,
+reprobe?:ReadinessReportResponse)` + nested `RemediationActionResponse(action?, messageId?,
+intervalMicros?, outcome, previousValue?, newValue?, detail?)` — assembled by `RemediationOrchestrator`
+(`support/`), not mapped off one domain type (see that class's own javadoc for why no single
+`vision-flight` application service composes this end to end — a flagged plan gap). `DiscoveredDeviceResponse`
+gained an additive `suggestedOptions:Map<String,String>` field (D16) — synthesized from the existing
+`details` map (currently just `{"sysid": details["sysid"]}}` when present, `{}` otherwise) rather than
+a new `DiscoveredDevice` domain field, since every value it carries already exists on `details` today;
+`details` itself stays for one release, its removal deferred and named here, not yet scheduled.
+
 ### `com.drones.vision.api.proxy` — `HlsProxyController`, HLS reverse proxy
 
 `HlsProxyController(URI hlsUpstreamBase, VisionApiProperties.HlsProxy hlsProxy)` (`@Autowired`; `hlsUpstreamBase` wired by `vision-app`'s `PublishWiring#hlsProxyUpstreamBase` from `VisionPublishProperties.Mediamtx#hlsBase()`, `hlsProxy` by `PublishWiring#hlsProxySettings` from `VisionApiProperties#hlsProxy()` as of docs/plans/active/SCALE-100-PLAN.md §5 S7 — see Conventions for why this one controller deviates from the "ports only" rule). A package-private 1-arg overload (`HlsProxyController(URI hlsUpstreamBase)`, defaulting to `VisionApiProperties.HlsProxy.defaults()`) is the test seam every existing `HlsProxyControllerTest` case still uses. `GET /hls/{streamId}/**` forwards the request to `hlsUpstreamBase + "/" + <raw remainder after "/hls/">`, so browsers never talk to the mediamtx sidecar directly — see `StreamPublisherPort#viewUrl`'s new app-relative contract below.
@@ -338,6 +375,10 @@ one knob, no per-endpoint tiers, no auth-aware policy.
 **`LocalNetworkAddresses`** — `SystemNetworkController`'s one collaborator (see that controller's own javadoc in `controller/`), enumerating this host's site-local IPv4 addresses. Public for the same cross-package reason as `SnapshotJpegEncoder` (its caller is now in `controller/`, not `support/`) — still no interface, still no second implementation.
 
 **`CapabilityParsing`** — moved out of `dto/` (docs/plans/active/LAYERING-REFACTOR-PLAN.md §7 row B: it's a helper, not a wire record — `dto/` stays wire-records-only). Public for the same cross-package reason; `RegisterDeviceRequest`/`CreateAssetRequest.DeviceSpec` (both `dto/`) call `CapabilityParsing.parse(List<String>)` across the package boundary now.
+
+**`OnboardingProperties`** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1/O5) — the same "plain framework-free record, `vision-app` binds its `@ConfigurationProperties` mirror onto an instance of this" bridge `VisionApiProperties` establishes, one level down: just `inventoryWindow`/`requestTimeout` `Duration`s, since `vision-api` may not depend on `vision-app`'s own `VisionOnboardingProperties`. Populated by `OnboardingWiringConfiguration#onboardingApiProperties`.
+
+**`RemediationOrchestrator`** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1/O5) — composes `POST /api/assets/{assetId}/remediate`'s `{features, actions}` request into dispatched `RemediationService` calls plus a conditional re-probe; constructor-injected with `FeatureRequirementRepositoryPort`/`RemediationService`/`VehicleProfileService`/`ReadinessService`/`OnboardingProperties`. See its own javadoc for the full algorithm and, in particular, why it lives here rather than as a fourth `vision-flight` application service (a plan gap this wave could not close — that context was O3's, already closed) — flagged in the wave report at the end of this file.
 
 **`VisionApiProperties`** (new, plain framework-free record — `@ConfigurationProperties` may only live in `vision-app`, docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3 rule 1) — the single documented source of truth for every `vision.api.*` tunable, with a `static defaults()` factory reproducing each literal it replaces byte-for-byte:
 
@@ -1843,3 +1884,102 @@ is the one provider wired unconditionally (MAVLink has no enable/disable flag of
 **Endpoint is readable by any authenticated user** — `SystemStatusController` carries no `managerOnly`/
 scope check, a deliberate call (see that class's own subsection above): nothing in `SystemStatus`'s
 wire shape is a secret.
+
+## docs/plans/active/DRONE-ONBOARDING-PLAN.md Wave O5 done (vehicle onboarding, vision-api/vision-app/persistence half)
+
+Six new endpoints across two new controllers — `OnboardingController` (PROBE + CONFIGURE stages) and
+`ReadinessController` (NEGOTIATE stage, read-only) — see the API-surface controller table above for
+the full status-code breakdown, and the "Onboarding" DTO paragraph for every new wire shape. Byte-level
+proof every DTO matches docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1's frozen contract exactly
+(field names, nullability, enum spellings, explicit `null` never omitted) lives in
+`OnboardingWireContractTest` — a plain `JsonMapper`, no Spring context, substring-assertion idiom
+matching `ManualControlFrameDtoTest`'s own precedent.
+
+**Endpoints**: `POST /api/onboarding/probe` (pre-registration candidate probe, D7 — not scoped, not
+audited, nothing yet exists to scope or audit against), `GET /api/assets/{assetId}/profile` (latest
+observed snapshot), `POST /api/assets/{assetId}/probe` (active probe of a registered asset, D8 —
+authority action), `POST /api/assets/{assetId}/remediate` (CONFIGURE's vehicle-side half), `GET
+/api/assets/{assetId}/readiness`, `GET /api/fleet/readiness`.
+
+**Authority, mapped 1:1 to §6.1**: every gate is enforced inside O3's own `Default*Service` classes
+(`DefaultVehicleProfileService`/`DefaultRemediationService`/`DefaultReadinessService`, already closed
+before this wave started) — neither the two new controllers nor `RemediationOrchestrator` add any
+authority logic of their own; they let `ApiExceptionHandler`'s existing central mapping do the work
+(`NoSuchElementException`→404, `AccessDeniedException`(platform)→403, `IllegalStateException`→409).
+`/onboarding/probe` is the one endpoint outside that pattern (no asset exists yet to gate against).
+Every other write (`/probe`, `/remediate`) requires `canManage` and is audited on denial (D8); every
+read (`/profile`, `/readiness`, `/fleet/readiness`) is a **scoped lookup** that collapses
+unknown/out-of-scope/no-data-yet into one hiding 404 — a caller who may see an asset but not change it
+still gets 403 on a write, never 404, matching the OPS-UX "authority is not visibility" doctrine
+already shipped elsewhere in this codebase.
+
+**New `vision-api/support` types**: `OnboardingProperties` (plain framework-free bridge record,
+`inventoryWindow`/`requestTimeout`, populated by `OnboardingWiringConfiguration#onboardingApiProperties`
+from `vision-app`'s `VisionOnboardingProperties` — the same "vision-api cannot depend on vision-app's
+`@ConfigurationProperties`" bridge `VisionApiProperties`/`PublishWiring#snapshotJpegEncoder` already
+establish) and `RemediationOrchestrator` (composes `{features, actions}` into dispatched
+`RemediationService` calls plus a conditional re-probe — see its own javadoc for the full algorithm
+and for the plan gap it papers over: **no single `vision-flight` application service composes
+`{features,actions}`→dispatch→reprobe end-to-end**, so this composition had to live here instead of as
+a fourth O3 service, flagged for whoever next touches that context). `PARAM_WRITE`-shaped actions are
+always reported `UNSUPPORTED` with an honest detail — the frozen `RemediationRequest` shape carries no
+target value or explicit-consent flag, and guessing either would be exactly the "probably fine, didn't
+check" lie C7 forbids.
+
+**Flag-off guardrail (D17)**: `vision.onboarding.probe.enabled` defaults `false`.
+`OnboardingWiringConfiguration` wires `VehicleProfileService`/`RemediationService`/`ReadinessService`
+unconditionally (they behave identically regardless of the flag — same "core services unconditional,
+only the port varies" shape `AuthWiringConfiguration` already established for `AuthService`/
+`UserService`); only `VehicleConfigPort` is flag-gated, to `NoopVehicleConfigPort` when the flag is
+`false`/absent, refusing every probe with the exact §8.1-frozen 409 body
+(`"vehicle probing is disabled (vision.onboarding.probe.enabled)"`). **No bean at all when the flag is
+`true`** — this wave's file scope cannot construct `adapter-mavlink`'s real
+`MavlinkVehicleConfigurator` (O4, a separate concurrent wave), and a silent no-op fallback under a flag
+an operator explicitly turned on would itself be dishonest; flipping the flag on before O4 lands must
+fail application startup, not fail quietly at request time. `OnboardingWiringTest` proves the whole
+pipeline wires (every bean present, so the driving adapters mount) while the `VehicleConfigPort`
+resolves to the Noop and refuses with the frozen message — deliberately reusing the
+`@SpringBootTest(properties = "vision.publish.enabled=false")` shape 15+ existing vision-app test
+classes already share, to avoid growing `PostgresContextCustomizerFactory`'s cached-context count
+(see that class's own javadoc on the pool-exhaustion risk of a new distinct `@SpringBootTest`
+properties combination).
+
+**Persistence (`storage/persistence`)**: `V17__vehicle_profiles.sql` (append-only observations, jsonb
+`messages`/`parameters`/`capabilityFlags`), `V18__feature_requirements.sql` (the feature×requirement
+matrix as seed data, D6 — eleven rows, `firmware='ardupilot'` only per D13; two plan-sourced
+thresholds, `map-position`≥2.0Hz and `visual-geolocation`≥5.0Hz, the other five message-bearing rows
+seeded at a **judgment-call** 1.0Hz floor with no plan-given number to draw from), `V19__asset_usage_phase.sql`
+(schema-only additive columns on `asset_usages` — `phase`/`first_armed_at`/`last_disarmed_at` — ahead
+of O7's domain wiring, deliberately not touching `AssetUsageEntity` itself since `contexts/vision-warehouse`
+was out of this wave's file scope). Full detail — every column, every seeded row, every judgment call
+and representation gap — lives in `storage/persistence/MODULE.md`'s own Schema section; not repeated
+here.
+
+**Before/after** (`./mvnw -B -pl station/vision-api -am test -DskipWeb`, Maven's own `Tests run:`
+summary line, three consecutive runs): **624 → 633 (+9, `OnboardingWireContractTest`)**, `Tests run: 633,
+Failures: 0, Errors: 0, Skipped: 0` all three times. Zero pre-existing test, route, or DTO shape
+changed except `DiscoveredDeviceResponse`'s additive `suggestedOptions` field (D16 — synthesized
+purely at the DTO mapping layer from the existing `details` map, no domain change; `details` itself is
+untouched and still serializes, so no pre-existing caller of that DTO shape breaks).
+
+**Docker**: not run for `vision-api` itself (no Testcontainers dependency, pure unit/JsonMapper tests);
+ran for `storage/persistence`'s `PostgresDockerIntegrationTest` and for `vision-app`'s full suite (both
+require Docker since docs/plans/active/POSTGRES-ONLY-CONTEXT.md — Postgres is the only store, no
+in-memory devsupport fallback left to skip to).
+
+**Plan gaps found, flagged rather than silently resolved** (see also the migration header comments in
+`storage/persistence`): (1) no single `vision-flight` service composes remediation dispatch end-to-end
+— `RemediationOrchestrator` above; (2) ANY-DRONE §S1.2's `STATUSTEXT` requirement for `preflight-checks`
+is not independently modeled (`FeatureRequirement` holds one message per row); (3) the 45%-low-battery
+bar (§S8.1) has no field to live in (`FeatureRequirement` carries `minimumHz`/`requiredParameterName`
+only, no percentage threshold); (4) two of the five un-sourced minimum-Hz values are a judgment call,
+not a plan-given number; (5) §7's module-placement table's "devsupport in-memory repositories" mention
+is stale — POSTGRES-ONLY-CONTEXT.md already deleted that whole layer, so this wave wrote **no**
+in-memory devsupport repository for `VehicleProfileRepositoryPort`/`FeatureRequirementRepositoryPort`,
+only the real JPA ones.
+
+**Deferred, out of this wave's scope**: wiring `AssetUsageEntity`/`AssetUsageMapper`/
+`JpaAssetUsageRepository` to `V19`'s new columns (O7, `contexts/vision-warehouse`, concurrent); O4's
+mirror-image `@ConditionalOnProperty(havingValue = "true")` bean constructing the real
+`MavlinkVehicleConfigurator` (flagged in `OnboardingWiringConfiguration`'s own javadoc); promoting
+`RemediationOrchestrator` into a proper `vision-flight` application service.
