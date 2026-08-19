@@ -133,7 +133,6 @@
             [interactionMode]="facade.interactionMode()"
             [selectedMarkId]="facade.marks.selectedMarkId()"
             (markSelected)="facade.marks.select($event)"
-            (markMoved)="facade.marks.moveTo($event.id, $event.position)"
             (mapClicked)="facade.marks.handleMapClick($event)"
             (drawingCompleted)="facade.completeDrawing($event)"
             (drawingSelected)="facade.selectDrawing($event)"

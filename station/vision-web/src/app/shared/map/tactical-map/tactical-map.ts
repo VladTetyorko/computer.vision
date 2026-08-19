@@ -21,7 +21,6 @@ import { capitalizeLabel, formatConfidence, relativeTimeLabel } from '../../../c
 import type { GeoPosition, GeofenceZone } from '../../../core/api/models';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
 import { resolveZoneColors, zoneLayerStyle, FALLBACK_ZONE_COLORS, type ZoneColors } from '../../../core/geofence/geofence-logic';
-import type { MarkMoved } from '../../../core/map-data/mark-logic';
 import {
   trackChipLabel,
   trackErrorRadiusMeters,
@@ -259,9 +258,6 @@ export class TacticalMap {
 
   /** A mark symbol was clicked. */
   readonly markSelected = output<string>();
-
-  /** A mark symbol was dragged to a new position (drag-to-correct). */
-  readonly markMoved = output<MarkMoved>();
 
   /**
    * A click on the map's own background (never one that landed on an interactive marker — Leaflet
@@ -996,15 +992,11 @@ export class TacticalMap {
       const tooltip = escapeHtml(`${markKindLabel(mark.kind)} · ${affiliationLabel(mark.affiliation)}: ${mark.label}`);
       let marker = this.markHandles.get(mark.id);
       if (!marker) {
-        marker = L.marker(point, { icon, draggable: true, keyboard: false }).addTo(map);
+        // Deliberately not `draggable`: a mark records where something *was observed*, so nudging
+        // its symbol with a mouse would silently rewrite an observation. Correcting a wrong
+        // position is a re-report, not a gesture.
+        marker = L.marker(point, { icon, keyboard: false }).addTo(map);
         marker.on('click', () => this.markSelected.emit(mark.id));
-        // Only `dragend` writes back — a live `drag` tick would fight the in-progress gesture by
-        // re-rendering mid-drag. No optimistic local state here: the host's store owns the honest
-        // revert-on-failure, this handler only reports what the user did.
-        marker.on('dragend', () => {
-          const latlng = marker!.getLatLng();
-          this.markMoved.emit({ id: mark.id, position: { latitude: latlng.lat, longitude: latlng.lng } });
-        });
         marker.bindTooltip(tooltip, { direction: 'top', offset: [0, -14] });
         this.markHandles.set(mark.id, marker);
       } else {

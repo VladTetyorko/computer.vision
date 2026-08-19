@@ -152,7 +152,6 @@
               [tracks]="facade.tracks.tracks()"
               [selectedMarkId]="facade.marks.selectedMarkId()"
               (markSelected)="facade.marks.select($event)"
-              (markMoved)="facade.marks.moveTo($event.id, $event.position)"
             />
             <dl class="facts freshest-facts">
               @for (row of facade.freshestFacts(); track row.label) {

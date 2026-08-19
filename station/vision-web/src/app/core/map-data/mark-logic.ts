@@ -56,12 +56,6 @@ export function toTacticalMarks(marks: readonly MapMark[]): readonly TacticalMar
   return marks.map(toTacticalMark);
 }
 
-/** The map layer's `(markMoved)` payload — a drag-to-correct gesture on a mark symbol. */
-export interface MarkMoved {
-  readonly id: string;
-  readonly position: GeoPosition;
-}
-
 // --- SSE fold (docs/plans/done/MAP-REWORK-PLAN.md §4.3) ------------------------------------------------------
 
 const MARK_SPEC: MapEntitySpec<MapMark> = {
