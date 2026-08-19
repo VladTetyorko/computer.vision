@@ -7,7 +7,7 @@ import { TrainingStore } from '../../core/training/training-store';
 import { findVideoDevice } from '../../core/fleet/device-logic';
 import { deriveTrail, groupTelemetryByDevice, telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { formatDuration } from '../../core/stream-info-logic';
-import type { AssetDetails, TelemetrySample, UsageRecording, UsageTimeline } from '../../core/api/models';
+import type { AfterActionManifest, AssetDetails, TelemetrySample, UsageRecording, UsageTimeline } from '../../core/api/models';
 import {
   advancePlaybackClock,
   buildClipDownloadUrl,
@@ -62,6 +62,11 @@ export interface ReplayRouteInputs {
  * `videoOffsetSeconds(atMs(), recordingStartMs())` — the *exact* scrub→seconds conversion the
  * `<video>` DOM sync already trusts — as the captured instant, so "the frame you're looking at" is
  * genuinely the frame the server extracts.
+ *
+ * **After-action evidence package (docs/plans/active/AFTER-ACTION-PLAN.md §3, wave W2)** — `afterAction`/
+ * `afterActionLoading`/`afterActionErrorMessage`/`afterActionArchiveUrl` back `AfterActionPanel`, own
+ * `effect()`, own try/catch, deliberately independent of `load()`/`loadRecording()` above (see those
+ * fields' own doc comment for why this fires even while `usageOpen()` is true).
  */
 @Injectable()
 export class ReplayFacade {
@@ -99,6 +104,23 @@ export class ReplayFacade {
   readonly recordingStartMs = computed(() => {
     const start = this.recording()?.start;
     return start !== undefined ? Date.parse(start) : undefined;
+  });
+
+  // --- After-action evidence package (docs/plans/active/AFTER-ACTION-PLAN.md §3, wave W2) ------------------
+  // Fetched independently of `timeline`/`recording` (its own `effect()`, below) and gated only on
+  // both ids being known — deliberately **not** gated on `!usageOpen()`: §5 hazard 4 says a
+  // still-open usage is a valid input, so this panel renders in both the "Watch live" empty state
+  // and the loaded cockpit (see `replay.html`'s own placement of `<vision-after-action-panel>`).
+  // A failed read degrades this one card to an honest inline message — never blocks the rest of the
+  // page, same posture as `loadRecording` above.
+  readonly afterAction = signal<AfterActionManifest | undefined>(undefined);
+  readonly afterActionLoading = signal(false);
+  readonly afterActionErrorMessage = signal<string | undefined>(undefined);
+  /** `undefined` until both ids are known — `AfterActionPanel` hides the "Download package" control on `undefined`, never offering a dead link. */
+  readonly afterActionArchiveUrl = computed(() => {
+    const assetId = this.effectiveAssetId();
+    const usageId = this.effectiveUsageId();
+    return assetId && usageId ? this.api.afterActionArchiveUrl(assetId, usageId) : undefined;
   });
 
   // --- Clip export (docs/plans/done/OPS-CORE-PLAN.md §R, R-c) ---------------------------------------------
@@ -216,6 +238,12 @@ export class ReplayFacade {
       void this.load(this.effectiveAssetId(), this.effectiveUsageId());
     });
 
+    // Independent of the timeline/recording load above (own effect, own try/catch) — see the
+    // after-action fields' own doc comment for why this fires regardless of `usageOpen()`.
+    effect(() => {
+      void this.loadAfterAction(this.effectiveAssetId(), this.effectiveUsageId());
+    });
+
     // Mirrors `DatasetsFacade`'s own unconditional `training.refresh()` on construction — a viewer
     // may land on `/replay` without ever having visited `/manage/training` first, and `TrainingStore`
     // is lazy (`providedIn: 'root'`, not self-initializing), so nothing else guarantees this runs.
@@ -281,6 +309,32 @@ export class ReplayFacade {
       this.recording.set(await this.api.usageRecording(usageId));
     } catch {
       this.recording.set({ available: false });
+    }
+  }
+
+  /**
+   * Fetched independently of everything else on this page — an after-action read failure only ever
+   * degrades its own card (`AfterActionPanel`'s `errorMessage` branch), never the timeline/recording
+   * above it. `assetId` genuinely optional here mirrors `load()`'s own "no current UI links here
+   * without one" note — a bare `/replay?usage=…` with no `?asset=` simply never shows this panel
+   * (the endpoint is asset-scoped, §3.1), same honest omission as the per-device telemetry panels'
+   * own "no asset id" fallback above.
+   */
+  private async loadAfterAction(assetId: string | undefined, usageId: string | undefined): Promise<void> {
+    if (!assetId || !usageId) {
+      this.afterAction.set(undefined);
+      this.afterActionErrorMessage.set(undefined);
+      return;
+    }
+    this.afterActionLoading.set(true);
+    this.afterActionErrorMessage.set(undefined);
+    try {
+      this.afterAction.set(await this.api.afterAction(assetId, usageId));
+    } catch (error) {
+      this.afterAction.set(undefined);
+      this.afterActionErrorMessage.set(describeHttpError(error));
+    } finally {
+      this.afterActionLoading.set(false);
     }
   }
 

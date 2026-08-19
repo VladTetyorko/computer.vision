@@ -2741,3 +2741,62 @@ skipped: `docker info` succeeded and the Testcontainers-backed Postgres started 
 
 **Deferred, out of this wave's scope**: none — G4's own exit criteria (§8) are fully met. See
 `station/vision-api/MODULE.md`'s own G4 entry for the REST surface this wiring backs.
+
+## docs/plans/active/AFTER-ACTION-PLAN.md Wave W1 done (after-action evidence package, wiring half)
+
+One new file, `AfterActionWiringConfiguration` (`config/wiring/`), wiring `vision-api`'s
+`AfterActionAssembler` — no flag (the feature ships unconditionally on, D1), no new persistence, no
+new `@ConfigurationProperties` class: every collaborator the assembler needs already exists as a bean
+elsewhere in this module.
+
+**`AfterActionWiringConfiguration`** — three `@Bean` methods, same "small, dedicated `@Configuration`
+split out of `ApplicationServiceWiring`" precedent as `OnboardingWiringConfiguration`/
+`FixedCameraGeoWiringConfiguration`:
+- `afterActionProperties(VisionApplicationProperties, @Value("${vision.after-action.audit-limit:200}") int)`
+  — the framework-free `vision-api`-side `AfterActionProperties` bridge, same pattern as
+  `OnboardingWiringConfiguration#onboardingApiProperties`. `telemetryMaxPoints` is a **derived
+  reference** to `applicationProperties.replay().maxPointsCeiling()` — the exact same live-configured
+  ceiling `ApplicationServiceWiring#replayService` hands to `DefaultReplayService` itself — not a
+  second, independently-drifting literal, so D7's thinning-detection heuristic can never fall out of
+  sync with the real ceiling even if an operator retunes `vision.application.replay.max-points-ceiling`.
+  `auditLimit` has no existing home to derive from, so it is this feature's own new knob
+  (`vision.after-action.audit-limit`, default `200`) — the only new configuration surface this wave
+  adds, and it is a plain `@Value`, not a new `@ConfigurationProperties` class (no existing properties
+  record was a natural home for one bare int, and adding a whole new properties class for a single
+  knob would have been the over-engineered choice).
+- `afterActionSources(MarkService, VehicleProfileService, AuditTrailPort)` — bundles the assembler's
+  three secondary collaborators (all three already wired elsewhere: `MarkService`/`AuditTrailPort` in
+  `ApplicationServiceWiring`, `VehicleProfileService` in `OnboardingWiringConfiguration` — Spring
+  autowires by type across `@Configuration` classes regardless of which one declared the bean, so no
+  import-order concern).
+- `afterActionAssembler(AssetService, ReplayService, AfterActionSources, AfterActionProperties)` — the
+  assembler itself.
+
+**No `PersistenceWiringConfiguration` change**: this feature reads, never writes, and every read goes
+through an application service/port that already has a real implementation wired (Postgres-backed
+where applicable, per docs/plans/active/POSTGRES-ONLY-CONTEXT.md) — there is no new entity, no new
+Flyway migration, no new repository.
+
+**Tests**: none added to this module this wave (the launch scope for `vision-app` was explicitly "add
+a bean only" — no new wiring test file). Coverage instead comes from the existing `ArchitectureTest`/
+`ContextArchitectureTest` (both still green with the new `@Configuration` class present, which is the
+proof the new bean introduces no dependency-rule violation) and from `station/vision-api`'s own
+`AfterActionControllerTest`/`AfterActionAssemblerTest`, which exercise the real wired beans indirectly
+through every other `@SpringBootTest` in this module that boots the full context (e.g.
+`VisionApplicationTests`).
+
+**Before/after** (`./mvnw -B -pl station/vision-api,station/vision-app test -DskipWeb`, foreground; see
+`station/vision-api/MODULE.md`'s own W1 entry for why `-am` was intentionally omitted this run):
+vision-app **237 → 237 (+0)** — unchanged, which is itself the proof: the new bean composes into the
+full Spring context (`VisionApplicationTests` and every other context-loading test in this module still
+pass) without breaking anything, and `ArchitectureTest`/`ContextArchitectureTest` passing rules out an
+accidental dependency-rule violation from the new wiring class's imports (it names `vision-events`,
+`vision-flight`, `vision-map`, `vision-warehouse`, `vision-platform` — every one of them already an
+allowed dependency of `vision-app`). `BUILD SUCCESS`. Docker ran (Testcontainers Postgres, Flyway
+migrated to v22, confirmed by log output) — not skipped.
+
+**Deferred, out of this wave's scope**: none for this module — see `station/vision-api/MODULE.md`'s
+own W1 entry for the REST surface this wiring backs, including five findings from reading the plan
+against the real codebase (D7's detections-truncation gap, the structurally-unreachable `audit`
+`FORBIDDEN` state, the `scopedTo` display-name substitution, the plan's imprecise `@PreAuthorize`
+wording, and the ABSENT/FORBIDDEN-file-shape judgment call).

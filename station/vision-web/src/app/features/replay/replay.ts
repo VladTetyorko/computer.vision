@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, ElementRef, effect, injec
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ReplayMap } from './replay-map';
+import { AfterActionPanel } from './after-action-panel';
 import { PageBar, type PageBarCrumb, pluralize } from '../../shared/ui/page-bar/page-bar';
 import { ReplayFacade } from './replay-facade';
 import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs, type DetectionDensityBucket } from './replay-logic';
@@ -37,10 +38,15 @@ import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs, type DetectionDen
  * *entire* root is the enclave). See `replay.html`'s own comment on that section for the full
  * reasoning, including why the replay library (`replay-library.html`) needed no boundary decision
  * of its own (it never shows video).
+ *
+ * **Evidence package (docs/plans/active/AFTER-ACTION-PLAN.md, wave W2)**: `<vision-after-action-panel>`
+ * is mounted twice in `replay.html` — inside the `usageOpen` branch too, not just the loaded
+ * cockpit — since the package is genuinely servable mid-flight (§5 hazard 4); both mounts bind the
+ * same four `facade.afterAction*` reads, `ReplayPage` itself holds no state for it.
  */
 @Component({
   selector: 'vision-replay',
-  imports: [FormsModule, RouterLink, ReplayMap, PageBar],
+  imports: [FormsModule, RouterLink, ReplayMap, PageBar, AfterActionPanel],
   templateUrl: './replay.html',
   styleUrl: './replay.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
