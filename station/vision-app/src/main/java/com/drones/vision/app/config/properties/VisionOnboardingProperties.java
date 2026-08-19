@@ -17,9 +17,11 @@ import java.time.Duration;
  *
  * @param probe     the PROBE stage's guardrail and timeouts — see {@link Probe}
  * @param remediate the CONFIGURE stage's automatic half — see {@link Remediate}
+ * @param passport  the flight passport's automatic capture — see {@link Passport}
  */
 @ConfigurationProperties(prefix = "vision.onboarding")
-public record VisionOnboardingProperties(@DefaultValue Probe probe, @DefaultValue Remediate remediate) {
+public record VisionOnboardingProperties(@DefaultValue Probe probe, @DefaultValue Remediate remediate,
+                                          @DefaultValue Passport passport) {
 
     /**
      * The guardrail (D17): {@code enabled=false} (the default) means {@code VehicleConfigPort} has
@@ -73,6 +75,25 @@ public record VisionOnboardingProperties(@DefaultValue Probe probe, @DefaultValu
          */
         public record MessageInterval(@DefaultValue("false") boolean enabled) {
         }
+    }
+
+    /**
+     * The flight passport's automatic capture (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4,
+     * Wave O11): whether a usage's PREFLIGHT/POSTFLIGHT phase transition (folded by {@code
+     * UsageTracker}, vision-perception) triggers {@code
+     * VehicleProfileService#captureSnapshot} and attaches the resulting {@code VehicleProfile}
+     * snapshot to the {@code AssetUsage}.
+     *
+     * @param enabled the guardrail; default {@code false} — with it off, {@code
+     *                OnboardingWiringConfiguration} declares no {@code UsagePhaseObserver} bean at
+     *                all, and {@code ApplicationServiceWiring#usageTracker} falls back to the
+     *                no-op observer, so a usage's phase folding is byte-identical to before O11
+     *                wired anything up. {@code true} alone is not sufficient to capture anything
+     *                real — see {@link Probe#enabled()}'s own javadoc and {@code
+     *                OnboardingWiringConfiguration}'s startup-warning javadoc for what happens when
+     *                this is on while probing is off.
+     */
+    public record Passport(@DefaultValue("false") boolean enabled) {
     }
 
     static final String DEFAULT_INVENTORY_WINDOW = "10s";

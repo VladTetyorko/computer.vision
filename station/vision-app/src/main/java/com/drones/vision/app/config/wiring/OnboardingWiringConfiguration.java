@@ -8,6 +8,7 @@ import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionOnboardingProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.devsupport.NoopVehicleConfigPort;
+import com.drones.vision.app.onboarding.PassportCaptureObserver;
 import com.drones.vision.flight.application.DefaultReadinessService;
 import com.drones.vision.flight.application.DefaultRemediationService;
 import com.drones.vision.flight.application.DefaultVehicleProfileService;
@@ -52,6 +53,8 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @EnableConfigurationProperties(VisionOnboardingProperties.class)
 public class OnboardingWiringConfiguration {
+
+    private static final System.Logger LOG = System.getLogger(OnboardingWiringConfiguration.class.getName());
 
     /**
      * Flag off (default) or absent: no real vehicle link exists to probe, so every {@code
@@ -147,5 +150,40 @@ public class OnboardingWiringConfiguration {
                                                              OnboardingProperties onboardingApiProperties) {
         return new RemediationOrchestrator(featureRequirementRepositoryPort, remediationService, vehicleProfileService,
                 readinessService, onboardingApiProperties);
+    }
+
+    /**
+     * The flight passport's automatic capture (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4,
+     * Wave O11) — wired as vision-perception's {@code UsagePhaseObserver} seam in {@link
+     * ApplicationServiceWiring#usageTracker}, so a usage's PREFLIGHT/POSTFLIGHT phase transition
+     * triggers {@link VehicleProfileService#captureSnapshot} without {@code UsageTracker} ever
+     * depending on the flight context (the same {@code BiConsumer} composition role this class
+     * already plays for {@code geofenceMonitor::evaluate}).
+     *
+     * <p><b>Absent (no bean, no capture ever attempted) unless {@code
+     * vision.onboarding.passport.enabled} is {@code true}</b> (default {@code false}) — {@code
+     * ApplicationServiceWiring#usageTracker} falls back to {@code UsagePhaseObserver#NOOP} via its
+     * {@code ObjectProvider} when this bean is missing, so the default-config build folds a usage's
+     * phase exactly as it did before O11 wired anything up.
+     *
+     * <p><b>Capturing a passport needs {@code vision.onboarding.probe.enabled} too</b> to do
+     * anything real: with probing off, {@link VehicleConfigPort} is {@link NoopVehicleConfigPort},
+     * which has no probeable device by construction, so every capture attempt fails with the
+     * expected, low-level-logged {@link IllegalStateException} {@link PassportCaptureObserver}'s
+     * own javadoc documents — forever, silently (from an operator's point of view) unless something
+     * says so louder. Turning the passport flag on while probing stays off is exactly that trap, so
+     * this method logs one clear {@code WARNING} at startup naming both flags — the honesty C7
+     * demands, not a silent no-op.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "vision.onboarding.passport", name = "enabled", havingValue = "true")
+    public PassportCaptureObserver passportCaptureObserver(VehicleProfileService vehicleProfileService,
+                                                             VisionOnboardingProperties properties) {
+        if (!properties.probe().enabled()) {
+            LOG.log(System.Logger.Level.WARNING, "vision.onboarding.passport.enabled=true but "
+                    + "vision.onboarding.probe.enabled=false -- every flight passport capture will fail "
+                    + "(no device this platform can probe) until probing is also enabled");
+        }
+        return new PassportCaptureObserver(vehicleProfileService, properties.probe().inventoryWindow());
     }
 }

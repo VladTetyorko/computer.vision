@@ -63,6 +63,7 @@ class TelemetryWiringOnboardingTest {
                 new VisionOnboardingProperties(
                         new VisionOnboardingProperties.Probe(false, Duration.ofSeconds(10), REQUEST_TIMEOUT),
                         new VisionOnboardingProperties.Remediate(
-                                new VisionOnboardingProperties.Remediate.MessageInterval(requestMessagesOnConnect))));
+                                new VisionOnboardingProperties.Remediate.MessageInterval(requestMessagesOnConnect)),
+                        new VisionOnboardingProperties.Passport(false)));
     }
 }
