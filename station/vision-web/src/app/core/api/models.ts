@@ -2487,3 +2487,72 @@ export interface TrainingJobResponse {
 export interface TrainingJobsResponse {
   readonly jobs: readonly TrainingJobResponse[];
 }
+
+// --- After-action evidence package (docs/plans/active/AFTER-ACTION-PLAN.md §3's frozen wire contract, wave W2) ---
+// One request against one finished flight returns everything the platform knows about it, in open
+// formats, with an explicit account of what's missing/approximate (D3). Two endpoints (D2): this
+// JSON manifest — also what `features/replay/**`'s after-action panel renders directly — and a ZIP
+// archive (`VisionApi#afterActionArchiveUrl`) carrying the same facts as files, never fetched into
+// memory here (it's a browser download, see that method's own doc comment). **Coded against the
+// plan's own frozen §3.1 example verbatim, ahead of the backend (wave W1), which was built against
+// the identical contract in parallel** — see `core/after-action/after-action-logic.ts`'s own doc
+// comment for a defect found in that example while doing so.
+
+/** The six things an evidence package accounts for, always in this exact order on the wire (`AfterActionManifest#parts`) — never omitted, never reordered (§3.1). */
+export type AfterActionPart = 'telemetry' | 'detections' | 'marks' | 'recording' | 'passport' | 'audit';
+
+/**
+ * What happened when the assembler tried to gather one part (D3). `PRESENT`/`ABSENT` are both
+ * honest "nothing went wrong" outcomes (data existed, or genuinely doesn't); `TRUNCATED` is a
+ * truthful "you got some of it, not all" (telemetry thinning, D7/§3.4); `FORBIDDEN` is the caller's
+ * own role refusing a read the assembler otherwise could have made (e.g. the audit trail).
+ * `ABSENT` and `FORBIDDEN` are deliberately distinct constants, not one "couldn't get it" bucket —
+ * a referee must be able to tell "there is nothing to see" from "there is something, and you may
+ * not see it" apart.
+ */
+export type AfterActionPartState = 'PRESENT' | 'ABSENT' | 'TRUNCATED' | 'FORBIDDEN';
+
+/**
+ * One row of `AfterActionManifest#parts`. `count` is `0` for `ABSENT`/`FORBIDDEN` (never a real
+ * count masquerading as a state, §3.1). `note` is explicit `| null`, not optional — this DTO family
+ * deliberately does not mirror `@JsonInclude(NON_NULL)` as `?:` the way most of this file's other
+ * types do (see `AfterActionManifest`'s own doc comment): `null` is `null` only when
+ * `state === 'PRESENT'` and there's nothing to qualify, and must render as no text at all, never a
+ * fabricated reassurance (`core/after-action/after-action-logic.ts#buildPartRows`).
+ */
+export interface AfterActionPartStatus {
+  readonly part: AfterActionPart;
+  readonly state: AfterActionPartState;
+  readonly count: number;
+  readonly note: string | null;
+}
+
+/**
+ * Mirrors the after-action assembler's manifest DTO verbatim — `GET
+ * /api/assets/{assetId}/usages/{usageId}/after-action`. Every field is always present on a 200;
+ * `endedAt` and each part's own `note` are the two places `null` is meaningful data, not absence —
+ * **`@JsonInclude(NON_NULL)` is deliberately not used on this DTO family** (§3.1's own explicit
+ * rule), the one deliberate exception to this file's usual "absent, not `null`, typed `?:`"
+ * convention.
+ *
+ * `open: true` / `endedAt: null` together mean the flight is still running — the package is still
+ * served regardless (a still-open usage is a valid input, never a 404, §5 hazard 4), windowed as if
+ * `endedAt` were "now". `scopedTo` names the viewer whose visibility scope actually built this
+ * package (D6) — two referees with different scopes get different, both-correct packages.
+ * `complete === true` iff every part is `PRESENT`; `caveats` is the ordered list of every non-null
+ * `note` from a non-`PRESENT` part, empty when `complete` (see `after-action-logic.ts#deriveCaveats`
+ * for why this app recomputes that list itself rather than trusting this field verbatim).
+ */
+export interface AfterActionManifest {
+  readonly assetId: string;
+  readonly assetName: string;
+  readonly usageId: string;
+  readonly startedAt: string;
+  readonly endedAt: string | null;
+  readonly open: boolean;
+  readonly generatedAt: string;
+  readonly scopedTo: string;
+  readonly parts: readonly AfterActionPartStatus[];
+  readonly complete: boolean;
+  readonly caveats: readonly string[];
+}

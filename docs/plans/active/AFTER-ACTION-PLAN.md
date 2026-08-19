@@ -26,7 +26,7 @@ package that cannot quietly omit. Every design decision below serves that.
 | **D4** | Video is **referenced, never embedded** | It lives in mediamtx, it is gigabytes, and a stale URL is more honest than a copy that silently diverged |
 | **D5** | Marks are filtered to `createdAt ∈ [startedAt, endedAt]` **and** carry a note saying a mark is not bound to a flight | Context §3.2 — the link does not exist in the model; claiming it would be a lie in an evidence document |
 | **D6** | Built through the **requesting viewer's** scope, and the manifest names that viewer | Context §3.3. A package is evidence *as seen by someone*; anonymising that would misrepresent it |
-| **D7** | Telemetry thinning is **detected and declared**, not fixed | Context §3.4. `count == requested maxPoints` ⇒ thinned. Fixing it needs a time-bounded query on another context's port — a separate wave, recorded in §7 |
+| **D7** | Thinning is **detected and declared**, not fixed — for **telemetry *and* detections** | Context §3.4. `count == requested maxPoints` ⇒ thinned. Fixing it needs a time-bounded query on another context's port — a separate wave, recorded in §7. **Corrected 2026-08-19**: this decision originally named telemetry only, but `DefaultReplayService#timeline` passes *both* series through one `thin(…, effectiveMaxPoints)` call, so a flight with more detections than the ceiling would have reported `PRESENT` while silently dropping evidence — this row's own failure mode, inside this row. Found by the W1 agent, fixed in both the assembler and the contract |
 | **D8** | No new Maven dependency. `java.util.zip`, hand-written CSV, hand-written GeoJSON, Jackson 3 for JSON | 40 h means assembly, and every format here is a few lines |
 
 ## 3. FROZEN WIRE CONTRACT
@@ -60,8 +60,10 @@ if a wave believes it is wrong, it stops and reports rather than adapting.
   ],
   "complete": false,
   "caveats": [
-    "telemetry was thinned to 2000 points; this package is not a raw log",
-    "no recording is configured for this stream"
+    "thinned to the 2000-point ceiling; the source series is larger",
+    "marks created inside the flight window and visible to you; a mark is not bound to a flight",
+    "no recording is configured for this stream",
+    "your role cannot read the audit trail"
   ]
 }
 ```
@@ -70,7 +72,13 @@ if a wave believes it is wrong, it stops and reports rather than adapting.
 - `parts` is always all six, always in that order — `telemetry, detections, marks, recording, passport, audit`. A part is never omitted; `state` carries the truth.
 - `state` ∈ `PRESENT | ABSENT | TRUNCATED | FORBIDDEN`. `count` is `0` for `ABSENT`/`FORBIDDEN`.
 - `note` is `null` only when `state == PRESENT` and there is nothing to qualify.
-- `complete == true` **iff** every part is `PRESENT`. `caveats` is the ordered list of every non-null `note` from a non-`PRESENT` part — empty when `complete`.
+- `caveats` is **every non-null `note`, verbatim, in the canonical part order** — byte-identical to the string in `parts`, never reworded. A caveat and its note are the same sentence appearing twice, so a reader can match them.
+- A `note` counts **regardless of `state`**. A `PRESENT` part may carry one, and marks is the case that matters: "a mark is not bound to a flight" qualifies every package that has marks, and is exactly the approximation a referee must be told about.
+- `complete == true` **iff** every part is `PRESENT` — a statement about *states only*. `complete: true` with a non-empty `caveats` is therefore legal and expected: **an approximation is not an absence**, and collapsing the two is the failure this row exists to prevent.
+
+> **Corrected 2026-08-19**, after the W2 agent found this section's worked example contradicting its
+> own prose — the example omitted audit's `FORBIDDEN` note from `caveats` and paraphrased telemetry's
+> instead of quoting it. The rules above are authoritative over any JSON illustration.
 - `endedAt` is `null` and `open` is `true` for a still-running flight; the package is still served, with `endedAt` treated as *now* for windowing, and a caveat saying so.
 - `@JsonInclude(NON_NULL)` is **not** used here: `endedAt: null` and `note: null` are meaningful and must appear on the wire.
 

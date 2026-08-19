@@ -1,0 +1,58 @@
+<section class="card span-2 after-action-card">
+  <header>
+    <h2>Evidence package</h2>
+    @if (view(); as v) {
+      @if (v.complete) {
+        <span class="chip ok">Complete</span>
+      }
+    }
+  </header>
+
+  @if (loading()) {
+    <p class="muted hint">Loading the evidence package…</p>
+  } @else if (errorMessage(); as err) {
+    <vision-notice variant="neutral" icon="alert">Couldn't load the evidence package: {{ err }}</vision-notice>
+  } @else if (manifest(); as m) {
+    @if (view(); as v) {
+      <p class="muted hint">Built for {{ m.scopedTo }} · generated {{ formatInstant(m.generatedAt) }}</p>
+
+      @if (v.openNotice) {
+        <vision-notice variant="neutral">{{ v.openNotice }}</vision-notice>
+      }
+
+      <ul class="part-list">
+        @for (row of v.parts; track row.part) {
+          <li class="part-row">
+            <vision-icon [name]="iconFor(row.part)" [size]="18" />
+            <div class="part-main">
+              <div class="part-head">
+                <span class="part-label">{{ row.label }}</span>
+                <span class="chip" [class.ok]="row.tone === 'ok'">{{ badgeText(row) }}</span>
+              </div>
+              @if (row.note) {
+                <p class="part-note faint">{{ row.note }}</p>
+              }
+            </div>
+          </li>
+        }
+      </ul>
+
+      @if (v.caveats.length > 0) {
+        <div class="caveats">
+          <h3>Worth knowing before you rely on this</h3>
+          <ul>
+            @for (c of v.caveats; track c) {
+              <li>{{ c }}</li>
+            }
+          </ul>
+        </div>
+      }
+
+      <div class="row actions">
+        @if (archiveUrl(); as href) {
+          <a class="btn" [href]="href" download>Download package (.zip)</a>
+        }
+      </div>
+    }
+  }
+</section>

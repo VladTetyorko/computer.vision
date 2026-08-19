@@ -2169,3 +2169,151 @@ three runs identical): **650 → 684 (+34)**, `Tests run: 684, Failures: 0, Erro
 **Deferred, out of this wave's scope**: none — G4's own exit criteria (§8) are fully met. See
 `station/vision-app/MODULE.md`'s own G4 entry for the wiring half, including a real circular-dependency
 bug this wave's own `FixedCameraGeoEnabledWiringTest` caught (not a defect in this module).
+
+## docs/plans/active/AFTER-ACTION-PLAN.md Wave W1 done (after-action evidence package, backend)
+
+One request against one finished (or still-open) flight returns everything the platform knows about
+it — telemetry, detections, marks, recording reference, flight passport, audit trail — as a JSON
+manifest or a streamed ZIP, with an honest `PRESENT | ABSENT | TRUNCATED | FORBIDDEN` state per part
+(D3). Ships **on**, no flag (D1's own framing: nothing new is exposed, only re-shaped).
+
+**`com.drones.vision.api.support.afteraction`** (new package) — the framework-free assembler and its
+value types, deliberately isolated from `dto/`/`controller/` (D1):
+- **`AfterActionAssembler`** (constructor: `AssetService, ReplayService, AfterActionSources,
+  AfterActionProperties` — 4 params, under the 5-param ceiling via the `AfterActionSources` bundle) —
+  no Spring, no Jackson import; `assemble(AssetId, UsageId, VisibilityScope, Viewer, String scopedTo)`
+  returns a domain-ish `AfterActionPackage`. Two authority gates, not one: the top-level export gate
+  (`scope.canManage(ownership)`, same predicate `AssetController#requireManageable` uses — a PILOT
+  sees their asset, 404 never fires, but may not export its evidence package, 403) checked once before
+  any part resolves; the `audit` part's own gate (`!scope.canManageOrg()`, mirroring `AuditController`
+  verbatim) produces `FORBIDDEN` for that one part rather than failing the whole request. Six
+  package-private `resolve*` methods (one per `AfterActionPartKind`), each independently unit-testable
+  without going through `assemble()` — this is what let `AfterActionAssemblerTest` exercise the
+  `audit` part's `FORBIDDEN` branch directly (see Findings below — it is not reachable end-to-end).
+- **`AfterActionPartKind`** (enum, `TELEMETRY, DETECTIONS, MARKS, RECORDING, PASSPORT, AUDIT` —
+  declaration order **is** the wire order), **`AfterActionPartState`** (`PRESENT, ABSENT, TRUNCATED,
+  FORBIDDEN`), **`AfterActionPart`** (record: `part, state, count, note`), **`DetectionRow`** (one
+  flattened detection — a `DetectionResult` carries a whole frame, a CSV needs one row per detected
+  object).
+- **`AfterActionPackage`** — the assembler's return type: manifest fields plus the raw domain content
+  the archive's eight entries are built from. `complete()`/`caveats()` are pure functions of `parts()`
+  (see "Mid-wave spec correction" below for `caveats()`'s exact rule).
+- **`AfterActionSources`** (record: `MarkService, VehicleProfileService, AuditTrailPort`) — exists
+  purely to keep the assembler's constructor at 4 params, same precedent as `vision-events`'
+  `ReplaySources`/`vision-learning`'s `TrainingStores`.
+- **`AfterActionProperties`** (record: `telemetryMaxPoints, auditLimit`) — the framework-free
+  `vision-app`-bridges-onto-this-instance idiom `OnboardingProperties` established; `defaults()` reads
+  `ReplayServiceSettings.defaults().maxPointsCeiling()` (2000) so D7's thinning-detection ceiling is
+  never a second, independently-drifting literal.
+- **`AfterActionArchiveWriter`** — writes the ZIP's eight entries (`manifest.json, README.txt,
+  telemetry.csv, detections.csv, marks.geojson, passport.json, audit.csv, recording.txt`), always all
+  eight, never a zero-byte one for an `ABSENT`/`FORBIDDEN` part (§3.2). `manifest.json`/`passport.json`
+  go through `JsonMapper` (Jackson 3, D8); the two CSVs are hand-written RFC 4180 (`\r\n`, `"`
+  doubling, header row always present even when empty); `marks.geojson` is hand-written RFC 7946
+  (`FeatureCollection`, empty `features` array when absent). `recording.txt` is the one entry §3.2
+  names a literal explanatory line for; the CSV/GeoJSON/passport-JSON entries instead use each
+  format's own valid-but-empty shape for `ABSENT`/`FORBIDDEN` — a judgment call (see Findings).
+
+**`AfterActionController`** (`api/controller/`, new) — constructor `AfterActionAssembler, CurrentUser`;
+no `@PreAuthorize` (this module carries zero `org.springframework.security` dependency — every
+controller in this codebase resolves authority through `CurrentUser#scope()`/`#viewer()`, never a
+Spring Security annotation; see Findings for the plan's imprecise wording here):
+- `GET /api/assets/{assetId}/usages/{usageId}/after-action` → 200 `AfterActionManifestResponse`.
+- `GET /api/assets/{assetId}/usages/{usageId}/after-action/archive` → 200, `Content-Type:
+  application/zip`, `Content-Disposition: attachment; filename="after-action-{usageId}.zip"`, body a
+  `StreamingResponseBody` (D-mandated, a deliberate departure from `HlsProxyController`'s
+  `InputStreamResource` choice — never buffered whole in memory). The package is resolved
+  **synchronously** before the `ResponseEntity<StreamingResponseBody>` is returned, so a 404/403 lands
+  on the response before any async dispatch starts at all — proven by
+  `archiveReturns404BeforeAnyAsyncDispatchForAnUnknownAsset`/`...403...` asserting
+  `request().asyncNotStarted()`.
+- Both endpoints share one error mapping, entirely `assemble()`'s own exceptions through
+  `ApiExceptionHandler`: `NoSuchElementException` (unknown/out-of-scope asset, unknown/mismatched
+  usage — all collapse to 404, never leaking which) and `AccessDeniedException` (sees the asset, may
+  not export it — 403). No new exception mapping was added to `ApiExceptionHandler` — both types were
+  already wired for other endpoints.
+
+**New DTOs** (`api/dto/`), **no `@JsonInclude(NON_NULL)` on either** — §3.1's `endedAt: null` (a
+still-open usage) and every part's `note: null` are meaningful and must appear on the wire, the
+opposite convention from `FlightPassportResponse`:
+- `AfterActionManifestResponse(assetId, assetName, usageId, startedAt, endedAt, open, generatedAt,
+  scopedTo, parts, complete, caveats)` — `from(AfterActionPackage)`.
+- `AfterActionPartResponse(part, state, count, note)` — `part` lowercase (`wireName()`), `state`
+  the enum name verbatim — `from(AfterActionPart)`.
+
+**Mid-wave spec correction applied (D3.1 `caveats` rule)**: the plan owner corrected §3.1 after the
+parallel web-agent wave found its worked JSON example contradicted its own prose rule twice (omitted
+`audit`'s `FORBIDDEN` note; paraphrased `telemetry`'s note instead of quoting it verbatim). The
+corrected, now-authoritative rule: `caveats` is **every non-null `note`, verbatim, in canonical part
+order, regardless of `state`** — a `PRESENT` part's note (the `marks` part's standing "not bound to a
+flight" qualifier, D5, is the case that matters) still counts. `complete` stays defined on part states
+only (`true` iff all six `PRESENT`), so `complete: true` with a non-empty `caveats` is now an expected,
+correct combination, not a bug — "an approximation is not an absence." Landed after
+`AfterActionPackage`/`AfterActionArchiveWriter`/DTOs were already written but before any test existed,
+so nothing needed retroactive rewriting; `AfterActionArchiveWriter#readme`'s "Caveats: none" branch
+(previously keyed on `complete()`) was fixed to key on `caveats().isEmpty()` instead — the one place
+the old, incorrect coupling was baked into logic rather than just prose.
+
+**Findings — where the plan needed a judgment call or was imprecise** (every wave in this repo finds
+at least one; this wave found five):
+1. **D7's thinning-detection heuristic is scoped to `telemetry` only, but `DefaultReplayService.timeline`
+   thins `detections` with the exact same `thin()` call and the exact same ceiling.** A flight with
+   more detection-results than `telemetryMaxPoints` will report `detections: PRESENT` with no
+   truncation note — the precise "quietly omit" failure this feature exists to prevent, just on the
+   part D7 didn't name. Implemented literally per the frozen contract (its own §3.1 worked example
+   shows `detections` as plain `PRESENT`, count 214, no caveat) since deviating from a frozen contract
+   a parallel agent is coding against is worse than reporting the gap. Flagged, not fixed — a
+   follow-up wave's job.
+2. **The `audit` part's `FORBIDDEN` state is structurally unreachable end-to-end via `assemble()`
+   today.** `VisibilityScope.canManage(ownership) == true` always implies `canManageOrg() == true`
+   (both reduce to `UNBOUNDED`, or `GROUPS` with a matching group) — so whoever clears the top-level
+   export gate always also clears the audit gate; only a caller who fails the top-level gate (and
+   therefore never reaches part resolution) could see it. The branch is real, correctly wired to
+   `AuditController`'s own policy, and covered directly by `resolveAuditReturnsForbiddenWhenScopeMayNotManageOrg`
+   — exactly why every `resolve*` method is package-private rather than folded into `assemble()`.
+3. **§3.1's example `scopedTo: "referee@example.org"`** cannot be produced from any existing seam —
+   `CurrentUser` has no email/username accessor, only `userId()` (a UUID). `AfterActionController`
+   passes `currentUser.userId().value().toString()` instead; a display-name/email seam is a separate,
+   undelegated piece of identity work.
+4. **The plan's "`@PreAuthorize` consistent with `UsageTimelineController`" (§6 step 4) describes a
+   pattern that does not exist anywhere in this codebase.** No controller uses `@PreAuthorize` —
+   `vision-api` may not depend on `org.springframework.security` at all. Implemented via
+   `CurrentUser#scope()`/`#viewer()`, matching every other controller.
+5. **§3.2's "ABSENT/FORBIDDEN parts still get a file — a single explanatory line" general rule reads
+   as if it applies uniformly, but conflicts with the same section's per-format rules** (CSV's "header
+   row always present" implies structured emptiness, not prose; RFC 7946 GeoJSON validity likewise).
+   Resolved by using each format's own valid-but-empty shape for `telemetry.csv`/`detections.csv`/
+   `marks.geojson`/`passport.json`, reserving the literal "one explanatory line" treatment for
+   `recording.txt` — the one entry §3.2 names that way explicitly.
+
+**Tests** (all new):
+- `AfterActionAssemblerTest` (`api/support/afteraction/`, plain JUnit + hand-written fakes of
+  `AssetService`/`ReplayService`/`MarkService`/`VehicleProfileService`/`AuditTrailPort` — no Spring, no
+  Mockito, matching the class's own framework-free design) — 23 tests: full happy path (all six parts
+  `PRESENT`, fixed order), a still-open usage (`endedAt: null`, never 404), a no-recording/no-passport
+  manifest asserted field-by-field, every §3.3 error case (unknown asset, mismatched usage, visible-
+  but-unmanageable → 403 with `replayService.timeline` proven never called), each `resolve*` method's
+  every state (including the unreachable `audit` `FORBIDDEN`), `flattenDetections`
+  (one row per detection, not per frame), `filterMarksInWindow` (inclusive both ends).
+- `AfterActionControllerTest` (`api/controller/`) — 10 tests: manifest 200 with the corrected
+  `caveats` behavior asserted directly (a `PRESENT` marks part's note appears in `caveats` even though
+  `complete: true`), `note: null` asserted present-not-omitted on the wire, still-open-usage 200, every
+  §3.3 error mapping ×2 endpoints, the archive's 8-entry-fixed-order ZIP via the
+  `request().asyncStarted()` → `asyncDispatch()` pattern (no prior precedent for `StreamingResponseBody`
+  testing existed in this module before this wave), and the synchronous-404-before-any-async-dispatch
+  proof for both error paths on the archive endpoint.
+
+**Before/after** (`./mvnw -B -pl station/vision-api,station/vision-app test -DskipWeb`, foreground; no
+`-am` — upstream context/adapter jars were already freshly installed by an earlier step in this same
+session and this wave touches no upstream module, so `-am` would only have dragged an unrelated,
+pre-existing flaky `adapter-mavlink` UDP-port-bind test into the run): vision-api **684 → 717 (+33)**,
+vision-app unchanged at **237 → 237 (+0 test files, +1 wiring bean)** — `ArchitectureTest`/
+`ContextArchitectureTest` both still green, so the new `AfterActionWiringConfiguration` bean introduces
+no dependency-rule violation. `BUILD SUCCESS` both modules. Docker ran (Testcontainers Postgres,
+Flyway migrated to v22, confirmed by log output) — not skipped.
+
+**Deferred, out of this wave's scope** (§7, verbatim): a raw (unthinned) telemetry export path; fixing
+`UsageTimeline#detections`'s stale field javadoc ("always empty today" — confirmed false by reading
+`DefaultReplayService`, see Findings item 1, which is the real, non-stale version of this same gap);
+signing/hashing the package. Also deferred, not in §7 but found this wave: Finding 1 above (`detections`
+truncation-detection), and a `scopedTo` display-name/email seam (Finding 3).

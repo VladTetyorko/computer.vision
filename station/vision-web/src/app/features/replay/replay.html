@@ -29,6 +29,17 @@
         <a class="btn" [routerLink]="facade.backLink()">Back</a>
       }
     </div>
+
+    <!-- The evidence package is genuinely servable mid-flight (docs/plans/active/AFTER-ACTION-PLAN.md §5
+         hazard 4 — "a still-open usage is a valid input, do not 404 it") — a referee can watch the
+         evidence build up before the flight ends, unlike the scrub cockpit above, which only makes
+         sense once there's a fixed window to scrub through. -->
+    <vision-after-action-panel
+      [manifest]="facade.afterAction()"
+      [loading]="facade.afterActionLoading()"
+      [errorMessage]="facade.afterActionErrorMessage()"
+      [archiveUrl]="facade.afterActionArchiveUrl()"
+    />
   } @else if (facade.timeline(); as t) {
     <!-- The old page-head's own time-range line — real flight data, not page-identity prose, so it
          stays as plain content under the bar rather than moving into the bar itself (nothing in
@@ -39,6 +50,17 @@
     </p>
 
     <div class="detail-grid">
+      <!-- ---- Evidence package (docs/plans/active/AFTER-ACTION-PLAN.md, wave W2) --------------------------- -->
+      <!-- First card: "where a referee sees that honesty before they download anything" — every other
+           card below is this same flight's own data; this one names what's actually in the downloadable
+           package and what isn't, up front, not buried at the bottom of the page. -->
+      <vision-after-action-panel
+        [manifest]="facade.afterAction()"
+        [loading]="facade.afterActionLoading()"
+        [errorMessage]="facade.afterActionErrorMessage()"
+        [archiveUrl]="facade.afterActionArchiveUrl()"
+      />
+
       <!-- ---- Map --------------------------------------------------------------------------- -->
       <section class="card span-2">
         <header>

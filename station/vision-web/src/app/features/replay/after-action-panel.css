@@ -1,0 +1,105 @@
+/* `:host { display: contents }` mirrors `shared/ui/event-row.css`'s/`shared/ui/side-panel.css`'s own
+   precedent — this component adds no layout box of its own, so the `.card.span-2` it renders
+   participates directly in `replay.css`'s `.detail-grid`/`.span-2` layout as if it weren't wrapped
+   in a custom element at all. Without this, `<vision-after-action-panel>` itself (not its inner
+   `.card`) would be the actual grid item, and `.span-2`'s `grid-column: 1 / -1` would silently do
+   nothing. */
+:host {
+    display: contents;
+}
+
+/* ---- Header ------------------------------------------------------------------------------------ */
+
+.after-action-card header h2 {
+    margin: 0;
+}
+
+.after-action-card .hint {
+    margin: 0 0 var(--space-16);
+}
+
+/* ---- Part list — one row per part, always all six (docs/plans/active/AFTER-ACTION-PLAN.md §3.1) --- */
+
+.part-list {
+    list-style: none;
+    margin: 0 0 var(--space-16);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.part-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-8);
+    padding: var(--space-8) 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.part-row:last-child {
+    border-bottom: none;
+}
+
+.part-row vision-icon {
+    flex: none;
+    margin-top: var(--space-2);
+    color: var(--text-faint);
+}
+
+.part-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.part-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-8);
+}
+
+.part-label {
+    font-weight: 600;
+}
+
+/* A part's own note — rendered inline on its row, never behind a disclosure toggle (this wave's own
+   requirement: TRUNCATED/FORBIDDEN read as calm statements of fact, always visible). */
+.part-note {
+    margin: var(--space-4) 0 0;
+    font-size: 0.8rem;
+}
+
+/* ---- Caveats — plain language, no alarm styling (the panel's tone rule lives in the chip colors
+   above, not here; this section is just a quiet rollup of what's already stated per-row) --------- */
+
+.caveats {
+    margin: 0 0 var(--space-16);
+    padding-top: var(--space-16);
+    border-top: 1px solid var(--border);
+}
+
+.caveats h3 {
+    margin: 0 0 var(--space-8);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.caveats ul {
+    margin: 0;
+    padding-left: var(--space-16);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.caveats li {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.actions {
+    margin: 0;
+}

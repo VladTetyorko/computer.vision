@@ -90,6 +90,7 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 - `../idle-preload.ts` — `IdlePreload` (`PreloadingStrategy`): preloads lazy route chunks on browser idle; opt out via route `data: { preload: false }`. As of docs/main/CYCLES-PLAN.md §9, CU-b item 2, **no route opts out any more** — every tab chunk (including `/map` and `/debug`, previously excluded) is idle-preloaded; see Status below for why that's safe against the initial-bundle budget.
 - **`shared/player/webrtc-certificate.ts`/`webrtc-certificate-logic.ts`/`webrtc-certificate-db.ts`** (docs/plans/done/REALTIME-PLAN.md Phase R-b item 3, new; moved out of `core/` into `shared/player/` per station/vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §3, D2 — Player-only WebRTC internals, not a store) — `WebrtcCertificateService` (`providedIn: 'root'`, one instance app-wide): `certificates(): Promise<readonly RTCCertificate[]>` lazily creates (`RTCPeerConnection.generateCertificate({name:'ECDSA', namedCurve:'P-256'})`), persists in IndexedDB, and hands back the browser's *one* stable ECDSA certificate — `shared/player/player.ts` passes it to every `RTCPeerConnection` via the `certificates` option, so every `<vision-player>` tile and every reconnect presents the identical DTLS fingerprint (server-side viewer correlation, no application-level session/cookie needed) and skips ECDSA keygen latency after the first attach. Memoized and **re-validated on every call**, not just once at startup — `isCertificateUsable`/`CERTIFICATE_EXPIRY_SAFETY_MARGIN_MS` (`webrtc-certificate-logic.ts`, pure, unit-tested, 9 cases) is the one place "is this cert still safe to hand out" is decided, so a certificate that expires mid-session (Safari caps a generated cert's own lifetime at roughly a week regardless of what's requested) regenerates transparently on the *next* call rather than silently going stale. `webrtc-certificate-db.ts` is the minimal IndexedDB glue (one object store, one record — mirrors `shared/map/tile-cache-db.ts`'s identical "thin, undocumented-by-spec, no dedicated test" precedent; jsdom has neither IndexedDB nor `generateCertificate` to test against regardless); both `getStoredCertificate`/`putStoredCertificate` degrade to `undefined`/a no-op rather than throwing, which is what makes the private-mode/IndexedDB-unavailable fallback "just generate a fresh in-memory certificate, per tab" fall out for free rather than needing its own special-cased branch. Logs the fingerprint (`getFingerprints()`, formatted by `formatFingerprints`) at `info` once per session — memoization means this only fires once regardless of how many `<vision-player>` tiles call `certificates()`.
 - **`core/readiness/readiness-logic.ts` + `.spec.ts`** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1, wave O6, new — pure, no Angular) — rendering/sorting helpers shared by the fleet readiness board (`features/preflight`, `/operate/preflight`) and the per-asset readiness report (`features/readiness`, `/assets/:assetId/readiness`); presentation only, never re-derives a `ReadinessVerdict`/`FeatureStatus` the backend (`ReadinessService`, contexts/vision-flight) already decided. `isProbeDisabledError(error)` — the exact 409-body-text check shared with `OnboardingStore#verify` (see above). `featureLabel(key)` — the eleven seeded `FEATURE_KEYS` labels, verified against `V18__feature_requirements.sql`'s own INSERT rows, key itself as fallback for an unrecognised firmware/feature. `verdictTone`/`verdictLabel`, `featureStatusTone`/`featureStatusLabel`, `remedyLabel(remedy)` (`null` for a `null` remedy, not a blank string), `isRemediable(remedy): remedy is 'MESSAGE_INTERVAL'` — the only `RemedyKind` this wave's backend (`RemediationOrchestrator`, O5) actually dispatches end to end; `PARAM_WRITE` is never dispatched yet, `CLI_SCRIPT` only generates text, `MANUAL` is operator-side — a row whose remedy fails this check still shows `remedyLabel`'s sentence, just no Remediate button. `outcomeTone`/`outcomeLabel` for a remediation action's `'ACCEPTED'|'DENIED'|'NO_ACK'|'UNSUPPORTED'` outcome. `fleetRowAttention(row, limit = 2)` — the fleet board's compact per-row rollup: every non-`READY` feature's label, comma-joined, capped with "+N more" (`dataviz`'s "compact rollups over per-row chip clutter" — eleven per-row status chips would violate this app's own "one chip per row max" table rule, frontend-style §5); `null` when every evaluated feature is `READY`. `sortReadinessRows(rows)` — `NO_GO` first, then `UNKNOWN`, then `GO`, alphabetical tiebreak; **only orders, never filters/hides** (OQ3, resolved advisory-only this wave — see the O6 changelog section). `readinessCounts(rows)` — the board's own Go/No-go/Unknown stat-tile row.
+- **`core/after-action/after-action-logic.ts` + `.spec.ts`** (docs/plans/active/AFTER-ACTION-PLAN.md §3's frozen wire contract, wave W2, new — pure, no Angular) — the manifest → view-model transform behind `features/replay/after-action-panel.ts`; full write-up (design/tone choices, the defect found in the plan's own worked example, tests/build) in this file's own dated Status entry near the end. `AfterActionManifest`/`AfterActionPart`/`AfterActionPartState`/`AfterActionPartStatus` (new, `models.ts`) mirror §3.1 verbatim — the one deliberate `@JsonInclude(NON_NULL)`-is-not-used DTO family in this file (`endedAt`/`note` are explicit `string | null`, never optional `?:`, since a literal `null` is meaningful data here). `AFTER_ACTION_PART_ORDER` (the six parts, canonical order) plus `partLabel`/`partStateLabel`/`partTone` (deliberately two-valued — `'ok'` only for `PRESENT`, `'neutral'` for `ABSENT`/`TRUNCATED`/`FORBIDDEN` alike, so the panel never colors the two "calm fact" states as errors) /`showPartCount`/`buildPartRows` (defensively re-sorts into canonical order regardless of wire order; never fabricates a row for a part missing from the array) /`deriveCaveats` (recomputes §3.1's own caveat rule locally rather than trusting `manifest.caveats` verbatim — see the Status entry for why) /`openFlightNotice`/`buildAfterActionView`. `VisionApi#afterAction(assetId, usageId)` (`GET .../after-action` → `AfterActionManifest`) and `VisionApi#afterActionArchiveUrl(assetId, usageId)` (a plain URL builder, like `snapshotUrl`/`assetImageUrl` — never fetched through `HttpClient`, see §3.2) back it.
 
 ### Routes (`app.routes.ts`) — one lazy `loadComponent` chunk each
 
@@ -529,6 +530,7 @@ The single flow for bringing any source into the app — a forward-only, back-na
   - **Scrubbing** is a plain `<input type="range">` (`onScrub`, `[min]`/`[max]` = the window bounds in epoch ms, `[step]` ≈ 1/1000th of the window's span so it feels continuous regardless of flight length) — dragging pauses playback and takes over; no HTTP call in the handler, just `atMs.set(...)` against the already-cached `timeline`. The detection density strip (`detectionBuckets`, `capDetectionBuckets` applied over `bucketDetections` — docs/plans/done/OPS-CORE-PLAN.md §Q3a) overlays the same track, each bucket a small `--density`-scaled marker (`bucket.count / maxBucketCount()`, one hue — `var(--warn)` — opacity-ramped, not a rainbow) whose click calls `jumpTo(bucket.atMs)`; `detectionStripCapNote` renders a quiet "Showing latest N of totalCount markers" line under the strip, `null` (nothing rendered) unless the 200-bucket cap actually trimmed something.
   - **Telemetry-at-scrub, per source device**: mirrors `asset-detail.html`'s own per-device panels almost verbatim, except every value comes from `nearestSample(telemetryByDevice.get(deviceId), atMs)` (the scrub-time reading) rather than "latest" — each panel also names the exact recorded sample's own timestamp (`sampleAtScrubFor`/`sampleTimeMs`) so the reading's precision (or gap) is never hidden.
   - **Detections-at-scrub** lists `nearestDetectionResult(...)`'s own `label · confidence` chips only when `isDetectionNear` — otherwise one of three honest empty states, all distinct: **no detections recorded for this flight** (`timeline.detections` is empty outright — a legacy usage, or one from a streamless asset, per R-a's own documented gap before R-a2), **no detection data near this moment** (detections exist elsewhere in the flight but not near the current scrub time), or **nothing detected at this instant** (the nearest inference frame ran and simply saw nothing) — three different facts, never collapsed into one generic "—".
+- **`after-action-panel.ts`/`.html`/`.css` — `AfterActionPanel` (`<vision-after-action-panel>`, docs/plans/active/AFTER-ACTION-PLAN.md, wave W2, new)** — the evidence-package card: all six parts (telemetry/detections/marks/recording/passport/audit, always in that order), each with an icon, a plain-language state chip, a count where one is meaningful, and its own note rendered inline (never behind a disclosure), plus the recomputed caveat list and a "Download package" `<a href download>` (never fetched through `HttpClient`, per §3.2). Deliberately dumb, mirroring `shared/ui/preflight-checklist.ts`'s "items in, no store/DI" shape — `manifest`/`loading`/`errorMessage`/`archiveUrl` inputs only, transformed through `core/after-action/after-action-logic.ts#buildAfterActionView` internally. `:host { display: contents }` (mirrors `shared/ui/event-row.css`'s precedent) so its own `.card.span-2` participates directly in `replay.css`'s `.detail-grid`, not the `<vision-after-action-panel>` host element itself. **The tone rule this wave exists to get right**: `TRUNCATED`/`FORBIDDEN` render with the exact same neutral `.chip` (no modifier class) as `ABSENT` — only `PRESENT` earns `.chip.ok`'s green; the distinction lives entirely in the state word ("Not available" / "Thinned" / "Not visible to you"), never in color. **Mounted twice in `replay.html`** — inside the `usageOpen` branch (a still-open usage is a valid input for the evidence package, §5 hazard 4 — do not 404/hide it just because the scrub cockpit itself redirects to "Watch live") and as the first card in the loaded-timeline `.detail-grid` (ahead of Position/Recording/Playback — "where a referee sees that honesty before they download anything"). `ReplayFacade` gained `afterAction`/`afterActionLoading`/`afterActionErrorMessage`/`afterActionArchiveUrl`, fetched via their own independent `effect()` (own try/catch, mirrors `loadRecording`'s "an enrichment read failure never blocks the rest of the page" posture) — see that class's own doc comment. Full design/degrade/test/build write-up in this file's own dated Status entry near the end.
 
 ### `src/app/features/live/**` — video-first cockpit: player, collapsible rail, docs/main/CYCLES-PLAN.md §2, §9 (CU-b item 4), docs/plans/done/MVP1-PLAN.md §C8 bullet 4
 
@@ -11476,3 +11478,129 @@ entry).
   zero drift, `station/vision-web/` and `architecture.spec.ts` were already present and current) — the claim was
   wrong (it had checked a different, genuinely-stale worktree by mistake) and the reset was never run. Named here
   per this task's own instruction to report friction plainly rather than hide it; no code or scope was affected.
+
+## Status — AFTER-ACTION-PLAN wave W2: the evidence-package panel, and a defect found in the plan's own worked example (docs/plans/active/AFTER-ACTION-PLAN.md §3) — 2026-08-19
+
+A new `<vision-after-action-panel>` on the replay page, showing all six after-action parts
+(telemetry/detections/marks/recording/passport/audit) and their state, plus a plain-language
+caveats rollup and a Download-package link — coded against §3's frozen wire contract on
+`feat/after-action`, with **no backend yet** (W1 is building it in parallel against the same
+spec). Every read degrades honestly: `—`/empty-state, never a fabricated value.
+
+### What shipped
+
+- **`core/after-action/after-action-logic.ts`** (+`.spec.ts`, 17 cases) — pure functions only, no
+  Angular: `buildPartRows` (reorders the wire's `parts` array into the canonical six-part order,
+  drops anything unrecognized, never fabricates a missing part), `deriveCaveats` (recomputes §3.1's
+  rule locally — every non-null `note`, verbatim, in canonical order — rather than trusting the
+  wire's own `caveats` field; see the defect below), `partTone`/
+  `showPartCount`/`openFlightNotice`, and `buildAfterActionView` composing all of it into one view
+  model the panel binds to directly.
+- **`features/replay/after-action-panel.ts`/`.html`/`.css`** — a dumb, `OnPush`, no-facade/no-store
+  child component (mirrors `preflight-checklist.ts`'s shape), taking `manifest`/`loading`/
+  `errorMessage`/`archiveUrl` as inputs. Mounted twice in `replay.html`: inside the `usageOpen`
+  branch (§5 hazard 4 — a still-open usage is a valid input, the package is genuinely servable
+  mid-flight) and as the first card in the loaded-timeline `.detail-grid`, ahead of Position/Map —
+  "where a referee sees the honesty before they download anything."
+- **`core/api/models.ts`** — `AfterActionPart`, `AfterActionPartState`, `AfterActionPartStatus`,
+  `AfterActionManifest`, mirroring §3.1's DTO shape 1:1, including the deliberate `| null` (not
+  `?:`) on `endedAt`/`note` where the backend serializes `null` as meaningful data.
+- **`core/api/vision-api.ts`** — `afterAction(assetId, usageId)` (the one fetching call, `GET
+  .../after-action`) and `afterActionArchiveUrl(assetId, usageId)` (a plain URL-builder, joining
+  the precedent set by `snapshotUrl`/`assetImageUrl`/`sampleImageUrl` — the Download button binds
+  straight to `href`, the ZIP is never pulled through the API client into memory).
+- **`features/replay/replay-facade.ts`** — `afterAction`/`afterActionLoading`/
+  `afterActionErrorMessage` signals and an `afterActionArchiveUrl` computed, loaded by their own
+  independent `effect()` gated only on `assetId`/`usageId` being present (not on `usageOpen`/
+  `timeline`, so both panel mounts above share one fetch).
+
+### A defect found in the plan's own §3.1 worked example — reported, and since corrected
+
+§3's original prose rule for `caveats` was "every non-null `note` from a non-`PRESENT` part", but
+its own illustrated array contradicted it twice: it **paraphrased** telemetry's note instead of
+quoting it, and **omitted audit's `FORBIDDEN` note entirely** despite the rule plainly covering it.
+
+Settled by the plan owner the same day, and the fix widened the rule rather than just repairing the
+example: **a `note` now counts regardless of `state`**, and `complete` is decoupled from `caveats`.
+The case that forced it is marks — `PRESENT`, but carrying the standing "a mark is not bound to a
+flight" approximation that qualifies every package containing marks. Suppressing it because the part
+succeeded would have hidden the one caveat that is always true. `complete: true` alongside a
+non-empty `caveats` is now legal and expected: **an approximation is not an absence.**
+
+### Design/dataviz choices
+
+- **Calm-fact tone, not error styling**: `partTone` is deliberately two-valued —
+  `'ok'` for `PRESENT`, `'neutral'` for everything else (`ABSENT`/`TRUNCATED`/`FORBIDDEN` all read
+  the same quiet gray chip). `TRUNCATED`/`FORBIDDEN` were explicitly required to read as statements
+  of fact, not alarms — there is no `'warn'`/`'danger'` tone anywhere in this panel, and every note
+  renders inline on its own row (`.part-note`), never behind a disclosure toggle.
+- **No invented reassurance**: a `PRESENT` part with a `null` note renders only its label + chip —
+  `buildPartRows` passes `row.note` through untouched and the template's `@if (row.note)` guard
+  means nothing is printed when there's genuinely nothing to say.
+- **A `PRESENT` part can still carry a note** (marks' "not bound to a flight" disclaimer) — it
+  renders on its own row *and* surfaces in the top-level caveats rollup, since an approximation is
+  not an absence. Tested explicitly in the spec.
+- **`:host { display: contents; }`** on `after-action-panel.css` — without it, `<vision-after-
+  action-panel>` itself (not the `.card.span-2` it renders) would be the actual `.detail-grid` grid
+  item, and `.span-2`'s `grid-column: 1 / -1` would silently do nothing. Confirmed as an established
+  pattern (`shared/ui/event-row.css`, `shared/ui/side-panel.css`, and eight others) before using it.
+- **Download is a plain anchor** (`<a class="btn" [href]="archiveUrl()" download>`), never a fetch
+  into memory — per this wave's own explicit requirement and the existing `snapshotUrl`-style
+  precedent.
+
+### Degrade / role-gate / dev-parity notes
+
+- **No manifest yet / fetch fails**: `errorMessage()` renders via `<vision-notice variant="neutral"
+  icon="alert">Couldn't load the evidence package: …</vision-notice>` — a calm statement, not a red
+  banner; no partial/fabricated part rows are ever drawn from a failed fetch.
+- **`FORBIDDEN` parts** (e.g. audit, role-scoped): rendered as an ordinary row with the neutral
+  "Not visible to you" chip and the server's own note — this panel does no client-side role
+  prediction of its own (matching this codebase's established pattern of never guessing authority
+  client-side; the server's per-part `state` is the only source of truth).
+  Undocumented — no explicit `topRole` branch exists in this panel because none is needed: the
+  server-supplied `parts[].state` already carries whatever the caller's role permits.
+- **Open usage (§5 hazard 4)**: the panel mounts and fetches independently of the `usageOpen`/
+  `notFound`/`timeline` branch that governs the rest of the page — an in-progress flight's evidence
+  package is a valid, non-404 read.
+- **Dev-parity** (`vision.auth.enabled=false`): unaffected — this panel reads only the manifest the
+  server returns; an unbounded dev admin simply never sees a `FORBIDDEN` part, identical to how
+  every other role-scoped surface in this app behaves under dev parity.
+
+### Tests
+
+`npm test` (`npx ng test --watch=false`): **128 test files, 2246 tests, all passing** — up from the
+pre-wave baseline of **127 files / 2229 tests** (net **+1 file, +17 tests**, all in the new
+`after-action-logic.spec.ts`). `architecture.spec.ts` stays green unmodified — `AfterActionPanel`
+is a non-routed child component, the same exemption `camera-pose-panel`/`preflight-checklist`/etc.
+already use.
+
+### Build
+
+`npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json`. `ng build
+--configuration production`: green, exit 0. Both budget warnings are pre-existing and unchanged by
+this wave: initial bundle 409.52 kB vs the 390 kB budget, `tactical-map.css` 8.89 kB vs the 8 kB
+budget — no third warning introduced. (No true before/after diff was taken for this specific wave's
+lazy `replay` chunk, since obtaining one would require `git stash`/`git checkout`, both forbidden
+by this task's environment rules; the two named pre-existing warnings measuring unchanged is the
+available evidence of no eager-bundle regression.)
+
+### Files touched
+
+New: `core/after-action/{after-action-logic.ts,after-action-logic.spec.ts}` ·
+`features/replay/{after-action-panel.ts,after-action-panel.html,after-action-panel.css}`. Modified:
+`core/api/models.ts` (new `AfterAction*` types) · `core/api/vision-api.ts` (`afterAction`,
+`afterActionArchiveUrl`) · `features/replay/replay-facade.ts` (the four new signals/computed + the
+loader effect) · `features/replay/replay.ts` (import + mount) · `features/replay/replay.html`
+(the two `<vision-after-action-panel>` mounts). This file (MODULE.md — the `core/api/**` surface
+bullet, the `features/replay/**` panel bullet, this Status entry).
+
+### Left incomplete / deferred, named honestly
+
+- **The §3.1 example-vs-rule discrepancy above** — an open question for W1/the plan owner to
+  settle, not a bug in this wave; `deriveCaveats` follows the prose rule and documents the
+  disagreement inline rather than guessing which side is authoritative.
+- **No true before/after bundle diff for the `replay` lazy chunk** specifically (see "Build" above)
+  — reverting the working tree to get one is forbidden by this task's environment rules; the
+  unchanged pre-existing warnings are the closest available evidence.
+- **The backend (W1) does not exist yet** — this wave's own starting premise, not a gap it
+  introduces; every degrade path above is honest about it.

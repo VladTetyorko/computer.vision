@@ -3,6 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import type {
   ActiveStream,
+  AfterActionManifest,
   AssetDeletionResponse,
   AssetDetails,
   AssetEdit,
@@ -676,6 +677,38 @@ export class VisionApi {
     return firstValueFrom(
       this.http.get<UsageRecording>(`/api/usages/${encodeURIComponent(usageId)}/recording`),
     );
+  }
+
+  // --- After-action evidence package (docs/plans/active/AFTER-ACTION-PLAN.md §3's frozen wire contract, wave W2) ---
+  // One request against one finished (or still-open) flight, everything the platform knows about
+  // it: this manifest, plus the ZIP archive's own URL below. `features/replay/**`'s after-action
+  // panel is the one consumer.
+
+  /**
+   * The evidence manifest for one usage — every one of the six parts, always, each with its own
+   * honest `state`/`count`/`note` (see `AfterActionManifest`'s own doc comment). `404` for an
+   * unknown usage, a usage that doesn't belong to `assetId`, or an asset not visible to the caller
+   * (the same shape either way — existence itself is scoped, §3.3); `403` when the caller may see
+   * the asset but not export it. A still-open usage (`endedAt: null`) is a valid, non-404 response
+   * — never redirect/hide this panel the way `ReplayFacade`'s own timeline load does for `usageOpen`.
+   */
+  afterAction(assetId: string, usageId: string): Promise<AfterActionManifest> {
+    return firstValueFrom(
+      this.http.get<AfterActionManifest>(
+        `/api/assets/${encodeURIComponent(assetId)}/usages/${encodeURIComponent(usageId)}/after-action`,
+      ),
+    );
+  }
+
+  /**
+   * The ZIP archive's own URL (§3.2) — not promise-returning, like `snapshotUrl`/`assetImageUrl`
+   * above: this is a plain file download (`Content-Disposition: attachment`), and the browser
+   * handles that far better than fetching the whole archive into memory and re-offering it as a
+   * blob would. `features/replay/**`'s "Download package" control binds this straight to a plain
+   * `<a [href]="…" download>`, never through `HttpClient`.
+   */
+  afterActionArchiveUrl(assetId: string, usageId: string): string {
+    return `/api/assets/${encodeURIComponent(assetId)}/usages/${encodeURIComponent(usageId)}/after-action/archive`;
   }
 
   // --- Guarded command TX (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) -------------
