@@ -78,8 +78,10 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 
 ## API surface
 
-**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (21
-`Jpa*Repository`/`Jpa*Store` port implementations, up from 19 — docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 added
+**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (22
+`Jpa*Repository`/`Jpa*Store` classes, up from 21 — the database change audit wave added
+`JpaDbAuditLogRepository`, the one class in this package that implements no port at all, see "Database
+change audit" below; up from 19, docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 added
 `JpaVehicleProfileRepository`/`JpaFeatureRequirementRepository`), `mapper/` (20 entity↔domain mapper classes,
 one per aggregate — extracted out of the repositories that used to inline `toEntity`/`toDomain` as
 private static methods), `config/` (`PersistenceUnit`, `JpaOperations`), `entity/` (unchanged, see
@@ -107,6 +109,7 @@ below). This module gets no `controller/`, `dto/`, or `service/` package — it 
 - `final class JpaDetectionEventRepository implements DetectionEventRepositoryPort` — constructor `(EntityManagerFactory)` or `(EntityManagerFactory, int retentionLimitPerStream)`, same shape as `JpaDetectionRepository`. docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — debounced detection events (docs/plans/done/MVP2-PLAN.md §E, E-a); unlike `JpaDetectionRepository`'s always-`persist` rows, `save` is a genuine upsert (`merge`-by-id) — a `DetectionEvent` mutates over its own open lifetime, matching the deleted `InMemoryDetectionEventRepository`'s remove-then-re-add-by-id semantics. **Wired into `vision-app` since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b**: `ApplicationServiceWiring#detectionEventRepositoryPort` builds this unconditionally, wrapped in `LiveUpdateDetectionEventRepository` when `vision.live.enabled=true` — same deferred-then-closed wiring status as `JpaAuditTrail` above.
 - `final class JpaVehicleProfileRepository implements VehicleProfileRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 — `save` always `persist`s a brand-new row (append-only, `VehicleProfile` carries no id to merge by — see `VehicleProfileEntity`'s own javadoc); `findLatest(DeviceId)` is `order by observedAt desc` + `setMaxResults(1)`, same "newest row" shape as `JpaAssetRepository`/`JpaAssetUsageRepository`'s own single-row-latest queries. **O11 additions** (`V20__vehicle_profile_usage_link.sql`, the flight-passport wave): `save(DeviceId, UsageId, FlightPhase, VehicleProfile)` — same always-`persist` shape, tagged with the two new columns; `findByUsageAndPhase(UsageId, FlightPhase)` — same "newest row" query, filtered on `usage_id`/`phase` instead of `device_id`, backed by `idx_vehicle_profiles_usage_phase`.
 - `final class JpaFeatureRequirementRepository implements FeatureRequirementRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6 — **read-only**: the port has no `save` method at all, every row is Flyway seed data (`V18__feature_requirements.sql`), never written by application code. `findByFirmware`/`findAll` are plain JPQL selects.
+- `final class JpaDbAuditLogRepository` — constructor `(EntityManagerFactory)`. **The one class in this package implementing no port** — see "Database change audit" below for why: every row in `db_audit_log` is written by a Postgres trigger (`V21__db_audit_log.sql`), never by this class, and there is deliberately no domain port for it (infrastructure, not a concept any context module should import). Two read methods, matching the table's two indexes: `findRecent(int limit)` (newest overall) and `findRecentForRow(String tableName, String rowId, int limit)` (newest for one row) — both order by `occurredAt desc, id desc`, the `id` tiebreaker because two rows written inside the same transaction can share a timestamp down to the column's own precision.
 
 Every repository above composes a `com.drones.vision.adapter.persistence.config.JpaOperations`
 (one constructor argument, the module's `EntityManagerFactory`) and, except
@@ -153,7 +156,7 @@ no logic behind them — exactly the "empty ceremony" the plan's own guardrail w
 creating. Flagged here rather than silently decided, per this wave's brief.
 
 ### `com.drones.vision.adapter.persistence.config`
-- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password[, boolean seedDevUsers[, PersistencePoolSettings poolSettings]])`: builds one pooled `HikariDataSource` (docs/plans/active/SCALE-100-PLAN.md S3), migrates the schema through it with Flyway (`classpath:db/migration`, plus `classpath:db/seed/dev` when `seedDevUsers` is `true` — see the `db/seed/dev` schema entry below), then opens a Hibernate-native `EntityManagerFactory` over that same `DataSource` mapping all nineteen entities below (see "Connection pool" below and the "W1 done" narrative section near the end of this file for the `ignoreMigrationPatterns` story). The 3-arg and 4-arg overloads (`seedDevUsers` implicitly `false`, and/or `poolSettings` implicitly `PersistencePoolSettings.defaults()`) are kept so pre-existing callers (e.g. `PostgresDockerIntegrationTest`) don't need to change. The 5-arg overload is the one vision-app's wiring should move to, once it can bind `vision.persistence.pool.*` — see "Connection pool" below for the exact keys.
+- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password[, boolean seedDevUsers[, PersistencePoolSettings poolSettings]])`: builds one pooled `HikariDataSource` (docs/plans/active/SCALE-100-PLAN.md S3), migrates the schema through it with Flyway (`classpath:db/migration`, plus `classpath:db/seed/dev` when `seedDevUsers` is `true` — see the `db/seed/dev` schema entry below), then opens a Hibernate-native `EntityManagerFactory` over that same `DataSource` mapping every entity below — twenty-two as of the database change audit wave (`DbAuditLogEntity` added, see "Database change audit" below; this line previously read "nineteen," already stale before this wave — the running count was not kept in sync every prior wave either) (see "Connection pool" below and the "W1 done" narrative section near the end of this file for the `ignoreMigrationPatterns` story). The 3-arg and 4-arg overloads (`seedDevUsers` implicitly `false`, and/or `poolSettings` implicitly `PersistencePoolSettings.defaults()`) are kept so pre-existing callers (e.g. `PostgresDockerIntegrationTest`) don't need to change. The 5-arg overload is the one vision-app's wiring should move to, once it can bind `vision.persistence.pool.*` — see "Connection pool" below for the exact keys.
 - `public final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas). **Public, not package-private** (widened from the pre-refactor package-private): the `repository` package it now serves lives in a sibling package, so cross-package visibility is required — see Gotchas for the full visibility-widening note.
 - `record PersistencePoolSettings(int maximumPoolSize, int minimumIdle, long connectionTimeoutMillis, long leakDetectionThresholdMillis)` (docs/plans/active/SCALE-100-PLAN.md S3) — the four HikariCP knobs `PersistenceUnit` needs, pulled out as a framework-free record so no magic number lives inline in `PersistenceUnit` itself (CLAUDE.md rule 1). Compact constructor validates `maximumPoolSize >= 1`, `0 <= minimumIdle <= maximumPoolSize`, `connectionTimeoutMillis > 0`, `leakDetectionThresholdMillis >= 0` (`0` means "disabled", Hikari's own convention). `static PersistencePoolSettings defaults()` returns `maximumPoolSize=20, minimumIdle=5, connectionTimeoutMillis=30_000, leakDetectionThresholdMillis=30_000` — sized for ~100 concurrent users on one instance, not a placeholder; each default's justification is on its own `DEFAULT_*` constant's javadoc. vision-app's `VisionPersistenceProperties` is the intended source of a non-default instance, via `vision.persistence.pool.*` (see "Connection pool" below) — this module never reads Spring config itself.
 - `final class ClosingDatasourceConnectionProvider extends org.hibernate.engine.jdbc.connections.internal.DatasourceConnectionProviderImpl` (docs/plans/active/SCALE-100-PLAN.md S3) — the one behavior it adds over its base class: overriding `stop()` to also close the configured `DataSource` if it is `Closeable` (which `HikariDataSource` is). The base class assumes a container-managed `DataSource` Hibernate never owns and must never close (its `stop()` is a no-op); that assumption is wrong here, since `PersistenceUnit.start` builds and *owns* the pool. Hibernate instantiates it via `hibernate.connection.provider_class` (a bare class name, reflection, no-arg constructor) and calls `configure(Map)` — never constructed directly by this module's own code outside tests.
@@ -179,6 +182,7 @@ creating. Flagged here rather than silently decided, per this wave's brief.
 - `DetectionEventEntity` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3, `V15__detection_events.sql`) mirrors `DetectionEvent` field-for-field: `id` is the domain's own `DetectionEventId` (not synthetic — unlike `DetectionResultEntity`, an event mutates over its own open lifetime and needs a stable key to upsert by). `position` is a single, entirely-optional `GeoPosition`, flattened to nullable `position_latitude`/`position_longitude`/`position_altitude_meters` columns exactly like `AssetUsageEntity#startPosition`/`#lastPosition` (a lat/lon pair is null together iff the position itself is null) — the deliberate opposite of `GeofenceZoneEntity#polygon`'s jsonb choice for a whole vertex list. `state` reuses the domain `DetectionEventState` enum directly. No FK to any other table; `(stream_id, last_seen)` and `last_seen` alone are both indexed (`findByStream`/the retention prune query, and `findRecent`, respectively).
 - `VehicleProfileEntity` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5, `V17__vehicle_profiles.sql`) mirrors `VehicleProfile` field-for-field: `id` is a synthetic UUID (append-only observation, no domain identity — same rationale as `DetectionResultEntity`/`TelemetrySampleEntity`); `deviceId` is the FK the port's own `save(DeviceId, VehicleProfile)`/`findLatest(DeviceId)` key on, same "key lives in the port call, not a domain field" idiom as `TelemetrySampleEntity#usageId`. `capabilityFlags`/`messages`/`parameters` are jsonb — each row is only ever read back whole, never queried into by individual message/parameter, same convention as `DetectionResultEntity#detections`. Indexed on `(device_id, observed_at DESC)` for `findLatest`'s "newest row for this device" query. **O11 additions** (`V20__vehicle_profile_usage_link.sql`, the flight-passport wave): nullable `usageId`/`phase` fields — `phase` reuses the domain `FlightPhase` enum directly (`@Enumerated(EnumType.STRING)`, same `AssetUsageEntity#phase` convention); both are set together or neither (a row from the untagged `save(DeviceId, VehicleProfile)` — readiness's own ad hoc probes — has both `null`; a row from `save(DeviceId, UsageId, FlightPhase, VehicleProfile)` has both set). Indexed on `(usage_id, phase, observed_at DESC)` for `findByUsageAndPhase`'s "newest tagged row" query.
 - `FeatureRequirementEntity` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6, `V18__feature_requirements.sql`) mirrors `FeatureRequirement` field-for-field: `id` is a synthetic `"<firmware>:<featureKey>"` natural key this entity invents purely for a JPA primary key — the domain record carries no id field, but unlike `DetectionResultEntity`'s random-UUID precedent (a genuinely identity-less append-only record), a requirement row is reference data addressed by its own natural composite key, so a stable human-readable id lets the seed migration use `ON CONFLICT (id) DO NOTHING`, the same role `CategoryEntity`'s natural string id plays for `categories`. **Read-only**: the port has no `save` method — every row is seed data written by Flyway (`V18`), never by application code. No FK to any other table (reference/global data, same convention as `geofence_zones`/`categories`); indexed on `firmware` (`findByFirmware`'s access path).
+- `DbAuditLogEntity` (`V21__db_audit_log.sql`) — the database change audit; see "Database change audit" below for the full picture. **Read-only from Hibernate's side**: every row is written by that migration's `audit_row_change()` trigger function, never by a `persist`/`merge` call anywhere in this module — mapped here purely so `JpaDbAuditLogRepository`'s reads go through the same `jakarta.persistence` API as every other repository. `id` is a synthetic `BIGINT GENERATED ALWAYS AS IDENTITY` column (`@GeneratedValue(strategy = GenerationType.IDENTITY)`) rather than a UUID this module invents in Java — the only entity in this schema whose id Postgres itself generates, since the trigger that creates each row runs entirely inside the database. `rowId` is `String`, not `UUID`, even though every primary key in this schema is in fact a UUID (or, for the composite-key join tables, several) — the trigger resolves it generically from the catalog and cannot assume one uniform key shape across all seventeen audited tables. `oldRow`/`newRow` map to `Map<String, Object>` and `changedColumns` to `List<String>`, both jsonb — unlike every other jsonb column in this module (which always has one fixed domain record/map shape on the far side), these have no fixed shape at all, since the row image can belong to any of the seventeen audited tables. `oldRow` is `null` for an `INSERT`, `newRow` is `null` for a `DELETE`, `changedColumns` is `null` (not an empty list) for anything but an `UPDATE`. `operation` reuses a small persistence-local enum, `DbAuditOperation` (`INSERT`/`UPDATE`/`DELETE`, mirroring Postgres's own `TG_OP`) — not a domain enum, since there is no domain concept of "a database row changed."
 
 ## Schema (`src/main/resources/db/migration`)
 
@@ -244,6 +248,7 @@ creating. Flagged here rather than silently decided, per this wave's brief.
 - `V18__feature_requirements.sql` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6) — `feature_requirements` (`id` varchar(160) PK — the synthetic `"<firmware>:<featureKey>"` natural key; `feature_key`/`label`/`firmware` varchar `NOT NULL`; `required_message_id` nullable integer; `required_message_name` nullable varchar(64); `minimum_hz` nullable double precision; `required_parameter_name` nullable varchar(64)). New table, purely additive over V1-V17, no FK — reference/global data, same convention as `geofence_zones`/`categories`. Indexed on `firmware`. **Seeds eleven rows, `firmware='ardupilot'` only** (D13: PX4 is "generic MAVLink, unverified" until a PX4 SITL run proves otherwise — a firmware with zero rows is a correct answer, not an omission bug, per O3's own `ReadinessService` contract). Message ids verified against pymavlink's `common.xml`, not memory (`HEARTBEAT=0`, `SYS_STATUS=1`, `GPS_RAW_INT=24`, `ATTITUDE=30`, `GLOBAL_POSITION_INT=33`, `RC_CHANNELS=65`, `VFR_HUD=74`). Only two of the eleven rows carry a plan-given threshold (docs/conclusions/ANY-DRONE-PLAN.md §S1.2): `map-position` (`GLOBAL_POSITION_INT >= 2.0 Hz`) and `visual-geolocation` (`ATTITUDE >= 5.0 Hz`); the other five message-bearing rows (`preflight-checks`, `ground-speed`, `link-quality`, `failsafe-banners`, `battery`) got **no** plan-given number and were seeded at a **judgment-call 1.0 Hz floor** (the MAVLink stream-rate convention a healthy link clears easily; ArduPilot's own `SRx_*` defaults sit at or above it) — flagged here for whoever tunes it later. `fleet-identity` is parameter-only (`SYSID_THISMAV`); `command-tx`/`rc-relay`/`video-ingest` are "neither" rows (capability-bitmask- or non-MAVLink-driven, trivially satisfied once they exist, per `FeatureRequirement`'s own javadoc). **Two known representation gaps, deliberately left as gaps rather than smuggled into an existing column**: ANY-DRONE §S1.2 also lists `STATUSTEXT` as required for `preflight-checks` alongside `GPS_RAW_INT`, but this table models exactly one message per row (and the wire's own `{featureKey: status}` map has no room for two rows under one key either) — `GPS_RAW_INT` was kept as the modeled signal, `STATUSTEXT` is not independently checked. And the battery row only expresses "is `SYS_STATUS` arriving at all", not the 45%-low-battery bar ANY-DRONE §S8.1 also names — `FeatureRequirement` has no field to carry a percentage threshold (only `minimumHz`/`requiredParameterName`), so that number cannot be represented in this table as it stands today.
 - `V19__asset_usage_phase.sql` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5, D1/D2) — `ALTER TABLE asset_usages ADD COLUMN phase VARCHAR(20), ADD COLUMN first_armed_at TIMESTAMPTZ, ADD COLUMN last_disarmed_at TIMESTAMPTZ` — all three nullable, no backfill, same "unknown, not fabricated" discipline as `V6__telemetry_flight_state.sql`'s `flight_state` column. **Updated after O7 merged**: the migration originally shipped schema-only, deferring `phase` to O7 (`contexts/vision-warehouse`, running concurrently in a separate worktree) per the plan's module-placement table. O7 landed `AssetUsage`'s 9th component — `UsagePhase phase()` — but not `firstArmedAt()`/`lastDisarmedAt()`; those two fields don't exist on the domain record yet. This wave (O5) ended up owning the wiring after all: `AssetUsageEntity#phase`/`AssetUsageMapper` now map `phase` in both directions (see the entity's own field-bullet above and Tests below) — a cross-wave report caught that the column had gone live with no reader/writer, silently reverting every reload to `PREFLIGHT`. `first_armed_at`/`last_disarmed_at` remain schema-only, deliberately, still waiting on their domain fields. **Still true as of O11** (below) — that wave's `VehicleProfile`-based passport design does not need these two columns either, so they remain untouched; closing this gap properly still needs a `vision-warehouse` domain-field change, out of every persistence wave's own file scope so far.
 - `V20__vehicle_profile_usage_link.sql` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O11 — "the flight passport") — `ALTER TABLE vehicle_profiles ADD COLUMN usage_id UUID, ADD COLUMN phase VARCHAR(20)` — both nullable, no backfill, same additive-only shape as V19; `vehicle_profiles` stays append-only (every `save` still inserts a new row, this migration only widens what a row may optionally carry). `phase` is deliberately **not** constrained to `PREFLIGHT`/`POSTFLIGHT` at the schema level — enforced once in `DefaultVehicleProfileService#captureSnapshot` (`contexts/vision-flight`), the same "the allowlist is domain code, not a UI/schema convention" precedent D9 already set for `ParameterTier`. New index `idx_vehicle_profiles_usage_phase (usage_id, phase, observed_at DESC)` backs `findByUsageAndPhase`'s "newest tagged row for this usage+phase" query.
+- `V21__db_audit_log.sql` (the database change audit — see that section below for the full picture) — `db_audit_log` (`id` `BIGINT GENERATED ALWAYS AS IDENTITY` PK — the one Postgres-generated, not Java-generated, id in this schema; `occurred_at` timestamptz `NOT NULL DEFAULT now()`; `table_name`/`row_id` text `NOT NULL`; `operation` `VARCHAR(6) CHECK (operation IN ('INSERT','UPDATE','DELETE'))`; `db_user` text `NOT NULL` — `session_user`, stamped by the trigger, never by the application; `old_row`/`new_row` jsonb, nullable; `changed_columns` jsonb, nullable). Plus one generic PL/pgSQL trigger function, `audit_row_change()`, and seventeen `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW` triggers attached to the control-plane tables enumerated in that section. New table + function + triggers, purely additive over V1-V20 — no existing table's own DDL changes, only its write behavior gains a side effect. Two indexes matching the two real read paths: `occurred_at` alone (newest overall) and `(table_name, row_id, occurred_at)` (newest for one row).
 
 ### `src/main/resources/db/seed/dev` — a second, conditional Flyway location
 
@@ -305,6 +310,105 @@ creating. Flagged here rather than silently decided, per this wave's brief.
   calling `ignoreMigrationPatterns(...)` at all replaces that default outright, so it has to be
   restated explicitly here rather than assumed to still apply. See `PersistenceUnit`'s own javadoc and
   `DevAccountSeedMigrationTest` for the full account.
+
+## Database change audit
+
+A durable, unbypassable record of what actually changed in Postgres, row by row — **not** the same
+thing as `AuditTrailPort`/`audit_entries` (`V14__audit_trail.sql`, `AuditEntryEntity`/`JpaAuditTrail`,
+see that entry above), and the two must never be merged or made to duplicate each other:
+
+- `AuditTrailPort`/`audit_entries` answers **"which user did what to the fleet"** — a domain-intent
+  record, written only where an application service remembers to call `AuditTrailPort#record`. It has
+  an `actorId`, an `AuditAction`, a human `summary`. It can be silently absent for any write path nobody
+  wired it into.
+- `db_audit_log` (`V21__db_audit_log.sql`) answers **"which rows in this database changed, when, and
+  how"** — including a change made by a DBA typing SQL into `psql`, by a future migration, or by any
+  application code path that forgot to call `AuditTrailPort`. It has no notion of "user" beyond
+  `session_user`, no `AuditAction`, no summary — only the mechanical fact of an INSERT/UPDATE/DELETE and
+  the row image(s) involved. It is infrastructure, not domain, and nothing outside this module should
+  ever import a type from it.
+
+**Mechanism: a Postgres trigger, not a Java/Hibernate interceptor.** An interceptor can always be
+bypassed — manual SQL, a `psql` session, a future non-Hibernate writer — and an audit that can be
+bypassed is not an audit. `PersistenceUnit` also bootstraps Hibernate natively with no Spring in front of
+it (see "Bootstrap and connection pool" below), so there is no framework-level hook here that would be
+any cleaner than a trigger anyway. One generic PL/pgSQL function, `audit_row_change()`, is attached to
+every audited table below via a per-table `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW` trigger —
+one function, not one per table: it resolves each table's own primary-key column(s) from the catalog
+(`pg_index`/`pg_attribute`) at trigger time, so a composite-key join table (`device_capabilities`,
+`asset_devices`, `pilot_assignments`, `map_layer_grants`) and a single-UUID-PK table (`assets`, `users`,
+...) are both handled by the same function — `row_id` is always text, built by `:`-joining the
+primary-key column values in their declared key order, even though every id in this schema is in fact a
+UUID (CLAUDE.md rule 1: no per-table logic duplicated seventeen times where one generic rule already
+covers it). For an `UPDATE`, the function also diffs `new_data`/`old_data` key by key and records exactly
+which columns changed as `changed_columns` — the "what changed?" question answerable without the caller
+diffing two JSON blobs itself.
+
+**Included — the control-plane / configuration tables**, enumerated by reading every migration V1
+through V20, not guessed:
+
+| Table | Migration | Character |
+|---|---|---|
+| `categories` | V1 | fleet taxonomy |
+| `devices` | V1 | device inventory |
+| `device_capabilities` | V1 | device→capability join (element collection) |
+| `assets` | V1 | asset inventory |
+| `asset_devices` | V1 | asset→device join (element collection) |
+| `asset_usages` | V3 | a flight session record — one row per session plus a handful of updates, not a per-sample event stream |
+| `geofence_zones` | V7 | geofence configuration |
+| `groups` | V8 | org-chart nodes |
+| `users` | V8 | identity aggregate |
+| `pilot_assignments` | V9 | pilot→asset join |
+| `marks` | V10 | tactical marks (the shared operational picture) |
+| `datasets` | V11 | training dataset definitions |
+| `map_layers` | V12 | map layer definitions |
+| `map_layer_grants` | V12 | layer access grants — explicitly called out in `MapLayerEntity`'s own note above as "the one collection whose individual rows are a security decision," worth its own trigger even though it is an `@ElementCollection` join table |
+| `map_drawings` | V12 | map drawings |
+| `vehicle_profiles` | V17 | vehicle capability/parameter observations |
+| `feature_requirements` | V18 | seed-only today, but exactly the "someone edited it by hand" case this feature exists to catch |
+
+**Excluded — the high-volume append-only event tables, plus tables where a trigger would be actively
+wrong**: a trigger here would double the hottest write paths in the system and drown the log in rows
+nobody will ever read.
+
+| Table | Migration | Reason |
+|---|---|---|
+| `telemetry_samples` | V3 | per-sample event stream |
+| `detection_results` | V3 | per-frame event stream |
+| `detection_events` | V15 | debounced detection event stream |
+| `training_samples` | V11 | one row per captured training frame — the same append-heavy character as `detection_results` |
+| `sample_images` | V11 | training-frame image bytes, tied to the above |
+| `asset_images` | V5 | grouped with `sample_images` rather than with the control-plane set it might otherwise resemble: `to_jsonb()` on a row with a `bytea` column duplicates the whole image into every audit row it writes, and a fleet photo is content, not a configuration value this feature needs to answer "who changed X" for |
+| `audit_entries` | V14 | the existing domain audit trail; auditing an audit trail is not useful, and its own write character already matches this excluded set |
+| `db_audit_log` | V21 | this table itself — a trigger on itself would recurse |
+| `flyway_schema_history` | (Flyway) | schema-management bookkeeping, not application data |
+
+**Coverage is tested against the live schema, not trusted from the migration's own comment.**
+`DbAuditLogCoverageTests` (Tests below) reads `information_schema.tables`/`pg_trigger` directly and
+asserts the live table set matches these two lists exactly, both directions — a future migration that
+adds a table without updating either list fails that test until someone consciously classifies the new
+table, and a stray trigger on an excluded table fails it too.
+
+**No `vision.persistence.*` flag governs any of this, deliberately.** Trigger installation is schema, not
+application configuration — a Spring property on the JVM side has no way to make a Postgres trigger
+conditional, and pretending otherwise (e.g. an unused `vision.persistence.db-audit.enabled` nobody reads)
+would be worse than no flag at all. If the audited/excluded table sets ever need to change, that is a new
+migration (`V22` dropping/adding a trigger), not a config flip.
+
+**Retention: an explicitly open item, not addressed by this migration.** `db_audit_log` grows unbounded —
+the same accepted tradeoff `audit_entries` already makes (see "Retention" below and `JpaAuditTrail`'s own
+javadoc: "an audit trail that can be edited is not an audit trail," the same reasoning extends to one that
+evicts itself on a timer). No purge/rollup job exists. Whoever eventually needs one should decide (a) how
+long a change record must survive before it is safe to summarize/drop, and (b) whether that decision
+belongs in this module (a scheduled prune, mirroring nothing else this module does today — every existing
+retention mechanism here prunes *on write*, not on a timer) or in an operational tool outside the JVM
+entirely (e.g. a partition-and-drop strategy driven by `pg_partman` or a cron `DELETE`). Flagged here
+rather than guessed at.
+
+**Read side**: `DbAuditLogEntity`/`JpaDbAuditLogRepository` (see API surface above) — entirely inside this
+module, no port, no domain type anywhere learns about a database row. If a genuine consumer outside this
+module ever needs this data, that consumer's own wave should decide whether a port is warranted; it was
+not added speculatively here.
 
 ## Bootstrap and connection pool
 
@@ -604,6 +708,36 @@ of-the-same-usage, not-found-under-a-different-usage-with-the-same-phase, and
 its own PREFLIGHT/POSTFLIGHT pair, proving all four usage×phase cells resolve independently — the
 exact lookup `driftFromPreviousFlight` (`contexts/vision-flight`) depends on).
 
+`@Nested DbAuditLogRepositoryTests` (2, "Database change audit" below) — proves the trigger fires end to
+end through a real `Jpa*Repository`, not a hand-crafted native-SQL write (the whole point is that the
+trigger fires no matter *how* a row changes):
+`insertUpdateAndDeleteThroughAnExistingRepositoryEachLeaveTheirOwnAuditRowNewestFirst` saves, renames
+(and flips `enabled`), then deletes one `geofence_zones` row through `JpaGeofenceRepository`, and asserts
+`findRecentForRow("geofence_zones", <id>, 10)` returns exactly three rows, newest-first
+(DELETE/UPDATE/INSERT) — the INSERT row has a `null` `oldRow` and a populated `newRow`, the DELETE row
+the reverse, and the UPDATE row's `changedColumns` contains `name`/`enabled` but **not** `id` (the
+unchanged primary key must not be reported as changed), plus asserts `dbUser` equals the Testcontainers
+Postgres username (`session_user`, not anything the application supplies).
+`findRecentSpansEveryAuditedTableNewestFirstBoundedByLimit` saves two more zones and asserts the more
+recently saved one's row sorts before the other's in `findRecent`'s cross-table feed — the "own rows
+within a large fetch" technique `AuditTrailRepositoryTests`/`DetectionEventRepositoryTests` already use,
+since the shared container accumulates rows across every test in the class.
+
+`@Nested DbAuditLogCoverageTests` (2, "Database change audit" below) — reads the *live* schema rather
+than trusting the migration's own header comment:
+`everyPublicBaseTableIsEitherAuditedOrExplicitlyExcluded` queries `information_schema.tables` for every
+`public` base table and asserts it is a member of exactly one of this test class's own `AUDITED_TABLES`/
+`EXCLUDED_TABLES` constants (both directions — an unclassified live table fails loudly, and so does a
+classified name that no longer exists), so a future migration that adds a table without updating either
+constant fails this test until someone consciously classifies it.
+`everyAuditedTableCarriesExactlyTheAuditTriggerAndNoExcludedTableDoes` queries `pg_trigger`/`pg_class`
+directly and asserts the live set of triggered tables equals `AUDITED_TABLES` exactly — catching both a
+table the migration forgot to attach a trigger to and a stray trigger that should not exist.
+
+`v21MigrationCreatesTheDbAuditLogTableOnTopOfV1ThroughV20` — same `information_schema.columns` shape as
+the V19/V20 schema tests above: `table_name`/`row_id` are `NOT NULL`, `old_row`/`new_row` stay nullable
+(an INSERT has no `old_row`, a DELETE no `new_row`), proving `V21__db_audit_log.sql` applied cleanly.
+
 `DevAccountSeedMigrationTest` (5, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1) — its own `@Testcontainers`
 class, deliberately **not** a `@Nested` class inside `PostgresDockerIntegrationTest`: a **non-static**
 `@Container` field (a fresh `PostgreSQLContainer` per test method, not one shared across the class)
@@ -669,6 +803,17 @@ accepted as "disabled," not rejected.
 fake `DataSource`s (no HikariCP, no container) prove `stop()` closes a `Closeable` `DataSource` and
 tolerates one that is not `Closeable`, isolating the narrow shutdown-doesn't-leak claim from
 `ConnectionPoolTests`' end-to-end proof above.
+
+187 tests total (up from 182, the database change audit wave: new `DbAuditLogRepositoryTests` (2) +
+`DbAuditLogCoverageTests` (2) + `v21MigrationCreatesTheDbAuditLogTableOnTopOfV1ThroughV20` (1) = +5),
+measured directly with `./mvnw -B -pl storage/persistence -am test` immediately before (182, `git stash`
+of this wave's changes against the same `feat/drone-onboarding` tip) and after (187) — both runs docker-
+reachable, every case ran, none skipped (`skipped="0"` in both `TEST-...PostgresDockerIntegrationTest.xml`
+and `TEST-...UpgradePathMigrationTest.xml`). The "148" entry directly below already predates the O5/O11
+onboarding waves that pushed the pre-this-wave count to 182 — see "Database change audit" below and the
+O5/O11 entries near the end of this file for what those added; the running "up from N" chain below this
+point was not kept in sync every wave in between (a gap this file itself already flags a few paragraphs
+down), so the itemized per-wave sections remain the source of truth over any one summary line's older links.
 
 148 tests total (up from 137, docs/plans/active/SCALE-100-PLAN.md S3: new `PersistencePoolSettingsTest` (7) +
 `ClosingDatasourceConnectionProviderTest` (2) + `ConnectionPoolTests` (2) = +11), run against a real
@@ -1572,3 +1717,46 @@ site (currently 4 arguments) will not compile until it passes the already-availa
 **Deviations from the brief**: none. `VehicleProfileService` was extended rather than a new
 `FlightPassportService` interface created — see `contexts/vision-flight/MODULE.md`'s own note on
 this, a java-clean-code §5 call, not a deviation from what was asked.
+
+## Database change audit done (V21, persistence-only wave)
+
+Adds a durable, unbypassable, database-level record of what actually changed in Postgres, row by row —
+see "Database change audit" above for the full mechanism, the included/excluded table lists (and why),
+the deliberate absence of a `vision.persistence.*` flag, and the open retention question. New:
+`V21__db_audit_log.sql` (a table, a generic `audit_row_change()` PL/pgSQL trigger function, and
+seventeen per-table triggers), `DbAuditLogEntity`/`DbAuditOperation` (`entity` package), and
+`JpaDbAuditLogRepository` (`repository` package — the one class there implementing no port, by design;
+see its own javadoc and "Database change audit" above for why no port was added).
+
+`./mvnw -B -pl storage/persistence -am test`: **187/187 green** (up from 182, measured directly —
+`git stash` of this wave's changes against the same branch tip, run, then `git stash pop` and re-run,
+both against a real `postgres:16` Testcontainers instance, docker confirmed available both times, zero
+`[ERROR]`-prefixed lines and `skipped="0"` in every surefire XML in either run): new
+`DbAuditLogRepositoryTests` (2) + `DbAuditLogCoverageTests` (2) + one new top-level schema test
+(`v21MigrationCreatesTheDbAuditLogTableOnTopOfV1ThroughV20`) = +5. See "Tests" above for what each
+proves — in particular, `DbAuditLogRepositoryTests` proves the trigger end to end through a real
+`Jpa*Repository` write (insert/update/delete), including that an UPDATE names its changed columns, and
+`DbAuditLogCoverageTests` proves the included/excluded table lists match the live schema rather than
+just the migration's own comment.
+
+`./mvnw -B -pl station/vision-app -am test`: **214/214 green, unchanged** — this was also the count
+before this wave (confirmed by the coordinator's own before-measurement of the same branch tip), because
+no file inside `station/vision-app`'s scope for this task (`VisionPersistenceProperties`,
+`PersistenceWiringConfiguration`, the `vision.persistence` block of `application.yaml`) needed to
+change: there is genuinely no runtime-tunable value this feature introduces (see "no flag,
+deliberately" above) and no bean to wire (this class is read-only infrastructure with no port, per the
+brief). Zero `[ERROR]`-prefixed lines, `skipped="0"` throughout.
+
+**Deviations from the brief**: none that change behavior. One classification judgment call, flagged
+rather than silently decided: `asset_images` is not named in either the brief's "include" or "exclude"
+examples, and was placed in the excluded set (grouped with `sample_images`) rather than the included
+one — see "Database change audit" above for the reasoning (a `bytea` blob duplicated into every audit
+row is a different cost profile than a small config row, and an asset photo is content, not the kind of
+configuration value this feature exists to answer "who changed X" for).
+
+**Deliberately not done, per the brief**: no retention/purge job for `db_audit_log` (documented above as
+an open item, matching `audit_entries`'s own accepted unbounded-growth posture); no `vision.persistence.*`
+flag for trigger installation (schema-governed, not application-configurable — documented above rather
+than faked); no port/domain type for the read side (kept entirely inside this module, per the brief's
+own instruction to stop and report rather than add one speculatively — reported here: no port is
+warranted today, since there is no consumer yet).

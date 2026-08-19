@@ -99,6 +99,8 @@ import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 import com.drones.vision.adapter.persistence.config.ClosingDatasourceConnectionProvider;
 import com.drones.vision.adapter.persistence.config.PersistencePoolSettings;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
+import com.drones.vision.adapter.persistence.entity.DbAuditLogEntity;
+import com.drones.vision.adapter.persistence.entity.DbAuditOperation;
 import com.drones.vision.adapter.persistence.mapper.FeatureRequirementMapper;
 import com.drones.vision.adapter.persistence.repository.JpaAssetImageRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssetRepository;
@@ -107,6 +109,7 @@ import com.drones.vision.adapter.persistence.repository.JpaAssignmentRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
 import com.drones.vision.adapter.persistence.repository.JpaCategoryRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDatasetRepository;
+import com.drones.vision.adapter.persistence.repository.JpaDbAuditLogRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDeviceRepository;
@@ -144,6 +147,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -153,6 +157,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -182,6 +187,30 @@ class PostgresDockerIntegrationTest {
      * make a direct post-round-trip {@code assertEquals} flaky depending on the host clock.
      */
     private static final Instant NOW = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+
+    /**
+     * The control-plane / configuration tables {@code V21__db_audit_log.sql} attaches {@code
+     * trg_audit_*} to — kept here, not just in the migration's own header, so {@link
+     * DbAuditLogCoverageTests} fails loudly the moment a future migration adds a table and
+     * nobody consciously classifies it. Mirrors that migration's "Included" list exactly.
+     */
+    private static final Set<String> AUDITED_TABLES = Set.of(
+            "categories", "devices", "device_capabilities", "assets", "asset_devices",
+            "asset_usages", "geofence_zones", "groups", "users", "pilot_assignments",
+            "marks", "datasets", "map_layers", "map_layer_grants", "map_drawings",
+            "vehicle_profiles", "feature_requirements");
+
+    /**
+     * Every other base table in the schema as of V21 — high-volume append-only event tables, the
+     * existing domain audit trail, this table's own infrastructure, and Flyway's bookkeeping
+     * table. Mirrors {@code V21__db_audit_log.sql}'s "Excluded" list exactly; see that header for
+     * the reasoning behind each one, including why {@code asset_images} is grouped with {@code
+     * sample_images} rather than with the control-plane set it might otherwise resemble.
+     */
+    private static final Set<String> EXCLUDED_TABLES = Set.of(
+            "telemetry_samples", "detection_results", "detection_events",
+            "training_samples", "sample_images", "asset_images",
+            "audit_entries", "db_audit_log", "flyway_schema_history");
 
     private static EntityManagerFactory entityManagerFactory;
 
@@ -2964,6 +2993,183 @@ class PostgresDockerIntegrationTest {
                 }
                 smallPoolContext.close();
             }
+        }
+    }
+
+    /**
+     * The database-level change audit ({@code V21__db_audit_log.sql}) — proves the trigger fires
+     * end to end through a real {@code Jpa*Repository} (not a hand-crafted native-SQL write, since
+     * the whole point is that the trigger fires no matter <em>how</em> a row changes) and that the
+     * coverage the migration's own header claims actually holds against the live schema.
+     */
+    @Nested
+    class DbAuditLogRepositoryTests {
+
+        private final JpaDbAuditLogRepository auditLog = new JpaDbAuditLogRepository(entityManagerFactory);
+        private final GeofenceRepositoryPort geofences = new JpaGeofenceRepository(entityManagerFactory);
+
+        private List<GeoPosition> triangle() {
+            return List.of(
+                    new GeoPosition(10.0, 20.0, null),
+                    new GeoPosition(10.0, 21.0, null),
+                    new GeoPosition(11.0, 20.5, null));
+        }
+
+        @Test
+        void insertUpdateAndDeleteThroughAnExistingRepositoryEachLeaveTheirOwnAuditRowNewestFirst() {
+            ZoneId zoneId = ZoneId.random();
+            String rowId = zoneId.value().toString();
+
+            geofences.save(new GeofenceZone(zoneId, "Audit Zone", ZoneKind.KEEP_OUT, triangle(), 50.0, true));
+            geofences.save(new GeofenceZone(zoneId, "Audit Zone Renamed", ZoneKind.KEEP_OUT, triangle(), 50.0, false));
+            geofences.deleteById(zoneId);
+
+            List<DbAuditLogEntity> rows = auditLog.findRecentForRow("geofence_zones", rowId, 10);
+            assertEquals(3, rows.size(), "one audit row per INSERT/UPDATE/DELETE");
+
+            // newest first: DELETE, UPDATE, INSERT
+            DbAuditLogEntity deleteRow = rows.get(0);
+            DbAuditLogEntity updateRow = rows.get(1);
+            DbAuditLogEntity insertRow = rows.get(2);
+
+            assertEquals(DbAuditOperation.DELETE, deleteRow.operation());
+            assertEquals(DbAuditOperation.UPDATE, updateRow.operation());
+            assertEquals(DbAuditOperation.INSERT, insertRow.operation());
+
+            assertNull(insertRow.oldRow(), "an INSERT has no prior row image");
+            assertNotNull(insertRow.newRow());
+            assertEquals("Audit Zone", insertRow.newRow().get("name"));
+            assertNull(insertRow.changedColumns(), "changed_columns is only meaningful for an UPDATE");
+
+            assertNotNull(updateRow.oldRow());
+            assertNotNull(updateRow.newRow());
+            assertEquals("Audit Zone Renamed", updateRow.newRow().get("name"));
+            assertNotNull(updateRow.changedColumns(), "an UPDATE must name what changed");
+            assertTrue(updateRow.changedColumns().contains("name"), "name was renamed");
+            assertTrue(updateRow.changedColumns().contains("enabled"), "enabled flipped true -> false");
+            assertFalse(updateRow.changedColumns().contains("id"),
+                    "the unchanged primary key must not be reported as a changed column");
+            assertEquals(POSTGRES.getUsername(), updateRow.dbUser(),
+                    "db_user is session_user, not an application-supplied value");
+
+            assertNotNull(deleteRow.oldRow());
+            assertNull(deleteRow.newRow(), "a DELETE has no new row image");
+        }
+
+        @Test
+        void findRecentSpansEveryAuditedTableNewestFirstBoundedByLimit() {
+            // "Own rows within a large fetch" technique (same as AuditTrailRepositoryTests/
+            // DetectionEventRepositoryTests above): the container accumulates rows across every
+            // test in this class, so this only asserts about rows this test itself just wrote.
+            ZoneId first = ZoneId.random();
+            ZoneId second = ZoneId.random();
+            geofences.save(new GeofenceZone(first, "Recent A", ZoneKind.KEEP_OUT, triangle(), null, true));
+            geofences.save(new GeofenceZone(second, "Recent B", ZoneKind.KEEP_IN, triangle(), null, true));
+
+            List<DbAuditLogEntity> recent = auditLog.findRecent(100_000);
+            List<String> recentRowIds = recent.stream().map(DbAuditLogEntity::rowId).toList();
+
+            int firstIndex = recentRowIds.indexOf(second.value().toString());
+            int secondIndex = recentRowIds.indexOf(first.value().toString());
+            assertTrue(firstIndex >= 0 && secondIndex >= 0, "both freshly-inserted rows must appear");
+            assertTrue(firstIndex < secondIndex, "the more recently saved zone must sort first (newest-first)");
+        }
+    }
+
+    /**
+     * Reads the live schema and proves {@code V21__db_audit_log.sql}'s own "Included"/"Excluded"
+     * lists actually match reality — the coverage test the brief for this feature calls for, so a
+     * future migration that adds a table fails this test until someone consciously classifies it
+     * as audited or excluded, instead of silently falling through the cracks.
+     */
+    @Nested
+    class DbAuditLogCoverageTests {
+
+        @Test
+        void everyPublicBaseTableIsEitherAuditedOrExplicitlyExcluded() {
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                @SuppressWarnings("unchecked")
+                List<String> tableNames = em.createNativeQuery(
+                                "select table_name from information_schema.tables "
+                                        + "where table_schema = 'public' and table_type = 'BASE TABLE'")
+                        .getResultList();
+                Set<String> liveTables = new HashSet<>(tableNames);
+
+                Set<String> classified = new HashSet<>(AUDITED_TABLES);
+                classified.addAll(EXCLUDED_TABLES);
+
+                Set<String> unclassified = new HashSet<>(liveTables);
+                unclassified.removeAll(classified);
+                assertTrue(unclassified.isEmpty(),
+                        "every table in the live schema must be classified as audited or explicitly "
+                                + "excluded -- unclassified: " + unclassified);
+
+                Set<String> staleReferences = new HashSet<>(classified);
+                staleReferences.removeAll(liveTables);
+                assertTrue(staleReferences.isEmpty(),
+                        "AUDITED_TABLES/EXCLUDED_TABLES reference tables that no longer exist: "
+                                + staleReferences);
+            } finally {
+                em.close();
+            }
+        }
+
+        @Test
+        void everyAuditedTableCarriesExactlyTheAuditTriggerAndNoExcludedTableDoes() {
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                @SuppressWarnings("unchecked")
+                List<String> triggeredTables = em.createNativeQuery(
+                                "select c.relname from pg_trigger t join pg_class c on c.oid = t.tgrelid "
+                                        + "where not t.tgisinternal")
+                        .getResultList();
+
+                assertEquals(AUDITED_TABLES, new HashSet<>(triggeredTables),
+                        "the live set of triggered tables must equal AUDITED_TABLES exactly -- a "
+                                + "missing trigger or a stray one on an excluded table both fail here");
+            } finally {
+                em.close();
+            }
+        }
+    }
+
+    /**
+     * Proves {@code V21__db_audit_log.sql} applied cleanly on top of V1-V20: {@code
+     * db_audit_log} exists with the expected required/nullable columns. {@link
+     * DbAuditLogCoverageTests} separately proves the trigger attachment itself; this only proves
+     * the table shape, same "prove the migration, not the entity" split as the V19/V20 schema
+     * tests above.
+     */
+    @Test
+    void v21MigrationCreatesTheDbAuditLogTableOnTopOfV1ThroughV20() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String tableNameNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'db_audit_log' and column_name = 'table_name'")
+                    .getSingleResult();
+            assertEquals("NO", tableNameNullable);
+
+            String rowIdNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'db_audit_log' and column_name = 'row_id'")
+                    .getSingleResult();
+            assertEquals("NO", rowIdNullable);
+
+            String oldRowNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'db_audit_log' and column_name = 'old_row'")
+                    .getSingleResult();
+            assertEquals("YES", oldRowNullable, "old_row is null for an INSERT");
+
+            String newRowNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'db_audit_log' and column_name = 'new_row'")
+                    .getSingleResult();
+            assertEquals("YES", newRowNullable, "new_row is null for a DELETE");
+        } finally {
+            em.close();
         }
     }
 }
