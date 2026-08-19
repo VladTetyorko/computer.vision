@@ -13,6 +13,7 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
@@ -105,6 +106,47 @@ public final class DefaultAssetService implements AssetService {
         audit(actor, AuditAction.CREATED, saved,
                 "Created asset " + saved.displayName() + " with " + deviceIds.size() + " source(s)", Map.of());
         return saved;
+    }
+
+    @Override
+    public Asset createFromCandidate(AssetSpec spec, Ownership ownership, UserId actor) {
+        Objects.requireNonNull(spec, "spec must not be null");
+        Objects.requireNonNull(ownership, "ownership must not be null");
+        Objects.requireNonNull(actor, "actor must not be null");
+        requireCategory(spec.category());
+
+        // Duplicate check first, before anything is written: a candidate that is really the same
+        // airframe as an existing device must be refused, naming the asset that already owns it,
+        // rather than silently creating a second registration for it.
+        for (DeviceRegistration registration : spec.devices()) {
+            requireNoDuplicate(registration.stream());
+        }
+        return create(spec, ownership, actor);
+    }
+
+    /**
+     * The duplicate check {@link #createFromCandidate} needs: refuses a candidate stream descriptor
+     * that already matches an active, registered device on {@code (protocol, uri, sysid)} — keyed
+     * this way, not by {@link DeviceId}, since a re-discovered aircraft arrives as a brand-new
+     * {@link DeviceRegistration} with no device identity of its own yet.
+     *
+     * @throws IllegalStateException if an active device already carries this (protocol, uri, sysid)
+     */
+    private void requireNoDuplicate(StreamDescriptor candidate) {
+        String candidateSysid = candidate.options().get("sysid");
+        for (Device device : deviceService.devices(false)) {
+            StreamDescriptor existing = device.stream();
+            boolean sameAirframe = existing.protocol().equals(candidate.protocol())
+                    && existing.uri().equals(candidate.uri())
+                    && Objects.equals(existing.options().get("sysid"), candidateSysid);
+            if (sameAirframe) {
+                String owner = assetRepository.findByDeviceId(device.id())
+                        .map(asset -> " already registered to asset " + asset.displayName())
+                        .orElse(" already registered to device " + device.name());
+                throw new IllegalStateException(
+                        "Candidate " + candidate.protocol() + " " + candidate.uri() + " is" + owner);
+            }
+        }
     }
 
     // --- Reading -------------------------------------------------------------

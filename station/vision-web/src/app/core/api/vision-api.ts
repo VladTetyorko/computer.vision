@@ -27,6 +27,7 @@ import type {
   DetectionResult,
   Device,
   DeviceEdit,
+  FleetReadiness,
   FleetSummary,
   FlightCapability,
   FlightCommandResponse,
@@ -44,10 +45,14 @@ import type {
   PatchMarkRequest,
   PromoteMarkRequest,
   PatchStreamConfigResponse,
+  ProbeCandidateRequest,
   ProbeDeviceRequest,
   ProbeDeviceResult,
   PromoteModelRequest,
+  ReadinessReport,
   RegisterDeviceRequest,
+  RemediationRequest,
+  RemediationResult,
   RenameLayerRequest,
   RegisteredModel,
   RegisteredModelsResponse,
@@ -76,6 +81,7 @@ import type {
   UsageSummary,
   UsageTimeline,
   UserSummary,
+  VehicleProfile,
   VerifyMarkRequest,
 } from './models';
 
@@ -724,6 +730,75 @@ export class VisionApi {
    */
   systemNetwork(): Promise<SystemNetworkResponse> {
     return firstValueFrom(this.http.get<SystemNetworkResponse>('/api/system/network'));
+  }
+
+  // --- Drone onboarding: vehicle profile & fleet readiness (docs/plans/active/DRONE-ONBOARDING-PLAN.md
+  // §8.1's frozen wire contract, O6) --------------------------------------------------------------
+
+  /**
+   * The pre-registration probe (`OnboardingController#probeCandidate`) — observes a candidate keyed
+   * only by `(bind address, sysid)`, before any asset/device exists, from the onboarding wizard's
+   * new Verify step. `409 {message}` when `vision.onboarding.probe.enabled` is `false` (the default,
+   * D17) or the candidate is unreachable — both share the identical status code; only the message
+   * text distinguishes them (`core/readiness/readiness-logic.ts#isProbeDisabledError` matches the
+   * flag-off message exactly). No 403/404 — this call is not scoped, nothing yet exists to scope
+   * against.
+   */
+  probeVehicleCandidate(request: ProbeCandidateRequest): Promise<VehicleProfile> {
+    return firstValueFrom(this.http.post<VehicleProfile>('/api/onboarding/probe', request));
+  }
+
+  /**
+   * The most recently observed profile for a registered asset (`OnboardingController#profile`). A
+   * read: unknown, out-of-scope, and never-probed all `404` identically — the caller degrades to
+   * "no profile yet" on any rejection, never distinguishing the three.
+   */
+  assetProfile(assetId: string): Promise<VehicleProfile> {
+    return firstValueFrom(this.http.get<VehicleProfile>(`/api/assets/${encodeURIComponent(assetId)}/profile`));
+  }
+
+  /**
+   * Actively probes a registered asset's device and persists the resulting snapshot
+   * (`OnboardingController#probe`). An authority action (D8): puts traffic on the aircraft's own
+   * link, so it requires `canManage` on the asset — `403`, audited server-side. `404` unknown asset;
+   * `409 {message}` no probeable device, or probing disabled (same shared-status-code caveat as
+   * {@link probeVehicleCandidate}).
+   */
+  probeAsset(assetId: string): Promise<VehicleProfile> {
+    return firstValueFrom(this.http.post<VehicleProfile>(`/api/assets/${encodeURIComponent(assetId)}/probe`, {}));
+  }
+
+  /**
+   * One asset's full readiness report (`ReadinessController#readiness`) — never gated by
+   * `vision.onboarding.probe.enabled` (verified against source: no flag check in that controller);
+   * a never-probed asset still answers `200` with every feature `UNKNOWN`. `404` unknown or
+   * out-of-scope asset.
+   */
+  assetReadiness(assetId: string): Promise<ReadinessReport> {
+    return firstValueFrom(this.http.get<ReadinessReport>(`/api/assets/${encodeURIComponent(assetId)}/readiness`));
+  }
+
+  /**
+   * The fleet board (`ReadinessController#fleetReadiness`): one compact row per asset the caller's
+   * scope includes, never `404` (it only asks about assets already scope-filtered). Also never
+   * gated by `vision.onboarding.probe.enabled` — the board renders identically whether or not
+   * probing is enabled.
+   */
+  fleetReadiness(): Promise<FleetReadiness> {
+    return firstValueFrom(this.http.get<FleetReadiness>('/api/fleet/readiness'));
+  }
+
+  /**
+   * Attempts to remediate one or more readiness features against a registered asset, then re-probes
+   * if anything was actually dispatched (`OnboardingController#remediate`). `403` audited (D8);
+   * `404` unknown asset; `409 {message}` armed, arming unknown, or probing disabled. A request that
+   * dispatches nothing (e.g. the asset was never probed) still answers `200`, every action
+   * `UNSUPPORTED` — not a rejected promise.
+   */
+  remediateAsset(assetId: string, request: RemediationRequest): Promise<RemediationResult> {
+    return firstValueFrom(
+      this.http.post<RemediationResult>(`/api/assets/${encodeURIComponent(assetId)}/remediate`, request),
+    );
   }
 
   // --- System status (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.3's frozen wire contract, S3) --------------

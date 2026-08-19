@@ -48,7 +48,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       VehicleClaimPolicy} on every claim/re-election — a decoder's accumulated fields belong to
  *       one physical vehicle, and reusing one across a claim change would leak the old vehicle's
  *       stale values into the new one's first samples. This rule is load-bearing and unchanged
- *       from the pre-W4 design.</li>
+ *       from the pre-W4 design;</li>
+ *   <li>a {@link MavlinkMessageInventory} (docs/plans/active/DRONE-ONBOARDING-PLAN.md O1) — a
+ *       second, independent dispatcher subscription that passively counts every message type heard
+ *       from every peer, claimed or not; see {@link #messageInventory()}.</li>
+ *   <li>optionally, a {@link MavlinkConnectRemediator} (docs/plans/active/DRONE-ONBOARDING-PLAN.md
+ *       O8) — a third, independent dispatcher subscription, constructed only when {@link
+ *       MavlinkSettings.Onboarding#requestMessagesOnConnect()} is {@code true}, that fires
+ *       Mechanism A ({@code MAV_CMD_SET_MESSAGE_INTERVAL}) the instant a peer is learned.</li>
  * </ul>
  * It subscribes to {@code session.dispatcher()} once, for every frame; each dispatched frame is
  * handed to {@link VehicleClaimPolicy#resolve} to find the owning registration (by sysid alone --
@@ -104,6 +111,8 @@ final class MavlinkGateway {
     private final MavlinkSession session;
     private final VehicleClaimPolicy claimPolicy;
     private final Subscription subscription;
+    private final MavlinkMessageInventory messageInventory;
+    private final MavlinkConnectRemediator connectRemediator;
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     /**
@@ -126,6 +135,17 @@ final class MavlinkGateway {
         this.claimPolicy = new VehicleClaimPolicy(
                 session.peers(), settings.silenceWindow().toMillis(), settings.maxUnclaimedVehicles());
         this.subscription = session.dispatcher().subscribe(MessageFilter.any(), this::onFrame);
+        // A second, independent subscription (docs/plans/active/DRONE-ONBOARDING-PLAN.md O1,
+        // §3.2's "passive inventory") -- deliberately not folded into onFrame's routing/decode
+        // subscription above, so a bug in one can never affect the other, and so the inventory
+        // keeps counting sysids nobody has claimed (see MavlinkMessageInventory's own javadoc).
+        this.messageInventory = new MavlinkMessageInventory(session.dispatcher(), settings.inventory());
+        // Wave O8's Mechanism A: constructed -- and its own third subscription registered -- only
+        // when the flag is on. With it off, this field stays null and no subscription exists at
+        // all, so "flag off" is structurally "cannot send a command," not merely "chose not to."
+        this.connectRemediator = settings.onboarding().requestMessagesOnConnect()
+                ? new MavlinkConnectRemediator(session.dispatcher(), session.sink(), session.correlator(), settings)
+                : null;
     }
 
     /** Once closed (last registration released), never reused. */
@@ -210,6 +230,16 @@ final class MavlinkGateway {
         return session.peers();
     }
 
+    /**
+     * This gateway's passive per-sysid message inventory (docs/plans/active/DRONE-ONBOARDING-PLAN.md
+     * O1) — every message type heard on this socket, claimed or not, with a rolling count/Hz and a
+     * bytes/s estimate per peer. Never {@code null}: created alongside {@link #session} in the
+     * constructor and lives for this gateway's whole lifetime.
+     */
+    MavlinkMessageInventory messageInventory() {
+        return messageInventory;
+    }
+
     private void onFrame(MavFrame frame) {
         int sysid = frame.header().system().value();
         VehicleRegistration owner = claimPolicy.resolve(sysid);
@@ -226,12 +256,23 @@ final class MavlinkGateway {
      * this module's close-the-socket-to-unblock-the-reader idiom) then the session (stops and
      * joins that thread, bounded by the settings' close-join timeout) — matching the pre-W4 hub's
      * own shutdown ordering.
+     *
+     * <p>Package-private rather than private for exactly one caller besides {@link #unregister}:
+     * {@code MavlinkVehicleConfigurator} opens its own registration-less gateway when it must probe
+     * an address no device is streaming from yet, and closes that one itself. The invariant this
+     * relaxes is only "gateways die when their last registration goes"; the invariant that matters —
+     * <b>never close a gateway you did not open</b> — is enforced by that class's lease, because a
+     * borrowed gateway backs a live device's telemetry.
      */
-    private void close() {
+    void close() {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
         subscription.close();
+        messageInventory.close();
+        if (connectRemediator != null) {
+            connectRemediator.close();
+        }
         link.close();
         session.close();
     }

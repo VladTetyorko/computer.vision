@@ -7,6 +7,7 @@ import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.simulation.SimulatedTelemetrySource;
 import com.drones.vision.adapter.simulation.TelemetrySettings;
 import com.drones.vision.app.config.properties.VisionMavlinkProperties;
+import com.drones.vision.app.config.properties.VisionOnboardingProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.config.properties.VisionSimulationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -24,7 +25,7 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 @EnableConfigurationProperties({VisionSimulationProperties.class, VisionMavlinkProperties.class,
-        VisionRcProperties.class})
+        VisionRcProperties.class, VisionOnboardingProperties.class})
 public class TelemetryWiring {
 
     /**
@@ -51,16 +52,23 @@ public class TelemetryWiring {
      */
     @Bean
     public MavlinkTelemetrySource mavlinkTelemetrySource(VisionMavlinkProperties mavlinkProperties,
-                                                           VisionRcProperties rcProperties) {
-        return new MavlinkTelemetrySource(toMavlinkSettings(mavlinkProperties, rcProperties));
+                                                           VisionRcProperties rcProperties,
+                                                           VisionOnboardingProperties onboardingProperties) {
+        return new MavlinkTelemetrySource(toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties));
     }
 
     /**
      * Maps {@link VisionMavlinkProperties} (plus {@link VisionRcProperties} for the mandatory
-     * {@link MavlinkSettings#rc()} slice) onto a full {@code MavlinkSettings} — shared with {@code
-     * FeedTransmitterWiring#mavlinkFeedTransmitter}, which needs the identical mapping.
+     * {@link MavlinkSettings#rc()} slice and {@link VisionOnboardingProperties} for the
+     * {@link MavlinkSettings#onboarding()} one) onto a full {@code MavlinkSettings} — shared with
+     * {@code FeedTransmitterWiring#mavlinkFeedTransmitter}, which needs the identical mapping.
+     *
+     * <p>The onboarding slice is deliberately assembled from {@code vision.onboarding.*} rather than
+     * {@code vision.mavlink.*}: an operator reasons about onboarding as one feature with one set of
+     * guardrails, not as a MAVLink tuning knob that happens to live next to socket timeouts.
      */
-    static MavlinkSettings toMavlinkSettings(VisionMavlinkProperties properties, VisionRcProperties rcProperties) {
+    static MavlinkSettings toMavlinkSettings(VisionMavlinkProperties properties, VisionRcProperties rcProperties,
+                                              VisionOnboardingProperties onboardingProperties) {
         VisionMavlinkProperties.Scan scan = properties.scan();
         VisionMavlinkProperties.Transmit transmit = properties.transmit();
         return new MavlinkSettings(properties.bindHost(), properties.silenceWindow(),
@@ -71,7 +79,24 @@ public class TelemetryWiring {
                         transmit.defaultPositionRateHz(), transmit.defaultFailsafeBatteryPercent(),
                         transmit.defaultSysid()),
                 new MavlinkSettings.Rc(rcProperties.overrideHz(), rcProperties.minOverrideHz(),
-                        rcProperties.maxOverrideHz(), rcProperties.releaseFrames()));
+                        rcProperties.maxOverrideHz(), rcProperties.releaseFrames()))
+                .withOnboarding(toOnboarding(onboardingProperties));
+    }
+
+    /**
+     * Overrides exactly two things on {@link MavlinkSettings.Onboarding#defaults()}: the on-connect
+     * flag, and the per-request timeout that {@code vision.onboarding.probe.request-timeout} exists
+     * to set. The probe parameter list stays on its defaults on purpose — every name in it was
+     * verified against live firmware, and a stale override would degrade the probe silently rather
+     * than fail (see adapter-mavlink's MODULE.md, "Parameter names are firmware-version state").
+     */
+    private static MavlinkSettings.Onboarding toOnboarding(VisionOnboardingProperties properties) {
+        MavlinkSettings.Onboarding defaults = MavlinkSettings.Onboarding.defaults();
+        return new MavlinkSettings.Onboarding(defaults.probeParameters(),
+                properties.probe().requestTimeout(), defaults.capabilityRetries(),
+                properties.probe().requestTimeout(), defaults.parameterRetries(),
+                properties.remediate().messageInterval().enabled(),
+                defaults.onConnectMessageRequests());
     }
 
     /**

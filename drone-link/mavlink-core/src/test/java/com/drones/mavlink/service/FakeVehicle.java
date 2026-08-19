@@ -9,10 +9,14 @@ import com.drones.mavlink.codec.MavFrame;
 import com.drones.mavlink.transport.ByteChunk;
 import com.drones.mavlink.transport.UdpTargetLink;
 
+import io.dronefleet.mavlink.common.AutopilotVersion;
 import io.dronefleet.mavlink.common.CommandAck;
 import io.dronefleet.mavlink.common.MavCmd;
+import io.dronefleet.mavlink.common.MavParamType;
 import io.dronefleet.mavlink.common.MavResult;
+import io.dronefleet.mavlink.common.ParamValue;
 import io.dronefleet.mavlink.common.RcChannelsOverride;
+import io.dronefleet.mavlink.util.EnumValue;
 import io.dronefleet.mavlink.minimal.Heartbeat;
 import io.dronefleet.mavlink.minimal.MavAutopilot;
 import io.dronefleet.mavlink.minimal.MavModeFlag;
@@ -205,6 +209,37 @@ public final class FakeVehicle implements AutoCloseable {
         LinkBundle bundle = this.current;
         CommandAck ack = CommandAck.builder().command(command).result(MavResult.MAV_RESULT_IN_PROGRESS).progress(progress).build();
         bundle.writer().broadcast(ack, bundle.link().id());
+    }
+
+    /**
+     * Answers with a {@code PARAM_VALUE}. Takes the name verbatim rather than echoing whatever was
+     * requested, so a test can make this vehicle answer a <i>different</i> parameter than the one
+     * asked for — the case {@code ParameterService}'s exact-name verification exists for.
+     */
+    public void replyParamValue(String paramId, float value, MavParamType type, int index, int count) {
+        LinkBundle bundle = this.current;
+        ParamValue paramValue = ParamValue.builder()
+                .paramId(paramId)
+                .paramValue(value)
+                .paramType(type)
+                .paramIndex(index)
+                .paramCount(count)
+                .build();
+        bundle.writer().broadcast(paramValue, bundle.link().id());
+    }
+
+    /** Answers with an {@code AUTOPILOT_VERSION}; {@code capabilityBits} is the raw bitmask, as the wire carries it. */
+    public void replyAutopilotVersion(long flightSwVersion, int capabilityBits, long boardVersion,
+                                      int vendorId, int productId) {
+        LinkBundle bundle = this.current;
+        AutopilotVersion version = AutopilotVersion.builder()
+                .capabilities(EnumValue.create(capabilityBits))
+                .flightSwVersion(flightSwVersion)
+                .boardVersion(boardVersion)
+                .vendorId(vendorId)
+                .productId(productId)
+                .build();
+        bundle.writer().broadcast(version, bundle.link().id());
     }
 
     @Override

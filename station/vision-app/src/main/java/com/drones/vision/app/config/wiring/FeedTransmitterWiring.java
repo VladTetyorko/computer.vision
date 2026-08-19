@@ -5,6 +5,7 @@ import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
 import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionMjpegProperties;
+import com.drones.vision.app.config.properties.VisionOnboardingProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.config.properties.VisionRtspProperties;
@@ -26,7 +27,8 @@ import java.util.List;
  */
 @Configuration
 @EnableConfigurationProperties({VisionPublishProperties.class, VisionRtspProperties.class,
-        VisionMjpegProperties.class, VisionMavlinkProperties.class, VisionRcProperties.class})
+        VisionMjpegProperties.class, VisionMavlinkProperties.class, VisionRcProperties.class,
+        VisionOnboardingProperties.class})
 public class FeedTransmitterWiring {
 
     /**
@@ -60,8 +62,10 @@ public class FeedTransmitterWiring {
      */
     @Bean
     public MavlinkFeedTransmitter mavlinkFeedTransmitter(VisionMavlinkProperties mavlinkProperties,
-                                                          VisionRcProperties rcProperties) {
-        return new MavlinkFeedTransmitter(TelemetryWiring.toMavlinkSettings(mavlinkProperties, rcProperties));
+                                                          VisionRcProperties rcProperties,
+                                                          VisionOnboardingProperties onboardingProperties) {
+        return new MavlinkFeedTransmitter(
+                TelemetryWiring.toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties));
     }
 
     /**

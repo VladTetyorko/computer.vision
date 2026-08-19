@@ -17,6 +17,7 @@ import { ORG_ROUTES } from './features/org-settings/org-settings.routes';
 import { ACTIVITY_ROUTES } from './features/activity/activity.routes';
 import { LOGIN_ROUTES } from './features/auth/login/login.routes';
 import { PREFLIGHT_ROUTES } from './features/preflight/preflight.routes';
+import { READINESS_ROUTES } from './features/readiness/readiness.routes';
 import { ALERTS_ROUTES } from './features/alerts/alerts.routes';
 import { ROSTER_ROUTES } from './features/roster/roster.routes';
 import { AUDIT_ROUTES } from './features/audit/audit.routes';
@@ -88,6 +89,7 @@ export const routes: Routes = [
       ...WAREHOUSE_ROUTES,
       ...ONBOARDING_ROUTES,
       ...ASSET_DETAIL_ROUTES,
+      ...READINESS_ROUTES,
       ...REPLAY_ROUTES,
       ...LIVE_ROUTES,
       ...SETTINGS_ROUTES,

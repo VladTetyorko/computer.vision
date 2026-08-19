@@ -202,6 +202,109 @@ class DefaultAssetServiceTest {
         verify(assetRepository, never()).save(any());
     }
 
+    // --- Creating from a discovered candidate (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1
+    // stage 7, REGISTER; Wave O7) ------------------------------------------------------------
+
+    @Test
+    void createFromCandidateBehavesExactlyLikeCreateWhenNothingDuplicates() {
+        Device cam = device("cam-1");
+        when(deviceService.devices(false)).thenReturn(List.of());
+        when(deviceService.register(any(), eq(actingUser))).thenReturn(cam);
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(registration("cam-1")));
+
+        Asset created = service.createFromCandidate(spec, ownership, actingUser);
+
+        assertEquals("my drone", created.displayName());
+        assertEquals(Set.of(cam.id()), created.devices());
+    }
+
+    @Test
+    void createFromCandidateThrowsForUnknownCategoryAndNeverChecksDuplicatesOrRegistersDevices() {
+        CategoryId unknown = new CategoryId("unknown-category");
+        when(categoryRepository.findById(unknown)).thenReturn(Optional.empty());
+        AssetSpec spec = new AssetSpec("my drone", unknown, Map.of(), List.of(registration("cam-1")));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.createFromCandidate(spec, ownership, actingUser));
+        verifyNoInteractions(deviceService);
+    }
+
+    @Test
+    void createFromCandidateRefusesADeviceMatchingAnExistingRegisteredAirframe() {
+        Device existing = device("already-out-there");
+        Asset owner = asset(Set.of(existing.id()));
+        when(deviceService.devices(false)).thenReturn(List.of(existing));
+        when(assetRepository.findByDeviceId(existing.id())).thenReturn(Optional.of(owner));
+        AssetSpec spec =
+                new AssetSpec("my drone", DRONE, Map.of(), List.of(registration("already-out-there")));
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.createFromCandidate(spec, ownership, actingUser));
+
+        assertTrue(thrown.getMessage().contains(owner.displayName()));
+        verify(assetRepository, never()).save(any());
+        verify(deviceService, never()).register(any(), any());
+    }
+
+    @Test
+    void createFromCandidateNamesTheDeviceWhenTheDuplicateIsRegisteredButNotYetOwnedByAnAsset() {
+        Device existing = device("unowned-but-registered");
+        when(deviceService.devices(false)).thenReturn(List.of(existing));
+        when(assetRepository.findByDeviceId(existing.id())).thenReturn(Optional.empty());
+        AssetSpec spec =
+                new AssetSpec("my drone", DRONE, Map.of(), List.of(registration("unowned-but-registered")));
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.createFromCandidate(spec, ownership, actingUser));
+
+        assertTrue(thrown.getMessage().contains("unowned-but-registered"));
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void createFromCandidateDuplicateCheckIsKeyedByProtocolUriAndSysidNotJustUri() {
+        StreamDescriptor existingStream =
+                new StreamDescriptor("mavlink", URI.create("mavlink://same-uri"), Map.of("sysid", "1"));
+        Device existing = new Device(DeviceId.random(), "existing", Set.of(Capability.TELEMETRY), existingStream);
+        when(deviceService.devices(false)).thenReturn(List.of(existing));
+        Device candidate = device("candidate");
+        when(deviceService.register(any(), eq(actingUser))).thenReturn(candidate);
+        DeviceRegistration differentSysid = new DeviceRegistration("candidate", Set.of(Capability.TELEMETRY),
+                new StreamDescriptor("mavlink", URI.create("mavlink://same-uri"), Map.of("sysid", "2")));
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(differentSysid));
+
+        Asset created = service.createFromCandidate(spec, ownership, actingUser);
+
+        assertEquals(Set.of(candidate.id()), created.devices());
+    }
+
+    @Test
+    void createFromCandidateDuplicateCheckIgnoresSoftDeletedDevices() {
+        Device deleted = device("retired").withState(LifecycleState.DELETED);
+        when(deviceService.devices(false)).thenReturn(List.of()); // deleted devices excluded by the port contract
+        Device candidate = device("retired");
+        when(deviceService.register(any(), eq(actingUser))).thenReturn(candidate);
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(registration("retired")));
+
+        Asset created = service.createFromCandidate(spec, ownership, actingUser);
+
+        assertEquals(Set.of(candidate.id()), created.devices());
+    }
+
+    @Test
+    void createFromCandidateStillHonorsExistingDeviceIdsPromoteFlowWithoutDuplicateChecking() {
+        Device existing = device("already-registered");
+        when(deviceService.find(existing.id())).thenReturn(Optional.of(existing));
+        when(assetRepository.findByDeviceId(existing.id())).thenReturn(Optional.empty());
+        when(deviceService.devices(false)).thenReturn(List.of());
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(existing.id()));
+
+        Asset created = service.createFromCandidate(spec, ownership, actingUser);
+
+        assertEquals(Set.of(existing.id()), created.devices());
+        verify(deviceService, never()).register(any(), any());
+    }
+
     // --- Reading -------------------------------------------------------------
 
     @Test

@@ -16,6 +16,7 @@ function candidate(partial: Partial<DiscoveredDevice> = {}): DiscoveredDevice {
     name: 'ArduPilot quadcopter (sysid 7)',
     address: '0.0.0.0:14550',
     details: {},
+    suggestedOptions: {},
     ...partial,
   };
 }

@@ -25,6 +25,8 @@ import com.drones.vision.warehouse.domain.model.DeviceCategory;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.flight.domain.model.FeatureRequirement;
+import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.flight.domain.model.GeofenceZone;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.kernel.GroupId;
@@ -42,7 +44,9 @@ import com.drones.vision.map.domain.model.MarkKind;
 import com.drones.vision.map.domain.model.MarkSource;
 import com.drones.vision.map.domain.model.MarkStatus;
 import com.drones.vision.identity.domain.model.Membership;
+import com.drones.vision.flight.domain.model.MessageObservation;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
@@ -63,8 +67,10 @@ import com.drones.vision.perception.domain.model.TrackingTelemetry;
 import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.flight.domain.model.VehicleProfile;
 import com.drones.vision.flight.domain.model.ZoneId;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.map.domain.model.Verification.VerificationState;
@@ -78,6 +84,7 @@ import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
+import com.drones.vision.flight.domain.port.FeatureRequirementRepositoryPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
@@ -87,10 +94,14 @@ import com.drones.vision.learning.domain.port.SampleImageStorePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
+import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 
 import com.drones.vision.adapter.persistence.config.ClosingDatasourceConnectionProvider;
 import com.drones.vision.adapter.persistence.config.PersistencePoolSettings;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
+import com.drones.vision.adapter.persistence.entity.DbAuditLogEntity;
+import com.drones.vision.adapter.persistence.entity.DbAuditOperation;
+import com.drones.vision.adapter.persistence.mapper.FeatureRequirementMapper;
 import com.drones.vision.adapter.persistence.repository.JpaAssetImageRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssetRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssetUsageRepository;
@@ -98,10 +109,12 @@ import com.drones.vision.adapter.persistence.repository.JpaAssignmentRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
 import com.drones.vision.adapter.persistence.repository.JpaCategoryRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDatasetRepository;
+import com.drones.vision.adapter.persistence.repository.JpaDbAuditLogRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDeviceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDrawingRepository;
+import com.drones.vision.adapter.persistence.repository.JpaFeatureRequirementRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGeofenceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGroupRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMapLayerRepository;
@@ -111,6 +124,7 @@ import com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository;
 import com.drones.vision.adapter.persistence.repository.TelemetryBatchSettings;
 import com.drones.vision.adapter.persistence.repository.JpaTrainingSampleRepository;
 import com.drones.vision.adapter.persistence.repository.JpaUserRepository;
+import com.drones.vision.adapter.persistence.repository.JpaVehicleProfileRepository;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
@@ -133,6 +147,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -142,6 +157,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -171,6 +187,30 @@ class PostgresDockerIntegrationTest {
      * make a direct post-round-trip {@code assertEquals} flaky depending on the host clock.
      */
     private static final Instant NOW = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+
+    /**
+     * The control-plane / configuration tables {@code V21__db_audit_log.sql} attaches {@code
+     * trg_audit_*} to — kept here, not just in the migration's own header, so {@link
+     * DbAuditLogCoverageTests} fails loudly the moment a future migration adds a table and
+     * nobody consciously classifies it. Mirrors that migration's "Included" list exactly.
+     */
+    private static final Set<String> AUDITED_TABLES = Set.of(
+            "categories", "devices", "device_capabilities", "assets", "asset_devices",
+            "asset_usages", "geofence_zones", "groups", "users", "pilot_assignments",
+            "marks", "datasets", "map_layers", "map_layer_grants", "map_drawings",
+            "vehicle_profiles", "feature_requirements");
+
+    /**
+     * Every other base table in the schema as of V21 — high-volume append-only event tables, the
+     * existing domain audit trail, this table's own infrastructure, and Flyway's bookkeeping
+     * table. Mirrors {@code V21__db_audit_log.sql}'s "Excluded" list exactly; see that header for
+     * the reasoning behind each one, including why {@code asset_images} is grouped with {@code
+     * sample_images} rather than with the control-plane set it might otherwise resemble.
+     */
+    private static final Set<String> EXCLUDED_TABLES = Set.of(
+            "telemetry_samples", "detection_results", "detection_events",
+            "training_samples", "sample_images", "asset_images",
+            "audit_entries", "db_audit_log", "flyway_schema_history");
 
     private static EntityManagerFactory entityManagerFactory;
 
@@ -545,6 +585,71 @@ class PostgresDockerIntegrationTest {
             repository.save(new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0));
 
             assertTrue(repository.findOpenByAsset(assetId).isEmpty());
+        }
+
+        /**
+         * docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O5/O7 -- the regression this test
+         * guards against: {@code AssetUsageMapper} used to have no {@code phase} field at all, so a
+         * phase {@code UsageTracker} had actually computed and saved was silently discarded and every
+         * reload came back {@code PREFLIGHT} regardless of what was saved. Explicitly asserts a
+         * non-default phase (not {@code PREFLIGHT}, so a mapper that always wrote/read the default
+         * could not accidentally pass this test) survives save-then-reload exactly.
+         */
+        @Test
+        void savedUsageWithANonDefaultPhaseRoundTripsExactly() {
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.IN_FLIGHT);
+
+            repository.save(usage);
+
+            Optional<AssetUsage> found = repository.findById(usage.id());
+            assertTrue(found.isPresent());
+            assertEquals(UsagePhase.IN_FLIGHT, found.get().phase());
+            assertEquals(usage, found.get());
+        }
+
+        @Test
+        void saveIsAnUpsertThatCanTransitionPhase() {
+            UsageId id = UsageId.random();
+            AssetId assetId = AssetId.random();
+            repository.save(new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.PREFLIGHT));
+
+            repository.save(new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.IN_FLIGHT));
+
+            Optional<AssetUsage> found = repository.findById(id);
+            assertTrue(found.isPresent());
+            assertEquals(UsagePhase.IN_FLIGHT, found.get().phase(),
+                    "re-saving an existing usage must overwrite phase, not just insert-once");
+        }
+
+        /**
+         * Simulates a row written before {@code V19__asset_usage_phase.sql} existed (no backfill, so
+         * {@code phase} is {@code NULL} on disk) by nulling the column directly after a normal save,
+         * bypassing the mapper (which never writes {@code null} itself, since {@link
+         * AssetUsage#phase()} is non-null by construction) -- proves {@code AssetUsageMapper#toDomain}
+         * honestly defaults a legacy {@code NULL} column to {@link UsagePhase#PREFLIGHT} via {@link
+         * AssetUsage}'s own pre-O7 convenience constructor, per {@code AssetUsageEntity}'s javadoc.
+         */
+        @Test
+        void legacyRowWithNullPhaseColumnMapsToPreflightDefault() {
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.LINK_LOST);
+            repository.save(usage);
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                em.getTransaction().begin();
+                em.createNativeQuery("update asset_usages set phase = null where id = :id")
+                        .setParameter("id", usage.id().value())
+                        .executeUpdate();
+                em.getTransaction().commit();
+            } finally {
+                em.close();
+            }
+
+            Optional<AssetUsage> found = repository.findById(usage.id());
+
+            assertTrue(found.isPresent());
+            assertEquals(UsagePhase.PREFLIGHT, found.get().phase());
         }
     }
 
@@ -2408,6 +2513,265 @@ class PostgresDockerIntegrationTest {
         }
     }
 
+    @Nested
+    class VehicleProfileRepositoryTests {
+
+        private final VehicleProfileRepositoryPort repository = new JpaVehicleProfileRepository(entityManagerFactory);
+
+        @Test
+        void findLatestReturnsEmptyForUnknownDevice() {
+            assertTrue(repository.findLatest(DeviceId.random()).isEmpty());
+        }
+
+        @Test
+        void savedCompleteProfileRoundTripsEveryField() {
+            DeviceId deviceId = DeviceId.random();
+            VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.7",
+                    "quadcopter", 12345L, List.of("MAVLINK2", "MISSION_INT"),
+                    List.of(new MessageObservation(33, "GLOBAL_POSITION_INT", 0.9, 9)),
+                    List.of(new ParameterReading("SR2_EXTRA2", 0.0, "REAL32")), 2300L, true, null);
+
+            repository.save(deviceId, profile);
+
+            Optional<VehicleProfile> found = repository.findLatest(deviceId);
+            assertTrue(found.isPresent());
+            assertEquals(profile, found.get());
+        }
+
+        @Test
+        void savedIncompleteProfileRoundTripsIncompleteReasonAndNullFields() {
+            DeviceId deviceId = DeviceId.random();
+            VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#3", NOW, null, null, null, null, null,
+                    List.of(), List.of(), List.of(), null, false, "AUTOPILOT_VERSION not answered within 3s");
+
+            repository.save(deviceId, profile);
+
+            Optional<VehicleProfile> found = repository.findLatest(deviceId);
+            assertTrue(found.isPresent());
+            assertEquals(profile, found.get());
+        }
+
+        /** {@link com.drones.vision.adapter.persistence.repository.JpaVehicleProfileRepository#save}
+         * always inserts a new row (O3's "append-only, never overwrites" contract) — {@link
+         * com.drones.vision.adapter.persistence.repository.JpaVehicleProfileRepository#findLatest}
+         * must still resolve to the newest one. */
+        @Test
+        void saveIsAppendOnlyAndFindLatestReturnsTheNewestObservation() {
+            DeviceId deviceId = DeviceId.random();
+            VehicleProfile older = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.6",
+                    "quadcopter", null, List.of(), List.of(), List.of(), null, true, null);
+            VehicleProfile newer = new VehicleProfile("udp://0.0.0.0:14550#7", NOW.plusSeconds(60), 7, "ardupilot",
+                    "4.5.7", "quadcopter", null, List.of(), List.of(), List.of(), null, true, null);
+
+            repository.save(deviceId, older);
+            repository.save(deviceId, newer);
+
+            Optional<VehicleProfile> found = repository.findLatest(deviceId);
+            assertTrue(found.isPresent());
+            assertEquals(newer, found.get());
+        }
+
+        @Test
+        void findLatestIsolatesProfilesPerDevice() {
+            DeviceId deviceA = DeviceId.random();
+            DeviceId deviceB = DeviceId.random();
+            VehicleProfile profileA = new VehicleProfile("udp://a#1", NOW, 1, "ardupilot", null, null, null,
+                    List.of(), List.of(), List.of(), null, false, "incomplete");
+            VehicleProfile profileB = new VehicleProfile("udp://b#2", NOW, 2, "px4", null, null, null,
+                    List.of(), List.of(), List.of(), null, false, "incomplete");
+            repository.save(deviceA, profileA);
+            repository.save(deviceB, profileB);
+
+            assertEquals(profileA, repository.findLatest(deviceA).orElseThrow());
+            assertEquals(profileB, repository.findLatest(deviceB).orElseThrow());
+        }
+
+        /**
+         * docs/plans/active/DRONE-ONBOARDING-PLAN.md O11 -- the tagged {@code save}/{@code
+         * findByUsageAndPhase} pair the flight passport is built on, round-tripped end to end through
+         * V20's new {@code usage_id}/{@code phase} columns.
+         */
+        @Test
+        void findByUsageAndPhaseReturnsEmptyWhenNeitherThisUsageNorPhaseWasCaptured() {
+            assertTrue(repository.findByUsageAndPhase(UsageId.random(), FlightPhase.PREFLIGHT).isEmpty());
+        }
+
+        @Test
+        void taggedSaveRoundTripsAndIsFoundByItsOwnUsageAndPhase() {
+            DeviceId deviceId = DeviceId.random();
+            UsageId usageId = UsageId.random();
+            VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.7",
+                    "quadcopter", 12345L, List.of("MAVLINK2"),
+                    List.of(new MessageObservation(33, "GLOBAL_POSITION_INT", 0.9, 9)),
+                    List.of(new ParameterReading("SR2_EXTRA2", 0.0, "REAL32")), 2300L, true, null);
+
+            repository.save(deviceId, usageId, FlightPhase.PREFLIGHT, profile);
+
+            Optional<VehicleProfile> found = repository.findByUsageAndPhase(usageId, FlightPhase.PREFLIGHT);
+            assertTrue(found.isPresent());
+            assertEquals(profile, found.get());
+        }
+
+        @Test
+        void taggedSaveIsNotFoundUnderADifferentPhaseOfTheSameUsage() {
+            DeviceId deviceId = DeviceId.random();
+            UsageId usageId = UsageId.random();
+            VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.7",
+                    "quadcopter", null, List.of(), List.of(), List.of(), null, true, null);
+
+            repository.save(deviceId, usageId, FlightPhase.PREFLIGHT, profile);
+
+            assertTrue(repository.findByUsageAndPhase(usageId, FlightPhase.POSTFLIGHT).isEmpty());
+        }
+
+        @Test
+        void taggedSaveIsNotFoundUnderADifferentUsageWithTheSamePhase() {
+            DeviceId deviceId = DeviceId.random();
+            VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.7",
+                    "quadcopter", null, List.of(), List.of(), List.of(), null, true, null);
+
+            repository.save(deviceId, UsageId.random(), FlightPhase.PREFLIGHT, profile);
+
+            assertTrue(repository.findByUsageAndPhase(UsageId.random(), FlightPhase.PREFLIGHT).isEmpty());
+        }
+
+        /**
+         * Two flights of the same asset each capture their own PREFLIGHT/POSTFLIGHT pair -- {@link
+         * VehicleProfileRepositoryPort#findByUsageAndPhase} must resolve each cell of that 2x2
+         * independently, the exact lookup {@code driftFromPreviousFlight} depends on.
+         */
+        @Test
+        void findByUsageAndPhaseDistinguishesAllFourCellsAcrossTwoFlights() {
+            DeviceId deviceId = DeviceId.random();
+            UsageId firstUsage = UsageId.random();
+            UsageId secondUsage = UsageId.random();
+            VehicleProfile firstPre = new VehicleProfile("udp://0.0.0.0:14550#7", NOW, 7, "ardupilot", "4.5.7",
+                    "quadcopter", null, List.of(), List.of(),
+                    List.of(new ParameterReading("SR2_EXTRA2", 0.0, "REAL32")), null, true, null);
+            VehicleProfile firstPost = new VehicleProfile("udp://0.0.0.0:14550#7", NOW.plusSeconds(600), 7,
+                    "ardupilot", "4.5.7", "quadcopter", null, List.of(), List.of(),
+                    List.of(new ParameterReading("SR2_EXTRA2", 1.0, "REAL32")), null, true, null);
+            VehicleProfile secondPre = new VehicleProfile("udp://0.0.0.0:14550#7", NOW.plusSeconds(1200), 7,
+                    "ardupilot", "4.5.7", "quadcopter", null, List.of(), List.of(),
+                    List.of(new ParameterReading("SR2_EXTRA2", 1.0, "REAL32")), null, true, null);
+
+            repository.save(deviceId, firstUsage, FlightPhase.PREFLIGHT, firstPre);
+            repository.save(deviceId, firstUsage, FlightPhase.POSTFLIGHT, firstPost);
+            repository.save(deviceId, secondUsage, FlightPhase.PREFLIGHT, secondPre);
+
+            assertEquals(firstPre, repository.findByUsageAndPhase(firstUsage, FlightPhase.PREFLIGHT).orElseThrow());
+            assertEquals(firstPost, repository.findByUsageAndPhase(firstUsage, FlightPhase.POSTFLIGHT).orElseThrow());
+            assertEquals(secondPre, repository.findByUsageAndPhase(secondUsage, FlightPhase.PREFLIGHT).orElseThrow());
+            assertTrue(repository.findByUsageAndPhase(secondUsage, FlightPhase.POSTFLIGHT).isEmpty());
+        }
+    }
+
+    /**
+     * {@link FeatureRequirementRepositoryPort} has no {@code save} — every production row is Flyway
+     * seed data ({@code V18__feature_requirements.sql}, D6), so most of these assert against that
+     * real seeded data directly rather than against fixtures this test invents, proving the
+     * migration's eleven rows are actually reachable through the port. The one exception ({@link
+     * #mapperRoundTripsAnEntityNotFromSeedData}) inserts a throwaway row via {@link
+     * FeatureRequirementMapper} directly (the port itself has no write method to call) to keep the
+     * mapper's round trip under test, per that class's own javadoc.
+     */
+    @Nested
+    class FeatureRequirementRepositoryTests {
+
+        private final FeatureRequirementRepositoryPort repository =
+                new JpaFeatureRequirementRepository(entityManagerFactory);
+
+        @Test
+        void findByFirmwareReturnsEveryFrozenFeatureKeyForArdupilot() {
+            Set<String> found = repository.findByFirmware("ardupilot").stream()
+                    .map(FeatureRequirement::featureKey)
+                    .collect(java.util.stream.Collectors.toSet());
+
+            assertEquals(FeatureRequirement.FEATURE_KEYS, found);
+        }
+
+        /**
+         * D13: PX4 stays "generic MAVLink, unverified" until a PX4 SITL run proves otherwise — zero
+         * seeded rows is the honest v1 state, not an omission bug (ReadinessService reports every
+         * feature {@code UNKNOWN} for a firmware with no rows, per O3 MODULE.md).
+         */
+        @Test
+        void findByFirmwareReturnsEmptyForAnUnseededFirmware() {
+            assertTrue(repository.findByFirmware("px4").isEmpty());
+        }
+
+        @Test
+        void mapPositionRowCarriesThePlanGivenTwoHertzThreshold() {
+            FeatureRequirement row = repository.findByFirmware("ardupilot").stream()
+                    .filter(r -> r.featureKey().equals("map-position"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertEquals(33, row.requiredMessageId(), "GLOBAL_POSITION_INT");
+            assertEquals("GLOBAL_POSITION_INT", row.requiredMessageName());
+            assertEquals(2.0, row.minimumHz());
+        }
+
+        @Test
+        void visualGeolocationRowCarriesThePlanGivenFiveHertzThreshold() {
+            FeatureRequirement row = repository.findByFirmware("ardupilot").stream()
+                    .filter(r -> r.featureKey().equals("visual-geolocation"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertEquals(30, row.requiredMessageId(), "ATTITUDE");
+            assertEquals(5.0, row.minimumHz());
+        }
+
+        @Test
+        void fleetIdentityRowIsParameterOnly() {
+            FeatureRequirement row = repository.findByFirmware("ardupilot").stream()
+                    .filter(r -> r.featureKey().equals("fleet-identity"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertNull(row.requiredMessageId());
+            assertEquals("SYSID_THISMAV", row.requiredParameterName());
+        }
+
+        @Test
+        void commandTxRowRequiresNeitherMessageNorParameter() {
+            FeatureRequirement row = repository.findByFirmware("ardupilot").stream()
+                    .filter(r -> r.featureKey().equals("command-tx"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertNull(row.requiredMessageId());
+            assertNull(row.requiredParameterName());
+        }
+
+        @Test
+        void findAllIncludesEverySeededRow() {
+            List<FeatureRequirement> all = repository.findAll();
+            assertTrue(all.size() >= FeatureRequirement.FEATURE_KEYS.size());
+        }
+
+        @Test
+        void mapperRoundTripsAnEntityNotFromSeedData() {
+            // firmware is varchar(32); keep the throwaway id short, just unique enough not to
+            // collide with a seeded row or another run of this same test.
+            String firmware = "test-" + UUID.randomUUID().toString().substring(0, 8);
+            FeatureRequirement custom =
+                    new FeatureRequirement("battery", "Battery", firmware, 1, "SYS_STATUS", 1.0, null);
+
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                em.getTransaction().begin();
+                em.persist(FeatureRequirementMapper.toEntity(custom));
+                em.getTransaction().commit();
+            } finally {
+                em.close();
+            }
+
+            assertEquals(List.of(custom), repository.findByFirmware(firmware));
+        }
+    }
+
     /**
      * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — same {@code information_schema} shape as the V7-V12
      * schema tests, for the brand-new {@code audit_entries} table: asserts {@code details} is a
@@ -2462,6 +2826,107 @@ class PostgresDockerIntegrationTest {
                                     + "where table_name = 'detection_events' and column_name = 'last_seen'")
                     .getSingleResult();
             assertEquals("NO", lastSeenNullable, "last_seen is required");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 — same {@code information_schema} shape as the
+     * V14/V15 schema tests above, for the brand-new {@code vehicle_profiles} table: {@code messages}
+     * defaults to {@code '[]'::jsonb} so it is required, while {@code sysid} stays optional (a link
+     * key may carry no sysid), proving {@code V17__vehicle_profiles.sql} applied cleanly on top of
+     * V1-V16.
+     */
+    @Test
+    void v17MigrationCreatesTheVehicleProfilesTableOnTopOfV1ThroughV16() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String messagesNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'vehicle_profiles' and column_name = 'messages'")
+                    .getSingleResult();
+            assertEquals("NO", messagesNullable, "messages is required (defaults to '[]')");
+
+            String sysidNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'vehicle_profiles' and column_name = 'sysid'")
+                    .getSingleResult();
+            assertEquals("YES", sysidNullable, "sysid is optional -- a link key may carry no sysid");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6 — proves {@code V18__feature_requirements.sql}
+     * actually seeded one row per frozen v1 feature key (SS8.1) for {@code firmware = 'ardupilot'},
+     * on top of V1-V17; {@link FeatureRequirementRepositoryTests} exercises the same data through the
+     * port, this asserts the raw row count landed at all.
+     */
+    @Test
+    void v18MigrationSeedsElevenArdupilotFeatureRequirementRows() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            long count = ((Number) em.createNativeQuery(
+                            "select count(*) from feature_requirements where firmware = 'ardupilot'")
+                    .getSingleResult()).longValue();
+            assertEquals(11, count, "one seeded row per frozen v1 feature key (SS8.1)");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 — proves {@code V19__asset_usage_phase.sql}
+     * applied cleanly on top of V1-V18: {@code phase}/{@code first_armed_at}/{@code last_disarmed_at}
+     * are nullable, additive columns with no backfill (every pre-existing row predates the phase
+     * concept). Schema-only on purpose — see that migration's own header for why
+     * {@code AssetUsageEntity} is not wired to these columns by this wave.
+     */
+    @Test
+    void v19MigrationAddsNullablePhaseColumnsOnTopOfV1ThroughV18() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String phaseNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'asset_usages' and column_name = 'phase'")
+                    .getSingleResult();
+            assertEquals("YES", phaseNullable, "phase is nullable -- no backfill for pre-existing rows");
+
+            String firstArmedNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'asset_usages' and column_name = 'first_armed_at'")
+                    .getSingleResult();
+            assertEquals("YES", firstArmedNullable);
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O11 -- proves {@code V20__vehicle_profile_usage_link.sql}
+     * applied cleanly on top of V1-V19: {@code usage_id}/{@code phase} on {@code vehicle_profiles} are
+     * nullable, additive columns (every pre-existing row -- readiness's own ad hoc probes -- predates
+     * the passport concept and keeps both columns NULL). Schema-only on purpose, same "prove the
+     * migration, not the entity" split as {@link #v19MigrationAddsNullablePhaseColumnsOnTopOfV1ThroughV18};
+     * the entity/repository round trip is covered by {@link VehicleProfileRepositoryTests}.
+     */
+    @Test
+    void v20MigrationAddsUsageIdAndPhaseColumnsOnTopOfV1ThroughV19() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String usageIdNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'vehicle_profiles' and column_name = 'usage_id'")
+                    .getSingleResult();
+            assertEquals("YES", usageIdNullable, "usage_id is nullable -- no backfill for pre-existing rows");
+
+            String phaseNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'vehicle_profiles' and column_name = 'phase'")
+                    .getSingleResult();
+            assertEquals("YES", phaseNullable, "phase is nullable -- no backfill for pre-existing rows");
         } finally {
             em.close();
         }
@@ -2528,6 +2993,219 @@ class PostgresDockerIntegrationTest {
                 }
                 smallPoolContext.close();
             }
+        }
+    }
+
+    /**
+     * The database-level change audit ({@code V21__db_audit_log.sql}) — proves the trigger fires
+     * end to end through a real {@code Jpa*Repository} (not a hand-crafted native-SQL write, since
+     * the whole point is that the trigger fires no matter <em>how</em> a row changes) and that the
+     * coverage the migration's own header claims actually holds against the live schema.
+     */
+    @Nested
+    class DbAuditLogRepositoryTests {
+
+        private final JpaDbAuditLogRepository auditLog = new JpaDbAuditLogRepository(entityManagerFactory);
+        private final GeofenceRepositoryPort geofences = new JpaGeofenceRepository(entityManagerFactory);
+
+        private List<GeoPosition> triangle() {
+            return List.of(
+                    new GeoPosition(10.0, 20.0, null),
+                    new GeoPosition(10.0, 21.0, null),
+                    new GeoPosition(11.0, 20.5, null));
+        }
+
+        @Test
+        void insertUpdateAndDeleteThroughAnExistingRepositoryEachLeaveTheirOwnAuditRowNewestFirst() {
+            ZoneId zoneId = ZoneId.random();
+            String rowId = zoneId.value().toString();
+
+            geofences.save(new GeofenceZone(zoneId, "Audit Zone", ZoneKind.KEEP_OUT, triangle(), 50.0, true));
+            geofences.save(new GeofenceZone(zoneId, "Audit Zone Renamed", ZoneKind.KEEP_OUT, triangle(), 50.0, false));
+            geofences.deleteById(zoneId);
+
+            List<DbAuditLogEntity> rows = auditLog.findRecentForRow("geofence_zones", rowId, 10);
+            assertEquals(3, rows.size(), "one audit row per INSERT/UPDATE/DELETE");
+
+            // newest first: DELETE, UPDATE, INSERT
+            DbAuditLogEntity deleteRow = rows.get(0);
+            DbAuditLogEntity updateRow = rows.get(1);
+            DbAuditLogEntity insertRow = rows.get(2);
+
+            assertEquals(DbAuditOperation.DELETE, deleteRow.operation());
+            assertEquals(DbAuditOperation.UPDATE, updateRow.operation());
+            assertEquals(DbAuditOperation.INSERT, insertRow.operation());
+
+            assertNull(insertRow.oldRow(), "an INSERT has no prior row image");
+            assertNotNull(insertRow.newRow());
+            assertEquals("Audit Zone", insertRow.newRow().get("name"));
+            assertNull(insertRow.changedColumns(), "changed_columns is only meaningful for an UPDATE");
+
+            assertNotNull(updateRow.oldRow());
+            assertNotNull(updateRow.newRow());
+            assertEquals("Audit Zone Renamed", updateRow.newRow().get("name"));
+            assertNotNull(updateRow.changedColumns(), "an UPDATE must name what changed");
+            assertTrue(updateRow.changedColumns().contains("name"), "name was renamed");
+            assertTrue(updateRow.changedColumns().contains("enabled"), "enabled flipped true -> false");
+            assertFalse(updateRow.changedColumns().contains("id"),
+                    "the unchanged primary key must not be reported as a changed column");
+            assertEquals(POSTGRES.getUsername(), updateRow.dbUser(),
+                    "db_user is session_user, not an application-supplied value");
+
+            assertNotNull(deleteRow.oldRow());
+            assertNull(deleteRow.newRow(), "a DELETE has no new row image");
+        }
+
+        @Test
+        void findRecentSpansEveryAuditedTableNewestFirstBoundedByLimit() {
+            // "Own rows within a large fetch" technique (same as AuditTrailRepositoryTests/
+            // DetectionEventRepositoryTests above): the container accumulates rows across every
+            // test in this class, so this only asserts about rows this test itself just wrote.
+            ZoneId first = ZoneId.random();
+            ZoneId second = ZoneId.random();
+            geofences.save(new GeofenceZone(first, "Recent A", ZoneKind.KEEP_OUT, triangle(), null, true));
+            geofences.save(new GeofenceZone(second, "Recent B", ZoneKind.KEEP_IN, triangle(), null, true));
+
+            List<DbAuditLogEntity> recent = auditLog.findRecent(100_000);
+            List<String> recentRowIds = recent.stream().map(DbAuditLogEntity::rowId).toList();
+
+            int firstIndex = recentRowIds.indexOf(second.value().toString());
+            int secondIndex = recentRowIds.indexOf(first.value().toString());
+            assertTrue(firstIndex >= 0 && secondIndex >= 0, "both freshly-inserted rows must appear");
+            assertTrue(firstIndex < secondIndex, "the more recently saved zone must sort first (newest-first)");
+        }
+
+        /**
+         * {@code to_jsonb(NEW)} copies every column verbatim, so auditing {@code users} would
+         * otherwise write {@code password_hash} into this table — and on a password change, both the
+         * old and the new hash. That is credential material landing in a table with longer retention
+         * and a wider read audience than the row it came from, which is why the trigger redacts it.
+         *
+         * <p>The redaction must not cost information: {@code changed_columns} is computed before it,
+         * so "the password changed" is still reported while neither hash is stored.
+         */
+        @Test
+        void aPasswordHashIsNeverCopiedIntoTheAuditLogThoughItsChangeIsStillReported() {
+            UserRepositoryPort users = new JpaUserRepository(entityManagerFactory);
+            UserId userId = UserId.random();
+            String rowId = userId.value().toString();
+
+            users.save(new User(userId, "audit.secret", "Audit Secret", "secret@vision.local",
+                    "$2a$10$ORIGINALHASHVALUE", true, List.of()));
+            users.save(new User(userId, "audit.secret", "Audit Secret", "secret@vision.local",
+                    "$2a$10$ROTATEDHASHVALUE", true, List.of()));
+
+            List<DbAuditLogEntity> rows = auditLog.findRecentForRow("users", rowId, 10);
+            assertEquals(2, rows.size(), "one audit row for the INSERT, one for the UPDATE");
+
+            DbAuditLogEntity updateRow = rows.get(0);
+            DbAuditLogEntity insertRow = rows.get(1);
+
+            assertEquals("[redacted]", insertRow.newRow().get("password_hash"),
+                    "the hash must be replaced, and the key kept so the row's shape stays honest");
+            assertEquals("[redacted]", updateRow.oldRow().get("password_hash"), "including the superseded hash");
+            assertEquals("[redacted]", updateRow.newRow().get("password_hash"));
+            assertTrue(updateRow.changedColumns().contains("password_hash"),
+                    "redaction must not hide that the password changed — changed_columns is computed first");
+            assertEquals("audit.secret", updateRow.newRow().get("username"),
+                    "only the named sensitive columns are redacted; the rest of the row is intact");
+        }
+    }
+
+    /**
+     * Reads the live schema and proves {@code V21__db_audit_log.sql}'s own "Included"/"Excluded"
+     * lists actually match reality — the coverage test the brief for this feature calls for, so a
+     * future migration that adds a table fails this test until someone consciously classifies it
+     * as audited or excluded, instead of silently falling through the cracks.
+     */
+    @Nested
+    class DbAuditLogCoverageTests {
+
+        @Test
+        void everyPublicBaseTableIsEitherAuditedOrExplicitlyExcluded() {
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                @SuppressWarnings("unchecked")
+                List<String> tableNames = em.createNativeQuery(
+                                "select table_name from information_schema.tables "
+                                        + "where table_schema = 'public' and table_type = 'BASE TABLE'")
+                        .getResultList();
+                Set<String> liveTables = new HashSet<>(tableNames);
+
+                Set<String> classified = new HashSet<>(AUDITED_TABLES);
+                classified.addAll(EXCLUDED_TABLES);
+
+                Set<String> unclassified = new HashSet<>(liveTables);
+                unclassified.removeAll(classified);
+                assertTrue(unclassified.isEmpty(),
+                        "every table in the live schema must be classified as audited or explicitly "
+                                + "excluded -- unclassified: " + unclassified);
+
+                Set<String> staleReferences = new HashSet<>(classified);
+                staleReferences.removeAll(liveTables);
+                assertTrue(staleReferences.isEmpty(),
+                        "AUDITED_TABLES/EXCLUDED_TABLES reference tables that no longer exist: "
+                                + staleReferences);
+            } finally {
+                em.close();
+            }
+        }
+
+        @Test
+        void everyAuditedTableCarriesExactlyTheAuditTriggerAndNoExcludedTableDoes() {
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                @SuppressWarnings("unchecked")
+                List<String> triggeredTables = em.createNativeQuery(
+                                "select c.relname from pg_trigger t join pg_class c on c.oid = t.tgrelid "
+                                        + "where not t.tgisinternal")
+                        .getResultList();
+
+                assertEquals(AUDITED_TABLES, new HashSet<>(triggeredTables),
+                        "the live set of triggered tables must equal AUDITED_TABLES exactly -- a "
+                                + "missing trigger or a stray one on an excluded table both fail here");
+            } finally {
+                em.close();
+            }
+        }
+    }
+
+    /**
+     * Proves {@code V21__db_audit_log.sql} applied cleanly on top of V1-V20: {@code
+     * db_audit_log} exists with the expected required/nullable columns. {@link
+     * DbAuditLogCoverageTests} separately proves the trigger attachment itself; this only proves
+     * the table shape, same "prove the migration, not the entity" split as the V19/V20 schema
+     * tests above.
+     */
+    @Test
+    void v21MigrationCreatesTheDbAuditLogTableOnTopOfV1ThroughV20() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String tableNameNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'db_audit_log' and column_name = 'table_name'")
+                    .getSingleResult();
+            assertEquals("NO", tableNameNullable);
+
+            String rowIdNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'db_audit_log' and column_name = 'row_id'")
+                    .getSingleResult();
+            assertEquals("NO", rowIdNullable);
+
+            String oldRowNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'db_audit_log' and column_name = 'old_row'")
+                    .getSingleResult();
+            assertEquals("YES", oldRowNullable, "old_row is null for an INSERT");
+
+            String newRowNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'db_audit_log' and column_name = 'new_row'")
+                    .getSingleResult();
+            assertEquals("YES", newRowNullable, "new_row is null for a DELETE");
+        } finally {
+            em.close();
         }
     }
 }

@@ -4,6 +4,7 @@ import com.drones.mavlink.PeerId;
 import com.drones.mavlink.codec.FrameSink;
 import com.drones.mavlink.codec.MavFrame;
 import com.drones.mavlink.config.MavlinkCoreSettings;
+import com.drones.mavlink.session.CorrelationKeys;
 import com.drones.mavlink.session.Correlator;
 import com.drones.mavlink.session.MatchKey;
 
@@ -43,8 +44,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class CommandService {
 
-    /** {@code COMMAND_ACK}'s wire message id (MAVLink common.xml) — mirrors {@code DefaultCorrelator}'s own. */
-    public static final int COMMAND_ACK_MESSAGE_ID = 77;
+    /** {@code COMMAND_ACK}'s wire message id — re-exported from {@link CorrelationKeys}, which owns the value. */
+    public static final int COMMAND_ACK_MESSAGE_ID = CorrelationKeys.COMMAND_ACK_MESSAGE_ID;
 
     /**
      * Bounds how many times a single exchange re-extends its deadline in response to
@@ -129,7 +130,7 @@ public final class CommandService {
 
     private CompletableFuture<CommandOutcome> exchange(PeerId target, MavCmd command, RequestResponse.AttemptPayload payload) {
         int commandId = EnumValue.of(command).value();
-        MatchKey key = new MatchKey(target.system(), COMMAND_ACK_MESSAGE_ID, commandId);
+        MatchKey key = CorrelationKeys.forCommandAck(target.system(), commandId);
         AtomicBoolean sawInProgress = new AtomicBoolean(false);
         AtomicInteger extensionsUsed = new AtomicInteger();
         RequestResponse.ReplyClassifier classifier = reply -> classify(reply, sawInProgress, extensionsUsed);

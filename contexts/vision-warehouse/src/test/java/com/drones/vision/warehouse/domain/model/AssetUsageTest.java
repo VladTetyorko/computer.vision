@@ -141,4 +141,47 @@ class AssetUsageTest {
 
         assertNotEquals(withoutStream, withStream);
     }
+
+    // --- Phase (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O7) --------------------
+
+    @Test
+    void phaseDefaultsToPreflightViaEitherConvenienceConstructor() {
+        AssetUsage sevenArg = openUsage();
+        AssetUsage eightArg = new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0,
+                StreamId.random());
+
+        assertEquals(UsagePhase.PREFLIGHT, sevenArg.phase());
+        assertEquals(UsagePhase.PREFLIGHT, eightArg.phase());
+    }
+
+    @Test
+    void rejectsNullPhase() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0, null,
+                        null));
+    }
+
+    @Test
+    void withPhaseReturnsNewInstanceWithPhaseSet() {
+        AssetUsage usage = openUsage();
+
+        AssetUsage updated = usage.withPhase(UsagePhase.IN_FLIGHT);
+
+        assertEquals(UsagePhase.IN_FLIGHT, updated.phase());
+        assertEquals(UsagePhase.PREFLIGHT, usage.phase(), "original instance must be unchanged");
+    }
+
+    @Test
+    void closedWithPositionsAndWithSampleCountAllPreservePhase() {
+        AssetUsage usage = openUsage().withPhase(UsagePhase.LINK_LOST);
+
+        AssetUsage closed = usage.closed(usage.startedAt().plusSeconds(30));
+        AssetUsage repositioned =
+                usage.withPositions(new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null));
+        AssetUsage resampled = usage.withSampleCount(7);
+
+        assertEquals(UsagePhase.LINK_LOST, closed.phase());
+        assertEquals(UsagePhase.LINK_LOST, repositioned.phase());
+        assertEquals(UsagePhase.LINK_LOST, resampled.phase());
+    }
 }

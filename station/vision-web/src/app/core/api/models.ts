@@ -591,6 +591,14 @@ export interface DiscoveredDevice {
   readonly protocol?: string;
   readonly uri?: string;
   readonly details: Record<string, string>;
+  /**
+   * docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1/D16 — the same entries a probe/register call
+   * wants under its own `options` (e.g. `{"sysid":"7"}`), ending the lossy `details["sysid"]`-only
+   * read. Required, not optional: `DiscoveredDeviceResponse.from` (verified against source)
+   * constructs at minimum `Map.of()`, never `null` — unlike `suggestedCategory`/`protocol`/`uri`
+   * above, this field is never omitted from the wire.
+   */
+  readonly suggestedOptions: Record<string, string>;
 }
 
 /** Mirrors `dto.ScanRequestDto`. */
@@ -1635,6 +1643,199 @@ export interface NetworkAddress {
 export interface SystemNetworkResponse {
   readonly addresses: readonly NetworkAddress[];
   readonly mavlinkPort: number;
+}
+
+// --- Drone onboarding: vehicle profile & fleet readiness (docs/plans/active/DRONE-ONBOARDING-PLAN.md
+// §8.1's frozen wire contract, O6) — the PROBE/CONFIGURE stages (`OnboardingController`) and the
+// read-only NEGOTIATE stage (`ReadinessController`). Every type below is verified 1:1 against O5's
+// actual DTOs (`station/vision-api/.../dto/VehicleProfileResponse.java` etc.) and the domain enums
+// they wrap, not assumed from the plan doc alone — field names/order/nullability match exactly.
+//
+// **`vision.onboarding.probe.enabled` defaults `false` (D17, the guardrail).** With it off,
+// `POST /api/onboarding/probe` and `POST /api/assets/{id}/probe`/`/remediate` all 409 with the
+// exact, stable body `{"error":"...", "message":"vehicle probing is disabled
+// (vision.onboarding.probe.enabled)"}` (verified against `NoopVehicleConfigPort.DISABLED_MESSAGE`
+// and its wiring test) — `core/readiness/readiness-logic.ts#isProbeDisabledError` matches this exact
+// string so the UI can render "not enabled here" as a first-class state rather than a generic
+// failure toast, the same disabled-signal pattern `core/training/training-store.ts` established.
+// `GET /api/assets/{assetId}/readiness` and `GET /api/fleet/readiness` are **never** gated by this
+// flag (verified against `ReadinessController` — no flag check anywhere in it) — a never-probed
+// asset still gets a full report, every feature `UNKNOWN`, `profileObservedAt: null`. This is why
+// the fleet board and the readiness screen work identically whether or not probing is enabled; only
+// the wizard's Verify step and any "probe now"/"remediate" action are flag-gated.
+
+/** One `VehicleProfile#messages()` entry — a MAVLink message observed during a probe's passive inventory window. */
+export interface MessageObservation {
+  readonly messageId: number;
+  readonly name: string;
+  readonly hz: number;
+  readonly count: number;
+}
+
+/** One `VehicleProfile#parameters()` entry — a parameter value read back during a probe. */
+export interface ParameterReading {
+  readonly name: string;
+  readonly value: number;
+  readonly type: string;
+}
+
+/**
+ * Mirrors `VehicleProfileResponse` — the body of `POST /api/onboarding/probe`, `GET/POST
+ * /api/assets/{assetId}/profile|probe`. Verified against source: the Java record carries no
+ * `@JsonInclude(NON_NULL)` (unlike `DiscoveredDeviceResponse`), so every field below is always
+ * present on a `200` — `incompleteReason` serializes as a literal `null` when `complete` is `true`,
+ * never omitted (C7 — "never probed anything for this field" is itself an honest, renderable
+ * answer). `sysid`/`firmware`/`firmwareVersion`/`vehicleKind`/`capabilityBitmask`/
+ * `linkBytesPerSecond` are nullable for the same reason: a short or interrupted probe may complete
+ * with some fields still unobserved.
+ */
+export interface VehicleProfile {
+  readonly linkKey: string;
+  readonly observedAt: string;
+  readonly sysid: number | null;
+  readonly firmware: string | null;
+  readonly firmwareVersion: string | null;
+  readonly vehicleKind: string | null;
+  readonly capabilityBitmask: number | null;
+  readonly capabilityFlags: readonly string[];
+  readonly messages: readonly MessageObservation[];
+  readonly parameters: readonly ParameterReading[];
+  readonly linkBytesPerSecond: number | null;
+  readonly complete: boolean;
+  readonly incompleteReason: string | null;
+}
+
+/**
+ * Request body for `POST /api/onboarding/probe` — mirrors `ProbeCandidateRequest`, deliberately the
+ * same `{protocol, uri, options}` shape as `ProbeDeviceRequest` above (the plan's own "mirrors the
+ * existing probe-before-save gesture, just against a vehicle link"). `options["sysid"]`, when
+ * present, is folded into the derived candidate identity server-side.
+ */
+export interface ProbeCandidateRequest {
+  readonly protocol: string;
+  readonly uri: string;
+  readonly options?: Record<string, string>;
+}
+
+/**
+ * The frozen v1 feature keys (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1) — mirrors
+ * `FeatureRequirement.FEATURE_KEYS` verbatim, in the seed migration's own row order (not
+ * alphabetical), so a fleet-board column order that follows this array matches the report's own
+ * `features` array order (`ReadinessRowResponse`'s javadoc: "insertion order matches the report's
+ * own feature order").
+ */
+export const FEATURE_KEYS = [
+  'map-position',
+  'preflight-checks',
+  'ground-speed',
+  'link-quality',
+  'failsafe-banners',
+  'battery',
+  'visual-geolocation',
+  'fleet-identity',
+  'command-tx',
+  'rc-relay',
+  'video-ingest',
+] as const;
+
+/** One of the eleven frozen v1 {@link FEATURE_KEYS} strings. */
+export type FeatureKey = (typeof FEATURE_KEYS)[number];
+
+/** Mirrors `ReadinessVerdict` — frozen wire spelling, the enum constant name is the wire string. */
+export type ReadinessVerdict = 'GO' | 'NO_GO' | 'UNKNOWN';
+
+/** Mirrors `FeatureStatus` — frozen wire spelling, the enum constant name is the wire string. */
+export type FeatureStatus = 'READY' | 'DEGRADED' | 'MISSING' | 'UNKNOWN';
+
+/**
+ * Mirrors `RemedyKind` — frozen wire spelling. A {@link FeatureReadiness} row with no automatable
+ * remedy carries `remedy: null`, not a fifth constant here.
+ */
+export type RemedyKind = 'MESSAGE_INTERVAL' | 'PARAM_WRITE' | 'CLI_SCRIPT' | 'MANUAL';
+
+/**
+ * One `ReadinessReportResponse#features()` row. Mirrors `FeatureReadinessResponse` — note the wire
+ * key is `feature`, not `featureKey` (§8.1's own frozen spelling, carried through unchanged).
+ */
+export interface FeatureReadiness {
+  readonly feature: FeatureKey;
+  readonly label: string;
+  readonly status: FeatureStatus;
+  readonly detail: string;
+  readonly remedy: RemedyKind | null;
+}
+
+/**
+ * Mirrors `ReadinessReportResponse` — the body of `GET /api/assets/{assetId}/readiness`, and a
+ * remediation's own `reprobe`. No `NON_NULL` on the Java side (verified against source):
+ * `profileObservedAt` is a literal `null`, never omitted, for an asset that was never probed (C7) —
+ * `ReadinessReport`'s own javadoc calls this itself an honest, renderable answer, not a failure.
+ */
+export interface ReadinessReport {
+  readonly assetId: string;
+  readonly verdict: ReadinessVerdict;
+  readonly evaluatedAt: string;
+  readonly profileObservedAt: string | null;
+  readonly features: readonly FeatureReadiness[];
+  readonly blockers: readonly string[];
+}
+
+/**
+ * One `GET /api/fleet/readiness` row. Mirrors `ReadinessRowResponse` — deliberately flatter than
+ * {@link ReadinessReport} (no `detail`/`remedy` text): the fleet board renders a compact status
+ * grid, the per-asset readiness screen renders the full report. `features` is `featureKey ->
+ * status`, one entry per row the report evaluated, in the report's own order.
+ */
+export interface ReadinessRow {
+  readonly assetId: string;
+  readonly displayName: string;
+  readonly verdict: ReadinessVerdict;
+  readonly features: Record<string, FeatureStatus>;
+}
+
+/** Mirrors `FleetReadinessResponse` — the body of `GET /api/fleet/readiness`. */
+export interface FleetReadiness {
+  readonly assets: readonly ReadinessRow[];
+}
+
+/**
+ * Request body for `POST /api/assets/{assetId}/remediate` — mirrors `RemediationRequest`.
+ * `features` names which {@link FeatureReadiness} rows to attempt; `actions` names which
+ * {@link RemedyKind} mechanisms the caller allows — a feature whose own remedy isn't listed here
+ * reports `UNSUPPORTED`, never silently skipped.
+ */
+export interface RemediationRequest {
+  readonly features?: readonly FeatureKey[];
+  readonly actions?: readonly RemedyKind[];
+}
+
+/**
+ * One `RemediationResultResponse#actions()` entry — mirrors `RemediationActionResponse`. No
+ * `NON_NULL` on the Java side (verified against source): `messageId`/`intervalMicros`/
+ * `previousValue`/`newValue` all serialize as literal `null` when inapplicable to this action, never
+ * omitted. `action` itself is `null` when no remedy applies to the feature at all (mirrors
+ * `FeatureReadiness.remedy()`'s own nullability); `detail` is always an honest sentence (C7).
+ */
+export interface RemediationAction {
+  readonly action: RemedyKind | null;
+  readonly messageId: number | null;
+  readonly intervalMicros: number | null;
+  readonly outcome: 'ACCEPTED' | 'DENIED' | 'NO_ACK' | 'UNSUPPORTED';
+  readonly previousValue: number | null;
+  readonly newValue: number | null;
+  readonly detail: string;
+}
+
+/**
+ * Mirrors `RemediationResultResponse` — the body of `POST /api/assets/{assetId}/remediate`.
+ * `verifiedAt`/`reprobe` are both `null` together when nothing was actually dispatched to the
+ * vehicle (nothing to verify) — e.g. every requested action came back `UNSUPPORTED`.
+ */
+export interface RemediationResult {
+  readonly requestedAt: string;
+  readonly verifiedAt: string | null;
+  readonly actions: readonly RemediationAction[];
+  readonly reprobe: ReadinessReport | null;
 }
 
 // --- System status (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.1/§4.3's frozen wire contract, S3) -----------

@@ -2,8 +2,10 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.flight.domain.port.FeatureRequirementRepositoryPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
+import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
@@ -166,5 +168,28 @@ public class PersistenceWiringConfiguration {
     @Bean
     public DrawingRepositoryPort drawingRepositoryPort(EntityManagerFactory entityManagerFactory) {
         return new JpaDrawingRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 — append-only vehicle-probe observations, same
+     * shape as the seventeen above. Wired unconditionally like every other port here: {@code
+     * vision.onboarding.probe.enabled} only gates whether anything ever calls {@link
+     * #save}/{@link com.drones.vision.flight.domain.port.VehicleConfigPort} (see {@code
+     * OnboardingWiringConfiguration}), not whether the table/repository exists.
+     */
+    @Bean
+    public VehicleProfileRepositoryPort vehicleProfileRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaVehicleProfileRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6 — the seeded feature x requirement matrix
+     * ({@code V18__feature_requirements.sql}), same shape as the eighteen above. Read-only: this
+     * port has no {@code save}, every row is Flyway seed data.
+     */
+    @Bean
+    public FeatureRequirementRepositoryPort featureRequirementRepositoryPort(
+            EntityManagerFactory entityManagerFactory) {
+        return new JpaFeatureRequirementRepository(entityManagerFactory);
     }
 }

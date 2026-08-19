@@ -1,48 +1,63 @@
 <div class="page">
-  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/17-preflight.md — `page-head` becomes the
-       bar; the old paragraph carried real instruction (what the page is a live view *of*), so it
-       moves behind the `?` hint rather than being dropped. The `DRONE` select keeps its job (this
-       page's fleet-matrix rewrite is 17-preflight.md's own wave-4 scope, out of this task) but now
-       rides `[pageBarFilters]`, gated the same way it always was — only once there's a fleet to
-       pick from. -->
   <vision-page-bar
-    title="Pre-flight checklist"
+    title="Fleet readiness"
     icon="list"
-    hint="The live status card for any drone — video feed, telemetry link, GPS fix, battery, armable."
-  >
-    @if (!facade.loading() && !facade.error() && facade.hasAnyAssets()) {
-      <label pageBarFilters class="row preflight-picker">
-        <span class="muted">Drone</span>
-        <select
-          aria-label="Choose a drone"
-          [ngModel]="facade.selectedAssetId()"
-          (ngModelChange)="facade.selectAsset($event)"
-        >
-          @for (asset of facade.sortedAssets(); track asset.assetId) {
-            <option [value]="asset.assetId">{{ asset.displayName }}</option>
-          }
-        </select>
-      </label>
-    }
-  </vision-page-bar>
-
-  <vision-notice icon="help">
-    Saved, editable checklist templates are coming — the card below is today's live status only.
-  </vision-notice>
+    [count]="facade.loading() ? null : facade.rows().length"
+    countNoun="drone"
+    hint="Whether each drone's last-observed link satisfies what this platform's own features need — video feed and the live cockpit checklist stay on Fly. Advisory only: a No-go never blocks flight, it just tells you what's missing."
+  />
 
   @if (facade.loading()) {
-    <p class="muted">Loading…</p>
+    <p class="muted">Loading fleet readiness…</p>
   } @else if (facade.error(); as error) {
-    <vision-empty title="Couldn't load assets" [message]="error">
-      <button type="button" class="btn secondary" (click)="facade.loadAssets()">Try again</button>
+    <vision-empty title="Couldn't load fleet readiness" [message]="error">
+      <button type="button" class="btn secondary" (click)="facade.refresh()">Try again</button>
     </vision-empty>
   } @else if (!facade.hasAnyAssets()) {
-    <vision-empty title="No assets yet" message="Add a source, then its pre-flight status shows up here.">
+    <vision-empty title="No assets yet" message="Add a source, then its readiness shows up here.">
       <a class="btn" routerLink="/add-source">Add source</a>
     </vision-empty>
   } @else {
-    <div class="card preflight-card">
-      <vision-preflight-checklist [items]="facade.preflightItems()" />
+    <div class="kpi-tiles">
+      <vision-stat label="Go" [value]="facade.counts().go" tone="ok" />
+      <vision-stat label="No-go" [value]="facade.counts().noGo" [tone]="facade.counts().noGo > 0 ? 'danger' : 'muted'" />
+      <vision-stat label="Unknown" [value]="facade.counts().unknown" tone="muted" />
+    </div>
+
+    <div class="card">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Drone</th>
+              <th>Verdict</th>
+              <th>Needs attention</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of facade.rows(); track row.assetId) {
+              <tr>
+                <td class="name-cell truncate" [title]="row.displayName">{{ row.displayName }}</td>
+                <td>
+                  <span class="chip" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'">
+                    <span class="dot" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'"></span>
+                    {{ facade.verdictLabel(row.verdict) }}
+                  </span>
+                </td>
+                @if (facade.attention(row); as attention) {
+                  <td class="attention-cell truncate muted" [title]="attention">{{ attention }}</td>
+                } @else {
+                  <td class="faint">—</td>
+                }
+                <td class="actions">
+                  <a class="btn secondary small" [routerLink]="['/assets', row.assetId, 'readiness']">Report ›</a>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
     </div>
   }
 </div>

@@ -481,6 +481,122 @@ describe('VisionApi', () => {
     await expect(promise).resolves.toEqual({ addresses: [], mavlinkPort: 14550 });
   });
 
+  // --- Drone onboarding: vehicle profile & fleet readiness (docs/plans/active/DRONE-ONBOARDING-PLAN.md
+  // §8.1's frozen wire contract, O6) -------------------------------------------------------------
+
+  it('probes a candidate pre-registration', async () => {
+    const promise = api.probeVehicleCandidate({ protocol: 'mavlink', uri: 'udp://0.0.0.0:14550', options: { sysid: '7' } });
+    const request = http.expectOne({ method: 'POST', url: '/api/onboarding/probe' });
+    expect(request.request.body).toEqual({ protocol: 'mavlink', uri: 'udp://0.0.0.0:14550', options: { sysid: '7' } });
+    request.flush({
+      linkKey: 'udp://0.0.0.0:14550#7',
+      observedAt: '2026-08-18T00:00:00Z',
+      sysid: 7,
+      firmware: 'ardupilot',
+      firmwareVersion: null,
+      vehicleKind: null,
+      capabilityBitmask: null,
+      capabilityFlags: [],
+      messages: [],
+      parameters: [],
+      linkBytesPerSecond: null,
+      complete: false,
+      incompleteReason: 'inventory window elapsed before every message arrived',
+    });
+    await expect(promise).resolves.toMatchObject({ linkKey: 'udp://0.0.0.0:14550#7', complete: false });
+  });
+
+  it('fetches an asset\'s latest profile, escaping the asset id', async () => {
+    const promise = api.assetProfile('a/1 x');
+    const request = http.expectOne({ method: 'GET', url: '/api/assets/a%2F1%20x/profile' });
+    request.flush({
+      linkKey: 'udp://0.0.0.0:14550#7',
+      observedAt: '2026-08-18T00:00:00Z',
+      sysid: 7,
+      firmware: 'ardupilot',
+      firmwareVersion: '4.5.0',
+      vehicleKind: 'copter',
+      capabilityBitmask: 1,
+      capabilityFlags: ['MAV_PROTOCOL_CAPABILITY_MISSION_INT'],
+      messages: [{ messageId: 0, name: 'HEARTBEAT', hz: 1.0, count: 10 }],
+      parameters: [],
+      linkBytesPerSecond: 512,
+      complete: true,
+      incompleteReason: null,
+    });
+    await expect(promise).resolves.toMatchObject({ firmware: 'ardupilot', complete: true });
+  });
+
+  it('actively probes a registered asset', async () => {
+    const promise = api.probeAsset('a-1');
+    const request = http.expectOne({ method: 'POST', url: '/api/assets/a-1/probe' });
+    expect(request.request.body).toEqual({});
+    request.flush({
+      linkKey: 'udp://0.0.0.0:14550#7',
+      observedAt: '2026-08-18T00:00:00Z',
+      sysid: 7,
+      firmware: 'ardupilot',
+      firmwareVersion: null,
+      vehicleKind: null,
+      capabilityBitmask: null,
+      capabilityFlags: [],
+      messages: [],
+      parameters: [],
+      linkBytesPerSecond: null,
+      complete: true,
+      incompleteReason: null,
+    });
+    await expect(promise).resolves.toMatchObject({ complete: true });
+  });
+
+  it('fetches one asset\'s full readiness report', async () => {
+    const promise = api.assetReadiness('a-1');
+    const request = http.expectOne({ method: 'GET', url: '/api/assets/a-1/readiness' });
+    request.flush({
+      assetId: 'a-1',
+      verdict: 'NO_GO',
+      evaluatedAt: '2026-08-18T00:00:00Z',
+      profileObservedAt: null,
+      features: [
+        { feature: 'map-position', label: 'Map position', status: 'UNKNOWN', detail: 'never probed', remedy: null },
+      ],
+      blockers: ['map-position'],
+    });
+    await expect(promise).resolves.toMatchObject({ verdict: 'NO_GO', profileObservedAt: null });
+  });
+
+  it('fetches the fleet readiness board', async () => {
+    const promise = api.fleetReadiness();
+    const request = http.expectOne({ method: 'GET', url: '/api/fleet/readiness' });
+    request.flush({ assets: [{ assetId: 'a-1', displayName: 'Drone 1', verdict: 'GO', features: { battery: 'READY' } }] });
+    await expect(promise).resolves.toEqual({
+      assets: [{ assetId: 'a-1', displayName: 'Drone 1', verdict: 'GO', features: { battery: 'READY' } }],
+    });
+  });
+
+  it('remediates an asset\'s readiness features, escaping the asset id', async () => {
+    const promise = api.remediateAsset('a/1 x', { features: ['battery'], actions: ['MESSAGE_INTERVAL'] });
+    const request = http.expectOne({ method: 'POST', url: '/api/assets/a%2F1%20x/remediate' });
+    expect(request.request.body).toEqual({ features: ['battery'], actions: ['MESSAGE_INTERVAL'] });
+    request.flush({
+      requestedAt: '2026-08-18T00:00:00Z',
+      verifiedAt: null,
+      actions: [
+        {
+          action: 'MESSAGE_INTERVAL',
+          messageId: 1,
+          intervalMicros: 1000000,
+          outcome: 'UNSUPPORTED',
+          previousValue: null,
+          newValue: null,
+          detail: 'asset was never probed',
+        },
+      ],
+      reprobe: null,
+    });
+    await expect(promise).resolves.toMatchObject({ verifiedAt: null, reprobe: null });
+  });
+
   // --- Tracking engine (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7) ---------------
 
   it('fetches the tracker-engine roster', async () => {

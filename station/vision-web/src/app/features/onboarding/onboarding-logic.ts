@@ -2,6 +2,7 @@ import type {
   AssetEdit,
   CreateAssetRequest,
   Membership,
+  ProbeCandidateRequest,
   ProbeDeviceRequest,
   Role,
   UserSummary,
@@ -21,8 +22,8 @@ import { withRegistrationNumber } from '../../core/fleet/asset-attributes';
  */
 
 /**
- * The wizard's five steps, always in this order — `nextStep`/`prevStep` are the only way to move
- * through the first four. **`assign`** (docs/plans/active/OPS-UX-PLAN.md §2 A3, "Who flies this?") is the
+ * The wizard's six steps, always in this order — `nextStep`/`prevStep` are the only way to move
+ * through the first five. **`assign`** (docs/plans/active/OPS-UX-PLAN.md §2 A3, "Who flies this?") is the
  * exception: the wizard never reaches it via `next()` (the `create` step's own action button is
  * what gets there, only after `POST /api/assets` actually succeeds — see `OnboardingStore#finishCreate`)
  * and it is never back-navigable into `create` (the asset already exists by the time it renders;
@@ -30,10 +31,22 @@ import { withRegistrationNumber } from '../../core/fleet/asset-attributes';
  * cases for it (returning `'assign'`/`'create'` respectively) purely so both functions stay total
  * over the whole `WizardStep` union — `onboarding.html`'s own footer is what actually withholds the
  * Back/Next buttons on this step (see its own template comment).
+ *
+ * **`verify`** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1 stage 3/O6, inserted between `test` and
+ * `create`) is where the platform actually observes the aircraft's own vehicle link — a
+ * pre-registration `POST /api/onboarding/probe` (`OnboardingStore#verify`), distinct from `test`'s
+ * `POST /api/devices/probe` (one decoded video frame). Reached only from `test` when the Connect
+ * method is `register` — the same set that reaches `test` at all (`nextStep`'s own `connect` case;
+ * `discover`/`listen`/`drone` all pivot to `register` before either step, `simulate` skips both).
+ * **Never itself blocking**: `canAdvanceFromVerify` below is unconditionally `true` — this wave
+ * resolves the plan's own open question OQ3 ("does a NO-GO verdict block, or only advise?", §10) as
+ * advisory-only pending an operator's own answer, and separately, `vision.onboarding.probe.enabled`
+ * defaults `false` (D17) so a probe attempt commonly 409s outright; neither case may strand an
+ * operator mid-wizard over a read this platform cannot promise will succeed.
  */
-export type WizardStep = 'profile' | 'connect' | 'test' | 'create' | 'assign';
+export type WizardStep = 'profile' | 'connect' | 'test' | 'verify' | 'create' | 'assign';
 
-export const WIZARD_STEPS: readonly WizardStep[] = ['profile', 'connect', 'test', 'create', 'assign'];
+export const WIZARD_STEPS: readonly WizardStep[] = ['profile', 'connect', 'test', 'verify', 'create', 'assign'];
 
 /**
  * The Connect step's entry points (docs/plans/done/UX-REWORK-PLAN.md §U-d — "the existing 3-choice connect
@@ -77,6 +90,8 @@ export function nextStep(current: WizardStep, method: ConnectMethod | null): Wiz
     case 'connect':
       return method === 'simulate' ? 'create' : 'test';
     case 'test':
+      return 'verify';
+    case 'verify':
     case 'create':
       return 'create';
     case 'assign':
@@ -92,7 +107,9 @@ export function prevStep(current: WizardStep, method: ConnectMethod | null): Wiz
     case 'assign':
       return 'create';
     case 'create':
-      return method === 'simulate' ? 'connect' : 'test';
+      return method === 'simulate' ? 'connect' : 'verify';
+    case 'verify':
+      return 'test';
     case 'test':
       return 'connect';
     case 'connect':
@@ -155,6 +172,19 @@ export function canAdvanceFromTest(method: ConnectMethod | null, lastProbeOk: bo
   return method === 'simulate' || lastProbeOk === true;
 }
 
+/**
+ * Verify step (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1 stage 3/O6): unconditionally
+ * advanceable — see {@link WizardStep}'s own doc comment for why a vehicle-link observation may
+ * never strand an operator mid-wizard. Takes `method` only so this function's own signature makes
+ * the "does not actually depend on it" fact checkable at every call site, the same total-function
+ * shape every other `canAdvanceFrom*` gate here uses, rather than a bare `true` a caller could
+ * mistake for a stub.
+ */
+export function canAdvanceFromVerify(method: ConnectMethod | null): boolean {
+  void method;
+  return true;
+}
+
 // --- Request builders --------------------------------------------------------------------------
 
 /** What the Test step's probe call needs — the same three fields a register candidate carries. */
@@ -172,6 +202,16 @@ export function buildProbeRequest(draft: ProbeConnectionDraft): ProbeDeviceReque
     uri: draft.uri.trim(),
     ...(options && Object.keys(options).length > 0 ? { options } : {}),
   };
+}
+
+/**
+ * Builds `POST /api/onboarding/probe`'s body for the Verify step (§3.1 stage 3/O6) — the same
+ * trimmed `{protocol, uri, options}` shape {@link buildProbeRequest} builds for the Test step's own
+ * video probe, since `ProbeCandidateRequest` deliberately mirrors `ProbeDeviceRequest` (its own
+ * doc comment).
+ */
+export function buildVerifyRequest(draft: ProbeConnectionDraft): ProbeCandidateRequest {
+  return buildProbeRequest(draft);
 }
 
 /** The Profile step's facts, trimmed and validated already by {@link canAdvanceFromProfile}. */

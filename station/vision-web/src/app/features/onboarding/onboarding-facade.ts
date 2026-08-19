@@ -28,6 +28,7 @@ const STEP_LABELS: Record<WizardStep, string> = {
   profile: 'Profile',
   connect: 'Connect',
   test: 'Test',
+  verify: 'Verify',
   create: 'Create',
   assign: 'Pilots',
 };

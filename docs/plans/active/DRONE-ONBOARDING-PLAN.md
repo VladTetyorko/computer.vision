@@ -313,6 +313,37 @@ Today the repo can send exactly two commands (`MAV_CMD_DO_SET_MODE`,
 `MAV_CMD_COMPONENT_ARM_DISARM`) and has zero `PARAM_SET` references, so Mechanism B is entirely new
 code.
 
+> ### ⚠ Measured against ArduPilot Copter 4.7.0 in wave O4 — read before building O8/O9
+>
+> Wave O4 ran the probe and both mechanisms against the firmware `infra/sitl` actually ships. Two
+> results contradict assumptions this section and the tables below were written on:
+>
+> 1. **There are no `SRx_*` stream-rate parameters on 4.7.** `SR0_*`, `SR1_*` and `SR2_*` were each
+>    read off a live instance and every one is absent. So the Tier-A row's "`SRx_*` stream rates"
+>    example, §2.5's *"`VFR_HUD` not arriving (`SR2_EXTRA2 = 0`)"*, §3.2 VERIFY's *"escalate to
+>    Tier-A `SRx_*` write"*, O8's exit criterion *"connect with `SR2_EXTRA2=0`"*, and the §9 JSON
+>    example's `SR2_EXTRA2` reading are **not implementable on this firmware**. Mechanism A is not a
+>    cheaper alternative to a stream-rate write here — it is the only mechanism that exists.
+>    Rewriting those rows belongs to O8, which is the wave that has to act on them.
+>
+>    **O8's exit criterion becomes simpler, not impossible.** It was written as *"connect with
+>    `SR2_EXTRA2=0`"* because it assumed the starved link had to be manufactured. It does not: a stock
+>    SITL is **already** starved — measured at four message types over a UDP `--out` link (`HEARTBEAT`
+>    at 1 Hz plus three event-driven ones at ~0.1 Hz), against the dozen a connected GCS sees. So the
+>    test is *connect to a stock aircraft, observe the starved baseline, enable the flag, observe the
+>    requested messages begin arriving* — with **no parameter write at all**, which is the point
+>    Mechanism A was there to make.
+> 2. **Several named parameters have been renamed.** `SYSID_THISMAV` → `MAV_SYSID` (so O9's wizard
+>    and the §3.2 IDENTIFY conflict remedy both name a parameter that no longer exists),
+>    `FS_BATT_ENABLE` → `BATT_FS_LOW_ACT`, `GPS_TYPE` → `GPS1_TYPE`. `ARMING_CHECK`, `RTL_ALT`,
+>    `WPNAV_SPEED`, `LAND_SPEED`, `ANGLE_MAX` and `PILOT_SPEED_UP` are absent too.
+>
+> The general lesson, and the reason `probeParameters` is configuration: **MAVLink gives an autopilot
+> no way to report an unknown parameter name — it simply says nothing.** A stale list therefore does
+> not fail loudly; it degrades into a slow probe that quietly reads less than it claims. Any wave
+> that adds a parameter name must verify it against a live instance, and `MavlinkSitlOnboardingIntegrationTest`
+> asserts every configured name answers so a future drift fails the build rather than the flight.
+
 **Mechanism C — generated CLI diff.** Betaflight and INAV do not usefully expose the MAVLink
 parameter protocol. We generate the exact `set …` / `save` lines **from the probed state** — a diff,
 not a generic snippet — for paste into the configurator, then a `[Verify]` that re-probes. We write
@@ -600,19 +631,29 @@ stays green by construction**, because with the flag off the system behaves exac
 | **O1** | adapter-builder | `drone-link/mavlink/**` only: message inventory — a `Dispatcher` subscription on `MavlinkGateway` counting `(msgid → count, Hz)` per peer over a window, plus a bytes/s meter. **No library change, no write, no new port** | S | `./mvnw -B -pl drone-link/mavlink test` green ×3, all **155** existing tests unweakened; a new loopback test proves per-sysid isolation of the inventory | — |
 | **O2** | **Opus** | `drone-link/mavlink-core/**` only: the class→`MatchKey` table in `session` (MISSIONS **D6**), `ParameterService` (L4 — `PARAM_REQUEST_READ`/`PARAM_VALUE` correlated by param name, `PARAM_SET` + read-back, over `RequestResponse`), `AUTOPILOT_VERSION` correlation, `api` records, `API.md` amendment | **L** | `./mvnw -B -pl drone-link/mavlink-core test` green ×3, ≥ the **102** existing tests unweakened; new `FakeVehicle` suite: param read round-trip, a re-sent `PARAM_VALUE` answered without a duplicate-key race, `PARAM_SET` read-back mismatch surfaced as failure, `AUTOPILOT_VERSION` matched, timeout path terminal not retried | coordination with MISSIONS M1 (D14) |
 | **O3** | domain-modeler + application-service | `contexts/vision-flight/**` only: `VehicleProfile`/`ReadinessReport`/`FeatureRequirement`/`ParameterTier`/`FlightPhase`/`FlightPhaseRule`, the three ports, `Default*Service` with the scope+audit gate | **M–L** | `./mvnw -B -pl contexts/vision-flight test` green ×3; hand-fake tests incl.: 403+audit on out-of-scope probe, 404 on out-of-scope read, write refused while `armed==true` **and** while `armed==null`, Tier-C name rejected by the allowlist, incomplete profile yields `UNKNOWN` not `GO`; all **144** existing flight tests untouched | O2 (port shape only — can start in parallel against this doc) |
-| **O4** | **Opus** | `drone-link/mavlink/**` only: `MavlinkVehicleConfigurator implements VehicleConfigPort` (probe = O1's inventory + `AUTOPILOT_VERSION` + named param read; remediate = message-interval; write = Tier-A with snapshot/read-back) | **M** | `-pl drone-link/mavlink test` green ×3, 155 unweakened; **docker-gated SITL suite extended and run un-skipped (C10)**: probe a real ArduPilot SITL, assert ≥8 message types with plausible rates, read 20 named params, request `VFR_HUD` at 5 Hz and observe the rate change, write `SR2_EXTRA2` and read it back. **A skipped SITL run fails the wave** | O1, O2, O3 |
-| **O5** | spring-integrator | `station/vision-api/**`, `station/vision-app/**`, `storage/persistence/**`: the §8.1 wire contract, wiring behind the flag, JPA entities + Flyway for `vehicle_profile` / `feature_requirement` (seeded with today's thresholds) / `asset_usage.phase`. **Persistence shape per C14** — target whatever `POSTGRES-ONLY` leaves behind, not today's dual in-memory/JPA arrangement | **M** | scoped builds green ×3; wire contract byte-matches §8.1; **flag off ⇒ every pre-existing api/app test passes unchanged** (the guardrail, asserted); ArchUnit untouched-green | O3, **and `POSTGRES-ONLY` merged** (C14) |
+| **O4** | **Opus** | `drone-link/mavlink/**` only: `MavlinkVehicleConfigurator implements VehicleConfigPort` (probe = O1's inventory + `AUTOPILOT_VERSION` + named param read; remediate = message-interval; write = Tier-A with snapshot/read-back) | **M** | `-pl drone-link/mavlink test` green ×3, 155 unweakened; **docker-gated SITL suite extended and run un-skipped (C10)**: probe a real ArduPilot SITL, assert ≥8 message types with plausible rates, read 20 named params, request `VFR_HUD` at 5 Hz and observe the rate change, write a parameter and read it back. **A skipped SITL run fails the wave** | O1, O2, O3 | **DONE** (`a1ea3bc`), 172/172 ×3, `Skipped: 0`. The ≥8-message-type assertion holds *after* Mechanism A, not before — default firmware streams four; and `SR2_EXTRA2` does not exist, so the write is `FENCE_ALT_MAX`. See the ⚠ box in §4a |
+| **O5** | spring-integrator | `station/vision-api/**`, `station/vision-app/**`, `storage/persistence/**`: the §8.1 wire contract, wiring behind the flag, JPA entities + Flyway for `vehicle_profile` / `feature_requirement` (seeded with today's thresholds) / `asset_usage.phase`. **Persistence shape per C14** — target whatever `POSTGRES-ONLY` leaves behind, not today's dual in-memory/JPA arrangement | **M** | scoped builds green ×3; wire contract byte-matches §8.1; **flag off ⇒ every pre-existing api/app test passes unchanged** (the guardrail, asserted); ArchUnit untouched-green | O3, **and `POSTGRES-ONLY` merged** (C14) | **DONE** (`3c9191e`): persistence 176/176, api 633/633, app 208/208, `Skipped: 0`. Also closed the `AssetUsage.phase` persistence gap O7 surfaced — the column, entity field, mapper (both directions) and round-trip tests, without which every reload silently reverted a flight to `PREFLIGHT`. Shipped the `probe.enabled=false` branch only; the `true` branch was wired in a follow-up once O4 was in tree |
 | **O6** | web-ui | `station/vision-web/**`: the readiness report screen, the wizard's new **verify** step between `test` and `create`, the fleet readiness board replacing `features/preflight`'s single card; `derivePreflight` demoted to a renderer and `BATTERY_LOW_PERCENT` sourced from the API | **L** | `npm test` + `tsc --noEmit` + prod build green; the existing cockpit checklist renders identically when the API is unavailable (fallback path tested) | O5 |
 | **O7** | application-service + adapter-builder | `contexts/vision-warehouse/**` (`AssetUsage.phase`, `createFromCandidate`, duplicate check) + `contexts/vision-perception/**` (`UsageTracker` drives the phase; a session opens on first telemetry, not only first stream) | **M** | `-pl contexts/vision-warehouse test` and `-pl contexts/vision-perception test` green ×3; new tests: armed→disarmed walks PREFLIGHT→IN_FLIGHT→POSTFLIGHT; `armed==null` never leaves PREFLIGHT; silence→LINK_LOST→re-heard→IN_FLIGHT; close-while-armed→ABANDONED; a telemetry-only asset gets a usage | O3 |
-| **O8** | adapter-builder | `drone-link/mavlink/**` + `station/vision-app/**` (property only): **Mechanism A on connect** — request the message set the requirement table asks for, every time a gateway learns a peer. Flag `vision.onboarding.remediate.message-interval.enabled`, default **false** | S | `-pl drone-link/mavlink test` green ×3; SITL: connect with `SR2_EXTRA2=0`, observe `VFR_HUD` begin arriving without any parameter write; flag off ⇒ zero commands sent (asserted) | O4 |
+| **O8** | adapter-builder | `drone-link/mavlink/**` + `station/vision-app/**` (property only): **Mechanism A on connect** — request the message set the requirement table asks for, every time a gateway learns a peer. Flag `vision.onboarding.remediate.message-interval.enabled`, default **false** | S | `-pl drone-link/mavlink test` green ×3; SITL: connect with `SR2_EXTRA2=0`, observe `VFR_HUD` begin arriving without any parameter write; flag off ⇒ zero commands sent (asserted) | O4 | **DONE** (`86136de`), 189/189 ×3, `Skipped: 0`, all four SITL suites un-skipped. Built in `drone-link/mavlink/**` first — the flag lives in `MavlinkSettings.Onboarding` (`requestMessagesOnConnect`, default false); the Spring property `vision.onboarding.remediate.message-interval.enabled` was wired **after O5 merged** (it held `vision.onboarding.*`), together with the `probe.enabled=true` branch O5 had to leave empty. "Flag off" is structural: `MavlinkGateway` never constructs the remediator, so no subscription exists. Exit criterion run per the ⚠ box's replacement, not as written |
 | **O9** | **Opus** — **gated on OQ2** | `contexts/vision-flight/**` + `drone-link/mavlink/**` + `station/vision-api/**`: Tier-A writes live — snapshot, confirm, read-back, restore, audit; `SYSID_THISMAV` assignment in the wizard | **M** | scoped green ×3; SITL: write `SYSID_THISMAV`, verify by read-back, restore, and confirm both transitions are in the audit trail; a write attempted while armed is refused and audited as a denial | O4, operator go |
 | **O10** | spring-integrator + adapter-builder — **gated on OQ1** | `station/vision-api/**` (`GET /api/onboarding/setup.sh`, token issue/revoke), `infra/edge/**` (templating the two systemd units and `main.conf`), plus ingest self-diagnosis (codec/fps/GOP/jitter → readiness rows) | **M** | scoped green ×3; a generated script run on a clean container brings `mavlink-router` up and the asset appears with **zero** `CHANGE-ME` edits; an expired/revoked token yields 403, audited | O5, operator go |
-| **O11** | application-service | `contexts/vision-flight/**` + `storage/persistence/**`: the **passport** — a profile snapshot at PREFLIGHT and at POSTFLIGHT, attached to the `AssetUsage`; config-drift diff between consecutive flights | S–M | `-pl contexts/vision-flight test` green ×3; a two-flight fixture with one changed parameter produces exactly one drift row naming the parameter, both values, and both timestamps | O7, O4 |
+| **O11** | application-service | `contexts/vision-flight/**` + `storage/persistence/**`: the **passport** — a profile snapshot at PREFLIGHT and at POSTFLIGHT, attached to the `AssetUsage`; config-drift diff between consecutive flights | S–M | `-pl contexts/vision-flight test` green ×3; a two-flight fixture with one changed parameter produces exactly one drift row naming the parameter, both values, and both timestamps | O7, O4 | **DONE** (`934b228b`): vision-flight 240/240, persistence 182/182, `Skipped: 0`. **Drift compares the previous flight's POSTFLIGHT against the current flight's PREFLIGHT** — the plan never says which two snapshots, and D10's disarmed-only interlock makes that the only window a real parameter change can appear in. `V20` links `vehicle_profiles` to a usage+phase, additive and still append-only. **Nothing calls `captureSnapshot` yet** — `UsageTracker` (vision-perception) must invoke it at the PREFLIGHT/POSTFLIGHT transitions, and there is no REST surface for `passport`/`drift`; both are follow-ups |
+| **O12** | spring-integrator | `contexts/vision-perception/**` + `core/vision-platform/**` + `station/vision-app/**` (properties, `ApplicationServiceWiring`, `OnboardingWiringConfiguration`, new `app/onboarding/**`): **make the passport actually run** — a phase-change seam on `UsageTracker`, and a vision-app recorder that turns "usage opened" and "→POSTFLIGHT" into `captureSnapshot` calls off the telemetry thread. Flag `vision.onboarding.passport.enabled`, default **false** | S–M | `-pl contexts/vision-perception -am test` and `-pl station/vision-app -am test` green; the seam fires once per real transition and never on an unchanged phase; a throwing observer does not break telemetry ingest | O11 | **DONE** (`b0e17761`, review fixes in `b8cad29f`): perception 503 → **507**, vision-app 214 → **221**, platform 17 → **19**, `Skipped: 0`. Seam fires from **five** sites — the two usage-open paths and the three `withPhase` folds. **Two review fixes**: `PlatformActor` shipped holding `UUID(0, 2)`, which is the dev seed's *manager account*, so every unattended capture would have been audited as a real person; and the log-once-per-usage set grew unbounded. Capture is PREFLIGHT-at-open, not PREFLIGHT-just-before-arming — nothing marks the latter |
+| **O13** | spring-integrator | `station/vision-api/**`: the REST surface O11 has none of — `GET /api/assets/{id}/usages/{usageId}/passport` and `.../drift`, both scoped reads collapsing unknown/out-of-scope/not-yours to 404 | S | `-pl station/vision-api -am test` green; an uncaptured snapshot is **absent** from the JSON rather than `null`; an empty drift list answers 200, never 404 | O11 | **DONE** (`3c1d8d73`): vision-api 635 → **650**, vision-app **214/214** unchanged, `Skipped: 0`. No wiring changed — O11's own post-merge fix had already made `VehicleProfileService` a fully-injected bean, so the two reads were ordinary methods on it. `SecurityConfig`'s existing `/api/**` wildcard covers both routes; no security rule was added. **No UI** — `vision-web` shows neither the passport nor the drift |
+| **O14** | spring-integrator | `storage/persistence/**` + `station/vision-app/**` (`vision.persistence` only): **database change audit** — a PL/pgSQL trigger writing every insert/update/delete on the control-plane tables to `db_audit_log` (`V21`), with the high-volume event tables explicitly excluded. Distinct from `audit_entries`: that one records *who intended what*, this one records *what the database actually did*, including hand-typed SQL | M | `-pl storage/persistence -am test` green with the docker-gated tests **un-skipped**; an insert/update/delete through the real repositories produces the expected audit rows, and an UPDATE names the changed column; a coverage test fails when a future migration adds an unclassified table | — | **DONE** (`d6c10fdf`, review fix in `b8cad29f`): persistence 182 → **188**, `Skipped: 0`, `PostgresDockerIntegrationTest` 144 cases un-skipped. One generic `audit_row_change()` resolving primary keys from `pg_index`, so composite-key join tables work too; **17 tables audited, 9 excluded**, coverage asserted against the live `information_schema`. **Review fix**: `users` is audited and `to_jsonb(NEW)` is verbatim, so `password_hash` was being written into the log — and a password change stored *both* hashes. Now redacted, with `changed_columns` computed first so the change is still reported. No port, no flag, **no purge job** — retention is a written-down open item |
 
 **Sequencing.** O1 ∥ O2 ∥ O3 start immediately (this document is their shared contract; O3 builds
 against the port shapes frozen here). O4 needs O1+O2+O3. O5 needs O3 and runs parallel to O4. O6 needs
 O5. O7 needs O3 only, so it can run parallel to O4/O5. O8 needs O4. O9/O10 are operator-gated. O11
 last, and it is cheap.
+
+**O12–O14 were added after O11 merged.** O12 and O13 exist because O11 shipped a passport that
+nothing wrote and nothing could read — the wave was green and the feature was inert, which is the
+failure mode a per-wave exit criterion cannot catch on its own. O14 is unrelated to onboarding and
+merely lands here because the database work of this cycle made the gap obvious: `audit_entries`
+records the *intent* an application service chose to declare, so anything that writes without
+declaring — a migration, a repository nobody audited, a DBA at a SQL console — leaves no trace at all.
 
 **First demonstrable result: O1+O2+O3+O4 = "point the platform at a real SITL aircraft and get a
 truthful readiness report with named remedies"** — the whole diagnostic value, before any UI ships and
@@ -652,6 +693,31 @@ POST /api/assets/{assetId}/probe      → 200 VehicleProfileResponse | 403 (audi
 GET  /api/assets/{assetId}/readiness  → 200 ReadinessReport | 404
 POST /api/assets/{assetId}/remediate  → 200 RemediationResult | 403 (audited) | 409 (armed, or arming unknown, or disabled)
 GET  /api/fleet/readiness             → 200 { "assets": [ReadinessRow] }
+```
+
+**Per-flight** (O13 — the passport O11 built and nothing could reach). Both are scoped reads, and
+unknown asset / out of scope / `usageId` not belonging to that asset all collapse to the same 404:
+a distinguishable 404 would leak another asset's flight history to a caller scoped only to this one.
+
+```
+GET /api/assets/{assetId}/usages/{usageId}/passport → 200 FlightPassportResponse | 404
+GET /api/assets/{assetId}/usages/{usageId}/drift    → 200 { "drift": [ParameterDrift] } | 404
+```
+
+```jsonc
+// FlightPassportResponse — a snapshot never captured is ABSENT, not null: "we did not look"
+// and "we looked and found nothing" are different claims, and only one of them is true here.
+{
+  "usageId": "…",
+  "assetId": "…",
+  "preflight":  { /* VehicleProfileResponse */ },
+  "postflight": { /* VehicleProfileResponse */ }
+}
+
+// ParameterDrift — an EMPTY list is a correct 200 meaning "nothing to compare"
+// (no previous flight, or a snapshot was never captured). It is never a 404.
+{ "parameterName": "FENCE_ALT_MAX", "previousValue": 100.0, "currentValue": 120.0,
+  "previousObservedAt": "2026-08-18T09:10:00Z", "currentObservedAt": "2026-08-19T07:02:00Z" }
 ```
 
 ```jsonc
