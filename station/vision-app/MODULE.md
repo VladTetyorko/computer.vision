@@ -2628,3 +2628,116 @@ parameter), so the call site gained one more argument, `new VisionOnboardingProp
 - No UI wiring (`station/vision-web/**` untouched) — the passport is captured and persisted, but
   nothing in this wave surfaces it to an operator; that is the REST-surface follow-up above's
   prerequisite, not this wave's job.
+
+## docs/plans/active/FIXED-CAMERA-GEO-PLAN.md Wave G4 done (fixed-camera geolocation, wiring half)
+
+`vision.geo.fixed-camera.*` properties, `TrackProjectionRunner`'s scheduled composition, and the new
+`FixedCameraGeoWiringConfiguration` — behind `enabled` (default **false**), byte-identical demand/API
+behaviour to before this feature existed when the flag is off (D8).
+
+**`VisionGeoProperties`** (`config/properties/`) — `@ConfigurationProperties(prefix =
+"vision.geo.fixed-camera")`, every §6 value bound (CLAUDE.md rule 1, no magic numbers): `enabled`
+(default `false`), `publishIntervalMillis` (default `1000` — the map needs ~1 Hz, not the tracker's 10,
+D7), `minRayDepressionDegrees`/`maxRangeMeters`/`angularErrorDegrees`/`maxErrorRadiusMeters` (D6's
+horizon/range/error thresholds), nested `Trail` (`minDistanceMeters`, `maxPointsPerTrack`, `retention`)
+and `Calibration` (`maxRmsErrorPixels`). `toGeoSettings()`/`toTrackProjectionSettings()` convert to the
+`vision-map` application-layer settings records the services actually take. `FixedCameraGeoWiringConfiguration
+#fixedCameraGeoApiProperties` maps `enabled`/`calibration.maxRmsErrorPixels` field-by-field onto
+`vision-api`'s framework-free `FixedCameraGeoProperties` bridge (`vision-api` cannot depend on this
+`@ConfigurationProperties` type directly) — same bridge pattern as
+`OnboardingWiringConfiguration#onboardingApiProperties`.
+
+**`TrackProjectionRunner`** (new package `app/geo/`) — the vision-app composition `TrackProjectionService`
+needs but must not itself depend on (D2/D7): a self-managed `ScheduledExecutorService`
+(`initMethod="start"`/`destroyMethod="close"`, `CvChannelSupervisor`'s lifecycle idiom — this codebase
+never uses `@Scheduled`/`@EnableScheduling`), one tick per `publishIntervalMillis`, first tick immediate.
+Each tick, in order: (1) `CameraPoseService#list()` — every stored pose, whose asset ids become the new
+`posedAssetIds` cache *before* any projection runs, so D9 sees a calibrated asset as soon as its pose
+exists, independent of stream state; (2) per pose, resolve the asset's active stream (device-id match
+against `StreamService#streams()`) and its latest raw frame's dimensions — absent either, skip this
+asset for this tick, no fabricated frame size; (3) otherwise `StreamService#tracks` + pose become one
+`TrackProjectionInput` for `TrackProjectionService#project`; (4) **asset-level clearing** — any asset
+projected last tick but not this one (pose deleted, or stream became unresolvable — no debounce) gets an
+explicit `TrackProjectionService#clearAsset`; (5) `TrackProjectionService#pruneTrail` on the same
+cadence (D7 names no separate prune interval). A single asset's failure is caught and logged per-asset,
+never aborting the rest of the tick — the same never-let-one-failure-take-down-the-rest contract
+`LiveAndPollDetectionDemand` states explicitly.
+
+**A gap this wave found and closed**: `CameraPoseService#delete` (G2, frozen) is deliberately ignorant
+of `TrackProjectionService` — nothing else would ever notice a deleted pose and call `clearAsset`,
+leaving a stale track on the map forever. The tick-over-tick `lastProjectedAssetIds` vs
+`projectedThisTick` comparison above is the fix — this runner is the one place already visiting every
+stored pose once per cycle, so it is positioned to notice. This single mechanism covers both that gap
+and D3's own documented "stream stopped" case.
+
+**D9's cache**: `hasCameraPose(AssetId)` reads `posedAssetIds` (a `volatile Set<AssetId>`, written only
+by the scheduler thread, read by arbitrary caller threads) — never touches a repository, satisfying the
+"cheap, never-throws" contract every `DetectionDemandPort` consultation needs (the plan's hazard 2).
+
+**`FixedCameraGeoWiringConfiguration`** (`config/wiring/`, own file per the plan's hazard 5 — kept out of
+`ApplicationServiceWiring`/`PersistenceWiringConfiguration` where possible): wires `cameraPoseService`/
+`trackProjectionService` **unconditionally** (`CameraPoseController`/`MapTracksController` take them as
+ordinary constructor dependencies regardless of the flag, same as `OnboardingWiringConfiguration`'s
+services) — what the flag actually gates is `trackProjectionRunner`
+(`@ConditionalOnProperty(prefix = "vision.geo.fixed-camera", name = "enabled", havingValue = "true")`),
+the only thing that ever calls either service with real data. With the flag off, the bean does not
+exist, `CvWiring`'s `ObjectProvider<TrackProjectionRunner>` resolves to nothing, and D9's predicate
+defaults to `assetId -> false` — byte-identical to pre-G4 behaviour.
+
+**`PersistenceWiringConfiguration`** — two more unconditional JPA beans, straight-line like every other
+repository in this class (Postgres-only, no in-memory fallback per docs/plans/active/
+POSTGRES-ONLY-CONTEXT.md): `cameraPoseRepositoryPort` → `JpaCameraPoseRepository`, `trackTrailRepositoryPort`
+→ `JpaTrackTrailRepository` (both `storage/persistence`, frozen from G3 — untouched this wave except for
+registering these two beans).
+
+**The circular-dependency bug this wave found and fixed, in `CvWiring.detectionDemandPort`** — the one
+genuine defect this wave surfaced (in this wave's own first-draft wiring, not in the plan document):
+the bean method originally took `ObjectProvider<TrackProjectionRunner>` and called `.getIfAvailable()`
+**eagerly, once, at bean-creation time**. `TrackProjectionRunner`'s constructor needs `AssetService`,
+and `detectionDemandPort` itself sits on `AssetService`'s own indirect construction path
+(`assetService` → `deviceService` → `assetLiveStatePort` → `streamService` → `detectionDemandPort`) —
+so eager resolution forced Spring to construct `TrackProjectionRunner` (and re-enter `AssetService`
+construction) while `AssetService` was still mid-construction: an unresolvable circular reference. Only
+surfaced with `vision.geo.fixed-camera.enabled=true` — with the flag off, `TrackProjectionRunner`'s bean
+doesn't exist at all (`@ConditionalOnProperty`), so `getIfAvailable()` returns `null` immediately without
+attempting construction, which is why the flag-off `FixedCameraGeoWiringTest` passed cleanly on the first
+attempt while `FixedCameraGeoEnabledWiringTest` failed every one of its 4 tests with
+`UnsatisfiedDependencyException`. **Fix**: defer the `ObjectProvider.getIfAvailable()` call from
+bean-creation time into the `hasCameraPose` predicate lambda itself, so `TrackProjectionRunner` is only
+ever resolved at actual `detectionWanted()` invocation time, long after the whole context has finished
+starting. **Lesson for future wiring in this class**: an `ObjectProvider`-typed constructor parameter is
+only safe to resolve eagerly when its target bean does not, even indirectly, depend back on a bean
+upstream of the one being constructed — every other `ObjectProvider` in `CvWiring` is safe because none
+of their beans depend back on `AssetService`; this one was not, and the fix is documented in the bean
+method's own javadoc so the next editor does not reintroduce it.
+
+**Tests**:
+- `TrackProjectionRunnerTest` (new, `app/geo/`) — 8 tests, real scheduler at a 20ms fast tick, polling
+  assertions with a 2-second deadline (no fake clock — the tick method is private): `hasCameraPose`
+  reflects the most recent tick even when the stream never resolves; a resolvable active stream gets
+  projected; an asset is cleared once its pose stops being returned by `list()`; an asset is cleared
+  once its stream becomes unresolvable; one asset's resolution failure doesn't stop the others from
+  being projected; `pruneTrail` is called each tick with a retention-based cutoff; `start()`/`close()`
+  are both idempotent.
+- `FixedCameraGeoWiringTest` (new) — 4 tests, flag at its default (`vision.publish.enabled=false` only,
+  reuses the shared cached context): no `TrackProjectionRunner` bean exists; every application service
+  and driving adapter (`CameraPoseController`/`MapTracksController`/`CameraPoseService`/
+  `TrackProjectionService`) is wired regardless of the flag; the API properties bridge reports disabled;
+  `requireEnabled()` throws the frozen §5 message verbatim.
+- `FixedCameraGeoEnabledWiringTest` (new) — 4 tests, flag on
+  (`{"vision.publish.enabled=false", "vision.geo.fixed-camera.enabled=true"}`): exactly one
+  `TrackProjectionRunner` bean exists; its first tick against an empty Postgres store does nothing
+  harmful; the API properties bridge reports enabled; `detectionDemandPort.detectionWanted` resolves
+  through the real runner without throwing — this is the class whose original 4-for-4 failure caught
+  the circular-dependency bug above.
+
+**Before/after** (`./mvnw -B -pl station/vision-app -am test`, run three times in the foreground, all
+three runs identical): **221 → 237 (+16)** — 8 `TrackProjectionRunnerTest` + 4
+`FixedCameraGeoWiringTest` + 4 `FixedCameraGeoEnabledWiringTest`. `Tests run: 237, Failures: 0,
+Errors: 0, Skipped: 0`, `BUILD SUCCESS` every time. Every pre-existing test passes unchanged with the
+flag at its default (`false`) — the default-config acceptance bar is met exactly. Docker ran, not
+skipped: `docker info` succeeded and the Testcontainers-backed Postgres started normally for every
+`@SpringBootTest` in the run (mandatory since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4).
+
+**Deferred, out of this wave's scope**: none — G4's own exit criteria (§8) are fully met. See
+`station/vision-api/MODULE.md`'s own G4 entry for the REST surface this wiring backs.
