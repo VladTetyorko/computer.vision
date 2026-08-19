@@ -152,16 +152,11 @@ def build_region_index(
         if position == 0 or (position + 1) % 50 == 0 or position == len(reference_items) - 1:
             on_phase(PHASE_ENCODING, position + 1, len(reference_items), "")
 
-    # Slice A (§13.3 item 1): per-tile leave-one-out distinctiveness, computed on the fp32
-    # descriptors (full precision in, fp16 only for storage/serving below), persisted per tile
-    # row -- see `calibrate.leave_one_out_distinctiveness`'s docstring for the definition.
-    distinctiveness = calibrate.leave_one_out_distinctiveness(descriptors[:encoded_count])
-    tiles_meta = [
-        dataclasses.replace(meta, distinctiveness=float(score))
-        for meta, score in zip(tiles_meta, distinctiveness)
-    ]
-
-    reference_index = index.ReferenceIndex(
+    # This is a CALIBRATION-ONLY index (the `reference_items` split, `holdout_fraction` short of
+    # every tile) -- used below solely to measure accept_similarity/accept_margin against tiles it
+    # has genuinely never seen. It is NOT what gets persisted -- see the H0c fix below
+    # (VISUAL-GEO-V2-PLAN.md §9.8 defect 1) for why the persisted index differs.
+    calibration_index = index.ReferenceIndex(
         tiles_meta, descriptors[:encoded_count].astype(_DESCRIPTOR_STORE_DTYPE)
     )
     on_phase(PHASE_INDEXING, len(tiles_meta), len(tiles_meta), "")
@@ -175,7 +170,7 @@ def build_region_index(
             continue
         perturbed = calibrate.simulate_view_perturbation(image, rng)
         query_descriptor = encoder.encode(perturbed)
-        matches, _search_ms = reference_index.search(query_descriptor, top_k=2)
+        matches, _search_ms = calibration_index.search(query_descriptor, top_k=2)
         if not matches:
             continue
         top = matches[0]
@@ -191,14 +186,70 @@ def build_region_index(
 
     calibration = calibrate.calibrate(holdout_results, max_false_fix_rate=max_false_fix_rate)
 
+    # H0c fix (VISUAL-GEO-V2-PLAN.md §9.8 defect 1): the holdout split above exists ONLY to
+    # MEASURE accept_similarity/accept_margin against tiles the calibration index never saw -- it
+    # must never REMOVE those tiles from what a live query can actually match against. Before this
+    # fix the PERSISTED index WAS `calibration_index` itself, i.e. `holdout_fraction` (10%) of
+    # every region's tiles -- including, for kyiv-maidan, the Pexels clip's own ground-truth cell
+    # (17/76649/44196) -- were silently unlocalizable by construction (measured:
+    # `spikes/geo/results/h0b/rank_shift.json`'s `n_exact_cell_indexed: 0` on every frame, every
+    # dataset). Fix: encode every holdout tile's CLEAN (unperturbed) image too -- the perturbation
+    # above exists only to make the CALIBRATION measurement honest about viewpoint difference; the
+    # persisted index should hold each tile's own true appearance, exactly like every reference
+    # tile above -- and fold the result into the index that actually gets saved to disk. This is
+    # also a production defect (the real `cv_service/geo/orchestrator.py` this module was harvested
+    # from has the identical bug) -- H4 must carry the same fix when it ports this module.
+    holdout_tiles_meta: list["index.ReferenceTileMeta"] = []
+    holdout_descriptor_rows: list[np.ndarray] = []
+    for tile_path, tile_id, lat, lon in holdout_items:
+        if is_cancelled():
+            raise BuildCancelled()
+        image = cv2.imread(str(tile_path), cv2.IMREAD_COLOR)
+        if image is None:
+            LOGGER.warning("skipping unreadable holdout tile %s", tile_path)
+            continue
+        holdout_descriptor_rows.append(encoder.encode(image))
+        holdout_tiles_meta.append(index.ReferenceTileMeta(tile_id=tile_id, lat=lat, lon=lon))
+        gray, gray_scale = index.prep_verify_gray(image)
+        verify_grays.append(gray)
+        verify_scales.append(gray_scale)
+
+    all_tiles_meta = tiles_meta + holdout_tiles_meta
+    all_descriptors = (
+        np.concatenate([descriptors[:encoded_count], np.stack(holdout_descriptor_rows)], axis=0)
+        if holdout_descriptor_rows
+        else descriptors[:encoded_count]
+    )
+    total_readable = encoded_count + len(holdout_tiles_meta)
+    if len(all_tiles_meta) != total_readable or all_descriptors.shape[0] != total_readable:
+        # Self-test (VISUAL-GEO-V2-PLAN.md §9.8 defect 1): every tile whose image decoded
+        # successfully off disk must end up indexed -- fail loudly rather than silently ship a
+        # region with an unlocalizable slice of itself again.
+        raise RuntimeError(
+            f"index coverage defect: {len(all_tiles_meta)} tiles / {all_descriptors.shape[0]} "
+            f"descriptors assembled but {total_readable} tiles were readable on disk for region "
+            f"{region_dir.name!r} -- every readable tile must be indexed (VISUAL-GEO-V2-PLAN.md "
+            "§9.8 defect 1)"
+        )
+
+    # Slice A (§13.3 item 1): per-tile leave-one-out distinctiveness -- recomputed over the FULL
+    # persisted set (not just the calibration split) now that the two differ, because
+    # distinctiveness is a property of the index a live query actually searches against.
+    distinctiveness = calibrate.leave_one_out_distinctiveness(all_descriptors)
+    all_tiles_meta = [
+        dataclasses.replace(meta, distinctiveness=float(score))
+        for meta, score in zip(all_tiles_meta, distinctiveness)
+    ]
+
+    reference_index = index.ReferenceIndex(all_tiles_meta, all_descriptors.astype(_DESCRIPTOR_STORE_DTYPE))
     reference_index.save(region_dir)
     cache_bytes = index.write_verify_tiles(
-        region_dir, [m.tile_id for m in tiles_meta], verify_grays, verify_scales
+        region_dir, [m.tile_id for m in all_tiles_meta], verify_grays, verify_scales
     )
     LOGGER.info(
         "region %s: verify-tile cache written (%d tiles, %.1f KiB)",
         region_dir.name,
-        len(tiles_meta),
+        len(all_tiles_meta),
         cache_bytes / 1024.0,
     )
     descriptor_bytes = (region_dir / index.DESCRIPTORS_FILENAME).stat().st_size
@@ -206,7 +257,7 @@ def build_region_index(
 
     stats = index.ReferenceIndexStats(
         tile_count=len(parsed),
-        descriptor_count=len(tiles_meta),
+        descriptor_count=len(all_tiles_meta),
         descriptor_dim=encoder.dim,
         encoder_id=encoder.name,
         accept_similarity=calibration.accept_similarity,

@@ -1,29 +1,42 @@
 """cv-service/spikes/geo/rectify_rerank.py
 
-H0b deliverable (4): a rectify-first re-rank -- wires `harvested/rectify.py#rectify()` (perspective
-IPM, built in an earlier wave but never called from `rerank.py`'s conditioning path, per §9.8's
-harness-gap finding) into the exact matching/pose-fit pipeline `rerank.py`/`mosaic_rerank.py` use.
+H0b deliverable (4), completed by H0c (VISUAL-GEO-V2-PLAN.md §9.8 defect 2): a rectify-first
+re-rank -- wires `harvested/rectify.py#rectify()` (perspective IPM, built in an earlier wave but
+never called from `rerank.py`'s conditioning path -- H0b's own `calibrate_instrument.py`
+docstring, lines 32-39, named the gap) into the matching/pose-fit pipeline `rerank.py`/
+`mosaic_rerank.py` use.
 
-Flow per query, given a STATED (pitch_deg, altitude_m, heading_deg) prior -- see module docs on
-every caller for why "stated" (from the parked branch's blind-angle probe, §12.15) is not the same
-claim as "measured telemetry":
+`compute_rectification()` (H0c) runs `rectify()` ONCE per query, given a STATED (pitch_deg,
+altitude_m, heading_deg) prior -- see every caller for why "stated" (from the parked branch's
+blind-angle probe, §12.15) is not the same claim as "measured telemetry". The driver is
+responsible for feeding the SAME `RectifyResult.warped` pseudo-nadir image to BOTH the descriptor
+retrieval stage (encode+search, `harvested/localize.py`'s own machinery) and this module's
+matching stage below -- §9.8's own instruction ("the rectified pseudo-nadir image is the query for
+both stages") is why `rerank_rectified` no longer computes `rect` itself (H0b's original shape
+did, duplicating the rectify call and risking the two images drifting apart across a re-run).
 
-1. `rectify()` once per query (horizon-crop + IPM-warp; independent of which candidate it's later
-   matched against -- `target_gsd_m_per_px` only needs the region's own zoom/latitude, taken from
-   the top candidate, matching `condition_query`'s own "subset[0].lat" convention in `rerank.py`).
-   `None` means the crop/warp degenerated (e.g. the prior points the camera above the horizon at
-   this `min_depression_deg`) -- reported as `refusal="RECTIFY_DEGENERATE"`, never silently
-   swallowed into an unrectified fallback (this script exists to measure rectification, not to
-   paper over its failure modes).
-2. Match the RECTIFIED (warped) image against each candidate's target (single 256px tile, or its
+`rerank_rectified()` then, given that `rect`:
+
+1. Matches the RECTIFIED (warped) image against each candidate's target (single 256px tile, or its
    3x3 mosaic when `use_mosaic=True` -- reuses `mosaic.py` exactly as `mosaic_rerank.py` does).
-3. Per `RectifyResult`'s own docstring: map matched query keypoints back through
-   `rect.warped_to_input` into the CROPPED (not full-original) frame, and fit the pose against
+2. Per `RectifyResult`'s own docstring: maps matched query keypoints back through
+   `rect.warped_to_input` into the CROPPED (not full-original) frame, and fits the pose against
    `rect.cropped_width/cropped_height` -- the cropped frame is the query frame from here on, so
    `pose.py`'s yaw/footprint semantics stay meaningful (sky rows would project past the horizon
    line at infinity and poison the footprint sanity gate).
-4. Same gate table as every other H0b variant (`rerank.evaluate_gates`, reused verbatim).
-"""
+3. Same gate table as every other H0b/H0c variant (`rerank.evaluate_gates`, reused verbatim).
+
+**Deliberately NOT layering a second `condition_query` call on top of `rect.warped`** (a literal
+reading of §9.8's own wording could suggest it): `harvested/rectify.py`'s own module docstring
+(point 3, read in full before this refactor) states plainly that once `ipm_warp` is given
+`heading_deg` and a `target_gsd_m_per_px`, "a separate `condition_query` pass is redundant -- the
+warp already applied heading (when given) and GSD". `condition_query`'s footprint formula assumes
+the INPUT image's own width maps directly to `2*altitude*tan(fov/2)` (a flat-plane, nadir-only
+approximation); `rect.warped`'s width instead comes from IPM's own horizon-crop-aware ground-range
+computation, which is a different (and more correct, for an oblique source) number. Composing the
+two would either be a no-op (heading=0, and an altitude synthesized to cancel the rescale) or
+actively wrong (any other input) -- stated here as a deliberate scope decision, not a silent
+omission."""
 from __future__ import annotations
 
 import logging
@@ -37,11 +50,43 @@ import numpy as np
 from spikes.geo import mosaic as mosaic_mod
 from spikes.geo.harvested.localize import Candidate
 from spikes.geo.harvested.pose import MIN_MATCHES_FOR_FIT, RANSAC_REPROJ_PX, PoseResult, fit_homography_pose, parse_tile_id
-from spikes.geo.harvested.rectify import focal_px_from_fov, reference_gsd_m_per_px, rectify
+from spikes.geo.harvested.rectify import RectifyResult, focal_px_from_fov, reference_gsd_m_per_px, rectify
 from spikes.geo.harvested.verify import DEFAULT_ASSUMED_HORIZONTAL_FOV_DEGREES, MatchKeypoints
 from spikes.geo.rerank import CandidateScore, RerankResult, _reprojection_rms, evaluate_gates
 
 LOGGER = logging.getLogger("spikes.geo.rectify_rerank")
+
+
+def compute_rectification(
+    query_image: np.ndarray,
+    *,
+    pitch_deg: float,
+    altitude_m: float,
+    heading_deg: Optional[float],
+    tile_lat: float,
+    zoom: int,
+    roll_deg: float = 0.0,
+    fov_degrees: float = DEFAULT_ASSUMED_HORIZONTAL_FOV_DEGREES,
+    min_depression_deg: float = 15.0,
+) -> Optional[RectifyResult]:
+    """H0c (VISUAL-GEO-V2-PLAN.md §9.8 defect 2): one `harvested/rectify.py#rectify()` call per
+    query, factored out of `rerank_rectified` so a driver can compute it ONCE and use the SAME
+    `RectifyResult.warped` pseudo-nadir image as the query for BOTH descriptor retrieval
+    (`localize`-style encode+search) and this module's matching stage -- not two independently
+    rectified images that could drift apart. `heading_deg` given -> IPM renders north-up directly
+    (its own `heading_deg` parameter GENERALIZES `condition_query`'s separate rotate step, see
+    `harvested/rectify.py`'s own module docstring point 3); `target_gsd_m_per_px` comes from the
+    top retrieval candidate's own tile latitude, mirroring `rerank.rerank()`'s "subset[0].lat"
+    convention for `condition_query`. `pitch_deg` is degrees FROM NADIR (0=straight down,
+    90=horizon), `harvested/rectify.py`'s own frozen convention (module docstring, "Conventions"),
+    identical to `sitl_render.py`'s `--pitch-degrees`."""
+    target_gsd = reference_gsd_m_per_px(tile_lat, zoom)
+    focal_px = focal_px_from_fov(query_image.shape[1], fov_degrees)
+    return rectify(
+        query_image, pitch_deg=pitch_deg, focal_px=focal_px, roll_deg=roll_deg,
+        heading_deg=heading_deg, altitude_m=altitude_m, target_gsd_m_per_px=target_gsd,
+        min_depression_deg=min_depression_deg,
+    )
 
 
 def _target_image_and_origin(
@@ -116,42 +161,25 @@ def score_candidate_rectified(
 
 def rerank_rectified(
     matcher,
-    query_image: np.ndarray,
+    rect: RectifyResult,
     candidates: list[Candidate],
     region_dir: Path,
     tile_loader: Callable[[Candidate], Optional[np.ndarray]],
     match_keypoints_fn: Callable[[object, np.ndarray, np.ndarray], MatchKeypoints],
     *,
-    pitch_deg: float,
-    altitude_m: float,
-    heading_deg: Optional[float],
-    roll_deg: float = 0.0,
     top_k: int = 5,
-    fov_degrees: float = DEFAULT_ASSUMED_HORIZONTAL_FOV_DEGREES,
     use_mosaic: bool = False,
-    min_depression_deg: float = 15.0,
     cell_is_never_accept: Optional[bool] = None,
 ) -> RerankResult:
-    """Rectify-first twin of `rerank.rerank()`/`mosaic_rerank.rerank_mosaic()`: one `rectify()`
-    call per query against a STATED (pitch/altitude/heading) prior -- caller's responsibility to
-    label that prior honestly (this function has no way to know whether it came from telemetry or
-    a guess) -- then the shared match/pose-fit/gate path, single-tile or mosaic per `use_mosaic`."""
+    """Rectify-first twin of `rerank.rerank()`/`mosaic_rerank.rerank_mosaic()`'s MATCHING stage:
+    takes an already-computed `rect` (`compute_rectification`, one call per query, shared with the
+    retrieval stage -- H0c/§9.8 defect 2: the whole point is that the SAME rectified image drives
+    both, not two independent rectifications) and matches `rect.warped` against each of
+    `candidates[:top_k]`'s target (single tile, or its 3x3 mosaic per `use_mosaic`) through the
+    shared §4.2 gate table."""
     subset = candidates[:top_k]
     if not subset:
-        return RerankResult([], None, 0.0, False, {}, "NO_CANDIDATES")
-
-    parsed0 = parse_tile_id(subset[0].tile_id)
-    zoom0 = parsed0[0] if parsed0 is not None else 17
-    target_gsd = reference_gsd_m_per_px(subset[0].lat, zoom0)
-    focal_px = focal_px_from_fov(query_image.shape[1], fov_degrees)
-
-    rect = rectify(
-        query_image, pitch_deg=pitch_deg, focal_px=focal_px, roll_deg=roll_deg,
-        heading_deg=heading_deg, altitude_m=altitude_m, target_gsd_m_per_px=target_gsd,
-        min_depression_deg=min_depression_deg,
-    )
-    if rect is None:
-        return RerankResult([], None, 0.0, False, {"rectify_ok": False}, "RECTIFY_DEGENERATE")
+        return RerankResult([], None, 0.0, True, {"rectify_ok": True}, "NO_CANDIDATES")
 
     scored: list[CandidateScore] = []
     n_incomplete = 0

@@ -948,14 +948,36 @@ until then this is the bound, and it is labelled as one.
 - **`_roi_rescue`'s permissive gate can misidentify a NEIGHBOUR in a dense, similarly-coloured scene, and this is inherited, deliberate behaviour, not a wiring bug (TRACKING-V2-PLAN wave C5c)** — see "ROI re-detection" above for the full account, including the exact numbers. `CV_TRACK_COST_GATE_MIN_IOU=0.0` is a considered default for the PRIMARY `cost` match (wave C3's own reasoning: a strict floor would forbid the wide-displacement recovery ego-motion compensation exists for), and this wave's own instruction was to merge a rescue through the "existing association machinery", not a second, ROI-specific gate — so the SAME permissiveness applies to a crop several times a candidate's own size, where it can admit a neighbouring object instead of refusing an empty match. Measured on `clutter`: `IDSW` 0→6 with `CV_TRACK_ROI_ENABLED=1`. The shipped default (`CV_TRACK_ROI_ENABLED=False`) is unaffected — this only matters to a deployment that opts in, and one doing so in a dense/crowded scene should tighten `CV_TRACK_COST_GATE_MIN_IOU` first or evaluate the risk for its own scene density. If you are asked to make the rescue safer in a crowd without touching the primary match's own gate, a ROI-specific (stricter) `AssignGates` instance is the natural next knob — not built in this wave, since the task's own instruction was to reuse the existing gates, not add a new configuration surface.
 - **ROI re-detection pays its cost even when it cannot possibly help, and there is no cheap way to know that in advance (TRACKING-V2-PLAN wave C5c)** — `occlusion`/`long_occlusion`/`crowd_recall`/`pan`/`pan_step` all trigger real rescue attempts (10–61 per scenario) that NEVER find a match: the underlying failure in each is genuine occlusion (invisible to a crop exactly as it is to the full frame) or prediction drift (the crop is centered on the wrong place), neither of which apparent-size recall can fix. `_roi_rescue`'s eligibility check (confirmed + unmatched) cannot distinguish "probably just small" from "probably occluded" or "probably drifted" — it has no signal for either. This is measured, reported cost with zero accuracy return on five of ten scenarios when the feature is opted into; a future wave wanting to reduce it would need a cheaper pre-check (e.g. only rescue a candidate whose predicted confidence, `predict.py`'s own decay, is still above some floor) that this wave does not add.
 
-## Visual-geo v2 eval harness (`spikes/geo/`, wave H0, `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §5)
+## Visual-geo v2 eval harness (`spikes/geo/`, waves H0/H0b/H0c, `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §5/§9.8)
 
 **Scope discipline: `spikes/geo/**` is eval-harness/spike code only, never production.** No
 `cv_service/**` module imports anything under `spikes/`, and nothing here is wired into
 `cv_service.grpc.servicers` — H4 is where a matcher/gate choice measured here becomes production
-(`cv_service/geo/**`). Full measured numbers: `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §9;
+(`cv_service/geo/**`). Full measured numbers: `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §9 (H0)
+and §9.8 (H0b/H0c — two harness defects found and fixed, real re-measurement, gate re-answered);
 human-readable digest + every per-frame raw JSON: `spikes/geo/results/MEASUREMENTS.md`,
-`bakeoff.json`, `false_convergence_gate.json`.
+`bakeoff.json`, `false_convergence_gate.json` (H0, unchanged); `results/h0b/{calibration,mosaic,
+rank_shift}.json` (H0b); `results/h0c/{calibration_sweep,bakeoff_v2,false_convergence_gate_ipm}.json`
+(H0c).
+
+**Two H0 harness defects, found and fixed by H0b/H0c — read before trusting ANY H0 "rectified" or
+real-footage number above §9.8**:
+1. **Index coverage** (`harvested/orchestrator.py#build_region_index`): the calibration
+   holdout split (`DEFAULT_HOLDOUT_FRACTION=0.10`) was, until this fix, persisted directly as the
+   search index — the held-out 10% of tiles were never searchable, silently. `kyiv-maidan`'s own
+   Pexels ground-truth cell was one of them (`n_exact_cell_indexed: 0` for every H0 Pexels
+   measurement). Fixed: calibration still runs on the split, but every readable tile — reference
+   AND holdout — is now encoded into the final persisted index; a self-test asserts full coverage
+   (`spikes/geo/tests/test_index_coverage.py`). **Also a production defect**: `cv_service/geo/
+   orchestrator.py` (harvested from) has the identical bug — H4 must carry this fix when porting.
+2. **Rectification never applied**: H0's "rectified" column called `harvested/verify.py
+   #condition_query` (de-rotate + GSD-rescale, NADIR-ONLY, `pitch_degrees` always 0.0) — never
+   `harvested/rectify.py`'s real perspective IPM. Fixed: `rectify_pipeline.py`'s `--rectify
+   {none,condition,ipm}` (see below) actually runs IPM in `ipm` mode. §9.8's re-measurement shows
+   IPM closes most of the SITL-oblique gap outright (1.00 recall@100m/0 false-fix at k=20, xfeat)
+   and produces real, non-false, gate-passing fixes on the real Pexels clip for the first time
+   (loftr 6/12, lightglue_disk 3/12) — categorically different from H0's original "0/12, every
+   matcher, every k, ever."
 
 **Setup, once per machine:**
 ```
@@ -1032,6 +1054,60 @@ source spikes/geo/env.sh    # sets CV_GEO_MODEL_CACHE / TORCH_HOME / HF_HOME und
   post-fix. If you add a new SITL dataset, pass `--fov-degrees 84` explicitly (or thread it through
   `rerank()`'s own `fov_degrees` param if you deliberately want a different assumed FOV — the two
   must always match).
+- `spikes/geo/rectify_pipeline.py` (new, H0c) — the shared `--rectify {none,condition,ipm}` core
+  every H0c driver uses (`run_pass(...) -> PipelinePass`): `none` = raw query, no conditioning;
+  `condition` = H0's own (mislabeled) "rectified" path, nadir-only; `ipm` = the real fix — runs
+  `rectify_rerank.compute_rectification()` ONCE per query and feeds the SAME `RectifyResult.warped`
+  pseudo-nadir image to BOTH descriptor retrieval (encode+full-index search, so `retrieval_rank_of
+  _true_tile` is exact even past `k`) and matching (`rectify_rerank.rerank_rectified`) — never two
+  independently rectified images. `ipm` mode's `target_gsd`/`focal_px` use the region's own mean
+  tile latitude as a stand-in (IPM must run BEFORE retrieval, since its output IS the retrieval
+  query — there is no top-candidate latitude yet); negligible error at every region's <0.5deg
+  latitude span.
+- `spikes/geo/rectify_rerank.py` (H0b draft, completed by H0c) — `compute_rectification()` (one
+  `harvested/rectify.py#rectify()` call per query, factored out so a driver computes it once and
+  shares the result) and `rerank_rectified(matcher, rect, candidates, ...)` (matches `rect.warped`
+  against each candidate — single tile, or its 3x3 mosaic via `use_mosaic=True`, reusing
+  `mosaic.py` — then maps matched keypoints back through `rect.warped_to_input` into the CROPPED
+  frame before `pose.py#fit_homography_pose`, same §4.2 gate table as every other variant,
+  `rerank.evaluate_gates` reused verbatim). **Deliberately does NOT layer a second
+  `condition_query` on top of `rect.warped`** — see the module's own docstring for the full
+  justification (`harvested/rectify.py`'s docstring point 3: redundant once `ipm_warp` gets
+  `heading_deg`+`target_gsd_m_per_px`; composing both would be a no-op or actively wrong).
+- `spikes/geo/mosaic.py` / `mosaic_rerank.py` (H0b) — 3x3 tile mosaic candidate construction
+  (`build_tile_mosaic`, `has_full_neighbourhood`) and its own `rerank_mosaic()` (condition-mode
+  matching against a mosaic instead of a single tile — addresses the footprint-vs-tile-width
+  ceiling: at 84° FOV / 60-120m AGL a query's footprint can exceed one z17 tile's ~195m width).
+  `run_mosaic_bakeoff.py` is the driver, mirrors `run_bakeoff.py`'s shape.
+- `spikes/geo/calibrate_instrument.py` (H0b) — self-match instrument calibration on
+  `kyiv-pozniaky`: five synthetic query kinds per indexed tile (exact crop, 2x upsample, 30°
+  rotation, mosaic-crop with a half-tile offset, and a 45° synthetic oblique render via
+  `sitl_render.render_oblique`) through retrieval+re-rank, answering "does the harness recognise a
+  query built from its own indexed pixels" independent of any real domain gap. The oblique variant
+  (`v_oblique_45deg`) was H0b's own harness-gap reproduction (matched via `condition_query`, which
+  is nadir-only) — H0c's `calibrate_rectify_sweep.py` re-runs the identical tiles/construction
+  through `none`/`condition`/`ipm`.
+- `spikes/geo/calibrate_rectify_sweep.py` (H0c) — `calibrate_instrument.py`'s oblique-45° variant
+  (same tiles, same `SEED`) through all three `rectify_pipeline.py` modes and all three matchers
+  (45 rows total). Appends to `results/h0c/calibration_sweep.json`.
+- `spikes/geo/rank_shift.py` (H0b) — retrieval rank of the "true tile" (nearest-INDEXED tile by
+  haversine distance, falling back from the exact z17 cell when that cell isn't indexed — the
+  convention that surfaced defect 1) before vs. after re-rank, one (dataset, matcher, k) config per
+  invocation. Superseded in scope by `run_bakeoff_v2.py`'s own `retrieval_rank_before/after`
+  columns (task 2/3), which folded the same measurement into the main driver so one run produces
+  both the rank-shift and the accuracy/gate columns together.
+- `spikes/geo/run_bakeoff_v2.py` (H0c) — `run_bakeoff.py`'s twin: `--rectify {none,condition,ipm}`
+  instead of the old binary `--rectified`/`--unrectified`, plus `--pitch-deg`/`--heading-deg`/
+  `--altitude-m` (the last two override a frame's own manifest telemetry — needed for the geometry
+  sweep, and REQUIRED for `pexels` under `condition`/`ipm` since that dataset carries no telemetry
+  at all; every such summary sets `"geometry_is_stated_prior": true`) and `--mosaic`. Writes to
+  `results/h0c/bakeoff_v2.json` — `run_bakeoff.py`'s own `results/bakeoff.json` (H0's original
+  numbers) is untouched.
+- `spikes/geo/false_convergence_gate_ipm.py` (H0c) — a THIRD `SequenceLocalizer` pass alongside
+  `false_convergence_gate.py`'s existing "control" (raw similarity) and "geometric" (condition-only)
+  fields: "geometric_ipm", built from the best Pexels `ipm` configuration found by the H0c geometry
+  sweep. A separate script, not a modification of `false_convergence_gate.py` (a completed H0
+  deliverable) — writes to `results/h0c/false_convergence_gate_ipm.json`.
 - Files kept **reference-only, not run** (harvested but with an unresolved or lost dependency
   chain — a real gap in the plan's own §1.3 harvest manifest, not a shortcut taken here):
   `rectify_eval.py` (needs `run_homography_pose.py`/`homography_pose.py`, never named in §1.3 and
@@ -1044,10 +1120,20 @@ source spikes/geo/env.sh    # sets CV_GEO_MODEL_CACHE / TORCH_HOME / HF_HOME und
 **Tests**: `cd cv-service && .venv/bin/python -m pytest spikes -q` —
 `spikes/geo/tests/test_bakeoff_harness.py`, pure math/plumbing only (haversine, `_config_key`,
 `_reprojection_rms`, manifest roundtrip, `metrics.py`/`report.py`'s pre-existing pure functions),
-zero network/model/torch dependency, runs in ~1.3s. The bake-off/false-convergence-gate scripts
-themselves are exercised by hand against live tiles + real matcher models (results committed under
-`spikes/geo/results/**`), not by this suite — a real model forward pass and a live Esri fetch are
-explicitly out of scope for a fast, always-green unit suite.
+zero network/model/torch dependency, runs in ~1.3s. `test_index_coverage.py` (H0c, 4 cases) is
+also zero-dependency — a synthetic region + a tiny torch-free fake `Encoder` (the DI idiom
+`harvested/encoder.py`'s own docstring names), no network/model/live-tile fetch — proving defect
+1's fix (every readable tile ends up indexed, holdout tiles included, calibration still measured,
+degenerate single-tile regions handled, an unreadable file excluded not miscounted). The bake-off/
+false-convergence-gate scripts themselves are exercised by hand against live tiles + real matcher
+models (results committed under `spikes/geo/results/**`), not by this suite — a real model forward
+pass and a live Esri fetch are explicitly out of scope for a fast, always-green unit suite. The one
+exception: `test_rectify_ipm.py` (H0c) DOES need a live model + a built region (`kyiv-pozniaky`) —
+gated with `pytest.skip` (never a failure) when either is missing, since a 45°-oblique
+self-match-after-rectification proof needs a real matcher forward pass to mean anything. It uses
+`lightglue_disk`, not `xfeat`, as the gating matcher — see the defect-2 writeup in §9.8 for why
+(xfeat's own inlier-ratio-under-IPM signature would make a real rectification success look like a
+failure).
 
 ## Status
 Real inference (Ultralytics YOLO, CPU by default) implements `Inference.DetectStream` per `docs/plans/done/MVP1-PLAN.md` §C7 bullet 1; falls back to the Phase 0 echo stub when the `cv` extra is absent or the model can't load, so the service never crash-loops for lack of a model. `Training.ListModels`/`Training.PromoteModel`/`Training.StartTraining`/`Training.UploadDataset` are all implemented (CV-TRAINING Phase 2 + CV-TRAINING-V2 Wave W2) — see the API surface above and MODULE.md history for the full per-item design writeups (`ListModels`/`PromoteModel` against the shared `ModelRegistry`; `StartTraining` a real Ultralytics fine-tune with cancellation, off-thread execution, and never-auto-promote; `UploadDataset` a streamed dataset archive landed atomically). **`docs/plans/done/MVP2-PLAN.md` §V-d done**: `DetectStream` decouples per-stream frame receipt from inference and bounds cross-stream concurrent inference — see "V-d" above. **`docs/plans/done/CV-MODELS-PLAN.md` items 1-2 done (CP-b)**: model registry replaces the single hard-loaded detector with a lazy `{model_id -> YoloDetector}`, plus comma-separated composite mode — see "Model registry & composite mode" above. **CV-MODELS-PLAN follow-up done**: `yoloe-26s-seg-pf.pt` is a routable, opt-in open-vocabulary `model_id` covering people/vehicles/buildings — see "Routable model roster" above. **`docs/plans/done/REMOTE-CV-PLAN.md` P0/P1 done**: explicit `CV_DEVICE` knob + HTTP/2 keepalive server options — see `cv/cv-service/DEPLOY-GPU.md`.

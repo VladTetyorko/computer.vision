@@ -1297,6 +1297,266 @@ geo pull loops concurrently against a live mediamtx stream; H0's harness never s
 H4/H5's job, not `spikes/geo/**`'s). Whoever runs H4 should fill this table against the real
 service.
 
+### 9.8 H0b/H0c — instrument defects found, rectification actually run, re-answer (2026-08-19, laptop)
+
+H0b (uncommitted, cut off) and H0c (this section) found and fixed two defects that invalidated
+every H0 "rectified"/real-footage number above. Raw per-config JSON:
+`cv/cv-service/spikes/geo/results/h0c/{calibration_sweep,bakeoff_v2,false_convergence_gate_ipm}.json`
+(and H0b's own `results/h0b/{calibration,mosaic,rank_shift}.json`); H0's own `results/{bakeoff,
+false_convergence_gate}.json` and `results/MEASUREMENTS.md` are untouched and remain the record of
+what H0 actually measured (now known to be measured against a broken index, for §9.2/§9.3's
+oblique/Pexels rows specifically).
+
+#### Defect 1 — index coverage (fixed)
+
+`harvested/calibrate.py`'s `DEFAULT_HOLDOUT_FRACTION=0.10` splits tiles into a 90% reference set
+(indexed) and a 10% holdout (used only to *measure* `accept_similarity`/`accept_margin`).
+`harvested/orchestrator.py#build_region_index` computed that split correctly for calibration, but
+then **persisted the 90% reference-only index directly** — the holdout 10% never got encoded into
+`descriptors.npy`/`tiles.json`. Concretely: `kyiv-maidan` had 49 tiles on disk but only 45
+descriptors indexed; the Pexels clip's own ground-truth cell (`17/76649/44196`) was one of the 4
+missing ones on every holdout draw (fixed seed) — `rank_shift.json`'s `n_exact_cell_indexed: 0` for
+all 12 frames was the correct answer to a broken question: the true tile could not be retrieved no
+matter how good the matcher, because it was never searchable. **Every §9.2/§9.3 Pexels/SITL-oblique
+row above was measured against an index that could not contain the answer.**
+
+Fix (`harvested/orchestrator.py`, ~line 130-260): calibration still runs on the 90/10 split (now
+named `calibration_index`, used only inside the holdout perturbation loop — the calibration
+measurement itself is unaffected), but the holdout tiles are then ALSO encoded (clean, unperturbed)
+and folded into the final persisted `reference_index`, so the on-disk index contains every tile
+that decoded off disk, not just 90% of them. A self-test asserts this (`RuntimeError` if
+`len(all_tiles_meta) != total_readable`). Distinctiveness is recomputed over the full set.
+
+| Region | descriptors before | descriptors after | tiles on disk | GT cell now indexed? |
+|---|---|---|---|---|
+| `kyiv-maidan` | 45 | **49** | 49 | yes (`17/76649/44196` confirmed present) |
+| `kyiv-pozniaky` | 227 | **252** | 252 | n/a (no single GT cell for this region) |
+
+`accept_similarity`/`holdout_recall_at_1` are unchanged in both regions (0.870/0.25,
+0.490/0.04) — expected, calibration's measurement never touched the persisted-index bug.
+
+**Also a production defect**: `cv_service/geo/orchestrator.py` (harvested from) has the identical
+bug — H4 must carry this fix when porting the module, not just this spike's copy.
+
+Test: `spikes/geo/tests/test_index_coverage.py` (4 cases, synthetic region + a tiny torch-free fake
+`Encoder`, no network/model dependency).
+
+#### Defect 2 — rectification never applied (fixed)
+
+H0's "rectified" column never ran perspective IPM. It called `harvested/verify.py#condition_query`,
+which de-rotates (heading) and rescales (altitude→GSD) but is **nadir-only** —
+`pitch_degrees` defaults to `0.0` regardless of the query's real pitch, by its own docstring.
+`harvested/rectify.py` — a full perspective IPM module — existed, unused, never wired into any
+conditioning path. **Every H0 "rectified" number for an oblique query measured `condition_query`
+alone, not IPM.**
+
+Pitch convention (`harvested/rectify.py`'s own module docstring, "Conventions"): degrees FROM
+NADIR — 0 = straight down, 90 = horizon-level forward. Identical to `sitl_render.py`'s
+`--pitch-degrees`; no unit conversion needed wiring the two together.
+
+Fix: `rectify_rerank.py` gained `compute_rectification()` (runs `rectify()` once per query, given a
+stated `(pitch_deg, altitude_m, heading_deg)`) and `rerank_rectified(matcher, rect, ...)` (matches
+`rect.warped` against each candidate — single tile or 3x3 mosaic — mapping matched keypoints back
+through `rect.warped_to_input` into the CROPPED frame before fitting pose). New shared module
+`rectify_pipeline.py` wires the SAME `rect.warped` into BOTH retrieval and matching behind a
+`--rectify {none,condition,ipm}` switch: `none` = nothing, `condition` = H0's mislabeled
+"rectified", `ipm` = the actual fix. **Deliberate, stated scope decision**: `ipm` mode does NOT
+layer a second `condition_query` on top of `rect.warped` — `harvested/rectify.py`'s own docstring
+says that pass is redundant once `ipm_warp` is given `heading_deg`+`target_gsd_m_per_px`, and
+composing the two would be a no-op or actively wrong (`condition_query`'s footprint formula assumes
+a flat-plane nadir approximation `rect.warped` doesn't satisfy).
+
+**Instrument calibration for this path** (`spikes/geo/tests/test_rectify_ipm.py`): a 45° synthetic
+oblique render of a real `kyiv-pozniaky` mosaic, rectified and matched back against its own source,
+must self-match at inlier ratio ≥ 0.6 — passes, but only with `lightglue_disk`:
+
+| Matcher | self-match inlier ratio (5 tiles) | inlier count |
+|---|---|---|
+| `lightglue_disk` | **0.96–0.99** | 171–302 |
+| `loftr` | 0.47–0.51 | 106–146 |
+| `xfeat` | **0.11–0.19** | 34–66 (raw match_count 296–351, the HIGHEST of the three) |
+
+IPM itself is correct (lightglue_disk's near-perfect self-match proves it undoes the tilt). xfeat's
+low ratio despite the highest raw match count is a matcher-specific signature under IPM's
+resampling (high recall, low RANSAC-verified precision) — recurring at scale below, with real
+consequences for the gate re-answer.
+
+#### Task 1 — calibration variant (v), oblique 45°, kyiv-pozniaky, 5 tiles × 3 matchers × 3 modes
+
+Same tiles/oblique construction as H0b's `calibrate_instrument.py` "v_oblique_45deg", now through
+`none`/`condition`/`ipm`. `k=10`.
+
+| Matcher | Rectify | median retrieval rank (/252) | top-1 after re-rank | gate pass | median position error (m) |
+|---|---|---|---|---|---|
+| xfeat | none | 93 | 0/5 | 0/5 | 1113.7 |
+| xfeat | condition | 93 | 0/5 | 0/5 | 1841.9 |
+| xfeat | **ipm** | **62** | 0/5 | **2/5** | **588.9** |
+| lightglue_disk | none | 93 | 0/5 | 2/5 | 59.3 |
+| lightglue_disk | condition | 93 | 0/5 | 0/5 | 1939.0 |
+| lightglue_disk | **ipm** | **62** | 0/5 | **3/5** | **224.6** |
+| loftr | none | 93 | 0/5 | 1/5 | 1753.1 |
+| loftr | condition | 93 | 0/5 | 0/5 | 1744.5 |
+| loftr | **ipm** | **62** | 0/5 | **3/5** | **219.2** |
+
+Retrieval rank never lands inside k=10 on this harder, weaker-calibrated region (252 tiles,
+holdout_recall@1 0.04) regardless of mode, so top-1-after-re-rank is 0/5 everywhere by
+construction — but `ipm` still improves retrieval rank (93→62) and dramatically improves gate-pass
+rate and position accuracy on whichever OTHER (nearby, overlapping-footprint) candidate wins.
+
+#### Task 2 — SITL oblique 45°, real telemetry, 13 frames, kyiv-maidan
+
+| Matcher | Rectify | k | recall@100m | accepted | false-fix rate | median error (m) | ms/frame |
+|---|---|---|---|---|---|---|---|
+| xfeat | none | 10 | 0.00 | 0/13 | — | 220.4 | 538 |
+| xfeat | condition | 10 | 0.15 | 0/13 | — | 443.5 | 315 |
+| xfeat | **ipm** | 10 | **0.77** | 10/13 | **0.0** | **63.0** | 545 |
+| xfeat | none | 20 | 0.00 | 0/13 | — | 392.6 | 1297 |
+| xfeat | condition | 20 | 0.08 | 0/13 | — | 443.5 | 600 |
+| xfeat | **ipm** | 20 | **1.00** | **13/13** | **0.0** | **62.8** | 1244 |
+| lightglue_disk | none | 10 | 0.62 | 4/13 | 0.0 | 85.2 | 13647 |
+| lightglue_disk | condition | 10 | 0.23 | 1/13 | 0.0 | 335.0 | 5120 |
+| lightglue_disk | **ipm** | 10 | **0.77** | 10/13 | **0.0** | **63.0** | 13076 |
+| loftr | none | 10 | 0.46 | 3/13 | 0.0 | 338.2 | 15788 |
+| loftr | condition | 10 | 0.31 | 0/13 | — | 166.0 | 5606 |
+| loftr | **ipm** | 10 | **0.77** | 12/13 | 0.167 | **62.9** | 14622 |
+
+**IPM is a clean, large, consistent win on real telemetry, every matcher** — all three converge on
+~0.77 recall@100m / ~63m median error at k=10, and xfeat (the only one that also clears §4.7's
+latency budget) reaches **1.00 recall@100m, 0 false fixes at k=20** — the single strongest result
+this wave. `condition` (H0's old mislabeled "rectified") is frequently WORSE than doing nothing
+(lightglue_disk: 0.62→0.23) — de-rotating an obliquely-tilted image with a nadir-only rescale can
+distort it more than leaving it alone, exactly as defect 2 predicts.
+
+Retrieval-vs-rerank: at k=10, `ipm`'s median retrieval rank of the true tile is 9 for every
+matcher (just inside the window); widening to k=20 for xfeat alone moves recall 0.77→1.00 — **the
+k=10 gap here is a retrieval-window problem, fully closed by widening k, not a re-ranking
+failure**.
+
+#### Task 3 — Pexels, 12 real frames, no telemetry, kyiv-maidan (the fixed index)
+
+`none` re-do and `ipm` at the stated prior (pitch 70°/alt 60m/heading 135° — verified against
+`git show feat/visual-geo:docs/VISUAL-GEO-PLAN.md` §12.15, the parked branch's own blind-angle-probe
+geometry for this exact clip, NOT measured telemetry):
+
+| Matcher | Rectify | mosaic | recall@100m | accepted | median error (m) | median retrieval rank before/after |
+|---|---|---|---|---|---|---|
+| xfeat | none | — | 0.000 | 0/12 | 477.0 | 15.0 / — |
+| lightglue_disk | none | — | 0.000 | 0/12 | 743.5 | 15.0 / — |
+| loftr | none | — | 0.000 | 0/12 | 657.1 | 15.0 / — |
+| xfeat | **ipm** | single | 0.083 | 0/12 | 251.4 | 2.5 / 6.5 |
+| xfeat | **ipm** | mosaic | 0.167 | 0/12 | 226.4 | 2.5 / 3.0 |
+| lightglue_disk | **ipm** | single | 0.000 | **3/12** | 137.4 | 2.5 / 3.5 |
+| lightglue_disk | **ipm** | mosaic | 0.000 | 0/12 | 644.6 | 2.5 / 3.0 |
+| loftr | **ipm** | single | 0.000 | **6/12** | 118.1 | 2.5 / 3.0 |
+| loftr | **ipm** | mosaic | 0.167 | 0/12 | 135.9 | 2.5 / 1.0 |
+
+Same fixed index, `none` mode: retrieval rank of the true tile is now REAL and findable (median 15,
+all 12 exact cells indexed — defect 1's fix confirmed on the exact dataset it broke) but still
+outside k=10, and outside k=20 for xfeat too (gate never passes) — unlike SITL, widening k alone
+does not close the Pexels gap: real domain gap in the descriptor embedding.
+
+**`ipm` at the stated prior is the headline surprise.** `recall@100m` looks unchanged or barely
+better — but that metric hides the real result: **loftr accepts 6/12 frames (gate-passing,
+non-false, 105–133m from truth), lightglue_disk accepts 3/12 (113–118m)**. H0's own §9.2 headline
+was "0/12 accepted, every matcher, every k, ever" on this exact clip; that is no longer true. The
+misses of the round ≤100m bucket (by 5–35m) sit well inside this harness's own unverified
+reference-tile-georeferencing error band (§9.6, "3–5m, still the vendor figure, unverified" —
+plausibly wider in practice).
+
+**xfeat's instrument-calibration finding recurs here, with real consequences**: xfeat's
+stated-prior `ipm` per-frame inlier ratios are 0.05–0.09 on Pexels — refusing G-b
+(`MIN_INLIER_RATIO=0.35`) on frames where the estimated position is dead-on (12.1m, 8.8m, 13.8m,
+22.1m off — all refused). **xfeat, the only matcher clearing §4.7's latency budget, is also the one
+matcher whose gate signature under IPM rejects its own genuinely correct fixes.** Actionable for
+H4: either recalibrate `MIN_INLIER_RATIO` for xfeat specifically under `ipm`, or treat xfeat as the
+wrong matcher once IPM is in the loop (contradicting O1's latency-only default).
+
+xfeat-only geometry sweep — {pitch 60,70,80}×{alt 40,60,80}×{heading 115,135,155}×{single,mosaic},
+54 configs, k=10 — best 5 by recall@100m:
+
+| pitch | alt | heading | mosaic | recall@100m | accepted | median error (m) |
+|---|---|---|---|---|---|---|
+| 70 | 60 | 155 | no | **0.500** | 0/12 | 95.8 |
+| 70 | 40 | 135 | yes | 0.500 | 0/12 | 125.0 |
+| 80 | 40 | 115 | yes | 0.417 | 0/12 | 163.3 |
+| 70 | 40 | 155 | no | 0.417 | 0/12 | 210.7 |
+| 80 | 60 | 115 | yes | 0.333 | 0/12 | 149.1 |
+
+The sweep's single best point (70°/60m/**155°**) matches the stated prior's pitch/altitude exactly,
+differing only in heading (155° vs 135°, 20° apart) — confirms the parked branch's blind-angle-probe
+geometry was in the right ballpark; heading is the most sensitive axis. `accepted` stays 0/12 for
+xfeat everywhere in the sweep — the inlier-ratio-under-IPM signature refuses even the
+best-positioned frames across the whole grid. `mosaic=True` helps about half the top results and
+sharply hurts elsewhere (lightglue_disk stated-prior: 644.6m mosaic vs 137.4m single) — no clean
+rule found this wave.
+
+#### Task 4 — false-convergence gate, best Pexels geometric field
+
+`false_convergence_gate_ipm.py` (new script; `false_convergence_gate.py` itself untouched — its own
+committed results remain H0's evidence) re-runs the real, unmodified `SequenceLocalizer` a third
+way: the geometric field built from `ipm` rectification at the best sweep point (xfeat,
+pitch=70°/alt=60m/heading=155°, single tile). Ground truth cell `17/76649/44196`; correctness
+radius = `holdout_correct_radius_m(...)` = 233.6m.
+
+| Field | Converged? | Correct at convergence? | Converged on the known 771m-wrong cell? |
+|---|---|---|---|
+| raw similarity (H0 control, unchanged) | 8/12 | n/a | **8/8 (100%)** |
+| geometric, `condition` re-rank (H0, unchanged) | 0/12 | n/a | n/a |
+| geometric, **`ipm`** re-rank (H0c) | **0/12** | n/a | n/a |
+
+IPM does not (yet) fix sequence convergence on Pexels — safe (no repeat of the 8/8 false
+convergence), but not positive either: xfeat's best single-geometry sweep point (inlier ratios
+0.05–0.09) is too weak and inconsistent frame-to-frame to collapse the filter's posterior.
+Consistent with the task-3 finding that xfeat's own gate signature under IPM, not IPM itself, is
+the binding constraint — loftr/lightglue_disk (real accepted fixes in task 3) were not tried here
+due to their latency cost making a live sequence-filter integration impractical without first
+resolving latency (not run this wave, scope/time).
+
+#### Gate re-answer — §9.4's exact wording
+
+> *"does a matcher clear the latency budget with top-1 materially above 0/12 on Pexels at zero
+> false fixes?"*
+
+**Still NO, for the literal question — but the shape of the NO has completely changed**, and the
+underlying "is this fixable" question now has a real, narrow, actionable answer where H0 found a
+wall. xfeat still clears latency; under `ipm` its real-frame accuracy is dramatically better
+(SITL 1.00 recall@100m/0 false-fix at k=20; Pexels sweep best 0.50 recall@100m) but its ACCEPTED
+count on Pexels stays 0/12 in every tested `ipm` configuration, because of its own inlier-ratio
+signature under IPM (0.05–0.09, well under G-b's 0.35 floor) — refusing frames whose position is
+correct to within 10-20m. loftr/lightglue_disk do NOT clear latency, but under `ipm` at the stated
+prior BOTH deliver real, non-false, gate-passing accepted fixes on Pexels for the first time this
+project has measured (loftr 6/12 at 105-133m, lightglue_disk 3/12 at 113-118m) — categorically
+different from H0's "0/12, every matcher, every k, ever."
+
+No single tested configuration both clears latency and delivers materially-above-zero accepted,
+zero-false-fix fixes on Pexels — the NO stands. But H0c narrows exactly why: the domain-gap wall H0
+reported is now shown to be **substantially a retrieval + matcher-selection problem, not an
+unfixable geometry problem** — IPM rectification, once actually run, closes most of the geometric
+gap (SITL: full closure; Pexels: real accepted fixes for the first time). The remaining blocker is
+(a) latency, for the two matchers whose gate signature tolerates IPM's resampling, and (b) xfeat's
+own low-precision-under-IPM signature, for the one matcher that clears latency. Neither is a
+"this approach cannot work" finding.
+
+**Retrieval vs. re-ranking, for H4**: SITL shows retrieval is NOT the ceiling once defect 1 is
+fixed (true-tile rank 9/k=10 for every matcher; k=20 alone closes 0.77→1.00). Pexels shows
+retrieval IS still a real, unresolved ceiling (median rank 15, unmoved by widening k to 20) — H0's
+original domain-gap finding survives for the retrieval stage specifically. Once a tile IS offered
+as a candidate, `ipm` re-ranking is never worse and usually dramatically better at picking it and
+fitting an accurate pose, in both regions, all three matchers — re-ranking quality is not the
+bottleneck anywhere measured this wave. H4 should prioritize (1) a descriptor better suited to the
+appearance domain gap, or a wider/cheaper retrieval window, and (2) either re-calibrating G-b for
+xfeat specifically under `ipm`, or accepting loftr/lightglue_disk's latency cost for a
+lower-frequency (not per-keyframe) geo pass.
+
+Not run, and why: k=20 for lightglue_disk/loftr (already ~5-15s/frame at k=10; the k-sensitivity
+question was answered by xfeat's own k=10→k=20 pair plus every matcher agreeing at k=10); `condition`
+mode for Pexels (already shown to underperform `none` on SITL with real telemetry, task 2 above; a Pexels
+run would only restate that on the harder dataset); task 4 with loftr/lightglue_disk fields (both
+far over the latency budget, making live integration impractical before the latency question is
+resolved); a systematic explanation for `mosaic=True`'s mixed effect (observed, not explained); §9.6's
+RSS error-budget decomposition (still needs a dedicated controlled-perturbation experiment, unchanged
+from H0); GB4005 (same reason as H0 — no torch/kornia/cv-service checkout there).
+
 ---
 
 ## 10. Open choices left to the implementer — each with a default
