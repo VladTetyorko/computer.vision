@@ -17,6 +17,7 @@
     <modules>
         <module>vision-proto</module>
         <module>grpc</module>
+        <module>tiles</module>
     </modules>
 
 </project>
