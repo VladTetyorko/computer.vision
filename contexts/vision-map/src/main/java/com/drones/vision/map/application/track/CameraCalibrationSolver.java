@@ -44,12 +44,20 @@ import java.util.Objects;
  *       (radially collinear as seen from the camera, the classic "picked landmarks all roughly in
  *       the same direction" degenerate case) — {@link #REASON_BEARING_SPREAD_TOO_NARROW}.</li>
  * </ul>
- * After the search, for {@code N >= 3} landmarks only, a residual exceeding the caller-supplied
- * {@code maxRmsErrorPixels} refuses with {@link #REASON_RESIDUAL_EXCEEDS}. For exactly 2 landmarks
- * the fit is reported regardless of its residual — D5 calls it "exact," meaning nothing here can
- * independently verify it, not that the residual is necessarily near zero — with {@link
- * CalibrationQuality#UNDETERMINED} rather than a pass/fail RMS gate, so the UI can ask for a third
- * point instead of silently trusting an unverifiable fit.
+ * After the search, a residual exceeding the caller-supplied {@code maxRmsErrorPixels} refuses with
+ * {@link #REASON_RESIDUAL_EXCEEDS} — <b>at every N, including 2</b>.
+ *
+ * <p>D5 originally exempted {@code N == 2} on the premise that "the fit is exact and the residual
+ * meaningless." That premise is arithmetically false: two landmarks supply <em>four</em>
+ * measurements (two bearings, two depressions) against three unknowns, so one redundant degree of
+ * freedom remains and the residual measures something real. Running the endpoint proved it — two
+ * mutually inconsistent clicks returned {@code solved:true} carrying a 177-pixel residual and a
+ * pose wrong by 10° of yaw, which is exactly the "confident wrong pose" D5's own closing sentence
+ * forbids. The gate now runs at every N.
+ *
+ * <p>{@link CalibrationQuality#UNDETERMINED} survives for {@code N == 2}, but it now means what it
+ * should: the fit is internally consistent, yet one redundant measurement is too thin to
+ * cross-check it, so the UI asks for a third point. It no longer doubles as "nothing checked this."
  */
 public final class CameraCalibrationSolver {
 
@@ -142,21 +150,20 @@ public final class CameraCalibrationSolver {
         double degreesPerPixel = bestHfovDegrees / request.imageWidthPixels();
         double rmsErrorPixels = fit.rmsDegrees / degreesPerPixel;
 
-        if (n == CalibrationRequest.MIN_LANDMARKS) {
-            FixedCameraPose pose = new FixedCameraPose(request.cameraPosition(), request.aglMeters(), fit.yawDegrees,
-                    fit.pitchDegrees, bestHfovDegrees);
-            return CalibrationResult.solved(pose, rmsErrorPixels, CalibrationQuality.UNDETERMINED);
-        }
-
+        // The residual gate runs at every N, including 2 -- see this class's javadoc for why D5's
+        // "with N=2 the fit is exact and the residual meaningless" is arithmetically false.
         if (rmsErrorPixels > maxRmsErrorPixels) {
             String reason = String.format(Locale.ROOT, REASON_RESIDUAL_EXCEEDS_TEMPLATE, oneDecimal(rmsErrorPixels),
                     oneDecimal(maxRmsErrorPixels));
             return CalibrationResult.refused(reason, rmsErrorPixels);
         }
 
+        CalibrationQuality quality = n == CalibrationRequest.MIN_LANDMARKS
+                ? CalibrationQuality.UNDETERMINED
+                : CalibrationQuality.GOOD;
         FixedCameraPose pose = new FixedCameraPose(request.cameraPosition(), request.aglMeters(), fit.yawDegrees,
                 fit.pitchDegrees, bestHfovDegrees);
-        return CalibrationResult.solved(pose, rmsErrorPixels, CalibrationQuality.GOOD);
+        return CalibrationResult.solved(pose, rmsErrorPixels, quality);
     }
 
     /**

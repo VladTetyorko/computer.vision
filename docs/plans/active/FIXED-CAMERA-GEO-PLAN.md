@@ -110,13 +110,22 @@ today; C11 may lift it to kernel later):
 - 1-D search over hfov ∈ [20°, 120°] (golden section, fixed iterations): for each candidate,
   `yaw = circular mean of (βᵢ − aᵢ)`, `pitch = mean of (θᵢ − eᵢ)`; minimize summed squared
   angular residuals.
-- Quality: RMS residual converted to **pixels** (`rms / (hfov/width)` per axis). With N=2 the fit
-  is exact and the residual meaningless — the result carries `quality: "UNDETERMINED"` and the UI
-  says "add a third point to verify". With N≥3, `rmsErrorPixels > calibration.max-rms-error-pixels`
-  ⇒ **`solved:false`** with a reason. Degenerate geometry (bearing spread < 10°, or any landmark
-  nearer than 3 m) ⇒ `solved:false` with a reason. **An honest "cannot solve" beats a confident
-  wrong pose** — the solve endpoint never persists; the operator reviews the returned pose +
-  quality and confirms with a separate `PUT`.
+- Quality: RMS residual converted to **pixels** (`rms / (hfov/width)` per axis).
+  `rmsErrorPixels > calibration.max-rms-error-pixels` ⇒ **`solved:false`** with a reason, **at
+  every N including 2**. N=2 additionally carries `quality: "UNDETERMINED"` when it does pass, and
+  the UI says "add a third point to verify". Degenerate geometry (bearing spread < 10°, or any
+  landmark nearer than 3 m) ⇒ `solved:false` with a reason. **An honest "cannot solve" beats a
+  confident wrong pose** — the solve endpoint never persists; the operator reviews the returned
+  pose + quality and confirms with a separate `PUT`.
+
+> **Amended 2026-08-19 (found by running the endpoint, wave G6).** This bullet originally read
+> "With N=2 the fit is exact and the residual meaningless" and exempted N=2 from the ceiling. That
+> premise is arithmetically false — two landmarks give **four** measurements (two bearings, two
+> depressions) against three unknowns, leaving one redundant degree of freedom, so the residual
+> measures something real. Live, two inconsistent clicks returned `solved:true` with a **177-pixel**
+> residual and a pose wrong by 10° of yaw, offered to the operator as savable: precisely the
+> confident wrong pose this bullet's own last sentence forbids. The gate now runs at every N, and
+> `UNDETERMINED` means "consistent but too thin to cross-check", not "nothing checked this".
 
 **D6 — Uncertainty is computed, carried, and drawn; near-horizon fixes are refused, not faked.**
 For a ray at depression θ from height *agl*, with configured angular error σ (degrees, default 0.5

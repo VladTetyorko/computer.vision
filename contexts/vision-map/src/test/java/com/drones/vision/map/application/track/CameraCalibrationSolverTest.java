@@ -72,18 +72,40 @@ class CameraCalibrationSolverTest {
         assertEquals(AGL_METERS, pose.aglMeters(), 1e-9);
     }
 
-    // --- Exactly 2 landmarks: always UNDETERMINED, never refused on RMS -------------------------
+    // --- Exactly 2 landmarks: consistent ones solve UNDETERMINED, inconsistent ones still refuse --
 
     @Test
-    void exactlyTwoLandmarksReportsUndeterminedRegardlessOfResidualCeiling() {
+    void exactlyTwoConsistentLandmarksSolveButReportUndetermined() {
         List<CalibrationLandmark> landmarks = List.of(landmark(0.2, 0.5), landmark(0.8, 0.6));
 
-        // An absurdly strict ceiling would refuse any N>=3 fit; for N==2 it must not matter at all.
-        CalibrationResult result = CameraCalibrationSolver.solve(request(landmarks), 0.001);
+        CalibrationResult result = CameraCalibrationSolver.solve(request(landmarks), 5.0);
 
         assertTrue(result.solved(), () -> "expected solved, got refusal: " + result.reason());
         assertEquals(CalibrationQuality.UNDETERMINED, result.quality());
         assertNotNull(result.rmsErrorPixels());
+        assertTrue(result.rmsErrorPixels() < 1.0, "rmsErrorPixels=" + result.rmsErrorPixels());
+    }
+
+    /**
+     * The defect a live run of {@code POST /api/assets/{id}/camera-pose/calibration} exposed: D5
+     * exempted {@code N == 2} from the residual ceiling, calling the fit "exact." Two landmarks
+     * give four measurements against three unknowns, so the residual is real — and two mutually
+     * inconsistent clicks were coming back {@code solved:true} with a 177-pixel residual and a pose
+     * wrong by 10° of yaw, offered to the operator as savable.
+     */
+    @Test
+    void twoMutuallyInconsistentLandmarksRefuseInsteadOfReturningAConfidentWrongPose() {
+        // Second landmark's map position belongs to a different pixel entirely -- no single
+        // yaw/pitch/hfov explains the pair, and the leftover residual says so.
+        CalibrationLandmark elsewhere = landmark(0.8, 0.45);
+        List<CalibrationLandmark> landmarks =
+                List.of(landmark(0.2, 0.5), new CalibrationLandmark(0.35, 0.75, elsewhere.mapPosition()));
+
+        CalibrationResult result = CameraCalibrationSolver.solve(request(landmarks), 25.0);
+
+        assertFalse(result.solved(), () -> "expected refusal, got a pose with rms " + result.rmsErrorPixels());
+        assertTrue(result.reason().startsWith("residual "), () -> "reason=" + result.reason());
+        assertNull(result.quality());
     }
 
     // --- Degenerate geometry: landmarks radially collinear refuse on bearing spread -------------

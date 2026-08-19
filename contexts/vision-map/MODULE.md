@@ -339,10 +339,16 @@ com.drones.vision.map.application.track — camera pose CRUD, calibration solver
   - **Refuses before the search** (raw geometry alone, named reasons, frozen wire text — §5): any
     landmark nearer than 3m from the camera → `"landmark %d is %sm from the camera"`; every landmark's
     bearing within 10° of every other (radially collinear) → `"landmarks span only %s° of bearing"`.
-    **Refuses after the search**, `N≥3` only: residual exceeding the caller-supplied
-    `maxRmsErrorPixels` → `"residual %spx exceeds %spx"`. For exactly `N==2` the fit is *always*
-    reported (D5 calls it "exact" — nothing here can independently verify that), with
-    `CalibrationQuality.UNDETERMINED` rather than a pass/fail RMS gate, regardless of the residual.
+    **Refuses after the search**, at **every** `N` including 2: residual exceeding the caller-supplied
+    `maxRmsErrorPixels` → `"residual %spx exceeds %spx"`. `N==2` additionally reports
+    `CalibrationQuality.UNDETERMINED` when it passes — the fit is consistent, but one redundant
+    measurement is too thin to cross-check, so the UI asks for a third point.
+  - **Plan defect this closed (found by running the endpoint, 2026-08-19)**: D5 originally exempted
+    `N==2` from the ceiling, on the premise that "the fit is exact and the residual meaningless".
+    Two landmarks give **four** measurements (two bearings, two depressions) against three unknowns,
+    so one redundant degree of freedom remains and the residual is real. Live, two inconsistent
+    clicks returned `solved:true` with a **177-pixel** residual and a pose wrong by 10° of yaw. D5
+    is amended; the gate runs at every `N`.
   - **Plan gap, resolved as a named constant**: D5 states the 10°-bearing-spread and 3m-landmark-distance
     thresholds as part of the algorithm itself, but §6's configuration YAML block does not list them
     (unlike `calibration.max-rms-error-pixels`, which *is* listed and passed in as `maxRmsErrorPixels`).
