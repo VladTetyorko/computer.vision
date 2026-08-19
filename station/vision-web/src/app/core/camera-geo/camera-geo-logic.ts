@@ -359,28 +359,26 @@ export function trackKey(assetId: string, trackId: number): string {
 }
 
 /**
- * Folds one live `TRACK` {@link MapEventPayload} onto the current track list — the pure reducer
+ * Folds one live `track` {@link MapEventPayload} onto the current track list — the pure reducer
  * `core/map-data/tracks-store.ts` calls once per SSE arrival, mirroring
  * `core/map-data/marks-store.ts`'s own `applyMarkEvents` idiom (initial `GET` first, then fold
- * deltas — §5's own "not snapshot-on-connect" note). Ignores any payload whose `entity` isn't the
- * `'TRACK'` spelling §5 froze (see `core/api/models.ts#MapEventPayload`'s own doc comment on that
- * casing mismatch).
+ * deltas — §5's own "not snapshot-on-connect" note). Ignores any payload for another entity.
  *
- * `CREATED`/`UPDATED` upsert, preserving the existing `trail` — the live event never carries one
- * (§5: "trail via GET after reload"). `CLEARED` removes the track outright, never left stale on the
+ * `created`/`updated` upsert, preserving the existing `trail` — the live event never carries one
+ * (§5: "trail via GET after reload"). `cleared` removes the track outright, never left stale on the
  * map (D3's own "nothing lingers, nothing pretends" — a track whose id expires or whose stream stops
- * gets a `CLEARED` and leaves the map).
+ * gets a `cleared` and leaves the map).
  */
 export function applyTrackEvent(
   tracks: readonly ProjectedTrackResponse[],
   payload: MapEventPayload,
 ): readonly ProjectedTrackResponse[] {
-  if (payload.entity !== 'TRACK' || !payload.track) {
+  if (payload.entity !== 'track' || !payload.track) {
     return tracks;
   }
   const live = payload.track;
   const key = trackKey(live.assetId, live.trackId);
-  if (payload.action === 'CLEARED') {
+  if (payload.action === 'cleared') {
     return tracks.filter((track) => trackKey(track.assetId, track.trackId) !== key);
   }
   const existing = tracks.find((track) => trackKey(track.assetId, track.trackId) === key);

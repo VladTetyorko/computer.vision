@@ -218,8 +218,17 @@ context.
 ## 5. Frozen wire contract
 
 Backend and UI waves parallelize against exactly this. Property names, status codes and enum
-spellings are frozen. Every endpoint below answers `409 {"detail":"fixed-camera geolocation is
-disabled (vision.geo.fixed-camera.enabled)"}` while the flag is off.
+spellings are frozen. Every endpoint below answers **409** while the flag is off, in this app's
+real, shipped error envelope — `ErrorResponse(String error, String message)` — produced by throwing
+`IllegalStateException`, which `ApiExceptionHandler` already maps:
+
+```
+409 {"error":"CONFLICT","message":"fixed-camera geolocation is disabled (vision.geo.fixed-camera.enabled)"}
+```
+
+> **Amended 2026-08-19 (wave G5 found it).** This section originally specified
+> `{"detail":"…"}`, a shape that exists nowhere in this codebase. Corrected to the shipped
+> envelope rather than inventing a second error format for one feature.
 
 **Camera pose** (asset-scoped; 404 hides out-of-scope, 403 = visible but not manageable, audited):
 
@@ -273,17 +282,27 @@ ProjectedTrackResponse = {
 }
 ```
 
-**Live channel** — the existing `MAP` SSE topic; `MapEventPayload.entity` gains `"TRACK"`:
+**Live channel** — the existing `MAP` SSE topic; `MapEventPayload.entity` gains `"track"`:
 
 ```
-{ "entity": "TRACK", "action": "CREATED" | "UPDATED", "layerId": "…",
+{ "entity": "track", "action": "created" | "updated", "layerId": "…",
   "track": ProjectedTrackResponse-without-trail }          // trail via GET after reload
-{ "entity": "TRACK", "action": "CLEARED", "layerId": "…",
+{ "entity": "track", "action": "cleared", "layerId": "…",
   "track": { "assetId": "…", "trackId": 17 } }             // track expired or stream stopped
 ```
 
+> **Amended 2026-08-19 (wave G5 found it).** This section originally froze `"TRACK"` /
+> `"CREATED"`. The shipped `MapEventPayload.from` lowercases every entity and action
+> (`event.entity().name().toLowerCase(Locale.ROOT)`), and the SPA's map store already consumes
+> `"mark"`/`"created"`. Uppercase would have made `track` the only shouting entity on a topic with
+> live consumers. **Lowercase wins**; G5's TypeScript was corrected to match.
+
 Delivery scoping: identical predicate to `MARK` events (per-connection `canView(layerId)`).
-`DELETED` is never used for tracks; `CLEARED` is the single terminal action.
+`DELETED` is never used for tracks; `cleared` is the single terminal action.
+
+`ProjectedTrackResponse` must be `@JsonInclude(NON_NULL)` with **boxed** `Double`/`String` fields
+for everything except `assetId` and `trackId` — the `cleared` payload carries only those two, and
+absent-not-null is what makes one record serve both shapes.
 
 ---
 

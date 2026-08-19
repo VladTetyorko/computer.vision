@@ -332,7 +332,7 @@ describe('applyTrackEvent (D3, D11 — the live TRACK reducer)', () => {
 
   function createdPayload(overrides: Partial<ProjectedTrackResponse> = {}): MapEventPayload {
     const { trail: _trail, ...withoutTrail } = { ...liveTrack, ...overrides };
-    return { entity: 'TRACK', action: 'CREATED', layerId: liveTrack.layerId, track: withoutTrail };
+    return { entity: 'track', action: 'created', layerId: liveTrack.layerId, track: withoutTrail };
   }
 
   it('ignores a non-TRACK entity', () => {
@@ -350,8 +350,8 @@ describe('applyTrackEvent (D3, D11 — the live TRACK reducer)', () => {
   it('UPDATED upserts scalar fields while preserving the existing trail', () => {
     const existing: ProjectedTrackResponse = { ...liveTrack };
     const updated: MapEventPayload = {
-      entity: 'TRACK',
-      action: 'UPDATED',
+      entity: 'track',
+      action: 'updated',
       layerId: liveTrack.layerId,
       track: { assetId: 'asset-1', trackId: 17, latitude: 50.451, longitude: 30.524 },
     };
@@ -366,8 +366,8 @@ describe('applyTrackEvent (D3, D11 — the live TRACK reducer)', () => {
   it('CLEARED removes the track outright — nothing lingers', () => {
     const existing: ProjectedTrackResponse = { ...liveTrack };
     const cleared: MapEventPayload = {
-      entity: 'TRACK',
-      action: 'CLEARED',
+      entity: 'track',
+      action: 'cleared',
       layerId: liveTrack.layerId,
       track: { assetId: 'asset-1', trackId: 17 },
     };
@@ -378,8 +378,8 @@ describe('applyTrackEvent (D3, D11 — the live TRACK reducer)', () => {
     const other: ProjectedTrackResponse = { ...liveTrack, assetId: 'asset-2', trackId: 3 };
     const existing: ProjectedTrackResponse = { ...liveTrack };
     const cleared: MapEventPayload = {
-      entity: 'TRACK',
-      action: 'CLEARED',
+      entity: 'track',
+      action: 'cleared',
       layerId: liveTrack.layerId,
       track: { assetId: 'asset-1', trackId: 17 },
     };

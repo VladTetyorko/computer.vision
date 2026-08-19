@@ -1550,22 +1550,22 @@ export interface PatchDrawingRequest {
  * every `core/map-data/**` store does its own initial `GET` first and folds deltas on top.
  */
 /**
- * **`TRACK` entity (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D11, wave G5) — frozen with a casing
- * mismatch, kept exactly as the plan specifies rather than silently normalized.** Every other
- * entity/action spelling this payload carries is lowercase (verified against the shipped
- * `MapEventPayload.java`, which lowercases `MapEvent.EntityType.name()`, and `LiveMapScopingTest`'s
- * own literal `"mark"`/`"created"` assertions). §5's own frozen JSON for the new `TRACK` entity is
- * uppercase verbatim — `"entity": "TRACK"`, `"action": "CREATED" | "UPDATED" | "CLEARED"` — and D11
- * states this is "frozen here so G4's DTO mapping cannot drift", so this union follows §5 literally
- * rather than guessing G4 will lowercase it to match the sibling entities. **Flagged, not resolved**:
- * if G4 ships lowercase `"track"`/`"created"` instead (matching the sibling convention), this union
- * and `core/camera-geo/camera-geo-logic.ts`'s `action`/`entity` comparisons need one follow-up edit;
- * nothing else in this wave depends on which spelling wins.
+ * The `track` entity on the map SSE topic (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D11).
+ *
+ * Wave G5 shipped this uppercase because §5 froze it that way, and flagged the mismatch rather than
+ * normalizing it silently. §5 was wrong: the shipped `MapEventPayload.java` lowercases every
+ * `MapEvent.EntityType.name()`, and this SPA's map stores already fold `"mark"`/`"created"` off the
+ * same topic — uppercase would have made `track` the only shouting entity on a channel with live
+ * consumers. The plan was amended 2026-08-19 and this type follows it.
  */
-export type MapTrackEntity = 'TRACK';
+export type MapTrackEntity = 'track';
 
-/** See {@link MapTrackEntity}'s own doc comment — the three actions §5 froze for the `TRACK` entity, uppercase like the entity itself. `DELETED` is never used for tracks (§5): `CLEARED` is the single terminal action. */
-export type MapTrackAction = 'CREATED' | 'UPDATED' | 'CLEARED';
+/**
+ * The three actions a `track` event carries. `deleted` is never used for tracks (§5): `cleared` is
+ * the single terminal action, which is the whole reason this narrower alias exists rather than
+ * reusing {@link MapEventPayload}'s full action union.
+ */
+export type MapTrackAction = 'created' | 'updated' | 'cleared';
 
 /**
  * The `track` field of a live `TRACK` {@link MapEventPayload} (§5) — `ProjectedTrackResponse`
@@ -1594,7 +1594,7 @@ export interface MapEventPayload {
   readonly mark?: MapMark;
   readonly drawing?: MapDrawingResponse;
   readonly layer?: MapLayer;
-  /** Present only when `entity === 'TRACK'` — see {@link ProjectedTrackLive}'s own doc comment for the CLEARED-is-partial shape. */
+  /** Present only when `entity === 'track'` — see {@link ProjectedTrackLive}'s own doc comment for the CLEARED-is-partial shape. */
   readonly track?: ProjectedTrackLive;
 }
 
