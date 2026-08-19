@@ -13,6 +13,7 @@ import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UserId;
@@ -343,6 +344,52 @@ class UsageTimelineControllerTest {
     @Test
     void recordingReturns400ForMalformedUsageId() throws Exception {
         mockMvc.perform(get("/api/usages/{usageId}/recording", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    // ---- byStream (docs/plans/active/STREAM-STATE-PLAN.md S5 -- what happened to stream X) ----
+
+    @Test
+    void byStreamReturns200WithTheSameRowShapeTheListUses() throws Exception {
+        StreamId streamId = StreamId.random();
+        Instant start = Instant.parse("2026-08-04T10:36:29.895Z");
+        Instant end = Instant.parse("2026-08-04T11:20:00.000Z");
+        UsageSummary summary = new UsageSummary(usageId, assetId, "Falcon-2", start, end, 2610L, 1234);
+        when(usageService.byStream(VisibilityScope.unbounded(), streamId)).thenReturn(Optional.of(summary));
+
+        mockMvc.perform(get("/api/usages/by-stream/{streamId}", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.usageId").value(usageId.value().toString()))
+                .andExpect(jsonPath("$.assetId").value(assetId.value().toString()))
+                .andExpect(jsonPath("$.assetName").value("Falcon-2"))
+                .andExpect(jsonPath("$.endedAt").value("2026-08-04T11:20:00Z"))
+                .andExpect(jsonPath("$.durationSeconds").value(2610));
+    }
+
+    @Test
+    void byStreamPassesTheCallersScopeAndParsedStreamIdThrough() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(usageService.byStream(any(), any())).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/usages/by-stream/{streamId}", streamId.value()));
+
+        verify(usageService).byStream(VisibilityScope.unbounded(), streamId);
+    }
+
+    @Test
+    void byStreamReturns404WhenNoVisibleUsageCarriesThatStreamId() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(usageService.byStream(any(), any())).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/usages/by-stream/{streamId}", streamId.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void byStreamReturns400ForMalformedStreamId() throws Exception {
+        mockMvc.perform(get("/api/usages/by-stream/{streamId}", "not-a-uuid"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }

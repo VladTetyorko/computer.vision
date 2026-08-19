@@ -466,3 +466,27 @@ aggregation logic against fake `SubsystemStatusPort`s). Wired by `vision-app`'s 
 gated the same way `PublishWiring#mediamtxStreamPublisher` is (`vision.publish.enabled`, default
 `true`) with a companion `Health.DISABLED` bean for the opposite condition — both conditions repeated
 verbatim rather than read via `@ConditionalOnBean`, per docs/plans/active/CV-RECONNECT-PLAN.md §3.3.
+
+**docs/plans/active/STREAM-STATE-PLAN.md wave S4 — reader count, the one video-demand term the JVM cannot answer.**
+
+- `MediamtxControlApi#hasReaders(String pathName)` (package-private) — `GET /v3/paths/get/{name}`,
+  the same call `isReady` already makes, read for its `readers` array instead of its `ready` field.
+  A **presence test, not a count**: the idle policy only asks whether *anyone* is watching, and
+  counting would mean parsing session objects this thin client has no other reason to understand.
+  404 → `false` (no such path, so nothing can be reading it). Any other non-200, **and a 200 whose
+  body carries no `readers` field**, throws — the caller must be able to tell "no readers" from
+  "could not ask", because it fails open on the latter and stops a stream on the former.
+- `public final class MediamtxReaderProbe` — `(URI apiBase, String apiUser, String apiPassword)`,
+  one method `boolean hasReaders(StreamId)` (a stream's id *is* its mediamtx path name). Its own
+  object rather than a method on `MediamtxProxyPublisher`, which is only wired in proxy mode:
+  **reader count is wanted in every mode**, since push-mode streams publish to mediamtx paths too and
+  their WHEP viewers are just as invisible to the application.
+
+**Why this exists at all: WHEP/WebRTC viewers connect straight to mediamtx.** They open no SSE
+connection and send no request through the app, so every in-JVM demand signal is blind to them.
+Without this probe the idle policy would confidently stop streams being watched over WebRTC — this
+product's lowest-latency viewing path.
+
+*Tests:* `MediamtxControlApiTest` +2 (18 total, green) — the two real mediamtx 1.19.3 body shapes
+(`"readers":[]` vs a populated array), and an explicit pair asserting the parser **throws rather than
+guesses** when the field is absent or the body is null.

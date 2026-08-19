@@ -2,7 +2,9 @@ package com.drones.vision.api.proxy;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.exception.HlsUpstreamUnavailableException;
+import com.drones.vision.api.live.LiveHlsAndReaderVideoDemand;
 import com.drones.vision.api.support.VisionApiProperties;
+import com.drones.vision.kernel.StreamId;
 import jakarta.annotation.PreDestroy;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -141,6 +143,14 @@ public class HlsProxyController {
     private final int maxRedirectHops;
 
     /**
+     * Stamped on every proxied fetch so the idle policy counts an HLS viewer as demand
+     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2). {@code null} when the policy is off, or when this
+     * deployment wired no video-demand port at all — in which case this controller behaves exactly
+     * as it did before, the same optional-collaborator posture {@code StreamDetectionSupport} takes.
+     */
+    private final LiveHlsAndReaderVideoDemand videoDemand;
+
+    /**
      * Test seam (docs/plans/active/SCALE-100-PLAN.md §5 S7): defaults every tunable to {@link
      * VisionApiProperties.HlsProxy#defaults()} — today's exact pre-extraction values — so the
      * existing test suite, which constructs this controller with only its upstream {@link URI},
@@ -152,7 +162,7 @@ public class HlsProxyController {
      *                        never exposed to browsers
      */
     HlsProxyController(URI hlsUpstreamBase) {
-        this(hlsUpstreamBase, VisionApiProperties.HlsProxy.defaults());
+        this(hlsUpstreamBase, VisionApiProperties.HlsProxy.defaults(), null);
     }
 
     /**
@@ -165,9 +175,25 @@ public class HlsProxyController {
      * @param hlsProxy        this controller's upstream {@code HttpClient} timeouts and
      *                        buffer/redirect bounds ({@code vision.api.hls-proxy.*}), supplied by
      *                        {@code vision-app}'s {@code PublishWiring#hlsProxySettings}
+     * @param videoDemand     stamped on every proxied fetch so an HLS viewer counts as video demand;
+     *                        {@code null} when no video-demand port is wired
      */
-    @Autowired
+    /**
+     * The shape before {@code videoDemand} was added (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2),
+     * kept as a convenience constructor defaulting it to {@code null} — no demand stamping, i.e.
+     * exactly this controller's pre-S4 behaviour. Same N-1-arg idiom the domain records use.
+     *
+     * @param hlsUpstreamBase base HTTP URL of the mediamtx sidecar's HLS egress
+     * @param hlsProxy        this controller's timeouts and bounds
+     */
     public HlsProxyController(URI hlsUpstreamBase, VisionApiProperties.HlsProxy hlsProxy) {
+        this(hlsUpstreamBase, hlsProxy, null);
+    }
+
+    @Autowired
+    public HlsProxyController(URI hlsUpstreamBase, VisionApiProperties.HlsProxy hlsProxy,
+                               LiveHlsAndReaderVideoDemand videoDemand) {
+        this.videoDemand = videoDemand; // nullable -- see the field's own javadoc
         this.hlsUpstreamBase = Objects.requireNonNull(hlsUpstreamBase, "hlsUpstreamBase must not be null");
         Objects.requireNonNull(hlsProxy, "hlsProxy must not be null");
         this.requestTimeout = hlsProxy.requestTimeout();
@@ -188,6 +214,7 @@ public class HlsProxyController {
 
     @GetMapping("/hls/{streamId}/**")
     public ResponseEntity<InputStreamResource> proxy(@PathVariable String streamId, HttpServletRequest request) {
+        stampVideoDemand(streamId);
         URI upstreamUri = buildUpstreamUri(request);
         try {
             UpstreamResult result = fetch(upstreamUri, request.getHeader(HttpHeaders.COOKIE), request.getHeader(HttpHeaders.RANGE));
@@ -246,6 +273,23 @@ public class HlsProxyController {
             String bodyPreview = new String(nonSuccessPreview, StandardCharsets.UTF_8);
             LOG.log(System.Logger.Level.WARNING, () -> "Upstream returned " + status + " for " + path
                     + (bodyPreview.isEmpty() ? "" : ": " + bodyPreview));
+        }
+    }
+
+    /**
+     * Records that somebody just fetched this stream's HLS — before the upstream call, not after, so
+     * a viewer still counts while mediamtx is slow or erroring. A malformed id is ignored rather than
+     * thrown on: this is a side observation, and failing the whole proxy request over it would turn a
+     * bookkeeping detail into a broken video player.
+     */
+    private void stampVideoDemand(String streamId) {
+        if (videoDemand == null) {
+            return;
+        }
+        try {
+            videoDemand.touched(StreamId.of(streamId));
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.DEBUG, () -> "ignoring unparseable stream id in HLS path: " + streamId);
         }
     }
 

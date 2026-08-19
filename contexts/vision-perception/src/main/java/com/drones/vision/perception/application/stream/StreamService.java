@@ -4,6 +4,8 @@ import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.perception.domain.model.StopReason;
+import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.TrackedObject;
 import com.drones.vision.perception.domain.model.VideoFrame;
@@ -70,11 +72,27 @@ public interface StreamService {
     StreamId start(DeviceId deviceId, PipelineConfig config, TrackingConfigPatch tracking);
 
     /**
-     * Stops a stream and releases its source. A no-op for an unknown or already-stopped id.
+     * Stops a stream and releases its source, on an operator's behalf. A no-op for an unknown or
+     * already-stopped id.
      *
      * @param streamId the stream to stop
      */
     void stop(StreamId streamId);
+
+    /**
+     * Stops a stream and releases its source, recording <b>why</b> on the emitted
+     * {@code STREAM_STOPPED} event (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2). A no-op for an
+     * unknown or already-stopped id.
+     *
+     * <p>{@link #stop(StreamId)} is this method with {@link StopReason#OPERATOR}. The reason exists
+     * because {@link IdleStreamReaper} made stops something the system can decide on its own, and a
+     * stream that disappears with the unqualified message "Stream stopped" reads to an operator as a
+     * crash to go hunting for.
+     *
+     * @param streamId the stream to stop
+     * @param reason   why it is being stopped; never {@code null}
+     */
+    void stop(StreamId streamId, StopReason reason);
 
     /**
      * Lists the streams running in this instance.
@@ -215,6 +233,39 @@ public interface StreamService {
      *         {@link #trackingStats(StreamId)}
      */
     Optional<DetectionState> detectionState(StreamId streamId);
+
+    /**
+     * Whether a running stream's <b>video</b> is actually flowing right now
+     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.3) — the fact a client previously had to
+     * reconstruct by latching on a poll gap, because {@code GET /api/streams} carried no state.
+     *
+     * <p>See {@link StreamState}'s own javadoc for why this is a third axis and not a widening of
+     * {@link #detectionState(StreamId)}: this reports video flow and never detection, and
+     * {@link StreamState#UNOBSERVED} ("this JVM opens no source for a proxied stream, so it cannot
+     * judge") is explicitly not a fault.
+     *
+     * @param streamId the stream to inspect
+     * @return the video-flow state, or {@link Optional#empty()} if {@code streamId} is unknown or
+     *         not running on this instance — a stopped stream has no state here by design; it is
+     *         answered by {@code AssetUsage}'s own {@code endedAt} on the lifecycle axis
+     */
+    Optional<StreamState> streamState(StreamId streamId);
+
+    /**
+     * A running stream's <b>effective</b> configuration — the missing read half of a knob that was
+     * write-only over HTTP (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5).
+     *
+     * <p>{@link #updateConfig(StreamId, PipelineConfigPatch)} could change {@code detectionEnabled},
+     * the model, the label filter and the whole tracking configuration, and nothing could read any of
+     * it back. A client that wants to *render* those controls therefore had to keep its own local
+     * copy of what it believed it had sent — which is a guess the moment anything else patches the
+     * stream, the stream restarts, or a second client connects.
+     *
+     * @param streamId the stream to inspect
+     * @return the configuration the pipeline is running right now, or {@link Optional#empty()} if
+     *         {@code streamId} is unknown or not running on this instance
+     */
+    Optional<PipelineConfig> config(StreamId streamId);
 
     /**
      * Live-updates a running stream's detection config (docs/plans/done/CV-CONTROL-PLAN.md &sect;5,

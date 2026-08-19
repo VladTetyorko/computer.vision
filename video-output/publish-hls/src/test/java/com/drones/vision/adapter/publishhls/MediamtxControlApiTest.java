@@ -204,6 +204,22 @@ class MediamtxControlApiTest {
     }
 
     @Test
+    void extractHasReadersTellsAnEmptyArrayFromAPopulatedOne() {
+        // The real shapes, per mediamtx 1.19.3's /v3/paths/get/{name}.
+        assertFalse(MediamtxControlApi.extractHasReaders("p", "{\"name\":\"p\",\"ready\":true,\"readers\":[]}"));
+        assertTrue(MediamtxControlApi.extractHasReaders("p",
+                "{\"name\":\"p\",\"ready\":true,\"readers\":[{\"type\":\"webrtcSession\",\"id\":\"abc\"}]}"));
+    }
+
+    @Test
+    void extractHasReadersRefusesToGuessWhenTheFieldIsAbsent() {
+        // "Could not tell" must not collapse into "nobody is watching": the caller stops streams on
+        // the latter and fails open on the former (docs/plans/active/STREAM-STATE-PLAN.md §3.2).
+        assertThrows(MediamtxControlApiException.class, () -> MediamtxControlApi.extractHasReaders("p", "{}"));
+        assertThrows(MediamtxControlApiException.class, () -> MediamtxControlApi.extractHasReaders("p", null));
+    }
+
+    @Test
     void bodyIndicatesPathAlreadyExistsMatchesOnlyThatExactErrorText() {
         assertTrue(MediamtxControlApi.bodyIndicatesPathAlreadyExists(
                 "{\"status\":\"error\",\"error\":\"path already exists\"}"));

@@ -135,7 +135,11 @@ export class CockpitPage {
    * `fly-logic.ts#showDetectionOffChip`.
    */
   protected readonly detectionOffChipVisible = computed(() =>
-    showDetectionOffChip(this.facade.live(), this.facade.settings.effective().detectionEnabled),
+    // `facade.detectionOn()`, not the draft — the chip must describe the stream on screen
+    // (docs/plans/active/STREAM-STATE-PLAN.md §3.1). It also stands down while the video itself has
+    // something to say ({@link videoNotice}): "Detection off — video only" is a misleading thing to
+    // read over a stalled feed, since there is no video either.
+    showDetectionOffChip(this.facade.live(), this.facade.detectionOn()) && !this.facade.videoNotice(),
   );
 
   // --- Overlay state — host-owned, see this class's own doc comment above ------------------------

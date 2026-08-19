@@ -2800,3 +2800,30 @@ own W1 entry for the REST surface this wiring backs, including five findings fro
 against the real codebase (D7's detections-truncation gap, the structurally-unreachable `audit`
 `FORBIDDEN` state, the `scopedTo` display-name substitution, the plan's imprecise `@PreAuthorize`
 wording, and the ABSENT/FORBIDDEN-file-shape judgment call).
+
+**docs/plans/active/STREAM-STATE-PLAN.md wave S4 — wiring the idle-stream policy.**
+
+- **`VisionStreamsProperties`** (`vision.streams.*`) — `idle.enabled` (**default `true`**),
+  `idle.timeout` (`10m`), `idle.check-interval` (`30s`), `idle.demand-ttl` (`30s`). Its own root, not
+  `vision.pipeline.*`: those keys tune how one pipeline processes frames, these decide whether a
+  stream should exist at all — the same distinction that moved `video-stale-after` the other way in
+  S2. `Idle#toPolicy()` hands the domain record its own validation rather than duplicating it here.
+  `demand-ttl` is a **fourth key beyond the plan's §2.7 table**: the HLS-proxy term needs a window,
+  and it must comfortably exceed the segment duration or a viewer would stop counting between two
+  segment fetches.
+- **`StreamLifecycleWiring`** — three beans:
+  - `MediamtxReaderProbe`, under exactly `PublishWiring#mediamtxStreamPublisher`'s condition
+    (`vision.publish.enabled`). Absent means a smaller world, not a degraded policy: with no mediamtx
+    there are also no WHEP/RTSP viewers for it to have missed.
+  - `LiveHlsAndReaderVideoDemand`, **always created** even when the policy is off — `HlsProxyController`
+    takes it as an optional collaborator and stamping costs a map write, while a conditional bean
+    would mean the policy could not be turned on without having been wired at startup.
+  - `IdleStreamReaper`, `@Bean(initMethod = "start")` — the "disabled" branch lives inside `start()`,
+    so the policy is expressed by the property and never by omitting the call; `AutoCloseable` gives
+    Spring the shutdown hook.
+- `LiveFrameFallbackStreamService` gained the `stop(StreamId, StopReason)` delegation.
+
+**`usageTracker` resolves lazily inside the asset-resolver lambda, not eagerly at bean creation.**
+`UsageTracker` sits on `StreamService`'s own construction path, and forcing it while this bean's
+`StreamService` dependency is still being built is the exact circular reference
+`CvWiring#detectionDemandPort`'s javadoc records having tripped over once already.

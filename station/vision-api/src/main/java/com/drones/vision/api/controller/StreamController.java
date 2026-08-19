@@ -6,6 +6,7 @@ import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
 import com.drones.vision.api.dto.DetectionRateResponse;
 import com.drones.vision.api.dto.PipelineLatencyResponse;
+import com.drones.vision.api.dto.StreamConfigResponse;
 import com.drones.vision.api.dto.StreamTracksResponse;
 import com.drones.vision.api.dto.TrackResponse;
 import com.drones.vision.api.dto.TrackStatsResponse;
@@ -145,13 +146,20 @@ public class StreamController {
     /**
      * Lists streams currently active on this instance.
      *
-     * @return the active streams, each with its viewer URLs if available
+     * <p>Carries each stream's <b>state</b> and its <b>detection intent</b> alongside the viewer URLs
+     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5). Both are new, and both exist because this is
+     * the poll a fleet-wide client already runs: without them a client had to infer liveness from
+     * mere presence in this list, and had no way at all to learn whether detection was on for a
+     * stream — so it rendered its own local guess instead.
+     *
+     * @return the active streams, each with its viewer URLs if available, its video-flow state, the
+     *         operator's detect-on/off intent, and which CV gate currently explains its boxes
      */
     @GetMapping("/api/streams")
     public List<ActiveStreamResponse> list() {
         return streamService.streams().stream()
-                .map(s -> new ActiveStreamResponse(s.streamId().value().toString(), s.deviceId().value().toString(),
-                        s.startedAt(), viewUrl(s.streamId()), whepUrl(s.streamId()), s.burnedIn()))
+                .map(s -> ActiveStreamResponse.from(s, viewUrl(s.streamId()), whepUrl(s.streamId()),
+                        streamService.detectionState(s.streamId()).orElse(null)))
                 .toList();
     }
 
@@ -209,6 +217,30 @@ public class StreamController {
         UpdateOutcome outcome = streamService.updateConfig(id, body.toPatch());
         return new UpdateStreamConfigResponse(id.value().toString(), outcome.modelReArmed(),
                 outcome.trackingChanged());
+    }
+
+    /**
+     * A running stream's effective configuration (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5) —
+     * the read half {@link #updateConfig} never had.
+     *
+     * <p><b>Unlike {@link #tracks}, this is not forgiving.</b> An unknown or stopped stream is a 404,
+     * not a 200 carrying defaults. The forgiving idiom is right for a *polled* read model, where a
+     * client wants one code path and an empty answer is honest; it is wrong here, because a
+     * plausible-looking default configuration for a stream that does not exist is precisely the
+     * fiction this endpoint was added to abolish — a client would render it as the running state and
+     * never know the difference.
+     *
+     * @param streamId the running stream to inspect, as a canonical UUID string
+     * @return the configuration the pipeline is running right now
+     * @throws java.util.NoSuchElementException if {@code streamId} is unknown or not running on this
+     *                                            instance (&rarr;404)
+     */
+    @GetMapping("/api/streams/{streamId}/config")
+    public StreamConfigResponse config(@PathVariable String streamId) {
+        StreamId id = StreamId.of(streamId);
+        return streamService.config(id)
+                .map(StreamConfigResponse::from)
+                .orElseThrow(() -> new NoSuchElementException("Unknown or stopped stream: " + streamId));
     }
 
     /**

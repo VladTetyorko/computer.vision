@@ -6,6 +6,7 @@ import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionState;
+import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventType;
@@ -778,6 +779,36 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             return DetectionState.OFF;
         }
         return detectionDemand ? DetectionState.RUNNING : DetectionState.IDLE_NO_VIEWERS;
+    }
+
+    /**
+     * How many frames this pipeline has observed (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.2) —
+     * {@code 0} distinguishes "started, nothing has arrived yet" from "frames arrived and stopped,"
+     * which {@link StreamState} needs and no other read model exposes.
+     *
+     * <p>A proxied stream (docs/plans/active/MEDIA-SOT-PLAN.md D4) opens no video source in this JVM
+     * and therefore reports {@code 0} forever — a caller must establish observability separately
+     * rather than read this as a stall; {@link StreamState#resolve} takes that as its own first
+     * parameter for exactly this reason.
+     *
+     * @return the frame count, never negative; a plain volatile read off the hot path
+     */
+    public long framesObserved() {
+        return framesObserved;
+    }
+
+    /**
+     * Nanoseconds since the most recent frame arrived, measured against the same injectable
+     * {@link #nanoTimeSource} that stamped it — so a test's fake clock governs both ends of the
+     * comparison and never mixes a faked stamp with a real {@code System.nanoTime()} reading.
+     *
+     * @return the elapsed nanoseconds, or {@link Long#MAX_VALUE} when no frame has ever arrived
+     *         (the "infinitely stale" answer, which keeps every caller's comparison total without a
+     *         separate emptiness check)
+     */
+    public long nanosSinceLastFrame() {
+        long lastArrival = lastFrameArrivalNanos;
+        return lastArrival < 0L ? Long.MAX_VALUE : nanoTimeSource.getAsLong() - lastArrival;
     }
 
     /**

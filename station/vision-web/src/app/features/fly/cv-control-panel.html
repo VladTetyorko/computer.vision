@@ -11,9 +11,14 @@
     <!-- ---- Detect hero — the primary act, now first (docs/plans/active/CV-UX-RESEARCH.md §3) ---- -->
     <section class="cv-section cv-hero">
       <label class="toggle">
+        <!-- Bound to the stream's own server-side intent while one is running, the draft otherwise
+             (docs/plans/active/STREAM-STATE-PLAN.md §3.1, resolved once in `CockpitFacade#detectionOn`).
+             Disabled, not optimistically flipped, while the request is in flight — this switch shows
+             where detection actually is, never where a click asked it to go. -->
         <input
           type="checkbox"
-          [checked]="settings.effective().detectionEnabled"
+          [checked]="detectionEnabled()"
+          [disabled]="detectionPending()"
           (change)="onDetectionEnabledToggle($any($event.target).checked)"
         />
         <span>
@@ -24,7 +29,13 @@
           </span>
         </span>
       </label>
-      <p class="mono hint cv-status-line">{{ detectionStatusText() }}</p>
+      <p class="mono hint cv-status-line">
+        @if (detectionPending()) {
+          applying…
+        } @else {
+          {{ detectionStatusText() }}
+        }
+      </p>
     </section>
 
     <!-- ---- "Looking for" — model choice reframed as intent, not a filename (docs/plans/active/

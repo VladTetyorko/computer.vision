@@ -8,6 +8,7 @@ import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
@@ -51,6 +52,11 @@ class DefaultUsageServiceTest {
 
     private static AssetUsage usage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt) {
         return new AssetUsage(id, assetId, startedAt, endedAt, null, null, 7);
+    }
+
+    private static AssetUsage usageOfStream(AssetId assetId, StreamId streamId) {
+        Instant start = Instant.parse("2026-08-04T10:00:00Z");
+        return new AssetUsage(UsageId.random(), assetId, start, start.plusSeconds(90), null, null, 7, streamId);
     }
 
     @Test
@@ -151,5 +157,59 @@ class DefaultUsageServiceTest {
         service.recent(VisibilityScope.unbounded(), null, DefaultUsageService.MAX_LIMIT + 1000);
 
         verify(usageRepository).findRecent(DefaultUsageService.MAX_LIMIT);
+    }
+
+    @Test
+    void byStreamResolvesTheSameRowShapeRecentWouldHaveListed() {
+        AssetId assetId = AssetId.random();
+        StreamId streamId = StreamId.random();
+        AssetUsage usage = usageOfStream(assetId, streamId);
+        when(usageRepository.findByStream(streamId)).thenReturn(Optional.of(usage));
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(assetIn(assetId, GroupId.random(), "Falcon-2")));
+
+        Optional<UsageSummary> result = service.byStream(VisibilityScope.unbounded(), streamId);
+
+        assertTrue(result.isPresent());
+        assertEquals(usage.id(), result.get().usageId());
+        assertEquals("Falcon-2", result.get().assetName());
+        assertEquals(90L, result.get().durationSeconds());
+    }
+
+    @Test
+    void byStreamIsEmptyWhenNoUsageCarriesThatStreamId() {
+        StreamId streamId = StreamId.random();
+        when(usageRepository.findByStream(streamId)).thenReturn(Optional.empty());
+
+        assertTrue(service.byStream(VisibilityScope.unbounded(), streamId).isEmpty());
+    }
+
+    @Test
+    void byStreamHidesAUsageOutsideTheCallersScopeAsAnAbsenceNotAnError() {
+        AssetId assetId = AssetId.random();
+        StreamId streamId = StreamId.random();
+        when(usageRepository.findByStream(streamId)).thenReturn(Optional.of(usageOfStream(assetId, streamId)));
+        when(assetRepository.findById(assetId))
+                .thenReturn(Optional.of(assetIn(assetId, GroupId.random(), "Not mine")));
+
+        Optional<UsageSummary> result = service.byStream(VisibilityScope.groups(Set.of(GroupId.random())), streamId);
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void byStreamOfAGoneAssetFollowsTheSameUnboundedOnlyRuleRecentDoes() {
+        AssetId assetId = AssetId.random();
+        StreamId streamId = StreamId.random();
+        when(usageRepository.findByStream(streamId)).thenReturn(Optional.of(usageOfStream(assetId, streamId)));
+        when(assetRepository.findById(assetId)).thenReturn(Optional.empty());
+
+        assertEquals("", service.byStream(VisibilityScope.unbounded(), streamId).orElseThrow().assetName());
+        assertTrue(service.byStream(VisibilityScope.groups(Set.of(GroupId.random())), streamId).isEmpty());
+    }
+
+    @Test
+    void byStreamRejectsNullArguments() {
+        assertThrows(NullPointerException.class, () -> service.byStream(null, StreamId.random()));
+        assertThrows(NullPointerException.class, () -> service.byStream(VisibilityScope.unbounded(), null));
     }
 }

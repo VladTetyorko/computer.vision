@@ -10,6 +10,8 @@ import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.perception.domain.model.StopReason;
+import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.model.TrackedObject;
@@ -31,10 +33,12 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
@@ -526,7 +530,13 @@ public final class DefaultStreamService implements StreamService {
      */
     @Override
     public void stop(StreamId streamId) {
+        stop(streamId, StopReason.OPERATOR);
+    }
+
+    @Override
+    public void stop(StreamId streamId, StopReason reason) {
         Objects.requireNonNull(streamId, "streamId must not be null");
+        Objects.requireNonNull(reason, "reason must not be null");
         RunningStream active = activeStreams.remove(streamId);
         if (active == null) {
             return; // unknown or already-stopped stream: no-op, per the interface contract
@@ -540,7 +550,7 @@ public final class DefaultStreamService implements StreamService {
         if (active.supervisedPulledResults() != null) {
             active.supervisedPulledResults().stop();
         }
-        eventPublisher.publish(Event.of(streamId, EventType.STREAM_STOPPED, "Stream stopped"));
+        eventPublisher.publish(stoppedEvent(streamId, reason));
         if (usageTracker != null) {
             usageTracker.onStreamStopped(active.deviceId());
         }
@@ -572,6 +582,20 @@ public final class DefaultStreamService implements StreamService {
         });
     }
 
+    /**
+     * The {@code STREAM_STOPPED} event, worded and tagged by {@code reason}
+     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2). The reason also travels as a structured attribute,
+     * not only inside the prose: the message is for a human reading the ticker, the attribute is what
+     * a client can branch on without parsing English.
+     */
+    private static Event stoppedEvent(StreamId streamId, StopReason reason) {
+        String message = reason == StopReason.IDLE_NO_VIEWERS
+                ? "Stream stopped: no viewers"
+                : "Stream stopped";
+        return new Event(UUID.randomUUID().toString(), streamId, Instant.now(), EventType.STREAM_STOPPED,
+                message, Map.of("reason", reason.name()));
+    }
+
     private static String describeCauseSuffix(Throwable cause) {
         return cause == null ? "" : ": " + cause.getMessage();
     }
@@ -580,8 +604,49 @@ public final class DefaultStreamService implements StreamService {
     public List<ActiveStream> streams() {
         return activeStreams.entrySet().stream()
                 .map(e -> new ActiveStream(e.getKey(), e.getValue().deviceId(), e.getValue().startedAt(),
-                        e.getValue().burnedIn()))
+                        e.getValue().burnedIn(), stateOf(e.getValue()),
+                        e.getValue().pipeline().config().detectionEnabled()))
                 .toList();
+    }
+
+    @Override
+    public Optional<StreamState> streamState(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? Optional.empty() : Optional.of(stateOf(active));
+    }
+
+    @Override
+    public Optional<PipelineConfig> config(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? Optional.empty() : Optional.of(active.pipeline().config());
+    }
+
+    /**
+     * Joins the three facts {@link StreamState#resolve} needs, which no single collaborator holds:
+     * whether a video source was opened here at all (this service's own {@code start} decision),
+     * whether its supervisor is mid-outage (the supervisor's), and the frame cadence (the
+     * pipeline's).
+     *
+     * <p><b>A null {@code supervisedSource} is exactly the proxied case</b>
+     * (docs/plans/active/MEDIA-SOT-PLAN.md D4) — {@code start} wires one if and only if the active
+     * publisher does not dial the device itself — so it is the honest test for observability rather
+     * than a defensive null check. Such a stream can only ever be {@link StreamState#UNOBSERVED},
+     * and must never be reported as {@code STARTING}: its frame count stays {@code 0} for as long as
+     * it runs.
+     *
+     * <p>Deliberately consults only the <i>video</i> supervisor. In pull mode a second
+     * {@code SupervisedPublisher} supervises the detection-result stream; folding its outage in here
+     * would report a detector fault as a video fault, which is the axis collapse
+     * {@link StreamState}'s javadoc forbids.
+     */
+    private StreamState stateOf(RunningStream active) {
+        SupervisedPublisher<VideoFrame> supervisedSource = active.supervisedSource();
+        boolean sourceObservable = supervisedSource != null;
+        StreamPipeline pipeline = active.pipeline();
+        return StreamState.resolve(sourceObservable, sourceObservable && supervisedSource.reconnecting(),
+                pipeline.framesObserved(), pipeline.nanosSinceLastFrame(), settings.videoStaleAfter().toNanos());
     }
 
     @Override

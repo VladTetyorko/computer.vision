@@ -95,6 +95,11 @@ export function isWatchMode(param: string | undefined): boolean {
  * This chip sits directly on the video, so "this is video only" must be a statement about a stream
  * that actually exists — before Start there is no video for it to describe, only the picture the
  * operator is about to get.
+ *
+ * `detectionEnabled` is now `CockpitFacade#detectionOn` — the running stream's own server-side value,
+ * falling back to the draft only when nothing is running (docs/plans/active/STREAM-STATE-PLAN.md §3.1).
+ * The rail dot reads the same signal, so the "previews what Start would send" reading above holds
+ * exactly where it always did: before a stream exists, that resolved value *is* the draft.
  */
 export function showDetectionOffChip(live: boolean, detectionEnabled: boolean): boolean {
   return live && !detectionEnabled;
