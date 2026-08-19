@@ -67,8 +67,13 @@ def test_serve_passes_keepalive_options_to_grpc_server(monkeypatch):
     monkeypatch.setattr(server_module, "_build_default_registry", lambda settings: None)
     monkeypatch.setattr(server_module, "InferenceServicer", lambda **kwargs: object())
     monkeypatch.setattr(server_module, "TrainingServicer", lambda **kwargs: object())
+    # `GeolocationServicer` builds a real encoder/matcher at construction when the `geo` extra is
+    # installed (network fetch on first run) -- faked out for the same "slow and
+    # environment-dependent" reason the other two servicers already are above.
+    monkeypatch.setattr(server_module, "GeolocationServicer", lambda **kwargs: object())
     monkeypatch.setattr(server_module.cv_pb2_grpc, "add_InferenceServicer_to_server", lambda servicer, srv: None)
     monkeypatch.setattr(server_module.cv_pb2_grpc, "add_TrainingServicer_to_server", lambda servicer, srv: None)
+    monkeypatch.setattr(server_module.cv_pb2_grpc, "add_GeolocationServicer_to_server", lambda servicer, srv: None)
 
     result = server_module.serve(Settings(port=0))
 

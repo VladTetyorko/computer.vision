@@ -1297,6 +1297,21 @@ geo pull loops concurrently against a live mediamtx stream; H0's harness never s
 H4/H5's job, not `spikes/geo/**`'s). Whoever runs H4 should fill this table against the real
 service.
 
+**H4 (2026-08-19): still not run.** `GeolocationServicer.LocalizeStream` is wired per O3's default
+— its own `PullDecodeLoop`/`PullSource`, independent of `InferenceServicer.DetectStream`'s (see
+`cv_service/grpc/servicers.py` `GeolocationServicer.__init__`/`_open_pull_source`) — so the "two
+loops" architecture O3 defaults to is in place and correct either way this measurement eventually
+comes out. Measuring the actual marginal CPU cost needs a live rig this wave's environment does not
+have pre-built: a source stream pushed into mediamtx, a real `cv_service.grpc.server` process with
+both servicers backed by real models, `DetectStream` and `LocalizeStream` pulling the same path
+concurrently, and a CPU-delta measurement clean of noise (idle baseline vs. detection-only vs.
+detection+geo, several runs). Docker/mediamtx ARE available in this environment (confirmed: a
+`vision-mediamtx-1` container was already running), but no existing test or script in this repo
+wires two concurrent pull loops together — building that harness from scratch is a live-integration
+experiment, not the "cheaply measurable" bar H4's own task brief set. Left **not run**, honest
+gap; O3's "Two" default therefore stands unmeasured rather than confirmed. A follow-up task with a
+stable looping source video would be the cheapest way to close this.
+
 ### 9.8 H0b/H0c — instrument defects found, rectification actually run, re-answer (2026-08-19, laptop)
 
 H0b (uncommitted, cut off) and H0c (this section) found and fixed two defects that invalidated
@@ -1583,6 +1598,70 @@ Therefore H1–H8 **proceed**, with these amendments now binding:
 5. **Standing risk, named**: real footage + real logged telemetry has never been measured together
    (no such fixture exists). H7's demo uses SITL telemetry over the real clip and says so; closing
    this needs an operator-recorded flight with telemetry, tracked as the cycle's open item.
+
+### 9.10 H4 amendment (2026-08-19) — forced §3/§4 deviations, porting `cv_service/geo/`
+
+Every item below is a deviation from this plan's literal §3/§4 text or the H0/H0c spike code it
+ports from, forced by something H4 found while porting; each is also documented inline at its
+production call site (`cv_service/geo/**` docstrings/comments cited below) — this entry is the
+one-stop index the plan asked H4 to keep.
+
+1. **Matcher roster narrowed to two, not five.** §D4/O1 leave the matcher a config knob without
+   naming which ones ship. H4 ports only `xfeat` (default) and `loftr` (`cv_service/geo/
+   matchers.py`); `lightglue_aliked`/`lightglue_disk` (kornia-version breakage against this
+   service's pinned kornia) and `eloftr` (an unfetchable hand-download weight, no `torch.hub`
+   entry) are dropped. Matches §9.9 amendment 1's own "matcher is a config knob, default xfeat"
+   ruling — the two ported are exactly the two that ruling actually discusses.
+2. **`condition_query` (harvested `verify.py`'s de-rotate+GSD-rescale conditioning) not ported.**
+   §4.1 doesn't name it explicitly; H0c's own `rectify_pipeline.py` found it redundant once IPM
+   rectification (`rectify.py`) runs upstream of retrieval — the warp already de-rotates and
+   rescales the query before it ever reaches the matcher. See `cv_service/geo/rerank.py`'s and
+   `rectify.py`'s module docstrings.
+3. **Mosaic/angle-probe/precise-track spike scripts not ported.** These were H0/H0b measurement
+   tooling (`spikes/geo/mosaic.py`, `mosaic_rerank.py`, `rank_shift.py`, `analytical_circle_
+   telemetry.py`), never named as §3/§4 production deliverables — confirmed not a deviation, but
+   recorded here since the §1.3 harvest manifest lists their line counts and a reader could
+   mistake "harvested" for "ported".
+4. **`implied_agl_meters` always `None` this wave.** §3.1's `GeoFix`/`GeoEvidence` wire reserves
+   the field; H4 has no AGL-from-scale estimator ported (none of H0/H0c measured one), so
+   `localize.py`'s `FrameResult` leaves it `None` rather than fabricate a value. Wire shape is
+   unaffected — a future wave can populate it without a proto change.
+5. **OSM tie-breaker (`osm_fingerprint.py`, D8) not ported.** `CV_GEO_OSM_WEIGHT` defaults to
+   `0.0` (inert, per O5) and stays a dead knob this wave — `config.py` and `localize.py` both note
+   this is the same deferral O5 already named, not a new one.
+6. **Per-cell calibration is an H4 EXTENSION beyond §4.2's literal text, not a cut.** §4.2 G-e and
+   §4.4 Change 2 G-a both need a "this cell is known-unreliable" signal that neither H0 nor H0c
+   built (their bake-off scripts calibrated one `accept_similarity`/`accept_margin` pair per
+   region, not per cell). H4 added `calibrate.cell_is_never_accept`/`count_never_accept_cells`
+   (`cv_service/geo/calibrate.py`) — a per-cell never-accept table computed at index-build time
+   over the FULL persisted set (see item 8) and consulted by both gates. Flagged as an addition,
+   not a deviation, because it makes both frozen gates implementable rather than changing their
+   frozen intent.
+7. **IPM rectification and the sequence filter are both restricted to a single resolved region**
+   — H4's own judgment call, matching H0c's `rectify_pipeline.py#run_pass` precedent: IPM's
+   `target_gsd_m_per_px` needs a reference latitude+zoom before retrieval has run, and
+   `SequenceLocalizer.from_tile_ids` needs one region's own contiguous tile grid. When
+   `region_id=""` resolves more than one region, both features degrade off honestly
+   (`evidence.rectified=false`, no sequence filter) rather than guess. See `localize.py`'s module
+   docstring for the full reasoning.
+8. **§9.8's two H0c instrument-defect fixes are carried as PRODUCTION fixes, not just spike
+   fixes** (§9.9 amendment 4 already required this; recorded here as confirmation, not a new
+   deviation): `cv_service/geo/orchestrator.py#build_region_index` encodes the full holdout split
+   into the persisted index (not just the 90% calibration split) and asserts this with a
+   `RuntimeError` self-check; `rectify.py` is wired in front of both retrieval and matching. Both
+   verified present in the ported module during H4 (not re-derived — the fix predates this
+   specific edit of the plan).
+9. **§12.13's literal fixture ("14 recorded alias pairs") does not exist on disk.** No such
+   committed fixture was found under `spikes/geo/fixtures/` or `regions/`. Per this plan's own
+   line ~1270 routing ("Pozniaky/danger-region regressions are H4's `test_regression_alias_1213`"),
+   H4's standing regression (`tests/geo/test_regression_1213_alias.py`) substitutes the real,
+   committed `kyiv-pozniaky` region: it samples 14 evenly-spaced real tiles from that region,
+   round-trips each through the real `localize_frame()` pipeline, and asserts every accepted FIX
+   lands within `holdout_correct_radius_m` of its true tile. Documented in the test's own
+   docstring as a "Plan-defect note (found 2026-08-19, H4)" as well as here.
+
+Everything else in §3/§4 (wire shapes, gate order, gate thresholds, the §4.4 Change 1/2/3 sequence
+filter logic) ported as frozen, with no further deviation found.
 
 ## 10. Open choices left to the implementer — each with a default
 

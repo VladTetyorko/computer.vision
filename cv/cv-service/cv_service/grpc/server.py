@@ -1,12 +1,14 @@
 """gRPC composition root for the Vision CV service.
 
 ``serve()``/``main()`` live here: resolve :class:`cv_service.config.Settings`
-once, build the shared `ModelRegistry`/`InferenceGate`, wire the two
-servicers (`cv_service.grpc.servicers.InferenceServicer`/`TrainingServicer`),
-start the gRPC server, and handle `SIGTERM`/`SIGINT` for graceful shutdown.
-No servicer behavior lives here -- see `cv_service/grpc/servicers.py` for
-wire<->domain translation, `cv_service/inference/` for detection, and
-`cv_service/training/` for the training control plane.
+once, build the shared `ModelRegistry`/`InferenceGate`, wire the three
+servicers (`cv_service.grpc.servicers.InferenceServicer`/`TrainingServicer`/
+`GeolocationServicer`), start the gRPC server, and handle `SIGTERM`/`SIGINT`
+for graceful shutdown. No servicer behavior lives here -- see
+`cv_service/grpc/servicers.py` for wire<->domain translation,
+`cv_service/inference/` for detection, `cv_service/training/` for the
+training control plane, and `cv_service/geo/` for visual geolocation
+(VISUAL-GEO-V2-PLAN.md).
 
 Run with::
 
@@ -33,6 +35,7 @@ import grpc
 from cv_service.config import Settings
 from cv_service.inference.concurrency import InferenceGate
 from cv_service.grpc.servicers import (  # cv_pb2_grpc re-exported so tests can monkeypatch it here
+    GeolocationServicer,
     InferenceServicer,
     TrainingServicer,
     cv_pb2_grpc,
@@ -146,6 +149,10 @@ def serve(settings: Settings | None = None) -> grpc.Server:
         ),
         server,
     )
+    # `GeolocationServicer` builds its own encoder/matcher backend ONCE, here, at construction
+    # (same "probe/build at startup, log the roster, degrade to UNAVAILABLE per-call rather than
+    # block startup" posture as `registry`/`tracker_registry` above) -- see its own docstring.
+    cv_pb2_grpc.add_GeolocationServicer_to_server(GeolocationServicer(settings=settings), server)
     server.add_insecure_port(f"[::]:{settings.port}")
     server.start()
     LOGGER.info("cv-service gRPC server listening on :%d", settings.port)
