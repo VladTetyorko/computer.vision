@@ -1,7 +1,10 @@
 # MASTER-MATRIX — every capability, one table
 
 Status: **consolidated decision document (2026-08-09)** · **reconciled 2026-08-11** — K2 delivered,
-S2 promoted to the head of the list. This is the single row-level view. The reasoning behind it
+S2 promoted to the head of the list · **reconciled 2026-08-19** — the integration funnel (I1, I2,
+I3, I7) shipped, so rows 3 and 3b are struck; I4/I5 and I9/I10 are now explicitly operator-gated
+rather than merely unbuilt. **S2 is still the head of the list, and is now the only thing in front
+of it.** This is the single row-level view. The reasoning behind it
 lives in the companions and is not repeated here:
 
 | Doc | Answers |
@@ -71,8 +74,8 @@ fail, never execute.** This applies to Class B too — it is the price of allowi
 |---|---|---|---|---|---|---|---|---|
 | ~~1~~ | ~~**Tracking engine** — persistent target IDs~~ | **K2** | **HAVE** | D0 | C | **€0** | ~~L 180 h~~ | **DELIVERED 2026-08-11**, waves T0–T8, default `ASSOCIATE`. `TrackedObject` is live; C12 and C2 are unblocked. Spec: **docs/plans/done/TRACKING-PLAN.md** |
 | 2 | **Fixed-camera geolocation** — tracked object → map coordinate | **S2** | new | D0 | C | **€0** | M 60 h | the touchable demo, and it needs **no aircraft and no VPR** — known camera pose + `GeoProjection` |
-| 3 | Message inventory + readiness report | I | new | **D0** | A | **€0** | M 70 h | the funnel in front of every other feature |
-| 3b | `SET_MESSAGE_INTERVAL` auto-request | I | new | **D0** | B | **€0** | S 12 h | fixes most degraded setups, writes nothing |
+| ~~3~~ | ~~Message inventory + readiness report~~ | I | **HAVE** | **D0** | A | **€0** | ~~M 70 h~~ | **DRONE-ONBOARDING O1-O8 + O11-O14, merged 2026-08-19**. Ships behind `vision.onboarding.probe.enabled=false` |
+| ~~3b~~ | ~~`SET_MESSAGE_INTERVAL` auto-request~~ | I | **HAVE** | **D0** | B | **€0** | ~~S 12 h~~ | **DRONE-ONBOARDING O1-O8 + O11-O14, merged 2026-08-19** (O8), behind `vision.onboarding.remediate.message-interval.enabled=false` |
 | 4 | DEM/terrain dependency | X | new | — | — | €0 | M 40 h | unlocks 4 features + visual geo at once |
 | 5 | Energy-aware return decisioning | C3 | PUNCH | **D0** | A | **€0** | M 70 h | answers the pilot's only real question |
 | 6 | Wind field from the fleet | C4 | PUNCH | **D0** | A | **€0** | M 60 h | structurally impossible for one aircraft |
@@ -135,6 +138,8 @@ build **when an aircraft exists**, not before.
 | Users, roles, groups, scoped visibility, audit trail | — | — | U-AUTH / U-SCOPE |
 | Fleet dashboard, Fly, Wall, Replay, Reports, Roster, Warehouse | — | — | `vision-web` |
 | **Visual geolocation (VPR), measured pose, tile index** | D0 | C | **`feat/visual-geo` — BRANCH, 19 commits unmerged** |
+| **Vehicle onboarding — message inventory, probed `VehicleProfile`, readiness report, message-interval remediation, flight passport + config drift** | D0/D1 | A | **DRONE-ONBOARDING O1–O8, O11–O14 (2026-08-19)** — behind `vision.onboarding.probe.enabled` / `.passport.enabled`, both default off |
+| **Database change audit — `db_audit_log`, trigger-level, unbypassable** | — | — | **V21 (2026-08-19)** — distinct from `audit_entries`, which only holds declared intent |
 
 ---
 
@@ -142,16 +147,16 @@ build **when an aircraft exists**, not before.
 
 | # | Capability | Status | Drone | Link | Owner € | Dev | Depends | Architecture alignment |
 |---|---|---|---|---|---|---|---|---|
-| I1 | Message inventory + `AUTOPILOT_VERSION` + targeted param read → `VehicleProfile` | new | D0 | A | €0 | M 50 h | — | new `VehicleConfigPort`, read half only; rides `MavlinkSocketHub` ack seam |
-| I2 | Readiness report (feature × requirement, "why unknown") | new | D0 | A | €0 | M 40 h | I1 | pure evaluator + UI; wizard's final step |
-| I3 | `SET_MESSAGE_INTERVAL` auto-request on connect | new | D0 | B | €0 | S 12 h | I1 | same shape as `MavlinkFlightCommander`; **writes nothing** |
-| I4 | Tier-A `PARAM_SET` + snapshot + one-click restore + audit | new | D1 | B | €0 | M 60 h | I1 | write half of `VehicleConfigPort`; allowlist in domain; `AuditTrailPort` |
-| I5 | `SYSID_THISMAV` assignment in the wizard | new | D1 | B | €0 | S 16 h | I4 | makes multi-aircraft gateway actually work |
+| I1 | Message inventory + `AUTOPILOT_VERSION` + targeted param read → `VehicleProfile` | **HAVE** (O1, O2, O4) | D0 | A | €0 | M 50 h | — | new `VehicleConfigPort`, read half only; rides `MavlinkSocketHub` ack seam |
+| I2 | Readiness report (feature × requirement, "why unknown") | **HAVE** (O3, O5, O6) | D0 | A | €0 | M 40 h | I1 | pure evaluator + UI; wizard's final step |
+| I3 | `SET_MESSAGE_INTERVAL` auto-request on connect | **HAVE** (O8) | D0 | B | €0 | S 12 h | I1 | same shape as `MavlinkFlightCommander`; **writes nothing** |
+| I4 | Tier-A `PARAM_SET` + snapshot + one-click restore + audit | **GATE** (O9) | D1 | B | €0 | M 60 h | I1 | write half of `VehicleConfigPort`; allowlist in domain; `AuditTrailPort` |
+| I5 | `SYSID_THISMAV` assignment in the wizard | **GATE** (O9 — and ArduPilot 4.7 renamed it `MAV_SYSID`) | D1 | B | €0 | S 16 h | I4 | makes multi-aircraft gateway actually work |
 | I6 | BF/INAV CLI **diff** generation + [Verify] re-probe | new | D1 | A | €0 | M 50 h | I1 | no writes; upgrade of I-g's generic snippet |
-| I7 | Vehicle passport — config drift + per-usage param snapshot | new | D0 | A | €0 | M 50 h | I1 | one FK onto `AssetUsage`; maintenance + forensics |
+| I7 | Vehicle passport — config drift + per-usage param snapshot | **HAVE** (O11-O13) | D0 | A | €0 | M 50 h | I1 | one FK onto `AssetUsage`; maintenance + forensics |
 | I8 | "Works with" compatibility matrix (opt-in, aggregated) | new | D0 | — | €0 | M 60 h | I1 | policy decision as much as engineering |
-| I9 | One-line companion installer (`curl /setup.sh \| sh`) | new | D3 | C | €60–100 | M 50 h | — | I-d recipe made executable, per-asset generated |
-| I10 | Video ingest self-diagnosis (codec, GOP, jitter, bitrate vs budget) | new | D0 | C | €0 | M 40 h | — | readiness language applied to video |
+| I9 | One-line companion installer (`curl /setup.sh \| sh`) | **GATE** (O10) | D3 | C | €60–100 | M 50 h | — | I-d recipe made executable, per-asset generated |
+| I10 | Video ingest self-diagnosis (codec, GOP, jitter, bitrate vs budget) | **GATE** (O10) | D0 | C | €0 | M 40 h | — | readiness language applied to video |
 | — | Tier-B failsafe/link param writes | **GATE** | D1 | B | €0 | M 40 h | I4 | explicit per-item consent; disarmed-only |
 | — | **Tier-C flight-critical params (PID, arming, frame)** | **NO** | — | — | — | — | — | **never written. Reported only.** Non-negotiable |
 
@@ -355,7 +360,7 @@ touchable outcome per step.
 | ~~1~~ | ~~**Tracking engine**~~ — **DONE 2026-08-11** (docs/plans/done/TRACKING-PLAN.md) | **K2** | ~~~4 wk~~ |
 | **1** | **Fixed-camera geolocation** — the first demo you can show someone | **S2** | ~1.5 wk |
 | **2** | `StreamPipeline` decomposition + dead-type audit | **K3, K4** | ~2 wk |
-| 4 | Integration funnel | I1, I2, I3 | ~2 wk |
+| ~~4~~ | ~~Integration funnel~~ — **DONE 2026-08-19** (docs/plans/active/DRONE-ONBOARDING-PLAN.md, O1-O8 + O11-O14; O9/O10 stay operator-gated) | **I1, I2, I3, I7** | ~~~2 wk~~ |
 | 5 | DEM + the advisory cluster | X, C3, C4, C6, C9 | ~6 wk |
 | 6 | Honest position stack | A1, A2, C7a | ~2 wk |
 | 7 | Mission tasking + nav pack | M1, M2, M5 | ~5 wk |
