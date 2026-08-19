@@ -7,6 +7,7 @@ import com.drones.vision.adapter.persistence.entity.AssignmentEntity;
 import com.drones.vision.adapter.persistence.entity.AuditEntryEntity;
 import com.drones.vision.adapter.persistence.entity.CategoryEntity;
 import com.drones.vision.adapter.persistence.entity.DatasetEntity;
+import com.drones.vision.adapter.persistence.entity.DbAuditLogEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionEventEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
 import com.drones.vision.adapter.persistence.entity.DeviceEntity;
@@ -230,6 +231,11 @@ public final class PersistenceUnit {
         // docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 (V17__vehicle_profiles.sql, V18__feature_requirements.sql).
         configuration.addAnnotatedClass(VehicleProfileEntity.class);
         configuration.addAnnotatedClass(FeatureRequirementEntity.class);
+        // Database-level change audit (V21__db_audit_log.sql) -- read-only from Hibernate's side,
+        // every row is written by the migration's own audit_row_change() trigger, never by a
+        // Jpa*Repository persist/merge call; mapped here anyway so JpaDbAuditLogRepository's reads
+        // go through the same jakarta.persistence API as every other repository in this module.
+        configuration.addAnnotatedClass(DbAuditLogEntity.class);
         return configuration.buildSessionFactory();
     }
 
