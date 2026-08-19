@@ -1,5 +1,7 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.dto.FlightPassportResponse;
+import com.drones.vision.api.dto.ParameterDriftResponse;
 import com.drones.vision.api.dto.ProbeCandidateRequest;
 import com.drones.vision.api.dto.RemediationRequest;
 import com.drones.vision.api.dto.RemediationResultResponse;
@@ -9,14 +11,18 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.api.support.OnboardingProperties;
 import com.drones.vision.api.support.RemediationOrchestrator;
 import com.drones.vision.flight.application.VehicleProfileService;
+import com.drones.vision.flight.domain.model.FlightPassport;
+import com.drones.vision.flight.domain.model.ParameterDrift;
 import com.drones.vision.flight.domain.model.VehicleProfile;
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.UsageId;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -47,6 +53,14 @@ import java.util.Objects;
  *       409} (armed, arming unknown, or disabled) — see {@link RemediationOrchestrator} for why a
  *       request that dispatches nothing (e.g. the asset was never probed) answers {@code 200} with
  *       every action {@code UNSUPPORTED} rather than {@code 404}</li>
+ *   <li>{@code GET /api/assets/{assetId}/usages/{usageId}/passport} — {@code 200} | {@code 404}
+ *       (unknown asset, out of scope, or {@code usageId} not belonging to {@code assetId} — all
+ *       three collapse identically, see {@link VehicleProfileService#passport}'s own javadoc for
+ *       why: a distinguishable 404 would leak another asset's flight history to a caller scoped
+ *       only to this one)</li>
+ *   <li>{@code GET /api/assets/{assetId}/usages/{usageId}/drift} — {@code 200} (an empty {@code
+ *       drift} list is a correct answer, never {@code 404}) | {@code 404} (same three cases as
+ *       {@code .../passport})</li>
  * </ul>
  * Every status code above is produced by {@link ApiExceptionHandler}'s central mapping from
  * exceptions the underlying services already throw — this controller adds no authority logic of its
@@ -128,5 +142,40 @@ public class OnboardingController {
     public RemediationResultResponse remediate(@PathVariable String assetId, @RequestBody RemediationRequest request) {
         return remediationOrchestrator.remediate(AssetId.of(assetId), request.featuresOrEmpty(),
                 request.actionsOrEmpty(), currentUser.userId(), currentUser.scope());
+    }
+
+    /**
+     * The flight passport (docs/plans/active/DRONE-ONBOARDING-PLAN.md O11/O13): the {@code
+     * PREFLIGHT} and {@code POSTFLIGHT} {@code VehicleProfile} snapshots attached to one usage,
+     * whichever have been captured so far. A scoped read — see {@link
+     * VehicleProfileService#passport} for the full 404 collapse.
+     *
+     * @param assetId the asset the usage belongs to, as a canonical UUID string
+     * @param usageId the usage to describe, as a canonical UUID string
+     * @return the passport, with whichever snapshot(s) have been captured so far
+     */
+    @GetMapping("/api/assets/{assetId}/usages/{usageId}/passport")
+    public FlightPassportResponse passport(@PathVariable String assetId, @PathVariable String usageId) {
+        FlightPassport passport = vehicleProfileService.passport(AssetId.of(assetId), UsageId.of(usageId),
+                currentUser.scope());
+        return FlightPassportResponse.from(passport);
+    }
+
+    /**
+     * What changed on this aircraft between the previous flight's landing and this flight's
+     * takeoff (docs/plans/active/DRONE-ONBOARDING-PLAN.md O11/O13): the previous flight's {@code
+     * POSTFLIGHT} snapshot compared against this flight's {@code PREFLIGHT} one. Same scope/
+     * membership gate as {@link #passport}. An empty {@code drift} list is a correct answer — no
+     * previous flight, or either endpoint snapshot missing — never a {@code 404}.
+     *
+     * @param assetId the asset the usage belongs to, as a canonical UUID string
+     * @param usageId the usage to compare against its predecessor, as a canonical UUID string
+     * @return every parameter that changed, or an empty list when there is nothing to compare
+     */
+    @GetMapping("/api/assets/{assetId}/usages/{usageId}/drift")
+    public ParameterDriftResponse drift(@PathVariable String assetId, @PathVariable String usageId) {
+        List<ParameterDrift> drift = vehicleProfileService.driftFromPreviousFlight(AssetId.of(assetId),
+                UsageId.of(usageId), currentUser.scope());
+        return ParameterDriftResponse.from(drift);
     }
 }
