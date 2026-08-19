@@ -639,11 +639,21 @@ stays green by construction**, because with the flag off the system behaves exac
 | **O9** | **Opus** — **gated on OQ2** | `contexts/vision-flight/**` + `drone-link/mavlink/**` + `station/vision-api/**`: Tier-A writes live — snapshot, confirm, read-back, restore, audit; `SYSID_THISMAV` assignment in the wizard | **M** | scoped green ×3; SITL: write `SYSID_THISMAV`, verify by read-back, restore, and confirm both transitions are in the audit trail; a write attempted while armed is refused and audited as a denial | O4, operator go |
 | **O10** | spring-integrator + adapter-builder — **gated on OQ1** | `station/vision-api/**` (`GET /api/onboarding/setup.sh`, token issue/revoke), `infra/edge/**` (templating the two systemd units and `main.conf`), plus ingest self-diagnosis (codec/fps/GOP/jitter → readiness rows) | **M** | scoped green ×3; a generated script run on a clean container brings `mavlink-router` up and the asset appears with **zero** `CHANGE-ME` edits; an expired/revoked token yields 403, audited | O5, operator go |
 | **O11** | application-service | `contexts/vision-flight/**` + `storage/persistence/**`: the **passport** — a profile snapshot at PREFLIGHT and at POSTFLIGHT, attached to the `AssetUsage`; config-drift diff between consecutive flights | S–M | `-pl contexts/vision-flight test` green ×3; a two-flight fixture with one changed parameter produces exactly one drift row naming the parameter, both values, and both timestamps | O7, O4 | **DONE** (`934b228b`): vision-flight 240/240, persistence 182/182, `Skipped: 0`. **Drift compares the previous flight's POSTFLIGHT against the current flight's PREFLIGHT** — the plan never says which two snapshots, and D10's disarmed-only interlock makes that the only window a real parameter change can appear in. `V20` links `vehicle_profiles` to a usage+phase, additive and still append-only. **Nothing calls `captureSnapshot` yet** — `UsageTracker` (vision-perception) must invoke it at the PREFLIGHT/POSTFLIGHT transitions, and there is no REST surface for `passport`/`drift`; both are follow-ups |
+| **O12** | spring-integrator | `contexts/vision-perception/**` + `core/vision-platform/**` + `station/vision-app/**` (properties, `ApplicationServiceWiring`, `OnboardingWiringConfiguration`, new `app/onboarding/**`): **make the passport actually run** — a phase-change seam on `UsageTracker`, and a vision-app recorder that turns "usage opened" and "→POSTFLIGHT" into `captureSnapshot` calls off the telemetry thread. Flag `vision.onboarding.passport.enabled`, default **false** | S–M | `-pl contexts/vision-perception -am test` and `-pl station/vision-app -am test` green; the seam fires once per real transition and never on an unchanged phase; a throwing observer does not break telemetry ingest | O11 | **IN FLIGHT** |
+| **O13** | spring-integrator | `station/vision-api/**`: the REST surface O11 has none of — `GET /api/assets/{id}/usages/{usageId}/passport` and `.../drift`, both scoped reads collapsing unknown/out-of-scope/not-yours to 404 | S | `-pl station/vision-api -am test` green; an uncaptured snapshot is **absent** from the JSON rather than `null`; an empty drift list answers 200, never 404 | O11 | **IN FLIGHT** |
+| **O14** | spring-integrator | `storage/persistence/**` + `station/vision-app/**` (`vision.persistence` only): **database change audit** — a PL/pgSQL trigger writing every insert/update/delete on the control-plane tables to `db_audit_log` (`V21`), with the high-volume event tables explicitly excluded. Distinct from `audit_entries`: that one records *who intended what*, this one records *what the database actually did*, including hand-typed SQL | M | `-pl storage/persistence -am test` green with the docker-gated tests **un-skipped**; an insert/update/delete through the real repositories produces the expected audit rows, and an UPDATE names the changed column; a coverage test fails when a future migration adds an unclassified table | — | **IN FLIGHT** |
 
 **Sequencing.** O1 ∥ O2 ∥ O3 start immediately (this document is their shared contract; O3 builds
 against the port shapes frozen here). O4 needs O1+O2+O3. O5 needs O3 and runs parallel to O4. O6 needs
 O5. O7 needs O3 only, so it can run parallel to O4/O5. O8 needs O4. O9/O10 are operator-gated. O11
 last, and it is cheap.
+
+**O12–O14 were added after O11 merged.** O12 and O13 exist because O11 shipped a passport that
+nothing wrote and nothing could read — the wave was green and the feature was inert, which is the
+failure mode a per-wave exit criterion cannot catch on its own. O14 is unrelated to onboarding and
+merely lands here because the database work of this cycle made the gap obvious: `audit_entries`
+records the *intent* an application service chose to declare, so anything that writes without
+declaring — a migration, a repository nobody audited, a DBA at a SQL console — leaves no trace at all.
 
 **First demonstrable result: O1+O2+O3+O4 = "point the platform at a real SITL aircraft and get a
 truthful readiness report with named remedies"** — the whole diagnostic value, before any UI ships and
@@ -683,6 +693,31 @@ POST /api/assets/{assetId}/probe      → 200 VehicleProfileResponse | 403 (audi
 GET  /api/assets/{assetId}/readiness  → 200 ReadinessReport | 404
 POST /api/assets/{assetId}/remediate  → 200 RemediationResult | 403 (audited) | 409 (armed, or arming unknown, or disabled)
 GET  /api/fleet/readiness             → 200 { "assets": [ReadinessRow] }
+```
+
+**Per-flight** (O13 — the passport O11 built and nothing could reach). Both are scoped reads, and
+unknown asset / out of scope / `usageId` not belonging to that asset all collapse to the same 404:
+a distinguishable 404 would leak another asset's flight history to a caller scoped only to this one.
+
+```
+GET /api/assets/{assetId}/usages/{usageId}/passport → 200 FlightPassportResponse | 404
+GET /api/assets/{assetId}/usages/{usageId}/drift    → 200 { "drift": [ParameterDrift] } | 404
+```
+
+```jsonc
+// FlightPassportResponse — a snapshot never captured is ABSENT, not null: "we did not look"
+// and "we looked and found nothing" are different claims, and only one of them is true here.
+{
+  "usageId": "…",
+  "assetId": "…",
+  "preflight":  { /* VehicleProfileResponse */ },
+  "postflight": { /* VehicleProfileResponse */ }
+}
+
+// ParameterDrift — an EMPTY list is a correct 200 meaning "nothing to compare"
+// (no previous flight, or a snapshot was never captured). It is never a 404.
+{ "parameterName": "FENCE_ALT_MAX", "previousValue": 100.0, "currentValue": 120.0,
+  "previousObservedAt": "2026-08-18T09:10:00Z", "currentObservedAt": "2026-08-19T07:02:00Z" }
 ```
 
 ```jsonc
