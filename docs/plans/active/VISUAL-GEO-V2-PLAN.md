@@ -1559,6 +1559,31 @@ from H0); GB4005 (same reason as H0 — no torch/kornia/cv-service checkout ther
 
 ---
 
+### 9.9 Architect's gate ruling (2026-08-19) — PROCEED, with the operating point amended
+
+The literal §9.4 question stays "no": no single configuration clears ≤800 ms **and** delivers
+accepted fixes on the telemetry-less Pexels clip. The ruling is that the question, as frozen, over-
+weights a condition production never has: **this tier corrects telemetry, so telemetry is always
+present** — and wherever telemetry was present (SITL oblique, real Esri pixels), the budget matcher
+passed outright (xfeat, `ipm`, k=20: 13/13 @100 m, 0 false fixes, ≈500 ms/keyframe). The Pexels
+clip's stated-prior result (loftr 6/12 accepted at 105–133 m, 0 false; xfeat honestly refusing) is
+evidence about the *no-telemetry* corner, which is out of this cycle's scope by §0.1.
+
+Therefore H1–H8 **proceed**, with these amendments now binding:
+
+1. **Matcher is a config knob, default `xfeat`, `ipm` always on** (`CV_GEO_MATCHER`,
+   `CV_GEO_RERANK_K` default 20). `loftr` stays available as the slow high-recall option.
+2. **Keyframe cadence is the trade dial, not k**: `vision.geo.visual.keyframe-fps` default 1.0 for
+   xfeat; the config must remain honest at 0.2 fps for a slow matcher (latest-wins, never queue).
+3. **The sequence filter carries real-footage burden** (H0's measured result stands: geometric
+   field ⇒ zero false convergence); single-frame CONFIRMED on real footage is not promised.
+4. **H4 must carry both H0c instrument fixes as production fixes**: index every texture-passing
+   tile (calibration holdout is a measurement split, never the persisted index), and wire
+   `rectify.py` in front of retrieval *and* matching.
+5. **Standing risk, named**: real footage + real logged telemetry has never been measured together
+   (no such fixture exists). H7's demo uses SITL telemetry over the real clip and says so; closing
+   this needs an operator-recorded flight with telemetry, tracked as the cycle's open item.
+
 ## 10. Open choices left to the implementer — each with a default
 
 | # | Choice | Default if nobody decides | Who decides, when |
