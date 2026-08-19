@@ -39,3 +39,16 @@ runs/
 # CC BY-NC-SA licensed third-party dataset, never committed. Reproduced via
 # benchmarks/fetch_mot17.sh; see benchmarks/__init__.py for what this data feeds.
 benchmarks/data/
+
+# Visual-geo v2 eval harness (VISUAL-GEO-V2-PLAN.md wave H0, spikes/geo/) -- model weight
+# downloads (TORCH_HOME/HF_HOME), fetched Esri tiles, and built region indices are runtime
+# artefacts, never source. The parked branch (feat/visual-geo) gitignored spikes/geo/results/
+# too and lost every raw measurement -- R11's fix is that results/**/*.json and
+# results/**/report.md are explicitly NOT covered by any pattern here and ARE committed.
+.model-cache/
+spikes/geo/tile_cache/
+spikes/geo/regions/
+# A shallow `git clone` of the official zju3dv/EfficientLoFTR repo (matchers.py#build_eloftr,
+# for the eloftr bake-off candidate) -- a third-party checkout with its own .git dir, never this
+# repo's source; `git add` on it stages an embedded-repo gitlink unless ignored explicitly.
+spikes/geo/.eloftr-repo/

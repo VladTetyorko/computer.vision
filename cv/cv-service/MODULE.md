@@ -948,6 +948,107 @@ until then this is the bound, and it is labelled as one.
 - **`_roi_rescue`'s permissive gate can misidentify a NEIGHBOUR in a dense, similarly-coloured scene, and this is inherited, deliberate behaviour, not a wiring bug (TRACKING-V2-PLAN wave C5c)** — see "ROI re-detection" above for the full account, including the exact numbers. `CV_TRACK_COST_GATE_MIN_IOU=0.0` is a considered default for the PRIMARY `cost` match (wave C3's own reasoning: a strict floor would forbid the wide-displacement recovery ego-motion compensation exists for), and this wave's own instruction was to merge a rescue through the "existing association machinery", not a second, ROI-specific gate — so the SAME permissiveness applies to a crop several times a candidate's own size, where it can admit a neighbouring object instead of refusing an empty match. Measured on `clutter`: `IDSW` 0→6 with `CV_TRACK_ROI_ENABLED=1`. The shipped default (`CV_TRACK_ROI_ENABLED=False`) is unaffected — this only matters to a deployment that opts in, and one doing so in a dense/crowded scene should tighten `CV_TRACK_COST_GATE_MIN_IOU` first or evaluate the risk for its own scene density. If you are asked to make the rescue safer in a crowd without touching the primary match's own gate, a ROI-specific (stricter) `AssignGates` instance is the natural next knob — not built in this wave, since the task's own instruction was to reuse the existing gates, not add a new configuration surface.
 - **ROI re-detection pays its cost even when it cannot possibly help, and there is no cheap way to know that in advance (TRACKING-V2-PLAN wave C5c)** — `occlusion`/`long_occlusion`/`crowd_recall`/`pan`/`pan_step` all trigger real rescue attempts (10–61 per scenario) that NEVER find a match: the underlying failure in each is genuine occlusion (invisible to a crop exactly as it is to the full frame) or prediction drift (the crop is centered on the wrong place), neither of which apparent-size recall can fix. `_roi_rescue`'s eligibility check (confirmed + unmatched) cannot distinguish "probably just small" from "probably occluded" or "probably drifted" — it has no signal for either. This is measured, reported cost with zero accuracy return on five of ten scenarios when the feature is opted into; a future wave wanting to reduce it would need a cheaper pre-check (e.g. only rescue a candidate whose predicted confidence, `predict.py`'s own decay, is still above some floor) that this wave does not add.
 
+## Visual-geo v2 eval harness (`spikes/geo/`, wave H0, `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §5)
+
+**Scope discipline: `spikes/geo/**` is eval-harness/spike code only, never production.** No
+`cv_service/**` module imports anything under `spikes/`, and nothing here is wired into
+`cv_service.grpc.servicers` — H4 is where a matcher/gate choice measured here becomes production
+(`cv_service/geo/**`). Full measured numbers: `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §9;
+human-readable digest + every per-frame raw JSON: `spikes/geo/results/MEASUREMENTS.md`,
+`bakeoff.json`, `false_convergence_gate.json`.
+
+**Setup, once per machine:**
+```
+source spikes/geo/env.sh    # sets CV_GEO_MODEL_CACHE / TORCH_HOME / HF_HOME under
+                             # .model-cache/ (gitignored — symlinks hub/huggingface to
+                             # ~/.cache/{torch,huggingface} so a pre-downloaded model is
+                             # reused, never re-fetched) and PYTHONPATH
+```
+
+**Package layout:**
+- `spikes/geo/harvested/` — production `cv_service/geo/*.py` modules copied **verbatim** (imports
+  fixed for the module-layout move only, logic untouched) from the parked `feat/visual-geo` branch,
+  as an importable package: `rectify.py`, `pose.py`, `index.py`, `encoder.py`, `calibrate.py`,
+  `localize.py`, `verify.py`, `sequence.py`, `pack.py`, `orchestrator.py`. Never edit these to make
+  a spike experiment work — if a harvested module needs a real change, that is a finding, not a
+  patch (see the `manifest.py`/`sitl_render.py` altitude-threading fix below, done in the SPIKE
+  files, not here).
+- `spikes/geo/matchers.py` (new, H0) — the bake-off's five matcher backends behind one seam
+  (`build(name) -> MatcherHandle`, `MATCH_FNS[name](handle, query_bgr, tile_bgr) -> MatchKeypoints`,
+  same shape as `harvested/verify.py#loftr_match_keypoints`): `xfeat`, `lightglue_aliked`,
+  `lightglue_disk`, `loftr` (kornia `KF.LoFTR`), `eloftr` (official ZJU
+  `github.com/zju3dv/EfficientLoFTR`, shallow-cloned into `.eloftr-repo/` on first use, gitignored).
+  **`lightglue_aliked` is broken in this environment** — kornia 0.8.3's `KF.ALIKED`+
+  `KF.LightGlueMatcher` pairing produces 0 matches/0 inliers on every frame tested, including a
+  trivial self-match sanity check, despite the extractor and weight-loading both being verified
+  correct in isolation (the identical wrapper code path with `KF.DISK` works, 1469 matches on the
+  same sanity check). Use `lightglue_disk` instead until someone re-verifies against a newer
+  kornia. **`eloftr`'s `build_eloftr()` needs a compat shim** — the official repo imports
+  `kornia.utils.grid.create_meshgrid`, a dotted path kornia 0.8.3 no longer has
+  (`create_meshgrid` moved to `kornia.utils` directly); a small alias-module shim registers the old
+  path before import so upstream code runs unmodified. Even shimmed, `eloftr` is **not runnable**
+  without a hand-fetched checkpoint — upstream distributes weights via a Google Drive link in its
+  README, not a scripted download.
+- `spikes/geo/rerank.py` (new, H0) — §4.2's frozen re-rank scoring (`score_candidate`/`rerank`):
+  condition once (`harvested/verify.py#condition_query`, reused verbatim), match every one of
+  `candidates[:top_k]` via the chosen `matchers.py` backend, MAGSAC-fit each
+  (`harvested/pose.py#fit_homography_pose`), rank by **inlier count** (`sᵢ`, not raw match count —
+  `harvested/verify.py#verify()`'s own ranking is match-count-based, the OLD pre-v2 scoring; this
+  module replaces the ranking key and gate set, `harvested/verify.py` itself is untouched). Adds
+  `_reprojection_rms` (ρᵢ, `pose.py` fits H/counts inliers but never reports this) and evaluates
+  gates G-a through G-f from §4.2's table.
+- `spikes/geo/build_regions.py` (new, H0) — fetches live Esri z17 tiles for the `kyiv-maidan` /
+  `kyiv-pozniaky` bboxes (recovered from the parked branch's own `demo/build_region*.py`, not
+  restated in `VISUAL-GEO-V2-PLAN.md`) and drives `harvested/orchestrator.build_region_index()`.
+  Output under `spikes/geo/regions/<region-id>/` (gitignored — a runtime artefact, rebuild with
+  `python -m spikes.geo.build_regions --region {pozniaky,maidan} [--force]`, ~2–15s once tiles are
+  cached).
+- `spikes/geo/run_bakeoff.py` (new, H0) — one `(dataset, matcher, rectified, k)` configuration per
+  invocation, resumable (skips an already-recorded config unless `--force`), appends to
+  `results/bakeoff.json`. Datasets: `pexels` (the 12 real committed frames,
+  `fixtures/maidan-video-frames/manifest.jsonl` — H0 wrote this manifest; single ground truth
+  50.4502431°N/30.5240622°E, no telemetry, `--rectified` structurally refused — see
+  `REFUSED_RECTIFIED_NO_TELEMETRY`), `sitl-nadir`/`sitl-oblique45` (rendered by `sitl_render.py`
+  against a closed-form ArduCopter CIRCLE-mode track, real telemetry, both rectified/unrectified
+  runnable).
+- `spikes/geo/false_convergence_gate.py` (new, H0) — drives the real, unmodified
+  `harvested/sequence.py#SequenceLocalizer` twice over the 12 Pexels frames: once with today's raw
+  cosine-similarity field, once with a re-ranked geometric (inlier-ratio) field (§4.4 Change 1).
+  Measured: raw field converges 8/12 updates, 100% of those on the known 771m-wrong cell (the
+  real §12.14 defect, reproduced); geometric field never converges once. Appends to
+  `results/false_convergence_gate.json`.
+- `spikes/geo/manifest.py` — **H0 added an `altitude_meters` field to `QueryFrame`** (load/write
+  both threaded), needed because `sitl_render.py`'s `write_manifest` call previously dropped the
+  synthesized track's own altitude — `condition_query` needs it alongside `heading`
+  (`sitl_render.py#run` now passes `altitude_meters=sample.alt_m`). A manifest written before this
+  change parses fine (`altitude_meters` defaults to `None`, same as `heading`).
+- `spikes/geo/sitl_render.py` — **render with `--fov-degrees 84`, not its own CLI default of
+  60.** `condition_query` (`harvested/verify.py`) assumes
+  `DEFAULT_ASSUMED_HORIZONTAL_FOV_DEGREES=84°` (the real production fallback, `track.py`'s own
+  constant). H0's first SITL bake-off pass used `sitl_render`'s CLI default (60°) to render the
+  query frames, a self-inflicted FOV mismatch between rendering and conditioning that produced a
+  spurious 50% false-fix rate on the very first `--rectified` runs — caught before it was reported
+  as a real finding, frames re-rendered at `--fov-degrees 84`, every §9.3 number in the plan is
+  post-fix. If you add a new SITL dataset, pass `--fov-degrees 84` explicitly (or thread it through
+  `rerank()`'s own `fov_degrees` param if you deliberately want a different assumed FOV — the two
+  must always match).
+- Files kept **reference-only, not run** (harvested but with an unresolved or lost dependency
+  chain — a real gap in the plan's own §1.3 harvest manifest, not a shortcut taken here):
+  `rectify_eval.py` (needs `run_homography_pose.py`/`homography_pose.py`, never named in §1.3 and
+  never harvested), `pf_spike.py` (synthesizes same-source trajectories, does not exercise the real
+  false-convergence case — superseded by `false_convergence_gate.py`), `regression_1213.py`
+  (depends on region builds lost when the parked branch gitignored `results/`),
+  `bakeoff_matchers.py` (kept for its own `Candidate`/`build_matcher` design precedent; superseded
+  by `matchers.py` + `rerank.py`).
+
+**Tests**: `cd cv-service && .venv/bin/python -m pytest spikes -q` —
+`spikes/geo/tests/test_bakeoff_harness.py`, pure math/plumbing only (haversine, `_config_key`,
+`_reprojection_rms`, manifest roundtrip, `metrics.py`/`report.py`'s pre-existing pure functions),
+zero network/model/torch dependency, runs in ~1.3s. The bake-off/false-convergence-gate scripts
+themselves are exercised by hand against live tiles + real matcher models (results committed under
+`spikes/geo/results/**`), not by this suite — a real model forward pass and a live Esri fetch are
+explicitly out of scope for a fast, always-green unit suite.
+
 ## Status
 Real inference (Ultralytics YOLO, CPU by default) implements `Inference.DetectStream` per `docs/plans/done/MVP1-PLAN.md` §C7 bullet 1; falls back to the Phase 0 echo stub when the `cv` extra is absent or the model can't load, so the service never crash-loops for lack of a model. `Training.ListModels`/`Training.PromoteModel`/`Training.StartTraining`/`Training.UploadDataset` are all implemented (CV-TRAINING Phase 2 + CV-TRAINING-V2 Wave W2) — see the API surface above and MODULE.md history for the full per-item design writeups (`ListModels`/`PromoteModel` against the shared `ModelRegistry`; `StartTraining` a real Ultralytics fine-tune with cancellation, off-thread execution, and never-auto-promote; `UploadDataset` a streamed dataset archive landed atomically). **`docs/plans/done/MVP2-PLAN.md` §V-d done**: `DetectStream` decouples per-stream frame receipt from inference and bounds cross-stream concurrent inference — see "V-d" above. **`docs/plans/done/CV-MODELS-PLAN.md` items 1-2 done (CP-b)**: model registry replaces the single hard-loaded detector with a lazy `{model_id -> YoloDetector}`, plus comma-separated composite mode — see "Model registry & composite mode" above. **CV-MODELS-PLAN follow-up done**: `yoloe-26s-seg-pf.pt` is a routable, opt-in open-vocabulary `model_id` covering people/vehicles/buildings — see "Routable model roster" above. **`docs/plans/done/REMOTE-CV-PLAN.md` P0/P1 done**: explicit `CV_DEVICE` knob + HTTP/2 keepalive server options — see `cv/cv-service/DEPLOY-GPU.md`.
 

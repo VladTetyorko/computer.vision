@@ -173,7 +173,7 @@ re-layout** (`adapters/` → responsibility folders) — the "new path" column i
 | `cv_service/geo/structure/**` (521) | — | **left behind** | Measured honest negative. The frozen package layout stays documented in the research, not carried as dead code |
 | `cv-service/tests/geo/**` (18 files, 4,700) | same | **extract** for every module kept | ~3,400 lines survive; `test_precise.py`/`test_structure_*.py`/`test_track.py`/`test_angle_probe.py` are dropped with their modules |
 | `cv-service/tests/grpc/test_geolocation_servicer.py` (1,907) | same | **adapt** | Rewritten for the pull-mode servicer; the region-ingest half transfers nearly intact |
-| `cv-service/spikes/geo/` — `bakeoff_matchers.py` (577), `rectify_eval.py` (441), `pf_spike.py` (780), `regression_1213.py` (333), `metrics.py` (184), `report.py` (195), `analytical_circle_telemetry.py` (207), `tiles.py` (214), `video_input.py` (145), `geomath.py` (91), `fixtures/maidan-video-frames/` (12 JPEGs), `wayback_curated_releases.json` | `cv-service/spikes/geo/**` | **extract** | This is H0's harness and the only real out-of-sample fixture the project owns. **Its `results/` must be committed this time** — the branch gitignored them and lost every raw artefact (`00` §8) |
+| `cv-service/spikes/geo/` — `bakeoff_matchers.py` (577), `rectify_eval.py` (441), `pf_spike.py` (780), `regression_1213.py` (333), `metrics.py` (184), `report.py` (195), `analytical_circle_telemetry.py` (207), `tiles.py` (214), `video_input.py` (145), `geomath.py` (91), `fixtures/maidan-video-frames/` (12 JPEGs), `wayback_curated_releases.json` | `cv-service/spikes/geo/**` | **extract** | This is H0's harness and the only real out-of-sample fixture the project owns. **Its `results/` must be committed this time** — the branch gitignored them and lost every raw artefact (`00` §8). **H0 plan-defect note (found 2026-08-19): this row is incomplete.** Several of the named files' own transitive imports are NOT named here and had to be harvested/renamed anyway to make anything runnable: `encoders.py`, spike-local `index.py` (renamed `spike_index.py` to disambiguate from `cv_service/geo/index.py`, harvested above under a different verdict), `manifest.py`, `loftr_verify.py` — all harvested this wave. `rectify_eval.py`'s own `from spikes.geo.run_homography_pose import (...)` chain (`run_homography_pose.py`/`homography_pose.py`/`report_homography_pose.py`) was NOT named and was judged not worth chasing — `rectify_eval.py` is kept in this harvest as reference only, not run; H0 wrote fresh driver scripts (`build_regions.py`, `run_bakeoff.py`, `rerank.py`, `false_convergence_gate.py`) instead of resurrecting it |
 | everything else under `spikes/geo/` (~5,000 lines) | — | **left behind** | Encoder bake-offs, semantic/structure evals, SITL renderers — settled questions (`00` §5); re-surveying is forbidden |
 
 #### Java
@@ -1139,73 +1139,163 @@ Each risk names the **specific measurement on the parked branch** that makes it 
 
 ---
 
-## 9. Measured numbers — **empty until H0 fills them**
+## 9. Measured numbers — filled by H0, 2026-08-19
 
 > H0 writes into this section directly, in this document, with the date and the host each number was
 > measured on. Nothing here may be copied from literature; a row with no measurement stays blank and
 > says so.
 
+**Host for every number below unless stated otherwise: the laptop** (`cv/cv-service/.venv`,
+CPU-only, Python 3.12, kornia 0.8.3). **GB4005** (`vlad@192.168.0.106`) is reachable over SSH
+(confirmed) but has no `torch`/`kornia`/cv-service checkout and only 2 CPU cores — provisioning a
+full geo bake-off environment there is a new deployment task, judged disproportionate to this
+wave's "optional, try SSH, else not run" framing; every GB4005 cell below is **not run** for that
+one reason, not re-stated per row. Full digest with datasets/methodology and per-frame raw JSON:
+`cv/cv-service/spikes/geo/results/MEASUREMENTS.md`, `bakeoff.json`, `false_convergence_gate.json`.
+
+Two regions rebuilt from **live** Esri z17 tiles (deliverable 2; bboxes recovered from the parked
+branch's own `demo/build_region.py`/`demo/build_region_pozniaky.py`): `kyiv-maidan` (49 tiles, 45
+descriptors, `accept_similarity=0.870`, holdout recall@1 0.25) and `kyiv-pozniaky` (252 tiles, 227
+descriptors, `accept_similarity=0.490`, holdout recall@1 0.04) — both self-calibrate to real
+(non-never-accept) thresholds but with low holdout recall, honest evidence retrieval alone is weak
+on these regions.
+
 ### 9.1 Matcher bake-off — cost
 
 | Matcher | Backend | Host | ms/pair (rectified 512 px) | ms/pair (unrectified) | Notes |
 |---|---|---|---|---|---|
-| `xfeat` | | GB4005 | | | |
-| `xfeat` | | laptop | | | |
-| `lightglue_aliked` | | GB4005 | | | |
-| `lightglue_disk` | | GB4005 | | | |
-| `eloftr` (official ZJU) | | GB4005 | | | |
-| `loftr` (kornia, baseline) | | GB4005 | | | |
+| `xfeat` | verlab/accelerated_features via torch.hub | GB4005 | not run | not run | GB4005 has no torch/kornia; see above |
+| `xfeat` | verlab/accelerated_features via torch.hub | laptop | 23.5–25.5 | 43.6–64.7 | by far the fastest; weak geometric discriminative power on this domain (§9.2/§9.3) |
+| `lightglue_aliked` | kornia 0.8.3 `KF.ALIKED`+`KF.LightGlueMatcher` | GB4005 | not run | not run | |
+| `lightglue_aliked` | kornia 0.8.3 `KF.ALIKED`+`KF.LightGlueMatcher` | laptop | not run | 713.5, but **0 matches/0 inliers on every one of 12 frames** | reproducible kornia 0.8.3 ALIKED+LightGlueMatcher integration defect (extractor + weight loading both verified correct in isolation; identical code path with DISK works, 1469 matches on the same sanity check) — **`lightglue_disk` substituted for the priority triple** |
+| `lightglue_disk` | kornia 0.8.3 `KF.DISK`+`KF.LightGlueMatcher` | GB4005 | not run | not run | |
+| `lightglue_disk` | kornia 0.8.3 `KF.DISK`+`KF.LightGlueMatcher` | laptop | 484.2–555.5 | 766.5–1431.7 | conditioning cuts cost ~1.6–2.6x |
+| `eloftr` (official ZJU) | github.com/zju3dv/EfficientLoFTR | GB4005 | not run | not run | |
+| `eloftr` (official ZJU) | github.com/zju3dv/EfficientLoFTR | laptop | not run | not run | two real blockers: (1) `kornia.utils.grid` API-move import error, fixed with a compat shim (`matchers.py#build_eloftr`), then a dependency chain (`joblib`→`yacs`→`pytorch_lightning`) stopped at `pytorch_lightning` (disk-constrained env, 4.2GB free, not worth installing just to reach blocker 2); (2) the decisive one regardless of (1): upstream distributes weights via a **Google Drive link**, not a scripted download |
+| `loftr` (kornia, baseline) | kornia 0.8.3 `KF.LoFTR(pretrained="outdoor")` | GB4005 | not run | not run | |
+| `loftr` (kornia, baseline) | kornia 0.8.3 `KF.LoFTR(pretrained="outdoor")` | laptop | 504.4–575.9 | 964.1–1577.9 | closely reproduces §4.7's own literature anchors (≈530/≈1457ms) — real corroboration |
 
 ### 9.2 Matcher bake-off — accuracy on the Pexels clip (12 frames, real, out-of-sample)
 
 | Matcher | Rectified | k | top-1 (n=12) | median error (m) | **false-fix rate** | frames passing the §4.2 gate |
 |---|---|---|---|---|---|---|
-| | | | | | | |
+| `xfeat` | unrectified | 5 | 0/12 | 628.8 | N/A (0 accepted) | 0/12 |
+| `xfeat` | unrectified | 10 | 0/12 | 477.0 | N/A | 0/12 |
+| `xfeat` | unrectified | 20 | 0/12 | 585.2 | N/A | 0/12 |
+| `lightglue_disk` | unrectified | 5 | 0/12 | 774.6 | N/A | 0/12 |
+| `lightglue_disk` | unrectified | 10 | 0/12 | 743.5 | N/A | 0/12 |
+| `lightglue_disk` | unrectified | 20 | 0/12 | 608.3 | N/A | 0/12 |
+| `loftr` | unrectified | 5 | 0/12 | 649.9 | N/A | 0/12 |
+| `loftr` | unrectified | 10 | 0/12 | 657.1 | N/A | 0/12 |
+| `lightglue_aliked` | unrectified | 5 | 0/12 (broken, see §9.1) | 774.6 | N/A | 0/12 |
+| all matchers | **rectified: refused, not run** | — | Pexels carries no heading/altitude telemetry (branch's own finding); §4.2 needs both together — inventing a prior would misreport a measurement as real | | |
+
+**Headline: 0/12 top-1 ≤100m on the real out-of-sample clip, every matcher, every k** — and
+because the single-frame gate never accepted a frame, zero false fixes too, but also zero usable
+fixes. Matches the parked branch's own Wave 10a finding (correct tile never top-1 either way,
+0/12) — H0 reconfirms the same real-world domain-gap ceiling independently, via geometric re-rank
+rather than appearance-ranking mitigation.
 
 ### 9.3 SITL analytic track
 
-| Matcher | Rectified | k | median error (m) | yaw error (°) | pass rate | false fixes |
+13 frames each, `spikes/geo/sitl_render.py` from a closed-form ArduCopter CIRCLE-mode track
+(`analytical_circle_telemetry.py` — a real documented flight mode's own closed-form trace, **not**
+live SITL capture) against real Esri z17 tiles, `fov_degrees=84` (matching `condition_query`'s own
+assumed default).
+
+| Matcher | Rectified | k | median error (m) | yaw error (°) | pass rate (frames accepted) | false fixes |
 |---|---|---|---|---|---|---|
-| | | | | | | |
+| `xfeat` (nadir) | rectified | 10 | 584.3 | not measured | 0/13 | — |
+| `xfeat` (nadir) | unrectified | 10 | 578.2 | not measured | 0/13 | — |
+| `xfeat` (oblique 45°) | rectified | 10 | 455.6 | not measured | 0/13 | — |
+| `xfeat` (oblique 45°) | unrectified | 10 | 335.5 | not measured | 0/13 | — |
+| `lightglue_disk` (oblique 45°) | **rectified** | 10 | **260.8** | not measured | **1/13** | **0** |
+| `lightglue_disk` (oblique 45°) | unrectified | 10 | 272.7 | not measured | 0/13 | — |
+| `loftr` (oblique 45°) | rectified | 10 | 458.8 | not measured | 0/13 | — |
+| `loftr` (oblique 45°) | unrectified | 10 | 531.1 | not measured | 0/13 | — |
 
-### 9.4 End-to-end latency, chosen configuration
+Yaw error: **not measured** (`pose.py` extracts it per fit; no driver this wave compared it
+against the track's own `heading_deg` — flagged incomplete, not assumed correct).
 
-| Stage | ms (GB4005) | ms (laptop) |
-|---|---|---|
-| decode (pull loop) | | |
-| rectify (IPM) | | |
-| descriptor encode | | |
-| re-rank (k × matcher + MAGSAC) | | |
-| sequence update | | |
-| pose | | |
-| **total per keyframe** | | |
-| sustained keyframe-fps with ≥50% headroom | | |
+Two real findings beyond the table: (1) **xfeat's ceiling is retrieval, not re-ranking** — even
+against its own synthetic-nadir render of the SAME indexed imagery, the true tile lands rank 7/45
+by raw similarity, and its top-k candidates score 200+ raw matches but only 8–14 MAGSAC inliers
+(~4–5% inlier ratio) — G-b/G-d refuse essentially everything. (2) **`lightglue_disk`+rectification
+is this wave's one clean positive result**: conditioning cut cost 2.6x AND the one frame clearing
+every §4.2 gate was a true fix, not a false one — but only on the synthetic oblique track, not the
+real Pexels clip.
+
+### 9.4 End-to-end latency vs §4.7's ≤800ms/keyframe budget
+
+Per-stage GB4005/laptop breakdown: **not measured** (no working full pipeline harness driving
+decode→rectify→encode→re-rank→PF→pose end to end was built this wave — H0 measured the matcher
+stage in isolation, which dominates the budget; see below). What IS measured: matcher cost against
+the budget, accounting for production's own existing top-2 verification-candidate mitigation
+(`harvested/verify.py#DEFAULT_VERIFY_TOP_N`):
+
+| Matcher | ms/pair (rectified) | k=2 total | k=10 total | Clears 800ms at k=2? | Clears 800ms at k=10? |
+|---|---|---|---|---|---|
+| `xfeat` | ~25 | ~50ms | ~250ms | yes | yes |
+| `lightglue_disk` | ~520 | ~1040ms | ~5200ms | **no** | no |
+| `loftr` | ~540 | ~1080ms | ~5400ms | **no** | no |
+
+**Only `xfeat` clears the latency budget, at any tested k.** Frontier: `xfeat` has headroom at
+k≤10 (k=20 unrectified was still 40.6ms/pair ≈ 800ms total with zero margin left for the rest of
+the pipeline); `lightglue_disk`/`loftr` need k≤1 at 1Hz to have any chance, still leaving no
+headroom — effectively incompatible with §4.7's budget on this CPU-only laptop class, conditioned
+or not.
+
+**Gate question, answered directly**: *does a matcher clear the latency budget with top-1
+materially above 0/12 on Pexels at zero false fixes?* **No.** `xfeat` clears latency but is 0/12 on
+Pexels at every k (not "materially above zero" — flatly zero), and its own SITL-measured geometric
+precision is weak. `lightglue_disk`/`loftr` don't clear latency at any k leaving pipeline headroom,
+and are ALSO 0/12 on Pexels even when run unbudgeted. The one positive number (`lightglue_disk`
+rectified, 15.4% top-1/0 false fixes on synthetic SITL) neither clears latency nor transfers to the
+real clip. **No candidate matcher, at any configuration measured, simultaneously clears the
+latency budget and delivers materially-above-zero real-world accuracy at zero false fixes.** H0's
+recommendation to H4: ship `xfeat` as the only matcher fitting the latency envelope, but do not
+expect single-frame `CONFIRMED` fixes on real footage — lean on the §4.4 sequence filter + gate
+(next section, measured working) and the honest `NO_FIX`/`PROBABLE` ceiling.
 
 ### 9.5 Sequence filter and the false-convergence gate
 
+`spikes/geo/false_convergence_gate.py`, the real unmodified `harvested/sequence.py
+#SequenceLocalizer`, driven twice over the same 12 real Pexels frames with two different per-update
+measurement fields — only the field differs, filter mechanics identical:
+
 | Case | Converged? | Cell correct? | Updates to converge | Gate that refused (if any) |
 |---|---|---|---|---|
-| Pexels clip, gate **off** (reproducing §12.14) | | | | |
-| Pexels clip, gate **on** | | | | |
-| Pozniaky in-distribution | | | | |
-| Cross-region negative control | | | | |
+| Pexels clip, **raw-similarity field** (today's production behavior, reproducing §12.14) | **8/12 updates** | **no — 8/8 (100%) of convergences landed on the known 771m-wrong cell** (776.9m here vs the branch's own 771–773m) | as early as the branch's own "converged at update 7" | none (this is the ungated baseline) |
+| Pexels clip, **geometric field** (§4.2 MAGSAC inlier ratio in place of raw similarity — §4.4 Change 1) | **0/12 — never converges** | n/a | n/a | the field itself: no candidate ever produced sustained geometric consistency, so posterior spread never collapsed |
+| Pozniaky in-distribution | not run this wave (H0 scoped to the Pexels false-convergence case specifically, per the §5 H0 table; Pozniaky/danger-region regressions are H4's `test_regression_alias_1213`) | | | |
+| Cross-region negative control | not run this wave, same reason | | | |
+
+This is deliverable 5's headline, measured not simulated: the SAME filter code, fed today's raw
+field, reproduces the branch's own false convergence almost exactly; fed the re-ranked geometric
+field instead, it never once confidently commits to ungrounded evidence. Change 2's diversity/
+baseline gate and the two standing regressions are explicitly H4 deliverables, not H0's (§5 H0
+table) — correctly out of scope here.
 
 ### 9.6 Error budget — measured replacements for §4.6's "assumed" rows
 
 | Term | §4.6 estimate | Measured | How |
 |---|---|---|---|
-| Rectification geometry error | 3–8 m | | |
-| Reference tile georeferencing | 3–5 m | | |
-| Telemetry↔frame skew, observed | ~3 m | | |
-| **RSS, `CONFIRMED`** | ≤ 25 m target | | |
+| Rectification geometry error | 3–8 m | **not measured** — would need a controlled sweep of gimbal-pitch/AGL perturbation against a known-true pose; out of this wave's time budget | — |
+| Reference tile georeferencing | 3–5 m | **not measured** — still the vendor figure, unverified (as §4.6 already notes, OQ5) | — |
+| Telemetry↔frame skew, observed | ~3 m | **not measured** — the SITL track's telemetry is synthesized in lockstep with its rendered frames (zero real skew by construction), so this dataset cannot measure it; needs real onboard-logged telemetry against real captured video | — |
+| **RSS, `CONFIRMED`** | ≤ 25 m target | **not evaluatable this wave** — every §9.3 SITL config with ≥1 accepted frame (`lightglue_disk` rectified) reports 260.8m median error on the FULL matched set, not the RSS geometry-error components; the one gate-accepted frame's own position error was not isolated from retrieval/rectification noise | — |
+
+Honest gap: §9.6 needed a dedicated controlled-perturbation experiment this wave did not build
+(distinct from the bake-off/false-convergence-gate scripts already written); flagged for whoever
+next touches this table rather than filled with a guess.
 
 ### 9.7 Second-decode cost (R6)
 
-| Configuration | cv-service CPU % | detection achieved-fps | geo achieved-fps |
-|---|---|---|---|
-| detection pull only | | | — |
-| geo only | | — | |
-| both | | | |
+**Not run — out of H0's scope.** R6/§9.7 is about `cv-service`'s CPU cost running detection and
+geo pull loops concurrently against a live mediamtx stream; H0's harness never stands up a live
+`cv_service.grpc.server`, mediamtx, or a second decode loop (all production wiring, explicitly H3/
+H4/H5's job, not `spikes/geo/**`'s). Whoever runs H4 should fill this table against the real
+service.
 
 ---
 
@@ -1213,10 +1303,10 @@ Each risk names the **specific measurement on the parked branch** that makes it 
 
 | # | Choice | Default if nobody decides | Who decides, when |
 |---|---|---|---|
-| O1 | Which matcher | **XFeat** — CPU-native by design, Apache-2.0, community ONNX ports; the only candidate whose *whole design point* is this hardware class | H0, by measurement (§9.1/§9.2) |
+| O1 | Which matcher | **XFeat** — CPU-native by design, Apache-2.0, community ONNX ports; the only candidate whose *whole design point* is this hardware class. **H0 confirmed this by elimination, not by demonstrated accuracy**: XFeat is the only bake-off matcher that clears §4.7's latency budget at any tested k (§9.4), but its own Pexels top-1 is 0/12 and its SITL-measured geometric precision is weak (~4–5% inlier ratio, §9.3) — the default stands on latency grounds alone; H4 should not assume XFeat delivers working single-frame fixes on real footage | H0, by measurement (§9.1/§9.2) |
 | O2 | `k` (re-rank depth) | **10** — `11` §4.2's "generous relative to the gallery"; drop to 5 if §4.7's budget bites | H0 |
 | O3 | One decode loop or two | **Two** — a separate `PullDecodeLoop` at `keyframe-fps`, because it keeps the geo session independent of whether detection is even on. Fold into one loop **only if** §9.7 shows the second decode costs more than ~15% CPU | H4, informed by §9.7 |
-| O4 | Sequence-filter likelihood shape | **softmax over inlier counts** at the harvested temperature; keep the raw-similarity field only as a fallback when no candidate produces a homography | H4 |
+| O4 | Sequence-filter likelihood shape | **softmax over inlier counts** at the harvested temperature; keep the raw-similarity field only as a fallback when no candidate produces a homography. **H0 prototyped and measured this directly (§9.5, deliverable 5)**: the real `SequenceLocalizer`, fed today's raw-similarity field, converges 8/12 updates on the real Pexels clip, 8/8 (100%) of those on the known 771m-wrong cell; fed a geometric (inlier-ratio) field instead, it never converges once across the same 12 frames — the same filter code, only the field changed | H4 |
 | O5 | OSM tie-breaker weight `w` | **0.0** (inert). Raise only with a measured improvement on the alias regression, and never above a value that could flip a `CONFIRMED` | H0/H4 |
 | O6 | `WaybackTileSource` multi-date | **off** (`wayback-multi-date: false`) — the appearance-domain gap, not seasonal occlusion, is today's bottleneck | H3 wires both; the flag decides |
 | O7 | Whether `PROBABLE` corrections are persisted | **yes**, persisted and served, but never alarm-eligible — an operator reviewing a flight wants to see the near-misses | H2a |
