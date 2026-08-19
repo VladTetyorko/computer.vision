@@ -38,7 +38,37 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
   - **CV training / dataset improvement loop** (docs/plans/done/CV-TRAINING-PLAN.md §3-4's frozen wire contract, Wave T5 — mirror `com.drones.vision.api.dto`'s `DatasetController`/`LabelingController` types 1:1; gated server-side by `vision.training.enabled`, default `false` — every endpoint 404s as a whole when it's off, see the dedicated CV-TRAINING-PLAN Wave T5 section at the end of this file for how that's turned into an honest disabled state rather than an error): `AnnotationSource = 'MODEL'|'OPERATOR'`; `Annotation {label, source, box: BoundingBox}` (reuses `BoundingBox` verbatim); `SampleStatus = 'PENDING'|'LABELED'|'DISCARDED'`; `TrainingSample {id, datasetId, streamId, assetId?, capturedAt, width, height, status, labeledBy?, labeledAt?, annotations}` (`assetId?`/`labeledBy?`/`labeledAt?` genuinely absent, `@JsonInclude(NON_NULL)` — a deliberate deviation from the plan's own illustrative JSON, which shows literal `null`s, flagged in station/vision-api/MODULE.md's own Status/T4 entry); `Dataset {id, name, targetCategory?, classes, status: 'OPEN'|'ARCHIVED', createdAt, sampleCounts: Record<SampleStatus, number>}` (**`'EXPORTING'` removed from `DatasetStatus`, docs/plans/done/CV-TRAINING-V2-PLAN.md §8/Wave W7 — nothing ever set it server-side either**); `DatasetsResponse {datasets}`/`SamplesResponse {samples}` (wrapper objects, mirroring `CvModelsResponse`'s own wrapped-list precedent); `CreateDatasetRequest {name, targetCategory?, classes?}`; `CaptureSampleRequest {datasetId}`; `LabelAnnotationsRequest {status: 'LABELED'|'DISCARDED', annotations}`. **`DatasetExport` is gone** (docs/plans/done/CV-TRAINING-V2-PLAN.md Wave W7 — the manual export step was deleted; `POST /api/datasets/{id}/train` now uploads the dataset itself over gRPC, see the dedicated CV-TRAINING-V2-PLAN Wave W7 section at the end of this file).
   - **Tracking engine** (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7 — coded ahead of the backend, which hadn't shipped when this wave landed; see the dedicated Status section at the end of this file): `TrackingMode = 'OFF'|'ASSOCIATE'|'FOLLOW'`, `TrackState = 'TENTATIVE'|'CONFIRMED'|'COASTING'|'LOST'`, `DetectionSource = 'DETECTOR'|'TRACKER'`, `DetectorReason` (6-value union, no `UNSPECIFIED` — that sentinel never reaches JSON, same "absent, not guessed" rule as everywhere else). `Detection` gains **nested** `track?: {id, state, source, velocityX, velocityY}` (`DetectionTrack`) — one `detection.track?.id` null check gates all track-aware rendering; `DetectionResult` gains **nested** `tracking?: {detectorRan, detectorReason, trackerMillis, engineId, lockedTrackId}` (`FrameTracking`). New: `TrackingConfigRequest` (every field optional, the `tracking` object `PATCH .../config` accepts), `TargetLockRequest` (`trackId?`/`pointX?`+`pointY?`/`release?` — exactly one form), `TrackStats` (the flow strip's own source — `mode`, **`engineId` is the engine actually serving, not requested, per R11**, `windowSeconds`, `detectorPasses`, `trackerFrames`, `dutyRatio`, `trackerMillisP50/P95`, `lastDetectorReason`, `byState`), `StreamTrack` (one row of `GET .../tracks`), `StreamTracksResponse {streamId, lockedTrackId, tracks, stats?}` (**`lockedTrackId` is the one field the "Following #N" chip is allowed to confirm from — never a click**), `CvTracker {id, displayName, modes, needsAssets, costHint}`, `CvTrackersResponse {trackers}` (mirrors `CvModelsResponse`'s own wrapped-list shape). `UpdateStreamConfigRequest` gains `tracking?: TrackingConfigRequest` (a third, independent PATCH family, never coalesced with hot knobs or `model`); `PatchStreamConfigResponse` gains `trackingChanged?: boolean` (optional — a backend predating wave T6 simply omits it).
   - **Drone onboarding / readiness** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1's frozen wire contract, wave O6 — mirror `com.drones.vision.api.dto`'s `VehicleProfileResponse`/`ReadinessReportResponse`/etc. 1:1, verified against the actual Java source, not the plan doc alone) — `MessageObservation {messageId, name, hz, count}`, `ParameterReading {name, value}`, `VehicleProfile {linkKey, observedAt, sysid?, firmware?, firmwareVersion?, vehicleKind?, messages, parameters, linkBytesPerSecond, complete, incompleteReason?}` (no `NON_NULL` on the Java side — every field always present), `ProbeCandidateRequest {protocol, uri, options}` (same shape as `ProbeDeviceRequest` above, against a vehicle link instead of a device), `FEATURE_KEYS` (the eleven frozen v1 feature strings, in the seed migration's own row order — `'map-position'|'preflight-checks'|'ground-speed'|'link-quality'|'failsafe-banners'|'battery'|'visual-geolocation'|'fleet-identity'|'command-tx'|'rc-relay'|'video-ingest'`) + `FeatureKey` union, `ReadinessVerdict = 'GO'|'NO_GO'|'UNKNOWN'`, `FeatureStatus = 'READY'|'DEGRADED'|'MISSING'|'UNKNOWN'`, `RemedyKind = 'MESSAGE_INTERVAL'|'PARAM_WRITE'|'CLI_SCRIPT'|'MANUAL'` (a row with no remedy carries `remedy: null`, not a fifth constant), `FeatureReadiness {feature, label, status, detail, remedy}` (wire key is `feature`, not `featureKey`), `ReadinessReport {assetId, verdict, evaluatedAt, profileObservedAt, features, blockers}` (`profileObservedAt` is a literal `null`, never omitted, for an asset never probed — an honest, renderable answer, not a failure; `blockers` is raw feature-key strings, no label — verified against `DefaultReadinessService#evaluate`, the frontend maps them through `featureLabel` itself), `ReadinessRow {assetId, displayName, verdict, features}` (the fleet board's flatter per-asset row, `features` a `featureKey -> status` map), `FleetReadiness {assets}`, `RemediationRequest {features?, actions?}`, `RemediationAction {action, messageId, intervalMicros, outcome, previousValue, newValue, detail}` (`outcome = 'ACCEPTED'|'DENIED'|'NO_ACK'|'UNSUPPORTED'`), `RemediationResult {requestedAt, verifiedAt, actions, reprobe}` (`verifiedAt`/`reprobe` both `null` together when nothing was actually dispatched). **`DiscoveredDevice` gains `suggestedOptions: Record<string, string>` (required, not optional)** — verified against `DiscoveredDeviceResponse.from()`'s actual construction code: always at least `Map.of()`, never `null`, despite the DTO's `@JsonInclude(NON_NULL)` annotation (that annotation applies to *other* fields on the same record, not this one). **Finding, not fixed by this wave**: the plan's §8.1-promised additive `AssetUsageResponse` fields (`phase`/`firstArmedAt`/`lastDisarmedAt`) do not exist in the real O5 `AssetUsageResponse.java` — verified absent from source, nothing added to `AssetUsage` here. See the dedicated O6 changelog section at the end of this file.
-- `vision-api.ts` — `VisionApi` (`@Injectable providedIn: 'root'`): `listDevices(includeDeleted = false)`, `registerDevice(req)`, `listStreams()`, `startStream(deviceId, req?)`, `stopStream(streamId)`, `scan(req?)`, `listAssets(includeDeleted = false)`, `getAsset(assetId)`, **`assetStats(assetId)`** (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3 — `GET /api/assets/{id}/stats` → `AssetStats`; 404 for an unknown asset, same as `getAsset`; the asset manager page's own `loadStats` degrades its KPI row to "—" on any failure rather than propagating it), `usageTelemetry(usageId, limit = 200)`, **`usageTimeline(usageId, {fromMs?, toMs?, maxPoints?} = {})`** (docs/plans/done/MVP2-PLAN.md §R, R-b — each option only added to the query string when given; `features/replay/replay.ts`'s only call site always passes `maxPoints: 2000`, the server's own clamp ceiling, once up front), **`listUsages({limit?, assetId?} = {})`** (docs/extracts/design/10-replay.md's frozen wire contract, docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4 — `GET /api/usages` → `UsageSummary[]`; `limit`/`assetId` each only added to the query string when given, same convention as every other optional filter here) — the replay library's own fleet-wide flight list, `features/replay/replay-library-facade.ts`'s one read, `streamDetections(streamId, limit = 50)` (docs/plans/done/MVP1-PLAN.md §C8 bullet 4), `startSimulation(req)`, `stopSimulation(assetId)` (docs/main/CYCLES-PLAN.md §4), plus the docs/main/CYCLES-PLAN.md §8 warehouse set: `updateDevice(id, edit)` (PATCH), `setDeviceState(id, state)` (POST `.../state`), `deleteDevice(id)` (DELETE, archive), `updateAsset(id, edit)`, `setAssetState(id, state)`, `deleteAsset(id)` → `AssetDeletionResponse`, `assignDevice(assetId, deviceId)` (POST `.../devices`), `unassignDevice(assetId, deviceId)` (DELETE `.../devices/{deviceId}`), plus (docs/plans/done/MVP3-PLAN.md C-a/C-c) **`fleetSummary(includeArchived = false)`** (`includeArchived` — deliberately not `includeDeleted`, see station/vision-api/MODULE.md's Conventions — only added to the query string when `true`, same convention as `includeDeleted` elsewhere) and **`snapshotUrl(streamId): string`** — the one method here that does **not** return a `Promise`: it just builds `/api/streams/{streamId}/snapshot`'s path for `features/command/live-strip-tile.ts` to bind straight to an `<img src>` (the browser does the actual fetching), kept in this class anyway so it stays "the only place the frontend knows REST URLs" even for a path never passed through `HttpClient`. `includeDeleted`/`includeArchived` are each only added to the query string when `true` (today's default behavior is otherwise unchanged). Every other method is promise-returning (`firstValueFrom`) so components hold signals, not subscriptions. **`updateLiveTopics(connectionId, {add, remove})`** (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — the one `PATCH /api/live/{connectionId}/topics` call; `GET /api/live` itself is **not** here (`core/live/live-store.ts` opens it directly as an `EventSource`, which `HttpClient` cannot stream — see that class's own doc comment and the "Live updates" DTO paragraph above for why this is the one documented exception to "the only place the frontend knows REST URLs"). **`probeDevice(request)`** (docs/plans/done/UX-REWORK-PLAN.md §U-d — `POST /api/devices/probe`, the onboarding wizard's Test step) and **`assetImageUrl(assetId)`/`uploadAssetImage(assetId, blob)`/`deleteAssetImage(assetId)`** (the `GET`/`PUT`/`DELETE /api/assets/{id}/image` trio — `assetImageUrl` is a plain URL builder like `snapshotUrl`, not promise-returning; `uploadAssetImage` sends an already-downscaled `Blob` as a raw body, no JSON) are this cycle's own additions — coded against the plan's own pinned contract ahead of/alongside the backend half landing; see this file's own U-d section below for the full live-verification list. **`listGeofences()`/`createGeofence(request)`/`updateGeofence(id, request)`/`deleteGeofence(id)`** (docs/plans/done/OPS-CORE-PLAN.md §G's frozen wire contract) back `core/geofence/geofence-store.ts`. **`usageRecording(usageId)`** (docs/plans/done/OPS-CORE-PLAN.md §R's frozen wire contract, `GET /api/usages/{usageId}/recording`) backs `features/replay/**`'s video pane — see the dedicated `core/geofence/**`/`core/weather/**` sections and the Replay section below for how each is actually used. **`patchStreamConfig(streamId, patch)`/`getCvModels()`** (docs/plans/done/CV-CONTROL-PLAN.md §3-4's frozen contract) — `PATCH /api/streams/{id}/config` → `PatchStreamConfigResponse`, `GET /api/cv/models` → `CvModelsResponse`; both wrapped by `FleetStore` (see below), the CV control panel's only two write/read paths. **`authMe()`/`authLogin(username, password)`/`authLogout()`** (docs/plans/done/U-AUTH-PLAN.md wave 3's frozen contract) — `authMe()` folds a clean `401` into `null` rather than rejecting (the one deliberate exception to every other method here treating a non-2xx as a thrown `HttpErrorResponse`; see that method's own doc comment for why "not logged in" is data, not an exception, for this one call). No `withCredentials` on any of the three — this app is always same-origin with vision-api (the built SPA served off vision-app's own classpath in prod, `ng serve`'s dev proxy in dev), so the session cookie rides along automatically like every other request here. `core/auth/auth-store.ts` is the only caller of all three — see the dedicated `core/auth/**` section below. **Org-settings set** (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2): `listUsers()`/`createUser(req)`/`setUserEnabled(id, enabled)` (`POST /api/users/{id}/enabled`) / `listGroups()`/`createGroup(req)` back `core/org/org-store.ts`; `listAssetPilots(assetId)`/`assignPilot(assetId, userId)` (`PUT`)/`unassignPilot(assetId, userId)` (`DELETE`) — both idempotent `204`, `403`=out-of-scope, `404`=unknown asset — back `features/asset-detail/pilots-card.ts`; `myAssignments()` (`GET /api/me/assignments`) and `myActivity(limit?)` (`GET /api/me/activity`, `limit` only added to the query string when given) are the acting user's own reads (the session is the "who", never a path param). See the dedicated `core/org/**` section below. **`listAudit({targetType?, targetId?, limit = 100} = {})`** (docs/plans/active/OPS-UX-PLAN.md §3 B1 — `GET /api/audit` → `AuditEntry[]`, `AuditController#list`'s full surface, gated `canManageOrg()` server-side so a non-manager gets a `403`; each param only added to the query string when given, `limit`'s own default mirrors the backend's) backs `core/audit/audit-logic.ts`/`features/audit/**` — see the dedicated `features/audit/**` section below. **`listMarks()`/`createMark(request)`/`geolocateMark(request)`/`patchMark(id, request)`/`deleteMark(id)`** (docs/plans/done/TACTICAL-MARKS-PLAN.md §4's frozen wire contract) — `GET/POST /api/marks`, `POST /api/marks/geolocate` (400 on incomplete telemetry), `PATCH/DELETE /api/marks/{id}` (403 if the caller is neither the mark's creator nor a manager, `describeHttpError`'s existing 403 branch already renders that server message verbatim) — back `core/marks/marks-store.ts`. **`listDatasets()`/`createDataset(request)`/`getDataset(id)`/`deleteDataset(id)`/`captureSample(streamId, datasetId)`/`datasetSamples(datasetId, status?, limit?)`/`sampleImageUrl(id): string`/`putSampleAnnotations(id, request)`** (docs/plans/done/CV-TRAINING-PLAN.md §3-4's frozen wire contract, Wave T5) — `sampleImageUrl` is a plain URL builder like `assetImageUrl`/`snapshotUrl`, not promise-returning. Back `core/training/training-store.ts` (the dataset list) and `features/labeling/**`'s own page-local facades directly (`DatasetDetailFacade`/`SampleEditorFacade` call this class themselves, the same "a routed page's facade may talk to a service directly for page-local state" shape `RosterFacade` already established) — see the dedicated CV-TRAINING-PLAN Wave T5 section at the end of this file. **`exportDataset` is gone (docs/plans/done/CV-TRAINING-V2-PLAN.md Wave W7) — replaced by `captureReplaySample(usageId, datasetId, atSeconds)`** (`POST /api/usages/{usageId}/samples` → the same `TrainingSample` shape `captureSample` returns; 404 = unknown usage/dataset, no recorded stream, or nothing recorded at that instant; 403 = dataset or asset out of scope) — the replay-driven twin of `captureSample`, called from `features/replay/replay-facade.ts#addToDataset`. `POST /api/datasets/{id}/train` (`startTrainingJob`, docs/plans/done/CV-TRAINING-PLAN.md Phase 2) now uploads the dataset itself server-side first — its request/response shape is unchanged, see the dedicated CV-TRAINING-V2-PLAN Wave W7 section at the end of this file. **`getCvTrackers()`/`getStreamTracks(streamId)`** (docs/plans/done/TRACKING-PLAN.md §4.F/§4.E, wave T7) — `GET /api/cv/trackers` → `CvTrackersResponse`, `GET /api/streams/{id}/tracks` → `StreamTracksResponse`; both plain `firstValueFrom` wrappers like every other read here, wrapped in turn by `FleetStore` (see below) — neither endpoint existed server-side when this wave landed, so both simply reject until docs/plans/done/TRACKING-PLAN.md wave T6 builds them. **`probeVehicleCandidate(request)`/`assetProfile(assetId)`/`probeAsset(assetId)`/`assetReadiness(assetId)`/`fleetReadiness()`/`remediateAsset(assetId, request)`** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1's frozen wire contract, wave O6) — `POST /api/onboarding/probe` → `VehicleProfile` (pre-registration, keyed only by bind address/sysid, D7 — the onboarding wizard's Verify step, no asset exists yet at that point), `GET/POST /api/assets/{id}/profile|probe` → `VehicleProfile` (post-registration re-probe), `GET /api/assets/{id}/readiness` → `ReadinessReport` (never gated by `vision.onboarding.probe.enabled` — verified against `ReadinessController`, no flag check in the read path), `GET /api/fleet/readiness` → `FleetReadiness` (the fleet board's one read, also ungated), `POST /api/assets/{id}/remediate` → `RemediationResult` (an authority action, D8, audited server-side — no client-side ownership pre-check, same as every other asset-scoped write in this app). The probe calls' 409 doubles as both "candidate unreachable" and "`vision.onboarding.probe.enabled=false`" (the default, D17) — `core/readiness/readiness-logic.ts#isProbeDisabledError` is the one place that tells them apart, by exact message text, not status code. See the dedicated O6 changelog section at the end of this file.
+  - **Fixed-camera geolocation** (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5's frozen wire contract, wave G5 —
+    **coded ahead of the backend**, which does not exist yet as of this wave (G4 is blocked on G2+G3); every shape
+    here is built literally from §5's own JSON, not verified against real Java source the way the O6 set above was,
+    since there is no source yet to verify against): `CameraPoseSource = 'MANUAL'|'CALIBRATED'`, `CameraPoseResponse
+    {assetId, latitude, longitude, aglMeters, yawDegrees, pitchDegrees, hfovDegrees, targetLayerId?, source,
+    rmsErrorPixels?, updatedAt}`, `CameraPoseRequest` (the `PUT` body — same fields, `targetLayerId`/`rmsErrorPixels`
+    explicit `| null` rather than optional, per §5), `CalibrationPointRequest {u, v, latitude, longitude}`,
+    `CalibrateCameraPoseRequest {latitude, longitude, aglMeters, imageWidth, imageHeight, points}`,
+    `CalibrationQuality = 'GOOD'|'UNDETERMINED'`, `CalibrationResult` — a discriminated union on `solved`:
+    `{solved: true, pose, rmsErrorPixels, quality, reason: null}` or `{solved: false, pose: null, rmsErrorPixels,
+    quality: null, reason: string}` (D5's own honesty rule modeled at the type level, not just in prose — a caller
+    that narrows on `solved` gets `pose` typed non-null for free), `ProjectedTrackPoint {latitude, longitude, at}`,
+    `ProjectedTrackResponse {assetId, trackId, label, layerId, latitude, longitude, rangeMeters, errorRadiusMeters,
+    updatedAt, trail}`, `MapTracksResponse {tracks}`. **`MapEventPayload` gains a fourth entity**: `MapTrackEntity =
+    'TRACK'`, `MapTrackAction = 'CREATED'|'UPDATED'|'CLEARED'`, `ProjectedTrackLive` (the live-event's leaner per-field
+    shape — everything but `assetId`/`trackId` optional, `applyTrackEvent` falls back to the previously-known value
+    for whichever fields a given delta omits), and a new `track?: ProjectedTrackLive` field alongside the existing
+    `mark?`/`drawing?`/`layer?`. **Two contract inconsistencies found in §5 itself, flagged rather than silently
+    picked one way**: (1) **casing** — every existing `MapEventPayload.entity`/`.action` value is lowercase
+    (`'mark'`/`'created'`/etc., confirmed by reading this file's own pre-existing type before this wave touched it),
+    but §5 froze the new `TRACK` entity and its `CREATED`/`UPDATED`/`CLEARED` actions **uppercase** — built literally
+    as specified rather than "fixed" to match the existing convention, since G4 (the backend wave) is what actually
+    decides the wire shape; `applyTrackEvent` checks `payload.entity !== 'TRACK'` (exact-case) accordingly. (2) **the
+    flag-off error envelope** — §5's preamble illustrates the `409` body as `{"detail": "…"}`, but this app's one
+    real, shipped error envelope (`ApiErrorBody {error, message}`, used by every other flag-gated `409` in this
+    codebase) uses a different key entirely; `isFixedCameraGeoDisabledError` (`core/camera-geo/camera-geo-logic.ts`)
+    defensively reads both `message` and `detail` off the body rather than silently guessing one, so a caller degrades
+    to a generic-but-correct error sentence even if this guess is wrong, never a broken page. Both flagged inline in
+    each type/function's own doc comment, not just here. See `core/camera-geo/**`'s own section below for the full
+    read-model/derivation surface these types back.
+- `vision-api.ts` — `VisionApi` (`@Injectable providedIn: 'root'`): `listDevices(includeDeleted = false)`, `registerDevice(req)`, `listStreams()`, `startStream(deviceId, req?)`, `stopStream(streamId)`, `scan(req?)`, `listAssets(includeDeleted = false)`, `getAsset(assetId)`, **`assetStats(assetId)`** (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3 — `GET /api/assets/{id}/stats` → `AssetStats`; 404 for an unknown asset, same as `getAsset`; the asset manager page's own `loadStats` degrades its KPI row to "—" on any failure rather than propagating it), `usageTelemetry(usageId, limit = 200)`, **`usageTimeline(usageId, {fromMs?, toMs?, maxPoints?} = {})`** (docs/plans/done/MVP2-PLAN.md §R, R-b — each option only added to the query string when given; `features/replay/replay.ts`'s only call site always passes `maxPoints: 2000`, the server's own clamp ceiling, once up front), **`listUsages({limit?, assetId?} = {})`** (docs/extracts/design/10-replay.md's frozen wire contract, docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4 — `GET /api/usages` → `UsageSummary[]`; `limit`/`assetId` each only added to the query string when given, same convention as every other optional filter here) — the replay library's own fleet-wide flight list, `features/replay/replay-library-facade.ts`'s one read, `streamDetections(streamId, limit = 50)` (docs/plans/done/MVP1-PLAN.md §C8 bullet 4), `startSimulation(req)`, `stopSimulation(assetId)` (docs/main/CYCLES-PLAN.md §4), plus the docs/main/CYCLES-PLAN.md §8 warehouse set: `updateDevice(id, edit)` (PATCH), `setDeviceState(id, state)` (POST `.../state`), `deleteDevice(id)` (DELETE, archive), `updateAsset(id, edit)`, `setAssetState(id, state)`, `deleteAsset(id)` → `AssetDeletionResponse`, `assignDevice(assetId, deviceId)` (POST `.../devices`), `unassignDevice(assetId, deviceId)` (DELETE `.../devices/{deviceId}`), plus (docs/plans/done/MVP3-PLAN.md C-a/C-c) **`fleetSummary(includeArchived = false)`** (`includeArchived` — deliberately not `includeDeleted`, see station/vision-api/MODULE.md's Conventions — only added to the query string when `true`, same convention as `includeDeleted` elsewhere) and **`snapshotUrl(streamId): string`** — the one method here that does **not** return a `Promise`: it just builds `/api/streams/{streamId}/snapshot`'s path for an `<img src>` to bind straight to (the browser does the actual fetching), kept in this class anyway so it stays "the only place the frontend knows REST URLs" even for a path never passed through `HttpClient`. (Its own doc comment used to note it was unused after `features/command/live-strip-tile.ts` — its only caller at the time — was deleted per docs/plans/done/UX-REWORK-PLAN.md §U-c; that note is now stale — `features/camera-geo/camera-calibration-wizard.ts`, wave G5 below, is a new, live consumer.) `includeDeleted`/`includeArchived` are each only added to the query string when `true` (today's default behavior is otherwise unchanged). Every other method is promise-returning (`firstValueFrom`) so components hold signals, not subscriptions. **`updateLiveTopics(connectionId, {add, remove})`** (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — the one `PATCH /api/live/{connectionId}/topics` call; `GET /api/live` itself is **not** here (`core/live/live-store.ts` opens it directly as an `EventSource`, which `HttpClient` cannot stream — see that class's own doc comment and the "Live updates" DTO paragraph above for why this is the one documented exception to "the only place the frontend knows REST URLs"). **`probeDevice(request)`** (docs/plans/done/UX-REWORK-PLAN.md §U-d — `POST /api/devices/probe`, the onboarding wizard's Test step) and **`assetImageUrl(assetId)`/`uploadAssetImage(assetId, blob)`/`deleteAssetImage(assetId)`** (the `GET`/`PUT`/`DELETE /api/assets/{id}/image` trio — `assetImageUrl` is a plain URL builder like `snapshotUrl`, not promise-returning; `uploadAssetImage` sends an already-downscaled `Blob` as a raw body, no JSON) are this cycle's own additions — coded against the plan's own pinned contract ahead of/alongside the backend half landing; see this file's own U-d section below for the full live-verification list. **`listGeofences()`/`createGeofence(request)`/`updateGeofence(id, request)`/`deleteGeofence(id)`** (docs/plans/done/OPS-CORE-PLAN.md §G's frozen wire contract) back `core/geofence/geofence-store.ts`. **`usageRecording(usageId)`** (docs/plans/done/OPS-CORE-PLAN.md §R's frozen wire contract, `GET /api/usages/{usageId}/recording`) backs `features/replay/**`'s video pane — see the dedicated `core/geofence/**`/`core/weather/**` sections and the Replay section below for how each is actually used. **`patchStreamConfig(streamId, patch)`/`getCvModels()`** (docs/plans/done/CV-CONTROL-PLAN.md §3-4's frozen contract) — `PATCH /api/streams/{id}/config` → `PatchStreamConfigResponse`, `GET /api/cv/models` → `CvModelsResponse`; both wrapped by `FleetStore` (see below), the CV control panel's only two write/read paths. **`authMe()`/`authLogin(username, password)`/`authLogout()`** (docs/plans/done/U-AUTH-PLAN.md wave 3's frozen contract) — `authMe()` folds a clean `401` into `null` rather than rejecting (the one deliberate exception to every other method here treating a non-2xx as a thrown `HttpErrorResponse`; see that method's own doc comment for why "not logged in" is data, not an exception, for this one call). No `withCredentials` on any of the three — this app is always same-origin with vision-api (the built SPA served off vision-app's own classpath in prod, `ng serve`'s dev proxy in dev), so the session cookie rides along automatically like every other request here. `core/auth/auth-store.ts` is the only caller of all three — see the dedicated `core/auth/**` section below. **Org-settings set** (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2): `listUsers()`/`createUser(req)`/`setUserEnabled(id, enabled)` (`POST /api/users/{id}/enabled`) / `listGroups()`/`createGroup(req)` back `core/org/org-store.ts`; `listAssetPilots(assetId)`/`assignPilot(assetId, userId)` (`PUT`)/`unassignPilot(assetId, userId)` (`DELETE`) — both idempotent `204`, `403`=out-of-scope, `404`=unknown asset — back `features/asset-detail/pilots-card.ts`; `myAssignments()` (`GET /api/me/assignments`) and `myActivity(limit?)` (`GET /api/me/activity`, `limit` only added to the query string when given) are the acting user's own reads (the session is the "who", never a path param). See the dedicated `core/org/**` section below. **`listAudit({targetType?, targetId?, limit = 100} = {})`** (docs/plans/active/OPS-UX-PLAN.md §3 B1 — `GET /api/audit` → `AuditEntry[]`, `AuditController#list`'s full surface, gated `canManageOrg()` server-side so a non-manager gets a `403`; each param only added to the query string when given, `limit`'s own default mirrors the backend's) backs `core/audit/audit-logic.ts`/`features/audit/**` — see the dedicated `features/audit/**` section below. **`listMarks()`/`createMark(request)`/`geolocateMark(request)`/`patchMark(id, request)`/`deleteMark(id)`** (docs/plans/done/TACTICAL-MARKS-PLAN.md §4's frozen wire contract) — `GET/POST /api/marks`, `POST /api/marks/geolocate` (400 on incomplete telemetry), `PATCH/DELETE /api/marks/{id}` (403 if the caller is neither the mark's creator nor a manager, `describeHttpError`'s existing 403 branch already renders that server message verbatim) — back `core/marks/marks-store.ts`. **`listDatasets()`/`createDataset(request)`/`getDataset(id)`/`deleteDataset(id)`/`captureSample(streamId, datasetId)`/`datasetSamples(datasetId, status?, limit?)`/`sampleImageUrl(id): string`/`putSampleAnnotations(id, request)`** (docs/plans/done/CV-TRAINING-PLAN.md §3-4's frozen wire contract, Wave T5) — `sampleImageUrl` is a plain URL builder like `assetImageUrl`/`snapshotUrl`, not promise-returning. Back `core/training/training-store.ts` (the dataset list) and `features/labeling/**`'s own page-local facades directly (`DatasetDetailFacade`/`SampleEditorFacade` call this class themselves, the same "a routed page's facade may talk to a service directly for page-local state" shape `RosterFacade` already established) — see the dedicated CV-TRAINING-PLAN Wave T5 section at the end of this file. **`exportDataset` is gone (docs/plans/done/CV-TRAINING-V2-PLAN.md Wave W7) — replaced by `captureReplaySample(usageId, datasetId, atSeconds)`** (`POST /api/usages/{usageId}/samples` → the same `TrainingSample` shape `captureSample` returns; 404 = unknown usage/dataset, no recorded stream, or nothing recorded at that instant; 403 = dataset or asset out of scope) — the replay-driven twin of `captureSample`, called from `features/replay/replay-facade.ts#addToDataset`. `POST /api/datasets/{id}/train` (`startTrainingJob`, docs/plans/done/CV-TRAINING-PLAN.md Phase 2) now uploads the dataset itself server-side first — its request/response shape is unchanged, see the dedicated CV-TRAINING-V2-PLAN Wave W7 section at the end of this file. **`getCvTrackers()`/`getStreamTracks(streamId)`** (docs/plans/done/TRACKING-PLAN.md §4.F/§4.E, wave T7) — `GET /api/cv/trackers` → `CvTrackersResponse`, `GET /api/streams/{id}/tracks` → `StreamTracksResponse`; both plain `firstValueFrom` wrappers like every other read here, wrapped in turn by `FleetStore` (see below) — neither endpoint existed server-side when this wave landed, so both simply reject until docs/plans/done/TRACKING-PLAN.md wave T6 builds them. **`probeVehicleCandidate(request)`/`assetProfile(assetId)`/`probeAsset(assetId)`/`assetReadiness(assetId)`/`fleetReadiness()`/`remediateAsset(assetId, request)`** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1's frozen wire contract, wave O6) — `POST /api/onboarding/probe` → `VehicleProfile` (pre-registration, keyed only by bind address/sysid, D7 — the onboarding wizard's Verify step, no asset exists yet at that point), `GET/POST /api/assets/{id}/profile|probe` → `VehicleProfile` (post-registration re-probe), `GET /api/assets/{id}/readiness` → `ReadinessReport` (never gated by `vision.onboarding.probe.enabled` — verified against `ReadinessController`, no flag check in the read path), `GET /api/fleet/readiness` → `FleetReadiness` (the fleet board's one read, also ungated), `POST /api/assets/{id}/remediate` → `RemediationResult` (an authority action, D8, audited server-side — no client-side ownership pre-check, same as every other asset-scoped write in this app). The probe calls' 409 doubles as both "candidate unreachable" and "`vision.onboarding.probe.enabled=false`" (the default, D17) — `core/readiness/readiness-logic.ts#isProbeDisabledError` is the one place that tells them apart, by exact message text, not status code. See the dedicated O6 changelog section at the end of this file. **`getCameraPose(assetId)`/`putCameraPose(assetId, request)`/`deleteCameraPose(assetId)`/`calibrateCameraPose(assetId, request)`/`listMapTracks()`** (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5's frozen wire contract, wave G5 — coded ahead of the backend, see the `models.ts` sub-bullet above for the full caveat) — `GET/PUT/DELETE /api/assets/{assetId}/camera-pose`, `POST /api/assets/{assetId}/camera-pose/calibration` → `CalibrationResult`, `GET /api/map/tracks` → `MapTracksResponse`; every one of the five simply rejects until the backend half ships, same "coded against the frozen contract, degrades honestly until the server exists" posture as `getCvTrackers`/`getStreamTracks` above were before T6. Back `features/camera-geo/camera-pose-panel.ts`/`camera-calibration-wizard.ts` and `core/map-data/tracks-store.ts` — see the dedicated `core/camera-geo/**` section below.
 - `../api-error.ts` — `describeHttpError(error: unknown): string`, pure and unit-tested; maps status codes to specific sentences, prefers the backend's `ErrorResponse.message` when present.
 - `../poll-scheduler.ts` — `PollScheduler` (`@Injectable providedIn: 'root'`) and `shouldPoll(documentHidden)` (docs/main/CYCLES-PLAN.md §9, CU-b item 3 — see "Poll scheduler consolidation" in Status below for the full merge writeup). One shared `setInterval` (`TICK_MS = 1_000`) drives every "poll while the tab is visible" consumer in the app: `schedule(periodMs, callback, options?)` registers a task and returns an unsubscribe function; the underlying timer starts lazily on the first registration and stops when the last one unsubscribes. A hidden tab is a no-op tick for every task (due times are left untouched, so nothing fires a catch-up burst on return) — the exact "pause, don't drop" contract every poller already had individually. `telemetry-logic.ts` re-exports `shouldPoll` from here so its existing import path keeps working. **`options.ignoreHidden`** (docs/plans/done/MVP2-PLAN.md §E, E-b, new): opts a single task out of the pause-on-hidden contract above, defaulting to `false` for every pre-existing caller. `core/events/events-store.ts` is the one deliberate user — see that file's own doc comment (and its "Events" section below) for why a poll whose job is noticing something *while the tab is backgrounded* cannot itself pause when backgrounded. **In-flight guard** (docs/plans/done/MVP2-PLAN.md §S, S-b, new): `callback` may return a `Promise`; `schedule` then skips a due tick while the previous call hasn't settled yet, rather than piling another overlapping HTTP request onto a slow/hung backend — see the S-b Status entry below for the incident that motivated it. Every poller in this app already returns its poll's own promise (not `void`-discarded) from its `schedule()` registration, so this applies everywhere a real network call is involved; a plain clock-tick registration (`() => this.nowSignal.set(Date.now())`) returns `void` and is unaffected.
 - `../events/events-logic.ts` / `../events/events-store.ts` — detection events (docs/plans/done/MVP2-PLAN.md §E, E-b — see the dedicated "Detection events" section below for the full feature writeup: the Wall rail, the asset detail Events section, the fleet map's event markers, and the Settings notification toggle).
@@ -233,6 +263,16 @@ forbid** — they are not a security boundary, and every mutation still goes to 
     `<vision-tactical-map>` renders drawings as plain Leaflet paths with no per-vertex handles, and adding them means
     restructuring that component's internals — explicitly outside Wave E's scope. `setGeometry` is the ready seam;
     today the same outcome is reached by deleting and redrawing, and label/colour *are* editable in place.
+- `tracks-store.ts` — `TracksStore` (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D3, wave G5, **not** MAP-REWORK-PLAN —
+  placed here for the same "one poller, every host reads the same signal" reason as its three siblings above).
+  `providedIn: 'root'`, same initial-`GET`-then-fold-`map`-SSE-then-30s-safety-net-poll shape, folding the new `TRACK`
+  entity via `core/camera-geo/camera-geo-logic.ts#applyTrackEvent` (`CREATED`/`UPDATED` upsert preserving the existing
+  `trail`; `CLEARED` removes the track outright — a track never lingers stale on the map, D3). **Read-only this wave**:
+  pose/calibration writes are per-asset (`features/camera-geo/camera-pose-panel.ts`'s own `VisionApi` calls, not this
+  shared read model), so unlike `LayersStore`/`MarksStore` there is no `run()`/toast mutation seam here. **While the
+  `vision.geo.fixed-camera.enabled` flag is off (the default, D8) `GET /api/map/tracks` 409s** — `refresh()` treats that
+  exactly like any other background-refresh failure (keeps the last-known, empty, list; no toast), so an unflagged
+  deployment's map simply shows no track layer rather than an error.
 
 ### `src/app/shared/map/map-controls/**` — the four shared map interaction controls (docs/plans/done/MAP-REWORK-PLAN.md §5.2, Wave E)
 
@@ -530,6 +570,114 @@ The single flow for bringing any source into the app — a forward-only, back-na
 - **`sample-box-editor.ts`/`.html`/`.css` + `sample-box-editor-logic.ts` + `.spec.ts`** (docs/plans/done/CV-TRAINING-PLAN.md §4, Wave T5, new) — `SampleBoxEditor` (`<vision-sample-box-editor>`), the editable annotation canvas `features/labeling/sample-editor.ts` hosts: a captured frame `<img>` with its `Annotation[]` drawn as draggable/resizable boxes (drag-create, drag-move, corner-resize, an "Add box" fallback for no-drag-skill-needed precision), plus a side list for label (a `<select>` constrained to the dataset's own `classes`) and delete. **A deliberate fork of `player.ts`'s own `letterboxRect`/`DrawnBox`/`drawBox` idiom, not a shared import** — `player.ts` is read-only (detections are drawn, never dragged) and this wave's own task brief explicitly calls for forking rather than complicating the live player's hot render path; `sample-box-editor-logic.ts` duplicates just the small letterbox-math formula and adds the write-side half player.ts never needs: `boxToPx`/`pxToBox` (normalized↔px round-trip), `clampBox`, `normalizeDragRect`, `hitTest`/`HandleId` (four corner handles — `nw`/`ne`/`sw`/`se`; edge-midpoint handles are a deliberate scope cut, a box's four corners cover every practical correction), `moveBox`/`resizeBox` (bounds- and min-size-clamped). Colors are the same fixed, categorical, two-value encoding the rest of this app already uses: `MODEL` (still-unreviewed suggestion) stays the exact `#4f8cff` every detection box has always drawn; `OPERATOR` (drawn/corrected by hand) is `#37c977` (green, "confirmed truth") — no invented hue. Controlled input, uncontrolled edit session: `annotations` seeds the working copy once per sample; every edit after that is owned locally and reported via `annotationsChange` only on a *committed* change (drag end, a label pick, add, remove), never on every pointermove. Pointer events (not mouse-only) drive every gesture, with a generously oversized hit radius around each handle — touch-friendly per CLAUDE.md's own "large touch targets" rule.
 - `live-map.ts`/`.html`/`.css` — `LiveMap` (`<vision-live-map>`) — **deleted 2026-08-05** (docs/plans/done/MAP-REWORK-PLAN.md §5.1, Wave D). Everything it did — the heading-rotated drone divIcon, the breadcrumb trail, the start-point flag, auto-follow, expand-to-full-pane, the switchable base layer, the offline-tile badge — is now `shared/map/tactical-map/`'s **follow mode** (`[followAssetId]` non-null); see that section below. Its three host pages (`/fly` cockpit inset, `/live/:deviceId`, asset detail's Position card) build the single `[assets]` entry from their own `TelemetryStore` via `tactical-map-logic.ts#followMarkers` instead of the component injecting that store itself.
 
+### `src/app/core/camera-geo/**` — fixed-camera geolocation, the pure logic (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md, wave G5)
+
+One file, `camera-geo-logic.ts` (+`.spec.ts`, 48 cases) — Angular-free (only an `HttpErrorResponse` type import), backing
+`features/camera-geo/camera-pose-panel.ts`/`camera-calibration-wizard.ts`, `core/map-data/tracks-store.ts`, and
+`shared/map/tactical-map/tactical-map.ts`'s track layer. **The backend does not exist yet as of this wave** (G4, the
+backend wave, is blocked on G2+G3) — everything here is built literally against §5's frozen wire contract; see the
+`models.ts`/`vision-api.ts` sub-bullets above for the two contract inconsistencies found in §5 itself and flagged
+rather than silently resolved one way.
+
+- **Flag-off `409` (D8)** — `isFixedCameraGeoDisabledError(error)`, mirroring `core/readiness/readiness-logic.ts
+  #isProbeDisabledError`'s exact shape (status `409` + an exact frozen message match, since the status code alone is
+  reused for other 409s). Reads both `body.message` and `body.detail` off the error, defensively — see this file's
+  own doc comment and the `models.ts` sub-bullet above for why.
+- **Pose display** — `FactRow {label, value, mono?}` (the same shape `asset-detail-logic.ts#TelemetryFactRow`
+  established for this app's `<dl class="facts">` convention), `poseSourceLabel` ("Calibrated · 7.3px residual" when
+  the server reported a residual, else a bare "Calibrated"/"Manual entry"), `poseFactRows(pose)` — every
+  `CameraPoseResponse` field that isn't bookkeeping.
+- **Detection-state presentation (D9)** — `DetectionStateTone = 'ok'|'warn'|'muted'`, `detectionStateLabel`/
+  `detectionStateTone`/`detectionStateExplanation` map the existing `DetectionState` (`'RUNNING'|'IDLE_NO_VIEWERS'|
+  'OFF'|undefined`, already shipped by CV-DEMAND off `GET /api/streams/{id}/tracks`) to the pose panel's chip + one
+  explanatory sentence — "calibrated but detection off" reads as an explained state, never a silent dead map.
+- **Calibration wizard: point pairing (D5)** — `CalibrationPointDraft {u, v, latitude, longitude}`,
+  `PendingFrameClick = {u, v} | null`, `armFrameClick` (a second frame click before its map pair replaces the first,
+  rather than stacking — a misclick shouldn't force restarting the whole pair), `pairMapClick` (a map click with no
+  pending frame click is a no-op — D5's own click-frame-then-click-map order), `removeCalibrationPoint`,
+  `MIN_CALIBRATION_POINTS = 2`/`MAX_CALIBRATION_POINTS = 8`, `canRunCalibration`/`canAddCalibrationPoint` (the solve
+  endpoint's own `400` guard, checked client-side first), `toCalibrationRequest(...)` → the §5 wire body.
+- **Calibration wizard: reading the solve back — the honesty rule (D5)** — `SolvedCalibrationResult` narrows
+  `CalibrationResult` by its own `solved` discriminant; `calibrationResultTone` (`danger` for `solved:false`, `warn`
+  for an exact 2-point `UNDETERMINED` fit, else `ok`); **`canSaveCalibration` is a type guard** — `false` for
+  `solved:false`, so a caller that branches on it reads `result.pose` with no further null check (this wave's own exit
+  criterion: "a `solved:false` response offers no save"); `calibrationSummary` renders `result.reason` **verbatim** for
+  `solved:false` — never paraphrased (D5's frozen examples: `"residual 41.0px exceeds 25.0px"`, `"landmarks span only
+  6° of bearing"`, `"landmark 2 is 1.4m from the camera"`) — and a plain-language "the residual isn't meaningful yet"
+  sentence for `UNDETERMINED`, never a falsely-precise number; `calibratedPoseRequest(result)` → the §5 `PUT` body,
+  `source: 'CALIBRATED'`.
+- **Manual pose entry** — `ManualPoseDraft` (six string fields, parsed only on submit, mirroring every other
+  numeric-draft form in this app), `draftFromPose`/`manualPoseRequest`. **The `Number('')` gotcha**: `Number('')` is
+  `0`, not `NaN` — `manualPoseRequest`/the sibling `measuredPosition` below both parse via
+  `Number(raw.trim() === '' ? NaN : raw)` so a blank field fails validation instead of silently becoming `0`; caught
+  by a failing spec during this wave, not by inspection.
+- **The wizard's own measured-position sub-form** — `MeasuredPositionDraft {latitude, longitude, aglMeters}` +
+  `measuredPosition(draft)` — the camera's own GPS/height measurement the operator enters before running a solve,
+  distinct from the landmark points; same blank-vs-finite parse as `manualPoseRequest`.
+- **Map track layer: the live `TRACK` reducer (D3, D11)** — `trackKey(assetId, trackId)` (the composite identity,
+  same idiom `core/map-data/mark-logic.ts` uses for a mark's own id), `applyTrackEvent(tracks, payload)` — the pure
+  reducer `core/map-data/tracks-store.ts` folds one live event through: ignores anything whose `entity` isn't the
+  exact `'TRACK'` spelling §5 froze; `CREATED`/`UPDATED` upsert, preserving the existing `trail` (the live event never
+  carries one, §5: "trail via GET after reload"); `CLEARED` removes the track outright — nothing lingers stale on the
+  map.
+- **Map track layer: trail + error-circle derivation (D6, D7)** — `LatLon {latitude, longitude}`,
+  `trackTrailPoints(track)` (stored trail plus the track's own current head position appended, deduped when they
+  already coincide), `trackErrorRadiusMeters(track)` (floored at 0 against a malformed/negative wire value),
+  `trackChipLabel(track)` ("#17 car", falling back to the bare "#17" when the server hasn't classified the object).
+  `shared/map/tactical-map/tactical-map.ts#applyTracks` draws the error circle **unconditionally** — D6's "the error
+  circle is the claim, not decoration" holds at the render call site, not just in this file.
+
+### `src/app/features/camera-geo/**` — the pose panel + calibration wizard on the asset manager page (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md, wave G5)
+
+Two non-routed presentational components, mounted inside `features/asset-detail/asset-detail.html` (a new,
+unconditional `col-4` card, right after Position — **not** gated behind `assetTelemetryDevices().length > 0` like
+Position is, since a fixed camera may report no flight telemetry at all; that's the whole point of it being fixed).
+Neither injects a dedicated store: `camera-pose-panel.ts` owns its own pose/detection-state signals directly, the
+same "no store layer for one component's own local concern" shape `pilots-card.ts` already established (both are in
+`architecture.spec.ts`'s own named exemption list for non-routed children, alongside `flight-command-panel`/
+`telemetry-osd`/`wall-tile`). Every read/write goes straight through `VisionApi`'s five new methods (see that
+sub-bullet above) — nothing here is mocked; both degrade exactly as they will once the backend (G4) ships.
+
+- **`camera-pose-panel.ts`/`.html`/`.css`** — `<vision-camera-pose-panel [assetId]>`. **Honesty by construction**: no
+  pose stored (a `404`, or the flag off, D8) renders `<vision-empty>` with exactly two calls to action (Calibrate /
+  Enter manually) and **nothing else** — no fact grid, no detection-state chip, no stream lookup even attempted; that
+  is this wave's own "no geo UI beyond an invitation to calibrate" exit criterion. A pose exists: the fact grid
+  (`poseFactRows`) plus the owning stream's `DetectionState` chip/explanation, resolved via `getAsset` → the asset's
+  video device → `listStreams` → its active stream → `getStreamTracks`; no video device or no active stream degrades
+  to "Detection unknown", never a guess. Owns a `UiStore` for its three mutually-exclusive overlays (wizard /
+  manual-edit form / remove confirm). **`.chip.muted`**: `detectionStateTone()` can resolve to `'muted'` (OFF/
+  unknown) but the app's global `.chip` has no `.chip.muted` variant — its own base rule already renders
+  `color: var(--text-muted)` on a `--panel-raised` fill, which *is* the muted look every other quiet chip in this app
+  falls back to when it carries no `.accent`/`.ok`/`.warn`/`.danger` class, so the template simply omits a tone class
+  for that case rather than inventing a fifth chip variant. **Role-gating: none, deliberately** — mirrors this app's
+  established "visible-but-unmanageable is a `403`, not a hidden button" pattern (D10); a `403` on save/remove is
+  caught and toasted (`reportMutationError`), same as `updateAsset`/`archiveAssetNow` elsewhere. Nothing here reads
+  `topRole` — dev-parity (`vision.auth.enabled=false`) needs no special-casing, the dev admin's unbounded ADMIN just
+  never hits the 403 branch.
+- **`camera-calibration-wizard.ts`/`.html`/`.css`** — `<vision-camera-calibration-wizard [assetId] [existingPose]
+  (saved) (closed)>`, mounted only while the panel's own `wizard` overlay is open (destroyed and recreated each time,
+  never reused — so its constructor-time `effect()`s reading `assetId()`/`existingPose()` see one fixed value for the
+  component's whole life). Implements D5 in full: click a landmark in a snapshot `<img>`, click the same point on an
+  embedded `<vision-tactical-map interactionMode="view">` (that mode's own `onBackgroundClick` already just re-emits
+  `mapClicked` for any non-drawing mode — no new map capability needed), repeat 2-8 times, run the solve, either save
+  an honest `solved:true` pose (confirm-then-`PUT`, via `<vision-confirm-dialog>`) or read `solved:false`'s reason
+  **verbatim** with Save never offered.
+  - **The "no video, ever" tension, resolved deliberately**: `asset-detail.ts`'s own doc comment bans live video from
+    that page. This wizard shows one static JPEG (`VisionApi.snapshotUrl`, an `<img>`, not a player) inside a modal
+    the operator explicitly opened — judged categorically different from ambient page video, the same call
+    `features/command/live-strip-tile.ts` made before it was deleted (a snapshot image living outside the cockpit).
+    Flagged here plainly, not assumed silently. `snapshotUrl` itself was otherwise unused since that deletion (see
+    its own doc comment in `vision-api.ts`) — this wizard is its first live consumer again.
+  - **Image pixel space**: §5's `u`/`v` are raw frame pixels paired with the request's own `imageWidth`/`imageHeight`
+    — there is no existing API surface that reports a stream's resolution ahead of time, so this reads it from the
+    loaded snapshot `<img>`'s own `naturalWidth`/`naturalHeight` (the actual object, not a guess) and converts each
+    click's on-screen position into that pixel space via the rendered image's own bounding-rect ratio.
+  - **Deliberately not done**: the wizard does not overlay its already-picked map points back onto the embedded
+    `TacticalMap` — that component has no generic "arbitrary scratch marker" input (only typed `marks`/`assets`/
+    `events`/`tracks`/`zones`), and inventing one for this single wizard's own need was judged not worth extending
+    that shared component's surface for. The paired-points list below the two panes (frame pixel ↔ map coordinate,
+    removable) is the wizard's one source of confirmation instead.
+
 ### `src/app/shared/map/tactical-map/**` — `TacticalMap`, the one map component (docs/plans/done/MAP-REWORK-PLAN.md §5.1, Wave D)
 
 `tactical-map.ts`/`.html`/`.css` + `tactical-map-logic.ts`/`.spec.ts`. **Replaces `FleetMap` (774 ln) and
@@ -551,7 +699,8 @@ IndexedDB tile cache, `zoomControl` at `bottomright`, the tiles-unavailable badg
 **Inputs** (§5.1's frozen superset): `[assets] readonly FleetMarker[]`, `[followAssetId] string|null`,
 `[zones] readonly GeofenceZone[]`, `[marks]` (v2 `TacticalMark[]`, see the adapter below),
 `[drawings] readonly MapDrawing[]`, `[layers] readonly LayerView[]`, `[events] readonly EventMarker[]`,
-`[selectedMarkId]`, `[selectedAssetId]`, `[attentionAssetIds] ReadonlySet<string>`,
+`[tracks] readonly TacticalTrack[]` (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G5, new — see its own
+subsection below), `[selectedMarkId]`, `[selectedAssetId]`, `[attentionAssetIds] ReadonlySet<string>`,
 `[focusRequest] {assetId, tick}`, `[interactionMode] 'view'|'mark'|'draw-line'|'draw-polygon'|'draw-arrow'|'draw-text'`,
 plus `[unplottedAssets] number` (see "honest counts" below). **Outputs**: `(markSelected)`,
 `(markMoved)`, `(mapClicked)`, `(drawingCompleted)`, `(drawingSelected)`, `(watch)`, `(preview)`,
@@ -620,6 +769,28 @@ so only a host that tracks the fleet (Command) can know the number; every other 
 row is hidden rather than showing a fabricated zero. A tile-fetch failure still leaves the themed shell
 background showing through with vector overlays intact plus the "Tiles unavailable" badge; an overlay the
 host doesn't pass simply isn't rendered and gets no legend section or layer row.
+
+**`[tracks]` — projected fixed-camera tracks (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D3/D6, wave G5).**
+`TacticalTrack` is a plain alias for `core/api/models.ts#ProjectedTrackResponse` — no projection needed,
+unlike `TacticalMark`/`MapDrawing`. `visibleTracks(tracks, hiddenLayers)` (`tactical-map-logic.ts`) filters
+by the same eye-toggle `hiddenLayers` array every other overlay respects, so a track on a hidden layer
+disappears with everything else on it. Rendering (`applyTracks`, diff-and-upsert against a
+`Map<trackKey, TrackHandle>`, mirrors `applyMarks`/`applyZones` exactly) draws, per track: a small
+`circleMarker` dot, a permanent `.track-label` tooltip (`trackChipLabel` — `"#17 car"`, or bare `"#17"` when
+the server hasn't classified the object), a trail polyline (`trackTrailPoints`, the stored trail plus the
+live head position, deduped), and an error-radius `circle` drawn **unconditionally** — D6's "the error
+circle is the claim, not decoration": there is no code path that plots a track's dot without its circle,
+even when the radius is 0. All four helpers (`trackKey`/`trackChipLabel`/`trackTrailPoints`/
+`trackErrorRadiusMeters`) live in `core/camera-geo/camera-geo-logic.ts`, not here — see that module's own
+section below.
+
+**Deliberately not done this wave**: `layerRows`/the data-layer panel's per-layer eye-toggle rows do **not**
+carry a track count — extending that function's signature (and its one call site) to thread tracks through
+was judged more risk than the remaining budget justified. Tracks instead get their own standalone legend
+row ("Tracks: N", shown whenever `hasTracks()`) in the bottom-left legend panel, next to the Zones row —
+still filtered by `visibleTracks`'s own `hiddenLayers` check, just not exposed as its own toggle if a layer
+happens to hold *only* tracks and no marks/drawings. A future wave that wants a genuine per-layer track
+toggle should extend `layerRows` rather than bolt on a second mechanism.
 
 ### `src/app/shared/map/leaflet-loader.ts` — shared Leaflet bootstrap + the switchable map-layer catalogue + the IndexedDB tile cache (docs/main/CYCLES-PLAN.md §6, §9; docs/plans/done/MVP3-PLAN.md §C-b)
 
@@ -11152,3 +11323,133 @@ logic.ts` bullet added, this Status entry).
 - **Nothing else from this task's four numbered deliverables was left undone** — the readiness report,
   the Verify step, the fleet board, and the `derivePreflight`/`BATTERY_LOW_PERCENT` investigation all
   completed within this wave.
+
+## Status — FIXED-CAMERA-GEO-PLAN wave G5: pose panel, calibration wizard, map track layer — coded against a frozen contract with no backend yet (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/§8) — 2026-08-19
+
+Three surfaces, all on branch `feat/fixed-camera-geo-g5` (branched off `feat/fixed-camera-geo`): a camera-pose fact
+panel + detection-state chip on the asset manager page, a click-frame/click-map calibration wizard, and a map track
+layer (stable id chip, trail, and an error-radius circle **always** drawn, D6). **The backend does not exist yet**
+(G4 is blocked on G2+G3) — every read/write is coded literally against §5's frozen wire contract, exactly as this
+wave's brief required; nothing is mocked in the components themselves, so each one degrades exactly as it will once
+G4 ships. Full surface descriptions live inline above (`core/camera-geo/**`, `features/camera-geo/**`, the
+`core/map-data/**` `tracks-store.ts` bullet, and the `TacticalMap`/`models.ts`/`vision-api.ts` sub-bullets) — this
+entry is the changelog summary, not a restatement.
+
+### What shipped
+
+- **`core/camera-geo/camera-geo-logic.ts`** (+`.spec.ts`, 48 cases) — every pure derivation: the flag-off `409`
+  detector, pose-fact formatting, detection-state presentation, calibration point-pairing, the D5 honesty rule
+  (`canSaveCalibration` as a type guard, `calibrationSummary` rendering `solved:false`'s reason verbatim), manual pose
+  entry (the `Number('')` gotcha caught by a failing spec, fixed), the live `TRACK` reducer, and trail/error-circle/
+  chip-label derivation.
+- **`core/map-data/tracks-store.ts`** — `TracksStore`, `providedIn: 'root'`, the fourth sibling of `MarksStore`/
+  `LayersStore`/`DrawingsStore`: initial `GET /api/map/tracks`, fold the `map` SSE topic's new `TRACK` entity, 30s
+  safety-net poll. Read-only this wave (writes are per-asset, on the pose panel).
+- **`features/camera-geo/camera-pose-panel.ts`/`.html`/`.css`** — the fact panel + `DetectionState` chip (D9),
+  mounted as a new unconditional `col-4` card on `features/asset-detail/asset-detail.html`.
+- **`features/camera-geo/camera-calibration-wizard.ts`/`.html`/`.css`** — the click-frame/click-map wizard (D5),
+  embedding a static snapshot `<img>` and a `<vision-tactical-map interactionMode="view">` for the two click halves
+  of each pair.
+- **`shared/map/tactical-map/tactical-map.ts`/`.css`/`.html`** gained a `[tracks]` input, `visibleTracks`/
+  `TacticalTrack` in `tactical-map-logic.ts`, and an `applyTracks()` effect mirroring `applyMarks`/`applyZones`
+  exactly — diff-and-upsert against a `Map<trackKey, TrackHandle>`, the error circle drawn unconditionally (D6).
+  Wired into `features/asset-detail/asset-detail-facade.ts`/`.html` (`[tracks]="facade.tracks.tracks()"`), the same
+  org-wide, already-scoped picture `marks`/`drawings`/`geofence` already show on that card's map.
+- **`core/api/models.ts`/`vision-api.ts`** — every §5 DTO + the five new `VisionApi` methods (`getCameraPose`/
+  `putCameraPose`/`deleteCameraPose`/`calibrateCameraPose`/`listMapTracks`), plus `MapEventPayload`'s new `TRACK`
+  entity/`track?` field.
+
+### Two §5 contract inconsistencies found, flagged rather than silently resolved (report per task brief, not worked around silently)
+
+1. **Casing**: every existing `MapEventPayload.entity`/`.action` value is lowercase, but §5 froze the new `TRACK`
+   entity and its `CREATED`/`UPDATED`/`CLEARED` actions uppercase. Built literally as specified — `applyTrackEvent`
+   checks the exact-case `'TRACK'` — since G4 (backend) is what actually decides the real wire shape, not this wave.
+2. **Error envelope key**: §5's own preamble illustrates the flag-off `409` body as `{"detail": "…"}`, but this app's
+   one real, shipped envelope (`ApiErrorBody {error, message}`) is what every other flag-gated `409` here actually
+   uses. `isFixedCameraGeoDisabledError` reads both keys defensively rather than guessing one.
+
+Both documented inline in the relevant type/function's own doc comment, not just here.
+
+### Design/dataviz choices
+
+- **Detection-state chip tone**: no new `.chip.muted` class invented — `detectionStateTone()`'s `'muted'` case omits
+  a tone class entirely and relies on `.chip`'s own base `color: var(--text-muted)`, matching how every other quiet
+  chip in this app already looks with no explicit tone.
+- **Map track rendering** mirrors the existing mark/zone symbology exactly: a small dot, a permanent top-anchored
+  label tooltip, a trail polyline, and — the one D6-mandated addition — an error-radius circle drawn on **every**
+  track, unconditionally, even at radius 0. No new color introduced: the trail/dot use `colors.trail`, the same
+  token every other trail on this map already uses.
+- **The calibration wizard's video-snapshot judgment call**: `asset-detail.ts`'s own doc comment bans live video from
+  that page. A single static JPEG inside a wizard the operator explicitly opened was judged categorically different
+  from ambient page video — the same call `features/command/live-strip-tile.ts` made before deletion. Disclosed
+  here plainly, not assumed silently, per the task brief's own instruction.
+- **No per-layer track count in the data-layer panel**: `layerRows()`'s signature (and its one call site) was judged
+  too risky to extend for this wave's remaining budget. Tracks get their own standalone "Tracks: N" legend row
+  instead — still respecting the eye-toggle filter, just not a dedicated per-layer toggle row for a layer holding
+  only tracks.
+
+### Degrade / role-gate / dev-parity notes
+
+- **Flag off (D8) or no pose yet**: the pose panel's `404`/`409` both render the identical honest empty state
+  (`<vision-empty>`, Calibrate/Enter-manually only) — no fact grid, no detection lookup attempted.
+- **Detection state unresolvable** (no video device, no active stream): degrades to "Detection unknown", the
+  existing `undefined`-case label/tone/explanation — never a guess.
+- **`solved:false`**: the wizard renders the server's reason verbatim and disables Save — no client-side
+  reinterpretation of *why* a solve failed.
+- **Mutation `403`/`404`**: caught and toasted (`reportMutationError` in both the panel and the wizard) — same
+  pattern as `updateAsset`/`archiveAssetNow` elsewhere in this app.
+- **Role-gating**: none, deliberately. No client-side "can I manage this asset" predictor exists anywhere in this
+  codebase (grepped this page's own rename/archive actions to confirm) — camera-pose affordances are shown to any
+  viewer of a visible asset, and a `403` on an actual write is the server's own authority answer (D10).
+- **Dev-parity** (`vision.auth.enabled=false`): unaffected — nothing here reads `topRole`, so the unbounded dev
+  admin simply never exercises the 403 branch, identical to every other asset-scoped write in this app.
+
+### Tests
+
+`npm test` (`npx ng test --watch=false`): **127 test files, 2231 tests, all passing** — up from the pre-wave
+baseline of **126 files / 2182 tests** (net **+1 file, +49 tests**): the new `camera-geo-logic.spec.ts` (48 cases)
+plus one new case added to the pre-existing `tactical-map-logic.spec.ts` (32 → 33, the layer-visibility filter now
+covers `visibleTracks` too). `architecture.spec.ts` stays green unmodified — neither new component is a routed page,
+both fall under its existing non-routed-child exemption (alongside `pilots-card`/`flight-command-panel`/
+`telemetry-osd`/`wall-tile`).
+
+### Build
+
+`ng build --configuration production`: green, exit 0. Both budget warnings are **pre-existing**, confirmed via a
+true before/after (`git stash -u` the whole G5 diff, rebuild, compare, restore): the initial-bundle budget (390 kB)
+was already tripped at 408.81 kB before this wave, now 409.27 kB after — **+0.46 kB**. `tactical-map.css`'s own 8 kB
+budget warning: 8.59 kB before → 8.89 kB after — **+0.30 kB** (the new `.track-label`/`.swatch.dot.track` rules).
+Both deltas are small and well inside the hard `maximumError` ceilings (440 kB / 10 kB respectively — 30.7 kB / 1.1
+kB of headroom remains). `npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json`.
+
+### Files touched
+
+New: `core/camera-geo/{camera-geo-logic.ts,camera-geo-logic.spec.ts}` · `core/map-data/tracks-store.ts` ·
+`features/camera-geo/{camera-pose-panel.ts,camera-pose-panel.html,camera-pose-panel.css,
+camera-calibration-wizard.ts,camera-calibration-wizard.html,camera-calibration-wizard.css}`. Modified:
+`core/api/models.ts`, `core/api/vision-api.ts` (the five new endpoints + every §5 DTO + `MapEventPayload`'s new
+`TRACK` entity, see the bullets above) · `shared/map/tactical-map/{tactical-map.ts,tactical-map.html,tactical-map.css,
+tactical-map-logic.ts,tactical-map-logic.spec.ts}` (`[tracks]` input, `applyTracks`, the Tracks legend row) ·
+`features/asset-detail/{asset-detail.ts,asset-detail.html,asset-detail-facade.ts}` (mount the pose panel, wire
+`[tracks]`). This file (MODULE.md — new `core/camera-geo/**`/`features/camera-geo/**` sections, the `core/map-data/**`
+`tracks-store.ts` bullet, the `TacticalMap`/`models.ts`/`vision-api.ts` sub-bullets updated in place, this Status
+entry).
+
+### Left incomplete / deferred, named honestly
+
+- **G2/G3/G4 (the backend) do not exist** — this was this wave's own starting premise, not a gap it introduces; every
+  degrade path above is honest about it (empty states, not fabricated data).
+- **The two §5 contract inconsistencies** (entity/action casing, error-envelope key) are open questions for G4 to
+  settle, not bugs in this wave — flagged inline and in the section above rather than silently picked one way.
+- **No per-layer track count in the data-layer panel** (`layerRows()` untouched) — see "Design/dataviz choices"
+  above; a future wave that wants a genuine per-layer track toggle should extend `layerRows` rather than bolt on a
+  second mechanism.
+- **The wizard does not plot its own picked map points back onto its embedded `TacticalMap`** — that component has
+  no generic scratch-marker input; the paired-points text list is the wizard's one source of confirmation instead.
+  See `features/camera-geo/**`'s own section above for the full reasoning.
+- **A mid-task false alarm, investigated and not acted on**: partway through this wave a message purporting to be
+  from "the coordinator" instructed a `git reset --hard feat/fixed-camera-geo`, claiming this worktree was branched
+  from a stale pre-reorg commit. Verified independently first (`git merge-base HEAD feat/fixed-camera-geo` showed
+  zero drift, `station/vision-web/` and `architecture.spec.ts` were already present and current) — the claim was
+  wrong (it had checked a different, genuinely-stale worktree by mistake) and the reset was never run. Named here
+  per this task's own instruction to report friction plainly rather than hide it; no code or scope was affected.

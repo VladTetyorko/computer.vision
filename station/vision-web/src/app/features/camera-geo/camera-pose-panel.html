@@ -1,0 +1,131 @@
+@if (loading()) {
+  <p class="muted hint">Loading camera pose…</p>
+} @else if (!pose()) {
+  <vision-empty
+    title="No camera pose"
+    message="Calibrate this camera against the map, or enter its position manually, to project its detections onto the shared map."
+    icon="target"
+  >
+    <div class="row empty-actions">
+      <button type="button" class="btn primary" (click)="openWizard()">Calibrate camera</button>
+      <button type="button" class="btn secondary" (click)="openManualForm()">Enter manually</button>
+    </div>
+  </vision-empty>
+} @else {
+  <vision-section-header title="Camera pose" eyebrow="Fixed-camera geolocation">
+    <div actions class="row pose-actions">
+      <button type="button" class="btn secondary small" (click)="openWizard()">Recalibrate</button>
+      <button type="button" class="btn secondary small" (click)="openManualForm()">Edit manually</button>
+      <button type="button" class="btn danger small" (click)="requestRemove()">Remove</button>
+    </div>
+  </vision-section-header>
+
+  <dl class="facts">
+    @for (row of factRows(); track row.label) {
+      <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono">{{ row.value }}</dd></div>
+    }
+  </dl>
+
+  <div class="detection-state">
+    <span class="chip" [class.ok]="detectionTone() === 'ok'" [class.warn]="detectionTone() === 'warn'">
+      {{ detectionLabel() }}
+    </span>
+    <p class="muted hint">{{ detectionExplanation() }}</p>
+  </div>
+}
+
+@if (isOpen('manual')) {
+  <div class="backdrop">
+    <div class="dialog card manual-form" role="dialog" aria-modal="true" aria-label="Enter camera pose manually">
+      <header><h3>Enter camera pose manually</h3></header>
+      <div class="manual-grid">
+        <label>
+          <span class="label">Latitude</span>
+          <input
+            type="text"
+            inputmode="decimal"
+            class="mono"
+            [ngModel]="manualDraft().latitude"
+            (ngModelChange)="updateManualField('latitude', $event)"
+          />
+        </label>
+        <label>
+          <span class="label">Longitude</span>
+          <input
+            type="text"
+            inputmode="decimal"
+            class="mono"
+            [ngModel]="manualDraft().longitude"
+            (ngModelChange)="updateManualField('longitude', $event)"
+          />
+        </label>
+        <label>
+          <span class="label">Height AGL (m)</span>
+          <input
+            type="text"
+            inputmode="decimal"
+            class="mono"
+            [ngModel]="manualDraft().aglMeters"
+            (ngModelChange)="updateManualField('aglMeters', $event)"
+          />
+        </label>
+        <label>
+          <span class="label">Yaw (°)</span>
+          <input
+            type="text"
+            inputmode="decimal"
+            class="mono"
+            [ngModel]="manualDraft().yawDegrees"
+            (ngModelChange)="updateManualField('yawDegrees', $event)"
+          />
+        </label>
+        <label>
+          <span class="label">Pitch (°)</span>
+          <input
+            type="text"
+            inputmode="decimal"
+            class="mono"
+            [ngModel]="manualDraft().pitchDegrees"
+            (ngModelChange)="updateManualField('pitchDegrees', $event)"
+          />
+        </label>
+        <label>
+          <span class="label">Horizontal FOV (°)</span>
+          <input
+            type="text"
+            inputmode="decimal"
+            class="mono"
+            [ngModel]="manualDraft().hfovDegrees"
+            (ngModelChange)="updateManualField('hfovDegrees', $event)"
+          />
+        </label>
+      </div>
+      <p class="muted hint">Height above ground level, camera heading (0–360°, true north), downward tilt, and horizontal field of view.</p>
+      <div class="row dialog-actions">
+        <button type="button" class="btn primary" (click)="saveManualForm()" [disabled]="busy()">
+          {{ busy() ? 'Saving…' : 'Save pose' }}
+        </button>
+        <button type="button" class="btn secondary" (click)="cancelManualForm()" [disabled]="busy()">Cancel</button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (isOpen('remove')) {
+  <vision-confirm-dialog
+    message="Remove this camera's pose? It will stop projecting tracks onto the map until it's recalibrated."
+    confirmLabel="Remove pose"
+    [busy]="busy()"
+    (confirmed)="confirmRemove()"
+    (cancelled)="cancelRemove()"
+  />
+}
+
+@if (isOpen('wizard')) {
+  <vision-camera-calibration-wizard
+    [assetId]="assetId()"
+    [existingPose]="pose()"
+    (saved)="onPoseSaved($event)"
+    (closed)="closeWizard()"
+  />
+}
