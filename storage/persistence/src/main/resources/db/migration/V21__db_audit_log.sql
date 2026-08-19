@@ -57,6 +57,12 @@
 --   db_audit_log (this table -- a trigger on itself would recurse)
 --   flyway_schema_history -- Flyway's own bookkeeping table, not application data
 --
+-- Redaction: to_jsonb() takes every column verbatim, so an audited table holding a secret would
+-- copy it here. users.password_hash is replaced with "[redacted]" (the key kept, the value gone)
+-- before the row image is written, and changed_columns is computed first so a password change is
+-- still reported without either hash being stored. Any future migration adding a secret-bearing
+-- column to an audited table must add its name to the trigger's redaction list.
+--
 -- Retention: deliberately not addressed by this migration. This table grows unbounded, the same
 -- accepted tradeoff audit_entries already makes (see that table's own MODULE.md entry) -- a
 -- purge/rollup job is a known open item, not built here.
@@ -83,11 +89,12 @@ CREATE INDEX idx_db_audit_log_table_row ON db_audit_log (table_name, row_id, occ
 
 CREATE OR REPLACE FUNCTION audit_row_change() RETURNS trigger AS $$
 DECLARE
-    old_data  jsonb;
-    new_data  jsonb;
-    pk_cols   text[];
-    row_ident text;
-    changed   jsonb;
+    old_data      jsonb;
+    new_data      jsonb;
+    pk_cols       text[];
+    row_ident     text;
+    changed       jsonb;
+    sensitive_col text;
 BEGIN
     IF TG_OP = 'DELETE' THEN
         old_data := to_jsonb(OLD);
@@ -115,12 +122,27 @@ BEGIN
 
     IF TG_OP = 'UPDATE' THEN
         -- Every column whose value in new_data differs from old_data -- answers "what changed?"
-        -- without the caller diffing two JSON blobs itself.
+        -- without the caller diffing two JSON blobs itself. Computed BEFORE redaction below, so a
+        -- password change still reports "password_hash" as changed even though neither hash is kept.
         SELECT jsonb_agg(n.key ORDER BY n.key)
         INTO changed
         FROM jsonb_each(new_data) AS n(key, value)
         WHERE n.value IS DISTINCT FROM (old_data -> n.key);
     END IF;
+
+    -- Secrets are never copied into this table. to_jsonb(NEW) takes every column verbatim, which
+    -- for users would mean storing password_hash -- and on a password change, BOTH the old and the
+    -- new hash -- in a table with a longer retention and a wider read audience than the row it came
+    -- from. The key is replaced rather than dropped so the shape of the row stays honest: the reader
+    -- can see the column exists and (via changed_columns) that it changed, without the value.
+    FOREACH sensitive_col IN ARRAY ARRAY['password_hash'] LOOP
+        IF old_data ? sensitive_col THEN
+            old_data := jsonb_set(old_data, ARRAY[sensitive_col], '"[redacted]"'::jsonb);
+        END IF;
+        IF new_data ? sensitive_col THEN
+            new_data := jsonb_set(new_data, ARRAY[sensitive_col], '"[redacted]"'::jsonb);
+        END IF;
+    END LOOP;
 
     INSERT INTO db_audit_log (table_name, row_id, operation, db_user, old_row, new_row, changed_columns)
     VALUES (TG_TABLE_NAME::text, row_ident, TG_OP, session_user::text, old_data, new_data, changed);

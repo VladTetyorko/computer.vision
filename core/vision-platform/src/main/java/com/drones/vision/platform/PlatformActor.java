@@ -25,12 +25,22 @@ import java.util.UUID;
 public final class PlatformActor {
 
     /**
-     * The fixed identity every unattended, platform-initiated change is audited under. Wraps {@code
-     * UUID(0, 2)} — distinct from {@code DevPrincipal}'s {@code UUID(0, 0)}/{@code UUID(0, 1)} pair,
-     * so the two well-known identities can never collide even though both are, today, effectively
-     * hardcoded placeholders for the same missing identity phase.
+     * The fixed identity every unattended, platform-initiated change is audited under: {@code
+     * ffffffff-ffff-ffff-ffff-ffffffffffff}.
+     *
+     * <p>Deliberately <em>outside</em> the {@code UUID(0, n)} namespace every other well-known id in
+     * this repository lives in, rather than the next free slot in it. That namespace is not
+     * reserved for constants — {@code db/seed/dev/V90001__dev_accounts.sql} seeds real user rows at
+     * {@code UUID(0, 2)} (manager) and {@code UUID(0, 3)} (pilot), and {@code V12__map_layers.sql}
+     * stamps the COP layer {@code UUID(0, 2)} in its own id space. A platform actor sitting anywhere
+     * in that range would eventually be handed the same id as a real account, and the one thing this
+     * constant exists to guarantee is that an unattended action is never attributed to a person.
+     * Being far outside the range makes that structural rather than a matter of counting carefully.
+     *
+     * <p>All-ones is also unreachable by accident: {@link UUID#randomUUID()} stamps version 4 into
+     * the id, so it can never generate this value for a real user.
      */
-    public static final UserId USER_ID = new UserId(new UUID(0, 2));
+    public static final UserId USER_ID = new UserId(new UUID(-1L, -1L));
 
     private PlatformActor() {
     }

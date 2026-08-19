@@ -328,6 +328,15 @@ see that entry above), and the two must never be merged or made to duplicate eac
   the row image(s) involved. It is infrastructure, not domain, and nothing outside this module should
   ever import a type from it.
 
+**Secrets are redacted before the row image is written.** `to_jsonb(NEW)` takes every column verbatim,
+so auditing `users` would otherwise copy `password_hash` into this table — and on a password change,
+both the old and the new hash — where it would live longer, and be readable by more people, than the
+row it came from. The trigger replaces the value with `"[redacted]"` and keeps the key, so the row's
+shape stays honest; `changed_columns` is computed **before** redaction, so a password change is still
+reported as a change without either hash being stored. The wave shipped without this and it was added
+on review. **Any future migration that adds a secret-bearing column to an audited table must add that
+column name to the trigger's redaction list** — nothing enforces this automatically.
+
 **Mechanism: a Postgres trigger, not a Java/Hibernate interceptor.** An interceptor can always be
 bypassed — manual SQL, a `psql` session, a future non-Hibernate writer — and an audit that can be
 bypassed is not an audit. `PersistenceUnit` also bootstraps Hibernate natively with no Spring in front of
@@ -708,7 +717,7 @@ of-the-same-usage, not-found-under-a-different-usage-with-the-same-phase, and
 its own PREFLIGHT/POSTFLIGHT pair, proving all four usage×phase cells resolve independently — the
 exact lookup `driftFromPreviousFlight` (`contexts/vision-flight`) depends on).
 
-`@Nested DbAuditLogRepositoryTests` (2, "Database change audit" below) — proves the trigger fires end to
+`@Nested DbAuditLogRepositoryTests` (3, "Database change audit" below) — proves the trigger fires end to
 end through a real `Jpa*Repository`, not a hand-crafted native-SQL write (the whole point is that the
 trigger fires no matter *how* a row changes):
 `insertUpdateAndDeleteThroughAnExistingRepositoryEachLeaveTheirOwnAuditRowNewestFirst` saves, renames
@@ -804,10 +813,11 @@ fake `DataSource`s (no HikariCP, no container) prove `stop()` closes a `Closeabl
 tolerates one that is not `Closeable`, isolating the narrow shutdown-doesn't-leak claim from
 `ConnectionPoolTests`' end-to-end proof above.
 
-187 tests total (up from 182, the database change audit wave: new `DbAuditLogRepositoryTests` (2) +
-`DbAuditLogCoverageTests` (2) + `v21MigrationCreatesTheDbAuditLogTableOnTopOfV1ThroughV20` (1) = +5),
+188 tests total (up from 182, the database change audit wave: new `DbAuditLogRepositoryTests` (3, one
+of them the redaction guard added on review) + `DbAuditLogCoverageTests` (2) +
+`v21MigrationCreatesTheDbAuditLogTableOnTopOfV1ThroughV20` (1) = +6),
 measured directly with `./mvnw -B -pl storage/persistence -am test` immediately before (182, `git stash`
-of this wave's changes against the same `feat/drone-onboarding` tip) and after (187) — both runs docker-
+of this wave's changes against the same `feat/drone-onboarding` tip) and after (188) — both runs docker-
 reachable, every case ran, none skipped (`skipped="0"` in both `TEST-...PostgresDockerIntegrationTest.xml`
 and `TEST-...UpgradePathMigrationTest.xml`). The "148" entry directly below already predates the O5/O11
 onboarding waves that pushed the pre-this-wave count to 182 — see "Database change audit" below and the

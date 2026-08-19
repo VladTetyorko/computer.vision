@@ -11,10 +11,10 @@ import com.drones.vision.warehouse.domain.model.UsagePhase;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -65,11 +65,31 @@ public final class PassportCaptureObserver implements UsagePhaseObserver, AutoCl
      */
     private static final int QUEUE_CAPACITY = 32;
 
+    /**
+     * How many recent usages {@link #disabledSkipLogged} remembers. The set exists only to suppress
+     * repeat log lines, so forgetting the oldest entries costs at worst one extra line for a usage
+     * that has not been heard from in a long time — whereas remembering every usage forever would
+     * grow without bound on a station that never restarts. Same reasoning, and same LRU shape, as
+     * {@code MavlinkConnectRemediator}'s per-sysid table.
+     */
+    private static final int MAX_REMEMBERED_SKIPS = 256;
+
     private final VehicleProfileService vehicleProfileService;
     private final Duration window;
     private final ThreadPoolExecutor executor;
-    /** Usages a "probing disabled / no device" skip has already been logged for — see the class javadoc. */
-    private final Set<UsageId> disabledSkipLogged = ConcurrentHashMap.newKeySet();
+    /**
+     * Usages a "probing disabled / no device" skip has already been logged for — see the class
+     * javadoc. Bounded (see {@link #MAX_REMEMBERED_SKIPS}) and guarded by its own monitor rather than
+     * concurrent: it is touched only from {@link #executor}'s single thread today, and a plain
+     * {@code LinkedHashMap} is the only way to get eviction.
+     */
+    private final Map<UsageId, Boolean> disabledSkipLogged =
+            new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<UsageId, Boolean> eldest) {
+                    return size() > MAX_REMEMBERED_SKIPS;
+                }
+            };
 
     /**
      * @param vehicleProfileService the PROBE-stage service {@link #capture} calls
@@ -122,7 +142,11 @@ public final class PassportCaptureObserver implements UsagePhaseObserver, AutoCl
             vehicleProfileService.captureSnapshot(assetId, usageId, phase, window, PlatformActor.USER_ID,
                     VisibilityScope.unbounded());
         } catch (IllegalStateException e) {
-            if (disabledSkipLogged.add(usageId)) {
+            boolean firstTimeForThisUsage;
+            synchronized (disabledSkipLogged) {
+                firstTimeForThisUsage = disabledSkipLogged.put(usageId, Boolean.TRUE) == null;
+            }
+            if (firstTimeForThisUsage) {
                 LOG.log(System.Logger.Level.DEBUG, () -> "passport capture (" + phase + ") skipped for usage "
                         + usageId.value() + ": " + e.getMessage());
             }

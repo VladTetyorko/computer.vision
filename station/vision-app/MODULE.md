@@ -2595,7 +2595,10 @@ firing contract itself — see that module's own MODULE.md.
 0`, `BUILD SUCCESS`. Every pre-existing test passes unchanged with `vision.onboarding.passport.enabled`
 at its default (`false`, never set explicitly in any pre-existing test's properties) — the
 default-config acceptance bar is met exactly, identical counts everywhere except the one new test
-class. `core/vision-platform` **17/17 green, unchanged** (additive-only `PlatformActor`).
+class. `core/vision-platform` **19/19 green** (17 before the wave, +2): `PlatformActor` shipped holding
+`UUID(0, 2)` — the id `db/seed/dev/V90001__dev_accounts.sql` gives the dev **manager account**, so
+every unattended capture would have been audited as that person. Corrected on review to
+`UUID(-1L, -1L)` and pinned by a new `PlatformActorTest`.
 `contexts/vision-perception` **507/507 green** (up from 503; `UsageTrackerTest` 31→35, +4) — see that
 module's own MODULE.md for the four new test names.
 

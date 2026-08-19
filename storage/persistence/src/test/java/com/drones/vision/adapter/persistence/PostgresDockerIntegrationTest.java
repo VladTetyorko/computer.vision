@@ -3074,6 +3074,42 @@ class PostgresDockerIntegrationTest {
             assertTrue(firstIndex >= 0 && secondIndex >= 0, "both freshly-inserted rows must appear");
             assertTrue(firstIndex < secondIndex, "the more recently saved zone must sort first (newest-first)");
         }
+
+        /**
+         * {@code to_jsonb(NEW)} copies every column verbatim, so auditing {@code users} would
+         * otherwise write {@code password_hash} into this table — and on a password change, both the
+         * old and the new hash. That is credential material landing in a table with longer retention
+         * and a wider read audience than the row it came from, which is why the trigger redacts it.
+         *
+         * <p>The redaction must not cost information: {@code changed_columns} is computed before it,
+         * so "the password changed" is still reported while neither hash is stored.
+         */
+        @Test
+        void aPasswordHashIsNeverCopiedIntoTheAuditLogThoughItsChangeIsStillReported() {
+            UserRepositoryPort users = new JpaUserRepository(entityManagerFactory);
+            UserId userId = UserId.random();
+            String rowId = userId.value().toString();
+
+            users.save(new User(userId, "audit.secret", "Audit Secret", "secret@vision.local",
+                    "$2a$10$ORIGINALHASHVALUE", true, List.of()));
+            users.save(new User(userId, "audit.secret", "Audit Secret", "secret@vision.local",
+                    "$2a$10$ROTATEDHASHVALUE", true, List.of()));
+
+            List<DbAuditLogEntity> rows = auditLog.findRecentForRow("users", rowId, 10);
+            assertEquals(2, rows.size(), "one audit row for the INSERT, one for the UPDATE");
+
+            DbAuditLogEntity updateRow = rows.get(0);
+            DbAuditLogEntity insertRow = rows.get(1);
+
+            assertEquals("[redacted]", insertRow.newRow().get("password_hash"),
+                    "the hash must be replaced, and the key kept so the row's shape stays honest");
+            assertEquals("[redacted]", updateRow.oldRow().get("password_hash"), "including the superseded hash");
+            assertEquals("[redacted]", updateRow.newRow().get("password_hash"));
+            assertTrue(updateRow.changedColumns().contains("password_hash"),
+                    "redaction must not hide that the password changed — changed_columns is computed first");
+            assertEquals("audit.secret", updateRow.newRow().get("username"),
+                    "only the named sensitive columns are redacted; the rest of the row is intact");
+        }
     }
 
     /**
