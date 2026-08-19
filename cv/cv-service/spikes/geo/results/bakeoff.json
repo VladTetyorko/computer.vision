@@ -1065,8 +1065,8 @@
     "recall_at_1_100m": 0.0,
     "false_fix_rate": null,
     "median_distance_m": 477.022494222021,
-    "mean_per_pair_ms": 44.8,
-    "total_wall_seconds": 5.8,
+    "mean_per_pair_ms": 124.6,
+    "total_wall_seconds": 16.4,
     "per_frame": [
       {
         "query_id": "manifest-1",
@@ -1078,7 +1078,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 43.4,
+        "per_pair_ms": 123.7,
         "n_scored": 10
       },
       {
@@ -1091,7 +1091,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 40.5,
+        "per_pair_ms": 141.2,
         "n_scored": 10
       },
       {
@@ -1104,7 +1104,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 41.3,
+        "per_pair_ms": 132.8,
         "n_scored": 10
       },
       {
@@ -1117,7 +1117,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 43.5,
+        "per_pair_ms": 144.6,
         "n_scored": 10
       },
       {
@@ -1130,7 +1130,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 42.9,
+        "per_pair_ms": 130.8,
         "n_scored": 10
       },
       {
@@ -1143,7 +1143,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 48.6,
+        "per_pair_ms": 108.2,
         "n_scored": 10
       },
       {
@@ -1156,7 +1156,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 42.3,
+        "per_pair_ms": 128.1,
         "n_scored": 10
       },
       {
@@ -1169,7 +1169,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 42.5,
+        "per_pair_ms": 144.3,
         "n_scored": 10
       },
       {
@@ -1182,7 +1182,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 48.9,
+        "per_pair_ms": 118.5,
         "n_scored": 10
       },
       {
@@ -1195,7 +1195,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 46.4,
+        "per_pair_ms": 101.5,
         "n_scored": 10
       },
       {
@@ -1208,7 +1208,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 49.5,
+        "per_pair_ms": 102.3,
         "n_scored": 10
       },
       {
@@ -1221,7 +1221,7 @@
         "conditioned": false,
         "refusal": "G-b_inlier_ratio",
         "accepted": false,
-        "per_pair_ms": 48.3,
+        "per_pair_ms": 119.0,
         "n_scored": 10
       }
     ]

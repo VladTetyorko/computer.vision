@@ -145,6 +145,46 @@ def score_candidate(
     )
 
 
+def evaluate_gates(
+    scored: list[CandidateScore],
+    margin: float,
+    *,
+    cell_is_never_accept: Optional[bool] = None,
+    agl_footprint_area_m2: Optional[float] = None,
+) -> tuple[dict[str, Optional[bool]], Optional[str]]:
+    """§4.2 gates G-a..G-f evaluated against the winner of an already-sorted (by inlier count
+    descending) `scored` list. Factored out of `rerank()` (H0b) so `spikes/geo/mosaic_rerank.py`'s
+    mosaic-candidate variant can share the exact same gate rules instead of re-deriving them --
+    the frozen §4.2 table is data, not something two call sites should each reimplement."""
+    if not scored:
+        return {}, "NO_CANDIDATES"
+    winner = scored[0]
+    gates: dict[str, Optional[bool]] = {}
+    gates["G-a_inlier_floor"] = winner.inlier_count >= INLIER_FLOOR
+    gates["G-b_inlier_ratio"] = (
+        (winner.inlier_count / winner.match_count) >= MIN_INLIER_RATIO if winner.match_count > 0 else False
+    )
+    gates["G-c_residual_ceiling"] = (
+        winner.reprojection_rms_px is not None and winner.reprojection_rms_px <= MAX_REPROJECTION_RMS_PX
+    )
+    gates["G-d_rerank_margin"] = margin >= MIN_RERANK_MARGIN
+    gates["G-e_cell_calibration"] = (not cell_is_never_accept) if cell_is_never_accept is not None else None
+    if agl_footprint_area_m2 is not None and winner.pose.ok and winner.pose.footprint_area_m2 is not None:
+        ratio = winner.pose.footprint_area_m2 / agl_footprint_area_m2 if agl_footprint_area_m2 > 0 else math.inf
+        gates["G-f_footprint_sanity"] = bool(winner.pose.sanity_ok) and (0.25 <= ratio <= 4.0)
+    else:
+        # No AGL/FOV to derive the *expected* footprint from (no telemetry) -- fall back to
+        # pose.py's own absolute-plausibility sanity flags rather than fabricate a relative check.
+        gates["G-f_footprint_sanity"] = bool(winner.pose.sanity_ok) if winner.pose.ok else False
+
+    refusal = None
+    for name in ("G-a_inlier_floor", "G-b_inlier_ratio", "G-c_residual_ceiling", "G-d_rerank_margin", "G-e_cell_calibration", "G-f_footprint_sanity"):
+        if gates[name] is False:
+            refusal = name
+            break
+    return gates, refusal
+
+
 def rerank(
     matcher,
     query_image: np.ndarray,
@@ -188,28 +228,8 @@ def rerank(
     margin = (s1 - s2) / max(s1, 1) if s2 is not None else 0.0
     winner = scored[0]
 
-    gates: dict[str, Optional[bool]] = {}
-    gates["G-a_inlier_floor"] = winner.inlier_count >= INLIER_FLOOR
-    gates["G-b_inlier_ratio"] = (
-        (winner.inlier_count / winner.match_count) >= MIN_INLIER_RATIO if winner.match_count > 0 else False
+    gates, refusal = evaluate_gates(
+        scored, margin, cell_is_never_accept=cell_is_never_accept, agl_footprint_area_m2=agl_footprint_area_m2
     )
-    gates["G-c_residual_ceiling"] = (
-        winner.reprojection_rms_px is not None and winner.reprojection_rms_px <= MAX_REPROJECTION_RMS_PX
-    )
-    gates["G-d_rerank_margin"] = margin >= MIN_RERANK_MARGIN
-    gates["G-e_cell_calibration"] = (not cell_is_never_accept) if cell_is_never_accept is not None else None
-    if agl_footprint_area_m2 is not None and winner.pose.ok and winner.pose.footprint_area_m2 is not None:
-        ratio = winner.pose.footprint_area_m2 / agl_footprint_area_m2 if agl_footprint_area_m2 > 0 else math.inf
-        gates["G-f_footprint_sanity"] = bool(winner.pose.sanity_ok) and (0.25 <= ratio <= 4.0)
-    else:
-        # No AGL/FOV to derive the *expected* footprint from (no telemetry) -- fall back to
-        # pose.py's own absolute-plausibility sanity flags rather than fabricate a relative check.
-        gates["G-f_footprint_sanity"] = bool(winner.pose.sanity_ok) if winner.pose.ok else False
-
-    refusal = None
-    for name in ("G-a_inlier_floor", "G-b_inlier_ratio", "G-c_residual_ceiling", "G-d_rerank_margin", "G-e_cell_calibration", "G-f_footprint_sanity"):
-        if gates[name] is False:
-            refusal = name
-            break
 
     return RerankResult(scored, winner, margin, conditioned is not None, gates, refusal)

@@ -1,0 +1,1702 @@
+[
+  {
+    "config": "rankshift|pexels|lightglue_disk|unrectified|k10",
+    "dataset": "pexels",
+    "matcher": "lightglue_disk",
+    "rectified": false,
+    "k": 10,
+    "status": "ok",
+    "n_frames": 12,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 0,
+    "median_rank_before": null,
+    "median_rank_after": null,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      }
+    ]
+  },
+  {
+    "config": "rankshift|pexels|loftr|unrectified|k10",
+    "dataset": "pexels",
+    "matcher": "loftr",
+    "rectified": false,
+    "k": 10,
+    "status": "ok",
+    "n_frames": 12,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 0,
+    "median_rank_before": null,
+    "median_rank_after": null,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      }
+    ]
+  },
+  {
+    "config": "rankshift|pexels|xfeat|unrectified|k10",
+    "dataset": "pexels",
+    "matcher": "xfeat",
+    "rectified": false,
+    "k": 10,
+    "status": "ok",
+    "n_frames": 12,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 0,
+    "median_rank_before": null,
+    "median_rank_after": null,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      }
+    ]
+  },
+  {
+    "config": "rankshift|pexels|xfeat|unrectified|k20",
+    "dataset": "pexels",
+    "matcher": "xfeat",
+    "rectified": false,
+    "k": 20,
+    "status": "ok",
+    "n_frames": 12,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 0,
+    "median_rank_before": null,
+    "median_rank_after": null,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      }
+    ]
+  },
+  {
+    "config": "rankshift|sitl-oblique45|lightglue_disk|rectified|k10",
+    "dataset": "sitl-oblique45",
+    "matcher": "lightglue_disk",
+    "rectified": true,
+    "k": 10,
+    "status": "ok",
+    "n_frames": 13,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 5,
+    "median_rank_before": 2,
+    "median_rank_after": 2,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 2,
+        "shift": 0
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 1,
+        "shift": 1
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 8,
+        "rank_after": 8,
+        "shift": 0
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 2,
+        "shift": 0
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 1,
+        "shift": 1
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-13",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      }
+    ]
+  },
+  {
+    "config": "rankshift|sitl-oblique45|lightglue_disk|unrectified|k10",
+    "dataset": "sitl-oblique45",
+    "matcher": "lightglue_disk",
+    "rectified": false,
+    "k": 10,
+    "status": "ok",
+    "n_frames": 13,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 5,
+    "median_rank_before": 2,
+    "median_rank_after": 1,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 1,
+        "shift": 1
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 1,
+        "shift": 1
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 8,
+        "rank_after": 8,
+        "shift": 0
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 1,
+        "shift": 1
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 1,
+        "shift": 1
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-13",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      }
+    ]
+  },
+  {
+    "config": "rankshift|sitl-oblique45|loftr|rectified|k10",
+    "dataset": "sitl-oblique45",
+    "matcher": "loftr",
+    "rectified": true,
+    "k": 10,
+    "status": "ok",
+    "n_frames": 13,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 5,
+    "median_rank_before": 2,
+    "median_rank_after": 3,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 1,
+        "shift": 1
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 3,
+        "shift": -1
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 8,
+        "rank_after": 5,
+        "shift": 3
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 4,
+        "shift": -2
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 2,
+        "shift": 0
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-13",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      }
+    ]
+  },
+  {
+    "config": "rankshift|sitl-oblique45|loftr|unrectified|k10",
+    "dataset": "sitl-oblique45",
+    "matcher": "loftr",
+    "rectified": false,
+    "k": 10,
+    "status": "ok",
+    "n_frames": 13,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 5,
+    "median_rank_before": 2,
+    "median_rank_after": 8,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 10,
+        "shift": -8
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 5,
+        "shift": -3
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 8,
+        "rank_after": 9,
+        "shift": -1
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 8,
+        "shift": -6
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 6,
+        "shift": -4
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-13",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      }
+    ]
+  },
+  {
+    "config": "rankshift|sitl-oblique45|xfeat|rectified|k10",
+    "dataset": "sitl-oblique45",
+    "matcher": "xfeat",
+    "rectified": true,
+    "k": 10,
+    "status": "ok",
+    "n_frames": 13,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 5,
+    "median_rank_before": 2,
+    "median_rank_after": 2,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 2,
+        "shift": 0
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 1,
+        "shift": 1
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 8,
+        "rank_after": 2,
+        "shift": 6
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 6,
+        "shift": -4
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 5,
+        "shift": -3
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-13",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      }
+    ]
+  },
+  {
+    "config": "rankshift|sitl-oblique45|xfeat|rectified|k20",
+    "dataset": "sitl-oblique45",
+    "matcher": "xfeat",
+    "rectified": true,
+    "k": 20,
+    "status": "ok",
+    "n_frames": 13,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 11,
+    "median_rank_before": 11,
+    "median_rank_after": 9,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 2,
+        "shift": 0
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 14,
+        "rank_after": 13,
+        "shift": 1
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 17,
+        "rank_after": 9,
+        "shift": 8
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 2,
+        "shift": 0
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 8,
+        "rank_after": 3,
+        "shift": 5
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 13,
+        "shift": -11
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 20,
+        "rank_after": 17,
+        "shift": 3
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 8,
+        "shift": -6
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 18,
+        "rank_after": 12,
+        "shift": 6
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 11,
+        "rank_after": 7,
+        "shift": 4
+      },
+      {
+        "query_id": "manifest-13",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 14,
+        "rank_after": 16,
+        "shift": -2
+      }
+    ]
+  },
+  {
+    "config": "rankshift|sitl-oblique45|xfeat|unrectified|k10",
+    "dataset": "sitl-oblique45",
+    "matcher": "xfeat",
+    "rectified": false,
+    "k": 10,
+    "status": "ok",
+    "n_frames": 13,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 5,
+    "median_rank_before": 2,
+    "median_rank_after": 6,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 8,
+        "shift": -6
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 5,
+        "shift": -3
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 8,
+        "rank_after": 2,
+        "shift": 6
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 6,
+        "shift": -4
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 10,
+        "shift": -8
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-13",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      }
+    ]
+  },
+  {
+    "config": "rankshift|sitl-oblique45|xfeat|unrectified|k20",
+    "dataset": "sitl-oblique45",
+    "matcher": "xfeat",
+    "rectified": false,
+    "k": 20,
+    "status": "ok",
+    "n_frames": 13,
+    "n_exact_cell_indexed": 0,
+    "n_in_topk": 11,
+    "median_rank_before": 11,
+    "median_rank_after": 8,
+    "per_frame": [
+      {
+        "query_id": "manifest-1",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 13,
+        "shift": -11
+      },
+      {
+        "query_id": "manifest-2",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 14,
+        "rank_after": 3,
+        "shift": 11
+      },
+      {
+        "query_id": "manifest-3",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 17,
+        "rank_after": 2,
+        "shift": 15
+      },
+      {
+        "query_id": "manifest-4",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 7,
+        "shift": -5
+      },
+      {
+        "query_id": "manifest-5",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-6",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 8,
+        "rank_after": 2,
+        "shift": 6
+      },
+      {
+        "query_id": "manifest-7",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 8,
+        "shift": -6
+      },
+      {
+        "query_id": "manifest-8",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 20,
+        "rank_after": 9,
+        "shift": 11
+      },
+      {
+        "query_id": "manifest-9",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": false,
+        "rank_before": null,
+        "rank_after": null,
+        "shift": null
+      },
+      {
+        "query_id": "manifest-10",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 2,
+        "rank_after": 20,
+        "shift": -18
+      },
+      {
+        "query_id": "manifest-11",
+        "true_tile": "17/76650/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 18,
+        "rank_after": 7,
+        "shift": 11
+      },
+      {
+        "query_id": "manifest-12",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 11,
+        "rank_after": 17,
+        "shift": -6
+      },
+      {
+        "query_id": "manifest-13",
+        "true_tile": "17/76648/44196",
+        "exact_cell_tile_id": "17/76649/44196",
+        "exact_cell_indexed": false,
+        "in_topk": true,
+        "rank_before": 14,
+        "rank_after": 11,
+        "shift": 3
+      }
+    ]
+  }
+]
