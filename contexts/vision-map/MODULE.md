@@ -17,18 +17,26 @@ ArchUnit-enforced one-way (`domain` never imports `application`).
 **Depends on:**
 - `vision-kernel` — every typed id, `GeoPosition`, `Ownership`, `GeoProjection` (mark geolocation math;
   since docs/plans/active/GEO-POSE-PLAN.md wave V3, via `GeoProjection.aimFrom`/`CameraAim` rather than the
-  raw 4-arg `project`)
+  raw 4-arg `project`); since docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G2, also `FixedCameraGeo`/
+  `FixedCameraPose`/`FixedCameraGeoSettings`/`GroundFix`/`BoundingBox` (fixed-camera pixel→ground
+  projection) and `BearingDistance` (the calibration solver's own bearing/range math)
 - `vision-platform` — `AccessDeniedException` (every authorization refusal in this context throws it);
-  `AuditTrailPort`/`Audit*` are declared but **not currently used** by this context (no service here
-  writes an audit line — see Gotchas)
+  `AuditTrailPort`/`AuditEntry`/`AuditAction`/`AuditTargetType` — **used since wave G2** by
+  `application.track.DefaultCameraPoseService`, this context's first audit write (every other service
+  still writes none — see Gotchas)
 - `vision-identity` — `Role` (`MapAccessPolicy.Viewer` carries a `Role` to compute manager-tier access)
 - `vision-perception` — `perception.application.pipeline.UsageTracker` (`DefaultMarkService#geolocate`
-  reads an asset's freshest telemetry to project a `DETECTION` mark)
+  reads an asset's freshest telemetry to project a `DETECTION` mark); since wave G2, also
+  `perception.domain.model.TrackedObject`/`Detection` (`application.track.TrackProjectionInput` carries
+  perception's own current track list for one stream) — a new *reference* inside the already-legal
+  `map → perception` edge, not a new context edge
 
-**Used by:** `adapter-persistence` (JPA repositories for the four ports below), `vision-api`
-(`/api/map/**` REST surface), `vision-app` (wiring, devsupport in-memory repositories)
-**Build/test:** `./mvnw -B -pl contexts/vision-map test` — **227/227 green** as of docs/plans/active/GEO-POSE-PLAN.md
-wave V3 (up from 223 at the W1.7b extraction: +4 in `DefaultMarkServiceTest`, no other file changed)
+**Used by:** `adapter-persistence` (JPA repositories for the ports below), `vision-api`
+(`/api/map/**` REST surface), `vision-app` (wiring, devsupport in-memory repositories, and — since wave
+G2 — the `TrackProjectionRunner` that ticks `TrackProjectionService#project` on a schedule)
+**Build/test:** `./mvnw -B -pl contexts/vision-map test` — **282/282 green** as of docs/plans/active/
+FIXED-CAMERA-GEO-PLAN.md wave G2 (up from 227 at GEO-POSE-PLAN wave V3: +55 across the new
+`application.track` package and its domain types)
 
 ## Package shape
 
@@ -39,6 +47,9 @@ com.drones.vision.map.application       — layer/drawing services at the packag
 com.drones.vision.map.application.mark  — mark service (kept as its own subpackage; not folded into
                                            the root because "mark" is not the context's name and this
                                            context has more than one feature, unlike e.g. `flight`)
+com.drones.vision.map.application.track — camera pose CRUD, calibration solver, and track projection
+                                           (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G2); same
+                                           "own subpackage, not the root" reasoning as `.mark`
 ```
 
 ## API surface
@@ -70,11 +81,14 @@ com.drones.vision.map.application.mark  — mark service (kept as its own subpac
   (org-wide view, MANAGER+ writes, exactly one per deployment, the default mark-promotion target);
   `TEAM` is group-owned; `PERSONAL` is owner-only by default.
 - `record MapEvent(EntityType entity, Action action, LayerId layerId, Object payload)` — the payload
-  `MapLiveUpdatePort#publishMapEvent` carries; nested `enum EntityType { MARK, DRAWING, LAYER }`,
-  `enum Action { CREATED, UPDATED, CLEARED, DELETED }`. **`payload`'s runtime type is validated against
-  `entity`** (`MARK`→`Mark`, `DRAWING`→`Drawing`, `LAYER`→`MapLayer`) — a real compact-ctor invariant,
-  catching a wiring bug at construction rather than a `ClassCastException` deep in DTO mapping.
-  `Action.CLEARED` is only valid for `entity == MARK`.
+  `MapLiveUpdatePort#publishMapEvent` carries; nested `enum EntityType { MARK, DRAWING, LAYER, TRACK }`
+  (`TRACK` added wave G2), `enum Action { CREATED, UPDATED, CLEARED, DELETED }`. **`payload`'s runtime
+  type is validated against `entity`** (`MARK`→`Mark`, `DRAWING`→`Drawing`, `LAYER`→`MapLayer`,
+  `TRACK`→`ProjectedTrack`) — a real compact-ctor invariant, catching a wiring bug at construction
+  rather than a `ClassCastException` deep in DTO mapping. `Action.CLEARED` is valid for `entity == MARK`
+  **or** `entity == TRACK` (widened wave G2, decision D11: a track expiring from the perception track
+  book, or its owning stream stopping, is the track analogue of a mark's status flipping to `CLEARED`) —
+  invalid for `DRAWING`/`LAYER`, which have no "cleared" lifecycle state.
 - `record MapLayer(LayerId id, String name, LayerKind kind, Ownership ownership, List<LayerGrant> grants, Instant createdAt)`
   — `name` non-blank ≤80 chars; `grants` may be empty; exactly one `COP` layer per deployment is an
   **application-layer** invariant (the bootstrap service enforces it), not checkable on one record
@@ -99,6 +113,27 @@ com.drones.vision.map.application.mark  — mark service (kept as its own subpac
   verify→confirm→share-wider review state; nested `enum VerificationState { UNVERIFIED, CONFIRMED, REJECTED }`.
   `verifiedBy`/`verifiedAt` required when `CONFIRMED`/`REJECTED`. `static unverified()` returns
   `(UNVERIFIED, null, null)`.
+- `enum CameraPoseSource` (wave G2) — `MANUAL | CALIBRATED`: hand-entered vs. solved-then-confirmed.
+- `record CameraPose(AssetId assetId, GeoPosition position, double aglMeters, double yawDegrees, double pitchDegrees, double hfovDegrees, LayerId targetLayerId, CameraPoseSource source, Double rmsErrorPixels, Instant updatedAt, UserId updatedBy)`
+  (wave G2, decision D4) — the audited, asset-keyed, persisted pose of a stationary camera; one row per
+  `AssetId` (upsert by that key). Wraps the same five geometric numbers as kernel's `FixedCameraPose`
+  plus control-plane bookkeeping. `aglMeters` ≥0; `yawDegrees` normalized to `[0,360)` in the compact
+  ctor (not rejected out of range, unlike every other numeric field here); `pitchDegrees` ∈ `[-10,90]`;
+  `hfovDegrees` ∈ `(10,160)`; `rmsErrorPixels` nullable (`null` for a `MANUAL` pose), ≥0 when present.
+  `targetLayerId` nullable — `null` means "publish to the deployment's COP layer", resolved by
+  `TrackProjectionService`, not stored as an explicit id here. `toFixedCameraPose()` strips the
+  asset/audit/persistence concerns down to the pure kernel value `FixedCameraGeo` projects from.
+- `record TrackPoint(AssetId assetId, long trackId, String label, LayerId layerId, GeoPosition position, double errorRadiusMeters, Instant capturedAt)`
+  (wave G2, decision D3, §7 table `projected_track_points`) — one stored, decimated point of a track's
+  durable trail; append-only, no `rangeMeters` (unlike the live `ProjectedTrack`) since a rendered trail
+  only needs position + uncertainty. Excluded from `db_audit_log` — high-volume telemetry-character
+  data, same classification as `detection_results`/`telemetry_samples`.
+- `record ProjectedTrack(AssetId assetId, long trackId, String label, LayerId layerId, GeoPosition position, double rangeMeters, double errorRadiusMeters, Instant updatedAt)`
+  (wave G2, decision D3) — the live, ephemeral read model for one tracked object a fixed camera has
+  projected onto the ground; one object per `(assetId, trackId)`, updated in place, **never persisted
+  itself** (only its trail is) — held in memory by `TrackProjectionService` and republished each tick.
+  `errorRadiusMeters` is always populated, never omitted (D6: "a 200m-error estimate must never render
+  as a 5m-accurate-looking dot"). This is `MapEvent`'s `TRACK` entity payload.
 
 ### `com.drones.vision.map.domain.port` (driven — implemented by adapters)
 - `DrawingRepositoryPort` — `Drawing save(Drawing)` upsert by `DrawingId`; `Optional<Drawing> findById(DrawingId)`;
@@ -113,6 +148,19 @@ com.drones.vision.map.application.mark  — mark service (kept as its own subpac
   `LiveUpdatePublisherPort` (deleted in W1.6b, split per context — docs/plans/active/DOMAIN-SEPARATION-W1.md §15).
 - `MarkRepositoryPort` — mirrors `MapLayerRepositoryPort`'s shape: `save`/`findById`/`findAll`
   (no ownership/group/layer filter)/`deleteById(MarkId)` idempotent.
+- `CameraPoseRepositoryPort` (wave G2, decision D4) — `CameraPose save(CameraPose)` upserts by
+  `assetId`; `Optional<CameraPose> findByAssetId(AssetId)`; `List<CameraPose> findAll()` (what
+  `TrackProjectionRunner` iterates each tick to find calibrated assets); `void deleteByAssetId(AssetId)`
+  idempotent.
+- `TrackTrailRepositoryPort` (wave G2, decision D3, §7) — the durable, decimated trail behind a live
+  `ProjectedTrack`. Deliberately thin: *whether* to append a point (D7 decimation) is
+  `TrackProjectionService`'s decision, made by comparing a new fix against `findLatest`; this port only
+  stores/reads/caps/prunes. `TrackPoint save(TrackPoint)` always inserts (append-only, never upserted);
+  `List<TrackPoint> findByTrack(AssetId, long)` oldest→newest; `Optional<TrackPoint> findLatest(AssetId, long)`;
+  `void trimToMostRecent(AssetId, long, int maxPoints)` — the D7 per-track cap, a no-op if already at or
+  under it; `void deleteOlderThan(Instant)` — the D7 retention prune, run on the projection runner's own
+  cadence. `trimToMostRecent`/`deleteOlderThan` are phrased as single port operations (not "fetch then
+  delete in the caller") so an adapter can implement both as one bulk delete.
 
 ### `com.drones.vision.map.application`
 - **`MapAccessPolicy`** (final, no interface) — the map's whole authorization model: resolves
@@ -262,6 +310,98 @@ com.drones.vision.map.application.mark  — mark service (kept as its own subpac
   unambiguously means "leave unchanged" without colliding with `note`, which can itself legitimately
   be absent); `MarkPatch.NOTHING` the identity patch.
 
+### `com.drones.vision.map.application.track` (wave G2, docs/plans/active/FIXED-CAMERA-GEO-PLAN.md)
+- **`CameraPoseService`** (interface) → **`DefaultCameraPoseService`** — CRUD over one asset's
+  `CameraPose`, audited through `AuditTrailPort` (**this context's first audit write**, D10).
+  - `DefaultCameraPoseService(CameraPoseRepositoryPort, AuditTrailPort)` — 2-arg.
+  - `List<CameraPose> list()` / `Optional<CameraPose> find(AssetId)`.
+  - `CameraPose put(AssetId, CameraPoseInput, UserId actor)` — creates or replaces; always audits
+    (`CREATED` if the asset had no pose before, else `UPDATED`) with `AuditTargetType.ASSET` and
+    `targetId = assetId.value().toString()`.
+  - `void delete(AssetId, UserId actor)` — idempotent; audits `DELETED` only when a pose actually
+    existed (a no-op delete audits nothing — "there is nothing to say was deleted").
+  - **Authorization is deliberately not this service's job** — unlike `MarkService`/`DrawingService`/
+    `MapLayerService` (which take a `MapAccessPolicy.Viewer` because map authorization is
+    layer-scoped), a camera pose is *asset*-scoped. Per D10 it is gated at the `vision-api` edge exactly
+    like every other asset command (`VisibilityScope#canManage`, the same split `AssetController`
+    already uses for asset writes) — this service takes a plain `UserId actor` and never throws for
+    authorization, only for a malformed input. Whether `assetId` even names a real, visible asset is
+    also the API edge's job — this service holds no warehouse-port dependency at all.
+- **`CameraCalibrationSolver`** (static-only, no interface — java-clean-code §1: one implementation, no
+  substitution point) — solves yaw/pitch/hfov from 2–8 clicked landmark correspondences (decision D5,
+  exactly). `public static CalibrationResult solve(CalibrationRequest, double maxRmsErrorPixels)`.
+  - **Method**: per landmark, `GeoProjection#bearingDistance` gives a measured bearing/range; range +
+    operator-measured AGL gives a measured depression. The landmark's normalized pixel coordinates give
+    a *predicted* azimuth/depression offset for a candidate `hfov`, via `FixedCameraGeo`'s own
+    pixel-angle formula (reused, not re-derived). A 1-D golden-section search over `hfov` ∈ [20°,120°],
+    100 fixed iterations, minimizes the summed squared residual once `yaw` (circular mean) and `pitch`
+    (plain mean) are re-fit at every candidate.
+  - **Refuses before the search** (raw geometry alone, named reasons, frozen wire text — §5): any
+    landmark nearer than 3m from the camera → `"landmark %d is %sm from the camera"`; every landmark's
+    bearing within 10° of every other (radially collinear) → `"landmarks span only %s° of bearing"`.
+    **Refuses after the search**, `N≥3` only: residual exceeding the caller-supplied
+    `maxRmsErrorPixels` → `"residual %spx exceeds %spx"`. For exactly `N==2` the fit is *always*
+    reported (D5 calls it "exact" — nothing here can independently verify that), with
+    `CalibrationQuality.UNDETERMINED` rather than a pass/fail RMS gate, regardless of the residual.
+  - **Plan gap, resolved as a named constant**: D5 states the 10°-bearing-spread and 3m-landmark-distance
+    thresholds as part of the algorithm itself, but §6's configuration YAML block does not list them
+    (unlike `calibration.max-rms-error-pixels`, which *is* listed and passed in as `maxRmsErrorPixels`).
+    Implemented as `static final MIN_BEARING_SPREAD_DEGREES`/`MIN_LANDMARK_DISTANCE_METERS` (CLAUDE.md
+    rule 1's "mathematical constant" carve-out) rather than adding undocumented config properties — flag
+    this if a later wave wants them operator-tunable.
+- **`TrackProjectionService`** (interface) → **`DefaultTrackProjectionService`** — folds a fixed
+  camera's tracked objects into ground fixes, holds the live picture, decimates the durable trail, and
+  publishes `MapEvent.EntityType#TRACK` events (decision D3).
+  - `DefaultTrackProjectionService(TrackTrailRepositoryPort, MapLiveUpdatePort, MapAccessPolicy, LayerResolver, TrackProjectionSettings)`
+    — 5-arg, at the ceiling; `TrackProjectionSettings` bundles the caller-supplied numbers (geo
+    thresholds + decimation config) to stay under it. Holds one `ConcurrentHashMap<TrackKey, ProjectedTrack>`
+    (private nested `record TrackKey(AssetId, long trackId)`) as the live picture.
+  - `void project(TrackProjectionInput)` — for each tracked object: `FixedCameraGeo.project` the pose;
+    on a fix, decimate-append a `TrackPoint` (D7: only once moved `trailMinDistanceMeters` from the
+    last stored point) and upsert+publish the live `ProjectedTrack` (`CREATED` first time, else
+    `UPDATED`); **on a refusal, publish nothing and leave prior live state exactly as it was** (D6 —
+    the honesty rule this wave's exit criteria call out by name: a below-horizon-guard refusal must not
+    look like the object left the track book). After every tracked object is handled, any *previously*
+    live track for the same asset **not** present in this tick's list is cleared (`CLEARED` published,
+    removed from the live picture) — the D3 expiry path. Implementation detail worth flagging for
+    reviewers: `seenTrackIds` records a trackId **before** checking whether its ray refused, so a
+    same-tick refusal is never mistaken for the track having dropped out.
+  - `void clearAsset(AssetId)` — clears every live track for one asset (owning stream stopped),
+    publishing `CLEARED` for each; a no-op for an asset with no live tracks.
+  - `void pruneTrail(Instant cutoff)` — one-line delegation to `TrackTrailRepositoryPort#deleteOlderThan`
+    (D7 retention prune); does not touch the live picture.
+  - `List<ProjectedTrackView> list(Viewer)` — every live track on a layer `policy.canView`s, each
+    paired with its stored trail — what `GET /api/map/tracks` rebuilds the picture from after a reload
+    (live picture from memory, trail from the port).
+- **`CameraPoseInput(position, aglMeters, yawDegrees, pitchDegrees, hfovDegrees, targetLayerId, source, rmsErrorPixels)`**
+  — `CameraPoseService#put`'s command, the frozen `PUT /api/assets/{assetId}/camera-pose` body. Numeric
+  ranges are **not** duplicated here — `CameraPose`'s own compact ctor is the single source of truth,
+  same pattern as `GeolocateSpec#depressionDegrees` leaving range validation to the kernel type it feeds.
+- **`CalibrationLandmark(u, v, mapPosition)`** — one clicked correspondence; `u`/`v` normalized pixel
+  coordinates ∈ `[0,1]`, top-left origin (so a box's bottom edge is a larger `v`, matching
+  `FixedCameraGeo`'s own convention).
+- **`CalibrationRequest(cameraPosition, aglMeters, imageWidthPixels, imageHeightPixels, landmarks)`** —
+  `CameraCalibrationSolver#solve`'s input, the frozen `POST /api/assets/{assetId}/camera-pose/calibration`
+  body; `landmarks` between `MIN_LANDMARKS=2` and `MAX_LANDMARKS=8` inclusive (→400 outside that range).
+- **`CalibrationQuality`** — `GOOD | UNDETERMINED`.
+- **`CalibrationResult(solved, pose, rmsErrorPixels, quality, reason)`** — exactly one of two shapes,
+  enforced in the compact ctor: `solved` ⇒ `pose`/`quality` non-null, `reason` null; `!solved` ⇒
+  `pose`/`quality` null, `reason` non-blank (one of the solver's frozen strings). Package-private static
+  factories `solved(...)`/`refused(reason)`/`refused(reason, rmsErrorPixels)` — never persisted by the
+  solver itself; the operator reviews the result and confirms with a separate `CameraPoseService#put`.
+- **`TrackProjectionInput(pose, imageWidthPixels, imageHeightPixels, tracks, observedAt)`** — one tick's
+  work for `TrackProjectionService#project`; `pose.assetId()` identifies which asset the tick is for (no
+  separate field, so the two can never disagree); `tracks` is perception's own current track list
+  (`List<perception.domain.model.TrackedObject>` — the new map→perception reference this wave adds, see
+  Depends-on); `observedAt` is caller-supplied so the service never calls `Instant.now()` itself and
+  stays deterministic under test.
+- **`TrackProjectionSettings(geoSettings, trailMinDistanceMeters, trailMaxPointsPerTrack)`** — bundles
+  every caller-supplied number `TrackProjectionService` needs (java-clean-code §3), sourced entirely
+  from `vision.geo.fixed-camera.*` in the running app; `geoSettings` is kernel's `FixedCameraGeoSettings`
+  (D6's refusal thresholds), passed straight through to `FixedCameraGeo.project`.
+- **`ProjectedTrackView(track, trail)`** — one row of `TrackProjectionService#list`; `trail` is every
+  stored `TrackPoint` for that track, oldest first (already decimated at write time).
+
 ## Conventions
 - Every domain record validates in its compact constructor with manual `if (…) throw new IllegalArgumentException(…)`.
 - Every `List`/`Set`/`Map` component is reassigned via `List.copyOf`/`Set.copyOf`/`Map.copyOf` in the
@@ -293,11 +433,17 @@ com.drones.vision.map.application.mark  — mark service (kept as its own subpac
   a well-known sentinel `UUID(0,0)`/`UUID(0,1)` pair redefined locally (this module may not depend on
   `vision-app`, where the equivalent `DevPrincipal` sentinel lives) — the two coincide under the
   dev/no-auth profile by construction and are simply inert elsewhere.
-- **This context declares no dependency on `AuditTrailPort`** — unlike every other context with a
-  write path, no map service audits its mutations today. If that changes, it's a new constructor
-  parameter on `DefaultMapLayerService`/`DefaultDrawingService`/`DefaultMarkService`, all already at
-  or near the 5-arg ceiling (`.claude/skills/java-clean-code/SKILL.md` §3) — bundling would likely be
-  needed.
+- **`AuditTrailPort` is used by exactly one service, `DefaultCameraPoseService`** (since wave G2) —
+  `DefaultMapLayerService`/`DefaultDrawingService`/`DefaultMarkService` still audit nothing. If that
+  changes for one of them, it's a new constructor parameter, all three already at or near the 5-arg
+  ceiling (`.claude/skills/java-clean-code/SKILL.md` §3) — bundling would likely be needed.
+- **`CameraPoseService` takes a plain `UserId actor`, not a `MapAccessPolicy.Viewer`** — the one
+  service in this context that does not follow the `Viewer`-parameter convention every layer-scoped
+  service uses (see its own API-surface entry for why: a camera pose is asset-scoped, gated at the
+  `vision-api` edge like `AssetController`, not here). Do not "fix" this into a `Viewer` parameter
+  without re-reading D10 first.
+- **The D5 bearing-spread/landmark-distance thresholds are named constants, not `application.yaml`
+  settings** — see `CameraCalibrationSolver`'s own entry above for the plan gap this papers over.
 - **`GeolocationResult.measured` does not survive a page reload** — it is computed fresh by
   `DefaultMarkService#geolocate` and returned only on that call's direct response; it is not a `Mark`
   field, so a later `list()`/`patch()` of the same mark carries no measured-vs-assumed signal at all
@@ -373,6 +519,25 @@ caller sees never regresses to a differently-worded kernel exception. Every pre-
 assertion on the no-pose path is unchanged and green, proving no behavior change when a device reports
 none of the new `Telemetry` fields. **227/227 green** (see Build/test above). `vision-web` is not yet
 updated to read `measured` off the geolocate response — a follow-up, not part of this wave.
+
+docs/plans/active/FIXED-CAMERA-GEO-PLAN.md **wave G2 done** (fixed-camera geolocation, application half —
+`contexts/vision-map/**` scope only; kernel's pixel→ground projection math, `FixedCameraGeo`/
+`FixedCameraPose`/`FixedCameraGeoSettings`/`GroundFix`, was wave G1's, read-only here): three new domain
+types (`CameraPoseSource`, `CameraPose`, `TrackPoint`, `ProjectedTrack`), `MapEvent`'s new `TRACK` entity
+type plus the `CLEARED`-valid-for-`MARK|TRACK` invariant rework (D11), two new ports
+(`CameraPoseRepositoryPort`, `TrackTrailRepositoryPort`), and the new `application.track` package in
+full — see its own API-surface section above for `CameraPoseService`+`Default`, `CameraCalibrationSolver`,
+`TrackProjectionService`+`Default`, and every command/read-model record. **282/282 green** (up from 227
+at GEO-POSE-PLAN wave V3, +55: 15 `CameraPoseTest`, 8 `TrackPointTest`, 9 `ProjectedTrackTest`, 2 new
+`MapEventTest` cases, 9 `DefaultCameraPoseServiceTest`, 5 `CameraCalibrationSolverTest` — including a
+synthetic forward-projected 3-point round trip solving sub-pixel RMS against a known-true pose, not just
+hand-picked refusal fixtures — and 7 `DefaultTrackProjectionServiceTest`). Verified green three
+consecutive foreground runs.
+
+Not in this wave's scope (owned by other G-wave agents, not touched here): `vision-api`'s
+`/api/assets/{assetId}/camera-pose`+`/calibration` REST surface and `GET /api/map/tracks`, the
+`vision-app` `TrackProjectionRunner` scheduled caller of `TrackProjectionService#project`, and
+`adapter-persistence`'s JPA implementations of the two new ports.
 
 **Cross-module note**: the map context's live channel (`"marks"` SSE topic) and `list()` are
 deliberately consistent — both deployment-wide-then-layer-scoped, never a mismatch between what a

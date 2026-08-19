@@ -1,5 +1,6 @@
 package com.drones.vision.map.domain.model;
 
+import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
@@ -32,6 +33,11 @@ class MapEventTest {
 
     private static MapLayer layer(LayerId id) {
         return new MapLayer(id, "name", LayerKind.TEAM, ownership(), List.of(), Instant.now());
+    }
+
+    private static ProjectedTrack track(LayerId layerId) {
+        return new ProjectedTrack(AssetId.random(), 1L, "car", layerId, new GeoPosition(1, 1, null),
+                50.0, 5.0, Instant.now());
     }
 
     // --- Validation ------------------------------------------------------------
@@ -97,6 +103,16 @@ class MapEventTest {
     }
 
     @Test
+    void acceptsTrackPayloadForTrackEntity() {
+        LayerId layerId = LayerId.random();
+        ProjectedTrack track = track(layerId);
+
+        MapEvent event = new MapEvent(MapEvent.EntityType.TRACK, MapEvent.Action.CREATED, layerId, track);
+
+        assertEquals(track, event.payload());
+    }
+
+    @Test
     void rejectsMismatchedPayloadType() {
         LayerId layerId = LayerId.random();
 
@@ -106,9 +122,11 @@ class MapEventTest {
                 () -> new MapEvent(MapEvent.EntityType.DRAWING, MapEvent.Action.CREATED, layerId, mark(layerId)));
         assertThrows(IllegalArgumentException.class,
                 () -> new MapEvent(MapEvent.EntityType.LAYER, MapEvent.Action.CREATED, layerId, mark(layerId)));
+        assertThrows(IllegalArgumentException.class,
+                () -> new MapEvent(MapEvent.EntityType.TRACK, MapEvent.Action.CREATED, layerId, mark(layerId)));
     }
 
-    // --- CLEARED is mark-only -----------------------------------------------------
+    // --- CLEARED is valid only for MARK and TRACK ---------------------------------
 
     @Test
     void clearedIsValidForMarkEntity() {
@@ -116,6 +134,16 @@ class MapEventTest {
         Mark mark = mark(layerId);
 
         MapEvent event = new MapEvent(MapEvent.EntityType.MARK, MapEvent.Action.CLEARED, layerId, mark);
+
+        assertEquals(MapEvent.Action.CLEARED, event.action());
+    }
+
+    @Test
+    void clearedIsValidForTrackEntity() {
+        LayerId layerId = LayerId.random();
+        ProjectedTrack track = track(layerId);
+
+        MapEvent event = new MapEvent(MapEvent.EntityType.TRACK, MapEvent.Action.CLEARED, layerId, track);
 
         assertEquals(MapEvent.Action.CLEARED, event.action());
     }
