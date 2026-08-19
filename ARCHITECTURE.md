@@ -176,7 +176,7 @@ VideoSourcePort ──frames──▶ Sampler ──every Nth──▶ Detection
                           ▼ annotated frames
               ┌───────────┼──────────────┐
               ▼           ▼              ▼
-    StreamPublisherPort RecordingPort  EventPublisherPort
+    StreamPublisherPort            EventPublisherPort
 ```
 
 Key policies (application layer, protocol-agnostic — KISS):
@@ -328,7 +328,10 @@ Domain additions land in their own phase (below) — Phase 0–2 domain stays le
 
 ### Phase 5 — Events, recording, alerting
 - [ ] Event rules engine: zones, class filters, dwell time ("person in zone > 5 s").
-- [ ] `adapter-recording`: continuous + event-triggered clips, retention.
+- [x] Recording + clip export: **shipped by a different route than planned** — mediamtx records
+  natively and `StreamPublisherPort#playbackUrl` resolves the result, so no frame ever crosses into
+  Java for recording. The `adapter-recording` this line originally planned, and the `RecordingPort`
+  it would have implemented, were both retired unbuilt (K4, docs/plans/active/DEAD-CODE-AUDIT.md §2).
 - [ ] `adapter-notify`: webhook, MQTT, Telegram.
 - **Milestone: platform acts on what it sees.**
 

@@ -88,7 +88,6 @@ implementation; commands/read-models are top-level records (`.claude/skills/java
 - `FeedTransmitterPort`: `boolean supports(FeedSpec)`; `StreamDescriptor start(FeedId, FeedSpec)` — blocking setup then background transmit, returns the descriptor the RX side ingests from; `void stop(FeedId)` — idempotent. **TX half** of the RX/TX doctrine (`docs/main/CYCLES-PLAN.md` §0) — simulation infrastructure, unrelated to `StreamPublisherPort`
 - `OverlayPort`: `VideoFrame render(AnnotatedFrame)` — synchronous, input frame never mutated, returns a distinct instance
 - `PulledDetectionPort` (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M5) — the **pull** counterpart of `DetectionPort`: the worker opens the video itself, so this JVM hands it a URL instead of frames and never decodes the stream. `Flow.Publisher<DetectionResult> open(StreamId, URI sourceUrl, PipelineConfig)` — per-open, live; `void reconfigure(StreamId, PipelineConfig)` — restates the hot fields, no-op for an unopened id; `void attitude(StreamId, CameraAttitude)` — pose for whatever frame the worker analyses next, no-op for an unopened id; `void close(StreamId)` — idempotent. Deliberately **not** an overload on `DetectionPort`: "hand me a frame" and "go get your own frames" are two shapes, and the caller honors `maxInFlightInferences` for the first while the worker paces itself for the second
-- `RecordingPort`: `void streamStarted(StreamId, Device)`; `void publish(StreamId, VideoFrame)` — cheap, no blocking I/O; `void streamEnded(StreamId)` — idempotent; shape mirrors `StreamPublisherPort` but a distinct port (durable storage vs live egress)
 - `StreamPublisherPort`: `void streamStarted(StreamId, Device)`; `void publish(StreamId, VideoFrame)` — adapter owns latest-wins drop policy; `void streamEnded(StreamId)` — idempotent; `default Optional<URI> viewUrl(StreamId)` — HLS; `default Optional<URI> whepUrl(StreamId)` — WebRTC, **never proxied** (a WHEP session is a POST/SDP+ICE exchange, not a byte stream); `default Optional<URI> playbackUrl(StreamId, Instant, Duration)` — recorded-clip window, **never proxied either**
 - `VideoSourcePort`: `boolean supports(StreamDescriptor)`; `Flow.Publisher<VideoFrame> open(StreamId, StreamDescriptor)` — per-open, hot/live, latest-wins backpressure, unrecoverable failure → `onError`; `void close(StreamId)` — idempotent
 
@@ -313,3 +312,19 @@ Two adjustments the merge itself required, both in `vision-api` rather than here
 **Tests:** `./mvnw -B -pl contexts/vision-perception test` — **507/507 green** (up from 503) — `UsageTrackerTest` 31→35 (+4): `phaseObserverFiresOnceOnUsageOpenWithNullPrevious`, `phaseObserverFiresWithPreviousAndNextOnARealTransition`, `phaseObserverDoesNotFireWhenThePhaseIsUnchanged`, `aThrowingPhaseObserverNeverBreaksSampling` (asserts both that the usage still opens/folds and that `usageRepository.save` is still called the expected number of times even though the observer throws on every invocation). No pre-existing assertion was weakened, deleted, or disabled.
 
 **Tests:** `./mvnw -B -pl contexts/vision-perception test` — **503/503 green**, confirmed on three consecutive independent runs (up from 494) — `UsageTrackerTest` 22→31 (+9), covering exactly the five required phase behaviors plus telemetry-only-open regression coverage: `newlyOpenedUsageStartsPreflight`, `armedThenDisarmedWalksPreflightThroughInFlightToPostflight` (a), `unknownArmedStateNeverLeavesPreflight` (b), `silenceThenReheardWalksInFlightThroughLinkLostBackToInFlight` (c), `sessionClosedWhileStillArmedBecomesAbandoned` (d), `telemetryOnlyAssetWithNoVideoStreamStillGetsAUsageRecord` (e), `telemetryOnlyPreflightSessionClosesWhenNeverArmedAndGoesSilent` (regression guard for the `activeDevices`/`activeVideoStreams` split), `onTelemetryDeviceDiscoveredIsIdempotentPerDevice`, `onTelemetryDeviceDiscoveredIsANoOpForAnUnownedDevice`. No pre-existing assertion was weakened, deleted, or disabled. `contexts/vision-warehouse` — **181/181 green**, also three consecutive runs (up from 170); see its own MODULE.md for the 11 new tests there.
+
+**K4 (2026-08-19, docs/plans/active/DEAD-CODE-AUDIT.md §2) — `RecordingPort` removed.** A documented
+three-method driven port (`streamStarted`/`publish`/`streamEnded`) with **zero references anywhere in
+the repo**: never implemented, never injected, never named outside its own file. Removed as a fossil
+rather than a gap, and the distinction is the whole point of the audit that found it.
+
+Recording *shipped* — it simply shipped by a different route than this port anticipated. MEDIA-SOT
+settled that **mediamtx is the video source of truth**: the media server records natively and
+`StreamPublisherPort#playbackUrl` resolves the resulting clip window, so no frame ever crosses into
+this JVM for recording purposes. The design this port belonged to — Java pushing decoded frames into
+a recorder — lost to that one, and the `adapter-recording` in `ARCHITECTURE.md`'s Phase 5 list went
+with it.
+
+Related and deliberately kept: `PixelFormat.H264_PACKET` is consumed in `DefaultProbeService.codecFor`
+but produced by no capture adapter, for the same reason — under pull mode cv-service opens the RTSP
+itself, so compressed packets never reach Java. A legitimate branch of a format enum, costing nothing.
