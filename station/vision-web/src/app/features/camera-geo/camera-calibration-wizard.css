@@ -1,0 +1,209 @@
+:host {
+  display: contents;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  background: var(--hud-bg-strong);
+  backdrop-filter: blur(2px);
+}
+
+.wizard {
+  width: min(56rem, 96vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  box-shadow: var(--shadow);
+}
+
+.wizard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.wizard-header h3 {
+  margin: 0;
+}
+
+/* ---- Camera's own measured position ------------------------------------------------------------ */
+
+.measured-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-8) var(--space-16);
+}
+
+.measured-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.measured-grid .label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+@media (max-width: 640px) {
+  /* --bp-sm */
+  .measured-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Frame + map panes --------------------------------------------------------------------------- */
+
+.wizard-panes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-16);
+}
+
+@media (max-width: 900px) {
+  /* --bp-md — same collapse point the rest of this app's two-pane layouts use */
+  .wizard-panes {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel-label {
+  margin: 0 0 var(--space-4);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.frame-frame {
+  position: relative;
+  height: 320px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.frame-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  cursor: crosshair;
+}
+
+/* A frosted pill floating directly over the snapshot image — same recipe as `tactical-map.css`'s own
+   `.badge`, self-applying `surface-dark` in the template so its text stays legible over whatever the
+   frame happens to show (frontend-style skill §2's widened HUD rule: any control floating directly
+   over video/map tiles, not only inside a `.surface-dark` root). */
+.pending-badge {
+  position: absolute;
+  left: var(--space-8);
+  bottom: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg-strong);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+  box-shadow: var(--shadow);
+  font-size: 0.72rem;
+}
+
+.map-frame {
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  /* `vision-tactical-map`'s own `.map-shell` carries a 420px floor (`tactical-map.css`) — no height
+     forced here, so both panes settle to that shared floor rather than fighting it. */
+}
+
+/* ---- Paired points list --------------------------------------------------------------------------- */
+
+.point-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+.point-row {
+  display: grid;
+  grid-template-columns: 2rem 1fr 1fr auto;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+  font-size: 0.82rem;
+}
+
+/* ---- Run + result --------------------------------------------------------------------------------- */
+
+.wizard-actions {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-16);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.result p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+/* `-text` steps, not the bare intent colour — mirrors `.chip.warn`'s own note in `styles.css`: the
+   base intent colour is tuned for fills/borders, not for text on its own `-soft` tint. */
+.result.ok {
+  border-color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.result.ok p {
+  color: var(--color-success-text);
+}
+
+.result.warn {
+  border-color: var(--color-warn);
+  background: var(--color-warn-soft);
+}
+
+.result.warn p {
+  color: var(--color-warn-text);
+}
+
+.result.danger {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.result.danger p {
+  color: var(--color-danger-text);
+}

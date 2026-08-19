@@ -656,7 +656,15 @@ export interface ProbeDeviceResult {
   readonly warnings?: readonly string[];
 }
 
-/** Mirrors `dto.ErrorResponse`, produced by `ApiExceptionHandler`. */
+/**
+ * Mirrors `dto.ErrorResponse`, produced by `ApiExceptionHandler` — this app's one real, shipped
+ * error envelope, `{error, message}`, read by `core/api-error.ts#describeHttpError` and every
+ * flag-disabled-409 detector (`core/readiness/readiness-logic.ts#isProbeDisabledError`,
+ * `core/camera-geo/camera-geo-logic.ts#isFixedCameraGeoDisabledError`). Noted here because
+ * `docs/plans/active/FIXED-CAMERA-GEO-PLAN.md` §5's own preamble illustrates its flag-off 409 as
+ * `{"detail": "…"}` instead — a different key from this established shape.
+ * `isFixedCameraGeoDisabledError` checks both defensively rather than picking one and guessing wrong.
+ */
 export interface ApiErrorBody {
   readonly error: string;
   readonly message: string;
@@ -1541,13 +1549,185 @@ export interface PatchDrawingRequest {
  * **Deliberately not snapshot-on-connect**: a fresh connection gets no backlog on this topic, so
  * every `core/map-data/**` store does its own initial `GET` first and folds deltas on top.
  */
+/**
+ * **`TRACK` entity (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D11, wave G5) — frozen with a casing
+ * mismatch, kept exactly as the plan specifies rather than silently normalized.** Every other
+ * entity/action spelling this payload carries is lowercase (verified against the shipped
+ * `MapEventPayload.java`, which lowercases `MapEvent.EntityType.name()`, and `LiveMapScopingTest`'s
+ * own literal `"mark"`/`"created"` assertions). §5's own frozen JSON for the new `TRACK` entity is
+ * uppercase verbatim — `"entity": "TRACK"`, `"action": "CREATED" | "UPDATED" | "CLEARED"` — and D11
+ * states this is "frozen here so G4's DTO mapping cannot drift", so this union follows §5 literally
+ * rather than guessing G4 will lowercase it to match the sibling entities. **Flagged, not resolved**:
+ * if G4 ships lowercase `"track"`/`"created"` instead (matching the sibling convention), this union
+ * and `core/camera-geo/camera-geo-logic.ts`'s `action`/`entity` comparisons need one follow-up edit;
+ * nothing else in this wave depends on which spelling wins.
+ */
+export type MapTrackEntity = 'TRACK';
+
+/** See {@link MapTrackEntity}'s own doc comment — the three actions §5 froze for the `TRACK` entity, uppercase like the entity itself. `DELETED` is never used for tracks (§5): `CLEARED` is the single terminal action. */
+export type MapTrackAction = 'CREATED' | 'UPDATED' | 'CLEARED';
+
+/**
+ * The `track` field of a live `TRACK` {@link MapEventPayload} (§5) — `ProjectedTrackResponse`
+ * **without `trail`** for `CREATED`/`UPDATED` (a reload's `GET /api/map/tracks` is the trail's own
+ * source — see {@link ProjectedTrackResponse}'s own doc comment). For `CLEARED` the wire carries only
+ * `assetId`/`trackId` (§5's own second example); every other field is genuinely absent then, not
+ * merely unresolved — which is why every field but those two is optional here rather than this being
+ * two separate wire types: one interface, two honestly-partial shapes depending on `action`.
+ */
+export interface ProjectedTrackLive {
+  readonly assetId: string;
+  readonly trackId: number;
+  readonly label?: string;
+  readonly layerId?: string;
+  readonly latitude?: number;
+  readonly longitude?: number;
+  readonly rangeMeters?: number;
+  readonly errorRadiusMeters?: number;
+  readonly updatedAt?: string;
+}
+
 export interface MapEventPayload {
-  readonly entity: 'mark' | 'drawing' | 'layer';
-  readonly action: 'created' | 'updated' | 'cleared' | 'deleted';
+  readonly entity: 'mark' | 'drawing' | 'layer' | MapTrackEntity;
+  readonly action: 'created' | 'updated' | 'cleared' | 'deleted' | MapTrackAction;
   readonly layerId: string;
   readonly mark?: MapMark;
   readonly drawing?: MapDrawingResponse;
   readonly layer?: MapLayer;
+  /** Present only when `entity === 'TRACK'` — see {@link ProjectedTrackLive}'s own doc comment for the CLEARED-is-partial shape. */
+  readonly track?: ProjectedTrackLive;
+}
+
+// --- Fixed-camera geolocation (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5's frozen wire contract, wave G5) ---
+// The backend does not exist yet as of this wave (G4 is blocked on G2+G3) — every shape below is
+// typed directly off the plan's §5 prose, not off a running server; property names/status
+// codes/enum spellings are what §5 calls frozen. One more discrepancy flagged here (see
+// `ApiErrorBody`'s own doc comment for the first, `MapEventPayload`'s `TRACK` entity above): §5's
+// preamble illustrates the flag-off 409 body as `{"detail": "…"}`, but this app's one real,
+// shipped error envelope (`ApiErrorBody`, this file, `{error, message}`) is what every other
+// flag-gated 409 in this codebase actually uses (`core/readiness/readiness-logic.ts#isProbeDisabledError`'s
+// own precedent). `core/camera-geo/camera-geo-logic.ts#isFixedCameraGeoDisabledError` checks both
+// `message` and `detail` defensively rather than picking one and guessing wrong.
+
+export type CameraPoseSource = 'MANUAL' | 'CALIBRATED';
+
+/**
+ * Mirrors `CameraPoseResponse` (§5) — the 200 body of `GET`/`PUT /api/assets/{assetId}/camera-pose`.
+ * `targetLayerId`/`rmsErrorPixels` are absent (not `null`) when unset, this file's own
+ * `@JsonInclude(NON_NULL)` convention (see this file's top doc comment).
+ */
+export interface CameraPoseResponse {
+  readonly assetId: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly aglMeters: number;
+  readonly yawDegrees: number;
+  readonly pitchDegrees: number;
+  readonly hfovDegrees: number;
+  readonly targetLayerId?: string;
+  readonly source: CameraPoseSource;
+  readonly rmsErrorPixels?: number;
+  readonly updatedAt: string;
+}
+
+/**
+ * The body of `PUT /api/assets/{assetId}/camera-pose` (§5) — manual entry (`source: 'MANUAL'`), or
+ * confirming a solve (send the calibration result's own `pose` fields back verbatim with
+ * `source: 'CALIBRATED'`). `targetLayerId`/`rmsErrorPixels` are explicit `null`, not omitted — this
+ * is a PUT (whole-resource replace), unlike {@link PatchMarkRequest}'s partial-patch convention.
+ */
+export interface CameraPoseRequest {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly aglMeters: number;
+  readonly yawDegrees: number;
+  readonly pitchDegrees: number;
+  readonly hfovDegrees: number;
+  readonly targetLayerId: string | null;
+  readonly source: CameraPoseSource;
+  readonly rmsErrorPixels: number | null;
+}
+
+/**
+ * One frame-click ↔ map-click correspondence in a calibration attempt (§5, D5) — `u`/`v` are
+ * normalized pixel coordinates in `[0,1]`, top-left origin, `v` measured from the top of the frame
+ * (D3's own "bbox bottom-centre" convention for a live track's pixel, mirrored here for a
+ * calibration landmark click).
+ */
+export interface CalibrationPointRequest {
+  readonly u: number;
+  readonly v: number;
+  readonly latitude: number;
+  readonly longitude: number;
+}
+
+/** The body of `POST /api/assets/{assetId}/camera-pose/calibration` (§5) — solves but **never persists**; 2–8 `points`, `400` outside that range or for a `u`/`v` outside `[0,1]`. */
+export interface CalibrateCameraPoseRequest {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly aglMeters: number;
+  readonly imageWidth: number;
+  readonly imageHeight: number;
+  readonly points: readonly CalibrationPointRequest[];
+}
+
+/** `'GOOD'` for a ≥3-point solve within tolerance; `'UNDETERMINED'` for an exact 2-point fit (D5 — the residual is meaningless with only two points; the UI says "add a third point to verify"). `null` on the whole result exactly when `solved: false`. */
+export type CalibrationQuality = 'GOOD' | 'UNDETERMINED';
+
+/**
+ * Mirrors the 200 body of `POST .../camera-pose/calibration` (§5, D5) — a discriminated union on
+ * `solved`, matching the two literal shapes §5 documents. `solved: true` carries `pose`/`quality`
+ * and a `null` `reason`. `solved: false` carries a `null` `pose`/`quality` and a **verbatim** `reason`
+ * string — D5's own frozen examples are `"residual 41.0px exceeds 25.0px"`,
+ * `"landmarks span only 6° of bearing"`, `"landmark 2 is 1.4m from the camera"` — that this app must
+ * render exactly, never paraphrased or re-worded: this wave's own brief requires "refusal reasons
+ * shown verbatim, and offers no save" (`features/camera-geo/camera-calibration-wizard.ts`).
+ */
+export type CalibrationResult =
+  | {
+      readonly solved: true;
+      readonly pose: CameraPoseResponse;
+      readonly rmsErrorPixels: number;
+      readonly quality: CalibrationQuality;
+      readonly reason: null;
+    }
+  | {
+      readonly solved: false;
+      readonly pose: null;
+      readonly rmsErrorPixels: number;
+      readonly quality: null;
+      readonly reason: string;
+    };
+
+/** One trail point of a {@link ProjectedTrackResponse} (§5) — oldest→newest, already decimated server-side (D7). */
+export interface ProjectedTrackPoint {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly at: string;
+}
+
+/**
+ * Mirrors `ProjectedTrackResponse` (§5) — one row of `GET /api/map/tracks`. `errorRadiusMeters` is
+ * drawn as a circle under the track dot **always**, never conditionally — D6's own "a 200m-error
+ * estimate must never render as a 5m-accurate-looking dot" — see
+ * `shared/map/tactical-map/tactical-map.ts`'s `applyTracks`.
+ */
+export interface ProjectedTrackResponse {
+  readonly assetId: string;
+  readonly trackId: number;
+  readonly label: string;
+  readonly layerId: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly rangeMeters: number;
+  readonly errorRadiusMeters: number;
+  readonly updatedAt: string;
+  readonly trail: readonly ProjectedTrackPoint[];
+}
+
+/** The body of `GET /api/map/tracks` (§5) — every track on a layer the viewer `canView`s (D10). */
+export interface MapTracksResponse {
+  readonly tracks: readonly ProjectedTrackResponse[];
 }
 
 // --- Recording + clip export (docs/plans/done/OPS-CORE-PLAN.md §R's frozen wire contract) ------------------

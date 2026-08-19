@@ -1,0 +1,100 @@
+:host {
+  display: contents;
+}
+
+.empty-actions,
+.pose-actions {
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* ---- Facts grid (mirrors `asset-detail.css`'s own copy, itself mirroring
+   `shared/player/stream-info-panel.ts` — CSS encapsulation means every consumer needs its own). --- */
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-8) var(--space-16);
+  margin: var(--space-8) 0;
+}
+
+.fact dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.fact dd {
+  margin: var(--space-2) 0 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Detection-state chip + explanation (D9) ---------------------------------------------------
+   `detectionTone()` can also resolve to `'muted'` (OFF / unknown) — the app's global `.chip` has no
+   `.chip.muted` variant on purpose: its own base rule already renders `color: var(--text-muted)` on
+   a `--panel-raised` fill, which *is* the muted look every other quiet chip in this app falls back
+   to when it carries no `.accent`/`.ok`/`.warn`/`.danger` class. So the template simply omits a tone
+   class for that case rather than inventing a fifth chip variant this app doesn't otherwise have. */
+
+.detection-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
+
+.detection-state .hint {
+  margin: 0;
+}
+
+/* ---- Manual pose entry modal (same true-modal mechanics as `shared/ui/confirm-dialog.ts`) ------- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  background: var(--hud-bg-strong);
+  backdrop-filter: blur(2px);
+}
+
+.manual-form {
+  width: min(28rem, 100%);
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  box-shadow: var(--shadow);
+}
+
+.manual-form header h3 {
+  margin: 0;
+}
+
+.manual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-8) var(--space-16);
+}
+
+.manual-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.manual-grid .label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.dialog-actions {
+  justify-content: flex-end;
+}

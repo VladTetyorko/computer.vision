@@ -1,0 +1,120 @@
+<div class="backdrop">
+  <div class="dialog card wizard" role="dialog" aria-modal="true" aria-label="Calibrate camera">
+    <header class="wizard-header">
+      <h3>Calibrate camera</h3>
+      <button type="button" class="btn secondary small" (click)="close()" aria-label="Close calibration wizard">
+        <vision-icon name="close" [size]="14" />
+      </button>
+    </header>
+
+    <p class="muted hint">
+      Enter this camera's own measured position, then click a landmark in the frame and the same point on the map.
+      Repeat for 2–8 landmarks spread across the frame, then run the calibration.
+    </p>
+
+    <div class="measured-grid">
+      <label>
+        <span class="label">Camera latitude</span>
+        <input
+          type="text"
+          inputmode="decimal"
+          class="mono"
+          [ngModel]="measured().latitude"
+          (ngModelChange)="updateMeasured('latitude', $event)"
+        />
+      </label>
+      <label>
+        <span class="label">Camera longitude</span>
+        <input
+          type="text"
+          inputmode="decimal"
+          class="mono"
+          [ngModel]="measured().longitude"
+          (ngModelChange)="updateMeasured('longitude', $event)"
+        />
+      </label>
+      <label>
+        <span class="label">Height AGL (m)</span>
+        <input
+          type="text"
+          inputmode="decimal"
+          class="mono"
+          [ngModel]="measured().aglMeters"
+          (ngModelChange)="updateMeasured('aglMeters', $event)"
+        />
+      </label>
+    </div>
+
+    <div class="wizard-panes">
+      <div class="frame-pane">
+        <p class="panel-label">Frame — click a landmark</p>
+        @if (resolvingStream()) {
+          <p class="muted hint">Loading a snapshot…</p>
+        } @else if (!snapshotUrl()) {
+          <p class="muted hint">No active stream — start this camera's stream to take a calibration snapshot.</p>
+        } @else {
+          <div class="frame-frame">
+            <img
+              #frameImg
+              [src]="snapshotUrl()"
+              alt="Camera snapshot for calibration"
+              (load)="onFrameImageLoad(frameImg)"
+              (click)="onFrameClick($event, frameImg)"
+            />
+            @if (pending()) {
+              <span class="pending-badge surface-dark">Pending — click the same point on the map</span>
+            }
+          </div>
+        }
+      </div>
+
+      <div class="map-pane">
+        <p class="panel-label">Map — click the same point</p>
+        <div class="map-frame">
+          <vision-tactical-map interactionMode="view" (mapClicked)="onMapClick($event)" />
+        </div>
+      </div>
+    </div>
+
+    @if (points().length > 0) {
+      <ul class="point-list">
+        @for (point of points(); track $index) {
+          <li class="point-row">
+            <span class="mono">#{{ $index + 1 }}</span>
+            <span class="mono">frame ({{ point.u }}, {{ point.v }})</span>
+            <span class="mono">{{ point.latitude.toFixed(5) }}, {{ point.longitude.toFixed(5) }}</span>
+            <button type="button" class="btn secondary small" (click)="removePoint($index)" aria-label="Remove this point">
+              <vision-icon name="trash" [size]="13" />
+            </button>
+          </li>
+        }
+      </ul>
+    }
+
+    <div class="row wizard-actions">
+      <button type="button" class="btn primary" (click)="runCalibration()" [disabled]="!canRun() || solving()">
+        {{ solving() ? 'Solving…' : 'Run calibration' }}
+      </button>
+      <span class="muted hint">{{ points().length }} of 2–8 points</span>
+    </div>
+
+    @if (resultSummary(); as summary) {
+      <div class="result" [class.ok]="resultTone() === 'ok'" [class.warn]="resultTone() === 'warn'" [class.danger]="resultTone() === 'danger'">
+        <p>{{ summary }}</p>
+        @if (canSave()) {
+          <button type="button" class="btn primary" (click)="requestSave()" [disabled]="saving()">Save pose</button>
+        }
+      </div>
+    }
+  </div>
+</div>
+
+@if (confirmingSave()) {
+  <vision-confirm-dialog
+    message="Save this calibrated pose? It replaces the camera's current pose and starts projecting tracks with it immediately."
+    confirmLabel="Save pose"
+    [busy]="saving()"
+    (confirmed)="confirmSave()"
+    (cancelled)="cancelSave()"
+  />
+}

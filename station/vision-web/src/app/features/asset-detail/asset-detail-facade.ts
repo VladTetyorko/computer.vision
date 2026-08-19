@@ -13,6 +13,7 @@ import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { MarksStore } from '../../core/map-data/marks-store';
 import { LayersStore } from '../../core/map-data/layers-store';
 import { DrawingsStore } from '../../core/map-data/drawings-store';
+import { TracksStore } from '../../core/map-data/tracks-store';
 import { followMarkers } from '../../shared/map/tactical-map/tactical-map-logic';
 import { AuthStore } from '../../core/auth/auth-store';
 import { canManageOrg } from '../../core/org/org-logic';
@@ -146,6 +147,10 @@ export class AssetDetailFacade {
   /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/plans/done/MAP-REWORK-PLAN.md §5.2). */
   readonly layers = inject(LayersStore);
   readonly drawings = inject(DrawingsStore);
+  /** Projected fixed-camera tracks (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G5) — the same
+   *  org-wide, already-scoped picture `marks`/`drawings`/`geofence` show on this card's map, not
+   *  filtered to this one asset (this card's map has never been per-asset-scoped for its overlays). */
+  readonly tracks = inject(TracksStore);
 
   /** Switches the map into follow mode; `null` until the asset has loaded. */
   readonly mapFollowAssetId = computed(() => this.asset()?.assetId ?? null);
