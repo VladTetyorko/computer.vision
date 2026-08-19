@@ -55,6 +55,17 @@ import java.util.function.Supplier;
  * <p>A {@code null} {@code assetId} is <i>not</i> a failure and is not covered by the above — it is
  * the ordinary "this stream has no owning asset" case, which simply skips the SSE half and lets the
  * poll half answer on its own.
+ *
+ * <h2>Third OR-term: a calibrated fixed camera (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D9)</h2>
+ * {@link #hasCameraPose}, exactly like {@link #watchingDetections}, is a narrow {@code
+ * Predicate<AssetId>} seam rather than a dependency on {@code TrackProjectionRunner} itself —
+ * {@code CvWiring#detectionDemandPort} resolves it from an {@code ObjectProvider}, defaulting to
+ * {@code assetId -> false} when the runner bean does not exist ({@code
+ * vision.geo.fixed-camera.enabled=false}, the default), which reproduces this class's pre-G4
+ * behaviour exactly (hazard 2 in that plan's §8: this must consult a cache the runner refreshes
+ * once per tick, never hit a repository per poll tick). The two public constructors that omit it
+ * ({@link #LiveAndPollDetectionDemand(Predicate, Duration)} and the package-private clock-seam
+ * overload) default it the same way, so every pre-existing caller/test is unaffected.
  */
 public final class LiveAndPollDetectionDemand implements DetectionDemandPort {
 
@@ -62,17 +73,40 @@ public final class LiveAndPollDetectionDemand implements DetectionDemandPort {
 
     private final Predicate<AssetId> watchingDetections;
     private final Duration pollTtl;
+    private final Predicate<AssetId> hasCameraPose;
     private final Supplier<Instant> clock;
     private final ConcurrentHashMap<StreamId, Instant> polledAt = new ConcurrentHashMap<>();
 
     public LiveAndPollDetectionDemand(Predicate<AssetId> watchingDetections, Duration pollTtl) {
-        this(watchingDetections, pollTtl, Instant::now);
+        this(watchingDetections, pollTtl, assetId -> false, Instant::now);
+    }
+
+    /**
+     * Adds the D9 fixed-camera OR-term to the two-arg constructor.
+     *
+     * @param watchingDetections whether any live connection is watching an asset's detections
+     * @param pollTtl            how long a {@link #touched} stream counts as polled-demand
+     * @param hasCameraPose      whether an asset currently has a stored, flag-enabled camera pose
+     *                           (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D9) — {@code
+     *                           TrackProjectionRunner#hasCameraPose}, or {@code assetId -> false}
+     *                           when the feature is off/absent
+     */
+    public LiveAndPollDetectionDemand(Predicate<AssetId> watchingDetections, Duration pollTtl,
+                                       Predicate<AssetId> hasCameraPose) {
+        this(watchingDetections, pollTtl, hasCameraPose, Instant::now);
     }
 
     /** Test seam: an injectable clock so tests can move time without sleeping. */
     LiveAndPollDetectionDemand(Predicate<AssetId> watchingDetections, Duration pollTtl, Supplier<Instant> clock) {
+        this(watchingDetections, pollTtl, assetId -> false, clock);
+    }
+
+    /** Canonical constructor: every collaborator, including the injectable clock. */
+    LiveAndPollDetectionDemand(Predicate<AssetId> watchingDetections, Duration pollTtl,
+                                Predicate<AssetId> hasCameraPose, Supplier<Instant> clock) {
         this.watchingDetections = Objects.requireNonNull(watchingDetections, "watchingDetections must not be null");
         this.pollTtl = Objects.requireNonNull(pollTtl, "pollTtl must not be null");
+        this.hasCameraPose = Objects.requireNonNull(hasCameraPose, "hasCameraPose must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -91,7 +125,9 @@ public final class LiveAndPollDetectionDemand implements DetectionDemandPort {
     @Override
     public boolean detectionWanted(StreamId streamId, AssetId assetId) {
         try {
-            return (assetId != null && watchingDetections.test(assetId)) || recentlyPolled(streamId);
+            return (assetId != null && watchingDetections.test(assetId))
+                    || (assetId != null && hasCameraPose.test(assetId))
+                    || recentlyPolled(streamId);
         } catch (RuntimeException e) {
             // Fail OPEN -- see the class javadoc's Contract section. "We could not determine this"
             // is not "nobody is watching", and reporting it as the latter would stop detection

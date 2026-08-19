@@ -5,8 +5,10 @@ JPA/Postgres persistence adapter for every repository port the platform has: the
 telemetry samples, detection results (docs/plans/done/MVP2-PLAN.md P-b) — geofence zones
 (docs/plans/done/OPS-CORE-PLAN.md §G, G-b) — identity: users + groups (docs/plans/done/U-AUTH-PLAN.md wave 3) —
 pilot→asset assignments (docs/plans/done/U-SCOPE-PLAN.md slice 2) — tactical marks, the shared
-operational picture (docs/plans/done/TACTICAL-MARKS-PLAN.md M2) — and the map's Common Operational Picture:
-layers with grantable access, and drawings (docs/plans/done/MAP-REWORK-PLAN.md Wave C).
+operational picture (docs/plans/done/TACTICAL-MARKS-PLAN.md M2) — the map's Common Operational Picture:
+layers with grantable access, and drawings (docs/plans/done/MAP-REWORK-PLAN.md Wave C) — and, for fixed
+(non-tracking) cameras, a calibrated pose per asset plus the decimated ground-track trail its projected
+detections leave behind (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3).
 
 **Depends on:** vision-domain, `org.hibernate.orm:hibernate-core`, `org.hibernate.orm:hibernate-hikaricp`
 (docs/plans/active/SCALE-100-PLAN.md S3 — declared for its version pin only, see "Connection pool" below for why
@@ -17,7 +19,15 @@ reference `HikariConfig`/`HikariDataSource` directly), `org.postgresql:postgresq
 (Jackson 3, for jsonb columns — see Conventions) · **Used by:** vision-app
 (`PersistenceWiringConfiguration` — unconditional since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b;
 the `vision.persistence.enabled` flag is gone, Postgres is the only store)
-**Build/test:** `./mvnw -B -pl storage/persistence test` — 148 tests (up from 137 — measured directly
+**Build/test:** `./mvnw -B -pl storage/persistence -am test` — **205 tests** (up from 188, `Skipped: 0`,
+docker reachable — measured directly via three consecutive foreground runs, docs/plans/active/
+FIXED-CAMERA-GEO-PLAN.md wave G3: `camera_poses` (audited)/`projected_track_points` (excluded) —
+`CameraPoseEntity`/`TrackPointEntity`, `JpaCameraPoseRepository`/`JpaTrackTrailRepository` implementing
+`CameraPoseRepositoryPort`/`TrackTrailRepositoryPort` (`contexts/vision-map`, wave G2), `V22__fixed_camera_geo.sql`
+— +14 `CameraPoseRepositoryTests`/`TrackTrailRepositoryTests` round-trip cases, +2 `DbAuditLogRepositoryTests`
+cases (a pose update names its changed column, a trail insert leaves no row), +1 `v22Migration...` schema
+test, both `DbAuditLogCoverageTests` lists updated; see "Database change audit" and this module's own
+entity/repository bullets below for the full account) — 148 tests (up from 137 — measured directly
 via `./mvnw -B -pl storage/persistence clean test`, docker reachable, nothing skipped; docs/plans/active/SCALE-100-PLAN.md
 S3: a real HikariCP-backed connection pool, shared with Flyway, replaces Hibernate's built-in unpooled
 `DriverManagerConnectionProvider` — new `PersistencePoolSettingsTest` (7) + `ClosingDatasourceConnectionProviderTest`
@@ -78,14 +88,17 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 
 ## API surface
 
-**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (22
-`Jpa*Repository`/`Jpa*Store` classes, up from 21 — the database change audit wave added
-`JpaDbAuditLogRepository`, the one class in this package that implements no port at all, see "Database
-change audit" below; up from 19, docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 added
-`JpaVehicleProfileRepository`/`JpaFeatureRequirementRepository`), `mapper/` (20 entity↔domain mapper classes,
-one per aggregate — extracted out of the repositories that used to inline `toEntity`/`toDomain` as
-private static methods), `config/` (`PersistenceUnit`, `JpaOperations`), `entity/` (unchanged, see
-below). This module gets no `controller/`, `dto/`, or `service/` package — it is a driven adapter.
+**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (24
+`Jpa*Repository`/`Jpa*Store` classes, up from 22 — docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3
+added `JpaCameraPoseRepository`/`JpaTrackTrailRepository`; up from 21 — the database change audit wave
+added `JpaDbAuditLogRepository`, the one class in this package that implements no port at all, see
+"Database change audit" below; up from 19, docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 added
+`JpaVehicleProfileRepository`/`JpaFeatureRequirementRepository`), `mapper/` (22 entity↔domain mapper
+classes, up from 20 — wave G3 added `CameraPoseMapper`/`TrackPointMapper`, one per aggregate —
+extracted out of the repositories that used to inline `toEntity`/`toDomain` as private static methods),
+`config/` (`PersistenceUnit`, `JpaOperations`), `entity/` (24 classes, up from 22 — wave G3 added
+`CameraPoseEntity`/`TrackPointEntity`, see below). This module gets no
+`controller/`, `dto/`, or `service/` package — it is a driven adapter.
 
 ### `com.drones.vision.adapter.persistence.repository`
 - `final class JpaCategoryRepository implements CategoryRepositoryPort` — constructor `(EntityManagerFactory)`.
@@ -110,6 +123,8 @@ below). This module gets no `controller/`, `dto/`, or `service/` package — it 
 - `final class JpaVehicleProfileRepository implements VehicleProfileRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 — `save` always `persist`s a brand-new row (append-only, `VehicleProfile` carries no id to merge by — see `VehicleProfileEntity`'s own javadoc); `findLatest(DeviceId)` is `order by observedAt desc` + `setMaxResults(1)`, same "newest row" shape as `JpaAssetRepository`/`JpaAssetUsageRepository`'s own single-row-latest queries. **O11 additions** (`V20__vehicle_profile_usage_link.sql`, the flight-passport wave): `save(DeviceId, UsageId, FlightPhase, VehicleProfile)` — same always-`persist` shape, tagged with the two new columns; `findByUsageAndPhase(UsageId, FlightPhase)` — same "newest row" query, filtered on `usage_id`/`phase` instead of `device_id`, backed by `idx_vehicle_profiles_usage_phase`.
 - `final class JpaFeatureRequirementRepository implements FeatureRequirementRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6 — **read-only**: the port has no `save` method at all, every row is Flyway seed data (`V18__feature_requirements.sql`), never written by application code. `findByFirmware`/`findAll` are plain JPQL selects.
 - `final class JpaDbAuditLogRepository` — constructor `(EntityManagerFactory)`. **The one class in this package implementing no port** — see "Database change audit" below for why: every row in `db_audit_log` is written by a Postgres trigger (`V21__db_audit_log.sql`), never by this class, and there is deliberately no domain port for it (infrastructure, not a concept any context module should import). Two read methods, matching the table's two indexes: `findRecent(int limit)` (newest overall) and `findRecentForRow(String tableName, String rowId, int limit)` (newest for one row) — both order by `occurredAt desc, id desc`, the `id` tiebreaker because two rows written inside the same transaction can share a timestamp down to the column's own precision.
+- `final class JpaCameraPoseRepository implements CameraPoseRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4, wave G3 — one calibrated camera pose per fixed asset; `save` is merge-by-`assetId` upsert (`asset_id` is the primary key, not synthetic — same "owning id doubles as the uniqueness constraint" shape as `JpaAssetImageRepository`), `deleteByAssetId` a find-then-remove, idempotent. This table **is** audited (`trg_audit_camera_poses`, `V22__fixed_camera_geo.sql`).
+- `final class JpaTrackTrailRepository implements TrackTrailRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7, wave G3 — the decimated ground-track breadcrumb trail a projected detection leaves behind; `save` always `persist`s a brand-new row (append-only, `TrackPoint` carries no id to merge by, same "always persist" shape as `JpaDetectionRepository`/`JpaTelemetryRepository`), `findByTrack` orders oldest→newest (`capturedAt asc, id asc`), `findLatest` newest-first bounded to one row. `trimToMostRecent`/`deleteOlderThan` are each one bulk delete rather than a fetch-then-delete round trip — `trimToMostRecent`'s "keep only the newest N" query reuses `JpaDetectionEventRepository#pruneOldest`'s delete-not-in-a-bounded-select shape, scoped to `(asset_id, track_id)`; both are safe to call every tick (no-op when nothing is over the cap/cutoff). This table is **excluded** from `db_audit_log` (high-volume machine output, `V22__fixed_camera_geo.sql`).
 
 Every repository above composes a `com.drones.vision.adapter.persistence.config.JpaOperations`
 (one constructor argument, the module's `EntityManagerFactory`) and, except
@@ -132,8 +147,13 @@ JPA/transaction plumbing that stayed in `repository`).
 `DetectionResultMapper`, `AssetImageMapper`, `GeofenceZoneMapper`, `UserMapper`, `GroupMapper`,
 `MarkMapper`, `DatasetMapper`, `TrainingSampleMapper`, `SampleImageMapper`, `MapLayerMapper`,
 `DrawingMapper`, `AuditEntryMapper`, `DetectionEventMapper`, `VehicleProfileMapper`,
-`FeatureRequirementMapper` — 20 mappers (up from 18, docs/plans/active/DRONE-ONBOARDING-PLAN.md O5),
-one per aggregate the module's 21 repositories cover. `TelemetryMapper#toEntity`/`DetectionResultMapper#toEntity`
+`FeatureRequirementMapper`, `CameraPoseMapper`, `TrackPointMapper` — 22 mappers (up from 20,
+docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3), one per aggregate the module's 23 repositories
+cover. `CameraPoseMapper#toEntity`/`TrackPointMapper#toEntity` each flatten their record's single
+`GeoPosition position` field to `latitude`/`longitude`/nullable `altitudeMeters` columns — the same
+choice `MarkMapper` already makes for its own single-point position — and take no extra id argument
+(`CameraPose`/`TrackPoint` both already carry every id their entity needs: `assetId`, and for
+`TrackPoint`, `trackId`). `TelemetryMapper#toEntity`/`DetectionResultMapper#toEntity`
 take the extra argument (`UsageId`, or none) their entities' synthetic id generation needs;
 `AssetImageMapper#toEntity`/`SampleImageMapper#toEntity` each take the owning id (`AssetId`/
 `TrainingSampleId`) plus the domain value object, matching the shape `JpaAssetImageRepository`/
@@ -156,7 +176,7 @@ no logic behind them — exactly the "empty ceremony" the plan's own guardrail w
 creating. Flagged here rather than silently decided, per this wave's brief.
 
 ### `com.drones.vision.adapter.persistence.config`
-- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password[, boolean seedDevUsers[, PersistencePoolSettings poolSettings]])`: builds one pooled `HikariDataSource` (docs/plans/active/SCALE-100-PLAN.md S3), migrates the schema through it with Flyway (`classpath:db/migration`, plus `classpath:db/seed/dev` when `seedDevUsers` is `true` — see the `db/seed/dev` schema entry below), then opens a Hibernate-native `EntityManagerFactory` over that same `DataSource` mapping every entity below — twenty-two as of the database change audit wave (`DbAuditLogEntity` added, see "Database change audit" below; this line previously read "nineteen," already stale before this wave — the running count was not kept in sync every prior wave either) (see "Connection pool" below and the "W1 done" narrative section near the end of this file for the `ignoreMigrationPatterns` story). The 3-arg and 4-arg overloads (`seedDevUsers` implicitly `false`, and/or `poolSettings` implicitly `PersistencePoolSettings.defaults()`) are kept so pre-existing callers (e.g. `PostgresDockerIntegrationTest`) don't need to change. The 5-arg overload is the one vision-app's wiring should move to, once it can bind `vision.persistence.pool.*` — see "Connection pool" below for the exact keys.
+- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password[, boolean seedDevUsers[, PersistencePoolSettings poolSettings]])`: builds one pooled `HikariDataSource` (docs/plans/active/SCALE-100-PLAN.md S3), migrates the schema through it with Flyway (`classpath:db/migration`, plus `classpath:db/seed/dev` when `seedDevUsers` is `true` — see the `db/seed/dev` schema entry below), then opens a Hibernate-native `EntityManagerFactory` over that same `DataSource` mapping every entity below — twenty-four as of wave G3 (`CameraPoseEntity`/`TrackPointEntity` added, docs/plans/active/FIXED-CAMERA-GEO-PLAN.md; twenty-two as of the database change audit wave before it, `DbAuditLogEntity`, see "Database change audit" below; this line previously read "nineteen," already stale before that wave — the running count was not kept in sync every prior wave either) (see "Connection pool" below and the "W1 done" narrative section near the end of this file for the `ignoreMigrationPatterns` story). The 3-arg and 4-arg overloads (`seedDevUsers` implicitly `false`, and/or `poolSettings` implicitly `PersistencePoolSettings.defaults()`) are kept so pre-existing callers (e.g. `PostgresDockerIntegrationTest`) don't need to change. The 5-arg overload is the one vision-app's wiring should move to, once it can bind `vision.persistence.pool.*` — see "Connection pool" below for the exact keys.
 - `public final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas). **Public, not package-private** (widened from the pre-refactor package-private): the `repository` package it now serves lives in a sibling package, so cross-package visibility is required — see Gotchas for the full visibility-widening note.
 - `record PersistencePoolSettings(int maximumPoolSize, int minimumIdle, long connectionTimeoutMillis, long leakDetectionThresholdMillis)` (docs/plans/active/SCALE-100-PLAN.md S3) — the four HikariCP knobs `PersistenceUnit` needs, pulled out as a framework-free record so no magic number lives inline in `PersistenceUnit` itself (CLAUDE.md rule 1). Compact constructor validates `maximumPoolSize >= 1`, `0 <= minimumIdle <= maximumPoolSize`, `connectionTimeoutMillis > 0`, `leakDetectionThresholdMillis >= 0` (`0` means "disabled", Hikari's own convention). `static PersistencePoolSettings defaults()` returns `maximumPoolSize=20, minimumIdle=5, connectionTimeoutMillis=30_000, leakDetectionThresholdMillis=30_000` — sized for ~100 concurrent users on one instance, not a placeholder; each default's justification is on its own `DEFAULT_*` constant's javadoc. vision-app's `VisionPersistenceProperties` is the intended source of a non-default instance, via `vision.persistence.pool.*` (see "Connection pool" below) — this module never reads Spring config itself.
 - `final class ClosingDatasourceConnectionProvider extends org.hibernate.engine.jdbc.connections.internal.DatasourceConnectionProviderImpl` (docs/plans/active/SCALE-100-PLAN.md S3) — the one behavior it adds over its base class: overriding `stop()` to also close the configured `DataSource` if it is `Closeable` (which `HikariDataSource` is). The base class assumes a container-managed `DataSource` Hibernate never owns and must never close (its `stop()` is a no-op); that assumption is wrong here, since `PersistenceUnit.start` builds and *owns* the pool. Hibernate instantiates it via `hibernate.connection.provider_class` (a bare class name, reflection, no-arg constructor) and calls `configure(Map)` — never constructed directly by this module's own code outside tests.
@@ -182,7 +202,9 @@ creating. Flagged here rather than silently decided, per this wave's brief.
 - `DetectionEventEntity` (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3, `V15__detection_events.sql`) mirrors `DetectionEvent` field-for-field: `id` is the domain's own `DetectionEventId` (not synthetic — unlike `DetectionResultEntity`, an event mutates over its own open lifetime and needs a stable key to upsert by). `position` is a single, entirely-optional `GeoPosition`, flattened to nullable `position_latitude`/`position_longitude`/`position_altitude_meters` columns exactly like `AssetUsageEntity#startPosition`/`#lastPosition` (a lat/lon pair is null together iff the position itself is null) — the deliberate opposite of `GeofenceZoneEntity#polygon`'s jsonb choice for a whole vertex list. `state` reuses the domain `DetectionEventState` enum directly. No FK to any other table; `(stream_id, last_seen)` and `last_seen` alone are both indexed (`findByStream`/the retention prune query, and `findRecent`, respectively).
 - `VehicleProfileEntity` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5, `V17__vehicle_profiles.sql`) mirrors `VehicleProfile` field-for-field: `id` is a synthetic UUID (append-only observation, no domain identity — same rationale as `DetectionResultEntity`/`TelemetrySampleEntity`); `deviceId` is the FK the port's own `save(DeviceId, VehicleProfile)`/`findLatest(DeviceId)` key on, same "key lives in the port call, not a domain field" idiom as `TelemetrySampleEntity#usageId`. `capabilityFlags`/`messages`/`parameters` are jsonb — each row is only ever read back whole, never queried into by individual message/parameter, same convention as `DetectionResultEntity#detections`. Indexed on `(device_id, observed_at DESC)` for `findLatest`'s "newest row for this device" query. **O11 additions** (`V20__vehicle_profile_usage_link.sql`, the flight-passport wave): nullable `usageId`/`phase` fields — `phase` reuses the domain `FlightPhase` enum directly (`@Enumerated(EnumType.STRING)`, same `AssetUsageEntity#phase` convention); both are set together or neither (a row from the untagged `save(DeviceId, VehicleProfile)` — readiness's own ad hoc probes — has both `null`; a row from `save(DeviceId, UsageId, FlightPhase, VehicleProfile)` has both set). Indexed on `(usage_id, phase, observed_at DESC)` for `findByUsageAndPhase`'s "newest tagged row" query.
 - `FeatureRequirementEntity` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5/D6, `V18__feature_requirements.sql`) mirrors `FeatureRequirement` field-for-field: `id` is a synthetic `"<firmware>:<featureKey>"` natural key this entity invents purely for a JPA primary key — the domain record carries no id field, but unlike `DetectionResultEntity`'s random-UUID precedent (a genuinely identity-less append-only record), a requirement row is reference data addressed by its own natural composite key, so a stable human-readable id lets the seed migration use `ON CONFLICT (id) DO NOTHING`, the same role `CategoryEntity`'s natural string id plays for `categories`. **Read-only**: the port has no `save` method — every row is seed data written by Flyway (`V18`), never by application code. No FK to any other table (reference/global data, same convention as `geofence_zones`/`categories`); indexed on `firmware` (`findByFirmware`'s access path).
-- `DbAuditLogEntity` (`V21__db_audit_log.sql`) — the database change audit; see "Database change audit" below for the full picture. **Read-only from Hibernate's side**: every row is written by that migration's `audit_row_change()` trigger function, never by a `persist`/`merge` call anywhere in this module — mapped here purely so `JpaDbAuditLogRepository`'s reads go through the same `jakarta.persistence` API as every other repository. `id` is a synthetic `BIGINT GENERATED ALWAYS AS IDENTITY` column (`@GeneratedValue(strategy = GenerationType.IDENTITY)`) rather than a UUID this module invents in Java — the only entity in this schema whose id Postgres itself generates, since the trigger that creates each row runs entirely inside the database. `rowId` is `String`, not `UUID`, even though every primary key in this schema is in fact a UUID (or, for the composite-key join tables, several) — the trigger resolves it generically from the catalog and cannot assume one uniform key shape across all seventeen audited tables. `oldRow`/`newRow` map to `Map<String, Object>` and `changedColumns` to `List<String>`, both jsonb — unlike every other jsonb column in this module (which always has one fixed domain record/map shape on the far side), these have no fixed shape at all, since the row image can belong to any of the seventeen audited tables. `oldRow` is `null` for an `INSERT`, `newRow` is `null` for a `DELETE`, `changedColumns` is `null` (not an empty list) for anything but an `UPDATE`. `operation` reuses a small persistence-local enum, `DbAuditOperation` (`INSERT`/`UPDATE`/`DELETE`, mirroring Postgres's own `TG_OP`) — not a domain enum, since there is no domain concept of "a database row changed."
+- `DbAuditLogEntity` (`V21__db_audit_log.sql`) — the database change audit; see "Database change audit" below for the full picture. **Read-only from Hibernate's side**: every row is written by that migration's `audit_row_change()` trigger function, never by a `persist`/`merge` call anywhere in this module — mapped here purely so `JpaDbAuditLogRepository`'s reads go through the same `jakarta.persistence` API as every other repository. `id` is a synthetic `BIGINT GENERATED ALWAYS AS IDENTITY` column (`@GeneratedValue(strategy = GenerationType.IDENTITY)`) rather than a UUID this module invents in Java — the only entity in this schema whose id Postgres itself generates, since the trigger that creates each row runs entirely inside the database. `rowId` is `String`, not `UUID`, even though every primary key in this schema is in fact a UUID (or, for the composite-key join tables, several) — the trigger resolves it generically from the catalog and cannot assume one uniform key shape across all eighteen audited tables (seventeen as of V21, `camera_poses` added by V22 — see "Database change audit" below). `oldRow`/`newRow` map to `Map<String, Object>` and `changedColumns` to `List<String>`, both jsonb — unlike every other jsonb column in this module (which always has one fixed domain record/map shape on the far side), these have no fixed shape at all, since the row image can belong to any of those eighteen audited tables. `oldRow` is `null` for an `INSERT`, `newRow` is `null` for a `DELETE`, `changedColumns` is `null` (not an empty list) for anything but an `UPDATE`. `operation` reuses a small persistence-local enum, `DbAuditOperation` (`INSERT`/`UPDATE`/`DELETE`, mirroring Postgres's own `TG_OP`) — not a domain enum, since there is no domain concept of "a database row changed."
+- `CameraPoseEntity` (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4, wave G3, `V22__fixed_camera_geo.sql`) mirrors `CameraPose` field-for-field: `assetId` is the primary key, not synthetic — one calibrated pose per fixed asset, `save` is always an upsert, same "owning id doubles as the uniqueness constraint" shape as `AssetImageEntity`. `position` (a single `GeoPosition`) is flattened to `latitude`/`longitude`/nullable `altitude_meters` columns, same choice `MarkEntity` makes for its own single point — altitude is currently unused by the projection math but the column exists anyway so a round trip cannot silently drop it (a gap the plan's own §7 table sketch left out; flagged rather than silently worked around). `source` reuses the domain `CameraPoseSource` enum directly (`@Enumerated(EnumType.STRING)`), same convention as `MarkEntity#source`. `targetLayerId`/`rmsErrorPixels` are nullable. No FK to any other table. **Audited** (`trg_audit_camera_poses`) — see "Database change audit" below.
+- `TrackPointEntity` (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7, wave G3, `V22__fixed_camera_geo.sql`) mirrors `TrackPoint` field-for-field: `id` is a synthetic `BIGINT GENERATED ALWAYS AS IDENTITY` column the schema itself generates (same mechanism as `DbAuditLogEntity#id`, not invented in Java) — `TrackPoint` carries no id of its own, a decimated append-only breadcrumb never looked up by id, only by `(assetId, trackId)` or pruned by `capturedAt`. `position` is flattened to `latitude`/`longitude`/nullable `altitude_meters`, same choice as `CameraPoseEntity` (same §7 gap, same fix). Indexed on `(asset_id, track_id, captured_at)` (the `findByTrack`/`trimToMostRecent` access path) and `captured_at` alone (`deleteOlderThan`'s access path). No FK to any other table. **Excluded** from `db_audit_log` — high-volume machine output, the opposite of `CameraPoseEntity` — see "Database change audit" below.
 
 ## Schema (`src/main/resources/db/migration`)
 
@@ -249,6 +271,7 @@ creating. Flagged here rather than silently decided, per this wave's brief.
 - `V19__asset_usage_phase.sql` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O5, D1/D2) — `ALTER TABLE asset_usages ADD COLUMN phase VARCHAR(20), ADD COLUMN first_armed_at TIMESTAMPTZ, ADD COLUMN last_disarmed_at TIMESTAMPTZ` — all three nullable, no backfill, same "unknown, not fabricated" discipline as `V6__telemetry_flight_state.sql`'s `flight_state` column. **Updated after O7 merged**: the migration originally shipped schema-only, deferring `phase` to O7 (`contexts/vision-warehouse`, running concurrently in a separate worktree) per the plan's module-placement table. O7 landed `AssetUsage`'s 9th component — `UsagePhase phase()` — but not `firstArmedAt()`/`lastDisarmedAt()`; those two fields don't exist on the domain record yet. This wave (O5) ended up owning the wiring after all: `AssetUsageEntity#phase`/`AssetUsageMapper` now map `phase` in both directions (see the entity's own field-bullet above and Tests below) — a cross-wave report caught that the column had gone live with no reader/writer, silently reverting every reload to `PREFLIGHT`. `first_armed_at`/`last_disarmed_at` remain schema-only, deliberately, still waiting on their domain fields. **Still true as of O11** (below) — that wave's `VehicleProfile`-based passport design does not need these two columns either, so they remain untouched; closing this gap properly still needs a `vision-warehouse` domain-field change, out of every persistence wave's own file scope so far.
 - `V20__vehicle_profile_usage_link.sql` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O11 — "the flight passport") — `ALTER TABLE vehicle_profiles ADD COLUMN usage_id UUID, ADD COLUMN phase VARCHAR(20)` — both nullable, no backfill, same additive-only shape as V19; `vehicle_profiles` stays append-only (every `save` still inserts a new row, this migration only widens what a row may optionally carry). `phase` is deliberately **not** constrained to `PREFLIGHT`/`POSTFLIGHT` at the schema level — enforced once in `DefaultVehicleProfileService#captureSnapshot` (`contexts/vision-flight`), the same "the allowlist is domain code, not a UI/schema convention" precedent D9 already set for `ParameterTier`. New index `idx_vehicle_profiles_usage_phase (usage_id, phase, observed_at DESC)` backs `findByUsageAndPhase`'s "newest tagged row for this usage+phase" query.
 - `V21__db_audit_log.sql` (the database change audit — see that section below for the full picture) — `db_audit_log` (`id` `BIGINT GENERATED ALWAYS AS IDENTITY` PK — the one Postgres-generated, not Java-generated, id in this schema; `occurred_at` timestamptz `NOT NULL DEFAULT now()`; `table_name`/`row_id` text `NOT NULL`; `operation` `VARCHAR(6) CHECK (operation IN ('INSERT','UPDATE','DELETE'))`; `db_user` text `NOT NULL` — `session_user`, stamped by the trigger, never by the application; `old_row`/`new_row` jsonb, nullable; `changed_columns` jsonb, nullable). Plus one generic PL/pgSQL trigger function, `audit_row_change()`, and seventeen `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW` triggers attached to the control-plane tables enumerated in that section. New table + function + triggers, purely additive over V1-V20 — no existing table's own DDL changes, only its write behavior gains a side effect. Two indexes matching the two real read paths: `occurred_at` alone (newest overall) and `(table_name, row_id, occurred_at)` (newest for one row).
+- `V22__fixed_camera_geo.sql` (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §7, decisions D3/D4, wave G3) — two new tables, purely additive over V1-V21, no FK to any other table (same convention as the rest of this schema). `camera_poses` (`asset_id` UUID PK — one calibrated pose per fixed asset, not synthetic; `latitude`/`longitude` double precision `NOT NULL`, `altitude_meters` nullable double precision; `agl_meters`/`yaw_degrees`/`pitch_degrees`/`hfov_degrees` double precision `NOT NULL`; `target_layer_id` UUID nullable; `source` `VARCHAR(12) NOT NULL`; `rms_error_pixels` nullable double precision; `updated_at` timestamptz `NOT NULL`; `updated_by` UUID `NOT NULL`) — control-plane, one row per asset, **audited** via `trg_audit_camera_poses AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW EXECUTE FUNCTION audit_row_change()`, reusing V21's function rather than redefining it. `projected_track_points` (`id` `BIGINT GENERATED ALWAYS AS IDENTITY` PK — synthetic, same mechanism as `db_audit_log.id`; `asset_id` UUID `NOT NULL`; `track_id` BIGINT `NOT NULL`; `label` TEXT `NOT NULL`; `layer_id` UUID `NOT NULL`; `latitude`/`longitude` double precision `NOT NULL`, `altitude_meters` nullable double precision; `error_radius_meters` double precision `NOT NULL`; `captured_at` timestamptz `NOT NULL`) — high-volume append-only machine output, **deliberately excluded** from `db_audit_log` (see "Database change audit" below). Two indexes: `(asset_id, track_id, captured_at)` (`findByTrack`/`trimToMostRecent`'s access path) and `captured_at` alone (`deleteOlderThan`'s access path). **Gap in §7 as written, resolved rather than silently worked around**: the plan's own table sketch for both tables lists only `latitude, longitude` for position, omitting altitude — since both domain records' `position()` is a kernel `GeoPosition` whose `altitudeMeters` is a real (if projection-currently-unused) nullable component, dropping it would silently discard that value on every save/load round trip. Both tables carry a nullable `altitude_meters` column as a result; flagged here per this wave's own brief rather than fixed in silence.
 
 ### `src/main/resources/db/seed/dev` — a second, conditional Flyway location
 
@@ -348,13 +371,13 @@ one function, not one per table: it resolves each table's own primary-key column
 `asset_devices`, `pilot_assignments`, `map_layer_grants`) and a single-UUID-PK table (`assets`, `users`,
 ...) are both handled by the same function — `row_id` is always text, built by `:`-joining the
 primary-key column values in their declared key order, even though every id in this schema is in fact a
-UUID (CLAUDE.md rule 1: no per-table logic duplicated seventeen times where one generic rule already
+UUID (CLAUDE.md rule 1: no per-table logic duplicated eighteen times where one generic rule already
 covers it). For an `UPDATE`, the function also diffs `new_data`/`old_data` key by key and records exactly
 which columns changed as `changed_columns` — the "what changed?" question answerable without the caller
 diffing two JSON blobs itself.
 
 **Included — the control-plane / configuration tables**, enumerated by reading every migration V1
-through V20, not guessed:
+through V22, not guessed:
 
 | Table | Migration | Character |
 |---|---|---|
@@ -375,6 +398,7 @@ through V20, not guessed:
 | `map_drawings` | V12 | map drawings |
 | `vehicle_profiles` | V17 | vehicle capability/parameter observations |
 | `feature_requirements` | V18 | seed-only today, but exactly the "someone edited it by hand" case this feature exists to catch |
+| `camera_poses` | V22 | one calibrated pose per fixed asset — control-plane, low-write-volume, the same "one row per key" character as `vehicle_profiles`'s own newest-row query, but mutated in place (upsert) rather than append-only |
 
 **Excluded — the high-volume append-only event tables, plus tables where a trigger would be actively
 wrong**: a trigger here would double the hottest write paths in the system and drown the log in rows
@@ -391,6 +415,7 @@ nobody will ever read.
 | `audit_entries` | V14 | the existing domain audit trail; auditing an audit trail is not useful, and its own write character already matches this excluded set |
 | `db_audit_log` | V21 | this table itself — a trigger on itself would recurse |
 | `flyway_schema_history` | (Flyway) | schema-management bookkeeping, not application data |
+| `projected_track_points` | V22 | per-projected-detection breadcrumb stream — the same append-heavy, decimated-machine-output character as `detection_events`, pruned by `trimToMostRecent`/`deleteOlderThan` rather than ever hand-edited |
 
 **Coverage is tested against the live schema, not trusted from the migration's own comment.**
 `DbAuditLogCoverageTests` (Tests below) reads `information_schema.tables`/`pg_trigger` directly and
@@ -717,7 +742,8 @@ of-the-same-usage, not-found-under-a-different-usage-with-the-same-phase, and
 its own PREFLIGHT/POSTFLIGHT pair, proving all four usage×phase cells resolve independently — the
 exact lookup `driftFromPreviousFlight` (`contexts/vision-flight`) depends on).
 
-`@Nested DbAuditLogRepositoryTests` (3, "Database change audit" below) — proves the trigger fires end to
+`@Nested DbAuditLogRepositoryTests` (5, up from 3 — docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3 added
+2, "Database change audit" below) — proves the trigger fires end to
 end through a real `Jpa*Repository`, not a hand-crafted native-SQL write (the whole point is that the
 trigger fires no matter *how* a row changes):
 `insertUpdateAndDeleteThroughAnExistingRepositoryEachLeaveTheirOwnAuditRowNewestFirst` saves, renames
@@ -731,6 +757,13 @@ Postgres username (`session_user`, not anything the application supplies).
 recently saved one's row sorts before the other's in `findRecent`'s cross-table feed — the "own rows
 within a large fetch" technique `AuditTrailRepositoryTests`/`DetectionEventRepositoryTests` already use,
 since the shared container accumulates rows across every test in the class.
+**Wave G3's 2 additions**: `aCameraPoseUpdateProducesADbAuditLogRowNamingTheChangedColumn` saves a
+`CameraPose` through `JpaCameraPoseRepository`, saves it again with a different `yawDegrees`, and asserts
+the resulting UPDATE row's `changedColumns` contains `"yaw_degrees"` — proving `trg_audit_camera_poses`
+actually fires end to end, not just that the migration declared it. `aTrackTrailInsertProducesNoDbAuditLogRow`
+saves a `TrackPoint` through `JpaTrackTrailRepository` and asserts a native
+`select count(*) from db_audit_log where table_name = 'projected_track_points'` stays `0` — proving the
+exclusion is real, not merely undocumented.
 
 `@Nested DbAuditLogCoverageTests` (2, "Database change audit" below) — reads the *live* schema rather
 than trusting the migration's own header comment:
@@ -746,6 +779,32 @@ table the migration forgot to attach a trigger to and a stray trigger that shoul
 `v21MigrationCreatesTheDbAuditLogTableOnTopOfV1ThroughV20` — same `information_schema.columns` shape as
 the V19/V20 schema tests above: `table_name`/`row_id` are `NOT NULL`, `old_row`/`new_row` stay nullable
 (an INSERT has no `old_row`, a DELETE no `new_row`), proving `V21__db_audit_log.sql` applied cleanly.
+
+`@Nested CameraPoseRepositoryTests` (6, docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4, wave G3) —
+unknown asset → empty `Optional`; a pose with a `targetLayerId` and `rmsErrorPixels` round trips exactly,
+including altitude; a manual pose with neither round trips both as `null`; `save` is an upsert leaving
+exactly one `camera_poses` row per asset (a second save with a different `yawDegrees` replaces the first
+in place, same id); `findAll` returns every saved pose; `deleteByAssetId` is idempotent (removes the row,
+a second call on an already-deleted asset doesn't throw).
+
+`@Nested TrackTrailRepositoryTests` (8, docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7, wave G3) —
+an unknown `(assetId, trackId)` gives an empty `findLatest` and an empty `findByTrack` list; a saved point
+round trips exactly, including altitude; `findByTrack` returns points **oldest-to-newest regardless of
+insert order** (points saved out of `capturedAt` order still sort correctly — proving the query orders by
+the domain timestamp, not insertion sequence); `findLatest` returns the most recently *captured* point,
+same distinction; `trimToMostRecent` keeps only the newest N points for a track (older ones are gone,
+newer ones survive); `trimToMostRecent` is a no-op when the track is already at or under the cap (safe to
+call every tick, per this wave's own non-negotiable); `trimToMostRecent` only affects the named track (a
+sibling track's points are untouched — the `(asset_id, track_id)` scoping in the bulk-delete query is
+load-bearing, not just the id); `deleteOlderThan` removes points across **every** track captured before
+the cutoff, leaving newer points from every track in place.
+
+`v22MigrationCreatesTheFixedCameraGeoTablesOnTopOfV1ThroughV21` (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md
+§7, wave G3) — same `information_schema.columns` shape as the V19-V21 schema tests above:
+`camera_poses.asset_id` is `NOT NULL` (the primary key), `camera_poses.target_layer_id` stays nullable;
+`projected_track_points.id` reports `is_identity = 'YES'` (the `GENERATED ALWAYS AS IDENTITY` column,
+not a Java-invented UUID) — proving `V22__fixed_camera_geo.sql` applied cleanly on top of every prior
+migration.
 
 `DevAccountSeedMigrationTest` (5, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1) — its own `@Testcontainers`
 class, deliberately **not** a `@Nested` class inside `PostgresDockerIntegrationTest`: a **non-static**
@@ -1770,3 +1829,70 @@ flag for trigger installation (schema-governed, not application-configurable —
 than faked); no port/domain type for the read side (kept entirely inside this module, per the brief's
 own instruction to stop and report rather than add one speculatively — reported here: no port is
 warranted today, since there is no consumer yet).
+
+## docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3 done (fixed-camera geolocation, persistence half)
+
+Gives `CameraPoseRepositoryPort`/`TrackTrailRepositoryPort` (`contexts/vision-map`, wave G2) their
+Postgres implementations — see the entity/repository/mapper bullets above and the `V22__fixed_camera_geo.sql`
+schema bullet for the full shape. New: `V22__fixed_camera_geo.sql` (two tables — `camera_poses`, one
+calibrated pose per fixed asset, control-plane, upserted, **audited**; `projected_track_points`, the
+decimated ground-track breadcrumb trail a projected detection leaves behind, append-only, high-volume,
+**excluded** from `db_audit_log`, pruned by `trimToMostRecent`/`deleteOlderThan`), `CameraPoseEntity`/
+`TrackPointEntity` (`entity` package), `CameraPoseMapper`/`TrackPointMapper` (`mapper` package),
+`JpaCameraPoseRepository`/`JpaTrackTrailRepository` (`repository` package), both registered in
+`PersistenceUnit`. Both `DbAuditLogCoverageTests` lists updated (`camera_poses` → `AUDITED_TABLES`,
+`projected_track_points` → `EXCLUDED_TABLES`) — not optional bookkeeping, since that test reads the
+live schema and fails loudly on an unclassified table.
+
+**Base branch was stale.** This worktree's `feat/fixed-camera-geo` was pinned to a pre-reorg commit
+(`331a6a77`), predating the module-layout reorg this wave's own file paths assume. Corrected before any
+product code was written: `git checkout -b feat/fixed-camera-geo-g3 feat/fixed-camera-geo` from that
+same tip (`188deb9a`), then confirmed `storage/persistence/` and the two G2 port files
+(`CameraPoseRepositoryPort`/`TrackTrailRepositoryPort`) existed at that tip before proceeding — they did.
+
+**Migration numbering confirmed, not assumed.** The plan's own text claims "V22 is next as of master
+`e6f1d18e`"; this worktree's own `db/migration` directory was listed and sorted independently
+(`ls ... | sort -V | tail -20`) and V21 was indeed the highest migration present, so `V22__fixed_camera_geo.sql`
+was used as-is — no renumbering collision, unlike the hazard the plan's own brief warned might exist on
+a concurrent branch.
+
+**Gap in §7 as written, resolved rather than silently worked around**: the plan's own table sketch for
+both `camera_poses` and `projected_track_points` lists only `latitude, longitude` for position, omitting
+altitude — but `CameraPose#position()`/`TrackPoint#position()` are both kernel `GeoPosition` values whose
+`altitudeMeters` is a real (if currently projection-unused) nullable component. Omitting the column would
+have silently discarded that value on every save/load round trip, breaking the very round-trip contract
+this wave's own exit criteria require. Both tables therefore carry a nullable `altitude_meters` column
+not in the plan's own sketch — flagged here per this wave's brief rather than fixed in silence. Nothing
+else in §7/D3/D4 was wrong or under-specified as written.
+
+`./mvnw -B -pl storage/persistence -am test`: **205/205 green** (up from 188, `Skipped: 0`, docker
+reachable — measured directly across three consecutive **foreground** runs of the same command, each a
+clean `BUILD SUCCESS`, grepped with `-E "^\[(INFO|ERROR)\] Tests run:|BUILD"` to confirm no `[ERROR]`
+line and a single `adapter-persistence` "Results:" block per run, not a reactor-wide aggregate). New:
+`CameraPoseRepositoryTests` (6) + `TrackTrailRepositoryTests` (8) + 2 new `DbAuditLogRepositoryTests`
+cases (a pose update names its changed column, a trail insert leaves no `db_audit_log` row) + 1 new
+top-level schema test (`v22MigrationCreatesTheFixedCameraGeoTablesOnTopOfV1ThroughV21`) = +17, exactly
+205 − 188. See "Tests" above for what each proves.
+
+**Exit criteria, verified directly, not assumed from green**: `DbAuditLogCoverageTests` passes with
+both new tables classified (`everyPublicBaseTableIsEitherAuditedOrExplicitlyExcluded`/
+`everyAuditedTableCarriesExactlyTheAuditTriggerAndNoExcludedTableDoes`, both green against the live
+schema); a `camera_poses` UPDATE produces a `db_audit_log` row naming the changed column
+(`aCameraPoseUpdateProducesADbAuditLogRowNamingTheChangedColumn`); a `projected_track_points` INSERT
+produces none (`aTrackTrailInsertProducesNoDbAuditLogRow`); `save`-then-`save` on the same `assetId`
+leaves exactly one `camera_poses` row (`saveIsAnUpsertLeavingExactlyOneRowPerAsset`); `findByTrack`
+returns oldest→newest regardless of insert order
+(`findByTrackReturnsPointsOldestToNewestRegardlessOfInsertOrder`); `trimToMostRecent` keeps the newest N
+(`trimToMostRecentKeepsOnlyTheNewestPoints`), is a safe no-op under the cap
+(`trimToMostRecentIsANoOpWhenAlreadyAtOrUnderTheCap`), and never touches a sibling track
+(`trimToMostRecentOnlyAffectsTheNamedTrack`) — all three needed since the brief calls out
+"safe to call every tick" as a non-negotiable, not a nice-to-have.
+
+**Deviations from the brief**: none that change behavior — the altitude-column addition above is the one
+place this wave's output differs from §7's literal text, and it is called out rather than silently done.
+`audit_row_change()` was not redefined, only attached (one new `CREATE TRIGGER`, reusing V21's function).
+No magic numbers introduced: retention/point caps (`maxPoints` for `trimToMostRecent`, `cutoff` for
+`deleteOlderThan`) are caller-supplied arguments, not constants in this module.
+
+**Scope discipline**: `contexts/vision-map` (the domain/port side, wave G2) was read-only for this wave
+and untouched — this wave only supplies the driven-adapter implementation of ports that already existed.

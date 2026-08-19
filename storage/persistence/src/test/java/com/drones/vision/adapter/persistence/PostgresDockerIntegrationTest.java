@@ -10,6 +10,8 @@ import com.drones.vision.warehouse.domain.model.AssetImage;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.BoundingBox;
 import com.drones.vision.kernel.Capability;
+import com.drones.vision.map.domain.model.CameraPose;
+import com.drones.vision.map.domain.model.CameraPoseSource;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.learning.domain.model.Dataset;
 import com.drones.vision.learning.domain.model.DatasetId;
@@ -64,6 +66,7 @@ import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.model.TrackRef;
 import com.drones.vision.perception.domain.model.TrackState;
 import com.drones.vision.perception.domain.model.TrackingTelemetry;
+import com.drones.vision.map.domain.model.TrackPoint;
 import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UsageId;
@@ -79,6 +82,7 @@ import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
+import com.drones.vision.map.domain.port.CameraPoseRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
@@ -92,6 +96,7 @@ import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
 import com.drones.vision.learning.domain.port.SampleImageStorePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
+import com.drones.vision.map.domain.port.TrackTrailRepositoryPort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
 import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
@@ -107,6 +112,7 @@ import com.drones.vision.adapter.persistence.repository.JpaAssetRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssetUsageRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAssignmentRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
+import com.drones.vision.adapter.persistence.repository.JpaCameraPoseRepository;
 import com.drones.vision.adapter.persistence.repository.JpaCategoryRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDatasetRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDbAuditLogRepository;
@@ -122,6 +128,7 @@ import com.drones.vision.adapter.persistence.repository.JpaMarkRepository;
 import com.drones.vision.adapter.persistence.repository.JpaSampleImageStore;
 import com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository;
 import com.drones.vision.adapter.persistence.repository.TelemetryBatchSettings;
+import com.drones.vision.adapter.persistence.repository.JpaTrackTrailRepository;
 import com.drones.vision.adapter.persistence.repository.JpaTrainingSampleRepository;
 import com.drones.vision.adapter.persistence.repository.JpaUserRepository;
 import com.drones.vision.adapter.persistence.repository.JpaVehicleProfileRepository;
@@ -192,25 +199,31 @@ class PostgresDockerIntegrationTest {
      * The control-plane / configuration tables {@code V21__db_audit_log.sql} attaches {@code
      * trg_audit_*} to — kept here, not just in the migration's own header, so {@link
      * DbAuditLogCoverageTests} fails loudly the moment a future migration adds a table and
-     * nobody consciously classifies it. Mirrors that migration's "Included" list exactly.
+     * nobody consciously classifies it. Mirrors that migration's "Included" list, plus {@code
+     * camera_poses} added by {@code V22__fixed_camera_geo.sql} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md
+     * decision D4 — a camera's pose is control-plane configuration, not telemetry).
      */
     private static final Set<String> AUDITED_TABLES = Set.of(
             "categories", "devices", "device_capabilities", "assets", "asset_devices",
             "asset_usages", "geofence_zones", "groups", "users", "pilot_assignments",
             "marks", "datasets", "map_layers", "map_layer_grants", "map_drawings",
-            "vehicle_profiles", "feature_requirements");
+            "vehicle_profiles", "feature_requirements", "camera_poses");
 
     /**
-     * Every other base table in the schema as of V21 — high-volume append-only event tables, the
+     * Every other base table in the schema as of V22 — high-volume append-only event tables, the
      * existing domain audit trail, this table's own infrastructure, and Flyway's bookkeeping
-     * table. Mirrors {@code V21__db_audit_log.sql}'s "Excluded" list exactly; see that header for
-     * the reasoning behind each one, including why {@code asset_images} is grouped with {@code
-     * sample_images} rather than with the control-plane set it might otherwise resemble.
+     * table. Mirrors {@code V21__db_audit_log.sql}'s "Excluded" list, plus {@code
+     * projected_track_points} added by {@code V22__fixed_camera_geo.sql} (docs/plans/active/
+     * FIXED-CAMERA-GEO-PLAN.md decision D3 — a decimated trail is telemetry-character machine
+     * output, the same classification {@code detection_results}/{@code telemetry_samples} already
+     * have); see V21's header for the reasoning behind every other entry, including why {@code
+     * asset_images} is grouped with {@code sample_images} rather than with the control-plane set
+     * it might otherwise resemble.
      */
     private static final Set<String> EXCLUDED_TABLES = Set.of(
             "telemetry_samples", "detection_results", "detection_events",
             "training_samples", "sample_images", "asset_images",
-            "audit_entries", "db_audit_log", "flyway_schema_history");
+            "audit_entries", "db_audit_log", "flyway_schema_history", "projected_track_points");
 
     private static EntityManagerFactory entityManagerFactory;
 
@@ -2773,6 +2786,218 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
+     * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4 — every {@link CameraPoseRepositoryPort}
+     * method against a real Postgres, plus the upsert-by-{@code assetId} contract the port's own
+     * javadoc calls out.
+     */
+    @Nested
+    class CameraPoseRepositoryTests {
+
+        private final CameraPoseRepositoryPort repository = new JpaCameraPoseRepository(entityManagerFactory);
+
+        @Test
+        void unknownAssetReturnsEmptyOptional() {
+            assertTrue(repository.findByAssetId(AssetId.random()).isEmpty());
+        }
+
+        @Test
+        void savedPoseRoundTripsWithTargetLayerAndRmsError() {
+            AssetId assetId = AssetId.random();
+            LayerId layer = LayerId.random();
+            UserId actor = UserId.random();
+            CameraPose pose = new CameraPose(assetId, new GeoPosition(50.45, 30.52, 95.0), 12.0, 214.0, 8.5,
+                    62.0, layer, CameraPoseSource.CALIBRATED, 7.3, NOW, actor);
+
+            repository.save(pose);
+
+            Optional<CameraPose> found = repository.findByAssetId(assetId);
+            assertTrue(found.isPresent());
+            assertEquals(pose, found.get());
+        }
+
+        @Test
+        void manualPoseWithNoTargetLayerOrRmsErrorRoundTripsWithNullFields() {
+            AssetId assetId = AssetId.random();
+            CameraPose pose = new CameraPose(assetId, new GeoPosition(50.45, 30.52, null), 10.0, 0.0, 5.0, 70.0,
+                    null, CameraPoseSource.MANUAL, null, NOW, UserId.random());
+
+            repository.save(pose);
+
+            Optional<CameraPose> found = repository.findByAssetId(assetId);
+            assertTrue(found.isPresent());
+            assertNull(found.get().position().altitudeMeters());
+            assertNull(found.get().targetLayerId());
+            assertNull(found.get().rmsErrorPixels());
+            assertEquals(CameraPoseSource.MANUAL, found.get().source());
+        }
+
+        @Test
+        void saveIsAnUpsertLeavingExactlyOneRowPerAsset() {
+            AssetId assetId = AssetId.random();
+            UserId actor = UserId.random();
+            repository.save(new CameraPose(assetId, new GeoPosition(10.0, 20.0, null), 10.0, 0.0, 5.0, 60.0,
+                    null, CameraPoseSource.MANUAL, null, NOW, actor));
+            repository.save(new CameraPose(assetId, new GeoPosition(11.0, 21.0, 5.0), 15.0, 180.0, 10.0, 75.0,
+                    LayerId.random(), CameraPoseSource.CALIBRATED, 4.2, NOW, actor));
+
+            Optional<CameraPose> found = repository.findByAssetId(assetId);
+            assertTrue(found.isPresent());
+            assertEquals(15.0, found.get().aglMeters());
+            assertEquals(CameraPoseSource.CALIBRATED, found.get().source());
+
+            long rowsForAsset = repository.findAll().stream().filter(p -> p.assetId().equals(assetId)).count();
+            assertEquals(1, rowsForAsset, "a second save for the same asset must replace, not add, a row");
+        }
+
+        @Test
+        void findAllReturnsEverySavedPose() {
+            CameraPose first = new CameraPose(AssetId.random(), new GeoPosition(10.0, 20.0, null), 10.0, 0.0,
+                    5.0, 60.0, null, CameraPoseSource.MANUAL, null, NOW, UserId.random());
+            CameraPose second = new CameraPose(AssetId.random(), new GeoPosition(11.0, 21.0, null), 12.0, 90.0,
+                    6.0, 65.0, null, CameraPoseSource.MANUAL, null, NOW, UserId.random());
+            repository.save(first);
+            repository.save(second);
+
+            List<CameraPose> all = repository.findAll();
+            assertTrue(all.contains(first));
+            assertTrue(all.contains(second));
+        }
+
+        @Test
+        void deleteByAssetIdIsIdempotentAndRemovesThePose() {
+            AssetId assetId = AssetId.random();
+            repository.save(new CameraPose(assetId, new GeoPosition(10.0, 20.0, null), 10.0, 0.0, 5.0, 60.0,
+                    null, CameraPoseSource.MANUAL, null, NOW, UserId.random()));
+
+            repository.deleteByAssetId(assetId);
+            assertTrue(repository.findByAssetId(assetId).isEmpty());
+
+            // second call on an already-absent asset must not throw
+            repository.deleteByAssetId(assetId);
+        }
+    }
+
+    /**
+     * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7 — every {@link TrackTrailRepositoryPort}
+     * method against a real Postgres: append-only inserts, oldest-to-newest ordering, the D7
+     * per-track cap ({@link TrackTrailRepositoryPort#trimToMostRecent}), and the D7 retention prune
+     * ({@link TrackTrailRepositoryPort#deleteOlderThan}).
+     */
+    @Nested
+    class TrackTrailRepositoryTests {
+
+        private final TrackTrailRepositoryPort repository = new JpaTrackTrailRepository(entityManagerFactory);
+
+        private TrackPoint point(AssetId assetId, long trackId, GeoPosition position, Instant capturedAt) {
+            return new TrackPoint(assetId, trackId, "car", LayerId.random(), position, 6.5, capturedAt);
+        }
+
+        @Test
+        void unknownTrackReturnsEmptyFindLatestAndEmptyList() {
+            AssetId assetId = AssetId.random();
+            assertTrue(repository.findLatest(assetId, 1L).isEmpty());
+            assertTrue(repository.findByTrack(assetId, 1L).isEmpty());
+        }
+
+        @Test
+        void savedPointRoundTripsWithAltitude() {
+            AssetId assetId = AssetId.random();
+            TrackPoint saved = point(assetId, 7L, new GeoPosition(50.45, 30.52, 95.0), NOW);
+
+            repository.save(saved);
+
+            List<TrackPoint> found = repository.findByTrack(assetId, 7L);
+            assertEquals(1, found.size());
+            assertEquals(saved, found.get(0));
+        }
+
+        @Test
+        void findByTrackReturnsPointsOldestToNewestRegardlessOfInsertOrder() {
+            AssetId assetId = AssetId.random();
+            TrackPoint p1 = point(assetId, 3L, new GeoPosition(10.0, 20.0, null), NOW.minusSeconds(20));
+            TrackPoint p2 = point(assetId, 3L, new GeoPosition(10.001, 20.001, null), NOW.minusSeconds(10));
+            TrackPoint p3 = point(assetId, 3L, new GeoPosition(10.002, 20.002, null), NOW);
+            repository.save(p2);
+            repository.save(p3);
+            repository.save(p1);
+
+            List<TrackPoint> found = repository.findByTrack(assetId, 3L);
+            assertEquals(List.of(p1, p2, p3), found, "oldest to newest");
+        }
+
+        @Test
+        void findLatestReturnsTheMostRecentlyCapturedPoint() {
+            AssetId assetId = AssetId.random();
+            TrackPoint older = point(assetId, 9L, new GeoPosition(10.0, 20.0, null), NOW.minusSeconds(30));
+            TrackPoint newer = point(assetId, 9L, new GeoPosition(10.001, 20.001, null), NOW);
+            repository.save(older);
+            repository.save(newer);
+
+            Optional<TrackPoint> latest = repository.findLatest(assetId, 9L);
+            assertTrue(latest.isPresent());
+            assertEquals(newer, latest.get());
+        }
+
+        @Test
+        void trimToMostRecentKeepsOnlyTheNewestPoints() {
+            AssetId assetId = AssetId.random();
+            List<Instant> capturedAtInOrder = List.of(
+                    NOW.minusSeconds(40), NOW.minusSeconds(30), NOW.minusSeconds(20), NOW.minusSeconds(10), NOW);
+            for (int i = 0; i < capturedAtInOrder.size(); i++) {
+                repository.save(point(assetId, 4L, new GeoPosition(10.0 + i * 0.001, 20.0, null),
+                        capturedAtInOrder.get(i)));
+            }
+
+            repository.trimToMostRecent(assetId, 4L, 2);
+
+            List<TrackPoint> remaining = repository.findByTrack(assetId, 4L);
+            assertEquals(2, remaining.size());
+            assertEquals(NOW.minusSeconds(10), remaining.get(0).capturedAt());
+            assertEquals(NOW, remaining.get(1).capturedAt());
+        }
+
+        @Test
+        void trimToMostRecentIsANoOpWhenAlreadyAtOrUnderTheCap() {
+            AssetId assetId = AssetId.random();
+            repository.save(point(assetId, 5L, new GeoPosition(10.0, 20.0, null), NOW));
+
+            repository.trimToMostRecent(assetId, 5L, 10);
+
+            assertEquals(1, repository.findByTrack(assetId, 5L).size());
+        }
+
+        @Test
+        void trimToMostRecentOnlyAffectsTheNamedTrack() {
+            AssetId assetId = AssetId.random();
+            repository.save(point(assetId, 1L, new GeoPosition(10.0, 20.0, null), NOW.minusSeconds(10)));
+            repository.save(point(assetId, 1L, new GeoPosition(10.1, 20.1, null), NOW));
+            repository.save(point(assetId, 2L, new GeoPosition(30.0, 40.0, null), NOW));
+
+            repository.trimToMostRecent(assetId, 1L, 1);
+
+            assertEquals(1, repository.findByTrack(assetId, 1L).size());
+            assertEquals(1, repository.findByTrack(assetId, 2L).size(), "a different track's points are untouched");
+        }
+
+        @Test
+        void deleteOlderThanRemovesPointsAcrossEveryTrackCapturedBeforeTheCutoff() {
+            AssetId assetId = AssetId.random();
+            Instant cutoff = NOW.minusSeconds(15);
+            TrackPoint old1 = point(assetId, 1L, new GeoPosition(10.0, 20.0, null), NOW.minusSeconds(30));
+            TrackPoint old2 = point(assetId, 2L, new GeoPosition(30.0, 40.0, null), NOW.minusSeconds(20));
+            TrackPoint recent = point(assetId, 1L, new GeoPosition(10.1, 20.1, null), NOW);
+            repository.save(old1);
+            repository.save(old2);
+            repository.save(recent);
+
+            repository.deleteOlderThan(cutoff);
+
+            assertEquals(List.of(recent), repository.findByTrack(assetId, 1L));
+            assertTrue(repository.findByTrack(assetId, 2L).isEmpty());
+        }
+    }
+
+    /**
      * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — same {@code information_schema} shape as the V7-V12
      * schema tests, for the brand-new {@code audit_entries} table: asserts {@code details} is a
      * required {@code jsonb} column and the primary key is exactly {@code id}, proving {@code
@@ -3110,6 +3335,63 @@ class PostgresDockerIntegrationTest {
             assertEquals("audit.secret", updateRow.newRow().get("username"),
                     "only the named sensitive columns are redacted; the rest of the row is intact");
         }
+
+        /**
+         * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4/§7 — {@code camera_poses} is on the
+         * audited side of V22, opposite {@code projected_track_points} below. Same
+         * insert-then-update-then-inspect shape as {@link
+         * #insertUpdateAndDeleteThroughAnExistingRepositoryEachLeaveTheirOwnAuditRowNewestFirst}
+         * above, but only exercising the update path since that is the exit criterion this wave was
+         * built against ("a pose update produces a db_audit_log row naming the changed column").
+         */
+        @Test
+        void aCameraPoseUpdateProducesADbAuditLogRowNamingTheChangedColumn() {
+            CameraPoseRepositoryPort poses = new JpaCameraPoseRepository(entityManagerFactory);
+            AssetId assetId = AssetId.random();
+            UserId actor = UserId.random();
+            String rowId = assetId.value().toString();
+
+            poses.save(new CameraPose(assetId, new GeoPosition(50.45, 30.52, null), 10.0, 0.0, 5.0, 60.0,
+                    null, CameraPoseSource.MANUAL, null, NOW, actor));
+            poses.save(new CameraPose(assetId, new GeoPosition(50.45, 30.52, null), 10.0, 200.0, 5.0, 60.0,
+                    null, CameraPoseSource.MANUAL, null, NOW, actor));
+
+            List<DbAuditLogEntity> rows = auditLog.findRecentForRow("camera_poses", rowId, 10);
+            assertEquals(2, rows.size(), "one audit row for the INSERT, one for the UPDATE");
+
+            DbAuditLogEntity updateRow = rows.get(0);
+            assertEquals(DbAuditOperation.UPDATE, updateRow.operation());
+            assertNotNull(updateRow.changedColumns());
+            assertTrue(updateRow.changedColumns().contains("yaw_degrees"), "the changed column must be named");
+        }
+
+        /**
+         * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7 — {@code projected_track_points}
+         * carries no {@code trg_audit_*} trigger at all (V22's own header explains why: a tracked
+         * car at ~1 Hz would write thousands of rows per car-hour into a table meant for a human's
+         * intent, not machine output). Asserted directly against {@code db_audit_log} itself rather
+         * than through {@link JpaDbAuditLogRepository#findRecentForRow}, since a row_id lookup would
+         * only prove "no row under this key", not "no row at all" for this table.
+         */
+        @Test
+        void aTrackTrailInsertProducesNoDbAuditLogRow() {
+            TrackTrailRepositoryPort trail = new JpaTrackTrailRepository(entityManagerFactory);
+            AssetId assetId = AssetId.random();
+
+            trail.save(new TrackPoint(assetId, 1L, "car", LayerId.random(), new GeoPosition(50.45, 30.52, null),
+                    6.0, NOW));
+
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                long rowsForTable = ((Number) em.createNativeQuery(
+                                "select count(*) from db_audit_log where table_name = 'projected_track_points'")
+                        .getSingleResult()).longValue();
+                assertEquals(0L, rowsForTable, "the trail table carries no audit trigger -- an insert "
+                        + "must leave db_audit_log untouched, the whole point of excluding it (D3)");
+            } finally {
+                em.close();
+            }
+        }
     }
 
     /**
@@ -3204,6 +3486,43 @@ class PostgresDockerIntegrationTest {
                                     + "where table_name = 'db_audit_log' and column_name = 'new_row'")
                     .getSingleResult();
             assertEquals("YES", newRowNullable, "new_row is null for a DELETE");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4/§7 — proves {@code
+     * V22__fixed_camera_geo.sql} applied cleanly on top of V1-V21: {@code camera_poses.asset_id} is
+     * the primary key (not nullable), {@code camera_poses.target_layer_id} stays nullable (a pose
+     * may target the default COP layer), and {@code projected_track_points.id} is the
+     * database-generated identity column, not something the entity supplies. {@link
+     * DbAuditLogCoverageTests} separately proves the trigger attachment itself; this only proves
+     * the table shape, same "prove the migration, not the entity" split as the V19-V21 schema
+     * tests above.
+     */
+    @Test
+    void v22MigrationCreatesTheFixedCameraGeoTablesOnTopOfV1ThroughV21() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String assetIdNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'camera_poses' and column_name = 'asset_id'")
+                    .getSingleResult();
+            assertEquals("NO", assetIdNullable, "asset_id is the primary key");
+
+            String targetLayerNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'camera_poses' and column_name = 'target_layer_id'")
+                    .getSingleResult();
+            assertEquals("YES", targetLayerNullable, "null targetLayerId means \"use the default COP layer\"");
+
+            Object[] idColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, is_identity from information_schema.columns "
+                                    + "where table_name = 'projected_track_points' and column_name = 'id'")
+                    .getSingleResult();
+            assertEquals("NO", idColumn[0]);
+            assertEquals("YES", idColumn[1], "id is database-generated, never supplied by the entity");
         } finally {
             em.close();
         }

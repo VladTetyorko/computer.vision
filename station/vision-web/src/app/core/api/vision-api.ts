@@ -11,6 +11,10 @@ import type {
   AssignedPilot,
   Assignment,
   AuditEntry,
+  CalibrateCameraPoseRequest,
+  CalibrationResult,
+  CameraPoseRequest,
+  CameraPoseResponse,
   Category,
   CreateAssetRequest,
   CreateDatasetRequest,
@@ -40,6 +44,7 @@ import type {
   MapDrawingResponse,
   MapLayer,
   MapMark,
+  MapTracksResponse,
   MeResponse,
   PatchDrawingRequest,
   PatchMarkRequest,
@@ -485,13 +490,14 @@ export class VisionApi {
    * which fetches it itself via the browser's own image loading, cache-busted with a query param on
    * each poll — there is nothing this class could usefully `await` on the caller's behalf.
    *
-   * **Currently unused** (docs/plans/done/UX-REWORK-PLAN.md §U-c): its one consumer,
+   * Was unused for a while (docs/plans/done/UX-REWORK-PLAN.md §U-c): its one consumer,
    * `features/command/live-strip-tile.ts` (the Command dashboard's live-strip snapshot tiles), was
    * deleted when that section was removed from Command per the plan's own user-amendments
-   * blockquote ("live strip: removed"). Left in place rather than deleted — a small, self-contained,
-   * still-correct method, and out of `vision-web/MODULE.md`'s own "core/api/** mirrors the wire
-   * contract 1:1" scope to prune opportunistically; a future cycle that finds no plausible use for
-   * it is free to remove it then. Still lives here (not inlined at a call site, if one reappears) so
+   * blockquote ("live strip: removed") — left in place rather than deleted at the time, a small,
+   * self-contained, still-correct method kept on the bet that a future consumer would want it again.
+   * That bet paid off: `features/camera-geo/camera-calibration-wizard.ts`
+   * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G5) now binds this straight to the calibration
+   * frame `<img>` an operator clicks landmarks on. Still lives here (not inlined at the call site) so
    * `VisionApi` stays "the only place the frontend knows REST URLs" (this file's own top doc
    * comment) even for a path that's never actually passed through `HttpClient`.
    */
@@ -622,6 +628,41 @@ export class VisionApi {
   /** 403 unless the caller is the drawing's creator or MANAGEs its layer; 404 unknown/out-of-scope id. */
   deleteMapDrawing(id: string): Promise<void> {
     return firstValueFrom(this.http.delete<void>(`/api/map/drawings/${encodeURIComponent(id)}`));
+  }
+
+  // --- Fixed-camera geolocation (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5's frozen wire contract) -----
+  // Asset-scoped like every other `/api/assets/{id}/…` endpoint (D10): out-of-scope reads 404, a
+  // write on a visible-but-unmanageable asset 403. While `vision.geo.fixed-camera.enabled=false`
+  // (the default) every endpoint here 409s — `core/camera-geo/camera-geo-logic.ts#isFixedCameraGeoDisabledError`
+  // is what a caller checks for that case, mirroring `isProbeDisabledError`'s own precedent.
+
+  /** The asset's stored pose, or `404` if none has ever been saved (or the asset is out of scope) — `core/camera-geo/camera-pose-panel.ts`'s own "no pose yet" empty state reads that 404, not an error toast. */
+  getCameraPose(assetId: string): Promise<CameraPoseResponse> {
+    return firstValueFrom(this.http.get<CameraPoseResponse>(`/api/assets/${encodeURIComponent(assetId)}/camera-pose`));
+  }
+
+  /** Whole-resource replace — manual entry, or confirming a calibration solve (`source` says which). `400` on a range violation (§5); `403`/`404` per this section's own doc comment. */
+  putCameraPose(assetId: string, request: CameraPoseRequest): Promise<CameraPoseResponse> {
+    return firstValueFrom(
+      this.http.put<CameraPoseResponse>(`/api/assets/${encodeURIComponent(assetId)}/camera-pose`, request),
+    );
+  }
+
+  /** Idempotent — `204` even if no pose was stored. Removing a pose stops that asset's tracks from projecting (D9: no pose ⇒ no projection). */
+  deleteCameraPose(assetId: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/assets/${encodeURIComponent(assetId)}/camera-pose`));
+  }
+
+  /** Solves yaw/pitch/hfov from 2–8 landmark correspondences — **never persists** (D5); the caller reviews the result and calls {@link putCameraPose} separately to save it. `400` for fewer than 2 or more than 8 points, or a `u`/`v` outside `[0,1]`. */
+  calibrateCameraPose(assetId: string, request: CalibrateCameraPoseRequest): Promise<CalibrationResult> {
+    return firstValueFrom(
+      this.http.post<CalibrationResult>(`/api/assets/${encodeURIComponent(assetId)}/camera-pose/calibration`, request),
+    );
+  }
+
+  /** Every projected track on a layer the caller may view (D10) — the map track layer's initial load, folded forward afterward by the live `TRACK`-entity `map` topic (`core/map-data/tracks-store.ts`). */
+  listMapTracks(): Promise<MapTracksResponse> {
+    return firstValueFrom(this.http.get<MapTracksResponse>('/api/map/tracks'));
   }
 
   // --- Recording + clip export (docs/plans/done/OPS-CORE-PLAN.md §R's frozen wire contract) ---------------

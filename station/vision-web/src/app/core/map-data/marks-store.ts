@@ -61,10 +61,11 @@ const MARKS_POLL_INTERVAL_MS = 30_000;
  * upsert by id, `cleared`/`deleted` remove, and a deleted *layer* takes its marks with it. A delta
  * for a mark this store hasn't GET-ed yet (a narrow race right after boot) still upserts correctly.
  *
- * <h2>Not truly optimistic</h2>
+ * <h2>Not optimistic at all</h2>
  * Every mutation awaits the API call and adopts the server's own response — never assumes a write
- * succeeded before the network says so. The one deliberate exception is {@link moveTo}'s
- * revert-on-failure touch; see its own doc comment.
+ * succeeded before the network says so. The one exception used to be `moveTo`, whose drag gesture
+ * had already moved the Leaflet symbol before the PATCH settled; marks are no longer draggable, so
+ * that revert-on-failure touch is gone with it.
  *
  * <h2>Why selection + palette live here, not on a facade</h2>
  * Unchanged from the v1 store's own reasoning: they coordinate **two independent DOM subtrees under
@@ -295,30 +296,6 @@ export class MarksStore {
   /** Status → `CLEARED`. The creator may do this while UNVERIFIED; after that only a layer manager (§3). */
   async clear(id: string): Promise<boolean> {
     return this.applyPatch(id, { status: 'CLEARED' });
-  }
-
-  /**
-   * Drag-to-correct: PATCHes only the position. **Visually optimistic** — Leaflet has already moved
-   * the symbol by the time this settles. On success the server's response is adopted. On failure
-   * there is nothing to undo in this store's own data (it was never optimistically written), but the
-   * *map* still shows the dragged position, so this forces a fresh array reference (content
-   * unchanged) purely so the map's own `applyMarks` effect re-runs and snaps the symbol back to the
-   * last-known-good position — an honest revert, not a silent multi-second drift.
-   */
-  async moveTo(id: string, position: GeoPosition): Promise<boolean> {
-    const updated = await this.run(() =>
-      this.api.patchMapMark(id, {
-        latitude: position.latitude,
-        longitude: position.longitude,
-        altitudeMeters: position.altitudeMeters,
-      }),
-    );
-    if (!updated) {
-      this.marksSignal.update((marks) => [...marks]); // touch — see this method's own doc comment
-      return false;
-    }
-    this.adopt(updated);
-    return true;
   }
 
   // --- Verify / promote (managers only server-side; the UI hides both without MANAGE) ------------

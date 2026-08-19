@@ -86,7 +86,7 @@ export class CommandFacade {
    * The three halves of the Common Operational Picture (docs/plans/done/MAP-REWORK-PLAN.md §5.2) — exposed as
    * whole stores (not thin passthroughs, unlike `zones` above): `command.html` wires
    * `<vision-tactical-map>`'s `[marks]`/`[layers]`/`[drawings]`/`[selectedMarkId]`/`(markSelected)`/
-   * `(markMoved)`/`(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)` straight to them, and the
+   * `(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)` straight to them, and the
    * shared `shared/map/map-controls/**` components plus `features/command/marks-panel.ts` inject the
    * same `providedIn: 'root'` singletons directly (non-routed presentational children, mirroring
    * `zones-panel.ts` injecting `GeofenceStore` directly).

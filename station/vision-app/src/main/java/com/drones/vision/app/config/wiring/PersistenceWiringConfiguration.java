@@ -12,9 +12,11 @@ import com.drones.vision.identity.domain.port.UserRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 import com.drones.vision.learning.domain.port.SampleImageStorePort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
+import com.drones.vision.map.domain.port.CameraPoseRepositoryPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
+import com.drones.vision.map.domain.port.TrackTrailRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
@@ -191,5 +193,27 @@ public class PersistenceWiringConfiguration {
     public FeatureRequirementRepositoryPort featureRequirementRepositoryPort(
             EntityManagerFactory entityManagerFactory) {
         return new JpaFeatureRequirementRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §7, Wave G3 — one audited row per asset's stored
+     * camera pose, same shape as the nineteen above. Wired unconditionally like every other port
+     * here: {@code vision.geo.fixed-camera.enabled} only gates whether {@code
+     * FixedCameraGeoWiringConfiguration} ever calls {@code CameraPoseService#put}/{@code #delete}
+     * against it (via {@code CameraPoseController}), not whether the table/repository exists —
+     * matching {@link #vehicleProfileRepositoryPort}'s own precedent.
+     */
+    @Bean
+    public CameraPoseRepositoryPort cameraPoseRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaCameraPoseRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §7, Wave G3 — the excluded-from-audit, append-only
+     * projected-track trail, same shape as the twenty above.
+     */
+    @Bean
+    public TrackTrailRepositoryPort trackTrailRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaTrackTrailRepository(entityManagerFactory);
     }
 }

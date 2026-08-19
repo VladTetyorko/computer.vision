@@ -2064,3 +2064,108 @@ later wave per O11's own Status section — this wave is backend-only); `vision-
 `UsageTracker` still needs to call `captureSnapshot` at the `PREFLIGHT`/`POSTFLIGHT` transitions for a
 passport to ever have real data to serve (O12, concurrent, out of this wave's file scope — this wave
 only exposes the read side O11 already built, it does not make anything populate it).
+
+## docs/plans/active/FIXED-CAMERA-GEO-PLAN.md Wave G4 done (fixed-camera geolocation, REST surface)
+
+Four camera-pose endpoints, `GET /api/map/tracks`, and a `MapEventPayload`/D9 extension — §5's frozen
+wire contract, byte-matched. Flag off (`vision.geo.fixed-camera.enabled=false`, the default) makes
+every one of these endpoints a `409` and leaves every pre-existing test untouched.
+
+**`CameraPoseController`** (`api/controller/`) — asset-scoped CRUD plus the calibration solve, matching
+`AssetController`'s own authority split (D10):
+- `GET /api/assets/{assetId}/camera-pose` — visibility only (`requireVisible`, mirrors
+  `AssetController#requireVisible`); `404` if no pose is stored, or the asset is unknown/out of scope
+  (both hide which — `NoSuchElementException` either way).
+- `PUT /api/assets/{assetId}/camera-pose` — full-replace, `requireManageable` (403 if visible-but-not-
+  manageable); body validated (`PutCameraPoseRequest#toInput()`) **before** the scope guard, so a
+  malformed body is always `400` regardless of authority, matching `AssetController#update`'s ordering.
+- `DELETE /api/assets/{assetId}/camera-pose` — idempotent, `204`, `requireManageable`.
+- `POST /api/assets/{assetId}/camera-pose/calibration` — `requireManageable`; solves via
+  `CameraCalibrationSolver.solve` and **never persists** (D5) — saving is a separate `PUT` the operator
+  issues after reviewing the result. `CameraPoseService#put`/`#delete` audit the write themselves
+  (this context's first audit write, per D10) — no separate audit call in the controller.
+
+Every method's first line is `FixedCameraGeoProperties#requireEnabled()` — checked before path/body
+parsing, so the flag-off `409` is the answer regardless of what else might be wrong with the request.
+
+**`MapTracksController`** (`api/controller/`) — `GET /api/map/tracks`, scoped by `TrackProjectionService
+#list(Viewer)` reading `CurrentUser#viewer()` — the same `MapAccessPolicy#canView(layerId)` predicate
+`MapMarksController#list` already uses, never `VisibilityScope`. What a page reload rebuilds the picture
+from; live deltas ride the `map` SSE topic instead.
+
+**New DTOs** (`api/dto/`), all `@JsonInclude(NON_NULL)` except `CalibrationResponse` (§5's frozen
+examples show explicit `null` keys, not omitted ones):
+- `CameraPoseResponse(assetId, latitude, longitude, aglMeters, yawDegrees, pitchDegrees, hfovDegrees,
+  targetLayerId, source, rmsErrorPixels, updatedAt)` — position flattened (matches `MarkResponse`), no
+  `altitudeMeters` field (unused by the projection). Two factories: `from(CameraPose)` (a stored pose)
+  and `preview(AssetId, FixedCameraPose, rmsErrorPixels, solvedAt)` (a solved-but-never-persisted
+  calibration result — `targetLayerId` always absent, `source` always `CALIBRATED`).
+- `PutCameraPoseRequest`/`CalibrateCameraPoseRequest`/`CalibrationPointRequest` — request bodies;
+  numeric-range validation (`aglMeters ≥ 0`, `pitchDegrees ∈ [-10,90]`, `hfovDegrees ∈ (10,160)`,
+  2–8 calibration points, `u`/`v` ∈ [0,1]) lives entirely in the domain records' own compact
+  constructors (`CameraPose`, `CalibrationRequest`, `CalibrationLandmark`) — not duplicated in the DTO,
+  the same "let the domain type be the single source of truth" idiom as `CreateMarkRequest`.
+- `CalibrationResponse(solved, pose, rmsErrorPixels, quality, reason)` — `rmsErrorPixels` mirrors
+  `CalibrationResult#rmsErrorPixels()` verbatim, including its one legitimate `null` case (a refusal on
+  a degenerate-geometry check before any fit ran) — a found-but-non-breaking DTO looseness: nothing on
+  the frontend dereferences it when `solved:false`, but a future consumer needs to be prepared for it.
+- `ProjectedTrackResponse(assetId, trackId, label, layerId, latitude, longitude, rangeMeters,
+  errorRadiusMeters, updatedAt, trail)` — one record, three shapes by factory: `from(ProjectedTrackView)`
+  (full `GET` row, `trail` populated), `live(ProjectedTrack)` (live `created`/`updated` event, `trail`
+  always absent — a reload's `GET` is the trail's own source), `cleared(assetId, trackId)` (live
+  `cleared` event, every other field absent). `TrackPointResponse` (one `trail` entry) is deliberately
+  bare — `{latitude, longitude, at}` only, no `errorRadiusMeters`/`label`/`layerId` — per §5's frozen
+  shape; do not add fields to it without re-checking the plan.
+- `MapTracksResponse(List<ProjectedTrackResponse> tracks)` — `GET /api/map/tracks`'s body.
+
+**`MapEventPayload`** (`api/dto/`) gains a `track` field and `from(MapEvent)` gains the `TRACK` case
+(entity/action strings stay lowercase, matching every other case). Rides the *existing* `map` topic, not
+a new one — `LiveUpdateRegistry`'s existing per-connection `canView(layerId)` scoping applies to a
+`TRACK` event exactly as it already does to `MARK`/`DRAWING`/`LAYER`; no scoping code changed for this
+wave. A `CLEARED` action always maps through `ProjectedTrackResponse#cleared` (stripped
+assetId/trackId-only shape) regardless of the event's underlying payload type, per `MapEvent`'s own
+compact-ctor invariant that a `TRACK` event's payload is always a full `ProjectedTrack`.
+
+**`FixedCameraGeoProperties`** (`api/support/`) — the framework-free bridge `vision-app`'s real
+`@ConfigurationProperties` `VisionGeoProperties` maps onto (`vision-api` may not depend on
+`org.springframework.boot.context.properties`, or on `vision-app` at all), same pattern as
+`OnboardingProperties`/`VisionApiProperties`. `enabled` (default `false`, D8) and
+`calibrationMaxRmsErrorPixels` (D5, `CameraCalibrationSolver#solve`'s tolerance argument).
+`requireEnabled()` throws `IllegalStateException(DISABLED_MESSAGE)` —
+`"fixed-camera geolocation is disabled (vision.geo.fixed-camera.enabled)"` verbatim, mapped by
+`ApiExceptionHandler` to the frozen §5 `409` body `{"error":"CONFLICT","message":"..."}`.
+
+**D9 — `LiveAndPollDetectionDemand`** (`api/live/`) gains a third OR-term: `hasCameraPose`, a
+`Predicate<AssetId>` seam (same idiom as `watchingDetections`) resolved in `vision-app`'s `CvWiring` from
+`TrackProjectionRunner#hasCameraPose` — a cache the runner refreshes once per tick, **never** a
+per-poll-tick repository hit (the plan's named hazard 2). Fails open like the other two terms (an
+exception anywhere in `detectionWanted` reports "wanted", never "not wanted" — see the class's own
+Contract section). The two pre-existing public constructors that omit the new predicate default it to
+`assetId -> false`, so every pre-G4 caller/test is byte-identical in behavior.
+
+**Tests**:
+- `MapEventPayloadTest` (new, `api/dto/`) — 4 tests, the `TRACK` case of `from(MapEvent)`.
+- `CameraPoseControllerTest` (new, `api/controller/`) — 21 tests: flag-off `409` ×4 endpoints, `404`
+  (unknown/out-of-scope asset, no pose stored), `200` with full/partial DTO shape assertions,
+  visible-but-unmanageable `GET` succeeds, `403` on `PUT`/`DELETE`/`POST .../calibration` for a
+  pilot-scope caller, body-validation-before-scope-guard ordering, calibrate-never-persists
+  (`verifyNoInteractions` on the write path), calibration input validation (point-count, `u`/`v` range),
+  malformed-`assetId` `400`.
+- `MapTracksControllerTest` (new, `api/controller/`) — 4 tests: flag-off `409`, full-shape `200`
+  (including the bare `trail[].{latitude,longitude,at}` shape and `errorRadiusMeters` absent on trail
+  points), empty-array `200` when nothing is visible, the caller's `Viewer` threaded into the service
+  call unchanged.
+- `LiveAndPollDetectionDemandTest` extended (9→13): the new predicate reports demand even with no SSE
+  watcher/poll; the two-arg constructor still defaults it to `false` (pre-G4 behaviour preserved); a
+  `null` assetId skips the camera-pose half exactly like the SSE half; a throwing predicate fails open.
+- `LiveMapScopingTest` extended (4→5): `aTrackOnOneTeamsLayerReachesThatTeamsConnectionOnly` — the
+  mandated scoping proof that a `TRACK` event on one team's layer reaches only a connection that
+  `canView`s that layer, mirroring the pre-existing `Mark` equivalent in the same file.
+
+**Before/after** (`./mvnw -B -pl station/vision-api -am test`, run three times in the foreground, all
+three runs identical): **650 → 684 (+34)**, `Tests run: 684, Failures: 0, Errors: 0, Skipped: 0`,
+`BUILD SUCCESS` every time. Every pre-existing test passes unchanged with the flag at its default.
+
+**Deferred, out of this wave's scope**: none — G4's own exit criteria (§8) are fully met. See
+`station/vision-app/MODULE.md`'s own G4 entry for the wiring half, including a real circular-dependency
+bug this wave's own `FixedCameraGeoEnabledWiringTest` caught (not a defect in this module).

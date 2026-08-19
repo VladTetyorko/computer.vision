@@ -115,7 +115,7 @@ export class CockpitFacade {
    * The three halves of the Common Operational Picture (docs/plans/done/MAP-REWORK-PLAN.md §5.2) — exposed as
    * whole stores (not thin passthroughs), mirroring `geofence` above: `cockpit.html` wires
    * `<vision-tactical-map>`'s `[marks]`/`[layers]`/`[drawings]`/`[selectedMarkId]`/`(markSelected)`/
-   * `(markMoved)`/`(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)` straight to them, and
+   * `(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)` straight to them, and
    * `<vision-marks-panel>` plus the shared `shared/map/map-controls/**` components inject the same
    * `providedIn: 'root'` singletons directly (non-routed presentational children, per
    * `architecture.spec.ts`'s own carve-out).

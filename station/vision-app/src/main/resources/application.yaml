@@ -546,6 +546,41 @@ vision:
   #   max-override-hz: 50
   #   release-frames: 3
 
+  # --- Fixed-camera geolocation (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §6, D8, Wave G4) ---
+  geo:
+    fixed-camera:
+      # false (default, D8): TrackProjectionRunner is never scheduled, every camera-pose/map-tracks
+      # endpoint (§5) answers 409 naming this flag, and no TRACK event is ever published -- the
+      # feature is entirely invisible, byte-identical to before it existed. true: the runner ticks
+      # every publish-interval-millis below, projecting every calibrated asset's tracked objects
+      # onto the map. Calibrated-but-off-detection stays a visible, explained state (D9) rather than
+      # a silent dead map -- the pose panel surfaces the stream's own DetectionState.
+      enabled: false
+      # The runner's own tick cadence, milliseconds -- the map needs ~1 Hz, not the tracker's 10 (D7).
+      publish-interval-millis: 1000
+      # D6's horizon guard: at or above this ray depression there is no ground intersection under the
+      # flat-ground assumption, so the fix is dropped rather than faked.
+      min-ray-depression-degrees: 1.0
+      # D6's range ceiling: beyond this ground range the flat-ground fiction stops being useful.
+      max-range-meters: 500.0
+      # D6's assumed one-sigma angular error (pixel quantization + solve residual + the flat-ground
+      # sin), degrees -- sizes every fix's own errorRadiusMeters.
+      angular-error-degrees: 0.5
+      # D6: a fix less certain than this uncertainty radius, meters, is refused rather than published.
+      max-error-radius-meters: 100.0
+      trail:
+        # D7 decimation: a trail point is appended only after the track has moved at least this far,
+        # meters, from the last stored point.
+        min-distance-meters: 2.0
+        # D7's per-track cap on stored trail points -- at 2 m spacing, >1 km of street.
+        max-points-per-track: 600
+        # D7/§10: trail points older than this are pruned by the runner on its own cadence.
+        retention: PT30M
+      calibration:
+        # D5: a calibration solve above this residual (pixels) refuses rather than returning an
+        # over-confident pose.
+        max-rms-error-pixels: 25.0
+
   # --- Vehicle onboarding: probe / readiness / remediation (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1, Wave O5) ---
   onboarding:
     probe:

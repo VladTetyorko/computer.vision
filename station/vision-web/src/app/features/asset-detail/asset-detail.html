@@ -149,9 +149,9 @@
               [marks]="facade.marks.displayMarks()"
               [drawings]="facade.drawings.displayDrawings()"
               [layers]="facade.layers.layers()"
+              [tracks]="facade.tracks.tracks()"
               [selectedMarkId]="facade.marks.selectedMarkId()"
               (markSelected)="facade.marks.select($event)"
-              (markMoved)="facade.marks.moveTo($event.id, $event.position)"
             />
             <dl class="facts freshest-facts">
               @for (row of facade.freshestFacts(); track row.label) {
@@ -164,6 +164,15 @@
             </dl>
           </section>
         }
+
+        <!-- ---- Camera pose (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G5) — a stationary camera's
+             own measured/solved aim, so it isn't gated behind `assetTelemetryDevices()` like Position
+             above (a fixed camera may report no flight telemetry at all; that's the whole point of it
+             being fixed). Self-contained, no dedicated store — see `camera-pose-panel.ts`'s own doc
+             comment. -->
+        <section class="card col-4">
+          <vision-camera-pose-panel [assetId]="assetId()" />
+        </section>
 
         <!-- ---- KPI tile row (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) --------------- -->
         <section class="card col-8">

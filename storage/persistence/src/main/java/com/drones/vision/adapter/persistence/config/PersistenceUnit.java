@@ -5,6 +5,7 @@ import com.drones.vision.adapter.persistence.entity.AssetImageEntity;
 import com.drones.vision.adapter.persistence.entity.AssetUsageEntity;
 import com.drones.vision.adapter.persistence.entity.AssignmentEntity;
 import com.drones.vision.adapter.persistence.entity.AuditEntryEntity;
+import com.drones.vision.adapter.persistence.entity.CameraPoseEntity;
 import com.drones.vision.adapter.persistence.entity.CategoryEntity;
 import com.drones.vision.adapter.persistence.entity.DatasetEntity;
 import com.drones.vision.adapter.persistence.entity.DbAuditLogEntity;
@@ -19,6 +20,7 @@ import com.drones.vision.adapter.persistence.entity.MapLayerEntity;
 import com.drones.vision.adapter.persistence.entity.MarkEntity;
 import com.drones.vision.adapter.persistence.entity.SampleImageEntity;
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
+import com.drones.vision.adapter.persistence.entity.TrackPointEntity;
 import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
 import com.drones.vision.adapter.persistence.entity.VehicleProfileEntity;
@@ -236,6 +238,11 @@ public final class PersistenceUnit {
         // Jpa*Repository persist/merge call; mapped here anyway so JpaDbAuditLogRepository's reads
         // go through the same jakarta.persistence API as every other repository in this module.
         configuration.addAnnotatedClass(DbAuditLogEntity.class);
+        // docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/D4 (V22__fixed_camera_geo.sql) --
+        // CameraPoseEntity is audited (trg_audit_camera_poses), TrackPointEntity is not (see that
+        // migration's own header).
+        configuration.addAnnotatedClass(CameraPoseEntity.class);
+        configuration.addAnnotatedClass(TrackPointEntity.class);
         return configuration.buildSessionFactory();
     }
 

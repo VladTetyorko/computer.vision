@@ -28,12 +28,14 @@ import {
   toggleLayerHidden,
   visibleDrawings,
   visibleMarks,
+  visibleTracks,
   writeHiddenLayers,
   zoneTooltipLabel,
   type LayerView,
   type MapColors,
   type MapDrawing,
   type TacticalMark,
+  type TacticalTrack,
 } from './tactical-map-logic';
 
 function mark(overrides: Partial<TacticalMark> = {}): TacticalMark {
@@ -129,6 +131,37 @@ describe('layer visibility (the eye toggles)', () => {
     expect(visibleMarks(marks, ['a']).map((m) => m.id)).toEqual(['2']);
     expect(visibleDrawings(drawings, ['b']).map((d) => d.id)).toEqual(['d1']);
     expect(visibleMarks(marks, []).length).toBe(2);
+  });
+
+  it('filters projected tracks by their own target layer too (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D10, wave G5)', () => {
+    const tracks: TacticalTrack[] = [
+      {
+        assetId: 'a1',
+        trackId: 1,
+        label: 'car',
+        layerId: 'a',
+        latitude: 1,
+        longitude: 1,
+        rangeMeters: 10,
+        errorRadiusMeters: 5,
+        updatedAt: '2026-08-19T00:00:00Z',
+        trail: [],
+      },
+      {
+        assetId: 'a1',
+        trackId: 2,
+        label: 'van',
+        layerId: 'b',
+        latitude: 2,
+        longitude: 2,
+        rangeMeters: 20,
+        errorRadiusMeters: 8,
+        updatedAt: '2026-08-19T00:00:00Z',
+        trail: [],
+      },
+    ];
+    expect(visibleTracks(tracks, ['a']).map((t) => t.trackId)).toEqual([2]);
+    expect(visibleTracks(tracks, []).length).toBe(2);
   });
 });
 

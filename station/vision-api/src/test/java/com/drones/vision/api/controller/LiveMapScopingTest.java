@@ -13,6 +13,7 @@ import com.drones.vision.map.application.MapLayerService;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.map.domain.model.AccessLevel;
 import com.drones.vision.map.domain.model.Affiliation;
+import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.map.domain.model.LayerGrant;
@@ -26,6 +27,7 @@ import com.drones.vision.map.domain.model.MarkKind;
 import com.drones.vision.map.domain.model.MarkSource;
 import com.drones.vision.map.domain.model.MarkStatus;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.map.domain.model.ProjectedTrack;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
@@ -130,6 +132,11 @@ class LiveMapScopingTest {
                 Instant.now(), MarkStatus.ACTIVE, MarkSource.MANUAL, Verification.unverified());
     }
 
+    private ProjectedTrack trackOn(LayerId layerId, String label) {
+        return new ProjectedTrack(AssetId.random(), 1L, label, layerId, new GeoPosition(50.45, 30.52, null), 100.0,
+                10.0, Instant.now());
+    }
+
     @Test
     void aMarkOnOneTeamsLayerReachesThatTeamsConnectionOnly() throws Exception {
         MvcResult alphaStream = connect(alphaMvc);
@@ -151,6 +158,38 @@ class LiveMapScopingTest {
         assertEquals(bravoBefore, dataLines(bravoStream).size(),
                 "a mark on another team's layer must never reach this connection");
         assertFalse(bodyOf(bravoStream).contains("Alpha only"),
+                "the label must not appear anywhere in the other viewer's stream");
+        assertTrue(alphaBefore < dataLines(alphaStream).size(), "alpha's own stream did grow");
+    }
+
+    /**
+     * The G4 scoping proof (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D11): a {@code track}
+     * event rides the same {@code map} topic and the same per-connection {@code canView(layerId)}
+     * filter a {@code mark} event already does -- no new scoping mechanism exists for it, so this
+     * mirrors {@link #aMarkOnOneTeamsLayerReachesThatTeamsConnectionOnly()} exactly, substituting a
+     * {@link ProjectedTrack} for a {@link Mark}.
+     */
+    @Test
+    void aTrackOnOneTeamsLayerReachesThatTeamsConnectionOnly() throws Exception {
+        MvcResult alphaStream = connect(alphaMvc);
+        MvcResult bravoStream = connect(bravoMvc);
+        int alphaBefore = dataLines(alphaStream).size();
+        int bravoBefore = dataLines(bravoStream).size();
+
+        ProjectedTrack secret = trackOn(alphaLayer, "alpha-only-track");
+        registry.publishMapEvent(
+                new MapEvent(MapEvent.EntityType.TRACK, MapEvent.Action.CREATED, alphaLayer, secret));
+
+        JsonNode delivered = awaitMapTrack(alphaStream, "alpha-only-track");
+        assertEquals("track", delivered.get("payload").get("entity").asString());
+        assertEquals("created", delivered.get("payload").get("action").asString());
+        assertEquals(alphaLayer.value().toString(), delivered.get("payload").get("layerId").asString());
+
+        // Bravo's stream must not have grown at all -- the event was filtered out on the way out,
+        // not merely rendered differently.
+        assertEquals(bravoBefore, dataLines(bravoStream).size(),
+                "a track on another team's layer must never reach this connection");
+        assertFalse(bodyOf(bravoStream).contains("alpha-only-track"),
                 "the label must not appear anywhere in the other viewer's stream");
         assertTrue(alphaBefore < dataLines(alphaStream).size(), "alpha's own stream did grow");
     }
@@ -258,6 +297,27 @@ class LiveMapScopingTest {
             Thread.sleep(20);
         }
         fail("timed out waiting for a map envelope carrying mark \"" + label + "\"");
+        return null;
+    }
+
+    /**
+     * Polls until a {@code map} envelope carrying a track with {@code label} appears on this stream
+     * -- the {@code track}-field twin of {@link #awaitMapMark}.
+     */
+    private static JsonNode awaitMapTrack(MvcResult result, String label) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < deadline) {
+            for (String line : dataLines(result)) {
+                JsonNode node = json(line);
+                if (node.has("type") && "map".equals(node.get("type").asString())
+                        && node.get("payload").has("track")
+                        && label.equals(node.get("payload").get("track").get("label").asString())) {
+                    return node;
+                }
+            }
+            Thread.sleep(20);
+        }
+        fail("timed out waiting for a map envelope carrying track \"" + label + "\"");
         return null;
     }
 

@@ -21,7 +21,12 @@ import { capitalizeLabel, formatConfidence, relativeTimeLabel } from '../../../c
 import type { GeoPosition, GeofenceZone } from '../../../core/api/models';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
 import { resolveZoneColors, zoneLayerStyle, FALLBACK_ZONE_COLORS, type ZoneColors } from '../../../core/geofence/geofence-logic';
-import type { MarkMoved } from '../../../core/map-data/mark-logic';
+import {
+  trackChipLabel,
+  trackErrorRadiusMeters,
+  trackKey,
+  trackTrailPoints,
+} from '../../../core/camera-geo/camera-geo-logic';
 import {
   MAP_LAYERS,
   droneDivIcon,
@@ -64,6 +69,7 @@ import {
   toggleLayerHidden,
   visibleDrawings,
   visibleMarks,
+  visibleTracks,
   writeHiddenLayers,
   zoneTooltipLabel,
   type DrawingDraft,
@@ -73,6 +79,7 @@ import {
   type MapColors,
   type MapDrawing,
   type TacticalMark,
+  type TacticalTrack,
 } from './tactical-map-logic';
 
 /** Padding so the outermost markers aren't flush against the map's edge after a fit. */
@@ -100,6 +107,13 @@ interface DrawingHandle {
   /** `Leaflet.Path`, not `Polyline`, because a POLYGON and a LINE share this one field. */
   shape: Leaflet.Path | null;
   decoration: Leaflet.Marker | null;
+}
+
+/** One projected track's three Leaflet objects (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5 D6, wave G5) — the dot itself, its trail, and its error-radius circle, which is drawn **always** (D6), never conditionally. */
+interface TrackHandle {
+  dot: Leaflet.CircleMarker;
+  trail: Leaflet.Polyline;
+  errorCircle: Leaflet.Circle;
 }
 
 /**
@@ -197,6 +211,14 @@ export class TacticalMap {
   /** Detection events worth plotting (Command passes `selectEventMarkers(...)`; follow-mode hosts don't). */
   readonly events = input<readonly EventMarker[]>([]);
 
+  /**
+   * Projected fixed-camera tracks (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5, wave G5) —
+   * `core/map-data/tracks-store.ts#tracks`. Empty on every host that hasn't wired it yet (the
+   * default), which is exactly D8's own "the feature is inert, not wrong" for an unflagged
+   * deployment or a host that simply doesn't bind this input.
+   */
+  readonly tracks = input<readonly TacticalTrack[]>([]);
+
   readonly selectedMarkId = input<string | undefined>(undefined);
 
   /** The asset selected elsewhere on the page — gets the app's one `--color-info` selection ring. */
@@ -236,9 +258,6 @@ export class TacticalMap {
 
   /** A mark symbol was clicked. */
   readonly markSelected = output<string>();
-
-  /** A mark symbol was dragged to a new position (drag-to-correct). */
-  readonly markMoved = output<MarkMoved>();
 
   /**
    * A click on the map's own background (never one that landed on an interactive marker — Leaflet
@@ -325,6 +344,7 @@ export class TacticalMap {
   );
   protected readonly shownMarks = computed(() => visibleMarks(this.marks(), this.hiddenLayers()));
   protected readonly shownDrawings = computed(() => visibleDrawings(this.drawings(), this.hiddenLayers()));
+  protected readonly shownTracks = computed(() => visibleTracks(this.tracks(), this.hiddenLayers()));
 
   /** The data-layer eye-toggle rows — `public`, rendered by `<vision-layer-manager>`'s "Show on map" section (M1). */
   readonly dataRows = computed(() =>
@@ -360,6 +380,7 @@ export class TacticalMap {
     })).filter((row) => row.count > 0);
   });
   protected readonly hasMarks = computed(() => this.shownMarks().length > 0);
+  protected readonly hasTracks = computed(() => this.shownTracks().length > 0);
 
   // --- Leaflet state (plain fields — see the class doc's zoneless gotcha) -------------------------
 
@@ -371,6 +392,7 @@ export class TacticalMap {
   private readonly zoneHandles = new Map<string, Leaflet.Polygon>();
   private readonly markHandles = new Map<string, Leaflet.Marker>();
   private readonly drawingHandles = new Map<string, DrawingHandle>();
+  private readonly trackHandles = new Map<string, TrackHandle>();
   private draftLine: Leaflet.Polyline | null = null;
   private suppressAutoFitDisable = false;
   private lastFitFingerprint: string | null = null;
@@ -445,6 +467,7 @@ export class TacticalMap {
     effect(() => this.applyZones(this.shownZones(), this.zoneColors()));
     effect(() => this.applyMarks(this.shownMarks(), this.selectedMarkId(), copLayerIds(this.layers())));
     effect(() => this.applyDrawings(this.shownDrawings(), this.mapColors()));
+    effect(() => this.applyTracks(this.shownTracks(), this.mapColors()));
     effect(() => this.applyDraft(this.draft(), this.mapColors().trail));
 
     // Leaflet sizes itself from the DOM at creation time; expanding/collapsing resizes that DOM out
@@ -601,6 +624,7 @@ export class TacticalMap {
     this.applyZones(this.shownZones(), this.zoneColors());
     this.applyMarks(this.shownMarks(), this.selectedMarkId(), copLayerIds(this.layers()));
     this.applyDrawings(this.shownDrawings(), this.mapColors());
+    this.applyTracks(this.shownTracks(), this.mapColors());
   }
 
   /**
@@ -968,15 +992,11 @@ export class TacticalMap {
       const tooltip = escapeHtml(`${markKindLabel(mark.kind)} · ${affiliationLabel(mark.affiliation)}: ${mark.label}`);
       let marker = this.markHandles.get(mark.id);
       if (!marker) {
-        marker = L.marker(point, { icon, draggable: true, keyboard: false }).addTo(map);
+        // Deliberately not `draggable`: a mark records where something *was observed*, so nudging
+        // its symbol with a mouse would silently rewrite an observation. Correcting a wrong
+        // position is a re-report, not a gesture.
+        marker = L.marker(point, { icon, keyboard: false }).addTo(map);
         marker.on('click', () => this.markSelected.emit(mark.id));
-        // Only `dragend` writes back — a live `drag` tick would fight the in-progress gesture by
-        // re-rendering mid-drag. No optimistic local state here: the host's store owns the honest
-        // revert-on-failure, this handler only reports what the user did.
-        marker.on('dragend', () => {
-          const latlng = marker!.getLatLng();
-          this.markMoved.emit({ id: mark.id, position: { latitude: latlng.lat, longitude: latlng.lng } });
-        });
         marker.bindTooltip(tooltip, { direction: 'top', offset: [0, -14] });
         this.markHandles.set(mark.id, marker);
       } else {
@@ -1011,6 +1031,77 @@ export class TacticalMap {
    */
   private glyphSvg(mark: TacticalMark): string {
     return `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${ICONS[markKindIcon(mark.kind)]}</svg>`;
+  }
+
+  // --- Projected tracks (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5 D6/D7, wave G5) ----------------
+
+  /**
+   * Draws each track as three coupled Leaflet objects: a small dot at its own current position, a
+   * polyline through its (decimated) trail, and — **always**, never behind a toggle or a data check
+   * — a circle of radius `errorRadiusMeters` under the dot (D6's own "a 200m-error estimate must
+   * never render as a 5m-accurate-looking dot"). One shared colour (`colors.trail`, the same token
+   * an asset's own breadcrumb trail already uses) rather than a colour per track: D3 tracks are a
+   * single honest layer, not a categorical set that needs its own palette — the stable id chip
+   * (bound as a permanent tooltip, mirroring `applyZones`'s own centre label) is what tells two
+   * tracks apart, not colour.
+   */
+  private applyTracks(tracks: readonly TacticalTrack[], colors: MapColors): void {
+    const L = this.leaflet;
+    const map = this.map;
+    if (!L || !map) {
+      return;
+    }
+    const seen = new Set<string>();
+    for (const track of tracks) {
+      const key = trackKey(track.assetId, track.trackId);
+      seen.add(key);
+      const point = L.latLng(track.latitude, track.longitude);
+      const trailPoints = trackTrailPoints(track).map((p) => L.latLng(p.latitude, p.longitude));
+      const radius = trackErrorRadiusMeters(track);
+      const label = escapeHtml(trackChipLabel(track));
+
+      let handle = this.trackHandles.get(key);
+      if (!handle) {
+        const dot = L.circleMarker(point, {
+          radius: 6,
+          color: colors.trail,
+          weight: 2,
+          fill: true,
+          fillColor: colors.trail,
+          fillOpacity: 0.9,
+          interactive: false,
+        }).addTo(map);
+        dot.bindTooltip(label, { permanent: true, direction: 'top', offset: [0, -8], className: 'track-label' });
+        const trail = L.polyline(trailPoints, { color: colors.trail, weight: 2, opacity: 0.7, interactive: false }).addTo(map);
+        const errorCircle = L.circle(point, {
+          radius,
+          color: colors.trail,
+          weight: 1,
+          opacity: 0.5,
+          fill: true,
+          fillColor: colors.trail,
+          fillOpacity: 0.12,
+          interactive: false,
+        }).addTo(map);
+        handle = { dot, trail, errorCircle };
+        this.trackHandles.set(key, handle);
+      } else {
+        handle.dot.setLatLng(point);
+        handle.dot.setTooltipContent(label);
+        handle.trail.setLatLngs(trailPoints);
+        handle.errorCircle.setLatLng(point);
+        handle.errorCircle.setRadius(radius);
+      }
+    }
+    for (const key of [...this.trackHandles.keys()]) {
+      if (!seen.has(key)) {
+        const handle = this.trackHandles.get(key);
+        handle?.dot.remove();
+        handle?.trail.remove();
+        handle?.errorCircle.remove();
+        this.trackHandles.delete(key);
+      }
+    }
   }
 
   // --- Drawings -------------------------------------------------------------------------------------

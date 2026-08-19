@@ -317,30 +317,6 @@ describe('MarksStore', () => {
       expect(store.selectedMarkId()).toBeUndefined();
     });
 
-    it('moveTo sends flat coordinates and adopts the response', async () => {
-      const api = stubApi({ listMapMarks: vi.fn().mockResolvedValue([mark()]) });
-      const { store } = create(api);
-      await flush();
-      api.patchMapMark.mockResolvedValue(mark({ latitude: 5, longitude: 6 }));
-
-      expect(await store.moveTo('m1', { latitude: 5, longitude: 6 })).toBe(true);
-      expect(api.patchMapMark).toHaveBeenCalledWith('m1', { latitude: 5, longitude: 6, altitudeMeters: undefined });
-      expect(store.marks()[0]).toMatchObject({ latitude: 5, longitude: 6 });
-    });
-
-    it('a failed moveTo toasts, keeps the last-known-good position, and still yields a fresh reference (forces the map to snap back)', async () => {
-      const api = stubApi({ listMapMarks: vi.fn().mockResolvedValue([mark()]) });
-      const { store, toasts } = create(api);
-      await flush();
-      const before = store.marks();
-      api.patchMapMark.mockRejectedValue(new Error('forbidden'));
-
-      expect(await store.moveTo('m1', { latitude: 99, longitude: 99 })).toBe(false);
-      expect(toasts.error).toHaveBeenCalled();
-      expect(store.marks()).toEqual([mark()]);
-      expect(store.marks()).not.toBe(before);
-    });
-
     it('remove drops the mark; a 403 leaves it in place with a toast', async () => {
       const api = stubApi({ listMapMarks: vi.fn().mockResolvedValue([mark()]) });
       const { store, toasts } = create(api);

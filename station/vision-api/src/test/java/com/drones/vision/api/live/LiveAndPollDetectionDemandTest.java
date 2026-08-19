@@ -122,4 +122,47 @@ class LiveAndPollDetectionDemandTest {
         assertTrue(demand.detectionWanted(StreamId.random(), AssetId.random()),
                 "an undeterminable lookup must fail open, not claim nobody is watching");
     }
+
+    // ---- D9 third OR-term: a calibrated fixed camera (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md) ----
+
+    @Test
+    void detectionWantedIsTrueWhenTheAssetHasACameraPoseEvenWithNoSseWatcherOrPoll() {
+        LiveAndPollDetectionDemand demand =
+                new LiveAndPollDetectionDemand(assetId -> false, POLL_TTL, assetId -> true);
+
+        assertTrue(demand.detectionWanted(StreamId.random(), AssetId.random()));
+    }
+
+    @Test
+    void theTwoArgConstructorDefaultsHasCameraPoseToFalsePreservingPreG4Behaviour() {
+        // The two pre-existing public constructors must reproduce this class's exact pre-G4
+        // behaviour when the geo feature doesn't exist on a build, or is off (the default) --
+        // CvWiring#detectionDemandPort resolves hasCameraPose from an ObjectProvider that defaults
+        // to assetId -> false in exactly that situation, so this constructor must match.
+        LiveAndPollDetectionDemand demand = new LiveAndPollDetectionDemand(assetId -> false, POLL_TTL);
+
+        assertFalse(demand.detectionWanted(StreamId.random(), AssetId.random()));
+    }
+
+    @Test
+    void aNullAssetIdSkipsTheCameraPoseHalfEntirelyJustLikeTheSseHalf() {
+        AtomicReference<Boolean> hasCameraPoseWasCalled = new AtomicReference<>(false);
+        LiveAndPollDetectionDemand demand = new LiveAndPollDetectionDemand(assetId -> false, POLL_TTL, assetId -> {
+            hasCameraPoseWasCalled.set(true);
+            return true;
+        });
+
+        assertFalse(demand.detectionWanted(StreamId.random(), null));
+        assertFalse(hasCameraPoseWasCalled.get(), "hasCameraPose must not be consulted for a null assetId");
+    }
+
+    @Test
+    void aThrowingHasCameraPosePredicateFailsOpenJustLikeTheSseHalf() {
+        LiveAndPollDetectionDemand demand = new LiveAndPollDetectionDemand(assetId -> false, POLL_TTL, assetId -> {
+            throw new IllegalStateException("track-projection-runner blew up");
+        });
+
+        assertTrue(demand.detectionWanted(StreamId.random(), AssetId.random()),
+                "the same fail-open contract applies to every OR-term, not just the SSE half");
+    }
 }

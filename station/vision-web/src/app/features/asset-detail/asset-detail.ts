@@ -23,6 +23,7 @@ import { EmptyState } from '../../shared/ui/empty-state';
 import { Stat } from '../../shared/ui/stat';
 import { PageBar, type PageBarCrumb, pluralize } from '../../shared/ui/page-bar/page-bar';
 import { PilotsCard } from './pilots-card';
+import { CameraPosePanel } from '../camera-geo/camera-pose-panel';
 import { AssetDetailFacade } from './asset-detail-facade';
 import { attributeRowsToRecord, attributesToRows, telemetryFactRows, type AttributeRow, type TelemetryFactRow } from './asset-detail-logic';
 import type { AssetUsage, Device, DetectionEvent } from '../../core/api/models';
@@ -73,7 +74,7 @@ type AssetEditor = 'asset' | 'registration' | 'attributes' | 'assign';
  */
 @Component({
   selector: 'vision-asset-detail',
-  imports: [RouterLink, TacticalMap, PilotsCard, SectionHeader, SidePanel, Icon, KebabMenu, ConfirmDialog, EmptyState, Stat, PageBar],
+  imports: [RouterLink, TacticalMap, PilotsCard, CameraPosePanel, SectionHeader, SidePanel, Icon, KebabMenu, ConfirmDialog, EmptyState, Stat, PageBar],
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
