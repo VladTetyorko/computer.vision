@@ -6,7 +6,9 @@ import com.drones.vision.api.dto.VehicleProfileResponse.ParameterReadingResponse
 import com.drones.vision.api.dto.ReadinessReportResponse.FeatureReadinessResponse;
 import com.drones.vision.flight.domain.model.FeatureReadiness;
 import com.drones.vision.flight.domain.model.FeatureStatus;
+import com.drones.vision.flight.domain.model.FlightPassport;
 import com.drones.vision.flight.domain.model.MessageObservation;
+import com.drones.vision.flight.domain.model.ParameterDrift;
 import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.flight.domain.model.ReadinessReport;
 import com.drones.vision.flight.domain.model.ReadinessVerdict;
@@ -18,6 +20,7 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.model.Asset;
 import org.junit.jupiter.api.Test;
@@ -30,6 +33,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -200,5 +204,74 @@ class OnboardingWireContractTest {
         assertEquals("SYSID_THISMAV", parameter.name());
         assertEquals("link-quality", feature.feature());
         assertEquals("READY", feature.status());
+    }
+
+    // ---- FlightPassportResponse / ParameterDriftResponse (O13 -- docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1) ----
+
+    private static VehicleProfile minimalProfile(String linkKey, Instant observedAt) {
+        return new VehicleProfile(linkKey, observedAt, 7, "ardupilot", "4.5.7", "quadcopter", 12345L,
+                List.of("MAVLINK2"), List.of(), List.of(), null, true, null);
+    }
+
+    @Test
+    void flightPassportResponseOmitsAnUncapturedSnapshotRatherThanSerializingNull() {
+        UsageId usageId = UsageId.random();
+        AssetId assetId = AssetId.random();
+        VehicleProfile preflight = minimalProfile("udp://0.0.0.0:14550#7", Instant.parse("2026-08-19T07:00:00Z"));
+        FlightPassport passport = new FlightPassport(usageId, assetId, preflight, null);
+
+        String json = JSON.writeValueAsString(FlightPassportResponse.from(passport));
+
+        assertTrue(json.contains("\"usageId\":\"" + usageId.value() + "\""));
+        assertTrue(json.contains("\"assetId\":\"" + assetId.value() + "\""));
+        assertTrue(json.contains("\"preflight\":{"));
+        assertFalse(json.contains("\"postflight\""), "an uncaptured snapshot must be absent, not null: " + json);
+    }
+
+    @Test
+    void flightPassportResponseIncludesBothSnapshotsOnceBothAreCaptured() {
+        UsageId usageId = UsageId.random();
+        AssetId assetId = AssetId.random();
+        VehicleProfile preflight = minimalProfile("udp://0.0.0.0:14550#7", Instant.parse("2026-08-18T09:10:00Z"));
+        VehicleProfile postflight = minimalProfile("udp://0.0.0.0:14550#7", Instant.parse("2026-08-18T09:40:00Z"));
+        FlightPassport passport = new FlightPassport(usageId, assetId, preflight, postflight);
+
+        String json = JSON.writeValueAsString(FlightPassportResponse.from(passport));
+
+        assertTrue(json.contains("\"preflight\":{"));
+        assertTrue(json.contains("\"postflight\":{"));
+    }
+
+    @Test
+    void flightPassportResponseOmitsBothSnapshotsWhenNeitherWasEverCaptured() {
+        UsageId usageId = UsageId.random();
+        AssetId assetId = AssetId.random();
+        FlightPassport passport = new FlightPassport(usageId, assetId, null, null);
+
+        String json = JSON.writeValueAsString(FlightPassportResponse.from(passport));
+
+        assertFalse(json.contains("\"preflight\""));
+        assertFalse(json.contains("\"postflight\""));
+    }
+
+    @Test
+    void parameterDriftResponseMatchesTheFrozenShape() {
+        ParameterDrift drift = new ParameterDrift("FENCE_ALT_MAX", 100.0, 120.0,
+                Instant.parse("2026-08-18T09:10:00Z"), Instant.parse("2026-08-19T07:02:00Z"));
+
+        String json = JSON.writeValueAsString(ParameterDriftResponse.from(List.of(drift)));
+
+        assertTrue(json.contains("\"parameterName\":\"FENCE_ALT_MAX\""));
+        assertTrue(json.contains("\"previousValue\":100.0"));
+        assertTrue(json.contains("\"currentValue\":120.0"));
+        assertTrue(json.contains("\"previousObservedAt\":\"2026-08-18T09:10:00Z\""));
+        assertTrue(json.contains("\"currentObservedAt\":\"2026-08-19T07:02:00Z\""));
+    }
+
+    @Test
+    void parameterDriftResponseSerializesAnEmptyListAsAnEmptyArrayNeverAnError() {
+        String json = JSON.writeValueAsString(ParameterDriftResponse.from(List.of()));
+
+        assertEquals("{\"drift\":[]}", json, "an empty drift list is a correct 200, not withheld/omitted data");
     }
 }

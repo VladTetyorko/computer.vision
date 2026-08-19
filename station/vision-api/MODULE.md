@@ -139,6 +139,8 @@ literal it replaced (see `VisionApiProperties` below).
 | OnboardingController | GET | `/api/assets/{assetId}/profile` | 200 `VehicleProfileResponse` | 404 unknown, out-of-scope, or never-probed asset (a scoped read, all three collapse identically — `VehicleProfileService#latestProfile`) |
 | OnboardingController | POST | `/api/assets/{assetId}/probe` | 200 `VehicleProfileResponse` | 403 `!scope.canManage(ownership)`, audited (D8 — probing puts traffic on the aircraft's own link); 404 unknown asset; 409 no probeable device, or probing disabled |
 | OnboardingController | POST | `/api/assets/{assetId}/remediate` | 200 `RemediationResultResponse` | 403 `!scope.canManage(ownership)`, audited; 409 armed / arming unknown / probing disabled — every status code comes from `RemediationService`'s own gates, propagated unchanged through `RemediationOrchestrator` (see its own javadoc, `support/`, for why a request that dispatches nothing — e.g. the asset was never probed — answers 200 with every action `UNSUPPORTED` rather than 404) |
+| OnboardingController | GET | `/api/assets/{assetId}/usages/{usageId}/passport` | 200 `FlightPassportResponse` | 404 unknown asset, out-of-scope, or `usageId` not belonging to `assetId` — all three collapse identically (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1/O13, `VehicleProfileService#passport`; a distinguishable 404 would leak another asset's flight history to a caller scoped only to this one) |
+| OnboardingController | GET | `/api/assets/{assetId}/usages/{usageId}/drift` | 200 `ParameterDriftResponse` (`{drift:[ParameterDriftRow]}`) | 404 same three cases as `.../passport` — an **empty** `drift` array is a correct 200 ("nothing to compare": no previous flight, or a missing snapshot), never a 404 (`VehicleProfileService#driftFromPreviousFlight`) |
 | ReadinessController | GET | `/api/assets/{assetId}/readiness` | 200 `ReadinessReportResponse` | 404 unknown or out-of-scope asset (a scoped read) |
 | ReadinessController | GET | `/api/fleet/readiness` | 200 `FleetReadinessResponse` (`{assets:[ReadinessRow]}`) | — (thin composition of `AssetService#assets(scope,false)` + one `ReadinessService#evaluate` per asset; never 404s itself) |
 
@@ -285,7 +287,22 @@ the full report (no `detail`/`remedy` text). `FleetReadinessResponse(assets:List
 reprobe?:ReadinessReportResponse)` + nested `RemediationActionResponse(action?, messageId?,
 intervalMicros?, outcome, previousValue?, newValue?, detail?)` — assembled by `RemediationOrchestrator`
 (`support/`), not mapped off one domain type (see that class's own javadoc for why no single
-`vision-flight` application service composes this end to end — a flagged plan gap). `DiscoveredDeviceResponse`
+`vision-flight` application service composes this end to end — a flagged plan gap).
+
+**Onboarding — the flight passport** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1's frozen wire
+contract, wave O13; the two DTOs below deliberately break from the "no `NON_NULL`" rule the rest of
+this paragraph states, see each type's own javadoc for why): `FlightPassportResponse(usageId, assetId,
+preflight?:VehicleProfileResponse, postflight?:VehicleProfileResponse)`, `@JsonInclude(NON_NULL)` — an
+uncaptured snapshot is **absent**, not a literal `null` (the plan's own comment on this shape: "we did
+not look" and "we looked and found nothing" are different claims), the opposite convention from
+`VehicleProfileResponse` itself, matching `AssetUsageResponse`'s `endedAt`/positions idiom instead —
+`static from(FlightPassport)`; body of `GET /api/assets/{assetId}/usages/{usageId}/passport`.
+`ParameterDriftResponse(drift:List<ParameterDriftRowResponse>)` + nested
+`ParameterDriftRowResponse(parameterName, previousValue, currentValue, previousObservedAt,
+currentObservedAt)`, `static from(List<ParameterDrift>)` — body of
+`GET /api/assets/{assetId}/usages/{usageId}/drift`; no `NON_NULL` here (every field always present),
+and an empty `drift` list serializes as `{"drift":[]}`, a correct 200, never omitted or 404'd.
+`DiscoveredDeviceResponse`
 gained an additive `suggestedOptions:Map<String,String>` field (D16) — synthesized from the existing
 `details` map (currently just `{"sysid": details["sysid"]}}` when present, `{}` otherwise) rather than
 a new `DiscoveredDevice` domain field, since every value it carries already exists on `details` today;
@@ -1987,3 +2004,63 @@ only the real JPA ones.
 mirror-image `@ConditionalOnProperty(havingValue = "true")` bean constructing the real
 `MavlinkVehicleConfigurator` (flagged in `OnboardingWiringConfiguration`'s own javadoc); promoting
 `RemediationOrchestrator` into a proper `vision-flight` application service.
+
+## docs/plans/active/DRONE-ONBOARDING-PLAN.md Wave O13 done (the passport REST surface)
+
+Two new endpoints on the existing `OnboardingController` — no new controller was needed, it already
+held `VehicleProfileService` and `CurrentUser`: `GET /api/assets/{assetId}/usages/{usageId}/passport`
+and `GET /api/assets/{assetId}/usages/{usageId}/drift` (docs/plans/active/DRONE-ONBOARDING-PLAN.md
+§8.1's frozen wire contract) — the REST surface O11 built and nothing could reach
+(`VehicleProfileService#passport`/`#driftFromPreviousFlight`; that service's `AssetUsageRepositoryPort`
+5th constructor argument was already wired by O11's own post-merge fix, so no `vision-app` wiring
+change was needed either). Both are scoped reads: `currentUser.scope()` passed straight through, no
+authority logic added in the controller — `ApiExceptionHandler`'s existing
+`NoSuchElementException`→404 mapping does the whole job, exactly like every other onboarding read
+(`/profile`, `/readiness`). Class javadoc's "Status codes (§8.1, frozen)" list updated with both.
+
+**New DTOs**: `FlightPassportResponse`/`ParameterDriftResponse` — see the "Onboarding — the flight
+passport" DTO paragraph above for the full shape. `FlightPassportResponse` is the one member of the
+onboarding DTO family that *does* use `@JsonInclude(NON_NULL)` — deliberately the opposite of
+`VehicleProfileResponse`'s own "never omit, always literal `null`" rule, because a whole missing
+snapshot ("we never captured this") is a different claim than one unanswered field inside a captured
+snapshot ("we looked and found nothing"), per the plan's own comment on this exact shape.
+`ParameterDriftResponse` carries no `NON_NULL` (every field always present); an empty `drift` list
+serializes as `{"drift":[]}`, a correct `200` per §8.1 — "nothing to compare" is not an error and
+must never be confused with an omitted/withheld field.
+
+**Security — read directly, not inferred**: `station/vision-app`'s
+`com.drones.vision.app.config.SecurityConfig` was opened and read in full. Its `securedFilterChain`
+bean's `.requestMatchers("/api/**", "/ws/**").authenticated()` rule (line 82) already matches any
+path under `/api/**`, including both new ones — they are plain `@GetMapping`s added to an
+already-covered controller, not a new prefix. **No change was made to that file.** No ArchUnit or
+endpoint-inventory test in `vision-app` needed to learn about the two new routes either:
+`ArchitectureTest#restControllersLiveOnlyInApiControllerOrProxyPackage` checks package location only
+(`OnboardingController`'s package is unchanged), and `ContextArchitectureTest`'s `DECLARED_EDGES` set
+checks cross-context dependency edges, not REST routes — this wave added no new edge, it calls two
+more methods on a `VehicleProfileService` `vision-api` already depended on. Confirmed no test in
+either module enumerates concrete route strings anywhere else in the module (grepped for
+`RequestMappingHandlerMapping`/`getHandlerMethods`/endpoint-inventory patterns; the only two incidental
+hits were an unrelated "route" substring in a doc comment and a deleted-route regression test for a
+different controller).
+
+**Before/after** (Maven's own `Tests run:` summary line, `-am` used both times per this module's own
+build-verification gotcha):
+- `./mvnw -B -pl station/vision-api -am test`: **635 → 650 (+15)** — 5 new DTO tests added to
+  `OnboardingWireContractTest` (9→14: omitted-snapshot, both-captured, both-omitted, drift-row shape,
+  empty-drift-array) and a new `OnboardingControllerTest` (0→10: 200/404/400 for both endpoints, the
+  omitted-snapshot case, the empty-drift-array-not-404 case). `[INFO] Tests run: 650, Failures: 0,
+  Errors: 0, Skipped: 0`, `[INFO] BUILD SUCCESS`. Zero pre-existing test touched.
+- `./mvnw -B -pl station/vision-app -am test`: **214 → 214 (unchanged)**, run in the foreground to
+  completion. `[INFO] Tests run: 214, Failures: 0, Errors: 0, Skipped: 0`, `[INFO] BUILD SUCCESS` —
+  no new `vision-app` test was needed because no new `vision-app` wiring was needed:
+  `VehicleProfileService`'s bean already exposed `passport`/`driftFromPreviousFlight` as ordinary
+  interface methods once O11's own post-merge fix wired its 5th constructor argument. Docker actually
+  ran (not silently skipped): the raw log shows `Testcontainers version: 2.0.5`, a real Ryuk reaper
+  container starting, and `Connected to docker`, and the module summary's `Skipped: 0` covers every
+  Postgres-backed test in the run.
+
+**Deferred, out of this wave's scope**: `station/vision-web` has no passport/drift UI yet (a separate,
+later wave per O11's own Status section — this wave is backend-only); `vision-perception`'s
+`UsageTracker` still needs to call `captureSnapshot` at the `PREFLIGHT`/`POSTFLIGHT` transitions for a
+passport to ever have real data to serve (O12, concurrent, out of this wave's file scope — this wave
+only exposes the read side O11 already built, it does not make anything populate it).
