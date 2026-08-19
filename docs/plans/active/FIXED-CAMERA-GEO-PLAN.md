@@ -388,6 +388,15 @@ with projected tracks — G6 merely stages it properly.
 
 ## 10. Open questions for the operator
 
-Same four as CONTEXT §10: COP as the default target layer — yes/no; 30-minute trail retention —
-yes/no; buy the €50 camera + mount when the software track reaches G5; pick or film one
-street-traffic clip with 2–3 map-identifiable landmarks so G6 can run before any hardware exists.
+Same four as CONTEXT §10. Two are software and are now **decided on the documented defaults** so
+the waves are not blocked; both are configuration, so reversing either is a property change, not a
+rework:
+
+| Question | Resolution |
+|---|---|
+| COP as the default target layer | **Yes**, exactly as §4 already specifies: a pose's `target_layer_id` is nullable and null resolves to `LayerResolver#copLayerId()`. A track nobody can see is a worse failure than one an operator must move off the COP. |
+| 30-minute trail retention | **Yes** — `vision.geo.fixed-camera.trail.retention: PT30M`, per §6. Retention is enforced by the runner's prune and by bounding the trail query; it is not a database purge job, which stays named in §9. |
+
+Two remain genuinely the operator's, and neither blocks G2–G5: buy the €50 camera + mount when the
+software track reaches G5; pick or film one street-traffic clip with 2–3 map-identifiable landmarks
+so G6 can run before any hardware exists.
