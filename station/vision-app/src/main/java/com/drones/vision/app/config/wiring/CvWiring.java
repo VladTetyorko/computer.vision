@@ -11,6 +11,7 @@ import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
+import com.drones.vision.app.geo.TrackProjectionRunner;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.port.DetectionPort;
@@ -247,14 +248,41 @@ public class CvWiring {
      * VisionLiveProperties#enabled()} is {@code false} too (the SSE registry bean itself is
      * conditionally absent), in which case this deployment's demand can only ever come from the
      * poll half.
+     *
+     * <p>{@code hasCameraPose} is the D9 third OR-term (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md,
+     * hazard 2) — resolved from {@link TrackProjectionRunner#hasCameraPose}, itself an {@link
+     * ObjectProvider} because that bean is conditional on {@code vision.geo.fixed-camera.enabled}
+     * (default {@code false}, see {@code FixedCameraGeoWiringConfiguration}). Absent means {@code
+     * assetId -> false}, contributing nothing to the OR — a deployment with the geo feature off (or
+     * not yet on this build) sees byte-identical demand behaviour to before this OR-term existed.
+     *
+     * <p><b>{@code trackProjectionRunner.getIfAvailable()} is deliberately called inside the
+     * predicate, not once here at bean-creation time</b> — unlike {@code liveUpdateRegistry} above.
+     * {@code TrackProjectionRunner}'s own constructor takes {@code AssetService}, and this bean sits
+     * on {@code AssetService}'s own (indirect) construction path via {@code
+     * ApplicationServiceWiring#streamService}; resolving the {@code ObjectProvider} eagerly here
+     * would force Spring to construct {@code TrackProjectionRunner} — and therefore {@code
+     * AssetService} — while {@code AssetService} is still being constructed, an unresolvable circular
+     * reference (caught by {@code FixedCameraGeoEnabledWiringTest} the first time this wave enabled
+     * the flag in a real context — {@code ObjectProvider}-typed constructor parameters elsewhere in
+     * this class never trip this because none of their beans depend back on {@code AssetService}).
+     * Deferring the lookup into the predicate costs nothing at call time (every poll tick already
+     * calls through an {@code ObjectProvider} for {@code detectionDemandPort} itself, see {@link
+     * #streamDetectionSupport}) and means the runner is only ever resolved once the whole context —
+     * {@code AssetService} included — has finished starting.
      */
     @Bean
     @ConditionalOnExpression("${vision.cv.demand.enabled:true}")
     public LiveAndPollDetectionDemand detectionDemandPort(VisionCvProperties cvProperties,
-            @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> liveUpdateRegistry) {
+            @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> liveUpdateRegistry,
+            ObjectProvider<TrackProjectionRunner> trackProjectionRunner) {
         LiveUpdateRegistry registry = liveUpdateRegistry.getIfAvailable();
         Predicate<AssetId> watchingDetections = registry == null ? assetId -> false : registry::watchingDetections;
-        return new LiveAndPollDetectionDemand(watchingDetections, cvProperties.demand().pollTtl());
+        Predicate<AssetId> hasCameraPose = assetId -> {
+            TrackProjectionRunner runner = trackProjectionRunner.getIfAvailable();
+            return runner != null && runner.hasCameraPose(assetId);
+        };
+        return new LiveAndPollDetectionDemand(watchingDetections, cvProperties.demand().pollTtl(), hasCameraPose);
     }
 
     /**
