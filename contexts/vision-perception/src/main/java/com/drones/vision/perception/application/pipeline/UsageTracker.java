@@ -96,7 +96,13 @@ import com.drones.vision.perception.application.stream.StreamService;
  * long enough to reach {@code LINK_LOST}/{@code ABANDONED}) on demand, since neither transition can
  * arrive on a sample by definition — nothing in this wave wires it to a live scheduler (that is
  * left to whichever wave wires {@code vision.flight.phase.*}), but the method exists so the
- * transition itself is directly testable.
+ * transition itself is directly testable. Every one of those three fold sites, plus the two places
+ * a usage opens ({@link #deviceStreamStarted}/{@link #deviceTelemetryDiscovered}), notifies the
+ * configured {@link UsagePhaseObserver} exactly once whenever the phase actually changed (or, at
+ * open, once for the usage's initial {@link UsagePhase#PREFLIGHT}) — see {@link
+ * #notifyPhaseObserver} and {@link UsagePhaseObserver}'s own javadoc
+ * (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4, Wave O11: the seam {@code vision-app} hangs the
+ * flight passport's PREFLIGHT/POSTFLIGHT snapshot capture off of).
  *
  * <p>Plain class with no framework dependency; constructor-injected ports and
  * collaborators only, consistent with the rest of this module.
@@ -127,6 +133,8 @@ import com.drones.vision.perception.application.stream.StreamService;
  */
 public final class UsageTracker {
 
+    private static final System.Logger LOG = System.getLogger(UsageTracker.class.getName());
+
     private final AssetRepositoryPort assetRepository;
     private final DeviceRepositoryPort deviceRepository;
     private final AssetUsageRepositoryPort usageRepository;
@@ -138,6 +146,7 @@ public final class UsageTracker {
     private final long sourceMaxBackoffNanos;
     private final UsageSummaryBatchSettings summaryBatchSettings;
     private final UsagePhaseSettings phaseSettings;
+    private final UsagePhaseObserver usagePhaseObserver;
 
     /** One dedicated daemon thread scheduling every telemetry subscription's reopen retries; see {@code DefaultStreamService}'s own field of the same shape for why this is shared rather than per-subscription. */
     private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -229,8 +238,33 @@ public final class UsageTracker {
                          BiConsumer<AssetId, Telemetry> telemetryObserver,
                          UsageSummaryBatchSettings summaryBatchSettings, UsagePhaseSettings phaseSettings) {
         this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
+                liveUpdatePublisherPort, telemetryObserver, summaryBatchSettings, phaseSettings,
+                UsagePhaseObserver.NOOP);
+    }
+
+    /**
+     * Same as the 9-argument constructor, plus a {@link UsagePhaseObserver} notified whenever an
+     * open usage's phase is set for the first time or changes (docs/plans/active/DRONE-ONBOARDING-PLAN.md
+     * §2.4, Wave O11 -- the flight passport). This is the constructor {@code vision-app} is meant to
+     * use once it wires a real observer (e.g. one that calls {@code
+     * VehicleProfileService#captureSnapshot} at PREFLIGHT/POSTFLIGHT); every shorter public
+     * constructor still defaults this collaborator to {@link UsagePhaseObserver#NOOP}, so behavior
+     * is unchanged for every pre-O11 call site.
+     *
+     * @param usagePhaseObserver never {@code null} -- pass {@link UsagePhaseObserver#NOOP} for "do
+     *                           nothing", the same explicit-no-op idiom {@link UsagePhaseSettings}
+     *                           and every other collaborator added since Wave O7 already follows in
+     *                           this class
+     */
+    public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
+                         AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
+                         List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
+                         BiConsumer<AssetId, Telemetry> telemetryObserver,
+                         UsageSummaryBatchSettings summaryBatchSettings, UsagePhaseSettings phaseSettings,
+                         UsagePhaseObserver usagePhaseObserver) {
+        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
                 liveUpdatePublisherPort, telemetryObserver, SupervisedPublisher.INITIAL_BACKOFF_NANOS,
-                SupervisedPublisher.MAX_BACKOFF_NANOS, summaryBatchSettings, phaseSettings);
+                SupervisedPublisher.MAX_BACKOFF_NANOS, summaryBatchSettings, phaseSettings, usagePhaseObserver);
     }
 
     /**
@@ -266,9 +300,10 @@ public final class UsageTracker {
 
     /**
      * Test seam: same as the 10-argument constructor, plus explicit {@link UsagePhaseSettings} —
-     * the true canonical constructor every other one ultimately delegates to. Lets phase-transition
-     * tests use a fixed/steppable clock and small silence/abandon windows instead of production's
-     * real ones.
+     * defaults {@link UsagePhaseObserver} to {@link UsagePhaseObserver#NOOP}, delegating to the true
+     * canonical constructor below. Lets phase-transition tests use a fixed/steppable clock and small
+     * silence/abandon windows instead of production's real ones, without needing to know the
+     * phase-observer seam exists.
      */
     UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
                  AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
@@ -276,6 +311,21 @@ public final class UsageTracker {
                  BiConsumer<AssetId, Telemetry> telemetryObserver, long sourceInitialBackoffNanos,
                  long sourceMaxBackoffNanos, UsageSummaryBatchSettings summaryBatchSettings,
                  UsagePhaseSettings phaseSettings) {
+        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
+                liveUpdatePublisherPort, telemetryObserver, sourceInitialBackoffNanos, sourceMaxBackoffNanos,
+                summaryBatchSettings, phaseSettings, UsagePhaseObserver.NOOP);
+    }
+
+    /**
+     * The true canonical constructor every other one ultimately delegates to
+     * (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4, Wave O11 added {@code usagePhaseObserver}).
+     */
+    UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
+                 AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
+                 List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
+                 BiConsumer<AssetId, Telemetry> telemetryObserver, long sourceInitialBackoffNanos,
+                 long sourceMaxBackoffNanos, UsageSummaryBatchSettings summaryBatchSettings,
+                 UsagePhaseSettings phaseSettings, UsagePhaseObserver usagePhaseObserver) {
         this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.usageRepository = Objects.requireNonNull(usageRepository, "usageRepository must not be null");
@@ -288,6 +338,7 @@ public final class UsageTracker {
         this.sourceMaxBackoffNanos = sourceMaxBackoffNanos;
         this.summaryBatchSettings = Objects.requireNonNull(summaryBatchSettings, "summaryBatchSettings must not be null");
         this.phaseSettings = Objects.requireNonNull(phaseSettings, "phaseSettings must not be null");
+        this.usagePhaseObserver = Objects.requireNonNull(usagePhaseObserver, "usagePhaseObserver must not be null");
     }
 
     /**
@@ -355,6 +406,9 @@ public final class UsageTracker {
             return;
         }
         AssetUsage updated = null;
+        UsageId usageId = null;
+        UsagePhase previousPhase = null;
+        UsagePhase nextUsagePhase = null;
         synchronized (tracking) {
             if (tracking.usage == null || tracking.lastSample == null) {
                 return;
@@ -364,17 +418,21 @@ public final class UsageTracker {
             if (linkAge.isNegative()) {
                 linkAge = Duration.ZERO;
             }
-            FlightPhase priorPhase = toFlightPhase(tracking.usage.phase());
-            FlightPhase nextPhase = phaseSettings.rule().nextPhase(priorPhase, tracking.lastSample.flightState(),
-                    linkAge, tracking.activeVideoStreams);
+            UsagePhase priorPhase = tracking.usage.phase();
+            FlightPhase nextPhase = phaseSettings.rule().nextPhase(toFlightPhase(priorPhase),
+                    tracking.lastSample.flightState(), linkAge, tracking.activeVideoStreams);
             UsagePhase mappedPhase = toUsagePhase(nextPhase);
-            if (mappedPhase != tracking.usage.phase()) {
+            if (mappedPhase != priorPhase) {
+                usageId = tracking.usage.id();
                 updated = tracking.usage.withPhase(mappedPhase);
                 tracking.usage = updated;
+                previousPhase = priorPhase;
+                nextUsagePhase = mappedPhase;
             }
         }
         if (updated != null) {
             usageRepository.save(updated);
+            notifyPhaseObserver(assetId, usageId, previousPhase, nextUsagePhase);
         }
     }
 
@@ -443,6 +501,8 @@ public final class UsageTracker {
     private void deviceStreamStarted(Asset asset, StreamId streamId) {
         Tracking tracking = trackingByAsset.computeIfAbsent(asset.id(), id -> new Tracking());
         boolean openedNow;
+        UsageId openedUsageId = null;
+        UsagePhase openedPhase = null;
         synchronized (tracking) {
             tracking.activeDevices++;
             tracking.activeVideoStreams++;
@@ -451,10 +511,13 @@ public final class UsageTracker {
                 AssetUsage usage = new AssetUsage(UsageId.random(), asset.id(), phaseSettings.clock().get(), null,
                         null, null, 0, streamId);
                 tracking.usage = usageRepository.save(usage);
+                openedUsageId = tracking.usage.id();
+                openedPhase = tracking.usage.phase();
             }
         }
         if (openedNow) {
             subscribeTelemetry(asset, tracking);
+            notifyPhaseObserver(asset.id(), openedUsageId, null, openedPhase);
         }
     }
 
@@ -470,6 +533,8 @@ public final class UsageTracker {
         Tracking tracking = trackingByAsset.computeIfAbsent(asset.id(), id -> new Tracking());
         boolean openedNow = false;
         boolean firstTimeForDevice;
+        UsageId openedUsageId = null;
+        UsagePhase openedPhase = null;
         synchronized (tracking) {
             firstTimeForDevice = tracking.activeTelemetryOnlyDevices.add(deviceId);
             if (firstTimeForDevice) {
@@ -479,6 +544,8 @@ public final class UsageTracker {
                     AssetUsage usage = new AssetUsage(UsageId.random(), asset.id(), phaseSettings.clock().get(), null,
                             null, null, 0, null);
                     tracking.usage = usageRepository.save(usage);
+                    openedUsageId = tracking.usage.id();
+                    openedPhase = tracking.usage.phase();
                 }
             }
         }
@@ -486,6 +553,7 @@ public final class UsageTracker {
             // Covers every telemetry-capable device the asset has right now, not just this one --
             // see subscribeTelemetry's own loop over asset.devices(), same as deviceStreamStarted.
             subscribeTelemetry(asset, tracking);
+            notifyPhaseObserver(asset.id(), openedUsageId, null, openedPhase);
         }
     }
 
@@ -495,6 +563,9 @@ public final class UsageTracker {
             return;
         }
         AssetUsage closedUsage = null;
+        UsageId closedUsageId = null;
+        UsagePhase previousPhase = null;
+        UsagePhase closedPhaseFired = null;
         synchronized (tracking) {
             if (tracking.activeDevices > 0) {
                 tracking.activeDevices--;
@@ -507,19 +578,27 @@ public final class UsageTracker {
                 // state machine -- IN_FLIGHT/LINK_LOST both close to ABANDONED (the platform stopped
                 // watching while the aircraft was, so far as it knew, airborne), everything else to
                 // CLOSED.
-                FlightPhase priorPhase = toFlightPhase(tracking.usage.phase());
-                UsagePhase closedPhase = toUsagePhase(phaseSettings.rule().onSessionClosed(priorPhase));
+                UsagePhase priorPhase = tracking.usage.phase();
+                UsagePhase closedPhase = toUsagePhase(phaseSettings.rule().onSessionClosed(toFlightPhase(priorPhase)));
+                closedUsageId = tracking.usage.id();
                 closedUsage = tracking.usage.closed(phaseSettings.clock().get()).withPhase(closedPhase);
                 tracking.usage = null;
                 // the close below is written synchronously; nothing scheduled for the coalesced
                 // summary write should still fire against a now-null tracking.usage afterwards.
                 tracking.unflushedSummaryUpdates = 0;
                 cancelPendingSummaryFlush(tracking);
+                if (closedPhase != priorPhase) {
+                    previousPhase = priorPhase;
+                    closedPhaseFired = closedPhase;
+                }
             }
         }
         if (closedUsage != null) {
             unsubscribeTelemetry(tracking);
             usageRepository.save(closedUsage);
+            if (closedPhaseFired != null) {
+                notifyPhaseObserver(asset.id(), closedUsageId, previousPhase, closedPhaseFired);
+            }
         }
     }
 
@@ -593,6 +672,8 @@ public final class UsageTracker {
         }
         UsageId usageId;
         AssetUsage updated;
+        UsagePhase observedPreviousPhase = null;
+        UsagePhase observedNextPhase = null;
         synchronized (tracking) {
             if (tracking.usage == null) {
                 return; // usage already closed: drop a straggling sample rather than reopen it
@@ -611,14 +692,19 @@ public final class UsageTracker {
             // machine -- zero link age (a sample just arrived), streamCount scoped to genuine video
             // streams only (never activeDevices, which also counts telemetry-only devices -- see
             // deviceTelemetryDiscovered).
-            FlightPhase priorPhase = toFlightPhase(tracking.usage.phase());
-            FlightPhase nextPhase = phaseSettings.rule().nextPhase(priorPhase, sample.flightState(), Duration.ZERO,
-                    tracking.activeVideoStreams);
+            UsagePhase priorPhase = tracking.usage.phase();
+            FlightPhase nextPhase = phaseSettings.rule().nextPhase(toFlightPhase(priorPhase), sample.flightState(),
+                    Duration.ZERO, tracking.activeVideoStreams);
+            UsagePhase mappedPhase = toUsagePhase(nextPhase);
             updated = tracking.usage.withPositions(startPosition, lastPosition)
                     .withSampleCount(tracking.usage.sampleCount() + 1)
-                    .withPhase(toUsagePhase(nextPhase));
+                    .withPhase(mappedPhase);
             tracking.usage = updated;
             tracking.lastSample = sample; // docs/plans/done/MVP3-PLAN.md C-a: outlives the usage, see latestTelemetry's javadoc
+            if (mappedPhase != priorPhase) { // docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4/O11: fire only on a genuine transition
+                observedPreviousPhase = priorPhase;
+                observedNextPhase = mappedPhase;
+            }
         }
         telemetryRepository.save(usageId, sample);
         registerSummaryUpdate(assetId, tracking, updated);
@@ -627,6 +713,9 @@ public final class UsageTracker {
         }
         if (telemetryObserver != null) { // docs/plans/done/OPS-CORE-PLAN.md §G — geofence, wired in vision-app
             telemetryObserver.accept(assetId, sample);
+        }
+        if (observedNextPhase != null) {
+            notifyPhaseObserver(assetId, usageId, observedPreviousPhase, observedNextPhase);
         }
     }
 
@@ -742,6 +831,28 @@ public final class UsageTracker {
             case ABANDONED -> UsagePhase.ABANDONED;
             case CLOSED -> UsagePhase.CLOSED;
         };
+    }
+
+    /**
+     * Invokes {@link #usagePhaseObserver} for one open/transition, called with the lock already
+     * released (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4, Wave O11) — mirrors how {@link
+     * #telemetryObserver} is invoked outside {@code tracking}'s monitor in {@link #applySample}, so
+     * an observer that takes a while (or one day acquires its own lock) can never deadlock against
+     * this class's own per-asset synchronization.
+     *
+     * <p>Catches and logs every {@link RuntimeException} the observer raises — see {@link
+     * UsagePhaseObserver}'s own javadoc for why a misbehaving observer must never break the
+     * stream/telemetry event that triggered it.
+     *
+     * @param previous {@code null} exactly when {@code next} is the usage's opening phase
+     */
+    private void notifyPhaseObserver(AssetId assetId, UsageId usageId, UsagePhase previous, UsagePhase next) {
+        try {
+            usagePhaseObserver.onPhaseChanged(assetId, usageId, previous, next, phaseSettings.clock().get());
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING, () -> "usage " + usageId.value() + " phase observer threw for "
+                    + previous + " -> " + next + ": " + e.getMessage(), e);
+        }
     }
 
     /** Per-asset mutable tracking state; every access is synchronized on the instance itself. */

@@ -576,6 +576,18 @@ vision:
         # the request is session-scoped on the wire and a reboot forgets it. Measured on ArduPilot
         # Copter 4.7, a fresh link carries four message types until this asks for more.
         enabled: false
+    passport:
+      # false (default): no UsagePhaseObserver bean is wired at all -- a usage's PREFLIGHT/POSTFLIGHT
+      # phase transition (UsageTracker, vision-perception) folds exactly as it did before Wave O11
+      # existed, and no VehicleProfile snapshot is ever captured or attached to the AssetUsage. true:
+      # OnboardingWiringConfiguration#passportCaptureObserver captures a snapshot at PREFLIGHT (the
+      # usage's opening) and again at POSTFLIGHT, via VehicleProfileService#captureSnapshot, audited
+      # under the platform actor (PlatformActor.USER_ID, vision-platform) rather than a real person.
+      # Needs probe.enabled=true above to do anything real -- with it false, VehicleConfigPort is
+      # NoopVehicleConfigPort, so every capture attempt fails with the expected "no device this
+      # platform can probe" (logged once per usage, at DEBUG, no stack trace), and this app logs one
+      # startup WARNING naming both flags so that combination is never silently inert.
+      enabled: false
 
   # --- CV model-improvement training loop (docs/plans/done/CV-TRAINING-PLAN.md, Wave T4; delta docs/plans/done/CV-TRAINING-V2-PLAN.md) ---
   training:

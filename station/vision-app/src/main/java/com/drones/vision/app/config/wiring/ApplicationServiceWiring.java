@@ -303,6 +303,15 @@ public class ApplicationServiceWiring {
      * block {@code telemetryRepositoryPort} reads (docs/plans/active/SCALE-100-PLAN.md S4). The two
      * writes this class makes per sample are one ingest decision, so they are configured by one
      * number even though they need two settings types to cross the module boundary.
+     *
+     * <p>{@code usagePhaseObserver} (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4, Wave O11) is
+     * an {@link ObjectProvider} because {@code OnboardingWiringConfiguration#passportCaptureObserver}
+     * is itself conditionally present on {@code vision.onboarding.passport.enabled} (default {@code
+     * false}) — resolving to {@link UsagePhaseObserver#NOOP} when that flag is off reproduces the
+     * pre-O11 constructor's behaviour exactly: every phase fold still happens, nothing is ever
+     * notified. Same defaulting idiom as {@link #streamService}'s {@code detectionDemandPort}.
+     * {@code phaseSettings} stays {@link UsagePhaseSettings#defaults()} exactly as it was before this
+     * bean took an observer at all — nothing in this module binds {@code vision.flight.phase.*} yet.
      */
     @Bean
     public UsageTracker usageTracker(AssetRepositoryPort assetRepositoryPort,
@@ -312,12 +321,14 @@ public class ApplicationServiceWiring {
                                       List<TelemetrySourcePort> telemetrySources,
                                       TelemetryLiveUpdatePort telemetryLiveUpdatePort,
                                       GeofenceMonitor geofenceMonitor,
-                                      VisionPersistenceProperties persistenceProperties) {
+                                      VisionPersistenceProperties persistenceProperties,
+                                      ObjectProvider<UsagePhaseObserver> usagePhaseObserver) {
         // geofenceMonitor::evaluate, not the monitor itself: UsageTracker (perception) takes a
         // BiConsumer seam so it never depends on the flight context — docs/plans/active/DOMAIN-SEPARATION-W1.md §5 C2
         return new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort,
                 telemetryRepositoryPort, telemetrySources, telemetryLiveUpdatePort, geofenceMonitor::evaluate,
-                persistenceProperties.telemetry().toSummarySettings());
+                persistenceProperties.telemetry().toSummarySettings(), UsagePhaseSettings.defaults(),
+                usagePhaseObserver.getIfAvailable(() -> UsagePhaseObserver.NOOP));
     }
 
     /**

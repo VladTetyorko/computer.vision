@@ -16,6 +16,7 @@ import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
+import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
@@ -135,6 +136,18 @@ class UsageTrackerTest {
      * abandon 120s), driven by a caller-controlled clock rather than a real one -- so a test can
      * step "past" either window instantly instead of sleeping through it.
      */
+    /**
+     * docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4, Wave O11: same as {@link
+     * #trackerWithPhaseSettings}, plus an explicit {@link UsagePhaseObserver} via the public
+     * canonical constructor -- lets the phase-observer firing tests below reuse the same
+     * fixed/steppable-clock plumbing as the phase-transition tests above.
+     */
+    private UsageTracker trackerWithPhaseObserver(List<TelemetrySourcePort> sources, UsagePhaseSettings phaseSettings,
+                                                   UsagePhaseObserver usagePhaseObserver) {
+        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+                null, null, UsageSummaryBatchSettings.immediate(), phaseSettings, usagePhaseObserver);
+    }
+
     private static UsagePhaseSettings phaseSettings(AtomicReference<Instant> clock) {
         return new UsagePhaseSettings(clock::get, new FlightPhaseRule(Duration.ofSeconds(10), Duration.ofSeconds(120)));
     }
@@ -693,6 +706,95 @@ class UsageTrackerTest {
         verify(usageRepository, times(3)).save(captor.capture());
         assertEquals(UsagePhase.ABANDONED, captor.getValue().phase());
         assertTrue(captor.getValue().endedAt() != null, "an abandoned session is still a closed one");
+    }
+
+    // --- UsagePhaseObserver (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4, Wave O11) --------
+
+    @Test
+    void phaseObserverFiresOnceOnUsageOpenWithNullPrevious() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        List<Captured> observed = new CopyOnWriteArrayList<>();
+        UsageTracker tracker = trackerWithPhaseObserver(List.of(), UsagePhaseSettings.defaults(),
+                (assetId, usageId, previous, next, at) -> observed.add(new Captured(assetId, usageId, previous, next)));
+
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+
+        assertEquals(1, observed.size(), "opening a usage must notify the observer exactly once");
+        Captured opened = observed.get(0);
+        assertEquals(asset.id(), opened.assetId());
+        assertNull(opened.previous(), "nothing transitions into the initial phase -- previous must be null");
+        assertEquals(UsagePhase.PREFLIGHT, opened.next());
+    }
+
+    @Test
+    void phaseObserverFiresWithPreviousAndNextOnARealTransition() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        List<Captured> observed = new CopyOnWriteArrayList<>();
+        UsageTracker tracker = trackerWithPhaseObserver(List.of(source), UsagePhaseSettings.defaults(),
+                (assetId, usageId, previous, next, at) -> observed.add(new Captured(assetId, usageId, previous, next)));
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        observed.clear(); // drop the open notification -- only the transition below is under test
+
+        source.emit(telemetryDevice.id(), armedSample(telemetryDevice.id(), Instant.now(), true)); // -> IN_FLIGHT
+
+        assertEquals(1, observed.size());
+        Captured transition = observed.get(0);
+        assertEquals(UsagePhase.PREFLIGHT, transition.previous());
+        assertEquals(UsagePhase.IN_FLIGHT, transition.next());
+    }
+
+    @Test
+    void phaseObserverDoesNotFireWhenThePhaseIsUnchanged() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        List<Captured> observed = new CopyOnWriteArrayList<>();
+        UsageTracker tracker = trackerWithPhaseObserver(List.of(source), UsagePhaseSettings.defaults(),
+                (assetId, usageId, previous, next, at) -> observed.add(new Captured(assetId, usageId, previous, next)));
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        observed.clear();
+
+        // armed == null is unknown, never a stand-in for "not flying" (see
+        // unknownArmedStateNeverLeavesPreflight above) -- the phase stays PREFLIGHT, so the observer
+        // must not fire a second time.
+        source.emit(telemetryDevice.id(), armedSample(telemetryDevice.id(), Instant.now(), null));
+
+        assertTrue(observed.isEmpty(), "an unchanged phase must not notify the observer");
+    }
+
+    @Test
+    void aThrowingPhaseObserverNeverBreaksSampling() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsagePhaseObserver throwingObserver = (assetId, usageId, previous, next, at) -> {
+            throw new RuntimeException("boom");
+        };
+        UsageTracker tracker = trackerWithPhaseObserver(List.of(source), UsagePhaseSettings.defaults(), throwingObserver);
+
+        // The open call itself fires the observer (previous == null) -- opening the usage must
+        // still succeed even though the observer throws.
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+
+        Telemetry sample = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
+        source.emit(telemetryDevice.id(), sample);
+
+        ArgumentCaptor<AssetUsage> captor = ArgumentCaptor.forClass(AssetUsage.class);
+        verify(usageRepository, times(2)).save(captor.capture()); // 1 open + 1 sample update, neither broken
+        assertEquals(1, captor.getValue().sampleCount());
+    }
+
+    private record Captured(AssetId assetId, UsageId usageId, UsagePhase previous, UsagePhase next) {
     }
 
     @Test
