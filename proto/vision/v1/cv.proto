@@ -311,3 +311,147 @@ service Training {
   rpc ListModels(google.protobuf.Empty) returns (ModelList);
   rpc PromoteModel(ModelRefMsg) returns (Ack);
 }
+
+// ---- VISUAL-GEO-V2, heavy-A (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1) -------------------
+// Pull-only: the worker dials the video source itself, exactly like Inference.DetectPulled.
+// There is no frame payload on this wire, in either direction.
+
+// Everything the rectifier and the priors need, restated on every GeoControl message.
+// Every field is `optional` on purpose: an asset may have heading without a GPS fix, or a
+// gimbal without an IMU.
+message GeoTelemetry {
+  optional double latitude              = 1;   // WGS-84 degrees, the aircraft's own reported fix
+  optional double longitude             = 2;
+  optional double amsl_meters           = 3;   // Telemetry.altitudeMeters -- above mean sea level
+  optional double agl_meters            = 4;   // Telemetry.aglMeters -- what the projection wants
+  optional double heading_degrees       = 5;   // vehicle yaw, clockwise from true north, [0,360)
+  optional double groundspeed_mps       = 6;
+  // Camera pointing, in rectify.py's convention: DEGREES FROM NADIR (0 = straight down,
+  // 90 = horizon). The Java codec converts from Attitude's positive-up gimbal pitch exactly
+  // once (VISUAL-GEO-V2-PLAN.md D6). Absent = nadir assumed.
+  optional double camera_pitch_deg      = 7;
+  optional double camera_roll_deg       = 8;
+  optional double camera_yaw_deg        = 9;   // earth-frame gimbal yaw when present
+  optional double horizontal_fov_deg    = 10;  // 0/absent = the region's assumed default
+  int64  sample_millis                  = 11;  // epoch millis of THIS telemetry sample
+  optional double gps_radius_meters     = 12;  // the raw fix's own 1-sigma, from HDOP when known
+}
+
+// Restricts retrieval to a disc around where the station already believes the aircraft is.
+message GeoPrior {
+  double latitude      = 1;
+  double longitude     = 2;
+  double radius_meters = 3;   // > 0
+}
+
+// Declarative desired state for one localization session. Restated on EVERY message, same
+// doctrine as PullControl/TrackingConfig: a one-shot control message can be lost with no error.
+message GeoControl {
+  string stream_id                = 1;   // also the mediamtx path name
+  string source_url               = 2;   // read from the FIRST message of the call only
+  string rtsp_transport           = 3;   // first message only ("tcp"/"udp"/"")
+  string region_id                = 4;   // "" = search every READY region
+  float  target_fps               = 5;   // keyframe rate; <=0 = server default
+  optional GeoTelemetry telemetry = 6;   // hot -- takes effect as soon as the worker sees it
+  optional GeoPrior prior         = 7;   // hot
+  bool   stop                     = 8;   // requests a clean drain + half-close
+}
+
+enum GeoStatus {
+  GEO_STATUS_UNSPECIFIED = 0;
+  GEO_STATUS_FIX           = 1;  // a position cleared every Python-side gate
+  GEO_STATUS_NO_FIX        = 2;  // searched, nothing cleared; `refusal` says which gate
+  GEO_STATUS_LOW_TEXTURE   = 3;  // rejected pre-encode (Laplacian/entropy floor) -- never encoded
+  GEO_STATUS_OUT_OF_REGION = 4;  // the prior disc intersects no READY region
+  GEO_STATUS_NO_INDEX      = 5;  // no READY region exists at all
+  GEO_STATUS_ERROR         = 6;  // encoder/index/decode failure; `refusal` carries the reason
+}
+
+// Why the worker believes (or refuses) this fix. Java logs and serves this verbatim -- an
+// operator must always be able to see WHY, not just WHAT (VISUAL-GEO-V2-PLAN.md D5).
+message GeoEvidence {
+  int32  candidate_count         = 1;   // top-k actually re-ranked
+  int32  match_count             = 2;   // correspondences on the winning candidate
+  int32  inlier_count            = 3;   // MAGSAC inliers -- the promotion gate
+  double inlier_ratio            = 4;
+  double rerank_margin           = 5;   // (s1 - s2) / max(s1, 1) over inlier scores
+  double reprojection_rms_px     = 6;   // homography residual -- the ceiling applies at EVERY N
+  bool   rectified               = 7;   // IPM actually applied (false = degraded to raw frame)
+  bool   cell_calibrated         = 8;   // the winning cell has a real accept threshold, not never-accept
+  int32  supporting_frames       = 9;   // distinct frames whose own inliers cleared the floor
+  double baseline_meters         = 10;  // platform motion spanned by those frames
+  bool   sequence_converged      = 11;
+  double sequence_spread_meters  = 12;
+  int32  sequence_updates        = 13;
+  double osm_prior               = 14;  // the D8 tie-breaker's multiplier; 1.0 = inert
+}
+
+// Sentinels, spelled out once: every new enum's `0` value is its own `*_UNSPECIFIED`. A GeoFix
+// without `latitude`/`longitude` is never a `(0,0)` position -- absence is absence. `refusal`
+// is `""` only on GEO_STATUS_FIX.
+message GeoFix {
+  string stream_id             = 1;
+  int64  sequence              = 2;   // monotonically increasing per session
+  int64  frame_millis          = 3;   // capturedAt of the frame this fix came from (CaptureClock)
+  GeoStatus status             = 4;
+  string region_id             = 5;   // the region actually searched ("" when none was)
+  string tile_id               = 6;   // "<z>/<x>/<y>" of the winning cell, for diagnostics
+  optional double latitude     = 7;   // present iff status == GEO_STATUS_FIX
+  optional double longitude    = 8;
+  optional double yaw_degrees  = 9;   // camera image-up bearing; present only when the homography passed sanity
+  optional double radius_meters       = 10;  // 1-sigma horizontal, always present with a position
+  optional double implied_agl_meters  = 11;  // from the homography scale; the D-agl cross-check input
+  GeoEvidence evidence         = 12;
+  string refusal               = 13;  // "" on FIX; otherwise names the gate that refused
+  int64  telemetry_age_millis  = 14;  // frame_millis - telemetry.sample_millis (signed, honest)
+  int64  latency_millis        = 15;  // worker-side compute cost for this frame
+}
+
+// ---- Region ingest (harvested from feat/visual-geo, unchanged in shape) ----------------------
+message ReferencePackChunk {
+  string region_id = 1;   // set on EVERY chunk; must be identical throughout the stream
+  bytes  content   = 2;   // concatenation in stream order is a ZIP: region.json + tiles/<z>_<x>_<y>.jpg
+}
+
+message ReferenceIndexStats {
+  int32  tile_count                  = 1;
+  int32  descriptor_count            = 2;
+  int32  descriptor_dim              = 3;
+  string encoder_id                  = 4;
+  float  accept_similarity           = 5;   // self-calibrated on held-out tiles
+  float  accept_margin               = 6;
+  float  holdout_recall_at_1         = 7;
+  float  holdout_median_error_meters = 8;
+  int64  index_bytes                 = 9;
+  int32  never_accept_cells          = 10;  // NEW: cells the calibration refuses outright
+}
+
+message ReferenceIndexProgress {
+  string   region_id = 1;
+  string   phase     = 2;   // "receiving"|"extracting"|"encoding"|"indexing"|"calibrating"|"done"
+  int32    done      = 3;
+  int32    total     = 4;   // 0 when the phase has no countable unit
+  JobState state     = 5;   // reused: RUNNING | SUCCEEDED | FAILED
+  string   message   = 6;
+  optional ReferenceIndexStats stats = 7;   // present only on the terminal SUCCEEDED event
+}
+
+message RegionRef  { string region_id = 1; }
+message RegionInfo {
+  string region_id = 1;
+  string name      = 2;
+  int32  zoom      = 3;
+  ReferenceIndexStats stats = 4;
+  int64  built_at_millis    = 5;
+  double north = 6; double south = 7; double east = 8; double west = 9;
+}
+message RegionList { repeated RegionInfo regions = 1; }
+
+// LocalizeStream is pull-only (D2): GeoControl carries no frame payload, the worker dials the
+// video source itself. Ack and google.protobuf.Empty are reused from the shipped contract.
+service Geolocation {
+  rpc LocalizeStream(stream GeoControl) returns (stream GeoFix);
+  rpc BuildReferenceIndex(stream ReferencePackChunk) returns (stream ReferenceIndexProgress);
+  rpc ListRegions(google.protobuf.Empty) returns (RegionList);
+  rpc DeleteRegion(RegionRef) returns (Ack);
+}
