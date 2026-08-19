@@ -19,6 +19,7 @@ import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.perception.domain.model.TargetLock;
 import com.drones.vision.perception.domain.model.TrackRef;
 import com.drones.vision.perception.domain.model.TrackState;
@@ -213,6 +214,67 @@ class StreamControllerTest {
         mockMvc.perform(get("/api/streams"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].burnedIn").value(false));
+    }
+
+    // --- STREAM-STATE-PLAN S2: the truth on the wire -------------------------------------------
+
+    @Test
+    void listCarriesTheStateAndDetectionIntentAClientUsedToGuess() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(
+                new ActiveStream(streamId, DeviceId.random(), Instant.now(), true, StreamState.LIVE, true)));
+        when(streamService.detectionState(streamId)).thenReturn(Optional.of(DetectionState.RUNNING));
+
+        mockMvc.perform(get("/api/streams"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].state").value("LIVE"))
+                .andExpect(jsonPath("$[0].detectionEnabled").value(true))
+                .andExpect(jsonPath("$[0].detectionState").value("RUNNING"));
+    }
+
+    @Test
+    void listReportsDetectionOffAndAStalledSourceAsTwoIndependentFacts() throws Exception {
+        // The whole point of keeping the axes apart: "the video died" and "the operator turned
+        // detection off" must be separately readable, not folded into one status.
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(
+                new ActiveStream(streamId, DeviceId.random(), Instant.now(), true, StreamState.STALLED, false)));
+        when(streamService.detectionState(streamId)).thenReturn(Optional.of(DetectionState.OFF));
+
+        mockMvc.perform(get("/api/streams"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].state").value("STALLED"))
+                .andExpect(jsonPath("$[0].detectionEnabled").value(false))
+                .andExpect(jsonPath("$[0].detectionState").value("OFF"));
+    }
+
+    @Test
+    void configReadsBackWhatWasOnlyEverWritable() throws Exception {
+        StreamId streamId = StreamId.random();
+        PipelineConfig running = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.55, 12, 2, true,
+                Set.of("person", "car"), PipelineConfig.defaults().eventRule(), true, true,
+                new TrackingConfig(TrackingMode.FOLLOW, "cost", 2000, 15, 30, 30, 3, 0, 0, null));
+        when(streamService.config(streamId)).thenReturn(Optional.of(running));
+
+        mockMvc.perform(get("/api/streams/{id}/config", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.model").value("yolo26n.pt"))
+                .andExpect(jsonPath("$.confidenceThreshold").value(0.55))
+                .andExpect(jsonPath("$.inferenceFps").value(12))
+                .andExpect(jsonPath("$.detectionEnabled").value(true))
+                .andExpect(jsonPath("$.labelFilter", hasSize(2)))
+                .andExpect(jsonPath("$.tracking.mode").value("FOLLOW"))
+                .andExpect(jsonPath("$.tracking.engineId").value("cost"));
+    }
+
+    @Test
+    void configIs404ForAnUnknownStreamRatherThanPlausibleDefaults() throws Exception {
+        // Deliberately NOT the forgiving 200-with-defaults idiom `tracks` uses: a made-up config for
+        // a stream that does not exist is exactly the fiction this endpoint exists to abolish.
+        when(streamService.config(any())).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/streams/{id}/config", StreamId.random().value()))
+                .andExpect(status().isNotFound());
     }
 
     @Test

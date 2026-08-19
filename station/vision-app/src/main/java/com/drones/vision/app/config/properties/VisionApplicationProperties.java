@@ -1,5 +1,6 @@
 package com.drones.vision.app.config.properties;
 
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import com.drones.vision.perception.application.pipeline.AdaptiveRateSettings;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -73,7 +74,7 @@ public record VisionApplicationProperties(
             pipeline = new Pipeline(Pipeline.DEFAULT_ASSUMED_SOURCE_FPS_INT,
                     Pipeline.DEFAULT_MEASURED_FPS_EWMA_ALPHA_DOUBLE, Pipeline.DEFAULT_WARMUP_FRAMES_INT,
                     Pipeline.DEFAULT_MIN_MEASURED_FPS_DOUBLE, Pipeline.DEFAULT_MAX_MEASURED_FPS_DOUBLE, null, null,
-                    Pipeline.DEFAULT_CAMERA_HFOV_DEGREES_DOUBLE, null);
+                    Pipeline.DEFAULT_CAMERA_HFOV_DEGREES_DOUBLE, null, null);
         }
         if (extrapolation == null) {
             extrapolation = new Extrapolation(Extrapolation.DEFAULT_MAX_MILLIS_LONG,
@@ -170,8 +171,16 @@ public record VisionApplicationProperties(
                             Backoff detectionBackoff,
                             Backoff sourceReopenBackoff,
                             @DefaultValue(Pipeline.DEFAULT_CAMERA_HFOV_DEGREES) double cameraHfovDegrees,
-                            AdaptiveRate adaptiveRate) {
+                            AdaptiveRate adaptiveRate,
+                            @DefaultValue(Pipeline.DEFAULT_VIDEO_STALE_AFTER) Duration videoStaleAfter) {
         static final String DEFAULT_ASSUMED_SOURCE_FPS = "30";
+        /**
+         * How long a running stream may go without a frame before {@code StreamState} reports it
+         * {@code STALLED} rather than {@code LIVE} (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.4).
+         * A deliberately slow source (a 1 fps still camera) must raise this, or it reads
+         * {@code STALLED} forever against a threshold tuned for video.
+         */
+        static final String DEFAULT_VIDEO_STALE_AFTER = "5s";
         static final String DEFAULT_CAMERA_HFOV_DEGREES = "0.0";
         static final double DEFAULT_CAMERA_HFOV_DEGREES_DOUBLE = 0.0;
         static final String DEFAULT_MEASURED_FPS_EWMA_ALPHA = "0.2";
@@ -196,6 +205,9 @@ public record VisionApplicationProperties(
             if (adaptiveRate == null) {
                 adaptiveRate = new AdaptiveRate(AdaptiveRateSettings.DEFAULT_ENABLED,
                         AdaptiveRateSettings.DEFAULT_MAX_FPS, AdaptiveRateSettings.DEFAULT_EWMA_ALPHA);
+            }
+            if (videoStaleAfter == null) {
+                videoStaleAfter = Duration.ofSeconds(5);
             }
         }
 

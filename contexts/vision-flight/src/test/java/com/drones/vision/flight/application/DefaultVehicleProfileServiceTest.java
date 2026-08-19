@@ -16,6 +16,7 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
@@ -535,6 +536,11 @@ class DefaultVehicleProfileServiceTest {
 
         @Override
         public Optional<AssetUsage> findOpenByAsset(AssetId assetId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<AssetUsage> findByStream(StreamId streamId) {
             throw new UnsupportedOperationException();
         }
     }

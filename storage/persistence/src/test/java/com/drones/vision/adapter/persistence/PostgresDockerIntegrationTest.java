@@ -580,6 +580,28 @@ class PostgresDockerIntegrationTest {
         }
 
         @Test
+        void findByStreamFindsTheUsageThatStreamOpened() {
+            StreamId streamId = StreamId.random();
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, NOW.plusSeconds(60),
+                    null, null, 3, streamId);
+            repository.save(usage);
+
+            Optional<AssetUsage> found = repository.findByStream(streamId);
+
+            assertTrue(found.isPresent());
+            assertEquals(usage, found.get());
+        }
+
+        @Test
+        void findByStreamIsEmptyForAnUnknownStreamAndForStreamlessRows() {
+            repository.save(new AssetUsage(UsageId.random(), AssetId.random(), NOW, NOW.plusSeconds(1),
+                    null, null, 0));
+
+            assertTrue(repository.findByStream(StreamId.random()).isEmpty(),
+                    "a stream nothing recorded is an absence, and a stream_id=NULL row must never match it");
+        }
+
+        @Test
         void findOpenByAssetReturnsOnlyTheCurrentlyOpenUsage() {
             AssetId assetId = AssetId.random();
             AssetUsage closed = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0);

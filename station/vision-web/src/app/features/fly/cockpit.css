@@ -276,7 +276,12 @@
    `fly-osd.ts`'s own `.osd-group`), not a warning banner. `.dot` (base, unmodified — styles.css) is
    the neutral/muted tier of this app's one dot-status language; a red dot here would say "problem",
    which off-by-default deliberately is not. */
-.detection-off-chip {
+/* `.stream-state-chip` (docs/plans/active/STREAM-STATE-PLAN.md §2.3) shares this chrome verbatim: it is
+   the same neutral "this is not a fault" HUD pill, just about video flow instead of detection —
+   `STARTING` means the source opened and the first frame has not landed yet. The two faults
+   (`STALLED`/`RECONNECTING`) take `.notice`'s amber instead and never reach this rule. */
+.detection-off-chip,
+.stream-state-chip {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -295,7 +300,8 @@
   max-width: calc(100% - 2 * var(--overlay-pad));
 }
 
-.detection-off-chip .dot {
+.detection-off-chip .dot,
+.stream-state-chip .dot {
   flex: none;
 }
 

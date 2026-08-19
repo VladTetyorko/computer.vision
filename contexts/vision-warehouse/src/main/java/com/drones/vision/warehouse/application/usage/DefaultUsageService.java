@@ -4,6 +4,7 @@ import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
@@ -37,6 +38,12 @@ import java.util.Optional;
  * every other scope — the same "hide what you can't verify" posture {@link VisibilityScope}'s own
  * scoped reads already use elsewhere in this codebase, rather than guessing at visibility for a
  * usage nobody can prove is (or isn't) the caller's own.
+ *
+ * <h2>{@code byStream} reuses both of the above</h2>
+ * {@link #byStream} runs the same {@code toSummary} resolution over a single repository hit, so a
+ * usage the caller may not see and a stream that never opened one collapse to the same empty
+ * answer. {@link Optional#map} drops a {@code null} mapping result on its own — that is what turns
+ * "scope excluded it" into {@link Optional#empty()} here, with no extra filter.
  */
 public final class DefaultUsageService implements UsageService {
 
@@ -70,6 +77,13 @@ public final class DefaultUsageService implements UsageService {
                 .map(usage -> toSummary(usage, scope))
                 .filter(Objects::nonNull)
                 .toList();
+    }
+
+    @Override
+    public Optional<UsageSummary> byStream(VisibilityScope scope, StreamId streamId) {
+        Objects.requireNonNull(scope, "scope must not be null");
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        return usageRepository.findByStream(streamId).map(usage -> toSummary(usage, scope));
     }
 
     /**

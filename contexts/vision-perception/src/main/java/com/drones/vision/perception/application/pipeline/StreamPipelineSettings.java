@@ -109,7 +109,8 @@ public record StreamPipelineSettings(
         double cameraHfovDegrees,
         AdaptiveRateSettings adaptiveRate,
         Duration detectionDemandPollInterval,
-        Duration detectionDemandGrace) {
+        Duration detectionDemandGrace,
+        Duration videoStaleAfter) {
 
     /** @see #trackRetention() */
     private static final Duration DEFAULT_TRACK_RETENTION = Duration.ofSeconds(5);
@@ -119,6 +120,20 @@ public record StreamPipelineSettings(
 
     /** @see #detectionDemandGrace() */
     private static final Duration DEFAULT_DETECTION_DEMAND_GRACE = Duration.ofSeconds(30);
+
+    /**
+     * How long a running stream may go without a frame before {@code StreamState} reports it
+     * {@code STALLED} rather than {@code LIVE} (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.4).
+     *
+     * <p>5s is unambiguous against the source rates this deployment actually runs (~28 fps measured)
+     * — roughly 140 missed frames — while staying short enough that an operator sees a dead feed
+     * called dead. <b>A deliberately slow source must raise it:</b> a 1 fps still camera is healthy
+     * at a 1s gap but would read {@code STALLED} forever against a threshold tuned for video, which
+     * is why this is a setting and not a constant.
+     *
+     * @see #videoStaleAfter()
+     */
+    private static final Duration DEFAULT_VIDEO_STALE_AFTER = Duration.ofSeconds(5);
 
     /**
      * {@code 0} = the deployment has not described its camera's optics, which disables pose-based
@@ -226,6 +241,27 @@ public record StreamPipelineSettings(
                 DEFAULT_DETECTION_DEMAND_POLL_INTERVAL, DEFAULT_DETECTION_DEMAND_GRACE);
     }
 
+    /**
+     * The shape before {@link #videoStaleAfter()} was added (docs/plans/active/STREAM-STATE-PLAN.md
+     * &sect;2.4), defaulting it to {@link #DEFAULT_VIDEO_STALE_AFTER} — the value the plan itself
+     * pins (5s) — so every pre-existing call site compiles unchanged. Same "N-1-arg convenience
+     * ctor" idiom as every other addition to this record.
+     */
+    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
+                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
+                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
+                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
+                                   double extrapolationMatchGate, Duration trackingStatsWindow,
+                                   Duration trackRetention, TrackingConfigPatch trackingSeed,
+                                   double cameraHfovDegrees, AdaptiveRateSettings adaptiveRate,
+                                   Duration detectionDemandPollInterval, Duration detectionDemandGrace) {
+        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
+                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
+                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
+                trackRetention, trackingSeed, cameraHfovDegrees, adaptiveRate,
+                detectionDemandPollInterval, detectionDemandGrace, DEFAULT_VIDEO_STALE_AFTER);
+    }
+
     public StreamPipelineSettings {
         if (assumedSourceFps <= 0) {
             throw new IllegalArgumentException("assumedSourceFps must be positive, was " + assumedSourceFps);
@@ -284,6 +320,9 @@ public record StreamPipelineSettings(
         if (detectionDemandGrace == null || detectionDemandGrace.isZero() || detectionDemandGrace.isNegative()) {
             throw new IllegalArgumentException(
                     "detectionDemandGrace must be positive, was " + detectionDemandGrace);
+        }
+        if (videoStaleAfter == null || videoStaleAfter.isZero() || videoStaleAfter.isNegative()) {
+            throw new IllegalArgumentException("videoStaleAfter must be positive, was " + videoStaleAfter);
         }
     }
 

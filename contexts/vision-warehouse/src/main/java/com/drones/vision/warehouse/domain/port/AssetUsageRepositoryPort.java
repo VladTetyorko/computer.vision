@@ -2,6 +2,7 @@ package com.drones.vision.warehouse.domain.port;
 
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
 
 import java.util.List;
@@ -34,6 +35,11 @@ import java.util.Optional;
  *   <li>{@link #findOpenByAsset(AssetId)} returns the asset's currently open
  *       usage ({@code endedAt == null}), if any. At most one usage per asset
  *       is open at a time.</li>
+ *   <li>{@link #findByStream(StreamId)} returns the usage that stream opened,
+ *       if any. A {@code StreamId} is minted per stream start, so at most one
+ *       usage ever carries it; a usage written before the {@code streamId}
+ *       field existed, or a stream that never opened one, reads back as
+ *       {@link Optional#empty()} &mdash; an absence, not an error.</li>
  * </ul>
  *
  * <h2>Threading</h2>
@@ -86,4 +92,18 @@ public interface AssetUsageRepositoryPort {
      * @return the open usage, or {@link Optional#empty()} if none is open
      */
     Optional<AssetUsage> findOpenByAsset(AssetId assetId);
+
+    /**
+     * Finds the usage a stream opened &mdash; the answer to "what happened to stream X"
+     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.6).
+     *
+     * <p>This exists because a stopped stream is deliberately <b>not</b> a {@code StreamState}: it
+     * is absent from the running-stream list and present here, with an {@code endedAt}. Without
+     * this lookup that record was reachable only by id, so a caller holding a stream id could
+     * observe the stream disappear and had no way to find out what it had been.
+     *
+     * @param streamId the stream whose usage to find
+     * @return the usage that stream opened, or {@link Optional#empty()} if none carries that id
+     */
+    Optional<AssetUsage> findByStream(StreamId streamId);
 }

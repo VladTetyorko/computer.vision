@@ -12,6 +12,7 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 
 - `models.ts` — wire types 1:1 with `com.drones.vision.api.dto`: `Device` (mirrors `DeviceResponse`: id, name, capabilities, protocol, uri, options, state), `RegisterDeviceRequest`, `ActiveStream`, `StartStreamRequest`, `StartStreamResult`, `DiscoveredDevice` (mirrors `DiscoveredDeviceResponse`; `suggestedCategory?: string` is a category slug), `ScanRequest`, `ScanResult`, `ApiErrorBody`. `Capability = 'VIDEO'|'TELEMETRY'|'PTZ'|'AUDIO'`. **No `DeviceType`/`type` field anywhere** — removed server-side; categories are asset-level data.
   - **`ActiveStream`/`StartStreamResult` gain `burnedIn?: boolean`** (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§8 wave M8 — the backend field itself is wave M5's job and does not exist on the wire yet). **Absent means `true`** — every reader goes through `shared/player/detection-overlay-logic.ts#resolveBurnedIn` rather than a bare truthiness/`??` check, so a pre-M5 backend (every deployment today) behaves byte-identically to before this wave (D1's "defaults reproduce today's behaviour exactly"). See that section below and the M8 changelog entry at the end of this file.
+  - **`ActiveStream` gains `state?: StreamState`, `detectionEnabled?: boolean`, `detectionState?: DetectionState`** (docs/plans/active/STREAM-STATE-PLAN.md §2.5, wave S3) — the three facts `GET /api/streams` never carried. `StreamState = 'STARTING'|'LIVE'|'STALLED'|'RECONNECTING'|'UNOBSERVED'` is **video flow only** and deliberately has no `'STOPPED'`: a stopped stream is simply not in the list (its record is an `AssetUsage`, a different axis). All three are optional so an older backend degrades to exactly today's behaviour — `features/fly/stream-state-logic.ts` is where that degradation is decided, once.
   - **Live per-stream CV control (docs/plans/done/CV-CONTROL-PLAN.md §2-4's frozen contract, superseding the old hardcoded model list — see the dedicated changelog section at the end of this file)**: `StartStreamRequest` gains optional `labelFilter?: readonly string[]`/`detectionEnabled?: boolean`; new `UpdateStreamConfigRequest` (every field optional — the body of `PATCH /api/streams/{id}/config`, a **partial** patch, not a replace), `PatchStreamConfigResponse {streamId, modelReArmed}`, `CvModel {id, displayName, kind, openVocab, defaultLabelFilter}` (one row of the model-picker roster — `displayName` now carries the old `DetectionModelOption.hint` inline, there is no separate hint field), `CvModelsResponse {models}` (the body of `GET /api/cv/models`, never errors server-side).
   - **Asset-side DTOs** (docs/main/CYCLES-PLAN.md §2 — landed the mirroring this file previously deferred): `AssetSummary` (mirrors `AssetSummaryResponse`), `AssetDetails` (extends `AssetSummary` with `devices`/`recentUsages`, mirrors `AssetDetailsResponse`), `AssetUsage` (mirrors `AssetUsageResponse`; `endedAt` absent = open usage), `TelemetrySample` (mirrors `TelemetrySampleResponse`; every field but `at` is optional), `GeoPosition` (mirrors `GeoPositionResponse`), `Category` (mirrors `CategoryResponse`), plus `AssetStatus` union. Same `@JsonInclude(NON_NULL)` convention as everything else here: absent, not `null`, typed `?:`.
   - **`AssetStats`** (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave A's frozen wire contract — mirrors `dto.AssetStatsResponse`, `GET /api/assets/{id}/stats`): `{totalFlightSeconds, flightCount}` always present (0 for an asset with no usages fetched); `firstFlownAt?/lastFlownAt?/avgFlightSeconds?/lastKnownBatteryPercent?` each independently absent (never a fabricated `0`/`null`) exactly when honestly unavailable (no flights, no *closed* flights, or no telemetry ever reported, respectively); `flightInProgress: boolean` always present. Backs the asset manager page's KPI tile row — see `core/fleet/asset-stats-logic.ts` below and the rewritten `features/asset-detail/**` section.
@@ -11604,3 +11605,78 @@ bullet, the `features/replay/**` panel bullet, this Status entry).
   unchanged pre-existing warnings are the closest available evidence.
 - **The backend (W1) does not exist yet** — this wave's own starting premise, not a gap it
   introduces; every degrade path above is honest about it.
+
+---
+
+## Status — STREAM-STATE-PLAN wave S3: the cockpit's detection controls now render the stream, not this browser's localStorage (docs/plans/active/STREAM-STATE-PLAN.md §3.1) — 2026-08-19
+
+### The defect this closes
+
+Three surfaces claimed to show whether detection was on for the stream on screen — the drawer's
+Detect switch (`cv-control-panel.html`), the tool rail's off-dot and the video-surface "Detection
+off — video only" chip — and all three rendered `settings.effective().detectionEnabled`, i.e. **this
+browser's `localStorage` draft**. `PipelineConfig#detectionEnabled` had no read surface at all, so
+there was nothing else they could have rendered. Consequences, all reproducible: a second browser
+showed the opposite position for the same stream; a reload showed the draft, not the stream;
+switching drone carried one stream's switch position onto another's video.
+
+### What shipped
+
+| Surface | Reads now |
+|---|---|
+| Detect switch (`cv-control-panel.html`) | `detectionEnabled` input ← `facade.detectionOn()` |
+| Tool-rail off-dot (`cockpit.html`) | `facade.detectionOn()` |
+| "Turn on" chip (`cockpit.html`) | `facade.detectionOn()` |
+| Detect status sentence (`detectionStatusInfo`) | `detectionEnabled` input — same value as the switch above it |
+
+- **`features/fly/stream-state-logic.ts`** (new, pure + spec'd) — `resolveDetectionEnabled(streamValue, draft)`
+  is the whole rule: the running stream's own server-side value, falling back to the draft only when
+  `undefined` (nothing running, or a backend predating the field). `??`, never `||` — `false` is an
+  answer, not an absence. `videoNotice(live, state)` maps `StreamState` to what the operator is told
+  over the video, `null` for "say nothing".
+- **The draft is not deleted, it is demoted** to its honest job: what the next `Start` posts. That
+  is still what every other knob in the panel uses, because none of them can be read back.
+- **`CockpitFacade#setDetection(enabled)`** is now the single write path behind the switch *and* the
+  chip (`enableDetection()` is a thin alias). It writes the draft, PATCHes the stream, then
+  `fleet.refresh()` — the control shows where detection actually is, so a failed PATCH leaves it
+  where the stream really is instead of claiming a change that did not happen. `detectionPending`
+  disables the switch and shows `applying…` for the round trip rather than optimistically flipping it.
+- **`CvControlPanel`'s Detect switch left "Live vs. draft, one rule"** — it is now an
+  `input`/`output` pair, documented in that class doc as the one deliberate exception and why.
+- **A video-flow notice on the stage** — amber for `STALLED`/`RECONNECTING` (kept apart: only one of
+  them is already recovering by itself), a neutral `.stream-state-chip` pill for `STARTING`, and
+  **silence for `LIVE` and `UNOBSERVED`** — a proxied source counts no frames inside the JVM, so
+  "cannot judge" must not be rendered as a fault. It precedes the detection chip in the same
+  mutually-exclusive stage-notice chain, and suppresses it: "video only" is untrue when there is no
+  video either.
+- **`FleetStore#stop()` logged a lie** — `POST /api/streams/{id}/stop` for a call that has always
+  been `DELETE /api/streams/{id}`. Fixed; every other console line in that store was checked.
+
+### Tests
+
+`stream-state-logic.spec.ts` — 8 specs: the truth-over-draft rule both ways, the `undefined`
+fallback both ways, an explicit guard that `false` is not treated as absence (the `||` bug this
+would have been), silence for not-live / `LIVE` / `UNOBSERVED` / absent, both faults with their
+exact copy, and `STARTING` as neutral.
+
+Suite: **2255 passed / 129 files**, `npm run test:ci` (which bundles the app first, so every
+template binding above is type-checked).
+
+### Files touched
+
+`core/api/models.ts`, `core/fleet/fleet-store.ts`, `features/fly/stream-state-logic.ts` (new),
+`features/fly/stream-state-logic.spec.ts` (new), `features/fly/cockpit-facade.ts`,
+`features/fly/cockpit.ts`, `features/fly/cockpit.html`, `features/fly/cockpit.css`,
+`features/fly/cv-control-panel.ts`, `features/fly/cv-control-panel.html`, `features/fly/fly-logic.ts`.
+
+### Left incomplete / deferred, named honestly
+
+- **`UNOBSERVED` is silent, and that is a real gap, not a fix.** A proxied stream's video health is
+  genuinely unknown to this app; S4's mediamtx reader-count term is the first server-side signal that
+  will know anything about it. Until then the cockpit says nothing rather than guessing.
+- **The `detectionState === 'OFF'` branch of `detectionStatus` is now near-unreachable** — both its
+  inputs come from the server, so they only disagree during a one-tick poll skew. Left in place: the
+  skew is real, and its copy ("waiting for the server to confirm") is still honest during it.
+- **No component-level spec for the switch itself.** This module tests pure logic, not templates
+  (`rc-monitor.spec.ts` is the lone exception); the rule is fully covered where it lives.
+

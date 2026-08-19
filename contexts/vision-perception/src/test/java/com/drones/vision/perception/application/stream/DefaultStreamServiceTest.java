@@ -14,6 +14,7 @@ import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.perception.domain.model.StopReason;
 import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
@@ -183,6 +184,35 @@ class DefaultStreamServiceTest {
         verify(eventPublisher, times(2)).publish(captor.capture());
         assertEquals(EventType.STREAM_STARTED, captor.getAllValues().get(0).type());
         assertEquals(EventType.STREAM_STOPPED, captor.getAllValues().get(1).type());
+    }
+
+    @Test
+    void anOperatorStopCarriesTheOperatorReason() {
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+
+        service.stop(streamId);
+
+        assertEquals("OPERATOR", stoppedEvent().attributes().get("reason"));
+        assertEquals("Stream stopped", stoppedEvent().message());
+    }
+
+    @Test
+    void anIdleStopSaysSoInBothTheMessageAndTheAttributes() {
+        // docs/plans/active/STREAM-STATE-PLAN.md §3.2: a stop the system decided must not read as a crash.
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+
+        service.stop(streamId, StopReason.IDLE_NO_VIEWERS);
+
+        assertEquals(EventType.STREAM_STOPPED, stoppedEvent().type(), "still a stop, not an error");
+        assertEquals("Stream stopped: no viewers", stoppedEvent().message());
+        assertEquals("IDLE_NO_VIEWERS", stoppedEvent().attributes().get("reason"));
+    }
+
+    /** The second published event — every test above it starts exactly one stream first. */
+    private Event stoppedEvent() {
+        ArgumentCaptor<Event> captor = ArgumentCaptor.forClass(Event.class);
+        verify(eventPublisher, times(2)).publish(captor.capture());
+        return captor.getAllValues().get(1);
     }
 
     @Test

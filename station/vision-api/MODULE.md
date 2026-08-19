@@ -76,6 +76,7 @@ literal it replaced (see `VisionApiProperties` below).
 | UsageTimelineController | GET | `/api/usages?limit&assetId` | 200 `List<UsageSummaryResponse>`, newest first | 400 malformed `assetId` UUID (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/extracts/design/10-replay.md's frozen contract — the "replay library" list; scoped to `CurrentUser#scope()`, an unknown/out-of-scope `assetId` yields `[]`, never an error; `limit` defaults 50, clamped to `DefaultUsageService.MAX_LIMIT`=500) |
 | UsageTimelineController | GET | `/api/usages/{usageId}/timeline?fromMs&toMs&maxPoints` | 200 `UsageTimelineResponse` | 404 unknown usage, 400 bad UUID/non-positive `maxPoints`/`toMs` before `fromMs` (docs/plans/done/MVP2-PLAN.md §R, R-a — flight replay; windowed + downsampled, unlike `AssetController`'s older `.../telemetry`; see Gotchas) |
 | UsageTimelineController | GET | `/api/usages/{usageId}/recording` | 200 `UsageRecordingResponse` (`available:true` with `url`/`start`/`durationSeconds`, or `available:false` alone when the usage has no `streamId` or the stream publisher has no recording/playback endpoint — never an error) | 404 unknown usage, 400 bad UUID (docs/plans/done/OPS-CORE-PLAN.md §R, R-b — same collaborator as `timeline` above, so this endpoint joins that controller rather than a new one) |
+| UsageTimelineController | GET | `/api/usages/by-stream/{streamId}` | 200 `UsageSummaryResponse` | 404 no visible usage carries that stream id, 400 bad UUID (docs/plans/active/STREAM-STATE-PLAN.md §2.6, S5 — "what happened to stream X"; a stopped stream is absent from `GET /api/streams` by design, and this is where its record is read from. Scoped to `CurrentUser#scope()`: out-of-scope and does-not-exist are the **same** 404, never a 403 that would confirm existence) |
 | GeofenceController | GET | `/api/geofences` | 200 `List<GeofenceZoneResponse>` | — (docs/plans/done/OPS-CORE-PLAN.md §G; sorted by name, see `GeofenceService#zones()`) |
 | GeofenceController | POST | `/api/geofences` | 201 `GeofenceZoneResponse` | 400 unrecognized `kind`, polygon with fewer than 3 vertices, or an out-of-range vertex/`maxAltitudeMeters` (docs/plans/done/OPS-CORE-PLAN.md §G) |
 | GeofenceController | PUT | `/api/geofences/{id}` | 200 `GeofenceZoneResponse` | 404 unknown id, 400 bad UUID/same validation as create (docs/plans/done/OPS-CORE-PLAN.md §G; wholesale replace — same body shape as create) |
@@ -2317,3 +2318,56 @@ Flyway migrated to v22, confirmed by log output) — not skipped.
 `DefaultReplayService`, see Findings item 1, which is the real, non-stale version of this same gap);
 signing/hashing the package. Also deferred, not in §7 but found this wave: Finding 1 above (`detections`
 truncation-detection), and a `scopedTo` display-name/email seam (Finding 3).
+
+**docs/plans/active/STREAM-STATE-PLAN.md wave S4 — what "somebody is watching this video" means here.**
+
+- `LiveUpdateRegistry#watchingAsset(AssetId)` (new, public) — whether any open connection carries
+  **any** topic scoped to that asset. Deliberately broader than `watchingDetections`: that one asks
+  whether anyone wants *boxes*, which since CV-DEMAND is off by default and therefore says nothing
+  about whether the video is being watched. Video has no SSE topic of its own (it travels over
+  HLS/WHEP), so an asset-scoped subscription is the closest honest proxy this registry can offer —
+  and it is only ever one OR-term.
+- `public final class LiveHlsAndReaderVideoDemand implements VideoDemandPort` — structurally the
+  sibling of `LiveAndPollDetectionDemand` (same narrow-`Predicate` seams, same never-throws contract,
+  same clock seam). Three OR-terms, **cheapest first so the network one short-circuits**: `watchingAsset`
+  → a recent `touched(StreamId)` within `demandTtl` → `MediamtxReaderProbe#hasReaders`.
+- `HlsProxyController` takes an optional third constructor arg (`LiveHlsAndReaderVideoDemand`, N-1-arg
+  convenience ctor keeps every existing call site) and stamps demand on every proxied fetch —
+  **before** the upstream call, so a viewer still counts while mediamtx is slow or erroring. An
+  unparseable id is logged at DEBUG and ignored: this is a side observation, and failing the proxy
+  request over it would turn bookkeeping into a broken video player.
+
+**Fail-open, and the stakes are higher than the detection port's identical choice.** A wrong `false`
+there gates a detector; a wrong `false` here *stops the stream*, in front of an operator using it,
+attributing it to nobody. Notably this is also what happens when mediamtx is unreachable: nothing is
+reaped while we cannot see who is watching, which is the correct way for this policy to break.
+
+**Deliberately not a demand signal: `GET /api/streams/{id}/snapshot`.** Checked rather than assumed —
+its only SPA callers are the camera-calibration wizard and the alert detail panel, both of which show
+one static JPEG. It is not a watching poll, so counting it would have kept streams alive for a page
+nobody has open.
+
+*Tests:* `LiveHlsAndReaderVideoDemandTest` (+8) — each term alone, the TTL boundary, the WHEP case
+(readers with no SSE and no proxy traffic), the single answer that stops a stream, both throwing
+seams failing open, an explicit assertion that an open cockpit means mediamtx is **not** asked, and a
+null asset treated as ordinary rather than as failure.
+
+**docs/plans/active/STREAM-STATE-PLAN.md wave S5 — the ended-stream read path.** `GET
+/api/usages/by-stream/{streamId}` on `UsageTimelineController` (now four endpoints, still three
+collaborators — no new dependency: `UsageService` was already injected for `GET /api/usages`).
+
+- **Why not `StreamController`.** That is where a reader would look first, and it is exactly the
+  wrong place twice over: it sits at this codebase's five-constructor-parameter ceiling (the reason
+  `StreamDetectionSupport` exists), and the resource being read is a *usage*, not a stream — the
+  stream is gone. Putting it under `/api/usages` keeps the axis split §1 of the plan is built on.
+- **404, never 403, for an out-of-scope usage.** `UsageService#byStream` collapses "you may not see
+  it" and "it does not exist" into the same `Optional.empty()`, so the status code cannot be used to
+  probe for the existence of other operators' flights — the same posture `GET /api/usages` already
+  takes by silently excluding rows it will not show.
+- **No new DTO.** It returns `UsageSummaryResponse`, the row shape `GET /api/usages` already serves,
+  rather than the existing `AssetUsageResponse` (which no controller returns directly and carries
+  positions but no `assetName`/`durationSeconds`). A client that follows this lookup renders the same
+  card it already renders in the replay library.
+
+*Tests:* `UsageTimelineControllerTest` (+4, 25 total) — the mapped 200 body, scope and parsed
+`StreamId` passed through, 404 on empty, 400 on a malformed UUID. Module **734/734**.
