@@ -1,0 +1,121 @@
+/* Form grid mirrors `features/labeling/datasets.css`'s own — reused verbatim rather than shared,
+   the same "repeated rather than lifted a second time" convention that file's own sibling
+   `training-job.css` documents for its progress-bar rules below. */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-16);
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+}
+
+.submit-row {
+  justify-content: flex-end;
+  margin-top: var(--space-16);
+}
+
+@media (max-width: 640px) {
+  /* --bp-sm */
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Region cards ------------------------------------------------------------------------- */
+
+.region-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: var(--space-16);
+}
+
+.region-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.region-card header {
+  align-items: flex-start;
+}
+
+.region-card h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+/* ---- Live indexing progress — `.progress-row`/`.progress-track`/`.progress-fill`/`.progress-label`
+   mirror `features/training-jobs/training-job.css`'s own hero-progress rules verbatim (that file's
+   own comment already documents this app's "repeated rather than shared" convention for this
+   pattern), sized down here since a region card carries several rows of facts below it rather than
+   being the page's one hero measurement. */
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.progress-track {
+  flex: 1;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--color-info);
+  transition: width 0.4s ease;
+}
+
+.progress-fill.failed {
+  background: var(--color-danger);
+}
+
+.progress-label {
+  min-width: 6ch;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.phase-line {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.region-actions {
+  justify-content: flex-end;
+  margin-top: var(--space-4);
+}
+
+/* ---- Facts grid (mirrors `features/replay/replay.css`'s own — component-local by this app's
+   established convention, not lifted to `shared/ui`, see that file's own comment). ---------------- */
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-8) var(--space-16);
+  margin: 0;
+}
+
+.fact dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.fact dd {
+  margin: var(--space-2) 0 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}

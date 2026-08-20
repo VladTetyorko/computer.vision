@@ -2,6 +2,7 @@ import { DestroyRef, Injectable, type Signal, inject, signal } from '@angular/co
 import { VisionApi } from '../api/vision-api';
 import type {
   AssetSummary,
+  CorrectionResponse,
   DetectionEvent,
   DetectionResult,
   DevicesSnapshot,
@@ -17,6 +18,7 @@ import {
   buildTopicsParam,
   decrementTopicRef,
   detectionsTopic,
+  geoTopic,
   incrementTopicRef,
   mergeTelemetrySamples,
   telemetryTopic,
@@ -51,7 +53,7 @@ const MAX_LIVE_MAP_EVENTS = 300;
  * store's per-asset signals when live, falling back to their own polling otherwise (see their own
  * doc comments and `live-fallback-logic.ts#resolveAssetScopedTransport`).
  *
- * <h2>Seven topics now, seven projected stores — read before wiring a new consumer</h2>
+ * <h2>Eight topics now, eight projected stores — read before wiring a new consumer</h2>
  * The backend started with four topics (`fleet`, `event`, `telemetry:<assetId>`,
  * `detections:<assetId>`) and grew three more, always-on like `fleet`/`event`: `devices` and
  * `detection-events` (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch), then `map`
@@ -89,6 +91,13 @@ const MAX_LIVE_MAP_EVENTS = 300;
  *   as incremental deltas on top, and keeps a slow safety-net poll. It is also the only
  *   **per-connection-filtered** topic: the server drops events for layers this viewer may not see
  *   (§4.3), so nothing here is a client-side visibility filter.
+ * - `geo:<assetId>` ↔ `core/geo/geo-store.ts#GeoStore` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, wave H6) —
+ *   the 8th, opt-in per-asset topic, same shape/scoping as `telemetry:<assetId>` (D11 — deliberately
+ *   *not* viewer-filtered like `map`, since its raw twin `telemetry:<assetId>` isn't either).
+ *   Coalescing latest-wins with ring capacity 1 server-side, so `geoSignalFor` below only ever holds
+ *   the single most recent {@link CorrectionResponse} — `GeoStore`'s own poll fallback (`GET
+ *   /api/geo/corrections/live`, filtered client-side to the tracked asset) is what replays history
+ *   after a reconnect, exactly like `detections:<assetId>`'s "latest only, no backlog" contract.
  *
  * `fleet`'s own {@link AssetSummary} polling is still done ad hoc by several pages (`fly.ts`'s own
  * picker refresh, `core/map/map-store.ts`, `asset-detail.ts`), with no single existing store class —
@@ -193,6 +202,7 @@ export class LiveStore {
 
   private readonly telemetrySignals = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
   private readonly detectionsSignals = new Map<string, ReturnType<typeof signal<DetectionResult | undefined>>>();
+  private readonly geoSignals = new Map<string, ReturnType<typeof signal<CorrectionResponse | undefined>>>();
   /** Per-topic subscriber counts (docs/plans/done/REALTIME-PLAN.md §4, item 2) — see class doc's "Ref-counting". */
   private readonly topicRefs = new Map<string, number>();
 
@@ -220,6 +230,11 @@ export class LiveStore {
     return this.detectionsSignalFor(assetId);
   }
 
+  /** The latest live visual-geolocation correction for `assetId` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4) — `undefined` until one arrives. */
+  geoFor(assetId: string): Signal<CorrectionResponse | undefined> {
+    return this.geoSignalFor(assetId);
+  }
+
   /** Ref-counted opt-in to `telemetry:<assetId>` — call once per consumer; pair with `untrackTelemetry`. */
   trackTelemetry(assetId: string): void {
     this.track(telemetryTopic(assetId));
@@ -240,6 +255,16 @@ export class LiveStore {
     this.untrack(detectionsTopic(assetId), assetId, this.detectionsSignals);
   }
 
+  /** Ref-counted opt-in to `geo:<assetId>` — call once per consumer; pair with `untrackGeo`. */
+  trackGeo(assetId: string): void {
+    this.track(geoTopic(assetId));
+  }
+
+  /** The matching teardown for `trackGeo` — call from the consumer's own `reset()`/destroy. */
+  untrackGeo(assetId: string): void {
+    this.untrack(geoTopic(assetId), assetId, this.geoSignals);
+  }
+
   private telemetrySignalFor(assetId: string): ReturnType<typeof signal<readonly TelemetrySample[]>> {
     let existing = this.telemetrySignals.get(assetId);
     if (existing === undefined) {
@@ -254,6 +279,15 @@ export class LiveStore {
     if (existing === undefined) {
       existing = signal<DetectionResult | undefined>(undefined);
       this.detectionsSignals.set(assetId, existing);
+    }
+    return existing;
+  }
+
+  private geoSignalFor(assetId: string): ReturnType<typeof signal<CorrectionResponse | undefined>> {
+    let existing = this.geoSignals.get(assetId);
+    if (existing === undefined) {
+      existing = signal<CorrectionResponse | undefined>(undefined);
+      this.geoSignals.set(assetId, existing);
     }
     return existing;
   }
@@ -377,6 +411,11 @@ export class LiveStore {
       case 'map':
         // Chronological append — identical reasoning to `detection-events` above.
         this.mapEventsSignal.update((events) => [...events, envelope.payload].slice(-MAX_LIVE_MAP_EVENTS));
+        return;
+      case 'geo':
+        // Latest-wins, like `detections` above — the server's own ring capacity 1 means this is
+        // never a batch to merge, just the freshest correction replacing the last one.
+        this.geoSignalFor(envelope.assetId).set(envelope.payload);
         return;
     }
   }

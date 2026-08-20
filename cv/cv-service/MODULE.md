@@ -248,7 +248,63 @@ The **sole place** that touches generated `cv_pb2` message types — every other
 - Module-level `DetectPulled`-only helpers (none of them touch tracking): `_PullControlState` (thread-safe holder for a call's latest `PullControl`, swapped not mutated), `_PullControlReader` (the background thread above; `.should_stop`/`.error` are its two signals), `_PullStreamIdMismatch`, `_resolve_pull_target_fps`/`_resolve_pull_detect_width` (the `<=0 = deployment default` sentinels, §5.1 fields 7/8), `_downscale_for_detection` (mirrors `DetectionFrameCodec.withDownscaled`'s exact rule: only `>`, not `>=`, aspect preserved, rounded height).
 
 ### `cv_service/grpc/server.py`
-`def serve(settings: Settings | None = None) -> grpc.Server` — resolves `Settings.from_env()` if none given, builds `grpc.server(futures.ThreadPoolExecutor(max_workers=settings.grpc_workers), options=_KEEPALIVE_SERVER_OPTIONS)`, builds the `ModelRegistry` **once** (`_build_default_registry(settings)`, may be `None`) and one `InferenceGate(settings.max_concurrent_inferences)`, builds and **probes** the `TrackerRegistry` once (`_build_tracker_registry(settings)`, T1 — probing at startup rather than on first frame is the whole point, so the roster an operator sees is the one that actually constructs on this box; a failure here degrades trackers, never blocks startup), passes the same registry to both `InferenceServicer(registry=..., inference_gate=..., settings=..., tracker_registry=...)` and `TrainingServicer(registry=..., model_dir=settings.model_dir, dataset_dir=settings.dataset_dir, max_upload_bytes=settings.max_upload_bytes)` so `PromoteModel` re-points the very registry inference routes against (one source of truth), binds `[::]:{settings.port}`, starts, returns. `def main() -> None` — resolves `Settings` once, calls `serve(settings)`, installs `SIGTERM`/`SIGINT` handlers that call `server.stop(grace=settings.shutdown_grace_seconds)`. `_KEEPALIVE_SERVER_OPTIONS: list[tuple[str, int]]` — module-level constant, HTTP/2 keepalive server options (docs/plans/done/REMOTE-CV-PLAN.md "Transport decisions" P1): `grpc.keepalive_permit_without_calls=1`, `grpc.http2.min_ping_interval_without_data_ms=10000`, `grpc.keepalive_time_ms=30000`, `grpc.keepalive_timeout_ms=10000`.
+`def serve(settings: Settings | None = None) -> grpc.Server` — resolves `Settings.from_env()` if none given, builds `grpc.server(futures.ThreadPoolExecutor(max_workers=settings.grpc_workers), options=_KEEPALIVE_SERVER_OPTIONS)`, builds the `ModelRegistry` **once** (`_build_default_registry(settings)`, may be `None`) and one `InferenceGate(settings.max_concurrent_inferences)`, builds and **probes** the `TrackerRegistry` once (`_build_tracker_registry(settings)`, T1 — probing at startup rather than on first frame is the whole point, so the roster an operator sees is the one that actually constructs on this box; a failure here degrades trackers, never blocks startup), passes the same registry to both `InferenceServicer(registry=..., inference_gate=..., settings=..., tracker_registry=...)` and `TrainingServicer(registry=..., model_dir=settings.model_dir, dataset_dir=settings.dataset_dir, max_upload_bytes=settings.max_upload_bytes)` so `PromoteModel` re-points the very registry inference routes against (one source of truth), builds `GeolocationServicer(settings=settings)` (H4 — builds its own encoder/matcher backend once, at construction, same "probe/build at startup, degrade to UNAVAILABLE per-call rather than block startup" posture), binds `[::]:{settings.port}`, starts, returns. `def main() -> None` — resolves `Settings` once, calls `serve(settings)`, installs `SIGTERM`/`SIGINT` handlers that call `server.stop(grace=settings.shutdown_grace_seconds)`. `_KEEPALIVE_SERVER_OPTIONS: list[tuple[str, int]]` — module-level constant, HTTP/2 keepalive server options (docs/plans/done/REMOTE-CV-PLAN.md "Transport decisions" P1): `grpc.keepalive_permit_without_calls=1`, `grpc.http2.min_ping_interval_without_data_ms=10000`, `grpc.keepalive_time_ms=30000`, `grpc.keepalive_timeout_ms=10000`.
+
+### `cv_service/geo/` (H4, `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §4/§5) — production visual geolocation pipeline
+Wire-agnostic port (no module here imports `cv_pb2` — `GeolocationServicer` is the sole translation point, same discipline as `cv_service/tracking/`) of the measured `spikes/geo/harvested/` + H0c `rectify_pipeline.py`/`rectify_rerank.py`/`false_convergence_gate.py`/`matchers.py`/`rerank.py`/`orchestrator.py` pipeline, behind the frozen §3.1 `Geolocation` gRPC service. One file per §4.1 stage:
+- `pack.py` — reference-pack zip landing (`land_pack`, `is_safe_region_id`/`is_safe_pack_entry` zip-slip + region-id guards, `read_region_meta`). Pure stdlib, no `cv`/`geo` extra needed.
+- `index.py` — `ReferenceIndex` (descriptors + tile metadata, cosine search, save/load `descriptors.npy`/`tiles.json`/`index.json`, with a backward-compat default for `neverAcceptCells` on an index built before H4's per-cell calibration existed), plus `VerifyTileCache`/`write_verify_tiles`/`load_verify_tiles` — a persisted grayscale/pre-scaled tile cache built at index time (**write side only wired**, see Gotchas).
+- `encoder.py` — the `eigenplaces_r18_512` (O11) global-descriptor encoder via `torch.hub`; `torch`/`kornia` imported lazily so this module stays importable without the `geo` extra.
+- `matchers.py` — `xfeat` (default, §9.9 amendment 1) and `loftr` (kornia `KF.LoFTR`) keypoint matcher backends behind one `build(name)`/`MATCH_FNS[name]` seam; `lightglue_aliked`/`lightglue_disk`/`eloftr` NOT ported (§9.10 item 1 — kornia-version breakage / an unfetchable hand-download weight).
+- `rectify.py` — telemetry-conditional IPM perspective rectification (pitch/heading/AGL → pseudo-nadir warp), gated on `CV_GEO_RECTIFY_MIN_PITCH_DEG`; `condition_query` NOT ported, redundant once this runs (§9.10 item 2).
+- `rerank.py` — §4.2's frozen re-rank scoring (`score_candidate`/`rerank`, ranked by inlier count) + `evaluate_gates()` (G-a..G-f, first-failure-wins order) + `load_region_tile_image`.
+- `calibrate.py` — holdout-based `accept_similarity`/`accept_margin` calibration (`calibrate`, `sweep_thresholds`, `leave_one_out_distinctiveness`) plus the H4-added per-cell never-accept table (`cell_is_never_accept`/`count_never_accept_cells`) that §4.2 G-e / §4.4 Change 2 G-a need and neither H0 nor H0c built (§9.10 item 6 — an extension of the frozen gates, not a deviation from them).
+- `sequence.py` — `SequenceLocalizer`, the §4.4 particle-filter sequence gate: Change 1 (re-ranked geometric likelihood field, not raw similarity) + Change 2 (three independent `sequence_converged` gates — per-cell calibration, evidence diversity/baseline ≥40m/≥4 frames, spread/persistence). This is the code that structurally prevents §12.14's false-convergence defect.
+- `pose.py` — MAGSAC homography fit + reprojection RMS.
+- `localize.py` — `localize_frame()`, the single entry point driving the full frozen stage order (texture gate → [telemetry? IPM rectify : degraded] → retrieve top-k → geometric re-rank → §4.2 gates → sequence filter update → §4.4 convergence gate → pose → `GeoFix`), returning `FrameResult`. IPM rectification and the sequence filter are both restricted to a single resolved region (§9.10 item 7 — see the module's own docstring for the full reasoning); `implied_agl_meters` is always `None` (§9.10 item 4, no estimator ported).
+- `orchestrator.py` — `build_region_index()`: encode a region's tiles, self-calibrate against a holdout split, persist. Carries both §9.8 H0c production fixes (§9.10 item 8, re-verified present during H4): the full holdout split is encoded into the persisted index, not just the 90% calibration split (`RuntimeError` self-check on coverage), and per-cell never-accept is computed over the full persisted set.
+
+`GeolocationServicer` (`cv_service/grpc/servicers.py`) implements all four §3.1 RPCs — the only module touching `cv_pb2` for this service, same rule as `InferenceServicer`/`TrainingServicer`:
+- **`LocalizeStream`** (bidi) — pull-only (D2, reuses `cv_service/pull/`'s `PullDecodeLoop`/`PullSource`/`CaptureClock`): claims `GeoControl.region_id`/`source_url`, opens its **own** `PullSource`/`PullDecodeLoop` at `target_fps`, independent of any concurrent `DetectStream`/`DetectPulled` session on the same underlying path — O3's "two decode loops" default (§9.7, not measured this wave, see below). Drives `localize.localize_frame()` per served frame, translates `FrameResult` 1:1 onto `GeoFix`/`GeoEvidence`.
+- **`BuildReferenceIndex`** (client-streaming) — client-streamed `ReferencePackChunk`s land to a temp file (`tempfile.mkstemp` under `Settings.geo_data_dir`) via `os.fdopen`, THEN (after that write handle is closed and flushed — see Gotchas for why this ordering is load-bearing) `pack.land_pack()` + `orchestrator.build_region_index()` run; progress yielded per phase (`receiving`/`extracting`/`calibrating`/`done`).
+- **`ListRegions`** / **`DeleteRegion`** — filesystem enumeration/removal under `Settings.geo_data_dir`.
+
+Constructor DI mirrors `InferenceServicer.detector=`: `encoder=`/`matcher_handle=`/`match_keypoints_fn=`/`pull_source_open=` each replace the real backend wholesale (an `_UNSET_REGISTRY` sentinel distinguishes "omitted → build the real thing" from "explicitly `None`/a fake → use that"), letting `tests/geo/**`/`tests/grpc/test_geolocation_servicer.py` exercise the full pipeline with zero real torch/network dependency. `Settings.geo_*` is resolved once per `GeolocationServicer` construction into a plain `LocalizeParams`, not re-read per frame.
+
+#### `CV_GEO_*` configuration (`config.py`)
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `CV_GEO_DATA_DIR` | `<repo>/geo` | Region packs land here (`<dir>/<region_id>/{region.json,tiles/,descriptors.npy,tiles.json,index.json,verify_tiles.npz}`) |
+| `CV_GEO_MODEL_CACHE` | `<repo>/.model-cache` | `torch.hub`/`TORCH_HOME`/`HF_HOME` cache dir for encoder/matcher weights |
+| `CV_GEO_ENCODER` | `eigenplaces_r18_512` | Global-descriptor encoder id (O11) |
+| `CV_GEO_DEVICE` | auto | `torch` device string, same resolution style as `CV_DEVICE` |
+| `CV_GEO_RERANK_K` | `20` | Retrieval depth **and** re-rank depth — one consolidated knob (§9.10: every H0/H0c driver measured with one `k` feeding both stages) |
+| `CV_GEO_MATCHER` | `xfeat` | `xfeat` \| `loftr` (§9.9 amendment 1) |
+| `CV_GEO_MATCH_FLOOR` | `12` | Pre-RANSAC match-count skip (cheap, not a §4.2 gate) |
+| `CV_GEO_INLIER_FLOOR` | `8` | G-a, §4.2 — precision 1.0 at ≥8 inliers (§12.11) |
+| `CV_GEO_PROMOTION_INLIER_FLOOR` | `16` | Harvested; reserved for a not-yet-built promotion feature |
+| `CV_GEO_MIN_INLIER_RATIO` | `0.35` | G-b, §4.2 |
+| `CV_GEO_MAX_REPROJECTION_RMS_PX` | `4.0` | G-c, §4.2 |
+| `CV_GEO_MIN_RERANK_MARGIN` | `0.15` | G-d, §4.2 — catches §12.13's alias near-ties |
+| `CV_GEO_RECTIFY` | `true` | Master IPM on/off switch |
+| `CV_GEO_RECTIFY_MIN_PITCH_DEG` | `10.0` | Below this pitch-from-nadir, skip IPM (degraded raw-frame path) |
+| `CV_GEO_SEQUENCE` | `true` | Master sequence-filter on/off switch |
+| `CV_GEO_SEQUENCE_PARTICLES` | `4000` | Particle count |
+| `CV_GEO_SEQUENCE_TEMPERATURE` | `0.02` | Softmax temperature over the likelihood field |
+| `CV_GEO_SEQ_MIN_SUPPORTING_FRAMES` | `4` | §4.4 Change 2 G-b |
+| `CV_GEO_SEQ_MIN_BASELINE_M` | `40.0` | §4.4 Change 2 G-b — meters of telemetry-derived platform motion |
+| `CV_GEO_OSM_WEIGHT` | `0.0` | Inert — OSM tie-breaker (D8) not ported (§9.10 item 5) |
+| `CV_GEO_MAX_PACK_BYTES` | 8 GiB | `BuildReferenceIndex` upload cap |
+| `CV_GEO_MIN_LAPLACIAN_VARIANCE` | `50.0` | Texture gate (§4.1 node B) |
+| `CV_GEO_MIN_ENTROPY` | `3.0` | Texture gate (§4.1 node B) |
+| `CV_GEO_TARGET_FPS` | `1.0` | Fallback when `GeoControl.target_fps <= 0` (§9.9 amendment 2) |
+
+**`geo` pyproject extra** (self-referential on `cv`, see `pyproject.toml`'s own comment): `pip install -e '.[geo]' --extra-index-url https://download.pytorch.org/whl/cpu` (x86-only CPU wheel index — aarch64 needs no override, same convention as `cv`). Adds `torch`/`torchvision`/`kornia` on top of whatever `cv` already installs; INVARIANT P1 verified 2026-08-19 by downloading real `manylinux2014_aarch64` wheels: torch 2.5.1, torchvision 0.20.1, kornia 0.8.3. `Dockerfile` installs `.[cv,geo]` in the same layer as `openvino` and sets `ENV CV_GEO_MODEL_CACHE` explicitly — unlike the YOLO weights/OpenVINO IR baked in above, the geo encoder/matcher backbones are fetched lazily via `torch.hub` on first `GeolocationServicer` construction, not at image build time (see the Dockerfile's own comment for the first-call network-egress tradeoff this implies).
+
+**Not ported this wave (H4 scope cuts — §9.10 in the plan is the full dated amendment)**: `lightglue_aliked`/`lightglue_disk`/`eloftr` matchers; `condition_query`; the `osm_fingerprint.py` OSM tie-breaker (`CV_GEO_OSM_WEIGHT=0.0`, inert); `implied_agl_meters` (always `None`); mosaic/angle-probe/precise-track spike tooling (never a named §3/§4 deliverable). None of these are wire-breaking — each is a config default or an optional field left at its honest zero/absent value, addable later without a proto change.
+
+**Tests**: `tests/geo/**` (pure numpy/stdlib unit tests per module, zero network/torch dependency via injected fakes, plus `tests/geo/test_regression_1213_alias.py`/`test_regression_1214_false_convergence.py` — the two §4.4 Change 3 standing regressions, gated `pytest.skip` on the `geo` extra / committed region fixtures being absent, real end-to-end runs otherwise) and `tests/grpc/test_geolocation_servicer.py` (all four RPCs, fakes injected via the DI seam above). §12.13's regression substitutes the real committed `kyiv-pozniaky` region for the plan's literal (non-existent) "14 recorded alias pairs" fixture — see the test's own docstring and plan §9.10 item 9.
 
 ## Conventions
 - Generated stubs live under `cv_service/gen/` and are **never committed** — run `scripts/gen_proto.sh` after cloning and whenever `proto/vision/v1/cv.proto` changes.
@@ -948,6 +1004,200 @@ until then this is the bound, and it is labelled as one.
 - **`_roi_rescue`'s permissive gate can misidentify a NEIGHBOUR in a dense, similarly-coloured scene, and this is inherited, deliberate behaviour, not a wiring bug (TRACKING-V2-PLAN wave C5c)** — see "ROI re-detection" above for the full account, including the exact numbers. `CV_TRACK_COST_GATE_MIN_IOU=0.0` is a considered default for the PRIMARY `cost` match (wave C3's own reasoning: a strict floor would forbid the wide-displacement recovery ego-motion compensation exists for), and this wave's own instruction was to merge a rescue through the "existing association machinery", not a second, ROI-specific gate — so the SAME permissiveness applies to a crop several times a candidate's own size, where it can admit a neighbouring object instead of refusing an empty match. Measured on `clutter`: `IDSW` 0→6 with `CV_TRACK_ROI_ENABLED=1`. The shipped default (`CV_TRACK_ROI_ENABLED=False`) is unaffected — this only matters to a deployment that opts in, and one doing so in a dense/crowded scene should tighten `CV_TRACK_COST_GATE_MIN_IOU` first or evaluate the risk for its own scene density. If you are asked to make the rescue safer in a crowd without touching the primary match's own gate, a ROI-specific (stricter) `AssignGates` instance is the natural next knob — not built in this wave, since the task's own instruction was to reuse the existing gates, not add a new configuration surface.
 - **ROI re-detection pays its cost even when it cannot possibly help, and there is no cheap way to know that in advance (TRACKING-V2-PLAN wave C5c)** — `occlusion`/`long_occlusion`/`crowd_recall`/`pan`/`pan_step` all trigger real rescue attempts (10–61 per scenario) that NEVER find a match: the underlying failure in each is genuine occlusion (invisible to a crop exactly as it is to the full frame) or prediction drift (the crop is centered on the wrong place), neither of which apparent-size recall can fix. `_roi_rescue`'s eligibility check (confirmed + unmatched) cannot distinguish "probably just small" from "probably occluded" or "probably drifted" — it has no signal for either. This is measured, reported cost with zero accuracy return on five of ten scenarios when the feature is opted into; a future wave wanting to reduce it would need a cheaper pre-check (e.g. only rescue a candidate whose predicted confidence, `predict.py`'s own decay, is still above some floor) that this wave does not add.
 
+- **`BuildReferenceIndex`'s `land_pack()` call must run AFTER the temp-zip write handle closes, not inside the `with` block — this was a real production defect, found and fixed during H4, not a hypothetical** (`cv_service/grpc/servicers.py#GeolocationServicer.BuildReferenceIndex`). The original code called `geo_pack.land_pack(zip_path, ...)` — which independently reopens `zip_path` **by path**, through its own separate file descriptor (`zipfile.ZipFile(zip_path)`) — while still inside `with os.fdopen(tmp_fd, "wb") as tmp_zip:`, i.e. before the write buffer had been flushed to disk. Every single valid `BuildReferenceIndex` upload therefore failed with "File is not a zip file", 100% of the time, regardless of pack content — caught by this wave's own new `tests/grpc/test_geolocation_servicer.py`, not by inspection. Fixed by dedenting the post-write logic (the `chunk_count == 0` check, the `"extracting"` progress yield, and the `land_pack()` call itself) to run after the `with` block exits. If you ever see a "not a zip file" report against a pack that looks fine locally, check this ordering first before suspecting the client's upload.
+- **`torch.hub.load("gmberton/eigenplaces", ...)` fails non-interactively on a cold cache, even with `trust_repo=True` passed** — `gmberton/eigenplaces`'s own `hubconf.py` internally calls `torch.hub.load("gmberton/cosplace", ...)` as a NESTED dependency without forwarding `trust_repo=True`, so the nested load still hits torch.hub's own interactive trust prompt (`EOFError` on a server process with no stdin) — and `CV_GEO_ENCODER`'s own default (`eigenplaces_r18_512`) is exactly the variant that triggers it. `cv_service/grpc/servicers.py`'s `_apply_geo_model_cache_dir`/`_GEO_PRETRUSTED_HUB_REPOS` pre-seed `torch.hub`'s persisted `trusted_list` for both `gmberton/*` repos before the first real build, closing this off entirely. If a fresh deploy's first `LocalizeStream`/`BuildReferenceIndex` call ever silently hangs or `EOFError`s on encoder construction, this is the first thing to check — see the module-level comment above `_GEO_PRETRUSTED_HUB_REPOS` for the full account.
+- **`VerifyTileCache` is write-side only wired — a real, found-not-fixed gap, not a design choice.** `orchestrator.py#build_region_index` calls `index.write_verify_tiles(...)` and persists `verify_tiles.npz` (a pre-scaled grayscale tile cache) into every region built. Nothing on the query path ever reads it back: `localize.py`'s candidate image load always goes through `rerank.load_region_tile_image`, which does a fresh full-color `cv2.imread` of the raw JPEG off disk on every re-rank candidate, every query — `index.load_verify_tiles`/`VerifyTileCache.get` are never called anywhere in `cv_service/geo/**` or `cv_service/grpc/servicers.py`. Net effect: every `BuildReferenceIndex` pays the cost of building and storing a cache that currently buys nothing at query time. Not fixed this wave (deciding whether the matchers should even consume grayscale/pre-scaled input instead of full color is a real design call, not a wiring one-liner) — flagged here for whoever next touches `rerank.py`'s tile-loading path.
+- **The §12.13 standing regression does not use the plan's literal fixture, because that fixture does not exist on disk.** `VISUAL-GEO-V2-PLAN.md` describes "14 recorded alias pairs"; no such committed fixture was found under `spikes/geo/fixtures/` or `spikes/geo/regions/`. Per the plan's own routing (Pozniaky/danger-region regressions are H4's `test_regression_alias_1213`), `tests/geo/test_regression_1213_alias.py` substitutes the real, committed `kyiv-pozniaky` region instead — see the test's own docstring and plan §9.10 item 9 for the full account. If a future wave finds the real 14-pair fixture, this test should be pointed at it instead.
+
+## Visual-geo v2 eval harness (`spikes/geo/`, waves H0/H0b/H0c, `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §5/§9.8)
+
+**Superseded for production use by `cv_service/geo/` (H4, see the API surface above) — this section is now a historical/measurement record, not the thing that runs in production.** `spikes/geo/**` stays exactly as H0/H0b/H0c left it (read-only reference, per H4's own scope); nothing in `cv_service/**` imports it.
+
+**Scope discipline: `spikes/geo/**` is eval-harness/spike code only, never production.** No
+`cv_service/**` module imports anything under `spikes/`, and nothing here is wired into
+`cv_service.grpc.servicers` — H4 is where a matcher/gate choice measured here becomes production
+(`cv_service/geo/**`). Full measured numbers: `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §9 (H0)
+and §9.8 (H0b/H0c — two harness defects found and fixed, real re-measurement, gate re-answered);
+human-readable digest + every per-frame raw JSON: `spikes/geo/results/MEASUREMENTS.md`,
+`bakeoff.json`, `false_convergence_gate.json` (H0, unchanged); `results/h0b/{calibration,mosaic,
+rank_shift}.json` (H0b); `results/h0c/{calibration_sweep,bakeoff_v2,false_convergence_gate_ipm}.json`
+(H0c).
+
+**Two H0 harness defects, found and fixed by H0b/H0c — read before trusting ANY H0 "rectified" or
+real-footage number above §9.8**:
+1. **Index coverage** (`harvested/orchestrator.py#build_region_index`): the calibration
+   holdout split (`DEFAULT_HOLDOUT_FRACTION=0.10`) was, until this fix, persisted directly as the
+   search index — the held-out 10% of tiles were never searchable, silently. `kyiv-maidan`'s own
+   Pexels ground-truth cell was one of them (`n_exact_cell_indexed: 0` for every H0 Pexels
+   measurement). Fixed: calibration still runs on the split, but every readable tile — reference
+   AND holdout — is now encoded into the final persisted index; a self-test asserts full coverage
+   (`spikes/geo/tests/test_index_coverage.py`). **Also a production defect**: `cv_service/geo/
+   orchestrator.py` (harvested from) has the identical bug — H4 must carry this fix when porting.
+2. **Rectification never applied**: H0's "rectified" column called `harvested/verify.py
+   #condition_query` (de-rotate + GSD-rescale, NADIR-ONLY, `pitch_degrees` always 0.0) — never
+   `harvested/rectify.py`'s real perspective IPM. Fixed: `rectify_pipeline.py`'s `--rectify
+   {none,condition,ipm}` (see below) actually runs IPM in `ipm` mode. §9.8's re-measurement shows
+   IPM closes most of the SITL-oblique gap outright (1.00 recall@100m/0 false-fix at k=20, xfeat)
+   and produces real, non-false, gate-passing fixes on the real Pexels clip for the first time
+   (loftr 6/12, lightglue_disk 3/12) — categorically different from H0's original "0/12, every
+   matcher, every k, ever."
+
+**Setup, once per machine:**
+```
+source spikes/geo/env.sh    # sets CV_GEO_MODEL_CACHE / TORCH_HOME / HF_HOME under
+                             # .model-cache/ (gitignored — symlinks hub/huggingface to
+                             # ~/.cache/{torch,huggingface} so a pre-downloaded model is
+                             # reused, never re-fetched) and PYTHONPATH
+```
+
+**Package layout:**
+- `spikes/geo/harvested/` — production `cv_service/geo/*.py` modules copied **verbatim** (imports
+  fixed for the module-layout move only, logic untouched) from the parked `feat/visual-geo` branch,
+  as an importable package: `rectify.py`, `pose.py`, `index.py`, `encoder.py`, `calibrate.py`,
+  `localize.py`, `verify.py`, `sequence.py`, `pack.py`, `orchestrator.py`. Never edit these to make
+  a spike experiment work — if a harvested module needs a real change, that is a finding, not a
+  patch (see the `manifest.py`/`sitl_render.py` altitude-threading fix below, done in the SPIKE
+  files, not here).
+- `spikes/geo/matchers.py` (new, H0) — the bake-off's five matcher backends behind one seam
+  (`build(name) -> MatcherHandle`, `MATCH_FNS[name](handle, query_bgr, tile_bgr) -> MatchKeypoints`,
+  same shape as `harvested/verify.py#loftr_match_keypoints`): `xfeat`, `lightglue_aliked`,
+  `lightglue_disk`, `loftr` (kornia `KF.LoFTR`), `eloftr` (official ZJU
+  `github.com/zju3dv/EfficientLoFTR`, shallow-cloned into `.eloftr-repo/` on first use, gitignored).
+  **`lightglue_aliked` is broken in this environment** — kornia 0.8.3's `KF.ALIKED`+
+  `KF.LightGlueMatcher` pairing produces 0 matches/0 inliers on every frame tested, including a
+  trivial self-match sanity check, despite the extractor and weight-loading both being verified
+  correct in isolation (the identical wrapper code path with `KF.DISK` works, 1469 matches on the
+  same sanity check). Use `lightglue_disk` instead until someone re-verifies against a newer
+  kornia. **`eloftr`'s `build_eloftr()` needs a compat shim** — the official repo imports
+  `kornia.utils.grid.create_meshgrid`, a dotted path kornia 0.8.3 no longer has
+  (`create_meshgrid` moved to `kornia.utils` directly); a small alias-module shim registers the old
+  path before import so upstream code runs unmodified. Even shimmed, `eloftr` is **not runnable**
+  without a hand-fetched checkpoint — upstream distributes weights via a Google Drive link in its
+  README, not a scripted download.
+- `spikes/geo/rerank.py` (new, H0) — §4.2's frozen re-rank scoring (`score_candidate`/`rerank`):
+  condition once (`harvested/verify.py#condition_query`, reused verbatim), match every one of
+  `candidates[:top_k]` via the chosen `matchers.py` backend, MAGSAC-fit each
+  (`harvested/pose.py#fit_homography_pose`), rank by **inlier count** (`sᵢ`, not raw match count —
+  `harvested/verify.py#verify()`'s own ranking is match-count-based, the OLD pre-v2 scoring; this
+  module replaces the ranking key and gate set, `harvested/verify.py` itself is untouched). Adds
+  `_reprojection_rms` (ρᵢ, `pose.py` fits H/counts inliers but never reports this) and evaluates
+  gates G-a through G-f from §4.2's table.
+- `spikes/geo/build_regions.py` (new, H0) — fetches live Esri z17 tiles for the `kyiv-maidan` /
+  `kyiv-pozniaky` bboxes (recovered from the parked branch's own `demo/build_region*.py`, not
+  restated in `VISUAL-GEO-V2-PLAN.md`) and drives `harvested/orchestrator.build_region_index()`.
+  Output under `spikes/geo/regions/<region-id>/` (gitignored — a runtime artefact, rebuild with
+  `python -m spikes.geo.build_regions --region {pozniaky,maidan} [--force]`, ~2–15s once tiles are
+  cached).
+- `spikes/geo/run_bakeoff.py` (new, H0) — one `(dataset, matcher, rectified, k)` configuration per
+  invocation, resumable (skips an already-recorded config unless `--force`), appends to
+  `results/bakeoff.json`. Datasets: `pexels` (the 12 real committed frames,
+  `fixtures/maidan-video-frames/manifest.jsonl` — H0 wrote this manifest; single ground truth
+  50.4502431°N/30.5240622°E, no telemetry, `--rectified` structurally refused — see
+  `REFUSED_RECTIFIED_NO_TELEMETRY`), `sitl-nadir`/`sitl-oblique45` (rendered by `sitl_render.py`
+  against a closed-form ArduCopter CIRCLE-mode track, real telemetry, both rectified/unrectified
+  runnable).
+- `spikes/geo/false_convergence_gate.py` (new, H0) — drives the real, unmodified
+  `harvested/sequence.py#SequenceLocalizer` twice over the 12 Pexels frames: once with today's raw
+  cosine-similarity field, once with a re-ranked geometric (inlier-ratio) field (§4.4 Change 1).
+  Measured: raw field converges 8/12 updates, 100% of those on the known 771m-wrong cell (the
+  real §12.14 defect, reproduced); geometric field never converges once. Appends to
+  `results/false_convergence_gate.json`.
+- `spikes/geo/manifest.py` — **H0 added an `altitude_meters` field to `QueryFrame`** (load/write
+  both threaded), needed because `sitl_render.py`'s `write_manifest` call previously dropped the
+  synthesized track's own altitude — `condition_query` needs it alongside `heading`
+  (`sitl_render.py#run` now passes `altitude_meters=sample.alt_m`). A manifest written before this
+  change parses fine (`altitude_meters` defaults to `None`, same as `heading`).
+- `spikes/geo/sitl_render.py` — **render with `--fov-degrees 84`, not its own CLI default of
+  60.** `condition_query` (`harvested/verify.py`) assumes
+  `DEFAULT_ASSUMED_HORIZONTAL_FOV_DEGREES=84°` (the real production fallback, `track.py`'s own
+  constant). H0's first SITL bake-off pass used `sitl_render`'s CLI default (60°) to render the
+  query frames, a self-inflicted FOV mismatch between rendering and conditioning that produced a
+  spurious 50% false-fix rate on the very first `--rectified` runs — caught before it was reported
+  as a real finding, frames re-rendered at `--fov-degrees 84`, every §9.3 number in the plan is
+  post-fix. If you add a new SITL dataset, pass `--fov-degrees 84` explicitly (or thread it through
+  `rerank()`'s own `fov_degrees` param if you deliberately want a different assumed FOV — the two
+  must always match).
+- `spikes/geo/rectify_pipeline.py` (new, H0c) — the shared `--rectify {none,condition,ipm}` core
+  every H0c driver uses (`run_pass(...) -> PipelinePass`): `none` = raw query, no conditioning;
+  `condition` = H0's own (mislabeled) "rectified" path, nadir-only; `ipm` = the real fix — runs
+  `rectify_rerank.compute_rectification()` ONCE per query and feeds the SAME `RectifyResult.warped`
+  pseudo-nadir image to BOTH descriptor retrieval (encode+full-index search, so `retrieval_rank_of
+  _true_tile` is exact even past `k`) and matching (`rectify_rerank.rerank_rectified`) — never two
+  independently rectified images. `ipm` mode's `target_gsd`/`focal_px` use the region's own mean
+  tile latitude as a stand-in (IPM must run BEFORE retrieval, since its output IS the retrieval
+  query — there is no top-candidate latitude yet); negligible error at every region's <0.5deg
+  latitude span.
+- `spikes/geo/rectify_rerank.py` (H0b draft, completed by H0c) — `compute_rectification()` (one
+  `harvested/rectify.py#rectify()` call per query, factored out so a driver computes it once and
+  shares the result) and `rerank_rectified(matcher, rect, candidates, ...)` (matches `rect.warped`
+  against each candidate — single tile, or its 3x3 mosaic via `use_mosaic=True`, reusing
+  `mosaic.py` — then maps matched keypoints back through `rect.warped_to_input` into the CROPPED
+  frame before `pose.py#fit_homography_pose`, same §4.2 gate table as every other variant,
+  `rerank.evaluate_gates` reused verbatim). **Deliberately does NOT layer a second
+  `condition_query` on top of `rect.warped`** — see the module's own docstring for the full
+  justification (`harvested/rectify.py`'s docstring point 3: redundant once `ipm_warp` gets
+  `heading_deg`+`target_gsd_m_per_px`; composing both would be a no-op or actively wrong).
+- `spikes/geo/mosaic.py` / `mosaic_rerank.py` (H0b) — 3x3 tile mosaic candidate construction
+  (`build_tile_mosaic`, `has_full_neighbourhood`) and its own `rerank_mosaic()` (condition-mode
+  matching against a mosaic instead of a single tile — addresses the footprint-vs-tile-width
+  ceiling: at 84° FOV / 60-120m AGL a query's footprint can exceed one z17 tile's ~195m width).
+  `run_mosaic_bakeoff.py` is the driver, mirrors `run_bakeoff.py`'s shape.
+- `spikes/geo/calibrate_instrument.py` (H0b) — self-match instrument calibration on
+  `kyiv-pozniaky`: five synthetic query kinds per indexed tile (exact crop, 2x upsample, 30°
+  rotation, mosaic-crop with a half-tile offset, and a 45° synthetic oblique render via
+  `sitl_render.render_oblique`) through retrieval+re-rank, answering "does the harness recognise a
+  query built from its own indexed pixels" independent of any real domain gap. The oblique variant
+  (`v_oblique_45deg`) was H0b's own harness-gap reproduction (matched via `condition_query`, which
+  is nadir-only) — H0c's `calibrate_rectify_sweep.py` re-runs the identical tiles/construction
+  through `none`/`condition`/`ipm`.
+- `spikes/geo/calibrate_rectify_sweep.py` (H0c) — `calibrate_instrument.py`'s oblique-45° variant
+  (same tiles, same `SEED`) through all three `rectify_pipeline.py` modes and all three matchers
+  (45 rows total). Appends to `results/h0c/calibration_sweep.json`.
+- `spikes/geo/rank_shift.py` (H0b) — retrieval rank of the "true tile" (nearest-INDEXED tile by
+  haversine distance, falling back from the exact z17 cell when that cell isn't indexed — the
+  convention that surfaced defect 1) before vs. after re-rank, one (dataset, matcher, k) config per
+  invocation. Superseded in scope by `run_bakeoff_v2.py`'s own `retrieval_rank_before/after`
+  columns (task 2/3), which folded the same measurement into the main driver so one run produces
+  both the rank-shift and the accuracy/gate columns together.
+- `spikes/geo/run_bakeoff_v2.py` (H0c) — `run_bakeoff.py`'s twin: `--rectify {none,condition,ipm}`
+  instead of the old binary `--rectified`/`--unrectified`, plus `--pitch-deg`/`--heading-deg`/
+  `--altitude-m` (the last two override a frame's own manifest telemetry — needed for the geometry
+  sweep, and REQUIRED for `pexels` under `condition`/`ipm` since that dataset carries no telemetry
+  at all; every such summary sets `"geometry_is_stated_prior": true`) and `--mosaic`. Writes to
+  `results/h0c/bakeoff_v2.json` — `run_bakeoff.py`'s own `results/bakeoff.json` (H0's original
+  numbers) is untouched.
+- `spikes/geo/false_convergence_gate_ipm.py` (H0c) — a THIRD `SequenceLocalizer` pass alongside
+  `false_convergence_gate.py`'s existing "control" (raw similarity) and "geometric" (condition-only)
+  fields: "geometric_ipm", built from the best Pexels `ipm` configuration found by the H0c geometry
+  sweep. A separate script, not a modification of `false_convergence_gate.py` (a completed H0
+  deliverable) — writes to `results/h0c/false_convergence_gate_ipm.json`.
+- Files kept **reference-only, not run** (harvested but with an unresolved or lost dependency
+  chain — a real gap in the plan's own §1.3 harvest manifest, not a shortcut taken here):
+  `rectify_eval.py` (needs `run_homography_pose.py`/`homography_pose.py`, never named in §1.3 and
+  never harvested), `pf_spike.py` (synthesizes same-source trajectories, does not exercise the real
+  false-convergence case — superseded by `false_convergence_gate.py`), `regression_1213.py`
+  (depends on region builds lost when the parked branch gitignored `results/`),
+  `bakeoff_matchers.py` (kept for its own `Candidate`/`build_matcher` design precedent; superseded
+  by `matchers.py` + `rerank.py`).
+
+**Tests**: `cd cv-service && .venv/bin/python -m pytest spikes -q` —
+`spikes/geo/tests/test_bakeoff_harness.py`, pure math/plumbing only (haversine, `_config_key`,
+`_reprojection_rms`, manifest roundtrip, `metrics.py`/`report.py`'s pre-existing pure functions),
+zero network/model/torch dependency, runs in ~1.3s. `test_index_coverage.py` (H0c, 4 cases) is
+also zero-dependency — a synthetic region + a tiny torch-free fake `Encoder` (the DI idiom
+`harvested/encoder.py`'s own docstring names), no network/model/live-tile fetch — proving defect
+1's fix (every readable tile ends up indexed, holdout tiles included, calibration still measured,
+degenerate single-tile regions handled, an unreadable file excluded not miscounted). The bake-off/
+false-convergence-gate scripts themselves are exercised by hand against live tiles + real matcher
+models (results committed under `spikes/geo/results/**`), not by this suite — a real model forward
+pass and a live Esri fetch are explicitly out of scope for a fast, always-green unit suite. The one
+exception: `test_rectify_ipm.py` (H0c) DOES need a live model + a built region (`kyiv-pozniaky`) —
+gated with `pytest.skip` (never a failure) when either is missing, since a 45°-oblique
+self-match-after-rectification proof needs a real matcher forward pass to mean anything. It uses
+`lightglue_disk`, not `xfeat`, as the gating matcher — see the defect-2 writeup in §9.8 for why
+(xfeat's own inlier-ratio-under-IPM signature would make a real rectification success look like a
+failure).
+
 ## Status
 Real inference (Ultralytics YOLO, CPU by default) implements `Inference.DetectStream` per `docs/plans/done/MVP1-PLAN.md` §C7 bullet 1; falls back to the Phase 0 echo stub when the `cv` extra is absent or the model can't load, so the service never crash-loops for lack of a model. `Training.ListModels`/`Training.PromoteModel`/`Training.StartTraining`/`Training.UploadDataset` are all implemented (CV-TRAINING Phase 2 + CV-TRAINING-V2 Wave W2) — see the API surface above and MODULE.md history for the full per-item design writeups (`ListModels`/`PromoteModel` against the shared `ModelRegistry`; `StartTraining` a real Ultralytics fine-tune with cancellation, off-thread execution, and never-auto-promote; `UploadDataset` a streamed dataset archive landed atomically). **`docs/plans/done/MVP2-PLAN.md` §V-d done**: `DetectStream` decouples per-stream frame receipt from inference and bounds cross-stream concurrent inference — see "V-d" above. **`docs/plans/done/CV-MODELS-PLAN.md` items 1-2 done (CP-b)**: model registry replaces the single hard-loaded detector with a lazy `{model_id -> YoloDetector}`, plus comma-separated composite mode — see "Model registry & composite mode" above. **CV-MODELS-PLAN follow-up done**: `yoloe-26s-seg-pf.pt` is a routable, opt-in open-vocabulary `model_id` covering people/vehicles/buildings — see "Routable model roster" above. **`docs/plans/done/REMOTE-CV-PLAN.md` P0/P1 done**: explicit `CV_DEVICE` knob + HTTP/2 keepalive server options — see `cv/cv-service/DEPLOY-GPU.md`.
 
@@ -990,3 +1240,5 @@ Test suite (`tests/`), file membership as of wave C3 (grown since the T1 snapsho
 **`docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b/§8 item 2 density gate (2026-08-15)**: a SECOND, independent ORU refusal — see "ORU density gate" above for the full account; summarized here. §4b's own density split of the SAME 21 MOT17 pairs showed ORU improving 0 of 7 crowded scenes (net +320 IDSW) against 5 of 14 sparse scenes (net +57) — a bracket's velocity can be perfectly plausible and still be built from two different objects, more likely as the scene fills up, which a velocity bound alone cannot see. Fix: `reupdate()`/`late_correction()` gain `max_track_count`/`live_track_count` (both keyword-only, default `0`) and refuse the reconstruction (`None`, never clamped) when `live_track_count > max_track_count`. **Density signal chosen, and why it is a proxy, stated plainly**: §4b measured detections/frame, but `reupdate()`/`late_correction()` are pure functions with no `TrackBook` reference, so that number is not reachable there without threading a new argument through `session.py`'s five `TrackBook.apply()` call sites across both ASSOCIATE engines and every FOLLOW branch — a file already over its own size budget — and some of those callers (a tracker-only FOLLOW frame) have no detector pass to count in the first place. Live track count IS reachable, at both real call sites, with ZERO threading (`track.py`'s `_observe` is a `TrackBook` method; `session.py`'s `_late_corrected_box` already holds `self._book`), so that is what ships — correlated with crowding, not identical to what was measured. NEW `cv_service.config.DEFAULT_TRACK_REUPDATE_MAX_TRACK_COUNT = 0` / `CV_TRACK_REUPDATE_MAX_TRACK_COUNT` / `_parse_int_allow_nonpositive`; NEW `TrackingParams.reupdate_max_track_count` (deployment-only, no wire field, threaded by `resolve()`). `track.py`'s `_observe` passes `live_track_count=len(self._tracks)`; `session.py`'s `_late_corrected_box` passes `live_track_count=len(self._book.tracks)` — both alongside the existing `max_gap_millis`/`max_velocity_per_second`. A gated-out reconstruction logs once per process (`reupdate.py`'s NEW `_warn_high_density_once`, its own separate `global`-flag, same idiom `_warn_implausible_velocity_once` uses), never raises. **Ships DISABLED (`0`) by default, deliberately** — unlike the velocity bound, no sweep against real footage has picked a live-track threshold yet; that is the explicit next step, not this task's job. **Acceptance, measured**: the gate fires on a bracket with a perfectly plausible velocity purely because the book is crowded, and leaves the track exactly as an un-reupdated one, at the `reupdate()` level (`test_reupdate.py`), the `TrackBook` level (`test_track.py`) and the session level through `_late_corrected_box` (`test_session.py`); `max_track_count<=0` reproduces the pre-gate reconstruction exactly at all three levels (P7); **all thirty `BASELINE.md` rows unchanged at the shipped (disabled) default** — confirmed by a fresh `PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --all` run (no `CV_TRACK_*` override) diffed against `BASELINE.md` §1 (zero rows moved on every asserted column) and by `tests/trackeval/test_baseline_consistency.py` staying green. No proto change, no Java edit. **21 new tests. Verified directly** (`PYTHONPATH="$PWD" .venv/bin/python -m pytest -q`): **1027 → 1048 passed, 1 skipped**, reconciling exactly with 1027 + 21. **To sweep the threshold**: `CV_TRACK_REUPDATE_MAX_TRACK_COUNT=<N>` (a positive integer) against `cv/cv-service/benchmarks/`, e.g. `CV_TRACK_REUPDATE_MAX_TRACK_COUNT=8 PYTHONPATH="$PWD" .venv/bin/python -m benchmarks.runner --sequence 04 --detector DPM --engine cost --level 1 --oru on`.
 
 **`docs/conclusions/TRACKING-RECOVERY-RESEARCH.md` §2.1 bracket-identity check (2026-08-15)**: the third and final ORU guard this task set out to add — see "Bracket-identity check for ORU" above for the full account, including Check B's own tension with ORU's premise and why a size-scaled centre distance was chosen over IoU; summarized here. Neither prior guard (velocity, density) ever tests the bracket's own two observations against each other; `docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4b/§4c measured that this leaves ORU net negative on real MOT17 footage even with both shipped. Fix: `reupdate()`/`late_correction()` gain `max_shape_log_ratio` (Check A: refuses when `|ln(w2/w1)|`/`|ln(h2/h1)|` exceeds it) and `max_motion_center_distance` (Check B: forward-predicts the bracket's earlier box to the later one's timestamp using the TRACK's own pre-gap velocity, refuses when the forecast lands more than this many box-diagonals from the real later box's centre) — both keyword-only, both default `0.0`, both independently `<=0`-disabled. NEW `cv_service.config.DEFAULT_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO`/`DEFAULT_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE` (both `0.0`) / `CV_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO`/`CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE` / `_parse_float_allow_nonpositive`; NEW `TrackingParams.reupdate_max_shape_log_ratio`/`.reupdate_max_motion_center_distance` (deployment-only, no wire field, threaded by `resolve()`). `track.py`'s `_observe` and `session.py`'s `_late_corrected_box` both pass both through alongside the existing three ceilings. Each check logs once per process on its own flag (`reupdate.py`'s NEW `_warn_implausible_shape_once`/`_warn_implausible_motion_once`), never raises. **Swept, then decided (2026-08-15): A ships ENABLED at `0.40`, B ships disabled as measured-harmful** — `docs/conclusions/TRACKING-BENCHMARK-RESULTS.md` §4d. A turns ORU from +377 IDSW against not running it into **-97**, and lifts recovery 0.7pp — the first net win in three guard attempts, and the only one to move recovery at all. B was worse than no check at every setting, for the reason its own design note predicted: it forecasts from the pre-gap velocity, which is the estimate ORU exists because it distrusts. Trust the BAND not the digit if retuning — with the pathological `MOT17-04-DPM` pair excluded, <=0.5 consistently beats no ORU and >=0.55 consistently loses. **Acceptance, measured**: each check fires independently (`test_none_when_the_shape_changed_too_abruptly`/`test_none_when_the_motion_forecast_lands_far_from_the_real_observation`); each is an independent off switch and neither hides the other (`test_the_shape_and_motion_checks_are_independent`, A on/B off, A off/B on, both off, one shared bad bracket) and the new checks do not interfere with the pre-existing velocity guard (`test_the_new_checks_do_not_interfere_with_the_existing_velocity_guard`); **at the shipped defaults exactly one `BASELINE.md` row moves** (`pan`/FOLLOW `implaus_n` 0 -> 8, everything else in it byte-identical — a deliberate, recorded behaviour change, not drift) — confirmed by `tests/trackeval/test_baseline_consistency.py` staying green with no code change of its own (a fresh, in-process harness run diffed against every asserted column of all thirty rows). `late_correction()` coverage verified, not assumed, at two independent levels: `reupdate.py` (`test_late_correction_is_none_when_the_shape_changed_too_abruptly`/`..._when_the_motion_forecast_is_implausible`) and session-level through a real `StreamTrackingSession`'s `_late_corrected_box` (`test_detection_lag_correction_respects_the_shape_check`/`..._the_motion_check`). No proto change, no Java edit. **43 new tests. Verified directly** (`PYTHONPATH="$PWD" .venv/bin/python -m pytest tests/ -q`): **1048 → 1091 passed, 1 skipped**, reconciling exactly with 1048 + 43.
+
+**`docs/plans/active/VISUAL-GEO-V2-PLAN.md` wave H4 done (2026-08-19)**: the measured H0/H0b/H0c visual-geolocation pipeline (`spikes/geo/harvested/` + H0c's `rectify_pipeline.py`/`rectify_rerank.py`/`false_convergence_gate.py`/`matchers.py`/`rerank.py`/`orchestrator.py`) ported to production `cv_service/geo/` behind the frozen §3.1 `Geolocation` gRPC service — see "`cv_service/geo/`" above for the full API surface, the `CV_GEO_*` table, and what is honestly not ported. `GeolocationServicer` implements all four RPCs (`LocalizeStream` pull-only/deadline-sampled, `BuildReferenceIndex`/`ListRegions`/`DeleteRegion`) and is wired into `serve()`. **One genuine production defect found and fixed** (not hypothetical, caught by this wave's own new tests): `BuildReferenceIndex` called `land_pack()` on the temp zip while its write handle was still open/unflushed, so every valid upload failed with "File is not a zip file" — see Gotchas. A second gap was found and **left open, documented, not fixed**: `VerifyTileCache` is write-side only (`orchestrator.py` builds it, nothing on the query path reads it back) — also in Gotchas. §4.4's two standing regressions (`tests/geo/test_regression_1213_alias.py`/`test_regression_1214_false_convergence.py`) both run for real against committed fixtures (not skipped — `torch`/`kornia` are installed in this dev venv) and pass, including with a determinism re-run. §9.10 (new) in the plan records every forced §3/§4 deviation found while porting (matcher roster narrowed to two, `condition_query` dropped, OSM/`implied_agl_meters` deferred, per-cell calibration added as an extension, single-region restriction on IPM+sequence, the §12.13 fixture substitution) as a dated amendment; §9.7 (second-decode cost) stays **not run** — no existing harness wires two concurrent pull loops together, and building one from scratch was judged a live-integration experiment, not this wave's "cheaply measurable" bar; O3's "two independent decode loops" default is implemented and stands unmeasured either way. `pyproject.toml` gains the `geo` extra (self-referential on `cv`, INVARIANT P1 verified via real aarch64 wheel downloads); `Dockerfile` installs `.[cv,geo]` and sets `CV_GEO_MODEL_CACHE`, without baking encoder/matcher weights in at build time (first-call network fetch instead — documented tradeoff). **All prior suites stay green**: `tests -q` → **1198 passed, 1 skipped** (the pre-existing skip, unrelated to geo); `spikes -q` → **19 passed**, `spikes/**` untouched (read-only reference, confirmed via `git status`). `tests/geo/**` alone: 90 passed (including both real-model regressions).

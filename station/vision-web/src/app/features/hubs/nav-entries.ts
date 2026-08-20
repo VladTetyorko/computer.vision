@@ -290,6 +290,14 @@ export const NAV_MODES: readonly NavMode[] = [
         managerOnly: true,
       },
       {
+        icon: 'satellite',
+        name: 'Geo regions',
+        description: 'Reference-imagery regions for visual geolocation — ingest a bounding box, then watch it index.',
+        to: '/manage/geo/regions',
+        group: 'configuration',
+        managerOnly: true,
+      },
+      {
         icon: 'firmware',
         name: 'Firmware',
         description: 'Firmware inventory and update flow for every aircraft.',

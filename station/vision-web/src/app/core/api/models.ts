@@ -1255,7 +1255,7 @@ export interface DevicesSnapshot {
  * Mirrors `dto.LiveEnvelopeResponse` — the shape of every regular (default-named) `GET /api/live`
  * SSE `data:` line; the event's own `id:` field carries `seq` as a string (which is what makes
  * `EventSource`'s automatic `Last-Event-ID` resume work with no client code at all). A discriminated
- * union on `type` so a `switch` narrows `payload` to the right shape per branch — the seven `type`
+ * union on `type` so a `switch` narrows `payload` to the right shape per branch — the eight `type`
  * values and their payloads are fixed 1:1 with `LiveTopicKind`'s wire values and
  * `LiveUpdateRegistry`'s own javadoc (vision-api). `devices`/`detection-events`/`map` (each its own
  * backend follow-up batch) are, like `fleet`/`event`, always-on — every connection gets them
@@ -1266,6 +1266,11 @@ export interface DevicesSnapshot {
  * not-snapshot-on-connect caveat (see {@link MapEventPayload}), but it is the one topic with
  * **per-connection filtering** — the server delivers a map event only to connections whose captured
  * viewer may see the event's `layerId`, so this client never filters map data for visibility.
+ *
+ * **`geo` is the 8th, from docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4 (wave H6/H5)** — `geo:<assetId>`,
+ * opt-in like `telemetry`/`detections` (not always-on), coalescing latest-wins with ring capacity 1
+ * (the freshest correction is the only one that matters, CLAUDE.md rule 9); payload is
+ * {@link CorrectionResponse} verbatim, byte-identical to the REST shape.
  */
 export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'fleet'; readonly payload: readonly AssetSummary[] }
@@ -1274,7 +1279,8 @@ export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'event'; readonly payload: LiveEvent }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'devices'; readonly payload: DevicesSnapshot }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'detection-events'; readonly payload: DetectionEvent }
-  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'map'; readonly payload: MapEventPayload };
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'map'; readonly payload: MapEventPayload }
+  | { readonly seq: number; readonly assetId: string; readonly type: 'geo'; readonly payload: CorrectionResponse };
 
 /**
  * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
@@ -1747,6 +1753,169 @@ export interface ProjectedTrackResponse {
 /** The body of `GET /api/map/tracks` (§5) — every track on a layer the viewer `canView`s (D10). */
 export interface MapTracksResponse {
   readonly tracks: readonly ProjectedTrackResponse[];
+}
+
+// --- Visual geolocation v2 (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3/§3.4's frozen wire contract, wave H6) ---
+// Built against the plan text, not a running server — H5 (persistence/REST/SSE) lands concurrently.
+// D9's flag-off envelope is the app's real, shipped `ApiErrorBody` shape (`{error, message}`), no
+// ambiguity to flag here (contrast Fixed-camera-geo's `detail`-vs-`message` discrepancy above).
+// `RegionProgressResponse.phase`/`state` are fully enumerated in §3.1's proto comment
+// (`ReferenceIndexProgress.phase`, `JobState`), so both are closed unions, not loose `string`s.
+// `RegionIngestRequest`'s own field names aren't spelled out as a named DTO in §3.3 beyond "an
+// ingest form (bounds + zoom)" (§3.8) — mirrors `RegionResponse`'s own bounds/zoom fields exactly,
+// the same request-narrows-response idiom this file already uses for `GeofenceZoneRequest` against
+// `GeofenceZone`. Every optional `Double`/`String` field follows this file's own `@JsonInclude(NON_NULL)`
+// convention (absent via `?:`, never `null`) except `CorrectionResponse`'s `assetId`/`usageId`/
+// `frameAt`/`computedAt`/`status`/`source`/`divergent` — §3.3's own named exceptions to NON_NULL,
+// plus the two non-nullable `Instant`s the domain `TrackCorrection` record never omits.
+
+/**
+ * Mirrors `GeoController`'s D9 flag-off refusal (§3, D9) — `vision.geo.visual.enabled=false` answers
+ * this on all six `/api/geo/**` routes. Exported so `core/geo/geo-logic.ts#isVisualGeoDisabledError`
+ * can match against it without duplicating the literal.
+ */
+export const VISUAL_GEO_DISABLED_MESSAGE = 'visual geolocation is disabled (vision.geo.visual.enabled)';
+
+/** Mirrors `RegionStatus` (§3.3) — `NEVER_ACCEPT` is a first-class, honestly-displayed state (§3.8), never hidden like a failure. */
+export type RegionStatus = 'BUILDING' | 'READY' | 'NEVER_ACCEPT' | 'FAILED';
+
+/**
+ * Mirrors `RegionResponse` (§3.3) — one row of `GET /api/geo/regions`, and the `202` body of a
+ * successful `POST` (`status: 'BUILDING'`). D10: cv-service is the single source of truth for what
+ * regions exist — this DTO is proxied from cv-service's own `ListRegions`, not a Postgres table.
+ */
+export interface RegionResponse {
+  readonly regionId: string;
+  readonly name: string;
+  readonly zoom: number;
+  readonly north: number;
+  readonly south: number;
+  readonly east: number;
+  readonly west: number;
+  readonly status: RegionStatus;
+  readonly tileCount?: number;
+  readonly neverAcceptCells?: number;
+  readonly encoderId?: string;
+  readonly acceptSimilarity?: number;
+  readonly acceptMargin?: number;
+  readonly holdoutRecallAt1?: number;
+  readonly holdoutMedianErrorMeters?: number;
+  readonly builtAt?: string;
+}
+
+/** The body of `GET /api/geo/regions` (§3.3). */
+export interface RegionsResponse {
+  readonly regions: readonly RegionResponse[];
+}
+
+/**
+ * The body of `POST /api/geo/regions` (§3.3) — the ingest form's own bounds + zoom, `403` unless
+ * `canAdminister` (a region ingest hits an external imagery provider), `400` for invalid bounds,
+ * zoom outside `[15,19]`, or a tile count over `vision.geo.visual.tiles.max-tiles`.
+ */
+export interface RegionIngestRequest {
+  readonly name: string;
+  readonly zoom: number;
+  readonly north: number;
+  readonly south: number;
+  readonly east: number;
+  readonly west: number;
+}
+
+/** One in-flight ingest job's phase (§3.1 proto comment, `ReferenceIndexProgress.phase` — frozen, closed set). */
+export type RegionIngestPhase = 'receiving' | 'extracting' | 'encoding' | 'indexing' | 'calibrating' | 'done';
+
+/** `JobState`, reused (§3.1) — the job's own terminal/non-terminal status, independent of `phase`. */
+export type RegionJobState = 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+
+/**
+ * The index-quality stats attached to a progress event's terminal `SUCCEEDED` (§3.3's own literal
+ * example shows `"stats": null` for a `RUNNING` phase — this file infers the terminal shape from
+ * `RegionResponse`'s own stats fields, the same computed values a finished region reports there,
+ * rather than the proto's fuller `ReferenceIndexStats` — `descriptorCount`/`descriptorDim`/
+ * `indexBytes` are cv-service-internal and no `RegionResponse` example ever surfaces them).
+ */
+export interface RegionIndexStats {
+  readonly tileCount?: number;
+  readonly neverAcceptCells?: number;
+  readonly encoderId?: string;
+  readonly acceptSimilarity?: number;
+  readonly acceptMargin?: number;
+  readonly holdoutRecallAt1?: number;
+  readonly holdoutMedianErrorMeters?: number;
+}
+
+/** The body of `GET /api/geo/regions/{regionId}/progress` (§3.3) — `404` once no in-flight job and no `READY` region exists for `regionId`. */
+export interface RegionProgressResponse {
+  readonly regionId: string;
+  readonly phase: RegionIngestPhase;
+  readonly done: number;
+  readonly total: number;
+  readonly state: RegionJobState;
+  readonly message: string;
+  readonly stats?: RegionIndexStats | null;
+}
+
+/** Mirrors `CorrectionStatus` (§3.5) — wire spelling is the Java enum name verbatim. */
+export type CorrectionStatus = 'CONFIRMED' | 'PROBABLE' | 'NO_FIX';
+
+/** Mirrors `CorrectionSource` (§3.5) — one value today, by design. */
+export type CorrectionSource = 'VISUAL_HEAVY';
+
+/**
+ * Mirrors `CorrectionResponse` (§3.3) — one visual-geolocation fix against an asset's raw telemetry
+ * track, served by `GET /api/geo/corrections/live` (latest per asset), `GET /api/geo/corrections?usageId=`
+ * (a finished/open usage's full history), and the `geo:<assetId>` SSE topic payload (§3.4, byte-identical).
+ *
+ * `latitude`/`longitude` are absent (not `null`) exactly when `status === 'NO_FIX'` (domain: `position`
+ * null iff `NO_FIX`); `rawLatitude`/`rawLongitude` absent whenever the aircraft's own telemetry had
+ * no fix at `frameAt` (a telemetry gap — §4.5: "absence of evidence is not evidence", `separationMeters`
+ * absent in the same case). `refusal` carries the first refused gate's name, verbatim, only on a
+ * `NO_FIX` row (§3.8 cockpit popover: shown exactly as received, never paraphrased — the D5 rule).
+ *
+ * `cellCalibrated`/`sequenceConverged` are the two booleans the backend gate reads to choose PROBABLE
+ * over CONFIRMED; H8 gave them a column and a wire field so a correction can finally say why it was
+ * only PROBABLE (§9.11 defect 4). Optional here like every other evidence field, so a row served by an
+ * older backend simply reads `'—'` rather than a confident `'no'`.
+ */
+export interface CorrectionResponse {
+  readonly assetId: string;
+  readonly usageId: string;
+  readonly frameAt: string;
+  readonly computedAt: string;
+  readonly status: CorrectionStatus;
+  readonly source: CorrectionSource;
+  readonly latitude?: number;
+  readonly longitude?: number;
+  readonly yawDegrees?: number;
+  readonly radiusMeters?: number;
+  readonly impliedAglMeters?: number;
+  readonly rawLatitude?: number;
+  readonly rawLongitude?: number;
+  readonly separationMeters?: number;
+  readonly sigmaMeters?: number;
+  readonly divergent: boolean;
+  readonly divergentSince?: string;
+  readonly regionId?: string;
+  readonly tileId?: string;
+  readonly matchCount?: number;
+  readonly inlierCount?: number;
+  readonly inlierRatio?: number;
+  readonly rerankMargin?: number;
+  readonly reprojectionRmsPixels?: number;
+  readonly rectified?: boolean;
+  /** Whether the winning cell has a real, self-calibrated accept threshold rather than a never-accept verdict. */
+  readonly cellCalibrated?: boolean;
+  /** Whether the sequence filter reported convergence under its own false-convergence gate. */
+  readonly sequenceConverged?: boolean;
+  readonly sequenceSpreadMeters?: number;
+  readonly sequenceUpdates?: number;
+  readonly refusal?: string;
+}
+
+/** The body of both `GET /api/geo/corrections/live` and `GET /api/geo/corrections?usageId=` (§3.3). */
+export interface CorrectionsResponse {
+  readonly corrections: readonly CorrectionResponse[];
 }
 
 // --- Recording + clip export (docs/plans/done/OPS-CORE-PLAN.md §R's frozen wire contract) ------------------

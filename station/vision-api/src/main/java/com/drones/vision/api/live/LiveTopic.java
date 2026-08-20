@@ -41,6 +41,11 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
         return new LiveTopic(LiveTopicKind.DETECTIONS, assetId);
     }
 
+    /** Visual geolocation's per-asset corrected-track topic (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, D11). */
+    static LiveTopic geo(AssetId assetId) {
+        return new LiveTopic(LiveTopicKind.GEO, assetId);
+    }
+
     /**
      * @return the wire form, e.g. {@code "fleet"} or {@code "telemetry:<assetId>"}
      */
@@ -76,6 +81,7 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
             case MAP -> MAP;
             case TELEMETRY -> telemetry(requireAssetId(idPart, "telemetry"));
             case DETECTIONS -> detections(requireAssetId(idPart, "detections"));
+            case GEO -> geo(requireAssetId(idPart, "geo"));
         };
     }
 

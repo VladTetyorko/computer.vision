@@ -27,6 +27,8 @@ import com.drones.vision.warehouse.domain.model.DeviceCategory;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.flight.domain.model.CorrectionSource;
+import com.drones.vision.flight.domain.model.CorrectionStatus;
 import com.drones.vision.flight.domain.model.FeatureRequirement;
 import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.flight.domain.model.GeofenceZone;
@@ -47,6 +49,7 @@ import com.drones.vision.map.domain.model.MarkSource;
 import com.drones.vision.map.domain.model.MarkStatus;
 import com.drones.vision.identity.domain.model.Membership;
 import com.drones.vision.flight.domain.model.MessageObservation;
+import com.drones.vision.flight.domain.model.TrackCorrection;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.kernel.Ownership;
@@ -63,6 +66,7 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.DetectionSource;
 import com.drones.vision.perception.domain.model.DetectorReason;
 import com.drones.vision.kernel.Telemetry;
+import com.drones.vision.kernel.VisualFixEvidence;
 import com.drones.vision.perception.domain.model.TrackRef;
 import com.drones.vision.perception.domain.model.TrackState;
 import com.drones.vision.perception.domain.model.TrackingTelemetry;
@@ -96,6 +100,7 @@ import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
 import com.drones.vision.learning.domain.port.SampleImageStorePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
+import com.drones.vision.flight.domain.port.TrackCorrectionRepositoryPort;
 import com.drones.vision.map.domain.port.TrackTrailRepositoryPort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
@@ -128,6 +133,7 @@ import com.drones.vision.adapter.persistence.repository.JpaMarkRepository;
 import com.drones.vision.adapter.persistence.repository.JpaSampleImageStore;
 import com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository;
 import com.drones.vision.adapter.persistence.repository.TelemetryBatchSettings;
+import com.drones.vision.adapter.persistence.repository.JpaTrackCorrectionRepository;
 import com.drones.vision.adapter.persistence.repository.JpaTrackTrailRepository;
 import com.drones.vision.adapter.persistence.repository.JpaTrainingSampleRepository;
 import com.drones.vision.adapter.persistence.repository.JpaUserRepository;
@@ -218,12 +224,16 @@ class PostgresDockerIntegrationTest {
      * output, the same classification {@code detection_results}/{@code telemetry_samples} already
      * have); see V21's header for the reasoning behind every other entry, including why {@code
      * asset_images} is grouped with {@code sample_images} rather than with the control-plane set
-     * it might otherwise resemble.
+     * it might otherwise resemble. {@code track_corrections}, added by {@code
+     * V23__track_corrections.sql} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.7/D12), is the same
+     * classification as {@code projected_track_points}: append-only, ~1 Hz per flying asset,
+     * telemetry-character machine output.
      */
     private static final Set<String> EXCLUDED_TABLES = Set.of(
             "telemetry_samples", "detection_results", "detection_events",
             "training_samples", "sample_images", "asset_images",
-            "audit_entries", "db_audit_log", "flyway_schema_history", "projected_track_points");
+            "audit_entries", "db_audit_log", "flyway_schema_history", "projected_track_points",
+            "track_corrections");
 
     private static EntityManagerFactory entityManagerFactory;
 
@@ -3016,6 +3026,192 @@ class PostgresDockerIntegrationTest {
 
             assertEquals(List.of(recent), repository.findByTrack(assetId, 1L));
             assertTrue(repository.findByTrack(assetId, 2L).isEmpty());
+        }
+    }
+
+    /**
+     * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, H5 — every {@link
+     * TrackCorrectionRepositoryPort} method against a real Postgres: append-only inserts,
+     * oldest-to-newest ordering, {@link TrackCorrectionRepositoryPort#findLatest}, the retention
+     * prune ({@link TrackCorrectionRepositoryPort#deleteOlderThan}) and the per-usage cap ({@link
+     * TrackCorrectionRepositoryPort#trimUsageToMostRecent}) -- plus a full round trip proving every
+     * nullable field (a {@code NO_FIX} row, and a divergent {@code CONFIRMED} row) survives Postgres
+     * unchanged, save for the frozen-schema placeholders {@code TrackCorrectionMapper} documents.
+     */
+    @Nested
+    class TrackCorrectionRepositoryTests {
+
+        private final TrackCorrectionRepositoryPort repository =
+                new JpaTrackCorrectionRepository(entityManagerFactory);
+
+        /**
+         * {@code cellCalibrated}/{@code sequenceConverged} are deliberately set {@code true} here:
+         * H8 gave them real columns, so a round trip that still read {@code false} back would be the
+         * regression this fixture exists to catch (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11
+         * defect 4). {@code candidateCount}/{@code supportingFrames}/{@code baselineMeters} stay at
+         * the mapper's documented placeholder values, since those genuinely have no column.
+         */
+        private VisualFixEvidence evidence() {
+            return new VisualFixEvidence(0, 174, 131, 0.75, 0.41, 2.1, true, true, 0, 0.0, true, 38.0, 11, 1.0);
+        }
+
+        private TrackCorrection confirmed(AssetId assetId, UsageId usageId, Instant frameAt) {
+            return new TrackCorrection(assetId, usageId, frameAt, frameAt.plusMillis(500),
+                    CorrectionStatus.CONFIRMED, CorrectionSource.VISUAL_HEAVY,
+                    new GeoPosition(50.39411, 30.62870, null), 214.6, 18.4, 96.2,
+                    new GeoPosition(50.39402, 30.62851, null), 16.2, 21.0,
+                    true, frameAt.minusSeconds(5),
+                    "kyiv-pozniaky", "17/76687/44230", "", evidence());
+        }
+
+        private TrackCorrection noFix(AssetId assetId, UsageId usageId, Instant frameAt) {
+            return new TrackCorrection(assetId, usageId, frameAt, frameAt.plusMillis(500),
+                    CorrectionStatus.NO_FIX, CorrectionSource.VISUAL_HEAVY,
+                    null, null, null, null,
+                    null, null, null,
+                    false, null,
+                    "", "", "LOW_TEXTURE",
+                    new VisualFixEvidence(0, 0, 0, 0.0, 0.0, 0.0, false, false, 0, 0.0, false, 0.0, 0, 1.0));
+        }
+
+        @Test
+        void unknownAssetReturnsEmptyFindLatestAndEmptyUsageList() {
+            assertTrue(repository.findLatest(AssetId.random()).isEmpty());
+            assertTrue(repository.findByUsage(UsageId.random(), 10).isEmpty());
+        }
+
+        @Test
+        void aConfirmedDivergentCorrectionRoundTripsWithEveryNullablePreserved() {
+            AssetId assetId = AssetId.random();
+            UsageId usageId = UsageId.random();
+            TrackCorrection saved = confirmed(assetId, usageId, NOW);
+
+            repository.save(saved);
+
+            List<TrackCorrection> found = repository.findByUsage(usageId, 10);
+            assertEquals(1, found.size());
+            assertEquals(saved, found.get(0));
+        }
+
+        @Test
+        void aNoFixCorrectionRoundTripsWithEveryNullableAbsent() {
+            AssetId assetId = AssetId.random();
+            UsageId usageId = UsageId.random();
+            TrackCorrection saved = noFix(assetId, usageId, NOW);
+
+            repository.save(saved);
+
+            List<TrackCorrection> found = repository.findByUsage(usageId, 10);
+            assertEquals(1, found.size());
+            assertEquals(saved, found.get(0));
+        }
+
+        @Test
+        void findByUsageReturnsCorrectionsOldestToNewestRegardlessOfInsertOrder() {
+            AssetId assetId = AssetId.random();
+            UsageId usageId = UsageId.random();
+            TrackCorrection c1 = confirmed(assetId, usageId, NOW.minusSeconds(20));
+            TrackCorrection c2 = confirmed(assetId, usageId, NOW.minusSeconds(10));
+            TrackCorrection c3 = confirmed(assetId, usageId, NOW);
+            repository.save(c2);
+            repository.save(c3);
+            repository.save(c1);
+
+            assertEquals(List.of(c1, c2, c3), repository.findByUsage(usageId, 10), "oldest to newest");
+        }
+
+        @Test
+        void findLatestReturnsTheMostRecentlyFramedCorrectionAcrossUsages() {
+            AssetId assetId = AssetId.random();
+            TrackCorrection older = confirmed(assetId, UsageId.random(), NOW.minusSeconds(30));
+            TrackCorrection newer = confirmed(assetId, UsageId.random(), NOW);
+            repository.save(older);
+            repository.save(newer);
+
+            Optional<TrackCorrection> latest = repository.findLatest(assetId);
+            assertTrue(latest.isPresent());
+            assertEquals(newer, latest.get());
+        }
+
+        @Test
+        void trimUsageToMostRecentKeepsOnlyTheNewestRowsAndReportsHowManyWereDeleted() {
+            AssetId assetId = AssetId.random();
+            UsageId usageId = UsageId.random();
+            List<Instant> frameAtInOrder = List.of(
+                    NOW.minusSeconds(40), NOW.minusSeconds(30), NOW.minusSeconds(20), NOW.minusSeconds(10), NOW);
+            for (Instant frameAt : frameAtInOrder) {
+                repository.save(confirmed(assetId, usageId, frameAt));
+            }
+
+            int deleted = repository.trimUsageToMostRecent(usageId, 2);
+
+            assertEquals(3, deleted);
+            List<TrackCorrection> remaining = repository.findByUsage(usageId, 10);
+            assertEquals(2, remaining.size());
+            assertEquals(NOW.minusSeconds(10), remaining.get(0).frameAt());
+            assertEquals(NOW, remaining.get(1).frameAt());
+        }
+
+        @Test
+        void trimUsageToMostRecentOnlyAffectsTheNamedUsage() {
+            AssetId assetId = AssetId.random();
+            UsageId usageId1 = UsageId.random();
+            UsageId usageId2 = UsageId.random();
+            repository.save(confirmed(assetId, usageId1, NOW.minusSeconds(10)));
+            repository.save(confirmed(assetId, usageId1, NOW));
+            repository.save(confirmed(assetId, usageId2, NOW));
+
+            repository.trimUsageToMostRecent(usageId1, 1);
+
+            assertEquals(1, repository.findByUsage(usageId1, 10).size());
+            assertEquals(1, repository.findByUsage(usageId2, 10).size(), "a different usage's rows are untouched");
+        }
+
+        @Test
+        void deleteOlderThanRemovesCorrectionsAcrossEveryAssetFramedBeforeTheCutoffAndReportsHowMany() {
+            AssetId assetId = AssetId.random();
+            Instant cutoff = NOW.minusSeconds(15);
+            UsageId usage1 = UsageId.random();
+            UsageId usage2 = UsageId.random();
+            TrackCorrection old1 = confirmed(assetId, usage1, NOW.minusSeconds(30));
+            TrackCorrection old2 = confirmed(assetId, usage2, NOW.minusSeconds(20));
+            TrackCorrection recent = confirmed(assetId, usage1, NOW);
+            repository.save(old1);
+            repository.save(old2);
+            repository.save(recent);
+
+            // Not asserting an exact `deleted` count here (unlike trimUsageToMostRecent's per-usage-scoped
+            // tests above): deleteOlderThan is a genuinely table-wide delete, and this nested class's other
+            // tests leave their own past-dated rows behind in this same shared Postgres instance (no
+            // per-test truncation -- see TrackTrailRepositoryTests' identically-shaped
+            // deleteOlderThanRemovesPointsAcrossEveryTrackCapturedBeforeTheCutoff precedent, which makes
+            // the same choice). Only this test's own two usages are asserted.
+            repository.deleteOlderThan(cutoff);
+
+            assertEquals(List.of(recent), repository.findByUsage(usage1, 10));
+            assertTrue(repository.findByUsage(usage2, 10).isEmpty());
+        }
+
+        /**
+         * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.7/D12 — {@code track_corrections} carries no
+         * {@code trg_audit_*} trigger at all, the same {@code projected_track_points} precedent (see
+         * {@code aTrackTrailInsertProducesNoDbAuditLogRow} above): a flying asset writing at ~1 Hz
+         * would flood a table meant for a human's intent, not machine output.
+         */
+        @Test
+        void aTrackCorrectionInsertProducesNoDbAuditLogRow() {
+            repository.save(confirmed(AssetId.random(), UsageId.random(), NOW));
+
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                long rowsForTable = ((Number) em.createNativeQuery(
+                                "select count(*) from db_audit_log where table_name = 'track_corrections'")
+                        .getSingleResult()).longValue();
+                assertEquals(0L, rowsForTable, "the track_corrections table carries no audit trigger -- an "
+                        + "insert must leave db_audit_log untouched, the whole point of excluding it (D12)");
+            } finally {
+                em.close();
+            }
         }
     }
 

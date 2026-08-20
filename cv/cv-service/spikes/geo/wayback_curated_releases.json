@@ -1,0 +1,52 @@
+[
+  {
+    "date": "2014-02-20",
+    "releaseNum": "10",
+    "urlTemplate": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/10/{level}/{row}/{col}"
+  },
+  {
+    "date": "2014-03-26",
+    "releaseNum": "4230",
+    "urlTemplate": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/4230/{level}/{row}/{col}"
+  },
+  {
+    "date": "2015-03-18",
+    "releaseNum": "15084",
+    "urlTemplate": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/15084/{level}/{row}/{col}"
+  },
+  {
+    "date": "2017-01-25",
+    "releaseNum": "9486",
+    "urlTemplate": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/9486/{level}/{row}/{col}"
+  },
+  {
+    "date": "2017-03-15",
+    "releaseNum": "29387",
+    "urlTemplate": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/29387/{level}/{row}/{col}"
+  },
+  {
+    "date": "2021-02-24",
+    "releaseNum": "9812",
+    "urlTemplate": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/9812/{level}/{row}/{col}"
+  },
+  {
+    "date": "2022-06-08",
+    "releaseNum": "44710",
+    "urlTemplate": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/44710/{level}/{row}/{col}"
+  },
+  {
+    "date": "2022-08-10",
+    "releaseNum": "17825",
+    "urlTemplate": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/17825/{level}/{row}/{col}"
+  },
+  {
+    "date": "2025-02-27",
+    "releaseNum": "34007",
+    "urlTemplate": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/34007/{level}/{row}/{col}"
+  },
+  {
+    "date": "2025-10-23",
+    "releaseNum": "20512",
+    "urlTemplate": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/20512/{level}/{row}/{col}"
+  }
+]

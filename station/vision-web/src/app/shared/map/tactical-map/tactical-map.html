@@ -126,6 +126,16 @@
             </li>
           </ul>
         }
+
+        @if (hasCorrections()) {
+          <p class="panel-label">Geo corrections</p>
+          <ul class="rows">
+            <li class="row">
+              <span class="swatch ring geo-correction"></span>
+              <span class="row-name">Where the frame says you are — error radius shown</span>
+            </li>
+          </ul>
+        }
       </div>
     }
 

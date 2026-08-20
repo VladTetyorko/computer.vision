@@ -321,3 +321,31 @@ export function droneDivIcon(
     iconAnchor: [11, 11],
   });
 }
+
+/**
+ * A divIcon for a visual-geolocation correction (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave
+ * H6) — a hollow ring with a small heading tick, deliberately **not** {@link droneDivIcon}'s filled
+ * arrow: §3.8 requires the corrected marker to read as "visually secondary to the raw one", never a
+ * second "real" aircraft. `divergent` only toggles a CSS class (`nominal`/`divergent`) — the actual
+ * colour is resolved by the host's own `::ng-deep` rule from `--color-info`/`--color-warn`, never
+ * `--color-danger` (VISUAL-GEO-V2-PLAN.md §3.8's own "never red for divergent" — the same anti-alarm
+ * discipline the divergence chip follows).
+ */
+export function correctionDivIcon(
+  L: typeof Leaflet,
+  yawDegrees: number | undefined,
+  divergent: boolean,
+  className = 'geo-correction-marker',
+): Leaflet.DivIcon {
+  const rotation = yawDegrees ?? 0;
+  const tone = divergent ? 'divergent' : 'nominal';
+  return L.divIcon({
+    className: `${className} ${tone}`,
+    // Rotating the ring div (not the tick alone) rotates both together with no per-glyph transform
+    // math: a circle rotated is visually identical, so this only moves the tick — around the ring's
+    // own centre, which is the CSS transform default (`transform-origin: 50% 50%`).
+    html: `<div class="geo-correction-ring" style="transform: rotate(${rotation}deg)"><div class="geo-correction-tick"></div></div>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+}

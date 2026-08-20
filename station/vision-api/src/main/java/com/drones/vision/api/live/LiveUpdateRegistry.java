@@ -6,6 +6,7 @@ import com.drones.vision.api.dto.DetectionEventResponse;
 import com.drones.vision.api.dto.DetectionResultResponse;
 import com.drones.vision.api.dto.DeviceResponse;
 import com.drones.vision.api.dto.DevicesSnapshotResponse;
+import com.drones.vision.api.dto.CorrectionResponse;
 import com.drones.vision.api.dto.EventResponse;
 import com.drones.vision.api.dto.LiveConnectedResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
@@ -29,6 +30,8 @@ import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.platform.EventLiveUpdatePort;
 import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
+import com.drones.vision.flight.domain.port.TrackCorrectionLiveUpdatePort;
+import com.drones.vision.flight.domain.model.TrackCorrection;
 import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.springframework.beans.factory.ObjectProvider;
@@ -67,7 +70,9 @@ import com.drones.vision.api.controller.StreamController;
  * that implements every publishing context's live-update port ({@link FleetLiveUpdatePort}, {@link
  * TelemetryLiveUpdatePort}, {@link DetectionLiveUpdatePort}, {@link MapLiveUpdatePort}, {@link
  * EventLiveUpdatePort} — five ports the former god-port {@code LiveUpdatePublisherPort} split into,
- * docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b), a per-process ({@code single-instance
+ * docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b — plus a sixth, {@link
+ * TrackCorrectionLiveUpdatePort}, added for visual geolocation's {@code geo:<assetId>} topic,
+ * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4/D11), a per-process ({@code single-instance
  * deployment}, per the plan) hub fanning application-layer announcements out to every subscribed
  * {@code SseEmitter}. An adapter is exactly the place that may depend on every context at once —
  * each context's application code still only ever holds the one port it actually calls.
@@ -199,7 +204,7 @@ import com.drones.vision.api.controller.StreamController;
 @Component
 @ConditionalOnProperty(prefix = "vision.live", name = "enabled", matchIfMissing = true)
 public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryLiveUpdatePort,
-        DetectionLiveUpdatePort, MapLiveUpdatePort, EventLiveUpdatePort {
+        DetectionLiveUpdatePort, MapLiveUpdatePort, EventLiveUpdatePort, TrackCorrectionLiveUpdatePort {
 
     private static final System.Logger LOG = System.getLogger(LiveUpdateRegistry.class.getName());
 
@@ -288,10 +293,13 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      */
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> telemetryBuffers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> detectionBuffers = new ConcurrentHashMap<>();
+    /** Per-asset {@code geo:<assetId>} buffer (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, D11) -- same eviction/capacity-1 treatment as {@link #detectionBuffers}. */
+    private final ConcurrentHashMap<AssetId, LiveRingBuffer> geoBuffers = new ConcurrentHashMap<>();
 
     private final ConcurrentHashMap<AssetId, ConcurrentLinkedQueue<Telemetry>> pendingTelemetry =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, DetectionResult> pendingDetections = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<AssetId, TrackCorrection> pendingCorrections = new ConcurrentHashMap<>();
 
     /**
      * {@link #publishFleetChanged()}'s coalescing window, in nanoseconds ({@link System#nanoTime()}
@@ -678,6 +686,19 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         pendingDetections.put(assetId, result); // latest-only: a later put simply overwrites
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Latest-only, exactly {@link #publishDetections}'s treatment -- a corrected fix supersedes
+     * whatever this asset's previous fix said (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, D11).
+     */
+    @Override
+    public void publishCorrection(AssetId assetId, TrackCorrection correction) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        Objects.requireNonNull(correction, "correction must not be null");
+        pendingCorrections.put(assetId, correction); // latest-only: a later put simply overwrites
+    }
+
     @Override
     public void publishEvent(Event event) {
         Objects.requireNonNull(event, "event must not be null");
@@ -753,6 +774,17 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             LiveTopic topic = LiveTopic.detections(assetId);
             LiveEnvelopeResponse envelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(),
                     assetId.value().toString(), LiveTopicKind.DETECTIONS.wire(), DetectionResultResponse.from(result));
+            bufferFor(topic).append(envelope);
+            broadcast(topic, envelope);
+        }
+        for (AssetId assetId : List.copyOf(pendingCorrections.keySet())) {
+            TrackCorrection correction = pendingCorrections.remove(assetId);
+            if (correction == null) {
+                continue; // another flush already claimed it
+            }
+            LiveTopic topic = LiveTopic.geo(assetId);
+            LiveEnvelopeResponse envelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(),
+                    assetId.value().toString(), LiveTopicKind.GEO.wire(), CorrectionResponse.from(correction));
             bufferFor(topic).append(envelope);
             broadcast(topic, envelope);
         }
@@ -855,6 +887,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     void evictUnusedAssetBuffers() {
         telemetryBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.TELEMETRY));
         detectionBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.DETECTIONS));
+        geoBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.GEO));
     }
 
     private Set<AssetId> subscribedAssetIds(LiveTopicKind kind) {
@@ -903,6 +936,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             case TELEMETRY -> telemetryBuffers.computeIfAbsent(topic.assetId(),
                     id -> new LiveRingBuffer(telemetryBufferCapacity, false));
             case DETECTIONS -> detectionBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
+            case GEO -> geoBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
         };
     }
 

@@ -570,6 +570,52 @@ _PULL_CLOCK_MODES = ("anchor", "arrival")
 # than hardcoded in `clock.py` per rule 1 (no un-configurable magic numbers).
 DEFAULT_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS = 100.0
 
+# --- geo (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.6/§9.9, wave H4) ------
+#
+# Backs `cv_service.geo.*` -- `LocalizeStream`/`BuildReferenceIndex`/`ListRegions`/
+# `DeleteRegion` (`cv_service/grpc/servicers.py#GeolocationServicer`). The geo pull session
+# reuses `pull_decoder`/`pull_rtsp_transport`/`pull_open_timeout_millis`/
+# `pull_stall_timeout_millis` above rather than duplicating them -- D2's own words: "the
+# shipped ... `cv_service/pull/` machinery already does exactly this".
+_GEO_DIRNAME = "geo"
+_GEO_MODEL_CACHE_DIRNAME = ".model-cache"
+DEFAULT_GEO_ENCODER = "eigenplaces_r18_512"  # O11 -- harvested unchanged, the best measured real result
+# §3.6's table names `CV_GEO_MAX_CANDIDATES` (retrieval depth) and §9.9 amendment 1 separately
+# fixes `CV_GEO_RERANK_K=20` (re-rank depth). Every H0/H0c driver script measured with ONE k
+# feeding both stages (`localize(..., max_candidates=K)` and `rerank(..., top_k=K)`, the same
+# `K`) -- so H4 consolidates them into this single knob rather than inventing a
+# retrieve-more-than-you-rerank policy nothing measured. See MODULE.md.
+DEFAULT_GEO_RERANK_K = 20
+_GEO_MATCHERS = ("xfeat", "loftr")  # §9.9 amendment 1: default xfeat; loftr the slow high-recall option.
+# lightglue_aliked/lightglue_disk/eloftr are NOT ported -- see MODULE.md.
+DEFAULT_GEO_MATCHER = "xfeat"
+DEFAULT_GEO_MATCH_FLOOR = 12  # harvested `verify.DEFAULT_MATCH_FLOOR` -- a cheap pre-RANSAC skip, not a gate
+DEFAULT_GEO_INLIER_FLOOR = 8  # G-a, §4.2 -- precision 1.0 at >=8 inliers (§12.11)
+DEFAULT_GEO_PROMOTION_INLIER_FLOOR = 16  # harvested; reserved for a future promotion feature, see MODULE.md
+DEFAULT_GEO_MIN_INLIER_RATIO = 0.35  # G-b, §4.2
+DEFAULT_GEO_MAX_REPROJECTION_RMS_PX = 4.0  # G-c, §4.2 -- the residual ceiling that applies at every N
+DEFAULT_GEO_MIN_RERANK_MARGIN = 0.15  # G-d, §4.2
+DEFAULT_GEO_RECTIFY = True
+# Below this pitch-from-nadir the view is already close enough to nadir that IPM's own warp cost
+# buys little -- the degraded (raw-frame) path is used instead. Not a §12.11/§13.4 measured
+# number; a conservative, documented placeholder (rectify.py's own MIN_DEPRESSION_DEGREES=15 is
+# the geometric floor this sits well inside of).
+DEFAULT_GEO_RECTIFY_MIN_PITCH_DEG = 10.0
+DEFAULT_GEO_SEQUENCE = True
+DEFAULT_GEO_SEQUENCE_PARTICLES = 4000
+DEFAULT_GEO_SEQUENCE_TEMPERATURE = 0.02
+DEFAULT_GEO_SEQ_MIN_SUPPORTING_FRAMES = 4  # §4.4 Change 2 G-b
+DEFAULT_GEO_SEQ_MIN_BASELINE_M = 40.0  # §4.4 Change 2 G-b -- meters of telemetry-derived platform motion
+DEFAULT_GEO_OSM_WEIGHT = 0.0  # D8 -- inert until measured; osm_fingerprint.py is not ported this wave (MODULE.md)
+DEFAULT_GEO_MAX_PACK_BYTES = 8 * 1024 * 1024 * 1024  # 8 GiB, harvested
+# Texture gate (§4.1 node B). Not named in §3.6's table but named as UNVALIDATED placeholders in
+# harvested `localize.py` itself -- rule 1 (no un-configurable magic numbers) puts them here.
+DEFAULT_GEO_MIN_LAPLACIAN_VARIANCE = 50.0
+DEFAULT_GEO_MIN_ENTROPY = 3.0
+# `GeoControl.target_fps <= 0` falls back to this -- mirrors `DEFAULT_PULL_TARGET_FPS`'s own
+# contract. §9.9 amendment 2's own default (`vision.geo.visual.keyframe-fps: 1.0`, Java side).
+DEFAULT_GEO_TARGET_FPS = 1.0
+
 _ENV_MAX_CONCURRENT_INFERENCES = "CV_MAX_CONCURRENT_INFERENCES"
 
 
@@ -979,6 +1025,30 @@ class Settings:
     pull_stall_timeout_millis: int = DEFAULT_PULL_STALL_TIMEOUT_MILLIS
     pull_clock_mode: str = DEFAULT_PULL_CLOCK_MODE
     pull_clock_reanchor_threshold_millis: float = DEFAULT_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS
+    geo_data_dir: Path = field(default_factory=lambda: _BASE_DIR / _GEO_DIRNAME)
+    geo_model_cache: Path = field(default_factory=lambda: _BASE_DIR / _GEO_MODEL_CACHE_DIRNAME)
+    geo_encoder: str = DEFAULT_GEO_ENCODER
+    geo_device: Optional[str] = None
+    geo_rerank_k: int = DEFAULT_GEO_RERANK_K
+    geo_matcher: str = DEFAULT_GEO_MATCHER
+    geo_match_floor: int = DEFAULT_GEO_MATCH_FLOOR
+    geo_inlier_floor: int = DEFAULT_GEO_INLIER_FLOOR
+    geo_promotion_inlier_floor: int = DEFAULT_GEO_PROMOTION_INLIER_FLOOR
+    geo_min_inlier_ratio: float = DEFAULT_GEO_MIN_INLIER_RATIO
+    geo_max_reprojection_rms_px: float = DEFAULT_GEO_MAX_REPROJECTION_RMS_PX
+    geo_min_rerank_margin: float = DEFAULT_GEO_MIN_RERANK_MARGIN
+    geo_rectify: bool = DEFAULT_GEO_RECTIFY
+    geo_rectify_min_pitch_deg: float = DEFAULT_GEO_RECTIFY_MIN_PITCH_DEG
+    geo_sequence_enabled: bool = DEFAULT_GEO_SEQUENCE
+    geo_sequence_particles: int = DEFAULT_GEO_SEQUENCE_PARTICLES
+    geo_sequence_temperature: float = DEFAULT_GEO_SEQUENCE_TEMPERATURE
+    geo_seq_min_supporting_frames: int = DEFAULT_GEO_SEQ_MIN_SUPPORTING_FRAMES
+    geo_seq_min_baseline_m: float = DEFAULT_GEO_SEQ_MIN_BASELINE_M
+    geo_osm_weight: float = DEFAULT_GEO_OSM_WEIGHT
+    geo_max_pack_bytes: int = DEFAULT_GEO_MAX_PACK_BYTES
+    geo_min_laplacian_variance: float = DEFAULT_GEO_MIN_LAPLACIAN_VARIANCE
+    geo_min_entropy: float = DEFAULT_GEO_MIN_ENTROPY
+    geo_target_fps: float = DEFAULT_GEO_TARGET_FPS
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -1223,5 +1293,89 @@ class Settings:
                 os.environ.get("CV_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS"),
                 DEFAULT_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS,
                 "CV_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS",
+            ),
+            geo_data_dir=Path(os.environ.get("CV_GEO_DATA_DIR", str(_BASE_DIR / _GEO_DIRNAME))),
+            geo_model_cache=Path(
+                os.environ.get("CV_GEO_MODEL_CACHE", str(_BASE_DIR / _GEO_MODEL_CACHE_DIRNAME))
+            ),
+            geo_encoder=_parse_string(os.environ.get("CV_GEO_ENCODER"), DEFAULT_GEO_ENCODER),
+            geo_device=_parse_device(os.environ.get("CV_GEO_DEVICE")),
+            geo_rerank_k=_parse_positive_int(
+                os.environ.get("CV_GEO_RERANK_K"), DEFAULT_GEO_RERANK_K, "CV_GEO_RERANK_K"
+            ),
+            geo_matcher=_parse_choice(
+                os.environ.get("CV_GEO_MATCHER"), DEFAULT_GEO_MATCHER, _GEO_MATCHERS, "CV_GEO_MATCHER"
+            ),
+            geo_match_floor=_parse_positive_int(
+                os.environ.get("CV_GEO_MATCH_FLOOR"), DEFAULT_GEO_MATCH_FLOOR, "CV_GEO_MATCH_FLOOR"
+            ),
+            geo_inlier_floor=_parse_positive_int(
+                os.environ.get("CV_GEO_INLIER_FLOOR"), DEFAULT_GEO_INLIER_FLOOR, "CV_GEO_INLIER_FLOOR"
+            ),
+            geo_promotion_inlier_floor=_parse_positive_int(
+                os.environ.get("CV_GEO_PROMOTION_INLIER_FLOOR"),
+                DEFAULT_GEO_PROMOTION_INLIER_FLOOR,
+                "CV_GEO_PROMOTION_INLIER_FLOOR",
+            ),
+            geo_min_inlier_ratio=_parse_unit_fraction(
+                os.environ.get("CV_GEO_MIN_INLIER_RATIO"),
+                DEFAULT_GEO_MIN_INLIER_RATIO,
+                "CV_GEO_MIN_INLIER_RATIO",
+            ),
+            geo_max_reprojection_rms_px=_parse_positive_float(
+                os.environ.get("CV_GEO_MAX_REPROJECTION_RMS_PX"),
+                DEFAULT_GEO_MAX_REPROJECTION_RMS_PX,
+                "CV_GEO_MAX_REPROJECTION_RMS_PX",
+            ),
+            geo_min_rerank_margin=_parse_unit_interval(
+                os.environ.get("CV_GEO_MIN_RERANK_MARGIN"),
+                DEFAULT_GEO_MIN_RERANK_MARGIN,
+                "CV_GEO_MIN_RERANK_MARGIN",
+            ),
+            geo_rectify=_parse_bool(os.environ.get("CV_GEO_RECTIFY"), DEFAULT_GEO_RECTIFY, "CV_GEO_RECTIFY"),
+            geo_rectify_min_pitch_deg=_parse_nonnegative_float(
+                os.environ.get("CV_GEO_RECTIFY_MIN_PITCH_DEG"),
+                DEFAULT_GEO_RECTIFY_MIN_PITCH_DEG,
+                "CV_GEO_RECTIFY_MIN_PITCH_DEG",
+            ),
+            geo_sequence_enabled=_parse_bool(
+                os.environ.get("CV_GEO_SEQUENCE"), DEFAULT_GEO_SEQUENCE, "CV_GEO_SEQUENCE"
+            ),
+            geo_sequence_particles=_parse_positive_int(
+                os.environ.get("CV_GEO_SEQUENCE_PARTICLES"),
+                DEFAULT_GEO_SEQUENCE_PARTICLES,
+                "CV_GEO_SEQUENCE_PARTICLES",
+            ),
+            geo_sequence_temperature=_parse_positive_float(
+                os.environ.get("CV_GEO_SEQUENCE_TEMPERATURE"),
+                DEFAULT_GEO_SEQUENCE_TEMPERATURE,
+                "CV_GEO_SEQUENCE_TEMPERATURE",
+            ),
+            geo_seq_min_supporting_frames=_parse_positive_int(
+                os.environ.get("CV_GEO_SEQ_MIN_SUPPORTING_FRAMES"),
+                DEFAULT_GEO_SEQ_MIN_SUPPORTING_FRAMES,
+                "CV_GEO_SEQ_MIN_SUPPORTING_FRAMES",
+            ),
+            geo_seq_min_baseline_m=_parse_nonnegative_float(
+                os.environ.get("CV_GEO_SEQ_MIN_BASELINE_M"),
+                DEFAULT_GEO_SEQ_MIN_BASELINE_M,
+                "CV_GEO_SEQ_MIN_BASELINE_M",
+            ),
+            geo_osm_weight=_parse_nonnegative_float(
+                os.environ.get("CV_GEO_OSM_WEIGHT"), DEFAULT_GEO_OSM_WEIGHT, "CV_GEO_OSM_WEIGHT"
+            ),
+            geo_max_pack_bytes=_parse_positive_int(
+                os.environ.get("CV_GEO_MAX_PACK_BYTES"), DEFAULT_GEO_MAX_PACK_BYTES, "CV_GEO_MAX_PACK_BYTES"
+            ),
+            geo_min_laplacian_variance=_parse_nonnegative_float(
+                os.environ.get("CV_GEO_MIN_LAPLACIAN_VARIANCE"),
+                DEFAULT_GEO_MIN_LAPLACIAN_VARIANCE,
+                "CV_GEO_MIN_LAPLACIAN_VARIANCE",
+            ),
+            geo_min_entropy=_parse_nonnegative_float(
+                os.environ.get("CV_GEO_MIN_ENTROPY"), DEFAULT_GEO_MIN_ENTROPY, "CV_GEO_MIN_ENTROPY"
+            ),
+            geo_target_fps=_parse_positive_float(
+                os.environ.get("CV_GEO_TARGET_FPS"), DEFAULT_GEO_TARGET_FPS, "CV_GEO_TARGET_FPS"
             ),
         )

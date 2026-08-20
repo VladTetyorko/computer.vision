@@ -54,6 +54,38 @@ living in ``cv_service/training/`` and ``cv_service/grpc/server.py``.
   this method only reads the wire stream and translates the result.
   ``trainer.py`` is untouched by it: the landed directory is byte-identical
   to what a manual rsync would have produced.
+* ``Geolocation.LocalizeStream`` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1,
+  frozen wire; H4 production wiring) is ``DetectPulled``'s sibling: pull-only
+  (D2 -- the worker dials ``GeoControl.source_url`` itself, same
+  ``cv_service.pull`` machinery, no frame bytes cross the wire), a
+  declarative ``GeoControl`` restated on every message (same self-healing
+  doctrine as ``PullControl``/``TrackingConfig`` -- see ``_GeoControlState``/
+  ``_GeoControlReader`` below). Every SERVED frame runs through the frozen
+  §4.1 pipeline (``cv_service.geo.localize.localize_frame``) -- texture gate,
+  telemetry-conditional IPM rectify, retrieve, geometric re-rank (§4.2),
+  sequence-filter update (§4.4) -- and the result is translated 1:1 into a
+  ``GeoFix``/``GeoEvidence``. This method owns everything wire/session-level
+  the pipeline itself does not (encoder/matcher construction, region
+  resolution, the ``SequenceLocalizer``'s lifetime, telemetry-derived motion
+  deltas, ``telemetry_age_millis``/``latency_millis``) -- see
+  ``cv_service/geo/localize.py`` for the pipeline itself.
+* ``Geolocation.BuildReferenceIndex`` (client+server streaming) lands an
+  uploaded reference pack (mirrors ``Training.UploadDataset``'s chunked-zip
+  pattern, ``cv_service/geo/pack.py``) then runs
+  ``cv_service.geo.orchestrator.run_build_job`` (mirrors
+  ``Training.StartTraining``'s queue+daemon-thread job-lifecycle pattern),
+  translating each ``BuildEvent`` into a ``ReferenceIndexProgress``. This
+  method reports the ``"receiving"``/``"extracting"`` phases itself, before
+  the orchestrator job even starts (that module's own docstring states this
+  contract); the orchestrator reports ``"encoding"``/``"indexing"``/
+  ``"calibrating"``/``"done"``.
+* ``Geolocation.ListRegions``/``DeleteRegion`` are pure filesystem
+  management over ``CV_GEO_DATA_DIR`` -- deliberately built on
+  ``cv_service.geo.{index,pack}`` only (both stdlib-safe, numpy imported
+  lazily inside ``ReferenceIndex`` methods this code never calls), so region
+  management keeps working on a host with no ``geo`` extra installed at all,
+  mirroring ``Training.ListModels``'s "management works even without a
+  loaded model" posture.
 
 Requires the generated stubs under ``cv_service/gen`` - run
 ``scripts/gen_proto.sh`` first (see README.md). Generated code is never
@@ -63,8 +95,11 @@ committed.
 from __future__ import annotations
 
 import dataclasses
+import functools
+import json
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -77,6 +112,8 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Optional
 import grpc
 
 from cv_service.config import DEFAULT_CONFIDENCE, DEFAULT_MAX_UPLOAD_BYTES, Settings
+from cv_service.geo import index as geo_index
+from cv_service.geo import pack as geo_pack
 from cv_service.inference.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
 from cv_service.pull.clock import CaptureClock
 from cv_service.pull.loop import PullDecodeLoop, PullStalledError
@@ -1661,3 +1698,788 @@ _JOB_STATE_BY_EVENT_KIND = {
     "succeeded": cv_pb2.JobState.SUCCEEDED,
     "failed": cv_pb2.JobState.FAILED,
 }
+
+
+# --- Geolocation --------------------------------------------------------------------------------
+#
+# docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1 (frozen wire), H4. `GeolocationServicer` below is
+# the sole translation point between the wire (`cv_pb2.GeoControl`/`GeoFix`/`GeoEvidence`/
+# `ReferencePackChunk`/`ReferenceIndexProgress`/`RegionInfo`) and the plain, wire-agnostic
+# `cv_service.geo.*` package -- every function/class here mirrors an established pattern already
+# used above for `Inference.DetectPulled`/`Training.StartTraining`/`Training.UploadDataset`;
+# see their docstrings for the underlying rationale, not repeated here.
+
+
+class _GeoStreamIdMismatch(ValueError):
+    """A later `GeoControl` message named a different `stream_id` than the call's first message
+    -- mirrors `_PullStreamIdMismatch` exactly (same doctrine, `PullControl`/`TrackingConfig`/
+    `GeoControl` all restate desired state on every message but keep `stream_id` fixed for the
+    life of one call)."""
+
+
+class _GeoControlState:
+    """Thread-safe holder for a `LocalizeStream` call's latest `GeoControl` message -- mirrors
+    `_PullControlState` exactly. `region_id`/`target_fps`/`telemetry`/`prior` are HOT (§3.1's own
+    wire comment: "Restricted... hot" on fields 6/7, no such restriction on 4/5); `source_url`/
+    `rtsp_transport` are read from the FIRST message only (§3.1 field comments)."""
+
+    def __init__(self, first_message: "cv_pb2.GeoControl") -> None:
+        self._lock = threading.Lock()
+        self._message = first_message
+
+    def apply(self, message: "cv_pb2.GeoControl") -> None:
+        with self._lock:
+            self._message = message
+
+    def snapshot(self) -> "cv_pb2.GeoControl":
+        with self._lock:
+            return self._message
+
+
+class _GeoControlReader:
+    """Background thread draining the *rest* of a `LocalizeStream` call's `GeoControl` stream
+    into `state` -- mirrors `_PullControlReader` exactly; see that class's docstring for the full
+    rationale (declarative desired state applied in place, `should_stop`/`error` is the one
+    signal the main loop needs regardless of *why* the call is ending: explicit `stop=true`, a
+    half-close, or a read error)."""
+
+    def __init__(
+        self,
+        request_iterator: Iterable["cv_pb2.GeoControl"],
+        stream_id: str,
+        state: _GeoControlState,
+    ) -> None:
+        self._iterator = request_iterator
+        self._stream_id = stream_id
+        self._state = state
+        self._error: Optional[BaseException] = None
+        self._closed = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="cv-geo-control-reader", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            for message in self._iterator:
+                if message.stream_id != self._stream_id:
+                    self._error = _GeoStreamIdMismatch(
+                        f"GeoControl.stream_id changed mid-call "
+                        f"({self._stream_id!r} -> {message.stream_id!r})"
+                    )
+                    return
+                self._state.apply(message)
+                if message.stop:
+                    return
+        except Exception as exc:  # noqa: BLE001 - re-surfaced via `error`, never crashes this thread silently
+            self._error = exc
+        finally:
+            self._closed.set()
+
+    @property
+    def error(self) -> Optional[BaseException]:
+        return self._error
+
+    @property
+    def should_stop(self) -> bool:
+        return self._closed.is_set()
+
+    def stop(self) -> None:
+        """Best-effort, same posture as `_PullControlReader.stop()`: a message arriving right at
+        teardown just isn't applied; cannot interrupt a blocking read already in progress."""
+        self._closed.set()
+
+
+def _resolve_geo_target_fps(message: "cv_pb2.GeoControl", settings: Settings) -> float:
+    """`GeoControl.target_fps <= 0` -> the deployment default (`CV_GEO_TARGET_FPS`) -- mirrors
+    `_resolve_pull_target_fps`."""
+    return message.target_fps if message.target_fps > 0 else settings.geo_target_fps
+
+
+_GEO_TELEMETRY_OPTIONAL_FIELDS = (
+    "latitude",
+    "longitude",
+    "amsl_meters",
+    "agl_meters",
+    "heading_degrees",
+    "groundspeed_mps",
+    "camera_pitch_deg",
+    "camera_roll_deg",
+    "camera_yaw_deg",
+    "horizontal_fov_deg",
+    "gps_radius_meters",
+)
+
+
+def _geo_telemetry_from_wire(message: "cv_pb2.GeoTelemetry", telemetry_cls) -> object:
+    """`cv_pb2.GeoTelemetry` -> `cv_service.geo.localize.Telemetry`. Every scalar on the wire
+    message is `optional` (§3.1: "an asset may have heading without a GPS fix") -- `HasField`
+    per field, not a blanket zero-means-absent convention (proto3's usual shortcut doesn't apply
+    here, the wire message says so explicitly)."""
+    values = {
+        name: (getattr(message, name) if message.HasField(name) else None)
+        for name in _GEO_TELEMETRY_OPTIONAL_FIELDS
+    }
+    return telemetry_cls(sample_millis=message.sample_millis, **values)
+
+
+def _geo_prior_from_wire(message: "cv_pb2.GeoPrior") -> tuple[float, float, float]:
+    return message.latitude, message.longitude, message.radius_meters
+
+
+_GEO_STATUS_BY_NAME = {
+    "GEO_FIX": cv_pb2.GeoStatus.GEO_STATUS_FIX,
+    "GEO_NO_FIX": cv_pb2.GeoStatus.GEO_STATUS_NO_FIX,
+    "GEO_LOW_TEXTURE": cv_pb2.GeoStatus.GEO_STATUS_LOW_TEXTURE,
+    "GEO_OUT_OF_REGION": cv_pb2.GeoStatus.GEO_STATUS_OUT_OF_REGION,
+    "GEO_NO_INDEX": cv_pb2.GeoStatus.GEO_STATUS_NO_INDEX,
+    "GEO_ERROR": cv_pb2.GeoStatus.GEO_STATUS_ERROR,
+}
+
+
+def _geo_evidence_to_wire(evidence: object) -> "cv_pb2.GeoEvidence":
+    """`cv_service.geo.localize.FrameEvidence` -> `cv_pb2.GeoEvidence`, field-for-field (§3.1)."""
+    return cv_pb2.GeoEvidence(
+        candidate_count=evidence.candidate_count,
+        match_count=evidence.match_count,
+        inlier_count=evidence.inlier_count,
+        inlier_ratio=evidence.inlier_ratio,
+        rerank_margin=evidence.rerank_margin,
+        reprojection_rms_px=evidence.reprojection_rms_px,
+        rectified=evidence.rectified,
+        cell_calibrated=evidence.cell_calibrated,
+        supporting_frames=evidence.supporting_frames,
+        baseline_meters=evidence.baseline_meters,
+        sequence_converged=evidence.sequence_converged,
+        sequence_spread_meters=evidence.sequence_spread_meters,
+        sequence_updates=evidence.sequence_updates,
+        osm_prior=evidence.osm_prior,
+    )
+
+
+def _geo_fix_from_result(
+    result: object,
+    *,
+    stream_id: str,
+    sequence: int,
+    frame_millis: int,
+    telemetry_age_millis: int,
+    latency_millis: int,
+) -> "cv_pb2.GeoFix":
+    """`cv_service.geo.localize.FrameResult` -> `cv_pb2.GeoFix` (§3.1). The five `optional`
+    position/pose fields are only ever set when the pipeline actually produced them (`None`
+    stays wire-absent, never a fabricated `0.0`) -- built via a kwargs dict, not post-construction
+    attribute assignment, so absence is absence at construction time, not a two-step mutation."""
+    kwargs: dict = dict(
+        stream_id=stream_id,
+        sequence=sequence,
+        frame_millis=frame_millis,
+        status=_GEO_STATUS_BY_NAME[result.status],
+        region_id=result.region_id,
+        tile_id=result.tile_id,
+        evidence=_geo_evidence_to_wire(result.evidence),
+        refusal=result.refusal,
+        telemetry_age_millis=telemetry_age_millis,
+        latency_millis=latency_millis,
+    )
+    if result.latitude is not None:
+        kwargs["latitude"] = result.latitude
+    if result.longitude is not None:
+        kwargs["longitude"] = result.longitude
+    if result.yaw_degrees is not None:
+        kwargs["yaw_degrees"] = result.yaw_degrees
+    if result.radius_meters is not None:
+        kwargs["radius_meters"] = result.radius_meters
+    if result.implied_agl_meters is not None:
+        kwargs["implied_agl_meters"] = result.implied_agl_meters
+    return cv_pb2.GeoFix(**kwargs)
+
+
+def _reference_index_stats_to_wire(stats: "geo_index.ReferenceIndexStats") -> "cv_pb2.ReferenceIndexStats":
+    return cv_pb2.ReferenceIndexStats(
+        tile_count=stats.tile_count,
+        descriptor_count=stats.descriptor_count,
+        descriptor_dim=stats.descriptor_dim,
+        encoder_id=stats.encoder_id,
+        accept_similarity=stats.accept_similarity,
+        accept_margin=stats.accept_margin,
+        holdout_recall_at_1=stats.holdout_recall_at_1,
+        holdout_median_error_meters=stats.holdout_median_error_meters,
+        index_bytes=stats.index_bytes,
+        never_accept_cells=stats.never_accept_cells,
+    )
+
+
+# `BuildEvent.kind` (`cv_service.geo.orchestrator`) uses its OWN vocabulary ("phase"/"succeeded"/
+# "failed"/"cancelled" -- the last never yielded by `run_build_job`), distinct from training's
+# `JobEvent.kind` ("running"/"succeeded"/"failed") that `_JOB_STATE_BY_EVENT_KIND` above maps --
+# a separate dict on purpose, reusing that one here would silently mismatch "phase".
+_BUILD_JOB_STATE_BY_EVENT_KIND = {
+    "phase": cv_pb2.JobState.RUNNING,
+    "succeeded": cv_pb2.JobState.SUCCEEDED,
+    "failed": cv_pb2.JobState.FAILED,
+}
+
+_GEO_TILE_ID_RE = re.compile(r"^(\d+)/(\d+)/(\d+)$")
+
+
+def _parse_geo_tile_id(tile_id: str) -> Optional[tuple[int, int, int]]:
+    """`"17/76648/44197"` -> `(17, 76648, 44197)` (zoom, x, y). A pure-stdlib duplicate of
+    `cv_service.geo.pose.parse_tile_id` (same shape) -- duplicated on purpose, not cross-imported,
+    so `ListRegions` stays numpy/cv2-free (mirrors `cv_service.geo.sequence`'s own duplicate of
+    this exact function, for the same reason)."""
+    match = _GEO_TILE_ID_RE.match(tile_id)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+
+# Production-robustness fix, found running this servicer against the real `torch.hub` network
+# path (not caught by any spike -- H0/H0c always ran with an already-warm `~/.cache/torch/hub`):
+# `gmberton/eigenplaces`'s OWN `hubconf.py` internally calls `torch.hub.load("gmberton/cosplace",
+# ...)` as a nested dependency, WITHOUT forwarding `trust_repo=True` -- so even though
+# `VprHubEncoder` passes `trust_repo=True` on the OUTER call (`cv_service/geo/encoder.py`), that
+# only trusts `gmberton/eigenplaces` itself; the nested `gmberton/cosplace` load still hits
+# torch.hub's own `input()` trust prompt. On a non-interactive server process that is an
+# immediate `EOFError`, and `CV_GEO_ENCODER`'s own DEFAULT (`eigenplaces_r18_512`) is the variant
+# that trips it -- i.e. every fresh deploy would fail to build the encoder at all, silently,
+# until an operator manually ran `torch.hub.load(...)` once at an interactive prompt. Pre-seeding
+# `<hub_dir>/trusted_list` (torch.hub's own persisted allowlist, `torch.hub._check_repo_is_trusted`)
+# for both known `gmberton/*` repos closes this before it can ever prompt, regardless of which
+# variant is selected or which one depends on the other.
+_GEO_PRETRUSTED_HUB_REPOS = ("gmberton_eigenplaces", "gmberton_cosplace")
+
+
+def _apply_geo_model_cache_dir(settings: Settings) -> None:
+    """Point `torch.hub`'s download/cache dir at `CV_GEO_MODEL_CACHE` and pre-trust the known
+    `gmberton/*` hub repos (see module-level comment above) -- both are one-time, idempotent
+    process-wide `torch.hub` knobs, neither the encoder (`cv_service.geo.encoder.VprHubEncoder`,
+    via `torch.hub.load`) nor the `xfeat`/`loftr` matcher backends (`cv_service.geo.matchers`)
+    take either as a parameter of their own. Called once, lazily, before the first real build; a
+    no-op (silently) when `torch` isn't installed at all -- the caller's own build attempt
+    reports that absence."""
+    try:
+        import torch
+    except ImportError:
+        return
+    settings.geo_model_cache.mkdir(parents=True, exist_ok=True)
+    torch.hub.set_dir(str(settings.geo_model_cache))
+    trusted_list_path = Path(torch.hub.get_dir()) / "trusted_list"
+    existing = set()
+    if trusted_list_path.is_file():
+        existing = {line.strip() for line in trusted_list_path.read_text().splitlines() if line.strip()}
+    missing = [repo for repo in _GEO_PRETRUSTED_HUB_REPOS if repo not in existing]
+    if missing:
+        with trusted_list_path.open("a") as handle:
+            for repo in missing:
+                handle.write(repo + "\n")
+
+
+def _build_default_geo_encoder(settings: Settings) -> object:
+    """The real `Encoder` `GeolocationServicer` builds when no `encoder=` was injected -- lazy
+    import (needs the `geo` extra: `cv2`/`numpy`/`torch`), never blocks server startup: a failure
+    here degrades `LocalizeStream`/`BuildReferenceIndex` to UNAVAILABLE, logged once, exactly the
+    `_build_default_registry`/`_build_tracker_registry` posture above."""
+    try:
+        from cv_service.geo.encoder import build_encoder
+    except ImportError as exc:
+        LOGGER.warning(
+            "cv-service geo encoder unavailable (%s); Geolocation.LocalizeStream/"
+            "BuildReferenceIndex will report UNAVAILABLE until the 'geo' optional dependency "
+            "group is installed.",
+            exc,
+        )
+        return None
+    _apply_geo_model_cache_dir(settings)
+    try:
+        return build_encoder(settings.geo_encoder, device=settings.geo_device)
+    except Exception as exc:  # noqa: BLE001 - never block startup on a geo encoder
+        LOGGER.warning(
+            "cv-service geo encoder %r failed to build (%s); geo endpoints degrade to "
+            "UNAVAILABLE",
+            settings.geo_encoder,
+            exc,
+        )
+        return None
+
+
+def _build_default_geo_matcher(settings: Settings):
+    """The real `MatcherHandle` `GeolocationServicer` builds when no `matcher_handle=` was
+    injected -- same lazy-import/never-block-startup posture as `_build_default_geo_encoder`."""
+    try:
+        from cv_service.geo.matchers import build as build_matcher
+    except ImportError as exc:
+        LOGGER.warning(
+            "cv-service geo matcher backend unavailable (%s); Geolocation.LocalizeStream will "
+            "report UNAVAILABLE until the 'geo' optional dependency group is installed.",
+            exc,
+        )
+        return None
+    _apply_geo_model_cache_dir(settings)
+    try:
+        return build_matcher(settings.geo_matcher)
+    except Exception as exc:  # noqa: BLE001 - never block startup on a geo matcher
+        LOGGER.warning(
+            "cv-service geo matcher %r failed to build (%s); LocalizeStream degrades to "
+            "UNAVAILABLE",
+            settings.geo_matcher,
+            exc,
+        )
+        return None
+
+
+class GeolocationServicer(cv_pb2_grpc.GeolocationServicer):
+    """Wire <-> domain translation for `Geolocation` (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+    §3.1). See the module docstring's `Geolocation.*` bullets for each RPC's shape; this class
+    only owns session/wire plumbing -- the actual pipeline is `cv_service.geo.localize.
+    localize_frame`, the actual index build is `cv_service.geo.orchestrator.run_build_job`.
+
+    Two backends are built ONCE, at construction (mirrors `InferenceServicer`'s `registry`/
+    `_build_tracker_registry` posture: probe/build at startup, log the roster, never per-call):
+    the `Encoder` (`CV_GEO_ENCODER`) and the matcher backend (`CV_GEO_MATCHER`). Either failing
+    to build (no `geo` extra, or a first-run weight fetch with no internet) does NOT stop the
+    server -- `LocalizeStream`/`BuildReferenceIndex` abort UNAVAILABLE, clearly, on the first
+    call that actually needs the missing backend; `ListRegions`/`DeleteRegion` are unaffected
+    (see their own docstrings)."""
+
+    def __init__(
+        self,
+        *,
+        settings: Optional[Settings] = None,
+        data_dir: Optional[Path] = None,
+        pull_source_open: Optional[Callable[..., PullSource]] = None,
+        encoder: object = _UNSET_REGISTRY,
+        matcher_handle: object = _UNSET_REGISTRY,
+        match_keypoints_fn: Optional[Callable[[object, "Any", "Any"], "Any"]] = None,
+    ) -> None:
+        self._settings = settings if settings is not None else Settings.from_env()
+        self._data_dir = data_dir if data_dir is not None else self._settings.geo_data_dir
+        self._pull_source_open = pull_source_open if pull_source_open is not None else _default_pull_source_open
+
+        if encoder is _UNSET_REGISTRY:
+            self._encoder = _build_default_geo_encoder(self._settings)
+        else:
+            self._encoder = encoder
+
+        if matcher_handle is _UNSET_REGISTRY:
+            self._matcher_handle = _build_default_geo_matcher(self._settings)
+            if self._matcher_handle is not None:
+                from cv_service.geo.matchers import match_keypoints as _match_keypoints
+
+                self._match_keypoints_fn = functools.partial(_match_keypoints, self._settings.geo_matcher)
+            else:
+                self._match_keypoints_fn = None
+        else:
+            self._matcher_handle = matcher_handle
+            # An injected `matcher_handle` needs an injected `match_keypoints_fn` too -- the real
+            # `cv_service.geo.matchers.match_keypoints` cannot dispatch on a fake handle's made-up
+            # backend, so tests provide both together (mirrors `detector=`'s own "explicit
+            # injection replaces the whole real path" contract, `InferenceServicer.__init__`).
+            self._match_keypoints_fn = match_keypoints_fn
+
+    # ------------------------------------------------------------- LocalizeStream
+
+    def LocalizeStream(
+        self,
+        request_iterator: Iterable["cv_pb2.GeoControl"],
+        context: grpc.ServicerContext,
+    ) -> Iterator["cv_pb2.GeoFix"]:
+        try:
+            first_message = next(request_iterator)
+        except StopIteration:
+            return
+        if not first_message.source_url:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "GeoControl.source_url is required on the first message of a LocalizeStream call",
+            )
+            return
+        if self._encoder is None or self._matcher_handle is None:
+            context.abort(
+                grpc.StatusCode.UNAVAILABLE,
+                "geolocation backend unavailable on this host (encoder/matcher failed to build "
+                "-- install the 'geo' optional dependency group)",
+            )
+            return
+
+        # Lazy: needs the `geo` extra (cv2/numpy), already confirmed present by the encoder/
+        # matcher build above having succeeded -- see module docstring on why this whole package
+        # is never imported at `cv_service/grpc/servicers.py` module scope.
+        from cv_service.geo import localize as geo_localize
+
+        stream_id = first_message.stream_id
+        state = _GeoControlState(first_message)
+        control_reader = _GeoControlReader(request_iterator, stream_id, state)
+
+        pull_loop: Optional[PullDecodeLoop] = None
+        try:
+            source = self._open_pull_source(first_message)
+        except Exception as exc:  # noqa: BLE001 - mirrors DetectPulled's own posture exactly
+            if not isinstance(exc, (PullSourceError, ImportError)):
+                LOGGER.exception(
+                    "LocalizeStream: unexpected error opening pulled source %r", first_message.source_url
+                )
+            control_reader.stop()
+            context.abort(
+                grpc.StatusCode.UNAVAILABLE,
+                f"LocalizeStream could not open {first_message.source_url!r}: {exc}",
+            )
+            return
+
+        params = geo_localize.LocalizeParams(**self._localize_params_kwargs())
+        sequence = None
+        sequence_region_id: Optional[str] = None
+        prev_telemetry = None
+
+        try:
+            clock = CaptureClock(
+                mode=self._settings.pull_clock_mode,
+                reanchor_threshold_millis=self._settings.pull_clock_reanchor_threshold_millis,
+            )
+            pull_loop = PullDecodeLoop(
+                source,
+                target_fps=_resolve_geo_target_fps(first_message, self._settings),
+                clock=clock,
+                stall_timeout_millis=self._settings.pull_stall_timeout_millis,
+            )
+            seq_no = 0
+            for frame, captured_at_millis, _diagnostics in pull_loop.frames(
+                should_continue=lambda: not control_reader.should_stop and _context_active(context)
+            ):
+                snapshot = state.snapshot()
+                pull_loop.set_target_fps(_resolve_geo_target_fps(snapshot, self._settings))
+                seq_no += 1
+
+                telemetry = (
+                    _geo_telemetry_from_wire(snapshot.telemetry, geo_localize.Telemetry)
+                    if snapshot.HasField("telemetry")
+                    else None
+                )
+                prior = _geo_prior_from_wire(snapshot.prior) if snapshot.HasField("prior") else None
+                region_id = snapshot.region_id
+
+                # §3.1/localize.py's own "no caching" contract -- resolved fresh every frame.
+                regions = geo_localize.resolve_regions(self._data_dir, region_id)
+                region_dir_by_id = {r.region_id: self._data_dir / r.region_id for r in regions}
+
+                # Sequence filter: single-resolved-region sessions only (localize.py's own
+                # documented restriction) -- (re)built whenever the resolved single region's id
+                # changes (including OFF -> ON / ON -> OFF), torn down otherwise.
+                target_sequence_region_id = (
+                    regions[0].region_id
+                    if self._settings.geo_sequence_enabled and len(regions) == 1
+                    else None
+                )
+                if target_sequence_region_id != sequence_region_id:
+                    sequence = (
+                        self._build_sequence(regions) if target_sequence_region_id is not None else None
+                    )
+                    sequence_region_id = target_sequence_region_id
+
+                motion_e_m, motion_n_m = geo_localize.telemetry_motion_delta(prev_telemetry, telemetry)
+                if telemetry is not None:
+                    prev_telemetry = telemetry
+
+                t0 = time.perf_counter()
+                try:
+                    result = geo_localize.localize_frame(
+                        frame.image,
+                        encoder=self._encoder,
+                        regions=regions,
+                        region_dir_by_id=region_dir_by_id,
+                        matcher_handle=self._matcher_handle,
+                        match_keypoints_fn=self._match_keypoints_fn,
+                        telemetry=telemetry,
+                        prior=prior,
+                        sequence=sequence,
+                        motion_delta_e_m=motion_e_m,
+                        motion_delta_n_m=motion_n_m,
+                        params=params,
+                    )
+                except Exception as exc:  # noqa: BLE001 - one bad frame must not kill the session
+                    LOGGER.exception(
+                        "LocalizeStream stream_id=%s: localize_frame failed on frame %d", stream_id, seq_no
+                    )
+                    result = geo_localize.FrameResult(
+                        status=geo_localize.STATUS_ERROR,
+                        refusal="ERROR",
+                        message=f"localize_frame failed: {exc}",
+                    )
+                latency_millis = round((time.perf_counter() - t0) * 1000.0)
+                telemetry_age_millis = (
+                    captured_at_millis - telemetry.sample_millis if telemetry is not None else 0
+                )
+
+                yield _geo_fix_from_result(
+                    result,
+                    stream_id=stream_id,
+                    sequence=seq_no,
+                    frame_millis=captured_at_millis,
+                    telemetry_age_millis=telemetry_age_millis,
+                    latency_millis=latency_millis,
+                )
+        except PullStalledError as exc:
+            context.abort(grpc.StatusCode.UNAVAILABLE, str(exc))
+            return
+        finally:
+            control_reader.stop()
+            if pull_loop is not None:
+                pull_loop.close()
+
+        if control_reader.error is not None:
+            if isinstance(control_reader.error, _GeoStreamIdMismatch):
+                context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(control_reader.error))
+            else:
+                context.abort(
+                    grpc.StatusCode.UNKNOWN, f"LocalizeStream control stream failed: {control_reader.error}"
+                )
+
+    def _open_pull_source(self, first_message: "cv_pb2.GeoControl") -> PullSource:
+        transport = first_message.rtsp_transport or self._settings.pull_rtsp_transport
+        return self._pull_source_open(
+            first_message.source_url,
+            backend=self._settings.pull_decoder,
+            rtsp_transport=transport,
+            open_timeout_millis=self._settings.pull_open_timeout_millis,
+            read_timeout_millis=self._settings.pull_stall_timeout_millis,
+        )
+
+    def _localize_params_kwargs(self) -> dict:
+        """`Settings.geo_*` -> `LocalizeParams`' constructor kwargs -- a plain dict (not the
+        dataclass itself) so this method needs no `cv_service.geo.localize` import, keeping
+        `__init__` importable even when the encoder/matcher build failed (the dataclass itself is
+        built lazily inside `LocalizeStream`, after the `geo` extra is confirmed present)."""
+        s = self._settings
+        return dict(
+            max_candidates=s.geo_rerank_k,
+            match_floor=s.geo_match_floor,
+            inlier_floor=s.geo_inlier_floor,
+            min_inlier_ratio=s.geo_min_inlier_ratio,
+            max_reprojection_rms_px=s.geo_max_reprojection_rms_px,
+            min_rerank_margin=s.geo_min_rerank_margin,
+            min_laplacian_variance=s.geo_min_laplacian_variance,
+            min_entropy=s.geo_min_entropy,
+            rectify_enabled=s.geo_rectify,
+            rectify_min_pitch_deg=s.geo_rectify_min_pitch_deg,
+            sequence_enabled=s.geo_sequence_enabled,
+            seq_min_supporting_frames=s.geo_seq_min_supporting_frames,
+            seq_min_baseline_m=s.geo_seq_min_baseline_m,
+            osm_weight=s.geo_osm_weight,
+        )
+
+    def _build_sequence(self, regions: list) -> object:
+        """One `SequenceLocalizer` seeded from `regions[0]`'s own indexed tile grid -- `None` on
+        any construction failure (an empty/malformed grid), logged, never a crash: the session
+        simply runs without a sequence filter, same "absence of evidence is not evidence" posture
+        `localize.py` itself takes throughout."""
+        from cv_service.geo.sequence import SequenceLocalizer
+
+        region = regions[0]
+        tile_ids = [t.tile_id for t in region.index.tiles]
+        if not tile_ids:
+            return None
+        try:
+            return SequenceLocalizer.from_tile_ids(
+                tile_ids,
+                n_particles=self._settings.geo_sequence_particles,
+                temperature=self._settings.geo_sequence_temperature,
+                min_supporting_frames=self._settings.geo_seq_min_supporting_frames,
+                min_baseline_m=self._settings.geo_seq_min_baseline_m,
+            )
+        except ValueError as exc:
+            LOGGER.warning(
+                "LocalizeStream: could not build sequence filter for region %s (%s)",
+                region.region_id,
+                exc,
+            )
+            return None
+
+    # ------------------------------------------------------------- BuildReferenceIndex
+
+    def BuildReferenceIndex(
+        self,
+        request_iterator: Iterable["cv_pb2.ReferencePackChunk"],
+        context: grpc.ServicerContext,
+    ) -> Iterator["cv_pb2.ReferenceIndexProgress"]:
+        """Land a streamed reference-pack zip (mirrors `UploadDataset`'s chunk-to-temp-file
+        pattern) then build its index (`cv_service.geo.orchestrator.run_build_job`, mirrors
+        `StartTraining`'s job-lifecycle streaming). Reports `"receiving"`/`"extracting"` itself;
+        the orchestrator reports the rest (`orchestrator.py`'s own docstring states this split).
+
+        Same two-posture failure contract `UploadDataset` established: a protocol-level
+        `region_id` problem (blank/path-unsafe, or changed mid-stream) or an oversize upload is a
+        `context.abort()`; a content problem (zero chunks, a corrupt zip, a missing encoder) is a
+        *reported* terminal `FAILED` progress event, never an abort.
+        """
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+
+        region_id: Optional[str] = None
+        bytes_received = 0
+        chunk_count = 0
+
+        yield cv_pb2.ReferenceIndexProgress(phase="receiving", state=cv_pb2.JobState.RUNNING)
+
+        tmp_fd, tmp_name = tempfile.mkstemp(prefix=".geo-pack-", suffix=".zip", dir=self._data_dir)
+        zip_path = Path(tmp_name)
+        try:
+            # `land_pack` opens `zip_path` by PATH through a SEPARATE file descriptor
+            # (`zipfile.ZipFile(zip_path)`) -- it must run only AFTER this `with` block has closed
+            # (and therefore flushed) `tmp_zip`, never while still inside it. A small upload (well
+            # under the OS write-buffer size) can sit unflushed in `tmp_zip`'s internal buffer
+            # indefinitely, so calling `land_pack` inside this block reads a truncated/empty file
+            # off disk -- caught live by `tests/grpc/test_geolocation_servicer.py`'s happy-path
+            # test ("File is not a zip file" on a perfectly valid, fully-received upload).
+            with os.fdopen(tmp_fd, "wb") as tmp_zip:
+                for chunk in request_iterator:
+                    if region_id is None:
+                        if not geo_pack.is_safe_region_id(chunk.region_id):
+                            context.abort(
+                                grpc.StatusCode.INVALID_ARGUMENT, f"invalid region id {chunk.region_id!r}"
+                            )
+                        region_id = chunk.region_id
+                    elif chunk.region_id != region_id:
+                        context.abort(
+                            grpc.StatusCode.INVALID_ARGUMENT,
+                            f"region_id changed mid-stream ({region_id!r} -> {chunk.region_id!r})",
+                        )
+
+                    chunk_count += 1
+                    bytes_received += len(chunk.content)
+                    if bytes_received > self._settings.geo_max_pack_bytes:
+                        context.abort(
+                            grpc.StatusCode.RESOURCE_EXHAUSTED,
+                            f"reference pack upload exceeds the {self._settings.geo_max_pack_bytes}-byte cap",
+                        )
+                    tmp_zip.write(chunk.content)
+
+            if chunk_count == 0:
+                yield cv_pb2.ReferenceIndexProgress(
+                    phase="receiving",
+                    state=cv_pb2.JobState.FAILED,
+                    message="no reference pack chunks received",
+                )
+                return
+
+            yield cv_pb2.ReferenceIndexProgress(
+                region_id=region_id, phase="extracting", state=cv_pb2.JobState.RUNNING
+            )
+            outcome = geo_pack.land_pack(zip_path, self._data_dir, region_id, bytes_received)
+        finally:
+            zip_path.unlink(missing_ok=True)
+
+        if not outcome.ok:
+            yield cv_pb2.ReferenceIndexProgress(
+                region_id=region_id, phase="extracting", state=cv_pb2.JobState.FAILED, message=outcome.message
+            )
+            return
+
+        if self._encoder is None:
+            yield cv_pb2.ReferenceIndexProgress(
+                region_id=region_id,
+                phase="encoding",
+                state=cv_pb2.JobState.FAILED,
+                message="geo encoder unavailable on this host -- install the 'geo' optional dependency group",
+            )
+            return
+
+        # Lazy: `cv_service.geo.orchestrator` needs cv2/numpy at module scope (see that module's
+        # own docstring) -- aliased to avoid shadowing `cv_service.training.orchestrator`, already
+        # imported unqualified at this file's top for `TrainingServicer`.
+        from cv_service.geo import orchestrator as geo_orchestrator
+
+        region_dir = self._data_dir / region_id
+
+        def register_cancel_callback(callback) -> None:
+            if hasattr(context, "add_callback"):
+                context.add_callback(callback)
+
+        for event in geo_orchestrator.run_build_job(
+            region_dir,
+            self._encoder,
+            region_id=region_id,
+            is_context_active=lambda: _context_active(context),
+            register_cancel_callback=register_cancel_callback,
+        ):
+            kwargs: dict = dict(
+                region_id=region_id,
+                phase=event.phase,
+                done=event.done,
+                total=event.total,
+                state=_BUILD_JOB_STATE_BY_EVENT_KIND[event.kind],
+                message=event.message,
+            )
+            if event.stats is not None:
+                kwargs["stats"] = _reference_index_stats_to_wire(event.stats)
+            yield cv_pb2.ReferenceIndexProgress(**kwargs)
+
+    # ------------------------------------------------------------- ListRegions / DeleteRegion
+
+    def ListRegions(
+        self, request: "empty_pb2.Empty", context: grpc.ServicerContext
+    ) -> "cv_pb2.RegionList":
+        """Every READY region under `CV_GEO_DATA_DIR` (a landed pack with a successfully built
+        `index.json` -- a landed-but-not-yet-built region is silently omitted, same "not READY"
+        contract `cv_service.geo.localize.resolve_regions` applies). Needs no `geo` extra (see
+        class docstring): reads `index.json`/`tiles.json`/`region.json` as plain JSON, never
+        loads the (numpy) descriptor array."""
+        if not self._data_dir.is_dir():
+            return cv_pb2.RegionList()
+        infos = []
+        for region_dir in sorted(p for p in self._data_dir.iterdir() if p.is_dir() and not p.name.startswith(".")):
+            info = self._region_info(region_dir)
+            if info is not None:
+                infos.append(info)
+        return cv_pb2.RegionList(regions=infos)
+
+    def _region_info(self, region_dir: Path) -> Optional["cv_pb2.RegionInfo"]:
+        index_meta = geo_index.read_index_json(region_dir)
+        if index_meta is None:
+            return None  # landed but not (yet) built -- not READY, not reported
+        region_meta = geo_pack.read_region_meta(region_dir) or {}
+        region_id = region_dir.name
+        name = str(region_meta.get("name") or region_id)
+
+        zoom = 0
+        north = south = east = west = 0.0
+        tiles_path = region_dir / geo_index.TILES_JSON_FILENAME
+        try:
+            tiles_payload = json.loads(tiles_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            LOGGER.warning("region %s has a valid index.json but unreadable tiles.json (%s)", region_id, exc)
+            tiles_payload = []
+        if tiles_payload:
+            lats = [t["lat"] for t in tiles_payload]
+            lons = [t["lon"] for t in tiles_payload]
+            north, south = max(lats), min(lats)
+            east, west = max(lons), min(lons)
+            parsed = _parse_geo_tile_id(tiles_payload[0]["tileId"])
+            zoom = parsed[0] if parsed is not None else 0
+
+        return cv_pb2.RegionInfo(
+            region_id=region_id,
+            name=name,
+            zoom=zoom,
+            stats=_reference_index_stats_to_wire(index_meta.stats),
+            built_at_millis=index_meta.built_at_millis,
+            north=north,
+            south=south,
+            east=east,
+            west=west,
+        )
+
+    def DeleteRegion(
+        self, request: "cv_pb2.RegionRef", context: grpc.ServicerContext
+    ) -> "cv_pb2.Ack":
+        """Delete `<CV_GEO_DATA_DIR>/<region_id>/` outright (landed pack + built index alike, one
+        directory). An invalid/unknown id is a *reported* `Ack{ok:false}`, never an abort --
+        mirrors `PromoteModel`'s "an unknown id is a normal outcome" posture."""
+        region_id = request.region_id
+        if not geo_pack.is_safe_region_id(region_id):
+            return cv_pb2.Ack(ok=False, message=f"invalid region id {region_id!r}")
+        region_dir = self._data_dir / region_id
+        if not region_dir.is_dir():
+            return cv_pb2.Ack(ok=False, message=f"unknown region {region_id!r}")
+        shutil.rmtree(region_dir)
+        LOGGER.info("deleted geo region %s", region_id)
+        return cv_pb2.Ack(ok=True, message=f"deleted region {region_id!r}")

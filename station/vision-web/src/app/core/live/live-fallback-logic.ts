@@ -88,6 +88,11 @@ export function detectionsTopic(assetId: string): string {
   return `detections:${assetId}`;
 }
 
+/** `geo:<assetId>` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4) — opt-in, ref-counted exactly like `telemetryTopic`/`detectionsTopic` above. */
+export function geoTopic(assetId: string): string {
+  return `geo:${assetId}`;
+}
+
 export interface RefCountResult {
   /** The topic's new subscriber count. */
   readonly count: number;

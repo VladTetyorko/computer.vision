@@ -10,8 +10,9 @@ command/telemetry transport itself (`vision-flight` — this context only opens 
 `UsageTracker` needs, plus — since docs/plans/active/DRONE-ONBOARDING-PLAN.md Wave O7 — runs flight's
 pure `FlightPhaseRule` state machine and translates its verdict into warehouse's `UsagePhase`; see
 Status), and does not own replay/history (`vision-events` — a downstream reader of
-this context, never a dependency of it). The largest of the eight contexts by a wide margin: 522
-tests, 119 source files (345/91 when W1 landed — docs/plans/active/DOMAIN-SEPARATION-W1.md §16) — it
+this context, never a dependency of it). The largest of the eight contexts by a wide margin: 584
+tests across 59 test classes, 98 main source files (345 tests/91 source files when W1 landed —
+docs/plans/active/DOMAIN-SEPARATION-W1.md §16) — it
 inherited the hot per-frame pipeline, the whole detect/track/overlay/event machinery, (via W1.6b/d/e
 below) three features that used to be filed elsewhere by first-mover rather than by owner, and — from
 the MEDIA-SOT/CV-RATE-CONTROL merge — the **pull-mode** detection driver plus the rate and latency
@@ -43,6 +44,8 @@ com.drones.vision.perception.application.stream   stream lifecycle: StreamServic
 com.drones.vision.perception.application.pipeline the hot path: StreamPipeline + its collaborators,
                                                    UsageTracker, the two registries
 com.drones.vision.perception.application.device   ProbeService (moved in from warehouse, W1.6d)
+com.drones.vision.perception.application.geo      H2b: ReferenceRegionService/GeolocationSessionService --
+                                                   visual-geolocation seam (docs/plans/active/VISUAL-GEO-V2-PLAN.md)
 ```
 
 No `port.in` package — driving interfaces collapse into one service interface + one `Default*`
@@ -67,11 +70,23 @@ implementation; commands/read-models are top-level records (`.claude/skills/java
 - `record EventRuleConfig(Set<String> labels, double confidenceThreshold, int consecutiveToOpen, Duration absenceToClose)` — debounce rule for `DetectionEvent`, referenced by `PipelineConfig#eventRule()`; `labels` empty = "track nothing"; `confidenceThreshold` [0,1]; `consecutiveToOpen`>0; `absenceToClose` positive; `static defaults()` = {person,car} @ 0.5, N=3, 5s absence. Moved here from `events` alongside `DetectionEvent` (it names no other type, but it is `EventRuleConfig`'s only reader that ever moved — the old `perception ↔ events` cycle C4 was this record living in `events` while `PipelineConfig` referenced it)
 - `record FeedId(UUID value)` — `static random()`, `static of(String)`; identity for a transmitted feed
 - `record FeedSpec(String protocol, URI source, Map<String,String> options)` — `protocol` lower-case-validated like `StreamDescriptor.protocol` (kernel); `source`/`options` non-null, no defaulting ctor; `options` defensively copied
+- `record GeoPrior(double latitude, double longitude, double radiusMeters)` (H2b, docs/plans/active/VISUAL-GEO-V2-PLAN.md §5) — an optional search-radius hint fed into a `GeoSessionConfig`; `radiusMeters` must be positive, lat/lon range-checked like `RegionBounds`'s own corners (compact ctor)
+- `record GeoSessionConfig(String regionId, float targetFps, GeoPrior prior)` (H2b) — the config `GeolocationSessionService#start`/`PulledGeolocationPort#open` take; `regionId` non-blank, `targetFps` positive, `prior` nullable = "no prior, search the whole reference index"
+- `record IngestProgress(String regionId, String phase, int done, int total, IngestState state, String message, ReferenceIndexSummary summary)` (H2b) — one tick of `ReferenceIndexPort#build`'s progress stream; `regionId`/`phase`/`message` non-null (`message` may be blank), `done`/`total`≥0; `summary` must be `null` unless `state==SUCCEEDED` (compact ctor) — a build can succeed with or without one attached, but never carries one mid-flight or on failure
+- `enum IngestState` (H2b) — `RUNNING | SUCCEEDED | FAILED`; this context's own mirror of `vision-learning`'s `JobState` — perception does not, and per H2b's own "no new POM dependency" requirement must not, depend on `vision-learning`, so the two enums are deliberately not shared
 - `record ModelRef(String id, String version)`
 - `record PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences, boolean overlayTelemetry, Set<String> labelFilter, EventRuleConfig eventRule, boolean overlayBurnIn, boolean detectionEnabled, TrackingConfig tracking)` — inferenceFps/maxInFlightInferences>0; `eventRule` non-null; `overlayBurnIn` gates whether burn-in renders at all; `detectionEnabled` (docs/plans/done/CV-CONTROL-PLAN.md §1, Wave B) is the per-stream, **operator-intent** detect-on/off switch — one of two independent gates `StreamPipeline` ANDs together before it runs inference at all, the other being the system-derived `StreamPipeline#detectionDemand()` (docs/plans/active/CV-DEMAND-PLAN.md §1-2, wave D1; see `DetectionDemandPort`); `tracking` non-null. A four-deep chain of N-1-arg convenience ctors (6/7/8/9-arg) each default the field the wave before it added, ending at the 10-arg canonical. `static defaults()` = `yolo26n.pt`/latest, 0.4, 10fps, 2 in-flight, telemetry on, no filter, `EventRuleConfig.defaults()`, burn-in on, detection **off** (`DEFAULT_DETECTION_ENABLED=false` as of CV-DEMAND-PLAN wave D1, which flipped it from `true` — every convenience ctor picks this up too; a new stream is video-only until an operator turns detection on for it, since many concurrent streams must stay affordable by default; a deployment that wants the old always-on behavior back can restore it deployment-wide via `vision.cv.detection-default-enabled=true`, wave D2), tracking **`ASSOCIATE`** (docs/plans/done/TRACKING-PLAN.md Wave T8 — was `TrackingConfig.off()` through T2–T7). **Convenience ctors still default `TrackingConfig.off()`** — deliberate: a convenience ctor means "what you didn't mention keeps its old value," `defaults()` means "what should a new stream be," and conflating them would silently turn tracking on for every pre-T8 call site (`PipelineConfigTest` pins this with `assertNotEquals`). Turning tracking off is now an explicit act: `PATCH /api/streams/{id}/config`, or `vision.tracking.default-mode=OFF`
 - `enum PixelFormat` — BGR24, RGB24, YUV420P, JPEG, H264_PACKET, UNKNOWN
 - `record PullTelemetry(long decodeMillis, float sourceFps, float achievedFps, long droppedFrames, ...)` (docs/plans/active/MEDIA-SOT-PLAN.md §7) — what a **pulling worker** reports about the half of the loop this JVM can no longer see: it opens the source itself, so its decode cost, the rate it actually achieved, and the frames it dropped are facts only it holds. Rides the pull result stream and feeds `DetectionRateWindow`/`PipelineLatencyWindow` in pull mode
+- `record ReferenceIndexSummary(String regionId, String name, RegionBounds bounds, int zoom, Instant builtAt, int tileCount, int descriptorCount, int descriptorDim, String encoderId, double acceptSimilarity, double acceptMargin, double holdoutRecallAt1, double holdoutMedianErrorMeters, long indexBytes, int neverAcceptCells)` (H2b) — the full merged identity+stats view `ReferenceIndexPort#list()` returns for one built region (cv-service is the source of truth — D10, see Status); `impliedStatus()` returns `NEVER_ACCEPT` when every cell is never-accept (`neverAcceptCells>=tileCount` and `tileCount>0`), else `READY`
+- `record ReferenceRegion(String regionId, String name, RegionBounds bounds, int zoom, RegionStatus status, ReferenceIndexSummary summary)` (H2b) — `ReferenceRegionService`'s read model, merging an in-flight `BUILDING`/`FAILED` job with cv-service's own built regions; compact ctor requires `summary` non-null iff `status` is `READY`/`NEVER_ACCEPT`, null for `BUILDING`/`FAILED`
+- `record RegionBounds(double north, double south, double east, double west)` (H2b) — a reference region's bounding box; each corner range-checked ([-90,90] lat / [-180,180] lon), `south<north`/`west<east` enforced strictly (compact ctor) — a region spanning the antimeridian is out of scope
+- `record RegionIngestSpec(String regionId, String name, RegionBounds bounds, int zoom)` (H2b) — `ReferenceRegionService#ingest`'s command; `regionId` a kebab-case slug (its own `KEBAB_CASE` pattern, matching `CategoryId`'s idiom in warehouse), `name` non-blank, `zoom` in `[ZOOM_MIN=15, ZOOM_MAX=19]`
+- `enum RegionStatus` (H2b) — `BUILDING | READY | NEVER_ACCEPT | FAILED`; a reference region's ingest/usability lifecycle
 - `record TargetLock(long lockSeq, Long trackId, Double pointX, Double pointY, boolean release)` — which object `FOLLOW` should hold; restated every frame, applied by cv-service only when `lockSeq` is strictly greater than the last applied one (idempotent restatement, invariant P2). Accepts **exactly one** of three forms — `trackId`, `pointX`+`pointY` (normalized [0,1]), or `release=true`; rejects zero/two/three forms and a partial point. `lockSeq` allocated by the application layer's own monotonic counter, never a client
+- `record Tile(TileCoordinate coordinate, byte[] content)` (H2b) — one fetched map tile handed to `ReferenceIndexPort#build`; `content` not defensively copied (a large byte payload, streamed once)
+- `record TileCoordinate(int z, int x, int y)` (H2b) — a slippy-map tile address; `z`≥0, `x`/`y` in `[0, 2^z)` (compact ctor); `id()` → `"z/x/y"`
+- `final class TileGrid` (H2b) — pure utility (private ctor), CLAUDE.md rule-1 "mathematical constant" math: `static List<TileCoordinate> cover(RegionBounds, int zoom)` — every tile intersecting the bounds at that zoom, standard Web Mercator floor formulas; `static long count(RegionBounds, int zoom)` — the same count without materializing the list, letting `DefaultReferenceRegionService` refuse an oversized ingest before fetching a single tile
 - `record TrackedObject(long trackId, Detection detection, Instant firstSeen, Instant lastSeen)` — trackId≥0, lastSeen≥firstSeen; the application layer's track-book entry (`TrackBook`); deliberately **not** cross-validated against `detection.track().trackId()` — that would break holding an untracked detection
 - `record TrackingConfig(TrackingMode mode, String engineId, int verifyEveryMillis, int followFps, int redetectIouPercent, int maxAgeFrames, int minHits, int capabilityLevel, int reupdateMaxGapMillis, TargetLock lock)` — per-stream tracking config, joins `PipelineConfig`; `engineId` empty = server default; `redetectIouPercent` an **int** percent [0,100] (JSON-/PATCH-friendly); `followFps` is Java-side sampler rate only, no cv-service knob; `verifyEveryMillis`/`followFps`/`maxAgeFrames`/`minHits` positive; `capabilityLevel` (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2, E12) [0,5] — a **ceiling, not a demand**: cv-service serves `min(requested, affordable)`, never a refusal; `0` = auto-probe; `reupdateMaxGapMillis`≥0, `0` = server default — longest gap ORU may reconstruct; `lock` nullable. `static off()`/`static defaults()` both leave `capabilityLevel`/`reupdateMaxGapMillis` at `0` — today's behaviour exactly. An **8-arg convenience ctor** (the pre-V3 signature) defaults both new fields to `0`, byte-identical to not setting either wire field (invariant B2) — every call site written before this wave compiles and behaves unchanged. `static off()` — mode OFF, defaults `DEFAULT_VERIFY_EVERY_MILLIS=2000`/`DEFAULT_FOLLOW_FPS=15`/`DEFAULT_REDETECT_IOU_PERCENT=30`/`DEFAULT_MAX_AGE_FRAMES=30`/`DEFAULT_MIN_HITS=3`; `static defaults()` — mode ASSOCIATE, same cadences (what `PipelineConfig.defaults()` ships since T8)
 - `record TrackingCapability(int levelServed, String reason)` (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md §2) — what the capability ladder **actually served**, as opposed to `TrackingConfig#capabilityLevel`'s requested ceiling; `levelServed` [1,5] — a `TrackingCapability` only exists once a level was genuinely reported, never the ladder's own `0` ("auto-probe") sentinel; `reason` never null, `""` = served exactly as requested; `levelServed` is always ≤ requested — nothing on the Java side may raise it (invariant B5), and a reader must render it as what happened, never echo the request as if it were the outcome
@@ -91,6 +106,9 @@ implementation; commands/read-models are top-level records (`.claude/skills/java
 - `FeedTransmitterPort`: `boolean supports(FeedSpec)`; `StreamDescriptor start(FeedId, FeedSpec)` — blocking setup then background transmit, returns the descriptor the RX side ingests from; `void stop(FeedId)` — idempotent. **TX half** of the RX/TX doctrine (`docs/main/CYCLES-PLAN.md` §0) — simulation infrastructure, unrelated to `StreamPublisherPort`
 - `OverlayPort`: `VideoFrame render(AnnotatedFrame)` — synchronous, input frame never mutated, returns a distinct instance
 - `PulledDetectionPort` (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M5) — the **pull** counterpart of `DetectionPort`: the worker opens the video itself, so this JVM hands it a URL instead of frames and never decodes the stream. `Flow.Publisher<DetectionResult> open(StreamId, URI sourceUrl, PipelineConfig)` — per-open, live; `void reconfigure(StreamId, PipelineConfig)` — restates the hot fields, no-op for an unopened id; `void attitude(StreamId, CameraAttitude)` — pose for whatever frame the worker analyses next, no-op for an unopened id; `void close(StreamId)` — idempotent. Deliberately **not** an overload on `DetectionPort`: "hand me a frame" and "go get your own frames" are two shapes, and the caller honors `maxInFlightInferences` for the first while the worker paces itself for the second
+- `PulledGeolocationPort` (H2b, docs/plans/active/VISUAL-GEO-V2-PLAN.md §5) — the pull-shaped counterpart for visual geolocation, mirroring `PulledDetectionPort`: `Flow.Publisher<VisualFix> open(StreamId, URI sourceUrl, GeoSessionConfig)` — per-open, live, produces kernel `VisualFix`es; `void telemetry(StreamId, Telemetry)` — restates the session's kernel `Telemetry` every keyframe, **latest-wins** (the adapter applies only the newest sample it has when it next needs one, never queues/replays every call); `void close(StreamId)` — idempotent. H3's `cv/grpc` adapter is the intended sole implementer
+- `ReferenceIndexPort` (H2b) — `Flow.Publisher<IngestProgress> build(RegionIngestSpec, Iterable<Tile>)` — per-build, live progress; `List<ReferenceIndexSummary> list()` — proxies cv-service's own `ListRegions` (D10: cv-service is the single source of truth for built regions, this context tracks only in-flight jobs — see Status); `void delete(String regionId)` — idempotent. H3's `cv/grpc` adapter is the intended sole implementer
+- `ReferenceTileSourcePort` (H2b) — `boolean supports()` / `byte[] fetch(int z, int x, int y)`; the tile-provider seam `DefaultReferenceRegionService#ingest` fetches every covering tile through before handing them to `ReferenceIndexPort#build`. Kept separate from `ReferenceIndexPort` rather than folded in — fetching pixels and indexing them are two different concerns with two different failure modes (`ingestThrowsWhenNoTileProviderConfigured` pins the distinction). H3's own new `cv/tiles` module (an OSM/XYZ tile-provider client) is the intended implementer
 - `StreamPublisherPort`: `void streamStarted(StreamId, Device)`; `void publish(StreamId, VideoFrame)` — adapter owns latest-wins drop policy; `void streamEnded(StreamId)` — idempotent; `default Optional<URI> viewUrl(StreamId)` — HLS; `default Optional<URI> whepUrl(StreamId)` — WebRTC, **never proxied** (a WHEP session is a POST/SDP+ICE exchange, not a byte stream); `default Optional<URI> playbackUrl(StreamId, Instant, Duration)` — recorded-clip window, **never proxied either**
 - `VideoSourcePort`: `boolean supports(StreamDescriptor)`; `Flow.Publisher<VideoFrame> open(StreamId, StreamDescriptor)` — per-open, hot/live, latest-wins backpressure, unrecoverable failure → `onError`; `void close(StreamId)` — idempotent
 
@@ -193,6 +211,22 @@ implementation; commands/read-models are top-level records (`.claude/skills/java
   - `static String friendlyMessage(Throwable, StreamDescriptor)` (package-private) — pattern-matches well-known substrings in the message text only, **never** a concrete exception type (this module may not depend on the adapter that threw it)
 - `ProbeResult(frame, codec, fps, telemetryDetected, warnings)` — `frame` the raw `VideoFrame`, never re-encoded here; `codec`/`fps` honestly best-effort, nullable
 - `ProbeFailedException extends RuntimeException` (moved with its thrower in W1.6d) — the protocol is recognized but the connection fails/times out/ends without a frame; mapped 422 by `vision-api`, distinct from `UnsupportedProtocolException`'s 400
+
+### application.geo — visual-geolocation seam (H2b, docs/plans/active/VISUAL-GEO-V2-PLAN.md §5)
+- `record ReferenceRegionSettings(int maxTiles)` — the deployment-wide tile ceiling (`vision.geo.visual.region.max-tiles`) `DefaultReferenceRegionService#ingest` refuses an oversized `RegionIngestSpec` against, naming the count in the thrown message; `maxTiles` must be positive
+- **`ReferenceRegionService`** (interface) → **`DefaultReferenceRegionService`** — reference-region ingest lifecycle: builds via the tile-source + index ports, tracks in-flight `BUILDING`/`FAILED` jobs in memory (lost on restart by design — D10, cv-service is the durable source of truth once a build succeeds), merges them with `ReferenceIndexPort#list()`'s built regions for reads
+  - `DefaultReferenceRegionService(ReferenceTileSourcePort, ReferenceIndexPort, ReferenceRegionSettings)`
+  - `ReferenceRegion ingest(RegionIngestSpec spec)` — `TileGrid.count` refuses (naming the count) before a single tile is fetched if it would exceed `maxTiles`; `IllegalStateException` if no tile provider `supports()`; returns immediately with status `BUILDING` (a **lazily fetching** `Iterable<Tile>` — built via `.stream().map(...).iterator()` — is handed to `ReferenceIndexPort#build`, never eagerly materializing every tile's bytes up front) and subscribes internally to the returned progress publisher
+  - `List<ReferenceRegion> list()` — merges every in-flight job (`BUILDING`/`FAILED`) with `indexPort.list()`'s built summaries (`READY`/`NEVER_ACCEPT` via `ReferenceIndexSummary#impliedStatus`); a job is dropped from in-flight tracking the moment it reaches `SUCCEEDED`, so the two views never double-report the same region
+  - `Optional<IngestProgress> progress(String regionId)` — the latest tick received for an in-flight job; synthesizes a terminal `IngestProgress` from `indexPort.list()` once a `SUCCEEDED` job has left in-flight tracking, so a caller polling by id never sees a gap between "job disappeared" and "summary appeared"; empty for an unknown/never-ingested id
+  - `void delete(String regionId)` — always forwards to `indexPort.delete`, even for an unknown id (idempotent); also drops any in-flight job tracked for that id
+- **`GeolocationSessionService`** (interface) → **`DefaultGeolocationSessionService`** — the per-stream localize-session lifecycle this context owns per plan decision D7 ("perception owns... the localization session" itself); *which* streams need one is composition, decided later by `vision-app` (wave H5), never this service
+  - `DefaultGeolocationSessionService(PulledGeolocationPort port)`
+  - `Flow.Publisher<VisualFix> start(StreamId, URI sourceUrl, GeoSessionConfig)` — at most one open session per stream, chosen to mirror `DefaultStreamService#start`'s own uniqueness contract (this plan's terse H2b table names no demand-gating rule for a geo session, so this is the deliberate interpretation — see Status): `IllegalStateException` if already open; opens the port and returns its publisher unchanged
+  - `void telemetry(StreamId, Telemetry)` — a no-op for an unopened stream; otherwise forwards every call to the port (restated per keyframe — the adapter's own job to apply latest-wins on the wire) **and** caches the sample, so `currentTelemetry` always answers with the latest one regardless of what the adapter does with it
+  - `Optional<Telemetry> currentTelemetry(StreamId)` — the cached latest sample; empty if unopened or no telemetry ever arrived
+  - `boolean isOpen(StreamId)`
+  - `void stop(StreamId)` — idempotent; closes the port and clears the cached telemetry
 
 ## Conventions
 - No Spring/framework imports anywhere in this module.
@@ -347,6 +381,51 @@ Related and deliberately kept: `PixelFormat.H264_PACKET` is consumed in `Default
 but produced by no capture adapter, for the same reason — under pull mode cv-service opens the RTSP
 itself, so compressed packets never reach Java. A legitimate branch of a format enum, costing nothing.
 
+**docs/plans/active/VISUAL-GEO-V2-PLAN.md Wave H2b done** (perception-side seam for visual geolocation
+— `contexts/vision-perception` only, no new POM dependency): new `domain.model` additions —
+`RegionBounds`/`RegionStatus`/`RegionIngestSpec`/`TileCoordinate`/`Tile`/`TileGrid`/
+`ReferenceIndexSummary`/`ReferenceRegion`/`IngestState`/`IngestProgress`/`GeoPrior`/`GeoSessionConfig`
+(12 records/enums, entries above); three new driven ports — `ReferenceTileSourcePort`/
+`ReferenceIndexPort`/`PulledGeolocationPort` — framework-free, speaking kernel `VisualFix`/`Telemetry`
+(from H2a, commit 006b8daf) plus this context's own new types only; and a new `application.geo`
+package with two service areas, `ReferenceRegionService`/`DefaultReferenceRegionService` and
+`GeolocationSessionService`/`DefaultGeolocationSessionService`, plus `ReferenceRegionSettings` (all
+entries above). `IngestState` deliberately **mirrors, not reuses**, `vision-learning`'s `JobState` —
+this context does not, and per H2b's own scope must not, gain a dependency on `vision-learning`.
+
+`GeolocationSessionService` is a design elaboration beyond the plan's own terse H2b table (which names
+only `ReferenceRegionService`) — justified by D7's explicit text ("perception owns... the localization
+session itself") and the `TrackProjectionRunner`/`TrackProjectionService` precedent
+(`station/vision-app`/`contexts/vision-map`): composition/reconciliation of *which* streams need a
+session stays a future `vision-app` runner's job (wave H5), the actual session lifecycle is this
+context's. Judged a legitimate elaboration, not a plan deviation — it touches no wire type and stays
+entirely inside `contexts/vision-perception/**`, so no dated plan amendment was filed. Two other
+interpretive choices, also not deviations: "demand-gated... session" (no demand port exists yet for
+geo sessions in the frozen contract) was read as at-most-one-open-session-per-stream uniqueness,
+mirroring `DefaultStreamService#start`'s own `IllegalStateException` contract; "latest-wins telemetry
+restatement" is realized as forward-every-call-to-the-port (the wire-level coalescing is the H3
+adapter's job) plus a cached latest sample exposed via `currentTelemetry`, giving genuinely testable
+latest-wins semantics without inventing wire behavior the frozen contract doesn't specify.
+
+D10 (cv-service is the single source of truth for built regions) means `DefaultReferenceRegionService`
+tracks only in-flight `BUILDING`/`FAILED` jobs, in a `ConcurrentHashMap`, lost on restart by design —
+`list()`/`progress()` fall back to `ReferenceIndexPort#list()`'s own summaries once a job reaches
+`SUCCEEDED`. `ingest()` builds a **lazily fetching** `Iterable<Tile>` rather than eagerly materializing
+every tile's bytes before calling `indexPort.build()`, so a large ingest (up to
+`vision.geo.visual.region.max-tiles`, e.g. 4000 tiles) never holds every tile's pixels in memory at
+once. Hand-fake unit tests throughout (`ControllableProgressPublisher`, `FakeReferenceTileSourcePort`,
+`FakeReferenceIndexPort`, `FakePulledGeolocationPort`) — this module's dominant style, no cross-context
+service is a dependency here, so nothing is a Mockito mock.
+
+**Tests:** `./mvnw -B -pl contexts/vision-perception -am test` — **555/555 green**, confirmed on three
+consecutive independent runs (up from 503) — 48 new `@Test` methods across 11 new test files (9
+`domain.model`, 2 `application.geo`). No pre-existing assertion was weakened, deleted, or disabled.
+
+**What H3 must implement** (not built here, out of this wave's scope): `GrpcPulledGeolocationPort
+implements PulledGeolocationPort` and `GrpcReferenceIndexPort implements ReferenceIndexPort` (both in
+`cv/grpc`), plus a `ReferenceTileSourcePort` implementation in a new `cv/tiles` module — see the plan's
+own §5 H3 wave table.
+
 **docs/plans/active/STREAM-STATE-PLAN.md wave S4 — somebody now owns ending a stream.**
 
 *The measured problem.* Nothing in this system was responsible for stopping a stream. `start` had an
@@ -395,4 +474,3 @@ state, and a disabled policy scheduling nothing. `IdleStreamPolicyTest` (+4). `D
 *Not in this module:* the `VideoDemandPort` implementation (`vision-api`'s
 `LiveHlsAndReaderVideoDemand`), the mediamtx reader probe (`adapter-publish-hls`), and the wiring +
 `vision.streams.idle.*` properties (`vision-app`) — see each module's own MODULE.md.
-

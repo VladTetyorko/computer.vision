@@ -20,6 +20,7 @@ import com.drones.vision.adapter.persistence.entity.MapLayerEntity;
 import com.drones.vision.adapter.persistence.entity.MarkEntity;
 import com.drones.vision.adapter.persistence.entity.SampleImageEntity;
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
+import com.drones.vision.adapter.persistence.entity.TrackCorrectionEntity;
 import com.drones.vision.adapter.persistence.entity.TrackPointEntity;
 import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
@@ -243,6 +244,9 @@ public final class PersistenceUnit {
         // migration's own header).
         configuration.addAnnotatedClass(CameraPoseEntity.class);
         configuration.addAnnotatedClass(TrackPointEntity.class);
+        // docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7 (V23__track_corrections.sql) -- excluded
+        // from db_audit_log, same reasoning as TrackPointEntity above.
+        configuration.addAnnotatedClass(TrackCorrectionEntity.class);
         return configuration.buildSessionFactory();
     }
 

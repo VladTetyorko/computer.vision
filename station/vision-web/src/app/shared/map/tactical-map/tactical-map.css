@@ -263,6 +263,20 @@
   background: var(--color-info);
 }
 
+.swatch.ring {
+  border-radius: 50%;
+  background: transparent;
+}
+
+/* Hollow ring, not a filled dot — mirrors `correctionDivIcon`'s own glyph so the legend never
+   drifts from what `applyCorrections` actually draws (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8,
+   wave H6). */
+.swatch.ring.geo-correction {
+  width: 0.625rem;
+  height: 0.625rem;
+  border: 2px solid var(--color-info);
+}
+
 .swatch.glyph {
   color: var(--text-muted);
 }
@@ -589,6 +603,56 @@
 }
 
 :host ::ng-deep .track-label::before {
+  display: none;
+}
+
+/* ---- Visual-geolocation correction marker (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6)
+   `correctionDivIcon` (leaflet-loader.ts) builds the DOM; this only paints it. Hollow ring + tick,
+   never a filled dot — "visually secondary to the raw one" — and never `--color-danger` even while
+   divergent (§3.8's "never red for PROBABLE", extended to divergence generally: the same anti-alarm
+   rule the divergence chip follows in `fly-osd.css`). The `.nominal`/`.divergent` class toggles the
+   one colour swap; the ring itself is rotated to `yawDegrees`, so only the tick child visibly moves
+   (a circle's border looks identical rotated). ---------------------------------------------------- */
+
+:host ::ng-deep .geo-correction-marker .geo-correction-ring {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  margin: 2px;
+  border-radius: 50%;
+  border: 2px solid var(--color-info);
+  background: transparent;
+}
+
+:host ::ng-deep .geo-correction-marker.divergent .geo-correction-ring {
+  border-color: var(--color-warn);
+}
+
+:host ::ng-deep .geo-correction-marker .geo-correction-tick {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 2px;
+  height: 5px;
+  margin-left: -1px;
+  background: var(--color-info);
+}
+
+:host ::ng-deep .geo-correction-marker.divergent .geo-correction-tick {
+  background: var(--color-warn);
+}
+
+:host ::ng-deep .geo-correction-label {
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  padding: var(--space-2) var(--space-8);
+  box-shadow: none;
+}
+
+:host ::ng-deep .geo-correction-label::before {
   display: none;
 }
 

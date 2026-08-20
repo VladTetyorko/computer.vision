@@ -75,6 +75,7 @@
             [trail]="facade.trail()"
             [markerPosition]="facade.markerPosition()"
             [markerHeadingDegrees]="facade.markerSample()?.headingDegrees"
+            [correctedTrail]="facade.correctedTrail()"
           />
         }
       </section>
@@ -205,12 +206,31 @@
             (input)="facade.onScrub($any($event.target).value)"
             aria-label="Scrub position"
           />
+
+          <!-- Corrected-track divergence band(s) (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) —
+               absent entirely with no corrections/no divergence, never an empty strip. -->
+          @if (facade.geoDivergenceBands().length > 0) {
+            <div class="divergence-strip" aria-hidden="true">
+              @for (band of facade.geoDivergenceBands(); track band.fromMs) {
+                <span
+                  class="divergence-band"
+                  [style.left.%]="facade.bandLeftPercent(band)"
+                  [style.width.%]="facade.bandWidthPercent(band)"
+                  [title]="'Diverged from raw telemetry ' + facade.clockLabel(band.fromMs) + ' – ' + facade.clockLabel(band.toMs)"
+                ></span>
+              }
+            </div>
+          }
         </div>
 
         @if (t.detections.length === 0) {
           <p class="muted hint">No detections recorded for this flight.</p>
         } @else if (facade.detectionStripCapNote(); as note) {
           <p class="muted hint">{{ note }}</p>
+        }
+
+        @if (facade.geoDivergenceBands().length > 0) {
+          <p class="muted hint">Corrected track (visual geolocation) diverges from raw telemetry during the highlighted window(s) above.</p>
         }
       </section>
 

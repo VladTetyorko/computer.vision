@@ -47,10 +47,38 @@ RUN apt-get update \
 # --retries/--timeout: the wheel set is ~400MB (torch+opencv+openvino); on a
 # slow or flaky uplink pip's defaults (5 retries, 15s read timeout) abort the
 # whole layer for one stalled chunk, restarting the download from zero.
+#
+# `.[cv,geo]` (VISUAL-GEO-V2-PLAN.md H4): the `geo` extra is self-referential on
+# `cv` (see pyproject.toml) so this single `-e ".[cv,geo]"` installs both in one
+# resolve -- torch/torchvision/kornia ride the same CPU wheel index as
+# ultralytics' own torch pull, so there is no second `--extra-index-url` needed.
+# Unlike the YOLO weights baked in below, the geo encoder/matcher backbones
+# (`eigenplaces`/`cosplace` via `torch.hub`, `xfeat` via `torch.hub`) are NOT
+# fetched at build time here -- they are fetched lazily, once, on first
+# `GeolocationServicer` construction (server.py's `serve()`), and cached under
+# CV_GEO_MODEL_CACHE. Baking them in would mean every image rebuild re-fetches
+# ~100s of MB from GitHub for a feature not every deployment target uses (the
+# echo/no-geo-extra install path stays valid, see cv_service/geo/encoder.py's
+# ImportError message); the tradeoff is that the FIRST `BuildReferenceIndex` or
+# `LocalizeStream` call after a fresh container start needs network egress and
+# pays the download latency once. If that first-call network dependency proves
+# unacceptable for the offline GB4005 box, mount CV_GEO_MODEL_CACHE as a
+# persistent volume pre-seeded from a machine that does have network, exactly
+# like the YOLO `.pt`/OpenVINO IR baked into THIS image today.
 RUN pip install --no-cache-dir --retries 15 --timeout 120 \
       --extra-index-url https://download.pytorch.org/whl/cpu \
-      -e ".[cv]" openvino \
+      -e ".[cv,geo]" openvino \
     && ./scripts/gen_proto.sh
+
+# CV_GEO_MODEL_CACHE: where torch.hub lands the encoder/matcher weights on
+# first use (see comment above) -- set explicitly rather than relying on
+# config.py's default (`<repo>/.model-cache`) so the cache directory's location
+# is visible from the image definition and independent of Settings.geo_model_cache's
+# fallback logic changing later. Not volume-mounted here (no VOLUME directive) --
+# the image's own writable layer is fine for a demo/single-instance deployment;
+# an operator who wants the cache to survive a container replace mounts this
+# path externally at `docker run`/compose time.
+ENV CV_GEO_MODEL_CACHE=/app/cv-service/.model-cache
 
 # DEFERRED (docs/plans/done/TRACKING-PLAN.md §5.B, decision D14): the ONNX-backed
 # single-object trackers `cv2.TrackerNano` and `cv2.TrackerVit`. They exist

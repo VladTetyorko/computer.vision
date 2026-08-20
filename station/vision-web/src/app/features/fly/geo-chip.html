@@ -1,0 +1,31 @@
+@if (!disabled()) {
+  <div class="geo-chip-wrap">
+    <button
+      type="button"
+      class="osd-metric geo-chip"
+      [class]="'tone-' + tone()"
+      (click)="toggle()"
+      [attr.aria-expanded]="expanded()"
+      title="Visual-geolocation correction — click for details"
+    >
+      <vision-icon name="target" [size]="14" /><span class="v">{{ label() }}</span>
+    </button>
+
+    @if (expanded()) {
+      <div class="geo-popover surface-hud">
+        @if (rows().length === 0) {
+          <p class="geo-popover-empty">No correction computed yet for this asset.</p>
+        } @else {
+          <dl>
+            @for (row of rows(); track row.label) {
+              <div class="geo-fact" [class.refusal]="row.label === 'Refusal'">
+                <dt>{{ row.label }}</dt>
+                <dd [class.mono]="row.mono">{{ row.value }}</dd>
+              </div>
+            }
+          </dl>
+        }
+      </div>
+    }
+  </div>
+}

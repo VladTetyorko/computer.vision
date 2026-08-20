@@ -48,6 +48,7 @@ rewrite the citations in the same commit.
 |---|---|
 | [MOAT.md](conclusions/MOAT.md) | the four structural inversions of a vendor platform — which capabilities are ours alone |
 | [MEDIA-SOT-RESULTS.md](conclusions/MEDIA-SOT-RESULTS.md) | MEDIA-SOT-PLAN's five §1 claims, all held, measured against a live compose stack — CPU/RSS, restart survival, box age, GB4005 OpenVINO reproduced; one defect found (pull-mode `dropRatio` pinned at 1.0) |
+| [VISUAL-GEO-RESEARCH.md](conclusions/VISUAL-GEO-RESEARCH.md) | camera↔satellite geolocation research pack (6 reports, ~270 refs in `conclusions/visual-geo-research/`): why `feat/visual-geo` ranking fails, the light-onboard and heavy-server sub-ways, decisions before any build |
 | [ANY-DRONE-PLAN.md](conclusions/ANY-DRONE-PLAN.md) | the adoption funnel: PROBE → DIAGNOSE → REMEDIATE → VERIFY |
 | [BASE-COMPUTE-MATRIX.md](conclusions/BASE-COMPUTE-MATRIX.md) | the offload law — what the base computes so the drone doesn't have to |
 | [DRONE-COMPONENTS-MATRIX.md](conclusions/DRONE-COMPONENTS-MATRIX.md) | position stack, link classes, component ladder, what each feature costs the owner |

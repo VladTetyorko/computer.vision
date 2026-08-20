@@ -12,7 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
- * Wave T0 acceptance test (docs/plans/done/TRACKING-PLAN.md §4.A, §7 "T0").
+ * Wave T0 acceptance test (docs/plans/done/TRACKING-PLAN.md §4.A, §7 "T0"), extended by
+ * VISUAL-GEO-V2 wave H1 (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1/§5 H1).
  *
  * <p>Proto3 additive rules require that an old client against a new server (no {@code tracking}
  * sent) and a new client that simply leaves tracking off both produce the exact wire bytes the
@@ -23,6 +24,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * leaked a byte onto the wire while unset (e.g. a message field accidentally defaulted to a
  * non-empty instance), this test would fail rather than the two encodings coincidentally agreeing
  * with each other.
+ *
+ * <p>H1 added an entirely new, disjoint "Geolocation" service/message section to {@code cv.proto}
+ * (VISUAL-GEO-V2-PLAN.md §3.1) and touched no existing field number, name or type. {@link
+ * #pullControlRoundTripsAndStaysUnaffectedByTheGeoAddition()} pins that {@link PullControl} --
+ * the one pre-existing message this repo's proto contract carries that had no additivity
+ * coverage yet -- still serializes exactly as it did before H1's diff.
  */
 class TrackingProtoAdditivityTest {
 
@@ -172,6 +179,65 @@ class TrackingProtoAdditivityTest {
                 .build();
         DetectionResponse roundTrippedResponse = DetectionResponse.parseFrom(response.toByteArray());
         assertEquals(response, roundTrippedResponse);
+    }
+
+    /**
+     * H1 (VISUAL-GEO-V2-PLAN.md §5 H1): {@code PullControl} is a pre-existing message the new
+     * Geolocation section does not reference at all, but the wave's "done" criterion is that
+     * {@code FrameRequest}/{@code Detection}/{@code DetectionResponse}/{@code PullControl} all
+     * "serialize byte-identically" after the geo section lands. The first three already have
+     * cases above (pre-dating H1); this pins the fourth, byte-for-byte, independent of {@link
+     * PullControl}'s own generated serialization.
+     */
+    @Test
+    void pullControlRoundTripsAndStaysUnaffectedByTheGeoAddition() throws IOException {
+        TargetLock lock = TargetLock.newBuilder()
+                .setLockSeq(5L)
+                .setTrackId(9L)
+                .build();
+        TrackingConfig tracking = TrackingConfig.newBuilder()
+                .setMode(TrackingMode.TRACKING_MODE_FOLLOW)
+                .setLock(lock)
+                .build();
+        CameraPose pose = CameraPose.newBuilder()
+                .setYawDegrees(12.5f)
+                .setHfovDegrees(90f)
+                .build();
+
+        PullControl actual = PullControl.newBuilder()
+                .setStreamId("cam-1")
+                .setSourceUrl("rtsp://localhost:8554/cam-1")
+                .setRtspTransport("tcp")
+                .setModelId("yolo26n.pt")
+                .setModelVersion("latest")
+                .setConfidenceThreshold(0.35f)
+                .setTargetFps(5f)
+                .setDetectWidth(640)
+                .setTracking(tracking)
+                .setCameraPose(pose)
+                .setStop(false)
+                .build();
+
+        byte[] expected = encode(out -> {
+            out.writeString(1, "cam-1");
+            out.writeString(2, "rtsp://localhost:8554/cam-1");
+            out.writeString(3, "tcp");
+            out.writeString(4, "yolo26n.pt");
+            out.writeString(5, "latest");
+            out.writeFloat(6, 0.35f);
+            out.writeFloat(7, 5f);
+            out.writeInt32(8, 640);
+            out.writeMessage(9, tracking);
+            out.writeMessage(10, pose);
+            // field 11 (stop) at its proto3 zero-value (false) -- omitted
+        });
+
+        assertArrayEquals(expected, actual.toByteArray());
+
+        PullControl roundTripped = PullControl.parseFrom(actual.toByteArray());
+        assertEquals(actual, roundTripped);
+        assertEquals(TrackingMode.TRACKING_MODE_FOLLOW, roundTripped.getTracking().getMode());
+        assertEquals(9L, roundTripped.getTracking().getLock().getTrackId());
     }
 
     @FunctionalInterface

@@ -17,6 +17,7 @@ import type {
   CameraPoseRequest,
   CameraPoseResponse,
   Category,
+  CorrectionsResponse,
   CreateAssetRequest,
   CreateDatasetRequest,
   CreateGroupRequest,
@@ -56,6 +57,10 @@ import type {
   ProbeDeviceResult,
   PromoteModelRequest,
   ReadinessReport,
+  RegionIngestRequest,
+  RegionProgressResponse,
+  RegionResponse,
+  RegionsResponse,
   RegisterDeviceRequest,
   RemediationRequest,
   RemediationResult,
@@ -664,6 +669,48 @@ export class VisionApi {
   /** Every projected track on a layer the caller may view (D10) — the map track layer's initial load, folded forward afterward by the live `TRACK`-entity `map` topic (`core/map-data/tracks-store.ts`). */
   listMapTracks(): Promise<MapTracksResponse> {
     return firstValueFrom(this.http.get<MapTracksResponse>('/api/map/tracks'));
+  }
+
+  // --- Visual geolocation v2 (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3's frozen wire contract, wave H6) ---
+  // All six routes 409 with D9's exact envelope while `vision.geo.visual.enabled=false` —
+  // `core/geo/geo-logic.ts#isVisualGeoDisabledError` is what a caller checks for that case, the
+  // same "check for the frozen message, degrade to the generic sentence otherwise" idiom
+  // `isFixedCameraGeoDisabledError`/`isProbeDisabledError` already established.
+
+  /** Every region cv-service knows about, plus any still-`BUILDING` in-flight job (D10 — proxied, not a Postgres read). `503` when cv-service itself is unreachable. */
+  listGeoRegions(): Promise<RegionsResponse> {
+    return firstValueFrom(this.http.get<RegionsResponse>('/api/geo/regions'));
+  }
+
+  /** Starts an async ingest for a new region — `202` with the fresh `RegionResponse` in `status: 'BUILDING'`; poll {@link geoRegionProgress} for its phase. `403` unless `canAdminister` (an external imagery fetch); `400` invalid bounds/zoom/tile-count. */
+  createGeoRegion(request: RegionIngestRequest): Promise<RegionResponse> {
+    return firstValueFrom(this.http.post<RegionResponse>('/api/geo/regions', request));
+  }
+
+  /** Idempotent — `204` even if `regionId` is already gone. */
+  deleteGeoRegion(regionId: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/geo/regions/${encodeURIComponent(regionId)}`));
+  }
+
+  /** One in-flight (or just-finished) ingest job's phase/state — `404` once neither an in-flight job nor a `READY` region exists for `regionId`. */
+  geoRegionProgress(regionId: string): Promise<RegionProgressResponse> {
+    return firstValueFrom(
+      this.http.get<RegionProgressResponse>(`/api/geo/regions/${encodeURIComponent(regionId)}/progress`),
+    );
+  }
+
+  /** The latest correction per asset the caller may see — `core/geo/geo-store.ts`'s own poll-fallback source, filtered client-side to the one tracked asset (§3.3 has no single-asset "latest" route). */
+  liveGeoCorrections(): Promise<CorrectionsResponse> {
+    return firstValueFrom(this.http.get<CorrectionsResponse>('/api/geo/corrections/live'));
+  }
+
+  /** One usage's full correction history, oldest→newest — the replay page's corrected track + divergence band. `limit` defaults server-side; `400` outside `[1,10000]`; `404` unknown usage or out of scope. */
+  geoCorrections(usageId: string, limit?: number): Promise<CorrectionsResponse> {
+    const params: Record<string, string | number> = { usageId };
+    if (limit !== undefined) {
+      params['limit'] = limit;
+    }
+    return firstValueFrom(this.http.get<CorrectionsResponse>('/api/geo/corrections', { params }));
   }
 
   // --- Recording + clip export (docs/plans/done/OPS-CORE-PLAN.md §R's frozen wire contract) ---------------

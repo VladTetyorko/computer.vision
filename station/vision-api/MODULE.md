@@ -2319,6 +2319,73 @@ Flyway migrated to v22, confirmed by log output) — not skipped.
 signing/hashing the package. Also deferred, not in §7 but found this wave: Finding 1 above (`detections`
 truncation-detection), and a `scopedTo` display-name/email seam (Finding 3).
 
+## docs/plans/active/VISUAL-GEO-V2-PLAN.md Wave H5 done (visual geolocation, REST + SSE surface)
+
+Two controllers, six routes total, matching §3.3's frozen wire contract byte-for-byte; a 7th
+live-update port bridged onto SSE `geo:<assetId>` (§3.4/D11). Flag off
+(`vision.geo.visual.enabled=false`, the default) makes every one of the six routes a `409` with the
+frozen D9 body and leaves every pre-existing test untouched.
+
+**`GeoCorrectionController`** (`api/controller/`) — reads `TrackCorrectionService`:
+- `GET /api/geo/corrections/live` — the latest correction per asset the viewer may see; starts from
+  `AssetService#assets(scope, false)` (which already applies GROUPS) rather than asking the service
+  for "every asset's latest" unscoped, since `DefaultTrackCorrectionService#isVisible` only enforces
+  UNBOUNDED/ASSIGNED_ASSETS internally (the same amendment `vision-flight`'s H2a wave documented) —
+  GROUPS is deferred entirely to this edge.
+- `GET /api/geo/corrections?usageId=&limit=` — oldest-to-newest for one usage, `limit` defaulting to
+  2000, clamped to `[1,10000]` (`400` outside that range); resolves the usage's owning asset and
+  calls `AssetService#details` purely as a scope guard — unknown or out-of-scope usage is
+  `NoSuchElementException` → `404`, "hide, don't 403."
+
+**`GeoRegionController`** (`api/controller/`) — a thin proxy onto `ReferenceRegionService`, which owns
+the real merge between cv-service's built regions and Java's own in-memory in-flight ingest jobs
+(D10 — no `geo_regions` table):
+- `GET /api/geo/regions` — every known region, built or building; no additional authorization
+  (regions are a global map-tile resource, not asset-scoped).
+- `POST /api/geo/regions` — starts an async ingest, `202` with status `BUILDING`; body validated
+  (`RegionIngestRequest#toSpec()`) **before** the `canAdminister()` guard, the `CameraPoseController`
+  precedent — malformed body is always `400` regardless of authority.
+- `DELETE /api/geo/regions/{regionId}` — idempotent, `204`, `canAdminister()`.
+- `GET /api/geo/regions/{regionId}/progress` — `404` if neither an in-flight job nor a READY region
+  exists.
+
+Every method's first line is `VisualGeoProperties#requireEnabled()` (framework-free bridge record
+over `vision-app`'s real `@ConfigurationProperties`, the same pattern `FixedCameraGeoProperties`
+documents) — checked before path/body parsing, so the flag-off `409` is the answer regardless of what
+else might be wrong with the request.
+
+**`GeoServiceUnavailableException` → 503** (new, `ApiExceptionHandler`) — `GeoRegionController#safely`
+translates any transport failure `ReferenceRegionService`'s underlying gRPC port lets through
+(unnameable here as `io.grpc.StatusRuntimeException`) to this, while rethrowing every already-mapped
+exception type unchanged. Symmetric on `ingest` even though that path never blocks on cv-service
+reachability in practice (the build runs on a background thread; failure reports through `progress`,
+not the POST call).
+
+**SSE — `LiveTopicKind.GEO` / `LiveTopic.geo(AssetId)`** (§3.4/D11, 8th topic kind) —
+`LiveUpdateRegistry` now implements `TrackCorrectionLiveUpdatePort` (6th live-update port); its
+`geoBuffers` uses a ring capacity of **1** (latest-wins — a stale fix is worse than none), unfiltered/
+opt-in like every other asset-scoped topic. `vision-app`'s `NoopLiveUpdatePublisher` picks up the
+same port when `vision.live.enabled=false`.
+
+*Tests:* `GeoCorrectionControllerTest` (+9) — live/forUsage happy paths, GROUPS-at-edge scoping via
+`AssetService#assets`, limit clamping (`0`/`10001` → `400`), unknown/out-of-scope usage → `404`, and
+D9 `409` on both routes, and (wave H8) `forUsageSerializesTheTwoBooleansThatDecidePromotion`, a `PROBABLE`
+row asserting `cellCalibrated`/`sequenceConverged` reach the JSON as `true`/`false` rather than being
+dropped — the point of §9.11 defect 4 is that a `PROBABLE` row must be able to say *which* gate it failed. `GeoRegionControllerTest` (+13) — all four routes' happy paths,
+`canAdminister()` 403-vs-body-400 ordering on `POST`/`DELETE`, unknown region → `404` on `progress`,
+the 503 translation on a simulated transport failure, and D9 `409` on all four routes.
+
+**Before/after**: vision-api **718 → 740 (+22: `GeoCorrectionControllerTest` +9,
+`GeoRegionControllerTest` +13)** — the correction controller's ninth test arrived in wave H8 with
+`CorrectionResponse`'s two new promotion booleans (see §3.3/§9.12), measured as part of the same 27/27-module `BUILD SUCCESS` that
+landed this wave (real Postgres 16 container via Testcontainers; Docker ran, not skipped) —
+see the H5 commit (`feat(station): H5 -- persistence, REST, SSE, wiring for visual geolocation`)
+for the full cross-module figures (`adapter-persistence` 205→214, `vision-app` 237→241).
+
+**Deferred, out of this wave's scope**: none identified against §3.3/§3.4/§3.7 — every frozen
+endpoint, DTO, and exception mapping matched the plan as specified. H7 (per §5) is the next wave, not
+scoped here; see `station/vision-app/MODULE.md`'s own H5 entry for the composition/wiring half.
+
 **docs/plans/active/STREAM-STATE-PLAN.md wave S4 — what "somebody is watching this video" means here.**
 
 - `LiveUpdateRegistry#watchingAsset(AssetId)` (new, public) — whether any open connection carries

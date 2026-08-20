@@ -5,6 +5,7 @@ import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.flight.domain.port.FeatureRequirementRepositoryPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
+import com.drones.vision.flight.domain.port.TrackCorrectionRepositoryPort;
 import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
@@ -215,5 +216,16 @@ public class PersistenceWiringConfiguration {
     @Bean
     public TrackTrailRepositoryPort trackTrailRepositoryPort(EntityManagerFactory entityManagerFactory) {
         return new JpaTrackTrailRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, H5 — the excluded-from-audit, append-only
+     * visual-geolocation corrected track, same shape as {@link #trackTrailRepositoryPort} above.
+     * Wired unconditionally like every other port in this class: {@code vision.geo.visual.enabled}
+     * gates the runner that produces rows, not the schema or this repository.
+     */
+    @Bean
+    public TrackCorrectionRepositoryPort trackCorrectionRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaTrackCorrectionRepository(entityManagerFactory);
     }
 }

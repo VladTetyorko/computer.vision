@@ -6,6 +6,7 @@ import { formatLatency, transportLabel } from '../../core/stream-info-logic';
 import { DEFAULT_WIND_LIMIT_MPS } from '../../core/weather/weather-logic';
 import { Icon } from '../../shared/ui/icon';
 import { WeatherChip } from '../../shared/ui/weather-chip';
+import { GeoChip } from './geo-chip';
 import { positionLabel } from './fly-logic';
 import type { Transport } from '../../shared/player/player';
 
@@ -72,227 +73,24 @@ import type { Transport } from '../../shared/player/player';
  * this whole file already follows for `TelemetryStore`) — **not the same thing as this component's
  * own "Wind" chip two paragraphs up**, see `WeatherChip`'s own doc comment for the
  * telemetry-instrument-vs-ambient-forecast distinction.
+ *
+ * **Geo divergence chip (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6)** — `<vision-geo-chip>`,
+ * in the always-rendered Link group (a vision-derived position, like the transport/latency chip
+ * beside it, needs no flight-controller telemetry link at all). Same DI-sharing idiom as
+ * `<vision-weather-chip>` above, injecting `GeoStore` from `CockpitPage`'s own `providers` — see
+ * `geo-chip.ts`'s own doc comment for the chip label/tone rules and its detail popover.
+ *
+ * **This component was inline template/styles until wave H6 touched it** — split into
+ * `fly-osd.html`/`fly-osd.css` (this repo's own three-file component convention) purely as a side
+ * effect of adding the one `<vision-geo-chip />` line above; nothing about the markup/styles
+ * themselves changed in that split.
  */
 @Component({
   selector: 'vision-fly-osd',
-  imports: [Icon, WeatherChip],
+  imports: [Icon, WeatherChip, GeoChip],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <div class="osd-groups">
-      <div class="osd-group surface-hud">
-        <span class="osd-group-label">Power</span>
-        <div class="osd-group-body">
-          @if (store.hasTelemetry()) {
-            <span class="osd-metric" [class]="'batt-' + batterySeverityTier()">
-              <vision-icon name="battery" [size]="14" /><span class="v">{{ batteryLabel() }}</span>
-            </span>
-            @if (armed() !== undefined) {
-              <span class="osd-metric" [class.armed]="armed()" [class.disarmed]="!armed()">
-                <vision-icon name="power" [size]="14" /><span class="v">{{ armed() ? 'ARMED' : 'DISARMED' }}</span>
-              </span>
-            }
-          } @else {
-            <span class="osd-metric dim">No telemetry</span>
-          }
-        </div>
-      </div>
-
-      @if (store.hasTelemetry()) {
-        <div class="osd-group surface-hud">
-          <span class="osd-group-label">Nav</span>
-          <div class="osd-group-body">
-            @if (positionText(); as position) {
-              <span class="osd-metric">
-                <vision-icon name="map" [size]="14" /><span class="v">{{ position }}</span>
-              </span>
-            }
-            <span class="osd-metric">
-              <vision-icon name="ruler" [size]="14" /><span class="v">{{ altitudeLabel() }}</span>
-            </span>
-            <span class="osd-metric">
-              <vision-icon name="compass" [size]="14" /><span class="v">{{ headingLabel() }}</span>
-            </span>
-            @if (groundSpeedLabel(); as speed) {
-              <span class="osd-metric">
-                <vision-icon name="gauge" [size]="14" /><span class="v">{{ speed }}</span>
-              </span>
-            }
-            @if (modeLabel(); as mode) {
-              <span class="osd-metric">
-                <vision-icon name="list" [size]="14" /><span class="v">{{ mode }}</span>
-              </span>
-            }
-            @if (gpsFixType() !== undefined) {
-              <span class="osd-metric" [class]="'gps-' + gpsSeverityTier()">
-                <vision-icon name="satellite" [size]="14" /><span class="v">{{ gpsLabel() }}</span>
-              </span>
-            }
-          </div>
-        </div>
-      }
-
-      <!-- Link — the one group that always renders (the transport/latency chip is meaningful with
-           or without telemetry); the age/RSSI chips join it once a telemetry sample actually exists. -->
-      <div class="osd-group surface-hud">
-        <span class="osd-group-label">Link</span>
-        <div class="osd-group-body">
-          @if (store.hasTelemetry()) {
-            <span class="osd-metric" [class]="'age-' + ageSeverityTier()">
-              <vision-icon name="signal" [size]="14" /><span class="v">{{ ageLabel() }}</span>
-            </span>
-            @if (rssiPercent() !== undefined) {
-              <span class="osd-metric">
-                <vision-icon name="signal" [size]="14" /><span class="v">{{ rssiPercent() }}%</span>
-              </span>
-            }
-          }
-          <span class="osd-metric dim">
-            <span class="v">{{ transportLabelText() }}</span>
-          </span>
-        </div>
-      </div>
-
-      <!-- Env — the least flight-critical cluster (ambient wind/weather advisory), behind a compact
-           disclosure chevron (reuses diagnostics-card.ts's own expand/collapse idiom). Defaults
-           open, same as that component's own precedent. -->
-      <button type="button" class="osd-group-toggle" (click)="expanded.set(!expanded())" [attr.aria-expanded]="expanded()">
-        <vision-icon [name]="expanded() ? 'chevron-up' : 'chevron-down'" [size]="14" />
-        {{ expanded() ? 'Less' : 'Env' }}
-      </button>
-
-      @if (expanded()) {
-        <div class="osd-group surface-hud">
-          <span class="osd-group-label">Env</span>
-          <div class="osd-group-body">
-            @if (windSpeedLabel(); as wind) {
-              <span class="osd-metric">
-                <vision-icon name="wind" [size]="14" /><span class="v">{{ wind }}</span>
-                @if (windDirectionDegrees(); as direction) {
-                  <span class="wind-arrow" [style.transform]="'rotate(' + direction + 'deg)'" aria-hidden="true">➤</span>
-                }
-              </span>
-            }
-            <vision-weather-chip [limitMps]="windLimitMps()" />
-          </div>
-        </div>
-      }
-    </div>
-  `,
-  styles: `
-    /* A bottom bar now (fly.css's own telemetry grid row, below the video, not an overlay column
-       beside it) — clusters lay out left-to-right and wrap/center as the row narrows, rather than
-       stacking top-to-bottom down a fixed-width column. pointer-events: none on the row itself
-       still matters: the row's own empty gaps between cluster pills must never intercept clicks
-       meant for whatever renders below it (the controls row sits right after this one), only the
-       pills/Env toggle/weather chip re-enable it. */
-    .osd-groups {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: center;
-      gap: var(--space-8) var(--space-16);
-      pointer-events: none;
-    }
-
-    .osd-group {
-      pointer-events: auto;
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-4);
-      padding: var(--space-4) var(--space-8);
-      border-radius: var(--radius-sm);
-      min-width: 5.25rem;
-    }
-
-    .osd-group-label {
-      font-size: 0.58rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      color: color-mix(in srgb, var(--text) 58%, transparent);
-    }
-
-    .osd-group-body {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: var(--space-4) var(--space-8);
-    }
-
-    .osd-metric {
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-4);
-      font-size: 0.78rem;
-      color: var(--text);
-      white-space: nowrap;
-    }
-
-    .osd-metric .v {
-      font-family: var(--mono);
-      font-weight: 600;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .osd-metric.dim {
-      color: color-mix(in srgb, var(--text) 78%, transparent);
-    }
-
-    .osd-metric.batt-low .v,
-    .osd-metric.age-amber .v {
-      color: var(--color-warn);
-    }
-
-    .osd-metric.batt-critical .v,
-    .osd-metric.age-red .v {
-      color: var(--color-danger-text);
-    }
-
-    .osd-metric.gps-warn .v {
-      color: var(--color-warn);
-    }
-
-    .osd-metric.gps-critical .v {
-      color: var(--color-danger-text);
-    }
-
-    /* Armed/disarmed are both routine states, not a severity tier (a mild green-ish tint, not the
-       saturated --ok fill, so it doesn't compete with --live/--danger for attention) — disarmed is
-       dimmed rather than colored at all, a grounded drone being the normal, safe state. */
-    .osd-metric.armed .v {
-      color: var(--color-success-text);
-    }
-
-    .osd-metric.disarmed {
-      opacity: 0.7;
-    }
-
-    .wind-arrow {
-      display: inline-block;
-      font-size: 0.7rem;
-      line-height: 1;
-    }
-
-    .osd-group-toggle {
-      pointer-events: auto;
-      align-self: center;
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-4);
-      padding: var(--space-4) var(--space-8);
-      border-radius: var(--radius-pill);
-      background: none;
-      border: var(--hud-border);
-      color: color-mix(in srgb, var(--text) 70%, transparent);
-      font-size: 0.7rem;
-      cursor: pointer;
-    }
-
-    .osd-group-toggle:hover {
-      background: var(--hud-bg);
-      color: var(--text);
-    }
-  `,
+  templateUrl: './fly-osd.html',
+  styleUrl: './fly-osd.css',
 })
 export class FlyOsd {
   protected readonly store = inject(TelemetryStore);

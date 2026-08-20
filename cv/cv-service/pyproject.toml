@@ -70,6 +70,32 @@ cv = [
     "opencv-python>=5.0,<6",
     "lap>=0.5.12",
 ]
+# Visual geolocation (docs/plans/active/VISUAL-GEO-V2-PLAN.md H4): `cv_service/geo/{encoder,
+# matchers}.py`'s real backends (`eigenplaces`/`cosplace` via `torch.hub`, `xfeat`/`loftr`).
+# Self-referential on `cv` (a plain "torch"/"torchvision" pin here would otherwise risk drifting
+# out of step with ultralytics' own torch/torchvision requirement, and `opencv-python` must stay
+# the ONE place `cv2` is pinned, see that extra's own note above) -- installing `.[geo]` therefore
+# always also installs `.[cv]`. Same CPU-wheel-index install convention (the encoder/matcher error
+# messages in `encoder.py`/`matchers.py` spell out the exact command):
+#   pip install -e '.[geo]' --extra-index-url https://download.pytorch.org/whl/cpu
+# On aarch64, same as `cv` above: no index override needed, PyPI's plain wheels already are the
+# CPU build.
+#
+# INVARIANT P1 applies here too (this extra must stay deployable to the same laptop / GB4005 LAN
+# box / airframe-companion-computer targets as `cv`) -- `torch`/`torchvision`/`kornia` were each
+# verified to publish a real `manylinux2014_aarch64` wheel by downloading it (`pip download
+# --platform manylinux2014_aarch64 --python-version 311 --only-binary=:all: --no-deps`), not by
+# reading a compatibility table: torch 2.5.1, torchvision 0.20.1, kornia 0.8.3 (2026-08-19). `xfeat`
+# (`verlab/accelerated_features`, `CV_GEO_MATCHER=xfeat` default) and the encoder backbones
+# (`gmberton/eigenplaces`/`gmberton/cosplace`) are fetched via `torch.hub` at first build, not pip
+# dependencies -- nothing CUDA-only or x86-only among them (kornia's LoFTR path, `loftr`, is the
+# one heavier matcher option; still pure-torch, no CUDA-only op).
+geo = [
+    "cv-service[cv]",
+    "torch",
+    "torchvision",
+    "kornia",
+]
 # Test-only dependencies (not needed to run the service itself).
 dev = [
     "pytest>=8.0,<9",

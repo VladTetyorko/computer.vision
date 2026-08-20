@@ -6,9 +6,11 @@ telemetry samples, detection results (docs/plans/done/MVP2-PLAN.md P-b) — geof
 (docs/plans/done/OPS-CORE-PLAN.md §G, G-b) — identity: users + groups (docs/plans/done/U-AUTH-PLAN.md wave 3) —
 pilot→asset assignments (docs/plans/done/U-SCOPE-PLAN.md slice 2) — tactical marks, the shared
 operational picture (docs/plans/done/TACTICAL-MARKS-PLAN.md M2) — the map's Common Operational Picture:
-layers with grantable access, and drawings (docs/plans/done/MAP-REWORK-PLAN.md Wave C) — and, for fixed
+layers with grantable access, and drawings (docs/plans/done/MAP-REWORK-PLAN.md Wave C) — for fixed
 (non-tracking) cameras, a calibrated pose per asset plus the decimated ground-track trail its projected
-detections leave behind (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3).
+detections leave behind (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3) — and, for visual
+geolocation, the corrected track a moving asset's camera feed yields once matched against a reference
+tile index (docs/plans/active/VISUAL-GEO-V2-PLAN.md wave H5).
 
 **Depends on:** vision-domain, `org.hibernate.orm:hibernate-core`, `org.hibernate.orm:hibernate-hikaricp`
 (docs/plans/active/SCALE-100-PLAN.md S3 — declared for its version pin only, see "Connection pool" below for why
@@ -19,7 +21,17 @@ reference `HikariConfig`/`HikariDataSource` directly), `org.postgresql:postgresq
 (Jackson 3, for jsonb columns — see Conventions) · **Used by:** vision-app
 (`PersistenceWiringConfiguration` — unconditional since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b;
 the `vision.persistence.enabled` flag is gone, Postgres is the only store)
-**Build/test:** `./mvnw -B -pl storage/persistence -am test` — **205 tests** (up from 188, `Skipped: 0`,
+**Build/test:** `./mvnw -B -pl storage/persistence -am test` — **214 tests** (up from 205, `Skipped: 0`,
+docker reachable — measured directly via three consecutive foreground runs, docs/plans/active/
+VISUAL-GEO-V2-PLAN.md wave H5: `track_corrections` (excluded, `CorrectionStatus.NO_FIX` rows included) —
+`TrackCorrectionEntity`, `JpaTrackCorrectionRepository` implementing `TrackCorrectionRepositoryPort`
+(`contexts/vision-flight`), `V23__track_corrections.sql` — +9 `TrackCorrectionRepositoryTests` (incl. the
+frozen-schema lossy round trip: `rawPosition`'s altitude not persisted, `VisualFixEvidence`'s 14 fields
+reduced to 10 columns with 4 synthesized on read-back (8/6 before wave H8 widened `V23` in place — see
+"Wave H8" below) — see that entity's own javadoc; `deleteOlderThan`/
+`trimUsageToMostRecent` bulk-delete coverage; and `aTrackCorrectionInsertProducesNoDbAuditLogRow`, the
+D12 no-audit-trigger assertion, the same shape as `TrackTrailRepositoryTests`'s own); see "Database
+change audit" and this module's own entity/repository bullets below for the full account) — 205 tests (up from 188, `Skipped: 0`,
 docker reachable — measured directly via three consecutive foreground runs, docs/plans/active/
 FIXED-CAMERA-GEO-PLAN.md wave G3: `camera_poses` (audited)/`projected_track_points` (excluded) —
 `CameraPoseEntity`/`TrackPointEntity`, `JpaCameraPoseRepository`/`JpaTrackTrailRepository` implementing
@@ -88,16 +100,18 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 
 ## API surface
 
-**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (24
-`Jpa*Repository`/`Jpa*Store` classes, up from 22 — docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3
+**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (25
+`Jpa*Repository`/`Jpa*Store` classes, up from 24 — VISUAL-GEO-V2 wave H5 added
+`JpaTrackCorrectionRepository`; up from 22 — docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3
 added `JpaCameraPoseRepository`/`JpaTrackTrailRepository`; up from 21 — the database change audit wave
 added `JpaDbAuditLogRepository`, the one class in this package that implements no port at all, see
 "Database change audit" below; up from 19, docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 added
-`JpaVehicleProfileRepository`/`JpaFeatureRequirementRepository`), `mapper/` (22 entity↔domain mapper
-classes, up from 20 — wave G3 added `CameraPoseMapper`/`TrackPointMapper`, one per aggregate —
+`JpaVehicleProfileRepository`/`JpaFeatureRequirementRepository`), `mapper/` (23 entity↔domain mapper
+classes, up from 22 — wave H5 added `TrackCorrectionMapper`; up from 20 — wave G3 added `CameraPoseMapper`/`TrackPointMapper`, one per aggregate —
 extracted out of the repositories that used to inline `toEntity`/`toDomain` as private static methods),
-`config/` (`PersistenceUnit`, `JpaOperations`), `entity/` (24 classes, up from 22 — wave G3 added
-`CameraPoseEntity`/`TrackPointEntity`, see below). This module gets no
+`config/` (`PersistenceUnit`, `JpaOperations`), `entity/` (25 classes, up from 24 — VISUAL-GEO-V2 wave H5
+added `TrackCorrectionEntity`; up from 22 — wave G3 added `CameraPoseEntity`/`TrackPointEntity`, see
+below). This module gets no
 `controller/`, `dto/`, or `service/` package — it is a driven adapter.
 
 ### `com.drones.vision.adapter.persistence.repository`
@@ -125,6 +139,7 @@ extracted out of the repositories that used to inline `toEntity`/`toDomain` as p
 - `final class JpaDbAuditLogRepository` — constructor `(EntityManagerFactory)`. **The one class in this package implementing no port** — see "Database change audit" below for why: every row in `db_audit_log` is written by a Postgres trigger (`V21__db_audit_log.sql`), never by this class, and there is deliberately no domain port for it (infrastructure, not a concept any context module should import). Two read methods, matching the table's two indexes: `findRecent(int limit)` (newest overall) and `findRecentForRow(String tableName, String rowId, int limit)` (newest for one row) — both order by `occurredAt desc, id desc`, the `id` tiebreaker because two rows written inside the same transaction can share a timestamp down to the column's own precision.
 - `final class JpaCameraPoseRepository implements CameraPoseRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4, wave G3 — one calibrated camera pose per fixed asset; `save` is merge-by-`assetId` upsert (`asset_id` is the primary key, not synthetic — same "owning id doubles as the uniqueness constraint" shape as `JpaAssetImageRepository`), `deleteByAssetId` a find-then-remove, idempotent. This table **is** audited (`trg_audit_camera_poses`, `V22__fixed_camera_geo.sql`).
 - `final class JpaTrackTrailRepository implements TrackTrailRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7, wave G3 — the decimated ground-track breadcrumb trail a projected detection leaves behind; `save` always `persist`s a brand-new row (append-only, `TrackPoint` carries no id to merge by, same "always persist" shape as `JpaDetectionRepository`/`JpaTelemetryRepository`), `findByTrack` orders oldest→newest (`capturedAt asc, id asc`), `findLatest` newest-first bounded to one row. `trimToMostRecent`/`deleteOlderThan` are each one bulk delete rather than a fetch-then-delete round trip — `trimToMostRecent`'s "keep only the newest N" query reuses `JpaDetectionEventRepository#pruneOldest`'s delete-not-in-a-bounded-select shape, scoped to `(asset_id, track_id)`; both are safe to call every tick (no-op when nothing is over the cap/cutoff). This table is **excluded** from `db_audit_log` (high-volume machine output, `V22__fixed_camera_geo.sql`).
+- `final class JpaTrackCorrectionRepository implements TrackCorrectionRepositoryPort` — constructor `(EntityManagerFactory)`. docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7/D12, wave H5 — visual geolocation's corrected track; `save` always `persist`s a brand-new row (append-only, same "always persist" shape as `JpaTrackTrailRepository`), `findByUsage` orders oldest→newest (`frameAt asc, id asc`) bounded to `limit`, `findLatest` is `order by frameAt desc` + `setMaxResults(1)` scoped to `assetId`. `deleteOlderThan`/`trimUsageToMostRecent` are each one bulk delete, the same `JpaTrackTrailRepository#deleteOlderThan`/`#trimToMostRecent` shape, scoped by `frameAt`/`(usageId)` respectively. This table is **excluded** from `db_audit_log` (`V23__track_corrections.sql`).
 
 Every repository above composes a `com.drones.vision.adapter.persistence.config.JpaOperations`
 (one constructor argument, the module's `EntityManagerFactory`) and, except
@@ -176,7 +191,7 @@ no logic behind them — exactly the "empty ceremony" the plan's own guardrail w
 creating. Flagged here rather than silently decided, per this wave's brief.
 
 ### `com.drones.vision.adapter.persistence.config`
-- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password[, boolean seedDevUsers[, PersistencePoolSettings poolSettings]])`: builds one pooled `HikariDataSource` (docs/plans/active/SCALE-100-PLAN.md S3), migrates the schema through it with Flyway (`classpath:db/migration`, plus `classpath:db/seed/dev` when `seedDevUsers` is `true` — see the `db/seed/dev` schema entry below), then opens a Hibernate-native `EntityManagerFactory` over that same `DataSource` mapping every entity below — twenty-four as of wave G3 (`CameraPoseEntity`/`TrackPointEntity` added, docs/plans/active/FIXED-CAMERA-GEO-PLAN.md; twenty-two as of the database change audit wave before it, `DbAuditLogEntity`, see "Database change audit" below; this line previously read "nineteen," already stale before that wave — the running count was not kept in sync every prior wave either) (see "Connection pool" below and the "W1 done" narrative section near the end of this file for the `ignoreMigrationPatterns` story). The 3-arg and 4-arg overloads (`seedDevUsers` implicitly `false`, and/or `poolSettings` implicitly `PersistencePoolSettings.defaults()`) are kept so pre-existing callers (e.g. `PostgresDockerIntegrationTest`) don't need to change. The 5-arg overload is the one vision-app's wiring should move to, once it can bind `vision.persistence.pool.*` — see "Connection pool" below for the exact keys.
+- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password[, boolean seedDevUsers[, PersistencePoolSettings poolSettings]])`: builds one pooled `HikariDataSource` (docs/plans/active/SCALE-100-PLAN.md S3), migrates the schema through it with Flyway (`classpath:db/migration`, plus `classpath:db/seed/dev` when `seedDevUsers` is `true` — see the `db/seed/dev` schema entry below), then opens a Hibernate-native `EntityManagerFactory` over that same `DataSource` mapping every entity below — twenty-five as of wave H5 (`TrackCorrectionEntity` added, docs/plans/active/VISUAL-GEO-V2-PLAN.md; twenty-four as of wave G3, `CameraPoseEntity`/`TrackPointEntity` added, docs/plans/active/FIXED-CAMERA-GEO-PLAN.md; twenty-two as of the database change audit wave before it, `DbAuditLogEntity`, see "Database change audit" below; this line previously read "nineteen," already stale before that wave — the running count was not kept in sync every prior wave either) (see "Connection pool" below and the "W1 done" narrative section near the end of this file for the `ignoreMigrationPatterns` story). The 3-arg and 4-arg overloads (`seedDevUsers` implicitly `false`, and/or `poolSettings` implicitly `PersistencePoolSettings.defaults()`) are kept so pre-existing callers (e.g. `PostgresDockerIntegrationTest`) don't need to change. The 5-arg overload is the one vision-app's wiring should move to, once it can bind `vision.persistence.pool.*` — see "Connection pool" below for the exact keys.
 - `public final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas). **Public, not package-private** (widened from the pre-refactor package-private): the `repository` package it now serves lives in a sibling package, so cross-package visibility is required — see Gotchas for the full visibility-widening note.
 - `record PersistencePoolSettings(int maximumPoolSize, int minimumIdle, long connectionTimeoutMillis, long leakDetectionThresholdMillis)` (docs/plans/active/SCALE-100-PLAN.md S3) — the four HikariCP knobs `PersistenceUnit` needs, pulled out as a framework-free record so no magic number lives inline in `PersistenceUnit` itself (CLAUDE.md rule 1). Compact constructor validates `maximumPoolSize >= 1`, `0 <= minimumIdle <= maximumPoolSize`, `connectionTimeoutMillis > 0`, `leakDetectionThresholdMillis >= 0` (`0` means "disabled", Hikari's own convention). `static PersistencePoolSettings defaults()` returns `maximumPoolSize=20, minimumIdle=5, connectionTimeoutMillis=30_000, leakDetectionThresholdMillis=30_000` — sized for ~100 concurrent users on one instance, not a placeholder; each default's justification is on its own `DEFAULT_*` constant's javadoc. vision-app's `VisionPersistenceProperties` is the intended source of a non-default instance, via `vision.persistence.pool.*` (see "Connection pool" below) — this module never reads Spring config itself.
 - `final class ClosingDatasourceConnectionProvider extends org.hibernate.engine.jdbc.connections.internal.DatasourceConnectionProviderImpl` (docs/plans/active/SCALE-100-PLAN.md S3) — the one behavior it adds over its base class: overriding `stop()` to also close the configured `DataSource` if it is `Closeable` (which `HikariDataSource` is). The base class assumes a container-managed `DataSource` Hibernate never owns and must never close (its `stop()` is a no-op); that assumption is wrong here, since `PersistenceUnit.start` builds and *owns* the pool. Hibernate instantiates it via `hibernate.connection.provider_class` (a bare class name, reflection, no-arg constructor) and calls `configure(Map)` — never constructed directly by this module's own code outside tests.
@@ -272,6 +287,34 @@ creating. Flagged here rather than silently decided, per this wave's brief.
 - `V20__vehicle_profile_usage_link.sql` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O11 — "the flight passport") — `ALTER TABLE vehicle_profiles ADD COLUMN usage_id UUID, ADD COLUMN phase VARCHAR(20)` — both nullable, no backfill, same additive-only shape as V19; `vehicle_profiles` stays append-only (every `save` still inserts a new row, this migration only widens what a row may optionally carry). `phase` is deliberately **not** constrained to `PREFLIGHT`/`POSTFLIGHT` at the schema level — enforced once in `DefaultVehicleProfileService#captureSnapshot` (`contexts/vision-flight`), the same "the allowlist is domain code, not a UI/schema convention" precedent D9 already set for `ParameterTier`. New index `idx_vehicle_profiles_usage_phase (usage_id, phase, observed_at DESC)` backs `findByUsageAndPhase`'s "newest tagged row for this usage+phase" query.
 - `V21__db_audit_log.sql` (the database change audit — see that section below for the full picture) — `db_audit_log` (`id` `BIGINT GENERATED ALWAYS AS IDENTITY` PK — the one Postgres-generated, not Java-generated, id in this schema; `occurred_at` timestamptz `NOT NULL DEFAULT now()`; `table_name`/`row_id` text `NOT NULL`; `operation` `VARCHAR(6) CHECK (operation IN ('INSERT','UPDATE','DELETE'))`; `db_user` text `NOT NULL` — `session_user`, stamped by the trigger, never by the application; `old_row`/`new_row` jsonb, nullable; `changed_columns` jsonb, nullable). Plus one generic PL/pgSQL trigger function, `audit_row_change()`, and seventeen `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW` triggers attached to the control-plane tables enumerated in that section. New table + function + triggers, purely additive over V1-V20 — no existing table's own DDL changes, only its write behavior gains a side effect. Two indexes matching the two real read paths: `occurred_at` alone (newest overall) and `(table_name, row_id, occurred_at)` (newest for one row).
 - `V22__fixed_camera_geo.sql` (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §7, decisions D3/D4, wave G3) — two new tables, purely additive over V1-V21, no FK to any other table (same convention as the rest of this schema). `camera_poses` (`asset_id` UUID PK — one calibrated pose per fixed asset, not synthetic; `latitude`/`longitude` double precision `NOT NULL`, `altitude_meters` nullable double precision; `agl_meters`/`yaw_degrees`/`pitch_degrees`/`hfov_degrees` double precision `NOT NULL`; `target_layer_id` UUID nullable; `source` `VARCHAR(12) NOT NULL`; `rms_error_pixels` nullable double precision; `updated_at` timestamptz `NOT NULL`; `updated_by` UUID `NOT NULL`) — control-plane, one row per asset, **audited** via `trg_audit_camera_poses AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW EXECUTE FUNCTION audit_row_change()`, reusing V21's function rather than redefining it. `projected_track_points` (`id` `BIGINT GENERATED ALWAYS AS IDENTITY` PK — synthetic, same mechanism as `db_audit_log.id`; `asset_id` UUID `NOT NULL`; `track_id` BIGINT `NOT NULL`; `label` TEXT `NOT NULL`; `layer_id` UUID `NOT NULL`; `latitude`/`longitude` double precision `NOT NULL`, `altitude_meters` nullable double precision; `error_radius_meters` double precision `NOT NULL`; `captured_at` timestamptz `NOT NULL`) — high-volume append-only machine output, **deliberately excluded** from `db_audit_log` (see "Database change audit" below). Two indexes: `(asset_id, track_id, captured_at)` (`findByTrack`/`trimToMostRecent`'s access path) and `captured_at` alone (`deleteOlderThan`'s access path). **Gap in §7 as written, resolved rather than silently worked around**: the plan's own table sketch for both tables lists only `latitude, longitude` for position, omitting altitude — since both domain records' `position()` is a kernel `GeoPosition` whose `altitudeMeters` is a real (if projection-currently-unused) nullable component, dropping it would silently discard that value on every save/load round trip. Both tables carry a nullable `altitude_meters` column as a result; flagged here per this wave's own brief rather than fixed in silence.
+- `V23__track_corrections.sql` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, decision D12, wave H5)
+  — one new table, purely additive over V1-V22, no FK to any other table (same convention as the rest of
+  this schema). `track_corrections` (`id` `BIGINT GENERATED ALWAYS AS IDENTITY` PK — synthetic, the same
+  mechanism as `db_audit_log.id`/`projected_track_points.id`; `asset_id`/`usage_id` UUID `NOT NULL`;
+  `frame_at`/`computed_at` timestamptz `NOT NULL`; `status VARCHAR(12) NOT NULL` — `CorrectionStatus`;
+  `source VARCHAR(16) NOT NULL` — `CorrectionSource`; `latitude`/`longitude`/`altitude_meters` nullable
+  double precision — the corrected `GeoPosition` (`altitude_meters` present on principle even though
+  `TrackCorrection.position()` is always a 2-D homography fix in practice, same reasoning V22 gives for
+  `projected_track_points.altitude_meters`); `yaw_degrees`/`radius_meters`/`implied_agl_meters` nullable
+  double precision; `raw_latitude`/`raw_longitude` nullable double precision (`rawPosition`'s own altitude
+  is **not** persisted — the frozen-schema lossy round trip `TrackCorrectionEntity`'s javadoc documents);
+  `separation_meters`/`sigma_meters` nullable double precision; `divergent BOOLEAN NOT NULL`;
+  `divergent_since` nullable timestamptz; `region_id`/`tile_id TEXT NOT NULL` (empty string, not null, when
+  a `NO_FIX` row has none); `refusal TEXT NOT NULL` (empty string when not applicable); ten `NOT NULL`
+  evidence columns — `match_count`/`inlier_count INTEGER`, `inlier_ratio`/`rerank_margin`/
+  `reprojection_rms_px DOUBLE PRECISION`, `rectified BOOLEAN`, `sequence_spread_meters DOUBLE PRECISION`,
+  `sequence_updates INTEGER`, and (wave H8) `cell_calibrated`/`sequence_converged BOOLEAN` — the two
+  booleans that decide promotion, which used to be synthesized as `false` on read-back and so could never
+  answer "why is this row PROBABLE and not CONFIRMED?". `VisualFixEvidence` reduced from 14 fields to
+  these 10; see `TrackCorrectionEntity`'s own javadoc for exactly which 4 are synthesized on read-back
+  rather than persisted. The two H8 columns were added **by editing `V23` in place** rather than by a new
+  `V24`: `V23` had not shipped to any public/deployed database at that point, so no Flyway checksum
+  anywhere in the world had yet recorded the old text — a judgement recorded in the plan's §3.7 and in the
+  commit that made the change. High-volume append-only machine output — same `projected_track_points`/`detection_results`
+  posture — **deliberately excluded** from `db_audit_log` (D12; see "Database change audit" below). Three
+  indexes: `idx_track_corrections_usage_frame (usage_id, frame_at)` (`findByUsage`/`trimUsageToMostRecent`),
+  `idx_track_corrections_asset_frame (asset_id, frame_at DESC)` (`findLatest`), and
+  `idx_track_corrections_frame_at (frame_at)` alone (`deleteOlderThan`'s table-wide prune).
 
 ### `src/main/resources/db/seed/dev` — a second, conditional Flyway location
 
@@ -377,7 +420,7 @@ which columns changed as `changed_columns` — the "what changed?" question answ
 diffing two JSON blobs itself.
 
 **Included — the control-plane / configuration tables**, enumerated by reading every migration V1
-through V22, not guessed:
+through V23, not guessed:
 
 | Table | Migration | Character |
 |---|---|---|
@@ -416,6 +459,7 @@ nobody will ever read.
 | `db_audit_log` | V21 | this table itself — a trigger on itself would recurse |
 | `flyway_schema_history` | (Flyway) | schema-management bookkeeping, not application data |
 | `projected_track_points` | V22 | per-projected-detection breadcrumb stream — the same append-heavy, decimated-machine-output character as `detection_events`, pruned by `trimToMostRecent`/`deleteOlderThan` rather than ever hand-edited |
+| `track_corrections` | V23 | visual geolocation's corrected track — ~1 Hz per flying asset while `vision.geo.visual.enabled=true`, `CorrectionStatus.NO_FIX` rows included (a refusal is a measurement, not an error); the identical reasoning as `detection_results`/`telemetry_samples`/`projected_track_points`, pruned by `VisualGeoRunner` on its own cadence |
 
 **Coverage is tested against the live schema, not trusted from the migration's own comment.**
 `DbAuditLogCoverageTests` (Tests below) reads `information_schema.tables`/`pg_trigger` directly and
@@ -805,6 +849,22 @@ the cutoff, leaving newer points from every track in place.
 `projected_track_points.id` reports `is_identity = 'YES'` (the `GENERATED ALWAYS AS IDENTITY` column,
 not a Java-invented UUID) — proving `V22__fixed_camera_geo.sql` applied cleanly on top of every prior
 migration.
+
+`@Nested TrackCorrectionRepositoryTests` (9, docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, wave H5) —
+unknown asset gives an empty `findLatest` and an empty `findByUsage`; a `CONFIRMED` correction with every
+nullable populated (raw/corrected positions, divergence, confirmation fields, region/tile ids, full
+`VisualFixEvidence`) round trips exactly; a `NO_FIX` correction with every nullable absent round trips
+exactly (`CorrectionStatus.NO_FIX` is a persisted row, not a skipped one — O8); `findByUsage` returns
+**oldest-to-newest regardless of insert order**; `findLatest` returns the most recently *framed*
+correction across every usage for an asset; `trimUsageToMostRecent` keeps only the newest N rows for a
+usage and reports the deleted count, scoped to that usage only (a sibling usage's rows are untouched);
+`deleteOlderThan` removes corrections across every usage framed before the cutoff (not asserting an exact
+count — the same table-wide-delete-against-a-shared-instance caveat `TrackTrailRepositoryTests`'
+`deleteOlderThan` test documents); `aTrackCorrectionInsertProducesNoDbAuditLogRow` — D12's no-audit-trigger
+assertion, the same shape as `TrackTrailRepositoryTests`'s own. No separate `v23Migration...` schema test
+was added (unlike V19-V22's own precedent) — the 9 round-trip/prune cases above already exercise every
+column `V23__track_corrections.sql` defines; a schema-only smoke test would have added no coverage the
+round trips don't already give.
 
 `DevAccountSeedMigrationTest` (5, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1) — its own `@Testcontainers`
 class, deliberately **not** a `@Nested` class inside `PostgresDockerIntegrationTest`: a **non-static**
@@ -1898,3 +1958,24 @@ No magic numbers introduced: retention/point caps (`maxPoints` for `trimToMostRe
 
 **Scope discipline**: `contexts/vision-map` (the domain/port side, wave G2) was read-only for this wave
 and untouched — this wave only supplies the driven-adapter implementation of ports that already existed.
+
+## Wave H8 (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 4, §9.12) — done 2026-08-20
+
+`sequenceConverged` and `cellCalibrated` are the two `VisualFixEvidence` booleans that decide whether a
+fix is promoted from `PROBABLE` to `CONFIRMED`, and until this wave they were the two that never survived
+a round trip: `TrackCorrectionMapper#toDomain` synthesized both as `false`, so a stored `PROBABLE` row
+could not answer *why* it was not `CONFIRMED`. Three surgical changes, all additive: `V23__track_corrections.sql`
+gained `cell_calibrated`/`sequence_converged BOOLEAN NOT NULL` (edited **in place** — `V23` had not shipped
+to any deployed database, so no Flyway checksum existed to break; the judgement is recorded in the plan's
+§3.7 and in the commit); `TrackCorrectionEntity` gained the two matching `@Column` fields, two constructor
+parameters (immediately after `rectified`, mirroring the record's own field order) and two accessors, and
+its javadoc moved from "only 8 have a column" to "10 have a column, 4 synthesized"; `TrackCorrectionMapper`
+now writes and reads them instead of hard-coding `false`.
+
+`PostgresDockerIntegrationTest`'s `evidence()` fixture was flipped so **both** booleans are `true` on the
+round-tripped row — a fixture of `false, false` would pass identically against the old synthesize-`false`
+mapper and so would have proved nothing. `./mvnw -B -pl storage/persistence -am test`: **214/214 green,
+count unchanged** (this wave changed an existing assertion's fixture rather than adding a case), and
+`DbAuditLogCoverageTests` stayed green — `track_corrections` is still `EXCLUDED`, and two more columns on
+an already-excluded table do not change its classification.
+

@@ -18,7 +18,7 @@ import type * as Leaflet from 'leaflet';
 import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
 import { ThemeStore } from '../../../core/shell/theme-store';
 import { capitalizeLabel, formatConfidence, relativeTimeLabel } from '../../../core/events/events-logic';
-import type { GeoPosition, GeofenceZone } from '../../../core/api/models';
+import type { CorrectionResponse, GeoPosition, GeofenceZone } from '../../../core/api/models';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
 import { resolveZoneColors, zoneLayerStyle, FALLBACK_ZONE_COLORS, type ZoneColors } from '../../../core/geofence/geofence-logic';
 import {
@@ -28,7 +28,14 @@ import {
   trackTrailPoints,
 } from '../../../core/camera-geo/camera-geo-logic';
 import {
+  correctionRadiusMeters,
+  correctionToneKey,
+  geoChipLabel,
+  hasCorrectionFix,
+} from '../../../core/geo/geo-logic';
+import {
   MAP_LAYERS,
+  correctionDivIcon,
   droneDivIcon,
   effectiveMapLayerId,
   ensureLeafletStylesheet,
@@ -113,6 +120,20 @@ interface DrawingHandle {
 interface TrackHandle {
   dot: Leaflet.CircleMarker;
   trail: Leaflet.Polyline;
+  errorCircle: Leaflet.Circle;
+}
+
+/**
+ * One visual-geolocation correction's two Leaflet objects (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * §3.8, wave H6) — a marker (hollow ring + tick, never a filled dot, so it never reads as a second
+ * "real" aircraft) and its `radiusMeters` error circle, drawn **always**, the same D6 discipline
+ * `TrackHandle`'s own doc comment describes ("An 18 m estimate must never render like a 2 m one").
+ * No trail: a correction is "where the frame says you are right now", not a track with history —
+ * the corrected-track *history* is `features/replay`'s own polyline, read from a completely
+ * different endpoint (`VisionApi#geoCorrections(usageId)`), never this live layer.
+ */
+interface CorrectionHandle {
+  marker: Leaflet.Marker;
   errorCircle: Leaflet.Circle;
 }
 
@@ -218,6 +239,15 @@ export class TacticalMap {
    * deployment or a host that simply doesn't bind this input.
    */
   readonly tracks = input<readonly TacticalTrack[]>([]);
+
+  /**
+   * Visual-geolocation corrections (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) —
+   * hosts pass whatever they have latest-per-asset (the Fly cockpit's `GeoStore.latest()` wrapped
+   * in a single-element array; a fleet-wide host could pass one per asset). Empty on every host
+   * that hasn't wired it, or whenever `vision.geo.visual.enabled` is off — the whole layer is then
+   * silently absent, never an empty state (§3.8's own "Off state" row).
+   */
+  readonly corrections = input<readonly CorrectionResponse[]>([]);
 
   readonly selectedMarkId = input<string | undefined>(undefined);
 
@@ -381,6 +411,8 @@ export class TacticalMap {
   });
   protected readonly hasMarks = computed(() => this.shownMarks().length > 0);
   protected readonly hasTracks = computed(() => this.shownTracks().length > 0);
+  /** No layer-visibility filter — `CorrectionResponse` carries no `layerId` (asset-scoped, not layer-scoped); only rows with an actual fix are plottable (see `applyCorrections`). */
+  protected readonly hasCorrections = computed(() => this.corrections().some((c) => hasCorrectionFix(c)));
 
   // --- Leaflet state (plain fields — see the class doc's zoneless gotcha) -------------------------
 
@@ -393,6 +425,7 @@ export class TacticalMap {
   private readonly markHandles = new Map<string, Leaflet.Marker>();
   private readonly drawingHandles = new Map<string, DrawingHandle>();
   private readonly trackHandles = new Map<string, TrackHandle>();
+  private readonly correctionHandles = new Map<string, CorrectionHandle>();
   private draftLine: Leaflet.Polyline | null = null;
   private suppressAutoFitDisable = false;
   private lastFitFingerprint: string | null = null;
@@ -468,6 +501,7 @@ export class TacticalMap {
     effect(() => this.applyMarks(this.shownMarks(), this.selectedMarkId(), copLayerIds(this.layers())));
     effect(() => this.applyDrawings(this.shownDrawings(), this.mapColors()));
     effect(() => this.applyTracks(this.shownTracks(), this.mapColors()));
+    effect(() => this.applyCorrections(this.corrections(), this.mapColors()));
     effect(() => this.applyDraft(this.draft(), this.mapColors().trail));
 
     // Leaflet sizes itself from the DOM at creation time; expanding/collapsing resizes that DOM out
@@ -625,6 +659,7 @@ export class TacticalMap {
     this.applyMarks(this.shownMarks(), this.selectedMarkId(), copLayerIds(this.layers()));
     this.applyDrawings(this.shownDrawings(), this.mapColors());
     this.applyTracks(this.shownTracks(), this.mapColors());
+    this.applyCorrections(this.corrections(), this.mapColors());
   }
 
   /**
@@ -1104,6 +1139,74 @@ export class TacticalMap {
     }
   }
 
+  // --- Visual-geolocation corrections (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) --------
+
+  /**
+   * Draws each correction that has an actual fix (`hasCorrectionFix` — a `NO_FIX` row carries no
+   * `latitude`/`longitude` at all, so there is nothing to plot; the cockpit chip/popover are where a
+   * `NO_FIX` shows, verbatim, not here) as a hollow-ring-plus-tick marker (never a filled dot — §3.8's
+   * "visually secondary to the raw one") plus its `radiusMeters` error circle, drawn **always**, the
+   * same D6 discipline `applyTracks` follows: "An 18 m estimate must never render like a 2 m one".
+   * Keyed by `assetId` directly (unlike tracks' composite key) since §3.3 has no per-correction id and
+   * a correction is inherently one-per-asset.
+   */
+  private applyCorrections(corrections: readonly CorrectionResponse[], colors: MapColors): void {
+    const L = this.leaflet;
+    const map = this.map;
+    if (!L || !map) {
+      return;
+    }
+    const seen = new Set<string>();
+    for (const correction of corrections) {
+      if (!hasCorrectionFix(correction)) {
+        continue; // NO_FIX / not yet computed — nothing to plot at
+      }
+      seen.add(correction.assetId);
+      const point = L.latLng(correction.latitude as number, correction.longitude as number);
+      const divergent = correctionToneKey(correction) === 'warn';
+      const color = divergent ? colors.warn : colors.trail;
+      const radius = correctionRadiusMeters(correction);
+      const label = escapeHtml(geoChipLabel(correction));
+
+      let handle = this.correctionHandles.get(correction.assetId);
+      if (!handle) {
+        const marker = L.marker(point, {
+          icon: correctionDivIcon(L, correction.yawDegrees, divergent),
+          interactive: false,
+          keyboard: false,
+        }).addTo(map);
+        marker.bindTooltip(label, { permanent: true, direction: 'top', offset: [0, -8], className: 'geo-correction-label' });
+        const errorCircle = L.circle(point, {
+          radius,
+          color,
+          weight: 1,
+          opacity: 0.5,
+          fill: true,
+          fillColor: color,
+          fillOpacity: 0.12,
+          interactive: false,
+        }).addTo(map);
+        handle = { marker, errorCircle };
+        this.correctionHandles.set(correction.assetId, handle);
+      } else {
+        handle.marker.setLatLng(point);
+        handle.marker.setIcon(correctionDivIcon(L, correction.yawDegrees, divergent));
+        handle.marker.setTooltipContent(label);
+        handle.errorCircle.setLatLng(point);
+        handle.errorCircle.setRadius(radius);
+        handle.errorCircle.setStyle({ color, fillColor: color });
+      }
+    }
+    for (const assetId of [...this.correctionHandles.keys()]) {
+      if (!seen.has(assetId)) {
+        const handle = this.correctionHandles.get(assetId);
+        handle?.marker.remove();
+        handle?.errorCircle.remove();
+        this.correctionHandles.delete(assetId);
+      }
+    }
+  }
+
   // --- Drawings -------------------------------------------------------------------------------------
 
   private applyDrawings(drawings: readonly MapDrawing[], colors: MapColors): void {
@@ -1243,6 +1346,11 @@ export class TacticalMap {
     for (const id of [...this.drawingHandles.keys()]) {
       this.removeDrawing(id);
     }
+    for (const handle of this.correctionHandles.values()) {
+      handle.marker.remove();
+      handle.errorCircle.remove();
+    }
+    this.correctionHandles.clear();
     this.draftLine?.remove();
     this.draftLine = null;
     this.map?.remove();
