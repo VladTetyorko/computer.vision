@@ -29,17 +29,21 @@ import java.util.UUID;
  *       {@code raw_longitude} are stored, so {@code TrackCorrectionMapper#toDomain} always
  *       reconstructs a raw position with a {@code null} altitude, whatever the original
  *       telemetry sample carried.</li>
- *   <li>{@link com.drones.vision.kernel.VisualFixEvidence} carries 14 fields; only 8 have a
- *       column ({@code match_count}, {@code inlier_count}, {@code inlier_ratio}, {@code
- *       rerank_margin}, {@code reprojection_rms_px}, {@code rectified}, {@code
- *       sequence_spread_meters}, {@code sequence_updates}). {@code candidateCount}, {@code
- *       cellCalibrated}, {@code supportingFrames}, {@code baselineMeters}, {@code
- *       sequenceConverged} and {@code osmPrior} are not persisted; {@code
- *       TrackCorrectionMapper#toDomain} synthesizes inert placeholders for them (see that
- *       class's own javadoc) rather than failing {@link com.drones.vision.kernel.VisualFixEvidence}'s
- *       compact-constructor validation on read-back.</li>
+ *   <li>{@link com.drones.vision.kernel.VisualFixEvidence} carries 14 fields; 10 have a column
+ *       ({@code match_count}, {@code inlier_count}, {@code inlier_ratio}, {@code rerank_margin},
+ *       {@code reprojection_rms_px}, {@code rectified}, {@code cell_calibrated}, {@code
+ *       sequence_converged}, {@code sequence_spread_meters}, {@code sequence_updates}). {@code
+ *       candidateCount}, {@code supportingFrames}, {@code baselineMeters} and {@code osmPrior} are
+ *       not persisted; {@code TrackCorrectionMapper#toDomain} synthesizes inert placeholders for
+ *       them (see that class's own javadoc) rather than failing {@link
+ *       com.drones.vision.kernel.VisualFixEvidence}'s compact-constructor validation on read-back.
+ *       <p>{@code cellCalibrated}/{@code sequenceConverged} were placeholders too until H8. They
+ *       are the two booleans {@code DefaultTrackCorrectionService} reads to decide PROBABLE vs
+ *       CONFIRMED, so reading them back as {@code false} left a replayed correction unable to say
+ *       why it was only PROBABLE — against D5's "why is always one click away"
+ *       (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 4). They now have columns.</li>
  * </ul>
- * Both are consequences of the plan's own frozen contract, not omissions to fix here.
+ * The remaining losses are consequences of the plan's own frozen contract, not omissions to fix here.
  *
  * <p>No FK to any other table — same "no cross-entity foreign keys" convention as the rest of
  * this schema. <strong>Excluded</strong> from {@code db_audit_log} — see {@code
@@ -135,6 +139,12 @@ public class TrackCorrectionEntity {
     @Column(name = "rectified", nullable = false)
     private boolean rectified;
 
+    @Column(name = "cell_calibrated", nullable = false)
+    private boolean cellCalibrated;
+
+    @Column(name = "sequence_converged", nullable = false)
+    private boolean sequenceConverged;
+
     @Column(name = "sequence_spread_meters", nullable = false)
     private double sequenceSpreadMeters;
 
@@ -153,7 +163,8 @@ public class TrackCorrectionEntity {
                                   Double sigmaMeters, boolean divergent, Instant divergentSince, String regionId,
                                   String tileId, String refusal, int matchCount, int inlierCount,
                                   double inlierRatio, double rerankMargin, double reprojectionRmsPixels,
-                                  boolean rectified, double sequenceSpreadMeters, int sequenceUpdates) {
+                                  boolean rectified, boolean cellCalibrated, boolean sequenceConverged,
+                                  double sequenceSpreadMeters, int sequenceUpdates) {
         this.assetId = assetId;
         this.usageId = usageId;
         this.frameAt = frameAt;
@@ -181,6 +192,8 @@ public class TrackCorrectionEntity {
         this.rerankMargin = rerankMargin;
         this.reprojectionRmsPixels = reprojectionRmsPixels;
         this.rectified = rectified;
+        this.cellCalibrated = cellCalibrated;
+        this.sequenceConverged = sequenceConverged;
         this.sequenceSpreadMeters = sequenceSpreadMeters;
         this.sequenceUpdates = sequenceUpdates;
     }
@@ -295,6 +308,14 @@ public class TrackCorrectionEntity {
 
     public boolean rectified() {
         return rectified;
+    }
+
+    public boolean cellCalibrated() {
+        return cellCalibrated;
+    }
+
+    public boolean sequenceConverged() {
+        return sequenceConverged;
     }
 
     public double sequenceSpreadMeters() {

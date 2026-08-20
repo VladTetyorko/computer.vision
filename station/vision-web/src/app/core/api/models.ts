@@ -1872,6 +1872,11 @@ export type CorrectionSource = 'VISUAL_HEAVY';
  * no fix at `frameAt` (a telemetry gap — §4.5: "absence of evidence is not evidence", `separationMeters`
  * absent in the same case). `refusal` carries the first refused gate's name, verbatim, only on a
  * `NO_FIX` row (§3.8 cockpit popover: shown exactly as received, never paraphrased — the D5 rule).
+ *
+ * `cellCalibrated`/`sequenceConverged` are the two booleans the backend gate reads to choose PROBABLE
+ * over CONFIRMED; H8 gave them a column and a wire field so a correction can finally say why it was
+ * only PROBABLE (§9.11 defect 4). Optional here like every other evidence field, so a row served by an
+ * older backend simply reads `'—'` rather than a confident `'no'`.
  */
 export interface CorrectionResponse {
   readonly assetId: string;
@@ -1899,6 +1904,10 @@ export interface CorrectionResponse {
   readonly rerankMargin?: number;
   readonly reprojectionRmsPixels?: number;
   readonly rectified?: boolean;
+  /** Whether the winning cell has a real, self-calibrated accept threshold rather than a never-accept verdict. */
+  readonly cellCalibrated?: boolean;
+  /** Whether the sequence filter reported convergence under its own false-convergence gate. */
+  readonly sequenceConverged?: boolean;
   readonly sequenceSpreadMeters?: number;
   readonly sequenceUpdates?: number;
   readonly refusal?: string;

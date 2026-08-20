@@ -395,3 +395,45 @@ def test_delete_region_unsafe_id_returns_ok_false(tmp_path: Path):
     servicer = GeolocationServicer(data_dir=tmp_path, encoder=None, matcher_handle=None)
     ack = servicer.DeleteRegion(cv_pb2.RegionRef(region_id="../evil"), FakeContext())
     assert ack.ok is False
+
+
+def test_geo_evidence_reaches_the_wire_field_for_field_including_the_promotion_booleans():
+    """`cell_calibrated` and `sequence_converged` are the two booleans the Java gate reads to
+    choose PROBABLE over CONFIRMED. They were set here from H4 onward but nothing downstream
+    could see them (docs/plans/active/VISUAL-GEO-V2-PLAN.md 9.11 defect 4, fixed end-to-end in
+    H8), so this pins the servicer's own half of that chain rather than trusting it by reading."""
+    from cv_service.geo.localize import FrameEvidence
+    from cv_service.grpc.servicers import _geo_evidence_to_wire
+
+    evidence = FrameEvidence(
+        candidate_count=10,
+        match_count=174,
+        inlier_count=131,
+        inlier_ratio=0.75,
+        rerank_margin=0.41,
+        reprojection_rms_px=2.1,
+        rectified=True,
+        cell_calibrated=True,
+        supporting_frames=6,
+        baseline_meters=52.0,
+        sequence_converged=True,
+        sequence_spread_meters=38.0,
+        sequence_updates=11,
+        osm_prior=1.0,
+    )
+
+    wire = _geo_evidence_to_wire(evidence)
+
+    assert wire.cell_calibrated is True
+    assert wire.sequence_converged is True
+    assert wire.candidate_count == 10
+    assert wire.supporting_frames == 6
+    assert wire.baseline_meters == pytest.approx(52.0)
+    assert wire.inlier_ratio == pytest.approx(0.75)
+    assert wire.sequence_spread_meters == pytest.approx(38.0)
+    assert wire.sequence_updates == 11
+
+    # A default FrameEvidence must stay all-false/zero on the wire -- never a fabricated "yes".
+    bare = _geo_evidence_to_wire(FrameEvidence())
+    assert bare.cell_calibrated is False
+    assert bare.sequence_converged is False

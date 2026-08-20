@@ -10,6 +10,7 @@ import com.drones.vision.flight.domain.model.TrackCorrection;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UsageId;
@@ -185,6 +186,32 @@ class GeoCorrectionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.corrections", hasSize(1)))
                 .andExpect(jsonPath("$.corrections[0].usageId").value(usageId.value().toString()));
+    }
+
+    @Test
+    void forUsageSerializesTheTwoBooleansThatDecidePromotion() throws Exception {
+        // docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 4, H8: cellCalibrated and
+        // sequenceConverged are what DefaultTrackCorrectionService reads to choose PROBABLE over
+        // CONFIRMED, so an operator asking "why only PROBABLE?" must be able to see them.
+        AssetId assetId = AssetId.random();
+        UsageId usageId = UsageId.random();
+        when(assetUsageRepositoryPort.findById(usageId)).thenReturn(Optional.of(usage(usageId, assetId)));
+        when(assetService.details(any(VisibilityScope.class), eq(assetId))).thenReturn(mock(AssetDetails.class));
+        VisualFixEvidence evidence = new VisualFixEvidence(10, 174, 131, 0.75, 0.41, 2.1, true,
+                true, 6, 52.0, false, 38.0, 11, 1.0);
+        TrackCorrection probable = new TrackCorrection(assetId, usageId,
+                Instant.parse("2026-08-19T10:00:00Z"), Instant.parse("2026-08-19T10:00:01Z"),
+                CorrectionStatus.PROBABLE, CorrectionSource.VISUAL_HEAVY,
+                new GeoPosition(50.39411, 30.62870, null), 214.6, 18.4, 96.2, null, null, null, false, null,
+                "kyiv-pozniaky", "17/76687/44230", "", evidence);
+        when(trackCorrectionService.forUsage(eq(usageId), eq(GeoCorrectionController.DEFAULT_LIMIT),
+                any(VisibilityScope.class))).thenReturn(List.of(probable));
+
+        mockMvc.perform(get("/api/geo/corrections").param("usageId", usageId.value().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.corrections[0].status").value("PROBABLE"))
+                .andExpect(jsonPath("$.corrections[0].cellCalibrated").value(true))
+                .andExpect(jsonPath("$.corrections[0].sequenceConverged").value(false));
     }
 
     @Test

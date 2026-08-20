@@ -18,16 +18,20 @@ import com.drones.vision.kernel.VisualFixEvidence;
  * TrackPointMapper} precedent. Positions are flattened rather than nested.
  *
  * <h2>{@code toDomain}'s placeholders — the frozen-schema lossy round trip</h2>
- * See {@link TrackCorrectionEntity}'s own javadoc for why the V23 DDL persists only 8 of {@link
+ * See {@link TrackCorrectionEntity}'s own javadoc for why the V23 DDL persists 10 of {@link
  * VisualFixEvidence}'s 14 fields, and no {@code rawPosition} altitude. {@code toDomain}
  * reconstructs the missing fields with inert placeholders rather than fail {@link
  * TrackCorrection}/{@link VisualFixEvidence}'s own compact-constructor validation on read-back:
- * {@code candidateCount=0}, {@code cellCalibrated=false}, {@code supportingFrames=0}, {@code
- * baselineMeters=0.0}, {@code sequenceConverged=false}, {@code osmPrior=1.0} ({@code
- * VisualFixEvidence#osmPrior}'s own javadoc: {@code 1.0} is inert) — and {@code rawPosition}'s
- * {@code altitudeMeters} always reads back {@code null}. A row read back is therefore not
- * byte-identical to the one written; every field the wire contract (§3.3 {@code
+ * {@code candidateCount=0}, {@code supportingFrames=0}, {@code baselineMeters=0.0}, {@code
+ * osmPrior=1.0} ({@code VisualFixEvidence#osmPrior}'s own javadoc: {@code 1.0} is inert) — and
+ * {@code rawPosition}'s {@code altitudeMeters} always reads back {@code null}. A row read back is
+ * therefore not byte-identical to the one written; every field the wire contract (§3.3 {@code
  * CorrectionResponse}) actually serializes round-trips exactly.
+ *
+ * <p>{@code cellCalibrated}/{@code sequenceConverged} left this placeholder list in H8 — they are
+ * the two booleans that decide PROBABLE vs CONFIRMED, so substituting {@code false} on read-back
+ * was not inert at all (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 4). They now round-trip
+ * through real columns.
  */
 public final class TrackCorrectionMapper {
 
@@ -69,6 +73,8 @@ public final class TrackCorrectionMapper {
                 evidence.rerankMargin(),
                 evidence.reprojectionRmsPixels(),
                 evidence.rectified(),
+                evidence.cellCalibrated(),
+                evidence.sequenceConverged(),
                 evidence.sequenceSpreadMeters(),
                 evidence.sequenceUpdates());
     }
@@ -86,10 +92,10 @@ public final class TrackCorrectionMapper {
                 entity.rerankMargin(),
                 entity.reprojectionRmsPixels(),
                 entity.rectified(),
-                false, // cellCalibrated -- not persisted
+                entity.cellCalibrated(),
                 0, // supportingFrames -- not persisted
                 0.0, // baselineMeters -- not persisted
-                false, // sequenceConverged -- not persisted
+                entity.sequenceConverged(),
                 entity.sequenceSpreadMeters(),
                 entity.sequenceUpdates(),
                 INERT_OSM_PRIOR);

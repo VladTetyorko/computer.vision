@@ -98,8 +98,18 @@ describe('geoDetailRows', () => {
       { label: 'Inliers', value: '—', mono: true },
       { label: 'Inlier ratio', value: '—', mono: true },
       { label: 'Sequence spread', value: '—', mono: true },
+      { label: 'Cell calibrated', value: '—' },
+      { label: 'Sequence converged', value: '—' },
       { label: 'Region', value: '—' },
     ]);
+  });
+
+  it('shows the two promotion booleans as facts, never as a re-derived verdict', () => {
+    // §9.11 defect 4, H8: a PROBABLE row must be able to answer "why not CONFIRMED?".
+    const rows = geoDetailRows(correction({ status: 'PROBABLE', cellCalibrated: true, sequenceConverged: false }));
+    expect(rows).toContainEqual({ label: 'Cell calibrated', value: 'yes' });
+    expect(rows).toContainEqual({ label: 'Sequence converged', value: 'no' });
+    expect(rows).toContainEqual({ label: 'Status', value: 'PROBABLE' });
   });
 
   it('formats present values and appends refusal verbatim only on NO_FIX', () => {

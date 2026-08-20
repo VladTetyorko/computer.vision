@@ -49,6 +49,15 @@ CREATE TABLE track_corrections (
     rerank_margin          DOUBLE PRECISION NOT NULL,
     reprojection_rms_px    DOUBLE PRECISION NOT NULL,
     rectified              BOOLEAN NOT NULL,
+    -- H8, VISUAL-GEO-V2-PLAN.md 9.11 defect 4: these two booleans are what DefaultTrackCorrection-
+    -- Service reads to decide PROBABLE vs CONFIRMED (pythonEligible = sequenceConverged &&
+    -- cellCalibrated). They existed on the wire and in VisualFixEvidence from H1 but had no column,
+    -- so every replayed correction read back false and an operator could never see WHY a fix was
+    -- only PROBABLE -- exactly the "why is always one click away" rule D5 states. Added to this
+    -- migration in place rather than as a V24: V23 is not yet shipped anywhere public (introduced on
+    -- this same unmerged branch), so no deployed database has run it.
+    cell_calibrated        BOOLEAN NOT NULL,
+    sequence_converged     BOOLEAN NOT NULL,
     sequence_spread_meters DOUBLE PRECISION NOT NULL,
     sequence_updates       INTEGER NOT NULL
 );

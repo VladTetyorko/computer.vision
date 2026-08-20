@@ -42,6 +42,11 @@ import java.time.Instant;
  * @param rerankMargin           the re-rank margin over the second-best candidate
  * @param reprojectionRmsPixels  homography residual, pixels
  * @param rectified              whether IPM rectification was actually applied
+ * @param cellCalibrated         whether the winning cell has a real, self-calibrated accept threshold
+ *                               rather than a never-accept verdict — one of the two booleans that
+ *                               decide PROBABLE vs CONFIRMED (§9.11 defect 4, H8)
+ * @param sequenceConverged      whether the sequence filter reported convergence under its own
+ *                               false-convergence gate — the other half of that decision
  * @param sequenceSpreadMeters   the sequence filter's posterior 1-sigma spread, meters
  * @param sequenceUpdates        how many filter updates contributed
  * @param refusal                names the first gate that refused this correction; {@code null} iff a position is present
@@ -59,7 +64,8 @@ public record CorrectionResponse(
         String regionId, String tileId,
         int matchCount, int inlierCount, double inlierRatio,
         double rerankMargin, double reprojectionRmsPixels,
-        boolean rectified, double sequenceSpreadMeters, int sequenceUpdates,
+        boolean rectified, boolean cellCalibrated, boolean sequenceConverged,
+        double sequenceSpreadMeters, int sequenceUpdates,
         String refusal) {
 
     /**
@@ -98,6 +104,8 @@ public record CorrectionResponse(
                 evidence.rerankMargin(),
                 evidence.reprojectionRmsPixels(),
                 evidence.rectified(),
+                evidence.cellCalibrated(),
+                evidence.sequenceConverged(),
                 evidence.sequenceSpreadMeters(),
                 evidence.sequenceUpdates(),
                 emptyToNull(correction.refusal()));

@@ -80,9 +80,16 @@ export interface GeoFactRow {
 /**
  * Every §3.8-named popover fact, always rendered (an absent optional reads `'—'`, never a fabricated
  * number) — `status`, `separationMeters`, `radiusMeters`, `inlierCount`, `inlierRatio`,
- * `sequenceSpreadMeters`, `regionId`, plus the verbatim `refusal` string, appended only on a
- * `NO_FIX` row. `refusal` is never paraphrased or re-worded — the D5 rule this app already applies to
- * `core/camera-geo/camera-geo-logic.ts#calibrationSummary`'s own solve-refusal reasons.
+ * `sequenceSpreadMeters`, `cellCalibrated`, `sequenceConverged`, `regionId`, plus the verbatim
+ * `refusal` string, appended only on a `NO_FIX` row. `refusal` is never paraphrased or re-worded —
+ * the D5 rule this app already applies to `core/camera-geo/camera-geo-logic.ts#calibrationSummary`'s
+ * own solve-refusal reasons.
+ *
+ * `cellCalibrated`/`sequenceConverged` join the list in H8. They are the two booleans the backend's
+ * own gate reads to choose PROBABLE over CONFIRMED, and until H8 they reached neither the database
+ * nor the wire — so a `PROBABLE` row could never answer "why not CONFIRMED?" (§9.11 defect 4). They
+ * are shown as plain facts, never re-derived into a verdict here: this module shapes the server's
+ * answer, it does not second-guess it.
  */
 export function geoDetailRows(correction: CorrectionResponse): readonly GeoFactRow[] {
   const rows: GeoFactRow[] = [
@@ -96,6 +103,8 @@ export function geoDetailRows(correction: CorrectionResponse): readonly GeoFactR
       mono: true,
     },
     { label: 'Sequence spread', value: formatMeters(correction.sequenceSpreadMeters), mono: true },
+    { label: 'Cell calibrated', value: formatFlag(correction.cellCalibrated) },
+    { label: 'Sequence converged', value: formatFlag(correction.sequenceConverged) },
     { label: 'Region', value: correction.regionId ?? '—' },
   ];
   if (correction.status === 'NO_FIX' && correction.refusal) {
@@ -106,6 +115,14 @@ export function geoDetailRows(correction: CorrectionResponse): readonly GeoFactR
 
 function formatMeters(value: number | undefined): string {
   return value !== undefined ? `${value.toFixed(1)} m` : '—';
+}
+
+/** A wire boolean as a fact; `'—'` for absent, so "not reported" never reads as a confident `'no'`. */
+function formatFlag(value: boolean | undefined): string {
+  if (value === undefined) {
+    return '—';
+  }
+  return value ? 'yes' : 'no';
 }
 
 // --- TacticalMap corrected-track layer (§3.8 — the FIXED-CAMERA D6 rule, verbatim) ------------------

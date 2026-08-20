@@ -3044,8 +3044,15 @@ class PostgresDockerIntegrationTest {
         private final TrackCorrectionRepositoryPort repository =
                 new JpaTrackCorrectionRepository(entityManagerFactory);
 
+        /**
+         * {@code cellCalibrated}/{@code sequenceConverged} are deliberately set {@code true} here:
+         * H8 gave them real columns, so a round trip that still read {@code false} back would be the
+         * regression this fixture exists to catch (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11
+         * defect 4). {@code candidateCount}/{@code supportingFrames}/{@code baselineMeters} stay at
+         * the mapper's documented placeholder values, since those genuinely have no column.
+         */
         private VisualFixEvidence evidence() {
-            return new VisualFixEvidence(0, 174, 131, 0.75, 0.41, 2.1, true, false, 0, 0.0, false, 38.0, 11, 1.0);
+            return new VisualFixEvidence(0, 174, 131, 0.75, 0.41, 2.1, true, true, 0, 0.0, true, 38.0, 11, 1.0);
         }
 
         private TrackCorrection confirmed(AssetId assetId, UsageId usageId, Instant frameAt) {
