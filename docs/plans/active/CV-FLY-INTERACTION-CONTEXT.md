@@ -78,3 +78,12 @@ web 2371 tests + tsc + prod build. **W6 still open at close of this session:** f
 labelDenyFilter drop observed live, poses flowing without overlay). Known follow-ups: replay box
 overlay (plan §6.1), tracks-in-SSE (§6.2), `alerting` wire flag (§6.3), `DetectionExtrapolator#at()`
 now dead code (perception MODULE.md gotcha).
+
+**W6 smoke, first finding (2026-08-20):** owner observed boxes trailing moving objects — the
+deleted burn-in path had been velocity-projecting boxes onto each published frame
+(`DetectionExtrapolator.at`), a catching-up the client overlay never had. Fixed as wave W7
+(plan §7): projection ported to `detection-overlay-logic.ts` mirroring the server's tuning
+(track match / 0.15 gate / 800 ms cap-then-freeze), applied per redraw at the estimated
+on-screen instant. `a8f12b6a` docs + `d775c4de` web (2400 tests, tsc, prod build green).
+Known bound: under the 2 s poll fallback boxes freeze at the 800 ms cap — §6.2 (feed into SSE)
+is the real fix. W6 remains open: re-run the live smoke to confirm the trailing is gone.
