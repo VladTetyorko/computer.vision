@@ -544,7 +544,8 @@ CorrectionResponse = {
   "regionId":"kyiv-pozniaky", "tileId":"17/76687/44230",
   "matchCount":174, "inlierCount":131, "inlierRatio":0.75,
   "rerankMargin":0.41, "reprojectionRmsPixels":2.1,
-  "rectified":true, "sequenceSpreadMeters":38.0, "sequenceUpdates":11,
+  "rectified":true, "cellCalibrated":true, "sequenceConverged":true,
+  "sequenceSpreadMeters":38.0, "sequenceUpdates":11,
   "refusal":null
 }
 ```
@@ -734,6 +735,8 @@ CREATE TABLE track_corrections (
     rerank_margin          DOUBLE PRECISION NOT NULL,
     reprojection_rms_px    DOUBLE PRECISION NOT NULL,
     rectified              BOOLEAN NOT NULL,
+    cell_calibrated        BOOLEAN NOT NULL,   -- H8 amendment, see below
+    sequence_converged     BOOLEAN NOT NULL,   -- H8 amendment, see below
     sequence_spread_meters DOUBLE PRECISION NOT NULL,
     sequence_updates       INTEGER NOT NULL
 );
@@ -749,6 +752,21 @@ silently drops it on every round trip.
 **Numbering hazard:** V23 is next as of `feat/visual-geo-v2` (`32e4ec81`). If another branch claims
 V23 first, renumber at merge — Flyway will not.
 
+**Amendment — `cell_calibrated` / `sequence_converged`, added by H8 (2026-08-20).** This DDL as
+originally frozen persisted 8 of `VisualFixEvidence`'s 14 fields, and `TrackCorrectionMapper#toDomain`
+substituted `false` for the two missing booleans on read-back. That substitution was never inert:
+§4.3's own table makes `evidence.sequenceConverged && evidence.cellCalibrated` the Python-side
+condition for `CONFIRMED`, so every *replayed* correction silently claimed both had failed and a
+`PROBABLE` row could never answer "why not CONFIRMED?" — against D5 (§9.11 defect 4). Both now have
+columns and round-trip; 10 of 14 fields persist. `candidateCount`, `supportingFrames`,
+`baselineMeters` and `osmPrior` remain deliberate, documented placeholders.
+
+The two columns were added to `V23__track_corrections.sql` **in place rather than as a V24**: V23 was
+introduced on this same unmerged branch and has never run against any deployed database, so there is
+no history to preserve — the ordinary "never edit a shipped migration" rule does not apply, and a V24
+would leave a permanently misleading V23 in the repository. The numbering hazard above is unchanged.
+`track_corrections` stays classified **excluded** with no trigger; `DbAuditLogCoverageTests` green.
+
 ### 3.8 Web visual contract (`station/vision-web`)
 
 Frozen so H6 can build against a mock before H5 lands.
@@ -757,7 +775,7 @@ Frozen so H6 can build against a mock before H5 lands.
 |---|---|---|
 | `TacticalMap` (shared) | A second aircraft marker on the corrected position, visually **secondary** to the raw one (hollow ring + tick, not a filled dot), with its `radiusMeters` drawn as a circle **always** | An 18 m estimate must never render like a 2 m one. The FIXED-CAMERA D6 rule, verbatim |
 | Cockpit (`features/fly/cockpit`) | A **divergence chip** in the OSD row: `GEO ok` (neutral) / `GEO —` (no fix, dimmed) / `GEO Δ 84 m` (alarm state, warning token) | The chip is the alarm's only always-visible surface. Never red for `PROBABLE` |
-| Cockpit detail popover | `status`, `separationMeters`, `radiusMeters`, `inlierCount`/`inlierRatio`, `sequenceSpreadMeters`, `regionId`, and the verbatim `refusal` string on a `NO_FIX` | "Why" is always one click away (D5) |
+| Cockpit detail popover | `status`, `separationMeters`, `radiusMeters`, `inlierCount`/`inlierRatio`, `sequenceSpreadMeters`, `cellCalibrated`, `sequenceConverged` (both added by H8, §9.12), `regionId`, and the verbatim `refusal` string on a `NO_FIX` | "Why" is always one click away (D5) |
 | Replay (`features/replay`) | The corrected track as a second polyline over the raw one, plus a divergence band on the timeline where `divergent` was true | Reads `GET /api/geo/corrections?usageId=` — no new backend surface |
 | Region manager | A page under `features/geo` listing regions with status/tile count/holdout recall, an ingest form (bounds + zoom), and live progress | `NEVER_ACCEPT` is displayed as a first-class honest state, never hidden |
 | Off state | With the flag off every geo surface is **absent**, not empty — a 409 hides the whole feature | The FIXED-CAMERA G5 precedent |
@@ -1068,6 +1086,9 @@ Full `./mvnw -B verify` (only once no wave is red), `cv/cv-service` full suite, 
 build; ArchUnit and `DbAuditLogCoverageTests` green; every touched `MODULE.md` re-read for staleness;
 §9's tables reconciled against what shipped; every §3 amendment recorded inline with the wave that
 found it. **Commit:** `chore(geo): H8 -- the reactor is green and the doc tells the truth`
+
+**Executed 2026-08-20 — see §9.12 for the closure note** (what was fixed, final counts, what stays
+open). H7's four defects: three fixed here, the fourth (`infra/sitl`) carried to §9.12's open list.
 
 ---
 
@@ -1708,6 +1729,54 @@ rectification never runs (proven: `rectified` false 323/323 with #30 only, true 
 emitted, mean inlier ratio +36%). D6 and §1.3 freeze the #285/#265 sources without ever saying what a
 fixed-camera platform does, and the kernel's own `GeoProjection.aimFrom` already carries the
 `fallbackDepressionDegrees` knob that `GeoFixCodec` lacks.
+
+### 9.12 H8 closure (2026-08-20) — what was fixed, what is measured, what stays open
+
+**Fixed — four items, three of them product code.**
+
+| # | Defect (§9.11 / H7) | Fix | Test evidence |
+|---|---|---|---|
+| 1 | A cv-service bounce ended geolocation permanently and silently | `LatestFixSubscriber` latches termination (`onError` **and** `onComplete`); `ensureSessionOpen` treats a terminated subscriber as closed → `closeSafely` (which also clears `DefaultGeolocationSessionService`'s own open set) → reopen next tick. **No backoff coded**: the reopen runs through `GrpcPulledGeolocationPort#open`, already gated fail-fast by `CvChannelSupervisor#available()`, so `runner-interval-millis` *is* the retry cadence. The defect was in `station/vision-app`, not `cv/grpc` — the adapter's `failAndDrop` was already correct | New `VisualGeoRunnerTest` (2), **verified to fail against the pre-fix condition**; `GrpcPulledGeolocationPortTest` 11 → 12 with an in-process server that kills the first stream and serves the second |
+| 2 | `camera_pitch_deg` never crossed the wire for a gimbal-less aircraft | `GeoFixCodec` falls back to the airframe's `Attitude.pitchDegrees()` plus `vision.geo.visual.mount-pitch-degrees` (new, default `0.0`, bound in `VisionGeoVisualProperties`, threaded port → session → codec). Sign conversion still happens in the one place D6 names; a measured gimbal pitch is earth-frame so the offset never applies to it. Deliberately unclamped — see the §3.6 amendment | `GeoFixCodecTest` 11 → 13; the two-convention test extended to the fallback (level flight on a −36° mount → 54° from nadir; nose 10° down → 44°; default `0.0` → 90°), plus a gimbal-wins case and a nothing-reported case |
+| 3 | `infra/sitl` never reached a position estimate | **Not fixed** — out of H8's scope by instruction. Verified recorded in [VISUAL-GEO-V2-DEMO.md](VISUAL-GEO-V2-DEMO.md) §5.1 and its defect list item 3, and carried into "stays open" below so it is not lost | n/a |
+| 4 | `sequenceConverged`/`cellCalibrated` invisible | Survey found the wire half **already done** since H1 — `GeoEvidence` fields 8 and 11 are frozen in §3.1, cv-service sets both, `VisualFixEvidence` carries both, `GeoFixCodec` decodes both. **No proto change was needed**; no field number moved. The gap was the tail: `V23` gained `cell_calibrated`/`sequence_converged` (extended **in place** — V23 was introduced on this same unmerged branch and has never shipped publicly), `TrackCorrectionEntity`/`Mapper` stopped substituting `false` on read-back (10 of `VisualFixEvidence`'s 14 fields now persist, not 8), `CorrectionResponse` and therefore the byte-identical SSE payload carry both, and vision-web's model + the geo chip popover show them as plain facts | `PostgresDockerIntegrationTest`'s `TrackCorrection` fixture now sets both `true`, so the round trip fails if either stops persisting; `GeoCorrectionControllerTest` pins both JSON fields on a `PROBABLE` row; a new cv-service servicer test pins `_geo_evidence_to_wire` field-for-field including an all-default `FrameEvidence`; `geo-logic.spec.ts` covers the absent-dash and yes/no rows |
+
+**Final counts, all foreground, all green.**
+
+| Suite | Result |
+|---|---|
+| `./mvnw -B verify` (full reactor) | **BUILD SUCCESS**, 37/37 modules, **3961 tests, 0 failures, 0 errors, 2 skipped** |
+| ArchUnit | `ArchitectureTest` 14, `ContextArchitectureTest` 4 — green (inside `verify`) |
+| `DbAuditLogCoverageTests` | 2 green; `track_corrections` still classified **excluded**, no trigger |
+| `cv/cv-service` `pytest tests -q` | **1199 passed, 1 skipped** |
+| `cv/cv-service` `pytest spikes -q` | **19 passed** |
+| `station/vision-web` `npm test` | **2301 tests / 131 files passed** |
+| `station/vision-web` `npm run build` | succeeded; one **pre-existing** budget warning (`tactical-map.css` 9.86 kB vs an 8 kB budget, from H6 — untouched by H8) |
+
+§7's H8 row is met: the reactor is green across every module, and the D9 flag stays `false` by default,
+so a deployment that does not opt in is behaviourally identical to before this cycle.
+
+**Stays open — named, not silently dropped.**
+
+1. **`infra/sitl` produces no position estimate on this host** (demo §5.1). The EKF never converged, so
+   ArduPilot streamed `HEARTBEAT` and nothing else, and step 4's telemetry came from a scripted
+   `pymavlink` sender instead. Whether this is ArduPilot/CPU contention (host load ~5.6 on 12 cores) or
+   an `infra/sitl` misconfiguration was never determined. **Not an H8 fix by instruction**; it belongs
+   to `infra/`, and it is what makes item 2 below unmeasured.
+2. **Real footage with real logged telemetry remains unmeasured.** §9.9 amendment 5's fiction still
+   stands: every measurement to date pairs real frames with synthetic telemetry, or synthetic frames
+   with real telemetry, never both real. Fix 2 above is pinned by unit tests and by H7's own
+   #30-vs-#285 measurement, but its *end-to-end* effect on a fixed-camera airframe is still unproven.
+3. **GB4005 provisioning.** Every number in §9 was measured on the laptop. The Intel/OpenVINO host has
+   never run this pipeline, so §4.7's latency budget is unverified on the hardware it was written for.
+4. **§9.6's error-budget experiment** — the "assumed" rows still have no measured replacements.
+5. **§9.7's second-decode cost (R6)** — O3's "two decode loops" default has not been re-tested against
+   the ~15% CPU threshold that would justify folding it into one.
+6. **`EventType.POSITION_DIVERGENCE` has still never been emitted by a running system** (demo step 6).
+   The chain is deliberate at every link — no sequence convergence → no `CONFIRMED` → the alarm cannot
+   arm — so this is a consequence of the gate holding, not a defect. It stays unproven end-to-end.
+7. **`tactical-map.css` exceeds its 8 kB budget by 1.86 kB** (H6). A warning, not an error; noted so it
+   is not mistaken for H8 drift.
 
 ## 10. Open choices left to the implementer — each with a default
 

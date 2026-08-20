@@ -2367,14 +2367,17 @@ not the POST call).
 opt-in like every other asset-scoped topic. `vision-app`'s `NoopLiveUpdatePublisher` picks up the
 same port when `vision.live.enabled=false`.
 
-*Tests:* `GeoCorrectionControllerTest` (+8) — live/forUsage happy paths, GROUPS-at-edge scoping via
+*Tests:* `GeoCorrectionControllerTest` (+9) — live/forUsage happy paths, GROUPS-at-edge scoping via
 `AssetService#assets`, limit clamping (`0`/`10001` → `400`), unknown/out-of-scope usage → `404`, and
-D9 `409` on both routes. `GeoRegionControllerTest` (+13) — all four routes' happy paths,
+D9 `409` on both routes, and (wave H8) `forUsageSerializesTheTwoBooleansThatDecidePromotion`, a `PROBABLE`
+row asserting `cellCalibrated`/`sequenceConverged` reach the JSON as `true`/`false` rather than being
+dropped — the point of §9.11 defect 4 is that a `PROBABLE` row must be able to say *which* gate it failed. `GeoRegionControllerTest` (+13) — all four routes' happy paths,
 `canAdminister()` 403-vs-body-400 ordering on `POST`/`DELETE`, unknown region → `404` on `progress`,
 the 503 translation on a simulated transport failure, and D9 `409` on all four routes.
 
-**Before/after**: vision-api **718 → 739 (+21: `GeoCorrectionControllerTest` +8,
-`GeoRegionControllerTest` +13)**, measured as part of the same 27/27-module `BUILD SUCCESS` that
+**Before/after**: vision-api **718 → 740 (+22: `GeoCorrectionControllerTest` +9,
+`GeoRegionControllerTest` +13)** — the correction controller's ninth test arrived in wave H8 with
+`CorrectionResponse`'s two new promotion booleans (see §3.3/§9.12), measured as part of the same 27/27-module `BUILD SUCCESS` that
 landed this wave (real Postgres 16 container via Testcontainers; Docker ran, not skipped) —
 see the H5 commit (`feat(station): H5 -- persistence, REST, SSE, wiring for visual geolocation`)
 for the full cross-module figures (`adapter-persistence` 205→214, `vision-app` 237→241).

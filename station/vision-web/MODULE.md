@@ -82,8 +82,9 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
     `usageId`/`frameAt`/`computedAt`/`status`/`source`/`divergent` (§3.3's named non-optional exceptions), carrying
     `latitude?`/`longitude?`/`yawDegrees?`/`radiusMeters?`/`impliedAglMeters?`/`rawLatitude?`/`rawLongitude?`/
     `separationMeters?`/`sigmaMeters?`/`divergentSince?`/`regionId?`/`tileId?`/`matchCount?`/`inlierCount?`/
-    `inlierRatio?`/`rerankMargin?`/`reprojectionRmsPixels?`/`rectified?`/`sequenceSpreadMeters?`/`sequenceUpdates?`/
-    `refusal?`; `CorrectionsResponse {corrections}`. **D9's error envelope has no `detail`-vs-`message` ambiguity**
+    `inlierRatio?`/`rerankMargin?`/`reprojectionRmsPixels?`/`rectified?`/`cellCalibrated?`/`sequenceConverged?`/
+    `sequenceSpreadMeters?`/`sequenceUpdates?`/`refusal?` — the two boolean promotion gates added in wave H8
+    (§9.11 defect 4), which the backend already computed but never serialized; `CorrectionsResponse {corrections}`. **D9's error envelope has no `detail`-vs-`message` ambiguity**
     unlike D8's own — the frozen example (`{"error":"CONFLICT","message":"…"}`) is already this app's one real,
     shipped `ApiErrorBody` shape, so `isVisualGeoDisabledError` (`core/geo/geo-logic.ts`) only reads `message`. See
     `core/geo/**`'s own section below for the full read-model/derivation surface these types back.
@@ -723,7 +724,9 @@ landed concurrently** with this wave — built literally against the frozen cont
 - **Cockpit detail popover (§3.8, D5)** — `GeoFactRow {label, value, mono?}` (the same shape
   `core/camera-geo/camera-geo-logic.ts#FactRow` established for this app's `<dl class="facts">` convention),
   `geoDetailRows(correction)` — every named popover fact (status, separation, radius, inliers/ratio, sequence
-  spread, region), an absent optional always reading `'—'`, plus the `refusal` string **verbatim** on a `NO_FIX`
+  spread, **cell calibrated**, **sequence converged**, region), an absent optional always reading `'—'` (the two
+  booleans render as a flat `'yes'`/`'no'` fact via `formatFlag`, never re-derived into a verdict the backend
+  did not send — wave H8, §9.11 defect 4: a `PROBABLE` row now shows *which* gate it failed), plus the `refusal` string **verbatim** on a `NO_FIX`
   row — never paraphrased, the same D5 rule `camera-geo-logic.ts#calibrationSummary` already applies to a
   solve-refusal reason.
 - **`TacticalMap` corrected-track layer (§3.8, the D6 rule extended verbatim)** — `correctionRadiusMeters`
@@ -11967,3 +11970,24 @@ template binding above is type-checked).
   skew is real, and its copy ("waiting for the server to confirm") is still honest during it.
 - **No component-level spec for the switch itself.** This module tests pure logic, not templates
   (`rc-monitor.spec.ts` is the lone exception); the rule is fully covered where it lives.
+
+## Wave H8 (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 4, §9.12) — done 2026-08-20
+
+The two booleans that decide whether a visual fix is promoted from `PROBABLE` to `CONFIRMED` —
+`cellCalibrated` and `sequenceConverged` — were computed by cv-service and thrown away at every layer
+below the UI. The frontend half of closing that is two files: `core/api/models.ts` (`CorrectionResponse`
+gained `cellCalibrated?`/`sequenceConverged?`, sitting between `rectified?` and `sequenceSpreadMeters?`,
+matching the DTO's field order) and `core/geo/geo-logic.ts` (`geoDetailRows` gained a `Cell calibrated`
+and a `Sequence converged` row after `Sequence spread`, rendered through a new `formatFlag` helper —
+`'yes'`/`'no'`/`'—'`). They are plain facts, not a verdict: the popover never re-derives "should have
+been CONFIRMED" from them, the same never-paraphrase rule §3.8/D5 already imposes on `refusal`. No
+component, template, or stylesheet changed — the popover is data-driven off `geoDetailRows`, so two more
+rows needed no markup. `geo-logic.spec.ts` gained the two rows to its exhaustive `toEqual` list plus one
+new case asserting a `PROBABLE` row shows `yes`/`no` for the two gates.
+
+**Measured 2026-08-20** (both foreground, at the close of the wave): `npm test -- --watch=false` —
+**131 test files, 2301 tests, all passing**; `npm run build` — succeeded, with one pre-existing budget
+warning carried over from wave H6 (`tactical-map.css` 9.86 kB against an 8 kB budget), not introduced
+or worsened here. The "130 files / 2292 tests" figure in the H6 section above is that wave's own
+measurement and is left as written; this is the current number.
+

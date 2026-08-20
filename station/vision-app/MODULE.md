@@ -2811,7 +2811,11 @@ flag-gated bean.
 
 **`VisionGeoVisualProperties`** (`config/properties/`, `@ConfigurationProperties(prefix =
 "vision.geo.visual")`) — every `vision.geo.visual.*` key from §3.6, nested `Region`/`Tiles`/`Upload`/
-`Gate`/`Divergence` records, each with `@DefaultValue` matching the yaml exactly; conversion methods
+`Gate`/`Divergence` records, each with `@DefaultValue` matching the yaml exactly. Top-level scalars
+include `mountPitchDegrees` (`vision.geo.visual.mount-pitch-degrees`, `@DefaultValue("0.0")`, validated
+finite) — wave H8's fixed camera-mount pitch offset, added to the airframe's own pitch when the aircraft
+reports no gimbal attitude; it is passed to `GrpcPulledGeolocationPort`'s constructor and read only by
+`GeoFixCodec` (cv/grpc/MODULE.md, **Visual geolocation**). Also conversion methods
 onto `TrackCorrectionSettings`/`ReferenceRegionSettings`/`TileSourceSettings`/`GeoUploadSettings`/
 `GeoSessionConfig`, the application-layer settings records those services actually take.
 
@@ -2903,3 +2907,35 @@ wave, not scoped here.
 `UsageTracker` sits on `StreamService`'s own construction path, and forcing it while this bean's
 `StreamService` dependency is still being built is the exact circular reference
 `CvWiring#detectionDemandPort`'s javadoc records having tripped over once already.
+
+## Wave H8 (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11, §9.12) — done 2026-08-20
+
+**`VisualGeoRunner` — a terminated session is not an open one.** The H7 demo found that a cv-service
+bounce ended visual geolocation permanently for the rest of the flight. The adapter half was already
+right (`GeolocationSession#failAndDrop` removes itself from the port's map and closes its publisher
+exceptionally); the wedge was here, in this runner's own `openSessions` bookkeeping. Its reconcile tick
+returned early whenever an entry existed for the asset's current `streamId`, so a session whose fix
+stream had already terminated stayed "open" forever and `ensureSessionOpen` never reopened it.
+`LatestFixSubscriber` now records a `terminated` flag (set in **both** `onError` and `onComplete`),
+exposed as `terminated()`, and the early-return additionally requires `!terminated()`; a terminated —
+or re-pointed — session is closed through the existing `closeSafely` path before a fresh one is opened.
+
+No backoff is coded here on purpose: the reopen goes through `GrpcPulledGeolocationPort#open`, which is
+already supervisor-gated and throws `CvUnavailableException` synchronously while the channel is
+unhealthy, so `vision.geo.visual.runner-interval-millis` **is** the retry cadence and `CvChannelSupervisor`
+is the health condition. New `VisualGeoRunnerTest` (2 tests): one kills the real `SubmissionPublisher`
+with `closeExceptionally` and asserts a later tick reopens the session and that fixes reach
+`TrackCorrectionService#submit` again; the other is the regression guard that a healthy session is opened
+exactly once and never torn down tick after tick. Both were proved to be real guards by temporarily
+reverting the production condition and watching them fail.
+
+**`mount-pitch-degrees`.** `VisionGeoVisualProperties` gained the top-level `mountPitchDegrees` component
+(see API surface above) and `VisualGeoWiringConfiguration#pulledGeolocationPort` now passes
+`properties.mountPitchDegrees()` into `GrpcPulledGeolocationPort`'s new three-argument constructor;
+`application.yaml` carries the key with `0.0` and a comment explaining when an operator should set it.
+
+**Before/after**: vision-app **241 → 243 (+2: `VisualGeoRunnerTest`)**, measured inside the full-reactor
+`./mvnw -B verify` that closed the wave (37/37 modules, 3961 tests, 0 failures, 0 errors, 2 skipped;
+real Postgres 16 via Testcontainers, Docker ran). ArchUnit stayed green (`ArchitectureTest` 14,
+`ContextArchitectureTest` 4) — nothing here crosses a layer that was not already crossed.
+

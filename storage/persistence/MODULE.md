@@ -27,7 +27,8 @@ VISUAL-GEO-V2-PLAN.md wave H5: `track_corrections` (excluded, `CorrectionStatus.
 `TrackCorrectionEntity`, `JpaTrackCorrectionRepository` implementing `TrackCorrectionRepositoryPort`
 (`contexts/vision-flight`), `V23__track_corrections.sql` — +9 `TrackCorrectionRepositoryTests` (incl. the
 frozen-schema lossy round trip: `rawPosition`'s altitude not persisted, `VisualFixEvidence`'s 14 fields
-reduced to 8 columns with 6 synthesized on read-back — see that entity's own javadoc; `deleteOlderThan`/
+reduced to 10 columns with 4 synthesized on read-back (8/6 before wave H8 widened `V23` in place — see
+"Wave H8" below) — see that entity's own javadoc; `deleteOlderThan`/
 `trimUsageToMostRecent` bulk-delete coverage; and `aTrackCorrectionInsertProducesNoDbAuditLogRow`, the
 D12 no-audit-trigger assertion, the same shape as `TrackTrailRepositoryTests`'s own); see "Database
 change audit" and this module's own entity/repository bullets below for the full account) — 205 tests (up from 188, `Skipped: 0`,
@@ -99,16 +100,18 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 
 ## API surface
 
-**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (24
-`Jpa*Repository`/`Jpa*Store` classes, up from 22 — docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3
+**Package layout** (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (25
+`Jpa*Repository`/`Jpa*Store` classes, up from 24 — VISUAL-GEO-V2 wave H5 added
+`JpaTrackCorrectionRepository`; up from 22 — docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G3
 added `JpaCameraPoseRepository`/`JpaTrackTrailRepository`; up from 21 — the database change audit wave
 added `JpaDbAuditLogRepository`, the one class in this package that implements no port at all, see
 "Database change audit" below; up from 19, docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 added
-`JpaVehicleProfileRepository`/`JpaFeatureRequirementRepository`), `mapper/` (22 entity↔domain mapper
-classes, up from 20 — wave G3 added `CameraPoseMapper`/`TrackPointMapper`, one per aggregate —
+`JpaVehicleProfileRepository`/`JpaFeatureRequirementRepository`), `mapper/` (23 entity↔domain mapper
+classes, up from 22 — wave H5 added `TrackCorrectionMapper`; up from 20 — wave G3 added `CameraPoseMapper`/`TrackPointMapper`, one per aggregate —
 extracted out of the repositories that used to inline `toEntity`/`toDomain` as private static methods),
-`config/` (`PersistenceUnit`, `JpaOperations`), `entity/` (24 classes, up from 22 — wave G3 added
-`CameraPoseEntity`/`TrackPointEntity`, see below). This module gets no
+`config/` (`PersistenceUnit`, `JpaOperations`), `entity/` (25 classes, up from 24 — VISUAL-GEO-V2 wave H5
+added `TrackCorrectionEntity`; up from 22 — wave G3 added `CameraPoseEntity`/`TrackPointEntity`, see
+below). This module gets no
 `controller/`, `dto/`, or `service/` package — it is a driven adapter.
 
 ### `com.drones.vision.adapter.persistence.repository`
@@ -297,12 +300,17 @@ creating. Flagged here rather than silently decided, per this wave's brief.
   is **not** persisted — the frozen-schema lossy round trip `TrackCorrectionEntity`'s javadoc documents);
   `separation_meters`/`sigma_meters` nullable double precision; `divergent BOOLEAN NOT NULL`;
   `divergent_since` nullable timestamptz; `region_id`/`tile_id TEXT NOT NULL` (empty string, not null, when
-  a `NO_FIX` row has none); `refusal TEXT NOT NULL` (empty string when not applicable); eight `NOT NULL`
+  a `NO_FIX` row has none); `refusal TEXT NOT NULL` (empty string when not applicable); ten `NOT NULL`
   evidence columns — `match_count`/`inlier_count INTEGER`, `inlier_ratio`/`rerank_margin`/
   `reprojection_rms_px DOUBLE PRECISION`, `rectified BOOLEAN`, `sequence_spread_meters DOUBLE PRECISION`,
-  `sequence_updates INTEGER` — `VisualFixEvidence` reduced from 14 fields to these 8; see
-  `TrackCorrectionEntity`'s own javadoc for exactly which 6 are synthesized on read-back rather than
-  persisted. High-volume append-only machine output — same `projected_track_points`/`detection_results`
+  `sequence_updates INTEGER`, and (wave H8) `cell_calibrated`/`sequence_converged BOOLEAN` — the two
+  booleans that decide promotion, which used to be synthesized as `false` on read-back and so could never
+  answer "why is this row PROBABLE and not CONFIRMED?". `VisualFixEvidence` reduced from 14 fields to
+  these 10; see `TrackCorrectionEntity`'s own javadoc for exactly which 4 are synthesized on read-back
+  rather than persisted. The two H8 columns were added **by editing `V23` in place** rather than by a new
+  `V24`: `V23` had not shipped to any public/deployed database at that point, so no Flyway checksum
+  anywhere in the world had yet recorded the old text — a judgement recorded in the plan's §3.7 and in the
+  commit that made the change. High-volume append-only machine output — same `projected_track_points`/`detection_results`
   posture — **deliberately excluded** from `db_audit_log` (D12; see "Database change audit" below). Three
   indexes: `idx_track_corrections_usage_frame (usage_id, frame_at)` (`findByUsage`/`trimUsageToMostRecent`),
   `idx_track_corrections_asset_frame (asset_id, frame_at DESC)` (`findLatest`), and
@@ -1950,3 +1958,24 @@ No magic numbers introduced: retention/point caps (`maxPoints` for `trimToMostRe
 
 **Scope discipline**: `contexts/vision-map` (the domain/port side, wave G2) was read-only for this wave
 and untouched — this wave only supplies the driven-adapter implementation of ports that already existed.
+
+## Wave H8 (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 4, §9.12) — done 2026-08-20
+
+`sequenceConverged` and `cellCalibrated` are the two `VisualFixEvidence` booleans that decide whether a
+fix is promoted from `PROBABLE` to `CONFIRMED`, and until this wave they were the two that never survived
+a round trip: `TrackCorrectionMapper#toDomain` synthesized both as `false`, so a stored `PROBABLE` row
+could not answer *why* it was not `CONFIRMED`. Three surgical changes, all additive: `V23__track_corrections.sql`
+gained `cell_calibrated`/`sequence_converged BOOLEAN NOT NULL` (edited **in place** — `V23` had not shipped
+to any deployed database, so no Flyway checksum existed to break; the judgement is recorded in the plan's
+§3.7 and in the commit); `TrackCorrectionEntity` gained the two matching `@Column` fields, two constructor
+parameters (immediately after `rectified`, mirroring the record's own field order) and two accessors, and
+its javadoc moved from "only 8 have a column" to "10 have a column, 4 synthesized"; `TrackCorrectionMapper`
+now writes and reads them instead of hard-coding `false`.
+
+`PostgresDockerIntegrationTest`'s `evidence()` fixture was flipped so **both** booleans are `true` on the
+round-tripped row — a fixture of `false, false` would pass identically against the old synthesize-`false`
+mapper and so would have proved nothing. `./mvnw -B -pl storage/persistence -am test`: **214/214 green,
+count unchanged** (this wave changed an existing assertion's fixture rather than adding a case), and
+`DbAuditLogCoverageTests` stayed green — `track_corrections` is still `EXCLUDED`, and two more columns on
+an already-excluded table do not change its classification.
+
