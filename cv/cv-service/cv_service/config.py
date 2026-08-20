@@ -111,12 +111,16 @@ DEFAULT_TRACK_MOTION_ENGINE = "flow"
 # TRACKING-V2-PLAN wave C3: which `AppearanceExtractor` a stream gets when
 # its `TrackingConfig.appearance_engine_id` is blank (proto field 9, frozen
 # at C0). Measured (see MODULE.md "Wave C3" for the harness table): `cost`
-# is NOT the `CV_TRACK_ASSOCIATE_ENGINE` default -- `bytetrack` never
-# resolves an appearance extractor at all (it has no descriptor input to
-# feed, see `session.py`'s `_run_cost_associate`) -- so this default only
-# matters to an operator who has already opted into `CV_TRACK_ASSOCIATE_
-# ENGINE=cost`. `"off"` disables appearance evidence outright, same shape as
-# `DEFAULT_TRACK_MOTION_ENGINE`'s "off".
+# IS the `CV_TRACK_ASSOCIATE_ENGINE` default (`DEFAULT_TRACK_ASSOCIATE_
+# ENGINE` above) -- this default therefore matters on every stream out of
+# the box, not only one that has opted in. `bytetrack` never resolves an
+# appearance extractor at all (it has no descriptor input to feed, see
+# `session.py`'s `_run_cost_associate`), so this knob is inert for a stream
+# that has opted OUT of `cost` back to `bytetrack`. `"off"` disables
+# appearance evidence outright, same shape as `DEFAULT_TRACK_MOTION_ENGINE`'s
+# "off". (TRACK-IDENTITY-PLAN wave L2, docs/plans/active/TRACK-IDENTITY-
+# RESEARCH.md §2 D-D: this comment previously claimed the opposite -- fixed
+# as a stale-doc ride-along, no behaviour change.)
 DEFAULT_TRACK_APPEARANCE_ENGINE = "histogram"
 
 # TRACKING-V2-PLAN wave C3: `assign.CostAssociator`'s cost weights and gates
@@ -137,12 +141,46 @@ DEFAULT_TRACK_APPEARANCE_ENGINE = "histogram"
 # `test_appearance_is_ignored_entirely_when_it_is_not_weighted`).
 DEFAULT_TRACK_COST_WEIGHT_IOU = 1.0
 DEFAULT_TRACK_COST_WEIGHT_APPEARANCE = 0.5
-DEFAULT_TRACK_COST_WEIGHT_LABEL = 0.0
-# `min_iou=0.0`: no geometric gate by default -- `max_cost` and, once an
-# appearance engine is active, `max_appearance` are what bound a match; a
-# strict `min_iou` would forbid exactly the wide-displacement case ego-motion
-# compensation exists to recover (a warped candidate whose IoU with the true
-# box is still imperfect right after a stall).
+# TRACK-IDENTITY-PLAN wave L2 (`docs/plans/active/TRACK-IDENTITY-PLAN.md`):
+# 0.0 -> 0.3. A SOFT penalty, never a hard gate -- a label gate would split
+# a track on every residual flip, the exact failure TRACKING-PLAN R9 set 0
+# to avoid, and wave L1's election already gives `Candidate.label` a stable
+# operand (`session.py`'s `_run_cost_associate` passes `track.elected_label`,
+# not the raw per-frame one) so the penalty compares a hysteresis-gated
+# opinion against the fresh detection's raw label, not noise against noise.
+# `_labels_compatible` (`assign.py`) still passes an unknown/composite-prefix
+# label pair through for free, so this only ever fires on a genuine,
+# elected-label disagreement. Measured, not merely reasoned (`BASELINE.md`'s
+# 2026-08-20 L2 section has the full trial table): isolated via
+# `CV_TRACK_COST_GATE_MIN_IOU=0 CV_TRACK_COST_GATE_MAX_COST=inf` against the
+# other two L2 knobs, this alone reproduces all 30 `tools/trackeval` rows
+# byte-identical to the pre-L2 baseline -- the harness has no scenario where
+# two live candidates compete for one detection under conflicting elected
+# labels, so the penalty is provably inert on every pinned scenario while
+# still tightening the real multi-object case it targets.
+DEFAULT_TRACK_COST_WEIGHT_LABEL = 0.3
+# TRACK-IDENTITY-PLAN wave L2: measured and REVERTED, stays `0.0`. The plan
+# proposed 0.05 ("a track may no longer absorb a detection it doesn't even
+# touch"), reasoning ego-motion warping would keep a genuine match's IoU
+# comfortably clear of it. Measured instead: isolating this knob alone (every
+# other L2 knob held at its OLD default) against the full `tools/trackeval`
+# suite regresses 4 of 15 scenarios' ASSOCIATE row -- `latency` (`IDSW`
+# 0->16, `recov%` 100->0, `life_mean` 52.0->2.9), `occlusion` and `nonlinear`
+# (each `recov%` 100->0, an `IDSW` appears where there was none), `tiny_fast`
+# (`IDSW` 2->4) -- at EVERY tested value from `0.05` down to `0.0001`, with
+# identical numbers at every step: the true IoU between the predicted
+# candidate and the reappearing/lagging/reversing target in each of these
+# four rows is exactly `0.0`, not merely small, so no strictly-positive gate
+# survives them (`nonlinear`'s own `BASELINE.md` writeup already named the
+# mechanism: constant-velocity extrapolation runs the WRONG WAY across an
+# occlusion/reversal, landing the prediction with zero overlap on the true
+# box). This IS the exact "wide-displacement case ego-motion compensation
+# exists to recover" the pre-L2 comment on this line named -- confirmed by
+# measurement to be a real, currently load-bearing behaviour, not a
+# hypothetical worry, so the knob reverts per the plan's own "a measured
+# retreat beats an unmeasured win" clause rather than shipping a harder gate
+# on an unmeasured guess. `max_cost` below is this wave's answer to the same
+# goal (bounding a worst-of-everything match) without a hard per-axis floor.
 DEFAULT_TRACK_COST_GATE_MIN_IOU = 0.0
 # Above this Hellinger distance ([0, 1], 1 = no match) an appearance-weighted
 # pair is forbidden outright rather than merely penalised -- tuned so two
@@ -150,9 +188,23 @@ DEFAULT_TRACK_COST_GATE_MIN_IOU = 0.0
 # even at moderate geometric ambiguity, while a colour shift from motion blur
 # or exposure does not.
 DEFAULT_TRACK_COST_GATE_MAX_APPEARANCE = 0.6
-# No cap beyond the two gates above -- `AssignGates`' own default (`assign.
-# FORBIDDEN`, i.e. "never accept purely on cost, gates decide").
-DEFAULT_TRACK_COST_GATE_MAX_COST = float("inf")
+# TRACK-IDENTITY-PLAN wave L2: inf -> 1.5, a starting point per the plan,
+# kept as-is (no further tuning needed -- see below). The full cost range
+# under the defaults above is `1.0*(1-iou) + 0.5*appearance + 0.3*label <=
+# 1.8`; 1.5 forbids only a pairing that is bad on EVERY axis at once
+# (near-zero overlap, near-maximum appearance distance, AND a label
+# disagreement) -- the "worst of everything" pairing a pure cost matrix with
+# no ceiling would otherwise still accept as merely expensive. Measured, not
+# merely reasoned (`BASELINE.md`'s 2026-08-20 L2 section has the full trial
+# table): isolated via `CV_TRACK_COST_WEIGHT_LABEL=0
+# CV_TRACK_COST_GATE_MIN_IOU=0` against the other two L2 knobs, and again
+# combined with `DEFAULT_TRACK_COST_WEIGHT_LABEL=0.3` at `min_iou=0.0` (this
+# file's own final L2 configuration), both produce the identical 30-row
+# `tools/trackeval` table as the pre-L2 baseline -- no pinned scenario's cost
+# ever approaches 1.5, so the ceiling is inert on every scenario measured
+# today and stands as a forward guard against the failure it targets, not
+# (yet) a demonstrated fix for one.
+DEFAULT_TRACK_COST_GATE_MAX_COST = 1.5
 # The high/low confidence split for `CostAssociator`'s two-stage match
 # (`assign.py`'s own docstring: "high-confidence targets first, then low").
 # Matches `engines/bytetrack.py`'s own `_TRACK_HIGH_THRESH` so `cost` and
