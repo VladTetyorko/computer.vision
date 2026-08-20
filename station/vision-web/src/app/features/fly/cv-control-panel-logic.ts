@@ -12,6 +12,7 @@ import type {
   UpdateStreamConfigRequest,
 } from '../../core/api/models';
 import type { PipelineSettings } from '../../core/settings/settings-store';
+import { HIDDEN_CLASS_TRUTH } from '../../core/detections/detections-logic';
 
 /**
  * Pure, Angular-free logic behind `cv-control-panel.ts` (docs/plans/done/CV-CONTROL-PLAN.md Wave E) — the Fly
@@ -108,15 +109,23 @@ export function recentObservedLabels(
 }
 
 /**
- * The full chip checklist: every currently-selected label (so toggling one off never makes it
- * disappear from the list) unioned with every recently-observed label (so the operator can prune
- * what is actually showing up), sorted for a stable, scannable order.
+ * The full chip checklist: every currently-selected (`labelFilter`) or currently-hidden
+ * (`labelDenyFilter`) label — so toggling one off, or hiding one, never makes it disappear from the
+ * list — unioned with every recently-observed label (so the operator can prune what is actually
+ * showing up), sorted for a stable, scannable order.
+ *
+ * The `labelDenyFilter` half matters for the same reason the strip's own candidate set needs it
+ * (`shared/player/detections-strip-logic.ts#stripChips`): a denied label is dropped server-side
+ * pre-fan-out (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2), so it can never reappear in `observed`
+ * once hidden — without unioning `labelDenyFilter` in directly, a hidden chip would vanish from this
+ * checklist the moment its last visible detection aged out, with no way back to un-hide it.
  */
 export function chipCandidates(
   labelFilter: readonly string[],
+  labelDenyFilter: readonly string[],
   observed: readonly string[],
 ): readonly string[] {
-  const set = new Set([...labelFilter, ...observed]);
+  const set = new Set([...labelFilter, ...labelDenyFilter, ...observed]);
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 
@@ -147,63 +156,31 @@ export function classesOnScreenCount(
   return shown.size;
 }
 
-/**
- * Toggles one chip in a class-filter array — the pure array-math primitive behind both this
- * panel's staged edits (`cv-control-panel.ts#toggleChip`, via {@link stagedLabelSeed}) and, before
- * this task, an immediate PATCH. The math is identical either way:
- *
- * - Starting from `[]` ("all"): unchecking `label` narrows to every *other* known candidate — the
- *   only way to express "all but this one" on the wire is to enumerate the rest.
- * - Starting from a concrete list: toggles `label`'s membership normally.
- * - Unchecking the last remaining explicit label produces `[]` again — the wire contract has no way
- *   to express "show nothing" (empty is defined as "all").
- *
- * **No longer an "immediate-apply" edge case, per the staged-selection rework** (direct user
- * request): this array reverting to `[]` used to matter because every click applied straight to the
- * wire, so unchecking the last filtered class made every class silently reappear on screen
- * mid-session with no warning — worth calling out as an "honest edge case, not hidden" in this
- * function's own doc comment. Staging removes the surprise, not the math: the same `[]` result now
- * only ever lands in `cv-control-panel.ts#pendingLabels`, visible as a pending edit until
- * `cv-control-panel.ts#submitLabelFilter` is actually clicked, and {@link submitLabelFilterButtonText}
- * states outright that submitting an empty selection shows every class again. This function and its
- * existing spec cases are otherwise unchanged — reused as the staging primitive, not superseded.
- */
-export function toggleLabelChip(
-  labelFilter: readonly string[],
-  label: string,
-  allCandidates: readonly string[],
-): readonly string[] {
-  if (labelFilter.length === 0) {
-    return allCandidates.filter((candidate) => candidate !== label);
-  }
-  return labelFilter.includes(label)
-    ? labelFilter.filter((entry) => entry !== label)
-    : [...labelFilter, label];
-}
-
-// --- Staged class-filter selection (direct user request: "Seen now" becomes staged selection +
-// Submit) --------------------------------------------------------------------------------------
-// `labelFilter` used to be edited immediately — one debounced PATCH per chip click. With many
-// classes on screen that produced a confusing first-click surprise (the whole reason
-// `FIRST_HIDE_HINT` below exists) and a PATCH burst on a fast run of clicks. The panel now stages
-// edits in its own `pendingLabels` signal (`cv-control-panel.ts`) — `null` mirrors the applied
-// filter (no edit in progress), a concrete array (possibly `[]`) is unapplied work waiting on an
-// explicit Submit. Both class-filter surfaces this panel owns — tier 0's capped "Seen now" chips
-// and Tune's uncapped full checklist — read and write through this one signal and the same handlers
-// (`toggleChip`/`addClass`/`fillPreset`/`clearLabelFilter`), so the two surfaces can never commit
-// the one wire field under two different rules. This changes nothing about the wire contract:
-// submitting still means "PATCH labelFilter as-is", and an empty submission still means "every
-// class" (`PipelineConfig`'s own "empty means all" javadoc) — see `HIDDEN_CLASS_TRUTH`, unchanged,
-// for what a *non-empty* submission means server-side (dropped everywhere, not just the screen, no
-// CPU saved — the model still scans for everything regardless of this selection).
+// --- Staged class-filter selection (bulk-edit paths only, wave W5) ------------------------------
+// `labelFilter` (the allowlist) is edited only through the bulk paths below — the preset fill
+// ({@link applyPreset}), free-text add ({@link addLabel}), and Clear-all — never by a per-chip
+// click anymore (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3: "allowlist stays only as a model-intent
+// seed, preset/seeding paths unchanged"). The panel stages these edits in its own `pendingLabels`
+// signal (`cv-control-panel.ts`) — `null` mirrors the applied filter (no edit in progress), a
+// concrete array (possibly `[]`) is unapplied work waiting on an explicit Submit — and only
+// {@link submitLabelFilterButtonText}'s own `submitLabelFilter()` caller actually writes the wire,
+// once. This changes nothing about the wire contract: submitting still means "PATCH labelFilter
+// as-is", and an empty submission still means "every class" (`PipelineConfig`'s own "empty means
+// all" javadoc).
+//
+// A per-chip click (both tier 0's "Seen now" and Tune's full checklist) is a *different*, unstaged
+// action as of wave W5: it writes `labelDenyFilter` immediately, via `toggleLabelDeny`
+// (`core/detections/detections-logic.ts`) — see `cv-control-panel.ts#toggleChip`. The checklist's own
+// "checked" state (`isLabelChecked` below, combined with the deny-list at the call site) reflects the
+// honest combined truth of both gates, even though only one of them is ever writable from a chip
+// click.
 
 /** The list any staged edit builds on top of: the staged selection itself once one exists, or the
  *  currently applied filter on the very first edit this panel session. Every staging entry point —
- *  chip toggle ({@link toggleLabelChip}), the preset fill ({@link applyPreset}), free-text add
- *  ({@link addLabel}), and the checked/selected-first-sort reads that decide what the checklist
- *  looks like — goes through this one function first, so "seed once from what's really applied,
- *  then keep building on the stage" can never drift between call sites or between the two surfaces
- *  that share it. */
+ *  the preset fill ({@link applyPreset}), free-text add ({@link addLabel}), and the checked/
+ *  selected-first-sort reads that decide what the checklist looks like — goes through this one
+ *  function first, so "seed once from what's really applied, then keep building on the stage" can
+ *  never drift between call sites. */
 export function stagedLabelSeed(
   pending: readonly string[] | null,
   effective: readonly string[],
@@ -327,16 +304,19 @@ export function applyPreset(
 // --- PATCH body construction (docs/plans/done/CV-CONTROL-PLAN.md §2-3's frozen contract) -----------------
 
 /**
- * The hot-knob patch body — confidence/fps/labelFilter/detectionEnabled, **never** `model` (a model
- * change is always its own separate call, {@link buildModelChangePatch}, so a slider drag or a chip
- * toggle can never accidentally trigger a re-arm). Sent on every debounced hot-knob edit while a
- * stream is running.
+ * The hot-knob patch body — confidence/fps/labelFilter/labelDenyFilter/detectionEnabled, **never**
+ * `model` (a model change is always its own separate call, {@link buildModelChangePatch}, so a
+ * slider drag or a chip toggle can never accidentally trigger a re-arm). Sent on every debounced
+ * hot-knob edit while a stream is running — includes `labelDenyFilter` since wave W5 (docs/plans/
+ * active/CV-CLEAN-FEED-PLAN.md D-2) so a per-chip hide/unhide click reaches the wire the same way
+ * every other hot knob already does.
  */
 export function buildHotKnobPatch(settings: PipelineSettings): UpdateStreamConfigRequest {
   return {
     confidenceThreshold: settings.confidenceThreshold,
     inferenceFps: settings.inferenceFps,
     labelFilter: settings.labelFilter,
+    labelDenyFilter: settings.labelDenyFilter,
     detectionEnabled: settings.detectionEnabled,
   };
 }
@@ -378,29 +358,19 @@ export function perfHint(openVocabSelected: boolean): string {
     : `Inference rate and detection on/off are the CPU-budget controls — the model still computes every class every frame regardless of the filter. ${HIDDEN_CLASS_TRUTH}`;
 }
 
-// --- Honest, repeated-verbatim copy (docs/plans/active/CV-UX-RESEARCH.md §4.3/§4.4) ------------
-// Two distinct sentences, each with its own job — kept as named constants rather than inlined in
-// the template so both surfaces that show them (`cv-control-panel.html`'s "Seen now" tier-0 section
-// and its Tune classes section) say the exact same words, and so `perfHint`'s closed-set branch
-// above can fold {@link HIDDEN_CLASS_TRUTH} in without duplicating the sentence a third time.
-
-/** What actually happens when a class is hidden — the corrected claim from §4.3, shown once at
- *  rest ("Seen now") and once in Tune's full checklist. Deliberately does **not** say "hiding
- *  classes tells the model what to look for" either — §4.3 names that promise false too (that
- *  would be text-prompted YOLOE, an explicit CV-CONTROL-PLAN non-goal); this states only the two
- *  true facts: dropped everywhere, no speed change. */
-export const HIDDEN_CLASS_TRUTH =
-  "Hidden classes are dropped everywhere — screen, alerts, recording. The model still scans for everything; hiding classes doesn't make it faster.";
-
-/** The one-time hint shown the first time an operator narrows the class selection from the tier-0
- *  "Seen now" chips (§4.4) — names the wire's one sharp edge (`labelFilter` is an allowlist) before
- *  they submit it, not after: since the staged-selection rework (direct user request), narrowing no
- *  longer applies on the click that triggers this hint, so the wording states the real consequence
- *  of *submitting* a non-empty selection rather than describing something that already happened.
- *  Dismissed once, persisted, never shown again — see `cv-control-panel.ts`'s own
- *  `firstHideHintDismissed` field. */
-export const FIRST_HIDE_HINT =
-  "Selecting classes builds a whitelist for this stream — once you submit it, only the classes you picked will appear, even if a different class is newly detected later. Clear the selection and submit to go back to every class.";
+// --- Honest, repeated-verbatim copy (docs/plans/active/CV-UX-RESEARCH.md §4.3, CV-CLEAN-FEED-PLAN.md
+// D-3 wave W5) -------------------------------------------------------------------------------------
+// {@link HIDDEN_CLASS_TRUTH} now lives in `core/detections/detections-logic.ts` (imported above) —
+// both this panel's class-chip checklist and the detections strip's one-click hide
+// (`shared/player/detections-strip.ts`, in `shared/`, which cannot import from `features/fly/`) need
+// the identical sentence, so it moved to the neutral home both can reach.
+//
+// The old `FIRST_HIDE_HINT` (a one-time warning that clicking a chip built an allowlist) is gone
+// along with the allowlist-complement toggle it explained: a chip click now writes the deny-list
+// (`toggleLabelDeny`, `core/detections/detections-logic.ts`), which has no "first click surprises
+// you" edge case at all — an empty deny-list unambiguously means "deny nothing", so there is nothing
+// to warn about before the first click the way there was for `labelFilter`'s "empty means all"
+// allowlist.
 
 // --- Tracking engine (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -----------------
 // The Tracking section's own patch builders, roster filter, and flow-strip formatter — pure so the

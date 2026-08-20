@@ -18,6 +18,8 @@ export interface PipelineProfile {
   readonly model: string;
   /** See `PipelineSettings#labelFilter`'s own doc comment — identical semantics, just persisted per profile. */
   readonly labelFilter: readonly string[];
+  /** See `PipelineSettings#labelDenyFilter`'s own doc comment — identical semantics, just persisted per profile. */
+  readonly labelDenyFilter: readonly string[];
   /** See `PipelineSettings#detectionEnabled`'s own doc comment. */
   readonly detectionEnabled: boolean;
 }
@@ -65,6 +67,7 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     inferenceFps: 5,
     model: DEFAULT_DETECTION_MODEL,
     labelFilter: [],
+    labelDenyFilter: [],
     detectionEnabled: false,
   },
   {
@@ -76,6 +79,7 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     inferenceFps: 3,
     model: DEFAULT_DETECTION_MODEL,
     labelFilter: [],
+    labelDenyFilter: [],
     detectionEnabled: false,
   },
   {
@@ -87,6 +91,7 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     inferenceFps: 10,
     model: DEFAULT_DETECTION_MODEL,
     labelFilter: [],
+    labelDenyFilter: [],
     detectionEnabled: false,
   },
 ];
@@ -104,6 +109,16 @@ export interface PipelineSettings {
    * `features/fly/cv-control-panel-logic.ts` for how the panel seeds/edits this on a model switch.
    */
   readonly labelFilter: readonly string[];
+  /**
+   * Which detection labels to drop, applied Java-side alongside {@link labelFilter} in the same
+   * pre-fan-out drop site (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) — **empty means "deny
+   * nothing"**. The everyday one-click "hide this class" act (the Vision drawer's detections strip,
+   * the class-chip checklist's own toggle) writes here, immediately, never to {@link labelFilter} —
+   * that field stays the rarer model-intent allowlist (preset fill, seeding on a model switch). A
+   * class in both lists is dropped regardless (deny always wins); this app's own UI never puts one
+   * there deliberately, but the wire contract makes no such promise either way.
+   */
+  readonly labelDenyFilter: readonly string[];
   /** Server-side detection on/off (docs/plans/done/CV-CONTROL-PLAN.md §1) — `false` means zero inference CPU
    * spent on this stream; video keeps flowing regardless either way. **Defaults `false`**
    * (docs/plans/active/CV-DEMAND-PLAN.md wave D3, flipped from `true`), mirroring
@@ -211,6 +226,7 @@ export class SettingsStore {
         inferenceFps: this.activeProfile().inferenceFps,
         model: this.activeProfile().model,
         labelFilter: this.activeProfile().labelFilter,
+        labelDenyFilter: this.activeProfile().labelDenyFilter,
         detectionEnabled: this.activeProfile().detectionEnabled,
       },
   );
@@ -249,6 +265,7 @@ export class SettingsStore {
       inferenceFps: current.inferenceFps,
       model: current.model,
       labelFilter: current.labelFilter,
+      labelDenyFilter: current.labelDenyFilter,
       detectionEnabled: current.detectionEnabled,
     };
     this.saveCustomProfile(profile);
@@ -366,13 +383,20 @@ function isStringArray(value: unknown): value is readonly string[] {
  * passes an explicit `false` (or `true`) through untouched, so this change is exactly and only the
  * one literal below.
  */
-function withValidPipelineFields<T extends { model?: unknown; labelFilter?: unknown; detectionEnabled?: unknown }>(
+function withValidPipelineFields<
+  T extends { model?: unknown; labelFilter?: unknown; labelDenyFilter?: unknown; detectionEnabled?: unknown },
+>(
   value: T,
-): T & { model: string; labelFilter: readonly string[]; detectionEnabled: boolean } {
+): T & { model: string; labelFilter: readonly string[]; labelDenyFilter: readonly string[]; detectionEnabled: boolean } {
   return {
     ...value,
     model: isNonEmptyString(value.model) ? value.model : DEFAULT_DETECTION_MODEL,
     labelFilter: isStringArray(value.labelFilter) ? value.labelFilter : [],
+    // A profile/draft saved before wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) has no such
+    // field at all — backfills to "deny nothing", the same honest default a fresh built-in carries,
+    // not a reason to drop the rest of the profile (mirrors `labelFilter`'s own migration-safe rule
+    // above).
+    labelDenyFilter: isStringArray(value.labelDenyFilter) ? value.labelDenyFilter : [],
     detectionEnabled: typeof value.detectionEnabled === 'boolean' ? value.detectionEnabled : false,
   };
 }

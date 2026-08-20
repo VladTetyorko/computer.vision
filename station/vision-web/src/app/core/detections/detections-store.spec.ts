@@ -5,7 +5,7 @@ import { DetectionsStore } from './detections-store';
 import { VisionApi } from '../api/vision-api';
 import { LiveStore, type LiveConnectionState } from '../live/live-store';
 import { PollScheduler } from '../poll-scheduler';
-import type { DetectionResult } from '../api/models';
+import type { DetectionResult, StreamTracksResponse } from '../api/models';
 import { CV_STATUS_FRESH_SECONDS } from './detections-logic';
 
 /** Lets the fire-and-forget promise chain inside `track()` settle before asserting. */
@@ -13,8 +13,11 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function stubApi(streamDetections: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue([])) {
-  return { streamDetections };
+function stubApi(
+  streamDetections: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue([]),
+  getStreamTracks: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({ streamId: '', lockedTrackId: 0, tracks: [] }),
+) {
+  return { streamDetections, getStreamTracks };
 }
 
 /**
@@ -362,5 +365,127 @@ describe('DetectionsStore', () => {
     expect(live.untrackDetections).toHaveBeenCalledExactlyOnceWith('a-15');
     expect(live.trackDetections).toHaveBeenCalledWith('a-16');
     store.reset();
+  });
+
+  // --- Tracks poll (docs/plans/done/TRACKING-PLAN.md §4.E, folded in from CvControlPanel — wave W5,
+  // docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3) ---------------------------------------------------
+
+  function tracksResponse(partial: Partial<StreamTracksResponse> = {}): StreamTracksResponse {
+    return { streamId: 't-1', lockedTrackId: 0, tracks: [], ...partial };
+  }
+
+  it('trackTracks() polls immediately and on the configured cadence', async () => {
+    const response = tracksResponse({ streamId: 't-1', lockedTrackId: 7 });
+    const getStreamTracks = vi.fn().mockResolvedValue(response);
+    const api = stubApi(undefined, getStreamTracks);
+    const scheduler = stubScheduler();
+
+    const store = inject(api, { scheduler });
+    store.trackTracks('t-1');
+    await flush();
+
+    expect(getStreamTracks).toHaveBeenCalledWith('t-1');
+    expect(scheduler.lastFor(2_000)).toBeDefined();
+    expect(store.tracks()).toEqual(response);
+    store.untrackTracks();
+  });
+
+  it('trackTracks() is a no-op when called again with the same streamId — mirrors track()\'s own dedupe', async () => {
+    const getStreamTracks = vi.fn().mockResolvedValue(tracksResponse());
+    const api = stubApi(undefined, getStreamTracks);
+
+    const store = inject(api);
+    store.trackTracks('t-2');
+    await flush();
+    store.trackTracks('t-2');
+    await flush();
+
+    expect(getStreamTracks).toHaveBeenCalledOnce();
+    store.untrackTracks();
+  });
+
+  it('trackTracks() with a new streamId supersedes the previous session and clears its stale response immediately', async () => {
+    const getStreamTracks = vi.fn().mockResolvedValue(tracksResponse({ streamId: 't-3', lockedTrackId: 3 }));
+    const api = stubApi(undefined, getStreamTracks);
+
+    const store = inject(api);
+    store.trackTracks('t-3');
+    await flush();
+    expect(store.tracks()?.lockedTrackId).toBe(3);
+
+    getStreamTracks.mockResolvedValue(tracksResponse({ streamId: 't-4', lockedTrackId: 0 }));
+    store.trackTracks('t-4');
+    expect(store.tracks()).toBeNull(); // cleared synchronously — never shows t-3's stale lock while t-4's poll is in flight
+    await flush();
+    expect(store.tracks()?.streamId).toBe('t-4');
+    store.untrackTracks();
+  });
+
+  it('untrackTracks() stops the poll and clears tracks()', async () => {
+    const getStreamTracks = vi.fn().mockResolvedValue(tracksResponse());
+    const api = stubApi(undefined, getStreamTracks);
+    const scheduler = stubScheduler();
+
+    const store = inject(api, { scheduler });
+    store.trackTracks('t-5');
+    await flush();
+    expect(store.tracks()).not.toBeNull();
+    const poll = scheduler.lastFor(2_000);
+
+    store.untrackTracks();
+    expect(store.tracks()).toBeNull();
+    expect(poll?.stop).toHaveBeenCalledOnce();
+  });
+
+  it('a stale in-flight tracks poll from a superseded trackTracks() never overwrites the newer stream', async () => {
+    let resolveFirst!: (value: StreamTracksResponse) => void;
+    const firstCall = new Promise<StreamTracksResponse>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const getStreamTracks = vi
+      .fn()
+      .mockImplementationOnce(() => firstCall)
+      .mockResolvedValueOnce(tracksResponse({ streamId: 't-7', lockedTrackId: 9 }));
+    const api = stubApi(undefined, getStreamTracks);
+
+    const store = inject(api);
+    store.trackTracks('t-6'); // in flight, not yet resolved
+    store.trackTracks('t-7'); // supersedes it before the first poll settles
+    await flush();
+    resolveFirst(tracksResponse({ streamId: 't-6', lockedTrackId: 2 }));
+    await flush();
+
+    expect(store.tracks()?.streamId).toBe('t-7');
+    store.untrackTracks();
+  });
+
+  it('silently degrades (tracks() -> null) when the tracks poll fails, rather than throwing', async () => {
+    const getStreamTracks = vi.fn().mockRejectedValue(new Error('network down'));
+    const api = stubApi(undefined, getStreamTracks);
+
+    const store = inject(api);
+    store.trackTracks('t-8');
+    await flush();
+
+    expect(store.tracks()).toBeNull();
+    store.untrackTracks();
+  });
+
+  it('the tracks poll is fully independent of the detections feed — track()/reset() never touch tracks()', async () => {
+    const streamDetections = vi.fn().mockResolvedValue([]);
+    const getStreamTracks = vi.fn().mockResolvedValue(tracksResponse({ lockedTrackId: 4 }));
+    const api = stubApi(streamDetections, getStreamTracks);
+
+    const store = inject(api);
+    store.trackTracks('t-9');
+    store.track('t-9');
+    await flush();
+
+    expect(store.tracks()?.lockedTrackId).toBe(4);
+    store.reset(); // detections feed teardown
+    expect(store.tracks()?.lockedTrackId).toBe(4); // untouched by reset()
+
+    store.untrackTracks();
+    expect(store.tracks()).toBeNull();
   });
 });

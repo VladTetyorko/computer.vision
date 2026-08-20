@@ -401,6 +401,19 @@ export class CockpitFacade {
    */
   readonly lockedTrackId = signal(0);
 
+  /**
+   * The class currently hovered in the merged Vision drawer's strip (wave W5,
+   * docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3, research §3.5) — `shared/player/detections-strip.ts`'s own
+   * `(hoveredClassChange)`, relayed straight into `<vision-player [hoveredClass]>` (`cockpit.html`),
+   * which temporarily promotes every box of that class to tier T1
+   * (`shared/player/detection-overlay-logic.ts#detectionTiers`). Mirrors {@link lockedTrackId}'s own
+   * "echo a child's own signal up through the facade, straight into the player" shape from wave W4,
+   * just without a poll behind it — hover is instantaneous DOM state, not a wire-confirmed fact, so
+   * there is nothing to reconcile against. `null` = nothing hovered (also this signal's own idle
+   * value — never a fabricated "something is hovered" default).
+   */
+  readonly hoveredDetectionClass = signal<string | null>(null);
+
   /** Persisted, non-mutually-exclusive toggle (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — see this class's own
    * doc comment above `MAP_VISIBLE_KEY`. */
   readonly mapVisible = signal(readPersistedFlag(MAP_VISIBLE_KEY, true));
@@ -498,6 +511,10 @@ export class CockpitFacade {
         return;
       }
       this.lastDetectionsStreamId = streamId;
+      // A hover carried over from the previous stream's strip would promote a box on a feed it was
+      // never hovered on — same "a stream switch clears anything scoped to the old one" rule
+      // `explicitlyStopped`/`hasBeenLive`/`capabilities` already follow elsewhere in this file.
+      this.hoveredDetectionClass.set(null);
       if (streamId) {
         // Already has the owning asset id (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — lets
         // `DetectionsStore` subscribe to live `detections:<assetId>` instead of only polling.

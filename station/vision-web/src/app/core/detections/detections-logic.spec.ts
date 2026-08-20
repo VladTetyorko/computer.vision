@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { Detection, DetectionResult } from '../api/models';
-import { CV_STATUS_FRESH_SECONDS, cvStatus, deriveChips, freshResults, MAX_DETECTION_CHIPS } from './detections-logic';
+import {
+  CV_STATUS_FRESH_SECONDS,
+  cvStatus,
+  deriveChips,
+  freshResults,
+  HIDDEN_CLASS_TRUTH,
+  isLabelDenied,
+  MAX_DETECTION_CHIPS,
+  toggleLabelDeny,
+} from './detections-logic';
 
 function detection(partial: Partial<Detection>): Detection {
   return {
@@ -148,5 +157,53 @@ describe('freshResults', () => {
     const r = result({ capturedAt: new Date(now - 30_000).toISOString() });
     expect(freshResults([r], now, 60)).toEqual([r]);
     expect(freshResults([r], now, 10)).toEqual([]);
+  });
+});
+
+// --- Class deny-list (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2/D-3, wave W5) -------------------------------
+
+describe('isLabelDenied', () => {
+  it('is false for an empty deny-list', () => {
+    expect(isLabelDenied([], 'person')).toBe(false);
+  });
+
+  it('is true when the label is present', () => {
+    expect(isLabelDenied(['person', 'car'], 'person')).toBe(true);
+  });
+
+  it('is false for a label not in the list', () => {
+    expect(isLabelDenied(['car'], 'person')).toBe(false);
+  });
+});
+
+describe('toggleLabelDeny', () => {
+  it('adds a label not yet denied', () => {
+    expect(toggleLabelDeny([], 'person')).toEqual(['person']);
+    expect(toggleLabelDeny(['car'], 'person')).toEqual(['car', 'person']);
+  });
+
+  it('removes a label already denied, leaving the rest untouched', () => {
+    expect(toggleLabelDeny(['person'], 'person')).toEqual([]);
+    expect(toggleLabelDeny(['car', 'person', 'truck'], 'person')).toEqual(['car', 'truck']);
+  });
+
+  it('is symmetric — toggling twice is a no-op', () => {
+    const start: readonly string[] = ['car'];
+    expect(toggleLabelDeny(toggleLabelDeny(start, 'person'), 'person')).toEqual(start);
+  });
+
+  it('never mutates the input array', () => {
+    const start = ['car'];
+    toggleLabelDeny(start, 'person');
+    expect(start).toEqual(['car']);
+  });
+});
+
+describe('HIDDEN_CLASS_TRUTH', () => {
+  it('is a non-empty, stable disclosure string shared by every hide affordance', () => {
+    expect(HIDDEN_CLASS_TRUTH.length).toBeGreaterThan(0);
+    expect(HIDDEN_CLASS_TRUTH).toContain('screen');
+    expect(HIDDEN_CLASS_TRUTH).toContain('alerts');
+    expect(HIDDEN_CLASS_TRUTH).toContain('recording');
   });
 });

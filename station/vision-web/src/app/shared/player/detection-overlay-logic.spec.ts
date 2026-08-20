@@ -480,6 +480,7 @@ function tierContext(partial: Partial<DetectionTierContext> = {}): DetectionTier
     trails: new Map(),
     contentWidthPx: 200,
     contentHeightPx: 200,
+    hoveredClass: null,
     ...partial,
   };
 }
@@ -589,6 +590,54 @@ describe('detectionTiers', () => {
     const ambient = fullDetection({ label: 'ambient', confidence: 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } });
     const tiers = detectionTiers([...strong, ambient], tierContext());
     expect(strong.every((d) => tiers.get(d) === 'T1')).toBe(true);
+    expect(tiers.get(ambient)).toBe('T2');
+  });
+
+  // --- Class hover promotion (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3, wave W5) -----------------
+
+  it('a size-eligible detection whose label matches hoveredClass promotes to T1 regardless of confidence', () => {
+    const matched = fullDetection({ label: 'person', confidence: 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } });
+    const stronger = Array.from({ length: NOTABLE_TOP_K }, (_, i) =>
+      fullDetection({ label: `s${i}`, confidence: 0.9 - i * 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } }),
+    );
+    const tiers = detectionTiers([matched, ...stronger], tierContext({ hoveredClass: 'person' }));
+    expect(tiers.get(matched)).toBe('T1');
+  });
+
+  it('hoveredClass shares the NOTABLE_TOP_K budget with the ranked remainder, not a separate one', () => {
+    const matched = fullDetection({ label: 'person', confidence: 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } });
+    const stronger = Array.from({ length: NOTABLE_TOP_K }, (_, i) =>
+      fullDetection({ label: `s${i}`, confidence: 0.9 - i * 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } }),
+    );
+    const tiers = detectionTiers([matched, ...stronger], tierContext({ hoveredClass: 'person' }));
+    expect(stronger.slice(0, NOTABLE_TOP_K - 1).every((d) => tiers.get(d) === 'T1')).toBe(true);
+    expect(tiers.get(stronger[NOTABLE_TOP_K - 1])).toBe('T2');
+  });
+
+  it('hoveredClass never promotes a sub-scale detection past T3 — a hover cannot make an object bigger', () => {
+    const tiny = fullDetection({
+      label: 'person',
+      box: { x: 0, y: 0, width: UNDER_SUB_SCALE_FRACTION, height: UNDER_SUB_SCALE_FRACTION },
+    });
+    const tiers = detectionTiers([tiny], tierContext({ hoveredClass: 'person' }));
+    expect(tiers.get(tiny)).toBe('T3');
+  });
+
+  it('hoveredClass never overrides an existing T0 (the FOLLOW lock/hovered box still win)', () => {
+    const locked = trackedDetection({ label: 'person' }, 7);
+    const tiers = detectionTiers([locked], tierContext({ lockedTrackId: 7, hoveredClass: 'person' }));
+    expect(tiers.get(locked)).toBe('T0');
+  });
+
+  it('null hoveredClass (nothing hovered) never matches — a detection with no label collision stays ranked normally', () => {
+    // Mirrors "everything left after T0/T3/T1 is T2" above — `strong` fills the NOTABLE_TOP_K
+    // ranking budget so `ambient` falls out to T2 on its own (low area × confidence) merit, not
+    // because a solo detection would otherwise win the budget by default.
+    const strong = Array.from({ length: NOTABLE_TOP_K }, (_, i) =>
+      fullDetection({ label: `strong${i}`, confidence: 0.9 - i * 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } }),
+    );
+    const ambient = fullDetection({ label: 'ambient', confidence: 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } });
+    const tiers = detectionTiers([...strong, ambient], tierContext({ hoveredClass: null }));
     expect(tiers.get(ambient)).toBe('T2');
   });
 });

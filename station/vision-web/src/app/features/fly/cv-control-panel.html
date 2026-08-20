@@ -1,12 +1,10 @@
-@if (open()) {
-  <vision-side-panel title="Detection" icon="scan" subtitle="What to detect on this stream" (close)="close.emit()">
-    <p class="muted hint cv-scope-hint">
-      @if (streamId()) {
-        Changes below apply live to the running stream.
-      } @else {
-        No stream running yet — changes are saved and applied on the next Start.
-      }
-    </p>
+<p class="muted hint cv-scope-hint">
+  @if (streamId()) {
+    Changes below apply live to the running stream.
+  } @else {
+    No stream running yet — changes are saved and applied on the next Start.
+  }
+</p>
 
     <!-- ---- Detect hero — the primary act, now first (docs/plans/active/CV-UX-RESEARCH.md §3) ---- -->
     <section class="cv-section cv-hero">
@@ -119,12 +117,6 @@
           </p>
         }
         <p class="muted hint">{{ hiddenClassTruth }}</p>
-        @if (showFirstHideHint()) {
-          <p class="notice cv-first-hide-hint">
-            {{ firstHideHintText }}
-            <button type="button" class="btn secondary small" (click)="dismissFirstHideHint()">Got it</button>
-          </p>
-        }
       } @else {
         <p class="muted hint">No classes observed yet — waiting for the first detections.</p>
       }
@@ -480,5 +472,3 @@
         }
       </div>
     </details>
-  </vision-side-panel>
-}

@@ -95,3 +95,41 @@ export function freshResults(
 ): readonly DetectionResult[] {
   return results.filter((result) => isFresh(result.capturedAt, nowMs, freshSeconds));
 }
+
+// --- Class deny-list (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2/D-3, wave W5) -------------------------------
+//
+// Lives here — not in `features/fly/cv-control-panel-logic.ts` where the deny-toggle used to be a
+// (now-deleted) allowlist-complement hack — because both the CV control panel's own class-chip
+// checklist (`features/fly/cv-control-panel.ts`) *and* the detections strip's one-click hide
+// (`shared/player/detections-strip.ts`, `shared/`, which cannot import from `features/fly/`) need the
+// identical array math. One function means the two surfaces can never quietly disagree about what
+// "hidden" means.
+
+/**
+ * The one honesty disclosure shown wherever an operator can hide a class — stated once, not
+ * re-litigated per surface. `PipelineConfig#denyFilter` is enforced once, pre-fan-out
+ * (`docs/plans/active/CV-CLEAN-FEED-PLAN.md` D-2/wave W1): screen, alerts and recording all lose a
+ * denied label identically, and the model itself never stops scanning for it — hiding is a display
+ * choice, not a performance one.
+ */
+export const HIDDEN_CLASS_TRUTH =
+  'Hidden classes are dropped everywhere — screen, alerts, recording. The model still scans for everything.';
+
+/** Whether `label` is currently in the operator's own deny-list — the strip/panel class-chip
+ *  checklist's own "hidden" state. */
+export function isLabelDenied(labelDenyFilter: readonly string[], label: string): boolean {
+  return labelDenyFilter.includes(label);
+}
+
+/**
+ * Toggles one label's deny-list membership — simple, symmetric add/remove. Unlike `labelFilter`'s
+ * own "empty means allow everything" allowlist trap (which used to force a first-hide click to
+ * enumerate every *other* observed label as the real allowlist), an empty deny-list has an
+ * unambiguous meaning — "deny nothing" — so there is no complement to enumerate and no first-click
+ * special case at all.
+ */
+export function toggleLabelDeny(labelDenyFilter: readonly string[], label: string): readonly string[] {
+  return isLabelDenied(labelDenyFilter, label)
+    ? labelDenyFilter.filter((entry) => entry !== label)
+    : [...labelDenyFilter, label];
+}

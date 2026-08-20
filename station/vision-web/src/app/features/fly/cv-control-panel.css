@@ -206,22 +206,15 @@
   margin-bottom: var(--space-8);
 }
 
-/* The tier-0 "Seen now" one-time first-hide hint (docs/plans/active/CV-UX-RESEARCH.md §4.4) — reuses
-   the shared `.notice` shell (no `.warn`/`.danger` intent: this is a plain fact, not bad news). */
-.cv-first-hide-hint {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-8);
-}
-
-/* The staged class-filter edit's own "count + Submit + Discard" row (direct user request: "Seen
-   now" becomes staged selection + Submit) — same shell/layout as `.cv-first-hide-hint` above (a
-   plain `.notice`, no `.warn`/`.danger` intent: unapplied work in progress is not bad news, just a
-   fact that must stay visible per the frontend-style skill's "unapplied state must be visible"
-   rule). Rendered identically in both the tier-0 "Seen now" section and Tune's full checklist
-   (`cv-control-panel.html`) — the two surfaces share one `pendingLabels` signal, so their own
-   pending rows must read the same too. */
+/* The staged **allowlist** edit's own "count + Submit + Discard" row (direct user request: "Seen
+   now" becomes staged selection + Submit) — a plain `.notice` shell, no `.warn`/`.danger` intent:
+   unapplied work in progress is not bad news, just a fact that must stay visible per the
+   frontend-style skill's "unapplied state must be visible" rule. Rendered identically in both the
+   tier-0 "Seen now" section and Tune's full checklist (`cv-control-panel.html`) — the two surfaces
+   share one `pendingLabels` signal, so their own pending rows must read the same too. Per-chip
+   clicks no longer stage anything (wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3 — they write
+   the deny-list immediately instead), so this row only ever appears from the preset/add/clear
+   bulk-edit paths now. */
 .cv-pending-row {
   display: flex;
   align-items: center;

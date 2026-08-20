@@ -142,12 +142,21 @@ export type StreamState = 'STARTING' | 'LIVE' | 'STALLED' | 'RECONNECTING' | 'UN
  * request, so it is always sent explicitly — the SPA's own default (also flipped to `false`, same
  * wave, §D3) is what actually governs a stream this app started, not this field's absence. Both are
  * also PATCH-able live afterward — see `UpdateStreamConfigRequest`.
+ *
+ * `labelDenyFilter` (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5) mirrors `dto.StartStreamRequest
+ * #labelDenyFilter` one for one: an explicit empty array is a real value meaning "deny nothing",
+ * absent leaves the server default (also "deny nothing") alone. Enforced server-side in
+ * `StreamPipeline`'s single drop site, *after* `labelFilter` — a label that fails the allowlist or
+ * matches the deny list is dropped identically before all fan-out (screen, alerts, recording). See
+ * `UpdateStreamConfigRequest#labelDenyFilter` below for the everyday one-click "hide this class" act
+ * this field backs; `labelFilter` stays the rarer model-intent allowlist.
  */
 export interface StartStreamRequest {
   readonly confidenceThreshold?: number;
   readonly inferenceFps?: number;
   readonly model?: string;
   readonly labelFilter?: readonly string[];
+  readonly labelDenyFilter?: readonly string[];
   readonly detectionEnabled?: boolean;
 }
 
@@ -178,11 +187,22 @@ export interface StartStreamRequest {
  * `buildTrackingCadencePatch`/`buildFollowLockPatch`/`buildReleaseLockPatch` each build a
  * `tracking`-only patch). See {@link TrackingConfigRequest}'s own doc comment for the one-of-three
  * `lock` rule.
+ *
+ * `labelDenyFilter` (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5) mirrors `dto.
+ * UpdateStreamConfigRequest#labelDenyFilter` — the one field added since the §2 contract froze,
+ * present/absent following the exact same "only present fields change" partial-patch rule as
+ * `labelFilter`; an explicit `[]` means "deny nothing" (a real value, not "leave unchanged"). Hot,
+ * never re-arms: sent on the same debounced hot-knob PATCH as `labelFilter`
+ * (`cv-control-panel-logic.ts#buildHotKnobPatch`). This is the field an operator's one-click "hide
+ * this class" act (the strip, the panel's class-chip checklist) actually writes — `labelFilter`
+ * itself is left alone by that flow, reserved for the rarer model-intent allowlist (preset fill,
+ * seeding on a model switch).
  */
 export interface UpdateStreamConfigRequest {
   readonly confidenceThreshold?: number;
   readonly inferenceFps?: number;
   readonly labelFilter?: readonly string[];
+  readonly labelDenyFilter?: readonly string[];
   readonly detectionEnabled?: boolean;
   readonly model?: string;
   readonly tracking?: TrackingConfigRequest;

@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
-import type { DetectionResult } from '../api/models';
+import type { DetectionResult, StreamTracksResponse } from '../api/models';
 import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
 import { cvStatus, deriveChips, freshResults } from './detections-logic';
@@ -9,6 +9,22 @@ import { detectionsPausedNotice } from '../../shared/player/detection-overlay-lo
 
 /** How often a tracked stream's recent detections are re-read while **polling** (the fallback) is active. */
 const POLL_INTERVAL_MS = 2_000;
+
+/**
+ * How often {@link trackTracks} re-reads `GET /api/streams/{id}/tracks` while a session is active
+ * (docs/plans/done/TRACKING-PLAN.md §4.E) — feeds `CvControlPanel`'s flow strip and is the **only**
+ * source the "Following #N" chip is allowed to confirm from (docs/extracts/TRACKING-ORCHESTRATION.md
+ * §3.3's honesty rule). Mirrors this store's own detections `POLL_INTERVAL_MS` — fast enough to feel
+ * live, slow enough to stay a background read.
+ *
+ * **"Only while the drawer is open" is now free**, not a flag this store tracks itself (wave W5,
+ * docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3): `CvControlPanel` is only ever mounted while the merged
+ * Vision drawer is open (`cockpit.html` owns the mount, `<vision-side-panel>`'s own doc comment —
+ * "mounting is the host's job… mounting IS opening"), so calling {@link trackTracks} from that
+ * component's constructor and {@link untrackTracks} from its `DestroyRef` bounds this poll to exactly
+ * the drawer's own open/closed lifetime, with no separate visibility signal to keep in sync.
+ */
+const TRACKS_POLL_INTERVAL_MS = 2_000;
 
 /** How often the CV status dot's recency check ticks, independent of the poll cadence. */
 const CLOCK_TICK_MS = 1_000;
@@ -60,12 +76,35 @@ const DETECTIONS_LIMIT = 50;
  * `detections-logic.ts#cvStatus` uses for the dot, so a stream that stopped producing detections
  * (switched off, no viewers, a CV outage, cv-service crashed) stops being drawn within one freshness
  * window regardless of which transport was feeding it or whether the server ever clears anything.
+ *
+ * **Also owns the `GET /api/streams/{id}/tracks` poll** ({@link trackTracks}/{@link untrackTracks}/
+ * {@link tracks}, wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3) — previously a private poller
+ * inside `CvControlPanel`. Folded in here because that panel is this store's own consumer already
+ * (it injects `DetectionsStore` for {@link results} too) and because "one store owns the whole Fly
+ * cockpit CV feed" is more honest than two independently-timed pollers reading overlapping server
+ * state. **Deliberately a separate lifecycle from {@link track}/{@link reset}** (the detections
+ * feed): the feed follows the active asset/stream regardless of whether the Vision drawer is even
+ * open (the box overlay needs it continuously), while tracks-polling is scoped to `CvControlPanel`'s
+ * own mounted lifetime — see {@link TRACKS_POLL_INTERVAL_MS}'s own doc comment for why that bound is
+ * now free rather than a flag this store has to track.
  */
 @Injectable()
 export class DetectionsStore {
   private readonly api = inject(VisionApi);
   private readonly scheduler = inject(PollScheduler);
   private readonly live = inject(LiveStore);
+
+  /** The most recent `GET .../tracks` poll, or `null` before the first poll settles, before
+   *  {@link trackTracks} has been called, or on any transport failure (including this endpoint not
+   *  existing yet on an old/absent server) — every downstream reader (lock chip, flow strip,
+   *  detection status) degrades to "hidden" from this one `null`, never a fabricated value. */
+  private readonly tracksResponseSignal = signal<StreamTracksResponse | null>(null);
+  readonly tracks = this.tracksResponseSignal.asReadonly();
+
+  private stopTracksPollFn: (() => void) | null = null;
+  /** The stream a `trackTracks()` session is currently for, or `undefined` after `untrackTracks()` —
+   *  guards a superseded poll from writing a stale response, mirrors {@link lastTrackKey}. */
+  private tracksStreamId: string | undefined;
 
   /** Kept fresh by the 2s poll while `transportSignal() === 'poll'`; stale/unused while `'live'`. */
   private readonly pollResultsSignal = signal<readonly DetectionResult[]>([]);
@@ -169,6 +208,7 @@ export class DetectionsStore {
     inject(DestroyRef).onDestroy(() => {
       this.stopClock();
       this.teardownTracking();
+      this.stopTracksPoll();
     });
   }
 
@@ -269,6 +309,61 @@ export class DetectionsStore {
     const assetId = this.currentAssetIdSignal();
     if (assetId !== undefined) {
       this.live.untrackDetections(assetId);
+    }
+  }
+
+  // --- Tracks poll (docs/plans/done/TRACKING-PLAN.md §4.E, folded in from `CvControlPanel` in wave
+  // W5 — see class doc's own "Also owns the GET .../tracks poll" paragraph). Independent of
+  // `track()`/`reset()`/`teardownTracking()` above (the detections feed) — a separate stream id, a
+  // separate poll timer, a separate `null`-degrades-honestly signal.
+
+  /**
+   * Starts polling `GET /api/streams/{streamId}/tracks` every {@link TRACKS_POLL_INTERVAL_MS}. A
+   * no-op when `streamId` is unchanged from the current session, mirroring {@link track}'s own
+   * `lastTrackKey` dedupe. Call from a mounted consumer's constructor (today, only
+   * `CvControlPanel`) and pair with {@link untrackTracks} on that consumer's `DestroyRef` — see
+   * {@link TRACKS_POLL_INTERVAL_MS}'s own doc comment for why that alone is enough to bound the poll
+   * to "only while the drawer is open".
+   */
+  trackTracks(streamId: string): void {
+    if (this.tracksStreamId === streamId) {
+      return;
+    }
+    this.tracksStreamId = streamId;
+    this.stopTracksPoll();
+    this.tracksResponseSignal.set(null); // never show the previous stream's stale lock/flow strip
+    void this.pollTracksOnce(streamId);
+    this.stopTracksPollFn = this.scheduler.schedule(TRACKS_POLL_INTERVAL_MS, () => this.pollTracksOnce(streamId));
+  }
+
+  /** Stops the tracks poll and clears {@link tracks} — call on teardown (a closed drawer, an
+   *  unmounted consumer) so a stale lock/flow-strip reading can never linger. */
+  untrackTracks(): void {
+    this.tracksStreamId = undefined;
+    this.stopTracksPoll();
+    this.tracksResponseSignal.set(null);
+  }
+
+  private async pollTracksOnce(streamId: string): Promise<void> {
+    if (this.tracksStreamId !== streamId) {
+      return; // superseded by a later trackTracks()/untrackTracks() call — never overwrite the newer session
+    }
+    try {
+      const response = await this.api.getStreamTracks(streamId);
+      if (this.tracksStreamId === streamId) {
+        this.tracksResponseSignal.set(response);
+      }
+    } catch {
+      if (this.tracksStreamId === streamId) {
+        this.tracksResponseSignal.set(null); // honest degrade — flow strip + lock chip both hide, no toast
+      }
+    }
+  }
+
+  private stopTracksPoll(): void {
+    if (this.stopTracksPollFn !== null) {
+      this.stopTracksPollFn();
+      this.stopTracksPollFn = null;
     }
   }
 }

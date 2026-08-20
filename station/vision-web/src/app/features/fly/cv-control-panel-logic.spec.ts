@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CvModel, CvTracker, DetectionResult, FrameTracking, TrackingCapability, TrackStats } from '../../core/api/models';
 import type { PipelineSettings } from '../../core/settings/settings-store';
+import { HIDDEN_CLASS_TRUTH } from '../../core/detections/detections-logic';
 import {
   CAPABILITY_LEVEL_OPTIONS,
   DETECTION_LAG_BUDGET_MILLIS,
-  FIRST_HIDE_HINT,
-  HIDDEN_CLASS_TRUTH,
   PEOPLE_VEHICLES_BUILDINGS_PRESET,
   SEEN_NOW_CHIP_CAP,
   addLabel,
@@ -45,7 +44,6 @@ import {
   sortSelectedFirst,
   stagedLabelSeed,
   submitLabelFilterButtonText,
-  toggleLabelChip,
 } from './cv-control-panel-logic';
 
 function model(partial: Partial<CvModel> = {}): CvModel {
@@ -81,6 +79,7 @@ function settings(partial: Partial<PipelineSettings> = {}): PipelineSettings {
     inferenceFps: 5,
     model: 'yolo26n.pt',
     labelFilter: [],
+    labelDenyFilter: [],
     detectionEnabled: true,
     ...partial,
   };
@@ -126,12 +125,20 @@ describe('cv-control-panel-logic', () => {
   });
 
   describe('chipCandidates', () => {
-    it('unions the current filter with observed labels, sorted', () => {
-      expect(chipCandidates(['zebra'], ['car', 'apple'])).toEqual(['apple', 'car', 'zebra']);
+    it('unions the filter, deny-list and observed labels, sorted', () => {
+      expect(chipCandidates(['zebra'], [], ['car', 'apple'])).toEqual(['apple', 'car', 'zebra']);
     });
 
     it('deduplicates overlapping entries', () => {
-      expect(chipCandidates(['car'], ['car', 'bus'])).toEqual(['bus', 'car']);
+      expect(chipCandidates(['car'], [], ['car', 'bus'])).toEqual(['bus', 'car']);
+    });
+
+    it('keeps a denied label in the checklist even when it is no longer observed — otherwise there is no way back to un-hide it', () => {
+      expect(chipCandidates([], ['truck'], [])).toEqual(['truck']);
+    });
+
+    it('deduplicates a label that is both observed and denied', () => {
+      expect(chipCandidates([], ['car'], ['car'])).toEqual(['car']);
     });
   });
 
@@ -143,25 +150,6 @@ describe('cv-control-panel-logic', () => {
     it('reads only listed labels as checked otherwise', () => {
       expect(isLabelChecked(['person'], 'person')).toBe(true);
       expect(isLabelChecked(['person'], 'car')).toBe(false);
-    });
-  });
-
-  describe('toggleLabelChip', () => {
-    it('unchecking one candidate while "all" narrows to every other known candidate', () => {
-      const next = toggleLabelChip([], 'car', ['person', 'car', 'building']);
-      expect(next).toEqual(['person', 'building']);
-    });
-
-    it('unchecks a label from a concrete filter', () => {
-      expect(toggleLabelChip(['person', 'car'], 'car', ['person', 'car'])).toEqual(['person']);
-    });
-
-    it('checks (adds) a label not yet in a concrete filter', () => {
-      expect(toggleLabelChip(['person'], 'car', ['person', 'car'])).toEqual(['person', 'car']);
-    });
-
-    it('unchecking the last remaining label honestly reverts to "all" ([])', () => {
-      expect(toggleLabelChip(['person'], 'person', ['person'])).toEqual([]);
     });
   });
 
@@ -249,12 +237,21 @@ describe('cv-control-panel-logic', () => {
   });
 
   describe('buildHotKnobPatch / buildModelChangePatch', () => {
-    it('carries confidence/fps/labelFilter/detectionEnabled, never model', () => {
-      const patch = buildHotKnobPatch(settings({ confidenceThreshold: 0.6, inferenceFps: 8, labelFilter: ['person'], detectionEnabled: false }));
+    it('carries confidence/fps/labelFilter/labelDenyFilter/detectionEnabled, never model', () => {
+      const patch = buildHotKnobPatch(
+        settings({
+          confidenceThreshold: 0.6,
+          inferenceFps: 8,
+          labelFilter: ['person'],
+          labelDenyFilter: ['dog'],
+          detectionEnabled: false,
+        }),
+      );
       expect(patch).toEqual({
         confidenceThreshold: 0.6,
         inferenceFps: 8,
         labelFilter: ['person'],
+        labelDenyFilter: ['dog'],
         detectionEnabled: false,
       });
       expect(patch).not.toHaveProperty('model');
@@ -299,19 +296,10 @@ describe('cv-control-panel-logic', () => {
     });
   });
 
-  describe('HIDDEN_CLASS_TRUTH / FIRST_HIDE_HINT', () => {
-    it('HIDDEN_CLASS_TRUTH names screen, alerts and recording, and denies a speed change', () => {
-      expect(HIDDEN_CLASS_TRUTH).toMatch(/alerts/i);
-      expect(HIDDEN_CLASS_TRUTH).toMatch(/recording/i);
-      expect(HIDDEN_CLASS_TRUTH).toMatch(/doesn't make it faster/i);
-    });
-
-    it('FIRST_HIDE_HINT names the whitelist mechanism and the real consequence of submitting it', () => {
-      expect(FIRST_HIDE_HINT).toMatch(/whitelist/i);
-      expect(FIRST_HIDE_HINT).toMatch(/newly detected/i);
-      expect(FIRST_HIDE_HINT).toMatch(/clear the selection and submit/i);
-    });
-  });
+  // HIDDEN_CLASS_TRUTH's own content is covered by `core/detections/detections-logic.spec.ts` —
+  // this file only asserts `perfHint` folds it in verbatim (above). FIRST_HIDE_HINT is gone as of
+  // wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3) along with the allowlist-complement toggle
+  // it explained — see `cv-control-panel-logic.ts`'s own "Staged class-filter selection" comment.
 
   describe('stagedLabelSeed', () => {
     it('returns the staged selection unchanged once one exists, ignoring the applied filter', () => {

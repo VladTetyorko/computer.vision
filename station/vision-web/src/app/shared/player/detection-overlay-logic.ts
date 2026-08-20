@@ -505,6 +505,16 @@ export interface DetectionTierContext {
    *  `redrawOverlay`'s own `content.width`/`content.height`. */
   readonly contentWidthPx: number;
   readonly contentHeightPx: number;
+  /**
+   * The label currently hovered on the detections strip's remote-control chips
+   * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3, wave W5, research §3.5) — `null` when nothing is
+   * hovered. An exact `detection.label` match promotes into T1 the same way {@link isMovingTrack}
+   * does: unconditional, budget-exempt, so hovering "person" never gets crowded out by
+   * {@link NOTABLE_TOP_K} already being spent elsewhere. Deliberately does *not* reach T3 (sub-scale
+   * dots stay dots — a hover can't make an object bigger) or override T0 (the FOLLOW lock and the
+   * single hovered *box* still win).
+   */
+  readonly hoveredClass: string | null;
 }
 
 function isMovingTrack(detection: Detection, trails: ReadonlyMap<number, readonly TrailPoint[]>): boolean {
@@ -535,8 +545,9 @@ function isSubScale(detection: Detection, context: DetectionTierContext): boolea
  *     has committed to never demotes.
  *  2. **T3** — everything else under {@link SUB_SCALE_PX} on both axes. Checked before T1 so the
  *     {@link NOTABLE_TOP_K} budget is never spent on a detection that will render as a dot regardless.
- *  3. **T1** — tracked-and-moving ({@link isMovingTrack}), or in the top {@link NOTABLE_TOP_K} of the
- *     size-eligible remainder by (box area × confidence).
+ *  3. **T1** — tracked-and-moving ({@link isMovingTrack}), matches {@link DetectionTierContext.hoveredClass}
+ *     (wave W5's class-hover promotion), or in the top {@link NOTABLE_TOP_K} of the size-eligible
+ *     remainder by (box area × confidence).
  *  4. **T2** — everything left.
  * Alert-rule promotion (the research table's third T1 criterion) is deliberately absent: there is no
  * `alerting` field on the wire yet (research §8.3 lists it as an open backend candidate) — nothing
@@ -569,7 +580,7 @@ export function detectionTiers(
 
   const notable = new Set<Detection>();
   for (const detection of sizeEligible) {
-    if (isMovingTrack(detection, context.trails)) {
+    if (isMovingTrack(detection, context.trails) || detection.label === context.hoveredClass) {
       notable.add(detection);
     }
   }

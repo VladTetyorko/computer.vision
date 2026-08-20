@@ -375,6 +375,18 @@ export class Player {
    */
   readonly lockedTrackId = input<number>(0);
 
+  /**
+   * The label currently hovered on the detections strip's remote-control chips
+   * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3, wave W5, research §3.5) — `null` when nothing is
+   * hovered. Passed straight through to {@link DetectionTierContext#hoveredClass}, which temporarily
+   * promotes every box carrying this exact label into T1 for the redraw. Mirrors `lockedTrackId`'s own
+   * "host holds the value, this component only draws it" plumbing: the strip lives outside this
+   * component (`CockpitFacade` relays its `hoveredClassChange` output into a signal fed here) — a host
+   * with no such strip (Live, Wall, replay) simply never binds this, so it stays `null` and hover
+   * promotion never fires there.
+   */
+  readonly hoveredClass = input<string | null>(null);
+
   /** Emits the measured seconds-behind-live on every sample, `null` while unknown/not playing. */
   readonly latencyChanged = output<number | null>();
 
@@ -1905,6 +1917,7 @@ export class Player {
       trails,
       contentWidthPx: content.width,
       contentHeightPx: content.height,
+      hoveredClass: this.hoveredClass(),
     });
     const allowedTiers = tiersForDeclutterLevel(this.boxesMode());
     // >1 model actually mixed in *this* frame (`showModelLegend`'s own gate) — composite streams keep

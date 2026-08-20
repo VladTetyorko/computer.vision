@@ -217,11 +217,13 @@
 /* ---- Main: the video hero + everything that overlays it ----------------------------------- */
 /* `position: relative` so every absolutely-positioned overlay below (header strip, map inset,
    secondary tiles, preflight/diagnostics cards) anchors to *this* box, not the whole `.cockpit`
-   grid — D-C's own rule: "the map inset and open drawer overlay `main`, not the grid." The two
-   tool-rail drawer components (`<vision-flight-command-panel>`/`<vision-cv-control-panel>`) and the
-   plain `<vision-side-panel>` instances below are all `position: fixed` internally (`side-panel.css`),
-   so they dock to the viewport regardless of being mounted here — mounting them inside `.grid-main`
-   is purely "renders beside main's other overlays in the template", not a positioning requirement. */
+   grid — D-C's own rule: "the map inset and open drawer overlay `main`, not the grid." One
+   remaining self-shelled drawer component (`<vision-flight-command-panel>`, still `position: fixed`
+   internally via `side-panel.css`) plus the plain `<vision-side-panel>` instances below (including
+   the merged Vision drawer, whose body is `<vision-detections-strip>` + `<vision-cv-control-panel>` —
+   the latter no longer wraps its own panel as of wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3) all
+   dock to the viewport regardless of being mounted here — mounting them inside `.grid-main` is purely
+   "renders beside main's other overlays in the template", not a positioning requirement. */
 .grid-main {
   grid-area: main;
   position: relative;

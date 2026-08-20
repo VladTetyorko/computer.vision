@@ -147,8 +147,10 @@ export class CockpitPage {
 
   /**
    * The right-edge icon tool-rail's one-open-at-a-time drawer manager (docs/plans/done/UI-REDESIGN-PLAN.md
-   * Wave 2, D-D/F3). Frozen rail ids (`ToolRailPanelId`): `flight`, `rc`, `cv`, `detections`,
-   * `marks`, `help`.
+   * Wave 2, D-D/F3). Frozen rail ids (`ToolRailPanelId`): `flight`, `rc`, `cv`, `marks`, `map`,
+   * `help` — `cv` is the merged Vision drawer as of wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3),
+   * the former separate `detections` id having been folded into it — see `fly-logic.ts#ToolRailPanelId`'s
+   * own doc comment.
    */
   protected readonly panels = new UiStore(ACTIVE_PANEL_KEY);
 

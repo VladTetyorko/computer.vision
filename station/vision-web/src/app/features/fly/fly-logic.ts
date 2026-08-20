@@ -111,12 +111,20 @@ export const TICKER_MAX_EVENTS = 4;
  * Phase 0 — the read-only RC transmitter monitor; `marks` added by docs/plans/done/TACTICAL-MARKS-PLAN.md M5
  * — the shared tactical-marks operational picture). This union's own declaration order is no longer
  * the rail's visual order: docs/conclusions/UX-SIMPLIFY-REVIEW.md F4 groups the rail by job — Control (flight,
- * rc), Vision (cv, detections), Situational (marks), Help (pinned last, separated) — see fly.html's
+ * rc), Vision (cv), Situational (marks), Help (pinned last, separated) — see fly.html's
  * own comment above `.grid-rail` for the full grouping. Every id/gate/behavior below is unchanged;
  * only where each button sits in the rail moved. **`layers` was removed** (per direct user request)
  * — the detection-boxes rendering-mode control it used to hold its own drawer for now lives inside
- * the `cv` (Detection) drawer instead (`cv-control-panel.html`'s own "Boxes rendering" section). */
-export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'map' | 'help';
+ * the `cv` drawer instead (`cv-control-panel.html`'s own "Boxes rendering" section).
+ *
+ * **`detections` was merged into `cv` in wave W5** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3): the
+ * standalone strip-only drawer and the CV control drawer are now one "Vision" drawer, id kept as
+ * `cv` — the least-disruptive choice (an operator's own persisted `localStorage` open-panel id still
+ * opens the same drawer; there is no `detections` id left to migrate away from). See `cockpit.html`'s
+ * own comment above the merged drawer block for the full reasoning, including why the drawer stays
+ * reachable in watch mode (the strip) even though the control body (`<vision-cv-control-panel>`)
+ * does not. */
+export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'marks' | 'map' | 'help';
 
 /**
  * `Esc`'s own "closest thing open, first" priority (docs/plans/done/UI-REDESIGN-PLAN.md D-D: "Esc calls
