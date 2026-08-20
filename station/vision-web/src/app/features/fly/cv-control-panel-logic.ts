@@ -56,6 +56,17 @@ export function seedLabelFilterForModel(model: CvModel | undefined): readonly st
   return model.defaultLabelFilter;
 }
 
+/**
+ * The "Looking for" card/summary's own cost word (docs/plans/active/CV-UX-RESEARCH.md §5) —
+ * `'slower'` for an open-vocabulary model, `'fast'` otherwise. Named so the Vision drawer's
+ * tier-0 summary row (`cv-control-panel.ts`, docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 §1.1
+ * item 2) and the setup modal's intent cards (`cv-setup-modal.ts`) can never disagree about the
+ * word for the same model — both call this instead of restating the ternary twice.
+ */
+export function modelCostWord(openVocab: boolean): 'fast' | 'slower' {
+  return openVocab ? 'slower' : 'fast';
+}
+
 // --- Class-filter chip candidates (docs/plans/done/CV-CONTROL-PLAN.md Wave E, coordinator amendment) -----
 // "Prune from what the model is really seeing, not a guessed a-priori list": the chip checklist is
 // built from labels actually observed in the live detection stream, unioned with whatever is
@@ -734,6 +745,14 @@ function formatDetectorReason(reason: DetectorReason): string {
 }
 
 // --- Debounce (hot-knob coalescing) -------------------------------------------------------------
+
+/** How long a hot-knob edit (confidence/fps/labelFilter/labelDenyFilter) waits for further edits
+ *  before actually sending the PATCH — coalesces a fast slider drag or a burst of chip clicks into
+ *  one request instead of one per input event. Lives here (not a local `const` in `cv-setup-
+ *  modal.ts`, its one caller as of docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) purely so it can't
+ *  drift from `debounce`'s own doc comment below, which names the exact behavior this constant
+ *  tunes. */
+export const HOT_KNOB_DEBOUNCE_MS = 400;
 
 /**
  * A trailing-edge debounce: `run()` schedules `fn`, cancelling any still-pending call from a

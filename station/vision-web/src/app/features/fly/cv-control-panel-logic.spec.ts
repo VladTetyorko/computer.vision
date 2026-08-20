@@ -36,6 +36,7 @@ import {
   isDetectionLagOverBudget,
   isLabelChecked,
   latestFrameTracking,
+  modelCostWord,
   observedLabels,
   perfHint,
   reArmHint,
@@ -110,6 +111,16 @@ describe('cv-control-panel-logic', () => {
 
     it('seeds [] for an unresolved (undefined) model', () => {
       expect(seedLabelFilterForModel(undefined)).toEqual([]);
+    });
+  });
+
+  describe('modelCostWord', () => {
+    it('reads "slower" for an open-vocabulary model', () => {
+      expect(modelCostWord(true)).toBe('slower');
+    });
+
+    it('reads "fast" for a closed-set model', () => {
+      expect(modelCostWord(false)).toBe('fast');
     });
   });
 

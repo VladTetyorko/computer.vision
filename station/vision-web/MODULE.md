@@ -158,7 +158,8 @@ The app's default landing page and the operator persona's one job: *flies ONE dr
   - **Geofence zones, read-only (docs/plans/done/OPS-CORE-PLAN.md §G-c, new)** — `[zones]="geofence.zones()"` passed straight to the cockpit's own `<vision-live-map>` (`GeofenceStore` injected root-wide, no page-local fetch); same styles as Command's own zones layer, no click affordance — see `core/geofence/**`'s own section above.
   - **Weather go/no-go chip (docs/plans/done/OPS-CORE-PLAN.md §W, new)** — `<vision-weather-chip>` inside `<vision-fly-osd>`'s own chip bar (that component injects `WeatherStore` from `CockpitPage`'s `providers` directly, same DI-sharing idiom as `TelemetryStore`), centered on the flown asset's own live-telemetry fix (falling back to `AssetDetails.lastKnownPosition` before one arrives) with `windLimitMps` read from `AssetDetails.attributes['windLimitMps']` — see `core/weather/**`'s own section above.
   - **Geo divergence chip (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6, new)** — `<vision-geo-chip>` inside `<vision-fly-osd>`'s Link cluster, always rendered, DI-sharing the `GeoStore` instance `CockpitPage`'s own `providers` now also carries; `CockpitFacade` gained a `geo` field + a constructor `effect()` that calls `geo.track(assetId)`/`geo.reset()` alongside the existing detections-tracking effect, and a `mapCorrections` computed (`facade.mapCorrections()`, `[latest]` or `[]`) feeding `<vision-tactical-map [corrections]>`. See `core/geo/**`'s own section above for the chip/store/detail-popover writeup in full.
-  - **CV control panel (docs/plans/done/CV-CONTROL-PLAN.md Wave E, new; boxes-mode + Classes rework and `layers` merge, per direct user request)** — `<vision-cv-control-panel>` (`features/fly/cv-control-panel.ts`/`.html`/`.css`, pure logic in `cv-control-panel-logic.ts`+`.spec.ts`), a HUD toggle button + drawer in `.hud-header` (right of the flight-command cluster, hidden with the rest of the controls in watch mode) — model picker, confidence/inference-rate sliders, a class-filter chip checklist, a **Boxes rendering** section (the Overlay/Off segmented control, shortcut `B` — formerly the standalone `layers` drawer's only content; the component gained a plain `boxesMode` input + `boxesModeChange` output for it, not routed through `SettingsStore` since it's a client-side rendering preference, not part of the `PipelineSettings` wire contract), and detection on/off. **"Burned in" is gone from the segmented control entirely** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3 — **superseding** the M8 entry below, which only ever conditionally hid it): server-side burn-in no longer exists at all, so there is nothing left for a third mode to name — the `burnedIn` input, `showBurnedInOption`, and the "Burned in" tab were all deleted rather than kept dark. `CockpitFacade.boxesMode` is a plain `signal<BoxesMode>('overlay')` (no more `linkedSignal`/`streamBurnedIn` — nothing left to re-derive against); `cycleBoxes()` (the `B` shortcut) now calls the two-state `cycleBoxesMode(current)`. Drawer subtitle is now "Model · classes · confidence · boxes". **Classes flow** (top to bottom): status line → quick-actions row (the "+ People, vehicles & buildings" preset, now primary `.btn`, plus a "Clear all" button once the filter is non-empty) → a search box that filters the chip checklist live and doubles as the free-text "add" input once nothing matches → the chip checklist itself, each chip a `<span class="class-chip">` shell around a `.chip-label` (click toggles) and, only while checked, a trailing `.chip-remove` "×" (same toggle, explicit affordance); checked chips sort first (`sortSelectedFirst`, a no-op while the filter is `[]`/"all"). New pure helpers `filterLabelsByQuery`/`hasExactLabelMatch`/`sortSelectedFirst` in `cv-control-panel-logic.ts`; the old `removeLabel`/`removeClass` (superseded by `toggleChip`, which — unlike `removeLabel` — handles the `labelFilter === []` "all" edge case) were deleted as dead code. See this file's own dedicated CV-CONTROL-PLAN Wave E changelog section at the end for the full write-up (predates the boxes/Classes rework above). **As of wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3), `<vision-cv-control-panel>` is body-only — it no longer self-wraps its own `<vision-side-panel>` or owns an `open`/`close` input/output**: `cockpit.html` mounts it (and the detections strip) as siblings inside one merged "Vision" drawer, so mounting the component *is* opening it. A class-chip click now writes `labelDenyFilter`, immediately, never the staged `labelFilter` allowlist — see the W5 changelog section for the full write-up, including why the two lists stay separate axes.
+  - **CV control panel (docs/plans/done/CV-CONTROL-PLAN.md Wave E, new; boxes-mode + Classes rework and `layers` merge, per direct user request)** — `<vision-cv-control-panel>` (`features/fly/cv-control-panel.ts`/`.html`/`.css`, pure logic in `cv-control-panel-logic.ts`+`.spec.ts`), a HUD toggle button + drawer in `.hud-header` (right of the flight-command cluster, hidden with the rest of the controls in watch mode) — model picker, confidence/inference-rate sliders, a class-filter chip checklist, a **Boxes rendering** section (the Overlay/Off segmented control, shortcut `B` — formerly the standalone `layers` drawer's only content; the component gained a plain `boxesMode` input + `boxesModeChange` output for it, not routed through `SettingsStore` since it's a client-side rendering preference, not part of the `PipelineSettings` wire contract), and detection on/off. **"Burned in" is gone from the segmented control entirely** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3 — **superseding** the M8 entry below, which only ever conditionally hid it): server-side burn-in no longer exists at all, so there is nothing left for a third mode to name — the `burnedIn` input, `showBurnedInOption`, and the "Burned in" tab were all deleted rather than kept dark. `CockpitFacade.boxesMode` is a plain `signal<BoxesMode>('overlay')` (no more `linkedSignal`/`streamBurnedIn` — nothing left to re-derive against); `cycleBoxes()` (the `B` shortcut) now calls the two-state `cycleBoxesMode(current)`. Drawer subtitle is now "Model · classes · confidence · boxes". **Classes flow** (top to bottom): status line → quick-actions row (the "+ People, vehicles & buildings" preset, now primary `.btn`, plus a "Clear all" button once the filter is non-empty) → a search box that filters the chip checklist live and doubles as the free-text "add" input once nothing matches → the chip checklist itself, each chip a `<span class="class-chip">` shell around a `.chip-label` (click toggles) and, only while checked, a trailing `.chip-remove` "×" (same toggle, explicit affordance); checked chips sort first (`sortSelectedFirst`, a no-op while the filter is `[]`/"all"). New pure helpers `filterLabelsByQuery`/`hasExactLabelMatch`/`sortSelectedFirst` in `cv-control-panel-logic.ts`; the old `removeLabel`/`removeClass` (superseded by `toggleChip`, which — unlike `removeLabel` — handles the `labelFilter === []` "all" edge case) were deleted as dead code. See this file's own dedicated CV-CONTROL-PLAN Wave E changelog section at the end for the full write-up (predates the boxes/Classes rework above). **As of wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3), `<vision-cv-control-panel>` is body-only — it no longer self-wraps its own `<vision-side-panel>` or owns an `open`/`close` input/output**: `cockpit.html` mounts it (and the detections strip) as siblings inside one merged "Vision" drawer, so mounting the component *is* opening it. A class-chip click now writes `labelDenyFilter`, immediately, never the staged `labelFilter` allowlist — see the W5 changelog section for the full write-up, including why the two lists stay separate axes. **As of docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 (2026-08-20), `<vision-cv-control-panel>` is slimmed to exactly seven fly-time items** — Detect hero, a "Looking for" name+cost-word summary row, Boxes, the "Following #N" lock chip, the two conditional honesty notices, and a "Detection setup…" door — every set-once/expert control (model intent cards, confidence, the full class checklist including "Seen now", tracking mode, the Expert tier) moved verbatim into a new sibling, `<vision-cv-setup-modal>` (`features/fly/cv-setup-modal.ts`/`.html`/`.css`, same shared `cv-control-panel-logic.ts`), a centered dialog opened by the panel's own "Change…"/"Detection setup…" buttons. See the CV-PANEL-SPLIT-PLAN P1 changelog section at the end of this file for the full write-up, including the dialog-group wiring and the panel/modal content inventory.
+  - **`<vision-cv-setup-modal>` (`features/fly/cv-setup-modal.ts`/`.html`/`.css`, new, docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1)** — a true `position: fixed` centered dialog (`--scrim-strong` backdrop, video dimmed-not-blanked behind it), backdrop-click/`Esc`-dismissible (mirrors `flight-plan-dialog.ts`/`geofence-zone-dialog.ts`'s convention, not `arm-confirm-dialog.ts`'s no-dismiss one — this dialog holds no destructive action). Opened/closed via `cockpit.ts`'s own transient `dialog` `UiStore` group, id `'cv-setup'` (joins `'stop'` in `CockpitDialog`). Injects `FleetStore`/`SettingsStore`/`ToastService`/`DetectionsStore` directly, same shape `CvControlPanel` already used pre-split (non-routed presentational child, out of `architecture.spec.ts`'s facade-injection rule) — **reads `DetectionsStore.tracks()`/`.results()` only, never calls `trackTracks`/`untrackTracks`**: that poll's lifecycle stays owned by `CvControlPanel`, which stays mounted for the whole time the Vision drawer is open, a strictly longer window than this modal's own nested open/close cycle. The "Expert" `<details>` disclosure's open state is **facade-owned** (`CockpitFacade.cvExpertOpen`, a plain `signal(false)`, round-tripped via `[expertOpen]`/`(expertOpenChange)`) rather than a component-local boolean — mirrors `lockedTrackId`/`hoveredDetectionClass`'s own "plain facade signal through an input/output pair" shape, needed here because this component (unlike the always-mounted panel) is destroyed/recreated every close/reopen.
   - **Map COP — marks, layers, drawings (docs/plans/done/MAP-REWORK-PLAN.md §5.2, Wave E; reworked from docs/plans/done/TACTICAL-MARKS-PLAN.md M5)** — the cockpit map inset binds `[marks]="facade.marks.displayMarks()"`/`[drawings]="facade.drawings.displayDrawings()"`/`[layers]="facade.layers.layers()"`/`[interactionMode]="facade.interactionMode()"`/`[selectedMarkId]` plus `(markSelected)`/`(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)`, all to `CockpitFacade`'s three public root stores (`marks`/`layers`/`drawings`, mirroring `geofence`). Two tool-rail drawers: **`marks`** (`<vision-marks-panel>`, `target` icon) — the one-tap **Mark target** geolocate (now carrying the palette's kind/affiliation/layer, still an honest estimate the notice states plainly), the shared `<vision-mark-palette>` for new marks and for editing one inline, an **UNVERIFIED filter chip** with a live count, a per-row **Confirm** shortcut for managers, `<vision-verify-controls>` on the selected mark, and the bearing/distance readout from the drone (`CockpitFacade.dronePosition`; `—`, never a fabricated distance, when either end is missing) — and the **new `map` drawer** (`layers` icon) holding `<vision-drawing-toolbar layout="stacked">` + `<vision-layer-manager>`. **One drawer for both map tools, not two rail buttons**: the cockpit's map is a 220 px inset, so Command's floating-toolbar shape would eat the picture it is meant to annotate. `ToolRailPanelId` is therefore seven ids now (`flight`/`rc`/`cv`/`detections`/`marks`/`map`/`help`). See `core/map-data/**` and `shared/map/map-controls/**` above for the stores and controls.
   - **Tool-rail grouped by job (docs/conclusions/UX-SIMPLIFY-REVIEW.md F4)** — the right-edge `.grid-rail` had grown to 7 glyph-only drawers (flight · rc · cv · detections · marks · layers · help), past the "glance and know" limit the finding names, and was regrouped into four `.rail-group`s (each `role="group" aria-label="…"` for assistive tech) separated by a thin `.rail-divider` (`--hairline`, the same token `.secondary-tile`'s own border already uses): **Control** (flight, rc), **Vision** (cv, detections), **Situational** (marks), and **Help** pinned to the rail's bottom via `.rail-group-help{margin-top:auto}` — reference material, deliberately separated from the flying tools above it. No group gets a text label: at the rail's ~2.25rem button width a word like "Situational" doesn't read clean (the finding's own fallback: "if it crowds, use just the divider"). No "more"/overflow affordance either — the finding explicitly rules that out on a safety-of-flight screen; every remaining button stays always-visible, gated exactly as before (`canShowCommands()`/`!watchMode()`/`live()`/always). **`layers` removed (per direct user request, later than F4 itself)** — the rail is down to 6 drawers (flight · rc · cv · detections · marks · help); the detection-boxes rendering-mode control that used to be the `layers` drawer's only content now lives inside the `cv` (Detection) drawer instead (see the CV control panel bullet above). `ToolRailPanelId` (`fly-logic.ts`) is `'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'help'`; its own doc comment notes the union's declaration order no longer matches the rail's visual order.
 
@@ -12575,3 +12576,174 @@ as a 3-file component, was inline) + new `detections-strip-logic.ts`/`.spec.ts`.
   `cockpit.ts`/`cockpit.html` only; `fly-logic.ts`/`fly-osd.ts`/`fly-redirect-guard.ts`/`fly.routes.ts`
   are pure-logic/routing/a different overlay component, not a second page needing its own review.
 
+
+## Status — CV-PANEL-SPLIT-PLAN wave P1: the Vision drawer splits into a fly-time panel and a calm-hands setup modal (docs/plans/active/CV-PANEL-SPLIT-PLAN.md §1) — 2026-08-20
+
+### What shipped
+
+W5 left `<vision-cv-control-panel>` as a single 474-line, 12-section scroll inside the merged Vision
+drawer — every fly-time glance (Detect on/off, the follow-lock chip, the two honesty notices) sharing
+one surface with every set-once decision (model choice, confidence, the full class checklist, tracking
+mode, the Expert rate/ceiling/engine tier). P1 splits that one surface into two, with **no content
+redesign** — every control not explicitly named for the fly-time panel moved verbatim into the new
+modal, none deleted.
+
+- **`<vision-cv-control-panel>` slimmed to exactly seven items**, top to bottom: (1) the Detect hero
+  toggle + its existing honest status line (a measured-rate line is deferred to P2, per the plan); (2)
+  a new **"Looking for" summary row** — the selected model's `displayName` + `costWord` (`'fast'`/
+  `'slower'`) plus a "Change…" button, a *door* into the modal's own intent cards, never a second copy
+  of them; (3) nothing — the W5 detections-strip sibling already covers "what's on screen right now"
+  and is not duplicated here; (4) the Boxes declutter segmented control, unchanged; (5) the "Following
+  #N — Release" lock chip, unchanged, still wire-confirmed-only; (6) the capability-downgrade
+  warn/lag-over-budget danger notices, unchanged, still only-when-firing; (7) a "Detection setup…"
+  button, the second door into the modal.
+- **New `<vision-cv-setup-modal>` (`features/fly/cv-setup-modal.ts`/`.html`/`.css`)** — a centered
+  `position: fixed` dialog over the cockpit stage, video visible-but-dimmed behind a `--scrim-strong`
+  backdrop (never blanked, no `backdrop-filter` blur). Contains, moved verbatim from the old panel's
+  Tune/Expert disclosures: the "Looking for" intent cards + open-vocab preset button, the "Seen now"
+  staged-allowlist mini-checklist, confidence, the full "All classes" search/toggle/add/clear
+  checklist, the tracking-mode segmented control, and a collapsed "Expert" `<details>` (fps floor,
+  capability ceiling + hint, engine picker, re-verify cadence, follow sampling, the flow strip, the
+  Serving/detection-lag readout). Backdrop-click and the header "×" both emit `(closed)`; `Esc` is
+  **not** handled locally — `cockpit.ts`'s existing page-level `keydown` listener closes it via
+  `collapseOverlays()`, extended this wave (see below). Opening the modal does not touch the `panels`
+  `UiStore` group at all, so the Vision drawer stays open underneath it.
+- **Dialog wiring** — `cockpit.ts`'s `CockpitDialog` union widens from `'stop'` to `'stop' |
+  'cv-setup'`, both sharing the page's existing transient `dialog` `UiStore` (no `storageKey`,
+  mirrors `arm-confirm-dialog.ts`'s group shape). New `requestCvSetup()`/`closeCvSetup()` methods
+  mirror `requestStop()`/`cancelStop()`. `cockpit.html` wires `<vision-cv-control-panel
+  (setupRequested)="requestCvSetup()">` and mounts `<vision-cv-setup-modal>` in a new
+  `@if (isDialogOpen('cv-setup') && !facade.watchMode())` block (not additionally gated on
+  `isPanelOpen('cv')` — nothing can call `requestCvSetup()` without the drawer already open, since the
+  only two triggers live inside the panel, which itself only renders while the drawer is open).
+- **`Esc`'s cascade gains a new first-priority step** — `fly-logic.ts#nextCollapseAction` takes a new
+  `cvSetupOpen` field, checked *before* `panelOpen`/`stopConfirmOpen`/`mapVisible`: the setup modal is
+  the topmost overlay in the stack (it opens *over* the still-open Vision drawer), so one `Esc` closes
+  it alone, leaving the drawer open for a second `Esc` to then close.
+- **`CockpitFacade.cvExpertOpen`** — a new plain `signal(false)`, round-tripped through the modal's
+  `[expertOpen]`/`(expertOpenChange)` input/output pair, mirroring `lockedTrackId`/
+  `hoveredDetectionClass`'s existing "facade-owned overlay-adjacent state" shape. Facade-owned rather
+  than a component-local boolean (the shape the pre-split panel's own `tuneTier`/`expertTier` used) so
+  an operator's "I always want Expert open" preference survives the modal being destroyed and
+  recreated on every close/reopen — a component-local field would forget it every time.
+- **`cv-control-panel-logic.ts` gains two exports**, shared by both components so they can never
+  disagree: `modelCostWord(openVocab)` (`'slower'`/`'fast'`, replaces the inline ternary both the old
+  panel's intent cards and the new summary row used to write separately) and `HOT_KNOB_DEBOUNCE_MS`
+  (`400`, hoisted out of a local `const` in the panel so the modal's own `hotKnobPatch` debounce can't
+  silently drift from it).
+
+### Design choices
+
+- **The "Seen now" staged-allowlist checklist moved to the modal, not deleted, not left in the
+  panel** — a plan-vs-code mismatch worth flagging explicitly. The plan's own item (3) assumed the
+  panel's tier-0 "Seen now" section *was* the W5 detections-strip sibling and could simply be dropped
+  as a duplicate. Reading the actual source showed these are two different mechanisms: the W5 strip
+  (`<vision-detections-strip>`) toggles `labelDenyFilter` immediately, no staging; the panel's own
+  "Seen now" section is a staged **allowlist** mini-checklist sharing `pendingLabels`/
+  `submitLabelFilter`/`discardStagedLabels` with the full "All classes" checklist. Since it is a
+  set-once decision control, not a fly-time glance, it moved into the modal (alongside "All classes",
+  which it already shares state with) rather than being deleted — "nothing is deleted in P1" per the
+  plan's own instruction for anything not explicitly named.
+- **Expert disclosure state: facade signal, not a component `UiStore`, even though that departs from
+  the very file being split.** The pre-split panel's `tuneTier`/`expertTier` were component-owned
+  `UiStore` fields — a working, already-shipped precedent. The task's explicit instruction ("facade-
+  owned, not a component boolean") is more specific than that precedent, so it was followed literally:
+  `CockpitFacade.cvExpertOpen` plus an input/output pair, mirroring wave W4/W5's `lockedTrackId`/
+  `hoveredDetectionClass` shape rather than the pre-split panel's own tier-`UiStore` shape.
+- **The modal is not additionally gated on `isPanelOpen('cv')`.** Considered gating the modal's `@if`
+  on the drawer also being open, so that manually closing the drawer (the rail icon, or `?` toggling
+  `help` — mutually exclusive with `cv` inside the `panels` `UiStore` group) would also force-close the
+  modal. Rejected: the two `UiStore` groups (`panels`, `dialog`) are intentionally independent, and
+  gating one on the other would mean a drawer close silently discarding dialog-open state the operator
+  never asked to lose, with no way back except re-triggering `requestCvSetup()`. If the drawer does
+  close while the modal is open (an edge case — closing it requires going out of the way, since the
+  only buttons that open the modal live inside the panel), the modal stays open but now reads cleared
+  tracks/lock data — honest (nothing fabricated, `untrackTracks()` clears stale reads on unmount, see
+  `CvControlPanel`'s own doc comment) even if visually orphaned; not a violation of any named
+  invariant, but worth a future wave's attention if it proves confusing in practice.
+- **`servedCapability` (the downgrade notice's `reason` text) is a small duplicate computed in both
+  components, not threaded through an output.** Both `CvControlPanel` and `CvSetupModal` read
+  `DetectionsStore.results()` directly and derive `frameTracking`/`servedCapability`/
+  `capabilityDowngraded`/`detectionLagOverBudget` independently — there is nothing to keep in sync by
+  wiring one from the other, since both read the identical shared signal. The panel only needs the two
+  booleans (for its conditional notices); the modal additionally needs the numeric readouts (Serving
+  chip, lag text) for its own quiet Expert-tier reading.
+
+### Degrade / role-gate / dev-parity
+
+- **Every existing honesty invariant carries over unchanged, only relocated**: the Detect switch still
+  renders `detectionEnabled()` (server truth via `CockpitFacade.detectionOn()`), never an optimistic
+  local flip; the "Following #N" chip still only ever reads `DetectionsStore.tracks()?.lockedTrackId`,
+  never a click's own guess; the capability-downgrade notice still reads `servedCapability()?.reason`
+  straight from the server's own field, never a local comparison (invariant B5); the tracks poll
+  (`trackTracks`/`untrackTracks`) is still keyed on `CvControlPanel`'s own mount lifetime — i.e. the
+  Vision drawer being open — unchanged by the split; `CvSetupModal` never calls either.
+- **No new role-gated surface.** Both components are reached exactly where the old single panel was —
+  gated on `!facade.watchMode()` — so a viewer (watch mode) sees neither the panel's mutating controls
+  nor the setup modal's door into them, same "viewer, not controller" rule as before. Nothing here
+  reads `MeResponse.topRole` directly; role-gating is unchanged from the pre-split panel.
+- **`vision.auth.enabled=false` dev parity**: unaffected — the split touches only client-side UI
+  composition, no auth/role logic. The unbounded dev admin sees the identical two-surface split as
+  every other ADMIN.
+- **Failed enrichment/PATCH reads degrade exactly as before**: a failed `GET /api/cv/models` still
+  renders the summary row's fallback (the raw model id, `mono`, no fabricated display name); a failed
+  hot-knob PATCH still leaves the draft updated but the running stream's actual state unconfirmed,
+  same as every other hot knob pre-split.
+
+### Tests
+
+`npm run test:ci`: **132 test files, 2374 tests, all passing** (up from 132/2371 at the close of W5 —
+net +3 tests, 0 new files: `cv-control-panel-logic.spec.ts` gains a `modelCostWord` describe block (+2
+cases); `fly-logic.spec.ts`'s existing `nextCollapseAction` describe block gains the new `cvSetupOpen`
+field on every case plus one new case for its first-priority behavior (+1, net over widening the
+existing 4). No new component spec for `cv-control-panel.ts`/`cv-setup-modal.ts` — this repo's own
+established precedent (pure-logic vitest over component specs) holds; every behavior the split could
+regress (the seven-item content, the modal's verbatim sections, dialog open/close) is either pure logic
+already covered by `cv-control-panel-logic.spec.ts`/`fly-logic.spec.ts` or template wiring inherently
+outside that precedent's scope. `npx tsc --noEmit` clean on both `tsconfig.app.json` and
+`tsconfig.spec.json` (and the default `tsconfig.json`). `architecture.spec.ts` green — `fly/cockpit.ts`
+itself (the only file this suite scans) injects no new store directly and declares no new bare-signal
+overlay flag; `cv-control-panel.ts`/`cv-setup-modal.ts` are non-routed presentational children, already
+out of that suite's scope by its own documented carve-out (same as `flight-command-panel.ts`).
+
+### Build
+
+`ng build --configuration production` — green. Same two pre-existing budget warnings as every prior
+wave back through H8 (initial bundle over its 390 kB warning threshold by ~19 kB, `tactical-map.css`
+over its 8 kB budget by ~1.86 kB), neither introduced nor worsened by this wave (both present,
+near-identical magnitude, in the pre-P1 baseline build below too). **Bundle delta**, measured via
+`git stash -u` back to the pre-P1 working tree (this branch's own tip going into P1) and rebuilding,
+then `git stash pop` to restore:
+
+- **Initial (eager) bundle: 409.05 kB → 409.08 kB raw (+0.03 kB) / 115.11 kB → 115.12 kB transfer
+  (+0.01 kB) — noise-level, effectively unchanged.** Expected: every file this wave touched lives in
+  the lazy-loaded `cockpit` chunk.
+- **`cockpit` lazy chunk: 128.18 kB → 132.49 kB raw (+4.31 kB, +3.4%) / 27.98 kB → 28.50 kB transfer
+  (+0.52 kB, +1.9%)** — the cost of one new component (`cv-setup-modal.ts`/`.html`/`.css`) plus the new
+  facade signal/dialog-id/collapse-cascade wiring, partly offset by the slimmed panel shedding roughly
+  half its own template/component code to the modal. A modest, expected increase for a structural
+  split that adds one new standalone component with its own selector/metadata overhead — no dead code
+  or duplication left behind (verified via a repo-wide grep for `tuneTier`/`expertTier`/
+  `onTierToggle`, all gone).
+
+### Files touched
+
+Modified: `src/app/features/fly/cockpit-facade.ts`, `src/app/features/fly/cockpit.ts`/`.html`,
+`src/app/features/fly/cv-control-panel.ts`/`.html`/`.css` (slimmed), `src/app/features/fly/
+cv-control-panel-logic.ts` (+`.spec.ts`, two new exports), `src/app/features/fly/fly-logic.ts`
+(+`.spec.ts`). New: `src/app/features/fly/cv-setup-modal.ts`/`.html`/`.css`.
+
+### Left incomplete / deferred, named honestly
+
+- **The measured-rate line for the Detect hero's status text is explicitly P2 scope**, per the plan —
+  the hero's status line is otherwise unchanged from pre-split.
+- **The modal is not gated on the Vision drawer's own open state** — see "Design choices" above for
+  the reasoning and the one honest-but-orphaned edge case this leaves (drawer closed via the rail/help
+  toggle while the modal is still open, which then shows cleared tracks data until manually dismissed).
+  Not a regression against any named invariant; flagged for a future wave's judgment call, not silently
+  left undocumented.
+- **No Help-drawer copy change was needed** — checked directly: the Help drawer's shortcuts `<dl>`
+  names only generic keys (`M`/`B`/`F`/`Esc`/`?`), never `cv`/"Vision"/"Detection setup" by name (the
+  same finding W5's own changelog recorded), and the new "Change…"/"Detection setup…" buttons are
+  text-labeled, not icon-only, matching this app's existing precedent that only icon-only controls earn
+  a Help-drawer entry.

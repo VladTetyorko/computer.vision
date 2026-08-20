@@ -414,6 +414,19 @@ export class CockpitFacade {
    */
   readonly hoveredDetectionClass = signal<string | null>(null);
 
+  /**
+   * Whether `CvSetupModal`'s own "Expert" `<details>` disclosure is open (docs/plans/active/
+   * CV-PANEL-SPLIT-PLAN.md P1) — facade-owned rather than a component-local boolean on the modal
+   * itself, mirroring {@link lockedTrackId}/{@link hoveredDetectionClass}'s own "plain
+   * `CockpitFacade` signal round-tripped through an input/output pair" shape. Needed here
+   * specifically (unlike those two) because the modal, unlike the always-mounted-while-the-drawer-
+   * is-open panel, is destroyed and recreated on every close/reopen — a component-local field would
+   * forget an operator's "I always want Expert open" preference the instant they closed the dialog.
+   * Transient, not persisted to `localStorage`: this is a per-session convenience, not a durable
+   * setting worth a storage key of its own.
+   */
+  readonly cvExpertOpen = signal(false);
+
   /** Persisted, non-mutually-exclusive toggle (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — see this class's own
    * doc comment above `MAP_VISIBLE_KEY`. */
   readonly mapVisible = signal(readPersistedFlag(MAP_VISIBLE_KEY, true));
