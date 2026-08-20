@@ -45,18 +45,26 @@ public final class GrpcPulledGeolocationPort implements PulledGeolocationPort {
 
     private final GeolocationGrpc.GeolocationStub asyncStub;
     private final CvChannelSupervisor supervisor;
+    private final double mountPitchDegrees;
     private final ConcurrentHashMap<StreamId, GeolocationSession> sessions = new ConcurrentHashMap<>();
 
     /**
-     * @param channel    a channel already open to cv-service — typically the same one {@link
-     *                   GrpcDetectionPort} built; never closed by this class
-     * @param supervisor gates {@link #open} fail-fast while cv-service is known unreachable; unlike
-     *                   detection's ports, required (never {@code null}) — see class javadoc
-     * @throws NullPointerException if either argument is {@code null}
+     * @param channel           a channel already open to cv-service — typically the same one {@link
+     *                          GrpcDetectionPort} built; never closed by this class
+     * @param supervisor        gates {@link #open} fail-fast while cv-service is known unreachable;
+     *                          unlike detection's ports, required (never {@code null}) — see class javadoc
+     * @param mountPitchDegrees this deployment's fixed camera-mount pitch relative to the airframe,
+     *                          positive-up ({@code vision.geo.visual.mount-pitch-degrees}, default
+     *                          {@code 0.0}); used by {@link GeoFixCodec} only when an aircraft
+     *                          reports no gimbal pitch at all — see that class's own javadoc, "H8 —
+     *                          the gimbal-less fallback"
+     * @throws NullPointerException if {@code channel} or {@code supervisor} is {@code null}
      */
-    public GrpcPulledGeolocationPort(ManagedChannel channel, CvChannelSupervisor supervisor) {
+    public GrpcPulledGeolocationPort(ManagedChannel channel, CvChannelSupervisor supervisor,
+                                      double mountPitchDegrees) {
         Objects.requireNonNull(channel, "channel must not be null");
         this.supervisor = Objects.requireNonNull(supervisor, "supervisor must not be null");
+        this.mountPitchDegrees = mountPitchDegrees;
         this.asyncStub = GeolocationGrpc.newStub(channel);
     }
 
@@ -69,7 +77,7 @@ public final class GrpcPulledGeolocationPort implements PulledGeolocationPort {
             throw new CvUnavailableException(supervisor.describe());
         }
 
-        GeolocationSession session = new GeolocationSession(id, asyncStub, sessions, config);
+        GeolocationSession session = new GeolocationSession(id, asyncStub, sessions, config, mountPitchDegrees);
         GeolocationSession previous = sessions.put(id, session);
         if (previous != null) {
             previous.endAndClose(); // defensive: an id must not have two live sessions

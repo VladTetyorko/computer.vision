@@ -623,6 +623,7 @@ vision:
       keyframe-fps: 1.0                    # the worker's own geo sampling rate
       runner-interval-millis: 2000         # session reconcile + telemetry pump + prune cadence
       telemetry-max-age: PT2S              # older than this: send no telemetry rather than stale
+      mount-pitch-degrees: 0.0             # H8 amendment, see below -- fixed camera pitch vs the airframe
       region:
         zoom: 17                           # z16 measured a 0.75-0.96 false-fix rate -- do not lower
         max-tiles: 4000                    # per region, before an ingest is refused
@@ -652,6 +653,23 @@ vision:
       retention: PT12H                     # track_corrections prune horizon
       max-rows-per-usage: 20000            # per-usage cap, trimmed by the runner
 ```
+
+**Amendment — `mount-pitch-degrees`, added by H8 (2026-08-20).** D6 and §1.3 freeze
+`GIMBAL_DEVICE_ATTITUDE_STATUS` (#285) / `MOUNT_ORIENTATION` (#265) as the camera-pointing sources
+and never say what a *fixed-camera* platform does. §9.11 defect 2 measured the consequence: MAVLink
+`ATTITUDE` (#30) never populates the gimbal trio, so `GeoFixCodec` sent no `camera_pitch_deg` at
+all, cv-service assumed nadir, and rectification never ran (`rectified` false 323/323 with #30 only,
+true 41/41 once #285 appeared, +36% mean inlier ratio). The codec now falls back to the **airframe's
+own** `Attitude.pitchDegrees()` plus this fixed mount offset when no gimbal pitch is reported —
+`camera_pitch_deg = 90 + (airframePitch + mountPitchDegrees)`, still converted in the one place D6
+names. The offset is positive-up *relative to the airframe* (a camera bolted 36° nose-down reads
+`-36.0`); a measured gimbal pitch is earth-frame and absolute, so the offset never applies to it.
+Default `0.0` = boresight along the airframe's forward axis, which for level flight lands at the
+horizon — deliberately **not clamped**: `localize.py` only rectifies at `camera_pitch_deg >=
+CV_GEO_RECTIFY_MIN_PITCH_DEG` and `rectify.py`'s `horizon_crop` returns `None` once too few
+ground-facing rows remain, so an unhelpful fallback degrades to `evidence.rectified=false` — the
+pre-H8 behaviour — rather than warping a horizon shot into a fabricated fix. No wire change: the
+`GeoTelemetry.camera_pitch_deg` field and its convention are exactly as frozen above.
 
 cv-service (`cv_service/config.py` `Settings.from_env()`, the one place `CV_*` is read):
 

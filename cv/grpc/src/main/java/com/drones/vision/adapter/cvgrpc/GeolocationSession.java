@@ -59,6 +59,7 @@ final class GeolocationSession {
     private final GeolocationGrpc.GeolocationStub asyncStub;
     private final ConcurrentHashMap<StreamId, GeolocationSession> sessions;
     private final GeoSessionConfig config;
+    private final double mountPitchDegrees;
     private final SubmissionPublisher<VisualFix> publisher = new SubmissionPublisher<>();
     private final Object writeLock = new Object();
     private final AtomicBoolean torndown = new AtomicBoolean(false);
@@ -67,11 +68,13 @@ final class GeolocationSession {
     private volatile Telemetry currentTelemetry;
 
     GeolocationSession(StreamId streamId, GeolocationGrpc.GeolocationStub asyncStub,
-            ConcurrentHashMap<StreamId, GeolocationSession> sessions, GeoSessionConfig config) {
+            ConcurrentHashMap<StreamId, GeolocationSession> sessions, GeoSessionConfig config,
+            double mountPitchDegrees) {
         this.streamId = streamId;
         this.asyncStub = asyncStub;
         this.sessions = sessions;
         this.config = config;
+        this.mountPitchDegrees = mountPitchDegrees;
     }
 
     Flow.Publisher<VisualFix> publisher() {
@@ -95,7 +98,7 @@ final class GeolocationSession {
                 .setStop(stop);
         Telemetry telemetry = currentTelemetry;
         if (telemetry != null) {
-            builder.setTelemetry(GeoFixCodec.toWireGeoTelemetry(telemetry));
+            builder.setTelemetry(GeoFixCodec.toWireGeoTelemetry(telemetry, mountPitchDegrees));
         }
         return builder;
     }

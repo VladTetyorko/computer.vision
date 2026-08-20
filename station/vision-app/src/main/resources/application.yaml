@@ -602,6 +602,15 @@ vision:
       # Telemetry older than this is withheld rather than sent stale (PullControl doctrine -- a
       # one-shot message can be lost with no error/retry).
       telemetry-max-age: PT2S
+      # The fixed camera's pitch relative to the airframe, degrees, positive-up -- a camera bolted
+      # 36 degrees nose-down reads -36.0. Used ONLY when an aircraft reports no gimbal pitch at all
+      # (MAVLink ATTITUDE #30 never populates one), in which case camera_pitch_deg becomes
+      # 90 + (airframe pitch + this offset). Before H8 such a platform sent no camera_pitch_deg,
+      # so cv-service assumed nadir and rectification never ran (VISUAL-GEO-V2-PLAN.md 9.11
+      # defect 2). 0.0 = boresight along the airframe's forward axis; a value that lands at or
+      # above the horizon is refused by rectify.py rather than warped, so the honest default is
+      # "no assumed downward tilt".
+      mount-pitch-degrees: 0.0
       region:
         # Tile zoom level -- z16 measured a 0.75-0.96 false-fix rate; do not lower.
         zoom: 17

@@ -28,6 +28,31 @@ import java.time.Instant;
  * cases this formula is pinned against, and {@code GeoFixCodecTest} for the unit test naming both
  * conventions explicitly.
  *
+ * <h2>H8 — the gimbal-less fallback, in D6's spirit</h2>
+ * D6 and §1.3 freeze {@code GIMBAL_DEVICE_ATTITUDE_STATUS} (#285)/{@code MOUNT_ORIENTATION} (#265)
+ * as the camera-pointing sources without ever saying what a <em>fixed-camera</em> platform does.
+ * H7 measured the consequence: MAVLink {@code ATTITUDE} (#30) never populates the gimbal trio, so
+ * every gimbal-less aircraft was silently modelled as nadir, {@code camera_pitch_deg} never crossed
+ * the wire, and rectification never ran — {@code rectified} false 323/323 with #30 only, true 41/41
+ * once #285 appeared, with a 36% higher mean inlier ratio (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * §9.11, defect 2).
+ *
+ * <p>When no gimbal pitch is reported, this codec now falls back to the <b>airframe's</b> own
+ * {@link Attitude#pitchDegrees()} plus a fixed camera-mount pitch offset — the same
+ * measured-then-assumed precedence {@code GeoProjection#aimFrom}'s {@code
+ * fallbackDepressionDegrees} already applies for the projection path, a knob {@code GeoFixCodec}
+ * simply lacked. The offset is the camera's pitch <em>relative to the airframe</em>, in the same
+ * positive-up convention (a camera bolted 36° nose-down reads {@code -36.0}); it is configuration,
+ * not a constant — {@code vision.geo.visual.mount-pitch-degrees}, default {@code 0.0} (boresight
+ * along the airframe's forward axis). A gimbal reading, when present, is earth-frame and absolute,
+ * so the mount offset never applies to it.
+ *
+ * <p>The fallback is deliberately <b>not clamped</b>. A value that lands at or above the horizon is
+ * refused downstream rather than fabricated into a usable warp: {@code localize.py} only rectifies
+ * at {@code camera_pitch_deg >= CV_GEO_RECTIFY_MIN_PITCH_DEG}, and {@code rectify.py}'s {@code
+ * horizon_crop} returns {@code None} once too few ground-facing rows remain — both of which surface
+ * honestly as {@code evidence.rectified=false}, exactly the pre-H8 behaviour, never a wrong fix.
+ *
  * <h2>Fields deliberately left absent</h2>
  * <ul>
  *   <li>{@code gps_radius_meters} — no HDOP-to-meters conversion formula exists anywhere in this
@@ -62,8 +87,13 @@ final class GeoFixCodec {
      * {@link Telemetry} restated as wire {@code GeoTelemetry} — every field {@code optional} on the
      * wire, so a {@code null} kernel field simply stays unset rather than becoming a fabricated
      * zero.
+     *
+     * @param telemetry          the sample to restate
+     * @param mountPitchDegrees  the fixed camera's pitch relative to the airframe, positive-up,
+     *                           used only when no gimbal pitch is reported (see class javadoc,
+     *                           "H8 — the gimbal-less fallback")
      */
-    static GeoTelemetry toWireGeoTelemetry(Telemetry telemetry) {
+    static GeoTelemetry toWireGeoTelemetry(Telemetry telemetry, double mountPitchDegrees) {
         GeoTelemetry.Builder builder = GeoTelemetry.newBuilder()
                 .setSampleMillis(telemetry.at().toEpochMilli());
         if (telemetry.latitude() != null) {
@@ -87,9 +117,9 @@ final class GeoFixCodec {
         }
         Attitude attitude = telemetry.attitude();
         if (attitude != null) {
-            Double gimbalPitch = attitude.gimbalPitchDegrees();
-            if (gimbalPitch != null) {
-                builder.setCameraPitchDeg(PITCH_FROM_NADIR_OFFSET_DEGREES + gimbalPitch);
+            Double cameraPitchPositiveUp = cameraPitchPositiveUp(attitude, mountPitchDegrees);
+            if (cameraPitchPositiveUp != null) {
+                builder.setCameraPitchDeg(PITCH_FROM_NADIR_OFFSET_DEGREES + cameraPitchPositiveUp);
             }
             if (attitude.gimbalRollDegrees() != null) {
                 builder.setCameraRollDeg(attitude.gimbalRollDegrees());
@@ -100,6 +130,21 @@ final class GeoFixCodec {
         }
         // horizontal_fov_deg and gps_radius_meters left absent -- see class javadoc.
         return builder.build();
+    }
+
+    /**
+     * The camera's own pitch in {@link Attitude}'s positive-up convention — a measured gimbal
+     * reading when there is one, else the airframe's pitch shifted by the fixed mount offset, else
+     * {@code null} (absence stays absence; the wire's own comment reads "Absent = nadir assumed").
+     * See the class javadoc for why the fallback exists and why it is not clamped.
+     */
+    private static Double cameraPitchPositiveUp(Attitude attitude, double mountPitchDegrees) {
+        Double gimbalPitch = attitude.gimbalPitchDegrees();
+        if (gimbalPitch != null) {
+            return gimbalPitch; // earth-frame and absolute -- the mount offset does not apply
+        }
+        Double airframePitch = attitude.pitchDegrees();
+        return airframePitch == null ? null : airframePitch + mountPitchDegrees;
     }
 
     /** {@link com.drones.vision.perception.domain.model.GeoPrior} restated as wire {@code GeoPrior}. */

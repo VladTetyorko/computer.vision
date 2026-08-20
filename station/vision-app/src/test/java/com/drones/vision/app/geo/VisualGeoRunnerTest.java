@@ -218,7 +218,7 @@ class VisualGeoRunnerTest {
 
     private static VisionGeoVisualProperties properties() {
         return new VisionGeoVisualProperties(true, URI.create("rtsp://localhost:8554"), "tcp", 1.0f,
-                FAST_TICK_MILLIS, java.time.Duration.ofSeconds(2),
+                FAST_TICK_MILLIS, java.time.Duration.ofSeconds(2), 0.0,
                 new VisionGeoVisualProperties.Region(17, 4000),
                 new VisionGeoVisualProperties.Tiles("https://tiles.invalid/{z}/{y}/{x}", "test", 4, 20.0,
                         java.time.Duration.ofSeconds(10), 5, "vision-geo/test", false),

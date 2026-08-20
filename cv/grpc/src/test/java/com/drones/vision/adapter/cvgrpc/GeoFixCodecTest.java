@@ -32,6 +32,9 @@ class GeoFixCodecTest {
 
     private static final DeviceId DEVICE_ID = DeviceId.random();
 
+    /** {@code vision.geo.visual.mount-pitch-degrees}'s own default — boresight along the airframe. */
+    private static final double NO_MOUNT_OFFSET = 0.0;
+
     // -- D6: the one and only pitch-sign conversion -------------------------------------------
 
     /**
@@ -45,7 +48,7 @@ class GeoFixCodecTest {
         // Positive-up convention: gimbal pointed straight down is the MOST NEGATIVE pitch (-90).
         // Degrees-from-nadir convention: straight down is 0 (nadir itself).
         Telemetry straightDown = telemetryWithGimbalPitch(-90.0);
-        GeoTelemetry wireStraightDown = GeoFixCodec.toWireGeoTelemetry(straightDown);
+        GeoTelemetry wireStraightDown = GeoFixCodec.toWireGeoTelemetry(straightDown, NO_MOUNT_OFFSET);
         assertEquals(0.0, wireStraightDown.getCameraPitchDeg(), 1e-9,
                 "gimbalPitchDegrees=-90 (positive-up, straight down) must become "
                         + "camera_pitch_deg=0 (degrees-from-nadir, nadir)");
@@ -53,27 +56,75 @@ class GeoFixCodecTest {
         // Positive-up convention: gimbal level with the horizon is 0.
         // Degrees-from-nadir convention: level with the horizon is 90.
         Telemetry level = telemetryWithGimbalPitch(0.0);
-        GeoTelemetry wireLevel = GeoFixCodec.toWireGeoTelemetry(level);
+        GeoTelemetry wireLevel = GeoFixCodec.toWireGeoTelemetry(level, NO_MOUNT_OFFSET);
         assertEquals(90.0, wireLevel.getCameraPitchDeg(), 1e-9,
                 "gimbalPitchDegrees=0 (positive-up, level with horizon) must become "
                         + "camera_pitch_deg=90 (degrees-from-nadir, horizon)");
     }
 
+    /**
+     * H8's gimbal-less fallback (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 2) — the SAME
+     * degrees-from-nadir conversion, sourced from the airframe when MAVLink {@code ATTITUDE} (#30) is
+     * all the aircraft reports. Both conventions are named explicitly here too: the airframe's own
+     * pitch is positive-up, the mount offset is positive-up <em>relative to the airframe</em>, and the
+     * wire value is degrees-from-nadir.
+     */
     @Test
-    void cameraPitchDegIsAbsentWhenAttitudeHasNoGimbalPitch() {
+    void cameraPitchDegFallsBackToTheAirframePitchPlusTheMountOffsetWhenNoGimbalPitchIsReported() {
+        // #30-only aircraft, level flight, camera bolted 36 degrees nose-down (positive-up: -36).
+        // Positive-up camera pitch = 0 + (-36) = -36; degrees-from-nadir = 90 + (-36) = 54.
+        GeoTelemetry level = GeoFixCodec.toWireGeoTelemetry(telemetryWithAirframePitch(0.0), -36.0);
+        assertTrue(level.hasCameraPitchDeg(),
+                "a gimbal-less aircraft must still send camera_pitch_deg -- before H8 it sent none and "
+                        + "cv-service silently assumed nadir, so rectification never ran");
+        assertEquals(54.0, level.getCameraPitchDeg(), 1e-9);
+
+        // Nose 10 degrees down on the same mount: positive-up -10 + (-36) = -46; from nadir = 44.
+        GeoTelemetry diving = GeoFixCodec.toWireGeoTelemetry(telemetryWithAirframePitch(-10.0), -36.0);
+        assertEquals(44.0, diving.getCameraPitchDeg(), 1e-9);
+
+        // The default offset (0.0) means "boresight along the airframe": level flight looks at the
+        // horizon, which is 90 from nadir -- honest, and refused downstream rather than warped.
+        GeoTelemetry boresighted =
+                GeoFixCodec.toWireGeoTelemetry(telemetryWithAirframePitch(0.0), NO_MOUNT_OFFSET);
+        assertEquals(90.0, boresighted.getCameraPitchDeg(), 1e-9);
+    }
+
+    @Test
+    void aMeasuredGimbalPitchIsEarthFrameSoTheMountOffsetNeverAppliesToIt() {
+        Telemetry withGimbal = new Telemetry(DEVICE_ID, Instant.now(), null, null, null, null, null, Map.of(),
+                null, null, new Attitude(1.0, 20.0, 3.0, 4.0, -90.0, 5.0), null);
+
+        GeoTelemetry wire = GeoFixCodec.toWireGeoTelemetry(withGimbal, -36.0);
+
+        assertEquals(0.0, wire.getCameraPitchDeg(), 1e-9,
+                "a reported gimbal pitch is absolute: neither the airframe's own pitch nor the fixed "
+                        + "mount offset may be added to it");
+    }
+
+    @Test
+    void cameraPitchDegIsAbsentWhenNeitherAGimbalNorAnAirframePitchIsReported() {
         Telemetry telemetry = new Telemetry(DEVICE_ID, Instant.now(), null, null, null, null, null, Map.of(),
-                null, null, new Attitude(1.0, 2.0, 3.0, 4.0, null, 5.0), null);
+                null, null, new Attitude(1.0, null, 3.0, 4.0, null, 5.0), null);
 
-        GeoTelemetry wire = GeoFixCodec.toWireGeoTelemetry(telemetry);
+        GeoTelemetry wire = GeoFixCodec.toWireGeoTelemetry(telemetry, -36.0);
 
-        assertFalse(wire.hasCameraPitchDeg());
+        assertFalse(wire.hasCameraPitchDeg(),
+                "absence stays absence -- with no pitch reading at all there is nothing to shift, and "
+                        + "the wire's own comment reads 'Absent = nadir assumed'");
+    }
+
+    private static Telemetry telemetryWithAirframePitch(double pitchDegrees) {
+        Attitude attitude = new Attitude(0.0, pitchDegrees, 90.0, null, null, null);
+        return new Telemetry(DEVICE_ID, Instant.now(), null, null, null, null, null, Map.of(), null, null, attitude,
+                null);
     }
 
     @Test
     void cameraPitchDegIsAbsentWhenAttitudeItselfIsNull() {
         Telemetry telemetry = new Telemetry(DEVICE_ID, Instant.now(), null, null, null, null, null, Map.of());
 
-        GeoTelemetry wire = GeoFixCodec.toWireGeoTelemetry(telemetry);
+        GeoTelemetry wire = GeoFixCodec.toWireGeoTelemetry(telemetry, NO_MOUNT_OFFSET);
 
         assertFalse(wire.hasCameraPitchDeg());
         assertFalse(wire.hasCameraRollDeg());
@@ -93,7 +144,7 @@ class GeoFixCodecTest {
         Telemetry bare = new Telemetry(DEVICE_ID, Instant.ofEpochMilli(12345), null, null, null, null, null,
                 Map.of());
 
-        GeoTelemetry wire = GeoFixCodec.toWireGeoTelemetry(bare);
+        GeoTelemetry wire = GeoFixCodec.toWireGeoTelemetry(bare, NO_MOUNT_OFFSET);
 
         assertEquals(12345L, wire.getSampleMillis());
         assertFalse(wire.hasLatitude());
@@ -116,7 +167,7 @@ class GeoFixCodecTest {
                 Map.of("groundspeedMps", 12.5), null, 80.0,
                 new Attitude(1.0, 2.0, 3.0, 4.0, 5.0, 6.0), null);
 
-        GeoTelemetry wire = GeoFixCodec.toWireGeoTelemetry(full);
+        GeoTelemetry wire = GeoFixCodec.toWireGeoTelemetry(full, NO_MOUNT_OFFSET);
 
         assertEquals(48.5, wire.getLatitude(), 1e-9);
         assertEquals(32.0, wire.getLongitude(), 1e-9);

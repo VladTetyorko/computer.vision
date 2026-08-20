@@ -27,6 +27,13 @@ import java.time.Duration;
  *                              telemetry pump + prune, all on one cadence; default {@value #DEFAULT_RUNNER_INTERVAL_MILLIS}
  * @param telemetryMaxAge       telemetry older than this is withheld rather than sent stale (PullControl
  *                              doctrine — a one-shot message can be lost with no error); default {@value #DEFAULT_TELEMETRY_MAX_AGE}
+ * @param mountPitchDegrees     the fixed camera's pitch relative to the airframe, positive-up (a camera
+ *                              bolted 36° nose-down reads {@code -36.0}) — used by {@code GeoFixCodec}
+ *                              only when an aircraft reports no gimbal pitch at all, so a gimbal-less
+ *                              platform still crosses the wire with a real {@code camera_pitch_deg}
+ *                              instead of being silently modelled as nadir (§9.11 defect 2, H8);
+ *                              default {@value #DEFAULT_MOUNT_PITCH_DEGREES}, boresight along the
+ *                              airframe's forward axis
  * @param region                reference-region ingest limits — see {@link Region}
  * @param tiles                 tile source configuration — see {@link Tiles}
  * @param upload                reference-tile upload limits — see {@link Upload}
@@ -42,6 +49,7 @@ public record VisionGeoVisualProperties(@DefaultValue("false") boolean enabled,
                                          @DefaultValue(DEFAULT_KEYFRAME_FPS) float keyframeFps,
                                          @DefaultValue(DEFAULT_RUNNER_INTERVAL_MILLIS) long runnerIntervalMillis,
                                          @DefaultValue(DEFAULT_TELEMETRY_MAX_AGE) Duration telemetryMaxAge,
+                                         @DefaultValue(DEFAULT_MOUNT_PITCH_DEGREES) double mountPitchDegrees,
                                          @DefaultValue Region region, @DefaultValue Tiles tiles,
                                          @DefaultValue Upload upload, @DefaultValue Gate gate,
                                          @DefaultValue Divergence divergence,
@@ -53,6 +61,7 @@ public record VisionGeoVisualProperties(@DefaultValue("false") boolean enabled,
     static final String DEFAULT_KEYFRAME_FPS = "1.0";
     static final String DEFAULT_RUNNER_INTERVAL_MILLIS = "2000";
     static final String DEFAULT_TELEMETRY_MAX_AGE = "PT2S";
+    static final String DEFAULT_MOUNT_PITCH_DEGREES = "0.0";
     static final String DEFAULT_RETENTION = "PT12H";
     static final String DEFAULT_MAX_ROWS_PER_USAGE = "20000";
 
@@ -77,6 +86,10 @@ public record VisionGeoVisualProperties(@DefaultValue("false") boolean enabled,
         if (maxRowsPerUsage <= 0) {
             throw new IllegalArgumentException(
                     "vision.geo.visual.max-rows-per-usage must be positive: " + maxRowsPerUsage);
+        }
+        if (!Double.isFinite(mountPitchDegrees)) {
+            throw new IllegalArgumentException(
+                    "vision.geo.visual.mount-pitch-degrees must be finite: " + mountPitchDegrees);
         }
     }
 

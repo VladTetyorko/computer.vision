@@ -105,7 +105,8 @@ public class VisualGeoWiringConfiguration {
                                                          ObjectProvider<CvChannelSupervisor> cvChannelSupervisor) {
         if (properties.enabled()) {
             CvChannelSupervisor supervisor = cvChannelSupervisor.getObject();
-            return new GrpcPulledGeolocationPort(cvGrpcChannel.getObject(), supervisor);
+            return new GrpcPulledGeolocationPort(cvGrpcChannel.getObject(), supervisor,
+                    properties.mountPitchDegrees());
         }
         return new NoopGeolocationPort();
     }

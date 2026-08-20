@@ -55,6 +55,9 @@ class GrpcPulledGeolocationPortTest {
     private static final int AWAIT_SECONDS = 5;
     private static final GeoSessionConfig CONFIG = new GeoSessionConfig("kyiv-pozniaky", 5.0f, null);
 
+    /** {@code vision.geo.visual.mount-pitch-degrees}; the fallback itself is pinned in {@link GeoFixCodecTest}. */
+    private static final double MOUNT_PITCH_DEGREES = 0.0;
+
     private final List<ManagedChannel> channels = new ArrayList<>();
     private final List<Server> servers = new ArrayList<>();
     private final List<CvChannelSupervisor> supervisors = new ArrayList<>();
@@ -79,7 +82,7 @@ class GrpcPulledGeolocationPortTest {
         servers.add(server);
         ManagedChannel channel = InProcessChannelBuilder.forName(name).build();
         channels.add(channel);
-        return new GrpcPulledGeolocationPort(channel, availableSupervisor(channel));
+        return new GrpcPulledGeolocationPort(channel, availableSupervisor(channel), MOUNT_PITCH_DEGREES);
     }
 
     /** A stub {@link CvChannelSupervisor} whose gate reports open regardless of the underlying channel's state. */
@@ -106,7 +109,7 @@ class GrpcPulledGeolocationPortTest {
         channels.add(channel);
 
         CvChannelSupervisor closedGate = closedGateSupervisor();
-        GrpcPulledGeolocationPort port = new GrpcPulledGeolocationPort(channel, closedGate);
+        GrpcPulledGeolocationPort port = new GrpcPulledGeolocationPort(channel, closedGate, MOUNT_PITCH_DEGREES);
 
         assertThrows(CvUnavailableException.class,
                 () -> port.open(StreamId.random(), URI.create("rtsp://localhost:8554/x"), CONFIG),
