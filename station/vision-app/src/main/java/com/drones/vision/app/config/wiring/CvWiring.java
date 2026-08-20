@@ -301,9 +301,8 @@ public class CvWiring {
     public PipelineConfig streamDefaultConfig(VisionCvProperties cvProperties) {
         PipelineConfig defaults = PipelineConfig.defaults();
         return new PipelineConfig(defaults.model(), defaults.confidenceThreshold(), defaults.inferenceFps(),
-                defaults.maxInFlightInferences(), defaults.overlayTelemetry(), defaults.labelFilter(),
-                defaults.eventRule(), defaults.overlayBurnIn(), cvProperties.detectionDefaultEnabled(),
-                defaults.tracking());
+                defaults.maxInFlightInferences(), defaults.labelFilter(), defaults.eventRule(),
+                cvProperties.detectionDefaultEnabled(), defaults.tracking(), defaults.labelDenyFilter());
     }
 
     /**

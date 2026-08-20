@@ -177,52 +177,13 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.whepUrl").doesNotExist());
     }
 
-    // ---- docs/plans/active/MEDIA-SOT-PLAN.md §5.4, wave M5: burnedIn ----
-
-    @Test
-    void startReportsBurnedInFromTheStreamService() throws Exception {
-        StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any(), any())).thenReturn(streamId);
-        when(streamService.burnedIn(streamId)).thenReturn(true);
-
-        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.burnedIn").value(true));
-    }
-
-    @Test
-    void startReportsBurnedInFalseForAProxiedOrPullStream() throws Exception {
-        StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any(), any())).thenReturn(streamId);
-        when(streamService.burnedIn(streamId)).thenReturn(false);
-
-        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
-                .andExpect(status().isCreated())
-                // a primitive boolean is always serialized, unlike viewUrl/whepUrl -- an absent
-                // burnedIn would read as "true" to the client (wave M8), which would misreport this.
-                .andExpect(jsonPath("$.burnedIn").value(false));
-    }
-
-    @Test
-    void listReportsEachStreamsOwnBurnedIn() throws Exception {
-        StreamId streamId = StreamId.random();
-        DeviceId listedDeviceId = DeviceId.random();
-        when(streamService.streams())
-                .thenReturn(List.of(new com.drones.vision.perception.application.stream.ActiveStream(streamId, listedDeviceId,
-                        Instant.now(), false)));
-
-        mockMvc.perform(get("/api/streams"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].burnedIn").value(false));
-    }
-
     // --- STREAM-STATE-PLAN S2: the truth on the wire -------------------------------------------
 
     @Test
     void listCarriesTheStateAndDetectionIntentAClientUsedToGuess() throws Exception {
         StreamId streamId = StreamId.random();
         when(streamService.streams()).thenReturn(List.of(
-                new ActiveStream(streamId, DeviceId.random(), Instant.now(), true, StreamState.LIVE, true)));
+                new ActiveStream(streamId, DeviceId.random(), Instant.now(), StreamState.LIVE, true)));
         when(streamService.detectionState(streamId)).thenReturn(Optional.of(DetectionState.RUNNING));
 
         mockMvc.perform(get("/api/streams"))
@@ -238,7 +199,7 @@ class StreamControllerTest {
         // detection off" must be separately readable, not folded into one status.
         StreamId streamId = StreamId.random();
         when(streamService.streams()).thenReturn(List.of(
-                new ActiveStream(streamId, DeviceId.random(), Instant.now(), true, StreamState.STALLED, false)));
+                new ActiveStream(streamId, DeviceId.random(), Instant.now(), StreamState.STALLED, false)));
         when(streamService.detectionState(streamId)).thenReturn(Optional.of(DetectionState.OFF));
 
         mockMvc.perform(get("/api/streams"))
@@ -251,9 +212,10 @@ class StreamControllerTest {
     @Test
     void configReadsBackWhatWasOnlyEverWritable() throws Exception {
         StreamId streamId = StreamId.random();
-        PipelineConfig running = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.55, 12, 2, true,
-                Set.of("person", "car"), PipelineConfig.defaults().eventRule(), true, true,
-                new TrackingConfig(TrackingMode.FOLLOW, "cost", 2000, 15, 30, 30, 3, 0, 0, null));
+        PipelineConfig running = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.55, 12, 2,
+                Set.of("person", "car"), PipelineConfig.defaults().eventRule(), true,
+                new TrackingConfig(TrackingMode.FOLLOW, "cost", 2000, 15, 30, 30, 3, 0, 0, null),
+                Set.of("bird"));
         when(streamService.config(streamId)).thenReturn(Optional.of(running));
 
         mockMvc.perform(get("/api/streams/{id}/config", streamId.value()))
@@ -263,6 +225,7 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.inferenceFps").value(12))
                 .andExpect(jsonPath("$.detectionEnabled").value(true))
                 .andExpect(jsonPath("$.labelFilter", hasSize(2)))
+                .andExpect(jsonPath("$.labelDenyFilter", hasSize(1)))
                 .andExpect(jsonPath("$.tracking.mode").value("FOLLOW"))
                 .andExpect(jsonPath("$.tracking.engineId").value("cost"));
     }
@@ -313,8 +276,8 @@ class StreamControllerTest {
         assertEquals(10, config.inferenceFps());
         assertEquals(defaults.model(), config.model());
         assertEquals(defaults.maxInFlightInferences(), config.maxInFlightInferences());
-        assertEquals(defaults.overlayTelemetry(), config.overlayTelemetry());
         assertEquals(defaults.labelFilter(), config.labelFilter());
+        assertEquals(defaults.labelDenyFilter(), config.labelDenyFilter());
     }
 
     @Test
@@ -340,15 +303,15 @@ class StreamControllerTest {
     }
 
     @Test
-    void startMergesOverlayBurnInOverrideOntoDefaults() throws Exception {
-        // docs/plans/done/MVP2-PLAN.md §V, V-e: overlayBurnIn is per-stream settable exactly like
-        // confidenceThreshold/inferenceFps above.
+    void startMergesLabelDenyFilterOverrideOntoDefaults() throws Exception {
+        // docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2: labelDenyFilter is per-stream settable exactly
+        // like labelFilter/confidenceThreshold/inferenceFps above.
         StreamId streamId = StreamId.random();
         when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         String body = """
-                {"overlayBurnIn":false}
+                {"labelDenyFilter":["bird"]}
                 """;
 
         mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value())
@@ -359,7 +322,7 @@ class StreamControllerTest {
         verify(streamService).start(eq(deviceId), captor.capture(), any());
         PipelineConfig defaults = PipelineConfig.defaults();
         PipelineConfig config = captor.getValue();
-        assertFalse(config.overlayBurnIn());
+        assertEquals(Set.of("bird"), config.labelDenyFilter());
         assertEquals(defaults.confidenceThreshold(), config.confidenceThreshold());
         assertEquals(defaults.inferenceFps(), config.inferenceFps());
     }

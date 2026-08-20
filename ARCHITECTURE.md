@@ -75,8 +75,8 @@ vision/                                  (parent pom, dependency management)
 │   ├── vision-identity/                  Users, auth, assignment, visibility-scope resolution. + warehouse
 │   ├── vision-flight/                    Flight sessions (AssetUsage), telemetry, geofencing, manual
 │   │                                     control. + warehouse
-│   ├── vision-perception/                StreamPipeline (VideoFrame → Detection → AnnotatedFrame),
-│   │                                     VideoSourcePort/DetectionPort/OverlayPort, device probing.
+│   ├── vision-perception/                StreamPipeline (VideoFrame → Detection),
+│   │                                     VideoSourcePort/DetectionPort, device probing.
 │   │                                     + warehouse, flight
 │   ├── vision-map/                       Tactical map layers and marks. + identity, perception
 │   ├── vision-events/                    Replay capture, usage timeline — a downstream sink that reads
@@ -100,8 +100,9 @@ vision/                                  (parent pom, dependency management)
 │
 ├── video-output/                        How pixels get out
 │   ├── publish-hls/                     H.264 RTSP push → mediamtx, HLS/LL-HLS viewing [adapter-publish-hls]
-│   ├── overlay/                         Frame annotation: boxes, labels, confidence, OSD telemetry
-│   │                                    (Java2D/JavaCV) — implements OverlayPort [adapter-overlay]
+│   │                                    (server-side burn-in removed — docs/plans/active/CV-CLEAN-FEED-PLAN.md
+│   │                                    D-1; every published frame is the clean source frame, detection boxes
+│   │                                    render client-side in the web console)
 │   └── (planned) recording/             Segmented MP4 recording, retention policy
 │
 ├── drone-link/                          How we talk to aircraft: commands out, telemetry/acks/RC in.
@@ -161,7 +162,6 @@ vision/                                  (parent pom, dependency management)
 | `Telemetry` | GPS, altitude, attitude, battery, RSSI — merged into the pipeline by timestamp |
 | `Detection` | Class label, confidence, bounding box, model version |
 | `TrackedObject` | Detection + stable track id across frames (tracking done core-side or CV-side) |
-| `AnnotatedFrame` | Frame + rendered overlay (detections, OSD telemetry) |
 | `Event` | Semantic occurrence: "person entered zone", "object of class X detected ≥N sec", "device offline" |
 | `PipelineConfig` | Per-stream settings: target FPS for inference (sample rate), model id, confidence threshold, zones of interest |
 
@@ -170,14 +170,15 @@ vision/                                  (parent pom, dependency management)
 ```
 VideoSourcePort ──frames──▶ Sampler ──every Nth──▶ DetectionPort (async)
       │                                                  │
-      │ (all frames)                                     ▼ detections
-      └────────────▶ OverlayPort ◀── latest detections + Telemetry
-                          │
-                          ▼ annotated frames
-              ┌───────────┼──────────────┐
-              ▼           ▼              ▼
-    StreamPublisherPort            EventPublisherPort
+      │ (all frames, unmodified)                         ▼ detections (labelFilter/labelDenyFilter applied)
+      ▼                                       ┌───────────┼──────────────┐
+StreamPublisherPort                           ▼           ▼              ▼
+                                    (client-side render)  EventPublisherPort
 ```
+
+No server-side burn-in: the frame reaching `StreamPublisherPort` is always the clean source frame —
+`OverlayPort`/`AnnotatedFrame` were removed entirely (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1), not
+defaulted off. Detection boxes are rendered client-side by the web console against the detection feed.
 
 Key policies (application layer, protocol-agnostic — KISS):
 - **Frame sampling:** inference runs at e.g. 5–10 FPS while video passes through at full FPS; detections are interpolated onto intermediate frames by the tracker.
@@ -308,7 +309,8 @@ Domain additions land in their own phase (below) — Phase 0–2 domain stays le
 ### Phase 2 — CV core *(the point of the project)*
 - [ ] Python `cv-service` inference server with pretrained YOLO (COCO classes).
 - [ ] `adapter-cv-grpc` implementing `DetectionPort`; sampling + backpressure policy.
-- [ ] `adapter-overlay`: boxes/labels/confidence burned into frames.
+- [ ] Detection boxes/labels/confidence rendered client-side over the video (no server-side burn-in —
+      docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1; `adapter-overlay` was removed, not built).
 - [ ] Detections persisted (`adapter-persistence`) + live detection feed over WebSocket.
 - **Milestone: browser shows live video with detection overlays; detections queryable.**
 

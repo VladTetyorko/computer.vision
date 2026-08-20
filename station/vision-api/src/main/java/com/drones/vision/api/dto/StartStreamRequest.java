@@ -12,17 +12,18 @@ import java.util.Set;
  *
  * <p>All fields are optional; each present field overrides the
  * corresponding value from {@link PipelineConfig#defaults()}. All other
- * settings (max in-flight inferences, telemetry overlay) come from the
+ * settings (max in-flight inferences) come from the
  * defaults untouched — Phase 1 only exposed the two settings a dev-console
- * user is likely to want to tweak (KISS); {@code overlayBurnIn}
- * (docs/plans/done/MVP2-PLAN.md §V, V-e), {@code model} (the frontend's detection-model
+ * user is likely to want to tweak (KISS); {@code model} (the frontend's detection-model
  * picker), and {@code labelFilter}/{@code detectionEnabled}
  * (docs/plans/done/CV-CONTROL-PLAN.md §2) were added the same way, per-stream,
- * mirroring this pattern rather than a global toggle.
+ * mirroring this pattern rather than a global toggle. {@code labelDenyFilter}
+ * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) followed the same shape once server-side overlay
+ * burn-in — and {@code overlayBurnIn} with it — was removed entirely (D-1): with no rendered boxes
+ * left to strip out, "don't even detect this label" needed a first-class deny list instead.
  *
  * @param confidenceThreshold overrides {@link PipelineConfig#confidenceThreshold()} if present
  * @param inferenceFps        overrides {@link PipelineConfig#inferenceFps()} if present
- * @param overlayBurnIn       overrides {@link PipelineConfig#overlayBurnIn()} if present
  * @param model               overrides {@link PipelineConfig#model()}'s {@code id} if present/non-blank —
  *                             the raw string verbatim, which may be a comma-composite (e.g. {@code
  *                             "yolo11n.pt,orion12l.pt"}) that {@code cv-service}'s model registry parses
@@ -32,6 +33,11 @@ import java.util.Set;
  * @param labelFilter         overrides {@link PipelineConfig#labelFilter()} if present (a JSON array); an
  *                             absent field keeps the default (empty, "all labels"); an explicit empty array
  *                             is itself a real value with the same "all labels" meaning
+ * @param labelDenyFilter      overrides {@link PipelineConfig#labelDenyFilter()} if present (a JSON array);
+ *                             an absent field keeps the default (empty, "deny nothing"); an explicit empty
+ *                             array is itself a real value with that same meaning. Applied alongside {@code
+ *                             labelFilter} at the single drop site in {@code StreamPipeline}, never a
+ *                             separate stage
  * @param detectionEnabled    overrides {@link PipelineConfig#detectionEnabled()} if present; absent keeps
  *                             the default ({@code true})
  * @param tracking            overrides the deployment's tracking seed if present (docs/plans/done/TRACKING-PLAN.md
@@ -40,27 +46,28 @@ import java.util.Set;
  *                             the stream has produced one and is therefore a 400 here; absent keeps
  *                             the seed exactly
  */
-public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFps, Boolean overlayBurnIn,
-                                  String model, List<String> labelFilter, Boolean detectionEnabled,
+public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFps, String model,
+                                  List<String> labelFilter, List<String> labelDenyFilter, Boolean detectionEnabled,
                                   TrackingConfigRequest tracking) {
 
     /** No overrides: use every default from {@link PipelineConfig#defaults()}. */
-    public static final StartStreamRequest EMPTY = new StartStreamRequest(null, null, null, null, null, null, null);
+    public static final StartStreamRequest EMPTY =
+            new StartStreamRequest(null, null, null, null, null, null, null);
 
     /**
-     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
-     * a convenience constructor defaulting it to {@code null} ("use the seed as-is").
+     * Convenience constructor defaulting {@code labelDenyFilter} to {@code null} ("deny nothing beyond
+     * the default").
      *
      * @param confidenceThreshold overrides the default confidence threshold if present
      * @param inferenceFps        overrides the default inference sample rate if present
-     * @param overlayBurnIn       overrides the default burn-in flag if present
      * @param model               overrides the default model id if present/non-blank
      * @param labelFilter         overrides the default label set if present
      * @param detectionEnabled    overrides the default detection on/off flag if present
+     * @param tracking            overrides the deployment's tracking seed if present
      */
-    public StartStreamRequest(Double confidenceThreshold, Integer inferenceFps, Boolean overlayBurnIn, String model,
-                               List<String> labelFilter, Boolean detectionEnabled) {
-        this(confidenceThreshold, inferenceFps, overlayBurnIn, model, labelFilter, detectionEnabled, null);
+    public StartStreamRequest(Double confidenceThreshold, Integer inferenceFps, String model,
+                               List<String> labelFilter, Boolean detectionEnabled, TrackingConfigRequest tracking) {
+        this(confidenceThreshold, inferenceFps, model, labelFilter, null, detectionEnabled, tracking);
     }
 
     /**
@@ -83,15 +90,16 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
     public PipelineConfig mergeOnto(PipelineConfig defaults) {
         double confidence = confidenceThreshold != null ? confidenceThreshold : defaults.confidenceThreshold();
         int fps = inferenceFps != null ? inferenceFps : defaults.inferenceFps();
-        boolean burnIn = overlayBurnIn != null ? overlayBurnIn : defaults.overlayBurnIn();
         ModelRef effectiveModel =
                 model != null && !model.isBlank() ? new ModelRef(model, defaults.model().version()) : defaults.model();
         Set<String> effectiveLabelFilter = labelFilter != null ? Set.copyOf(labelFilter) : defaults.labelFilter();
+        Set<String> effectiveLabelDenyFilter =
+                labelDenyFilter != null ? Set.copyOf(labelDenyFilter) : defaults.labelDenyFilter();
         boolean effectiveDetectionEnabled =
                 detectionEnabled != null ? detectionEnabled : defaults.detectionEnabled();
         return new PipelineConfig(effectiveModel, confidence, fps, defaults.maxInFlightInferences(),
-                defaults.overlayTelemetry(), effectiveLabelFilter, defaults.eventRule(), burnIn,
-                effectiveDetectionEnabled, defaults.tracking());
+                effectiveLabelFilter, defaults.eventRule(), effectiveDetectionEnabled, defaults.tracking(),
+                effectiveLabelDenyFilter);
     }
 
     /**

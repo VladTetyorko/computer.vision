@@ -12,11 +12,10 @@
     <artifactId>video-output</artifactId>
     <packaging>pom</packaging>
     <name>video-output</name>
-    <description>Aggregator for the egress adapters — how pixels get out (mediamtx publishing, overlay burn-in).</description>
+    <description>Aggregator for the egress adapters — how pixels get out (mediamtx publishing).</description>
 
     <modules>
         <module>publish-hls</module>
-        <module>overlay</module>
     </modules>
 
 </project>

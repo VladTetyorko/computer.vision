@@ -26,10 +26,9 @@ class PipelineConfigTest {
         assertEquals(0.4, defaults.confidenceThreshold());
         assertEquals(10, defaults.inferenceFps());
         assertEquals(2, defaults.maxInFlightInferences());
-        assertTrue(defaults.overlayTelemetry());
         assertTrue(defaults.labelFilter().isEmpty(), "empty labelFilter means all labels");
+        assertTrue(defaults.labelDenyFilter().isEmpty(), "empty labelDenyFilter means deny nothing");
         assertEquals(EventRuleConfig.defaults(), defaults.eventRule());
-        assertTrue(defaults.overlayBurnIn(), "overlay burn-in defaults on, unchanged behavior");
         // docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1: the flip. A new stream is video-only until an
         // operator turns detection on for it, so many concurrent streams stay affordable by default.
         assertFalse(defaults.detectionEnabled(), "detection defaults off as of CV-DEMAND-PLAN wave D1");
@@ -43,73 +42,71 @@ class PipelineConfigTest {
     }
 
     @Test
-    void sixArgConvenienceConstructorDefaultsEventRuleOverlayBurnInAndDetectionEnabled() {
-        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of());
+    void fiveArgConvenienceConstructorDefaultsEventRuleDetectionEnabledTrackingAndLabelDenyFilter() {
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of());
 
         assertEquals(EventRuleConfig.defaults(), config.eventRule());
-        assertTrue(config.overlayBurnIn());
         assertFalse(config.detectionEnabled(),
-                "old 6-arg ctor chain now defaults detectionEnabled=false (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1)");
-        assertEquals(TrackingConfig.off(), config.tracking(), "old 6-arg ctor chain still defaults tracking=off");
+                "5-arg ctor chain defaults detectionEnabled=false (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1)");
+        assertEquals(TrackingConfig.off(), config.tracking(), "5-arg ctor chain still defaults tracking=off");
+        assertTrue(config.labelDenyFilter().isEmpty(),
+                "5-arg ctor chain defaults labelDenyFilter to empty (deny nothing)");
     }
 
     @Test
-    void sevenArgConstructorAcceptsAnExplicitEventRuleAndDefaultsOverlayBurnInAndDetectionEnabled() {
+    void sixArgConstructorAcceptsAnExplicitEventRuleAndDefaultsDetectionEnabledTrackingAndLabelDenyFilter() {
         EventRuleConfig customRule = new EventRuleConfig(Set.of("dog"), 0.7, 5, Duration.ofSeconds(10));
 
-        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of(), customRule);
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of(), customRule);
 
         assertEquals(customRule, config.eventRule());
-        assertTrue(config.overlayBurnIn());
         assertFalse(config.detectionEnabled(),
-                "old 7-arg ctor chain now defaults detectionEnabled=false (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1)");
-        assertEquals(TrackingConfig.off(), config.tracking(), "old 7-arg ctor chain still defaults tracking=off");
+                "6-arg ctor chain defaults detectionEnabled=false (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1)");
+        assertEquals(TrackingConfig.off(), config.tracking(), "6-arg ctor chain still defaults tracking=off");
+        assertTrue(config.labelDenyFilter().isEmpty());
     }
 
     @Test
-    void eightArgConstructorAcceptsAnExplicitOverlayBurnInAndDefaultsDetectionEnabled() {
+    void sevenArgConstructorAcceptsAnExplicitDetectionEnabledAndDefaultsTrackingAndLabelDenyFilter() {
         EventRuleConfig customRule = EventRuleConfig.defaults();
 
         PipelineConfig config =
-                new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of(), customRule, false);
+                new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of(), customRule, true);
 
         assertEquals(customRule, config.eventRule());
-        assertFalse(config.overlayBurnIn());
-        assertFalse(config.detectionEnabled(),
-                "old 8-arg canonical ctor (pre-Wave-B) now defaults detectionEnabled=false "
-                        + "(docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1)");
-        assertEquals(TrackingConfig.off(), config.tracking(), "old 8-arg ctor chain still defaults tracking=off");
+        assertTrue(config.detectionEnabled());
+        assertEquals(TrackingConfig.off(), config.tracking(), "7-arg ctor chain still defaults tracking=off");
+        assertTrue(config.labelDenyFilter().isEmpty());
     }
 
     @Test
-    void nineArgConstructorRoundTripsAnExplicitDetectionEnabledAndDefaultsTracking() {
+    void eightArgConstructorRoundTripsAnExplicitTrackingAndDefaultsLabelDenyFilter() {
         EventRuleConfig customRule = EventRuleConfig.defaults();
+        TrackingConfig tracking = TrackingConfig.defaults();
 
         PipelineConfig config =
-                new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of(), customRule, false, false);
+                new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of(), customRule, false, tracking);
 
         assertEquals(customRule, config.eventRule());
-        assertFalse(config.overlayBurnIn());
         assertFalse(config.detectionEnabled());
-        // Wave T8 flipped defaults() to ASSOCIATE but deliberately left the convenience ctors on
-        // off(): "the component you did not mention keeps its pre-existing value" is a different
-        // contract from "what a new stream should be", and conflating them would turn tracking on
-        // for every call site that merely predates the field.
-        assertEquals(TrackingConfig.off(), config.tracking(),
-                "old 9-arg canonical ctor (pre-TRACKING-PLAN) still defaults tracking=off");
-        assertNotEquals(PipelineConfig.defaults().tracking(), config.tracking(),
-                "and that is deliberately NOT what defaults() ships as of wave T8");
+        assertEquals(tracking, config.tracking());
+        assertTrue(config.labelDenyFilter().isEmpty(),
+                "8-arg ctor chain (pre-CV-CLEAN-FEED-PLAN) defaults labelDenyFilter to empty");
     }
 
     @Test
-    void tenArgCanonicalConstructorRoundTripsAnExplicitTracking() {
+    void nineArgCanonicalConstructorRoundTripsAnExplicitLabelDenyFilter() {
         EventRuleConfig customRule = EventRuleConfig.defaults();
         TrackingConfig tracking = TrackingConfig.defaults();
 
         PipelineConfig config = new PipelineConfig(
-                new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of(), customRule, false, false, tracking);
+                new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of(), customRule, false, tracking, Set.of("bird"));
 
-        assertEquals(tracking, config.tracking());
+        assertEquals(Set.of("bird"), config.labelDenyFilter());
+        // Wave T8 flipped defaults() to ASSOCIATE but the convenience ctors deliberately keep off():
+        // "the component you did not mention keeps its pre-existing value" is a different contract
+        // from "what a new stream should be".
+        assertNotEquals(PipelineConfig.defaults().tracking(), TrackingConfig.off());
     }
 
     @Test
@@ -117,7 +114,7 @@ class PipelineConfigTest {
         ModelRef model = new ModelRef("yolo", "1");
 
         assertThrows(IllegalArgumentException.class,
-                () -> new PipelineConfig(model, 0.5, 5, 2, true, Set.of(), null, true, true));
+                () -> new PipelineConfig(model, 0.5, 5, 2, Set.of(), null, true, TrackingConfig.off()));
     }
 
     @Test
@@ -125,7 +122,15 @@ class PipelineConfigTest {
         ModelRef model = new ModelRef("yolo", "1");
 
         assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(
-                model, 0.5, 5, 2, true, Set.of(), EventRuleConfig.defaults(), true, true, null));
+                model, 0.5, 5, 2, Set.of(), EventRuleConfig.defaults(), true, null, Set.of()));
+    }
+
+    @Test
+    void rejectsNullLabelDenyFilter() {
+        ModelRef model = new ModelRef("yolo", "1");
+
+        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(
+                model, 0.5, 5, 2, Set.of(), EventRuleConfig.defaults(), true, TrackingConfig.off(), null));
     }
 
     @Test
@@ -133,7 +138,7 @@ class PipelineConfigTest {
         Set<String> labels = new HashSet<>();
         labels.add("person");
 
-        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, labels);
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, labels);
 
         labels.add("car");
 
@@ -142,15 +147,29 @@ class PipelineConfigTest {
     }
 
     @Test
+    void labelDenyFilterIsDefensivelyCopied() {
+        Set<String> denied = new HashSet<>();
+        denied.add("tree");
+
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of(),
+                EventRuleConfig.defaults(), false, TrackingConfig.off(), denied);
+
+        denied.add("cloud");
+
+        assertEquals(1, config.labelDenyFilter().size());
+        assertThrows(UnsupportedOperationException.class, () -> config.labelDenyFilter().add("bird"));
+    }
+
+    @Test
     void rejectsInvalidArguments() {
         ModelRef model = new ModelRef("yolo", "1");
 
-        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(null, 0.5, 5, 2, true, Set.of()));
-        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(model, -0.01, 5, 2, true, Set.of()));
-        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(model, 1.01, 5, 2, true, Set.of()));
-        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(model, 0.5, 0, 2, true, Set.of()));
-        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(model, 0.5, 5, 0, true, Set.of()));
-        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(model, 0.5, 5, 2, true, null));
+        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(null, 0.5, 5, 2, Set.of()));
+        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(model, -0.01, 5, 2, Set.of()));
+        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(model, 1.01, 5, 2, Set.of()));
+        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(model, 0.5, 0, 2, Set.of()));
+        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(model, 0.5, 5, 0, Set.of()));
+        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(model, 0.5, 5, 2, null));
     }
 
     @Test

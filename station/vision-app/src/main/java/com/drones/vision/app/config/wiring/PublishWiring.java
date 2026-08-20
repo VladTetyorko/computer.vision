@@ -1,7 +1,5 @@
 package com.drones.vision.app.config.wiring;
 
-import com.drones.vision.adapter.overlay.Java2DOverlayRenderer;
-import com.drones.vision.adapter.overlay.OverlaySettings;
 import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
 import com.drones.vision.adapter.publishhls.MediamtxProxyPublisher;
 import com.drones.vision.adapter.publishhls.MediamtxProxySettings;
@@ -14,11 +12,9 @@ import com.drones.vision.api.proxy.HlsProxyController;
 import com.drones.vision.api.support.SnapshotJpegEncoder;
 import com.drones.vision.app.config.properties.VisionApiProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
-import com.drones.vision.app.config.properties.VisionOverlayProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
 import com.drones.vision.app.devsupport.NoopReplayFrameExtractor;
 import com.drones.vision.app.devsupport.NoopStreamPublisher;
-import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.events.domain.port.ReplayFrameExtractionPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.springframework.beans.factory.ObjectProvider;
@@ -30,11 +26,12 @@ import org.springframework.context.annotation.Configuration;
 import java.net.URI;
 
 /**
- * Wires stream egress (mediamtx publish/replay), detection/OSD overlay burn-in, and the snapshot
- * JPEG encoder — the publish slice of what used to be one 825-line {@code WiringConfiguration}
- * (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D). Config extraction (wave F3): {@link #overlayRenderer}
- * now takes an {@code OverlaySettings} built from {@code vision.overlay.*}; {@link
- * #streamPublisherPort} now also threads {@code vision.publish.encoder.*}/{@code .resilience.*}/
+ * Wires stream egress (mediamtx publish/replay) and the snapshot JPEG encoder — the publish slice
+ * of what used to be one 825-line {@code WiringConfiguration} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
+ * wave D). Server-side detection/OSD overlay burn-in — the reason this class used to also own an
+ * {@code overlayRenderer} bean — was removed entirely (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1): every
+ * published frame is the clean one now, and {@code adapter-overlay} no longer exists. Config
+ * extraction (wave F3): {@link #streamPublisherPort} threads {@code vision.publish.encoder.*}/{@code .resilience.*}/
  * {@code .cadence.*} through a {@code PublishSettings}; {@link #replayFrameExtractionPort} threads
  * {@code vision.publish.replay.*} — every mapped default is byte-identical to the literal it
  * replaced. {@link #snapshotJpegEncoder} (wave D/B closeout) makes {@code
@@ -53,22 +50,9 @@ import java.net.URI;
  * qualified below, never imported, to avoid a simple-name collision).
  */
 @Configuration
-@EnableConfigurationProperties({VisionOverlayProperties.class, VisionPublishProperties.class,
+@EnableConfigurationProperties({VisionPublishProperties.class,
         VisionApiProperties.class, VisionCvProperties.class})
 public class PublishWiring {
-
-    /**
-     * Burns detection boxes/labels (and, once a telemetry input reaches {@code
-     * com.drones.vision.perception.application.pipeline.StreamPipeline}, a telemetry OSD) onto published frames
-     * (docs/plans/done/MVP1-PLAN.md §C8 bullets 1-2). Threaded into {@code
-     * ApplicationServiceWiring#streamService} below.
-     */
-    @Bean
-    public OverlayPort overlayRenderer(VisionOverlayProperties properties) {
-        return new Java2DOverlayRenderer(new OverlaySettings(properties.jpegQuality(), properties.minStrokeWidth(),
-                properties.strokeDivisor(), properties.minFontSize(), properties.fontDivisor(),
-                properties.osdBackgroundAlpha(), properties.osdMargin()));
-    }
 
     /**
      * The mediamtx-backed direct publisher itself — extracted into its own bean (docs/plans/active/

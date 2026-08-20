@@ -56,7 +56,7 @@ class IdleStreamReaperTest {
     }
 
     private ActiveStream stream() {
-        return new ActiveStream(streamId, deviceId, t0, true, StreamState.LIVE, false);
+        return new ActiveStream(streamId, deviceId, t0, StreamState.LIVE, false);
     }
 
     private IdleStreamReaper reaper(RecordingStreams streams, VideoDemandPort demand) {
@@ -134,7 +134,7 @@ class IdleStreamReaperTest {
         DeviceId healthyDevice = DeviceId.random();
         RecordingStreams streams = new RecordingStreams();
         streams.running.add(stream());
-        streams.running.add(new ActiveStream(healthy, healthyDevice, t0, true, StreamState.LIVE, false));
+        streams.running.add(new ActiveStream(healthy, healthyDevice, t0, StreamState.LIVE, false));
         VideoDemandPort demand = (id, asset) -> {
             if (id.equals(streamId)) {
                 throw new IllegalStateException("boom");

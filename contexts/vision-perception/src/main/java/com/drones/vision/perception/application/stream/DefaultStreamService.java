@@ -24,7 +24,6 @@ import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
-import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.perception.domain.port.VideoSourcePort;
@@ -102,7 +101,6 @@ public final class DefaultStreamService implements StreamService {
     private final DetectionRepositoryPort detectionRepositoryPort;
     private final EventPublisherPort eventPublisher;
     private final UsageTracker usageTracker;
-    private final OverlayPort overlayPort;
     private final DetectionEventRepositoryPort detectionEventRepositoryPort;
     private final DetectionLiveUpdatePort liveUpdatePublisherPort;
     private final StreamPipelineSettings settings;
@@ -131,10 +129,10 @@ public final class DefaultStreamService implements StreamService {
     /**
      * A video publisher that never emits (D4: when {@link StreamPublisherPort#proxiesSource} is
      * {@code true}, this service does not open a {@link VideoSourcePort} at all). Handed to {@link
-     * StreamPipeline} in place of a real source so its video-path half ({@code onNext}, overlay
-     * burn-in, {@code latestFrame}) simply never runs; {@code streamStarted}/{@code streamEnded} still
-     * fire (that is what lets a proxying publisher create/delete its mediamtx path), and detection
-     * results still flow in over the pull driver when one is wired.
+     * StreamPipeline} in place of a real source so its video-path half ({@code onNext}, {@code
+     * latestFrame}) simply never runs; {@code streamStarted}/{@code streamEnded} still fire (that is
+     * what lets a proxying publisher create/delete its mediamtx path), and detection results still
+     * flow in over the pull driver when one is wired.
      */
     private static final Flow.Publisher<VideoFrame> NO_VIDEO_SOURCE = subscriber ->
             subscriber.onSubscribe(new Flow.Subscription() {
@@ -183,95 +181,73 @@ public final class DefaultStreamService implements StreamService {
     }
 
     /**
-     * Same as the 7-argument constructor, plus an {@link OverlayPort} collaborator threaded into
-     * every {@link StreamPipeline} this service starts (docs/plans/done/MVP1-PLAN.md §C8 bullet 2). When both
-     * this and {@code usageTracker} are present, {@link #start} also builds and threads a telemetry
-     * supplier (see that method's own comments) so {@link
-     * com.drones.vision.perception.domain.model.PipelineConfig#overlayTelemetry()}'s OSD gate becomes
-     * reachable, closing the gap adapter-overlay/MODULE.md documented ("OSD gate not reachable" —
-     * {@code StreamPipeline} had no telemetry input at all).
-     *
-     * @param overlayPort nullable, following the same convention as {@code usageTracker}: {@code
-     *                     null} means no overlay rendering, exactly today's behavior.
-     */
-    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
-                                 DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
-                                 DetectionRepositoryPort detectionRepositoryPort,
-                                 EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                                 OverlayPort overlayPort) {
-        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, overlayPort, null);
-    }
-
-    /**
-     * Same as the 8-argument constructor, plus a {@link DetectionEventRepositoryPort} collaborator
+     * Same as the 7-argument constructor, plus a {@link DetectionEventRepositoryPort} collaborator
      * (docs/plans/done/MVP2-PLAN.md §E, E-a): when present, every {@link StreamPipeline} this service starts
      * is given a fresh, per-stream {@link DetectionEventEngine} built from {@code config}'s {@link
      * com.drones.vision.perception.domain.model.PipelineConfig#eventRule()}, {@code usageTracker} (for
      * asset/position resolution), and this port.
      *
      * @param detectionEventRepositoryPort nullable, following the same convention as {@code
-     *                                      overlayPort}/{@code usageTracker}: {@code null} means
-     *                                      no debounced {@code DetectionEvent} tracking on any
-     *                                      stream this service starts. Deliberately the only new
-     *                                      constructor parameter for this feature rather than
-     *                                      duplicating {@code AssetRepositoryPort}/{@code
-     *                                      AssetUsageRepositoryPort} here — {@code usageTracker}
-     *                                      already holds both and now exposes the two read
-     *                                      methods {@link DetectionEventEngine} needs.
+     *                                      usageTracker}: {@code null} means no debounced {@code
+     *                                      DetectionEvent} tracking on any stream this service
+     *                                      starts. Deliberately the only new constructor parameter
+     *                                      for this feature rather than duplicating {@code
+     *                                      AssetRepositoryPort}/{@code AssetUsageRepositoryPort}
+     *                                      here — {@code usageTracker} already holds both and now
+     *                                      exposes the two read methods {@link DetectionEventEngine}
+     *                                      needs.
      */
     public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
                                  DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
                                  DetectionRepositoryPort detectionRepositoryPort,
                                  EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                                 OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort) {
+                                 DetectionEventRepositoryPort detectionEventRepositoryPort) {
         this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, null);
+                eventPublisher, usageTracker, detectionEventRepositoryPort, null);
     }
 
     /**
-     * Same as the 9-argument constructor, plus a {@link DetectionLiveUpdatePort} collaborator
+     * Same as the 8-argument constructor, plus a {@link DetectionLiveUpdatePort} collaborator
      * (docs/plans/done/REALTIME-PLAN.md §4): threaded into every {@link StreamPipeline} this service starts,
      * alongside the owning asset id resolved once at {@link #start} via {@code usageTracker}, so
      * completed detection results are announced as live updates.
      *
      * @param liveUpdatePublisherPort nullable, following the same convention as {@code
-     *                                 overlayPort}/{@code detectionEventRepositoryPort}: {@code
-     *                                 null} means no live-update announcements from any stream this
-     *                                 service starts.
+     *                                 detectionEventRepositoryPort}: {@code null} means no
+     *                                 live-update announcements from any stream this service starts.
      */
     public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
                                  DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
                                  DetectionRepositoryPort detectionRepositoryPort,
                                  EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                                 OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
+                                 DetectionEventRepositoryPort detectionEventRepositoryPort,
                                  DetectionLiveUpdatePort liveUpdatePublisherPort) {
         this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort,
+                eventPublisher, usageTracker, detectionEventRepositoryPort, liveUpdatePublisherPort,
                 StreamPipelineSettings.defaults());
     }
 
     /**
-     * Test seam: same as the 10-argument constructor, with explicit (typically much smaller)
+     * Test seam: same as the 9-argument constructor, with explicit (typically much smaller)
      * source reopen backoff bounds so supervision-related tests don't have to wait out a real
      * 1s-30s backoff, folded onto {@link StreamPipelineSettings#defaults()}'s other tuning.
-     * Production always uses the 10-argument constructor's {@link StreamPipelineSettings#defaults()}.
+     * Production always uses the 9-argument constructor's {@link StreamPipelineSettings#defaults()}.
      */
     DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
                           DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
                           DetectionRepositoryPort detectionRepositoryPort,
                           EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                          OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
+                          DetectionEventRepositoryPort detectionEventRepositoryPort,
                           DetectionLiveUpdatePort liveUpdatePublisherPort,
                           long sourceInitialBackoffNanos, long sourceMaxBackoffNanos) {
         this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort,
+                eventPublisher, usageTracker, detectionEventRepositoryPort, liveUpdatePublisherPort,
                 withSourceReopenBackoff(StreamPipelineSettings.defaults(), sourceInitialBackoffNanos,
                         sourceMaxBackoffNanos));
     }
 
     /**
-     * Wiring/test seam: same as the 10-argument constructor, plus an explicit {@link
+     * Wiring/test seam: same as the 9-argument constructor, plus an explicit {@link
      * StreamPipelineSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction) —
      * {@code vision-app} supplies a {@code vision.application.pipeline.*}-bound settings record
      * here instead of this class hardcoding one, and it is threaded into both this service's own
@@ -283,20 +259,20 @@ public final class DefaultStreamService implements StreamService {
                           DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
                           DetectionRepositoryPort detectionRepositoryPort,
                           EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                          OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
+                          DetectionEventRepositoryPort detectionEventRepositoryPort,
                           DetectionLiveUpdatePort liveUpdatePublisherPort,
                           StreamPipelineSettings settings) {
         this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort,
+                eventPublisher, usageTracker, detectionEventRepositoryPort, liveUpdatePublisherPort,
                 settings, null);
     }
 
     /**
-     * Same as the 11-argument constructor, plus deployment-wide pull-mode wiring (docs/plans/active/MEDIA-SOT-PLAN.md
+     * Same as the 10-argument constructor, plus deployment-wide pull-mode wiring (docs/plans/active/MEDIA-SOT-PLAN.md
      * wave M5, switch B) threaded into every {@link StreamPipeline} this service starts.
      *
-     * @param pullDetectionSettings nullable, following the same convention as {@code overlayPort}/
-     *                              {@code liveUpdatePublisherPort}: {@code null} (the 11-argument
+     * @param pullDetectionSettings nullable, following the same convention as {@code
+     *                              liveUpdatePublisherPort}: {@code null} (the 10-argument
      *                              constructor's default) means every stream this service starts uses
      *                              push detection, exactly as before this capability existed.
      */
@@ -304,23 +280,23 @@ public final class DefaultStreamService implements StreamService {
                           DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
                           DetectionRepositoryPort detectionRepositoryPort,
                           EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                          OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
+                          DetectionEventRepositoryPort detectionEventRepositoryPort,
                           DetectionLiveUpdatePort liveUpdatePublisherPort,
                           StreamPipelineSettings settings, PullDetectionSettings pullDetectionSettings) {
         this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort,
+                eventPublisher, usageTracker, detectionEventRepositoryPort, liveUpdatePublisherPort,
                 settings, pullDetectionSettings, null);
     }
 
     /**
-     * Same as the 12-argument constructor, plus a {@link DetectionDemandPort} collaborator
+     * Same as the 11-argument constructor, plus a {@link DetectionDemandPort} collaborator
      * (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3): when present, this constructor schedules {@link
      * #pollDetectionDemand} on {@link #retryScheduler} at {@link
      * StreamPipelineSettings#detectionDemandPollInterval()}, re-evaluating every running stream's
      * demand on each tick.
      *
-     * @param detectionDemandPort nullable, following the same convention as {@code overlayPort}/
-     *                             {@code pullDetectionSettings}: {@code null} (the 12-argument
+     * @param detectionDemandPort nullable, following the same convention as {@code
+     *                             pullDetectionSettings}: {@code null} (the 11-argument
      *                             constructor's default) means the demand-poll task is never
      *                             scheduled at all, so every stream this service starts is fail-open
      *                             on demand — gated on {@code detectionEnabled} alone, exactly as
@@ -330,7 +306,7 @@ public final class DefaultStreamService implements StreamService {
                           DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
                           DetectionRepositoryPort detectionRepositoryPort,
                           EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                          OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
+                          DetectionEventRepositoryPort detectionEventRepositoryPort,
                           DetectionLiveUpdatePort liveUpdatePublisherPort,
                           StreamPipelineSettings settings, PullDetectionSettings pullDetectionSettings,
                           DetectionDemandPort detectionDemandPort) {
@@ -342,7 +318,6 @@ public final class DefaultStreamService implements StreamService {
                 Objects.requireNonNull(detectionRepositoryPort, "detectionRepositoryPort must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.usageTracker = usageTracker; // nullable: no-op usage tracking when absent
-        this.overlayPort = overlayPort; // nullable: no overlay rendering when absent
         this.detectionEventRepositoryPort = detectionEventRepositoryPort; // nullable: no event tracking when absent
         this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
@@ -403,9 +378,9 @@ public final class DefaultStreamService implements StreamService {
         try {
             // docs/plans/active/MEDIA-SOT-PLAN.md D4: when the active publisher itself dials this device's
             // source (a proxied RTSP path), this service opens no VideoSourcePort at all -- NO_VIDEO_SOURCE
-            // stands in so StreamPipeline's video-path half (onNext, overlay burn-in, latestFrame) simply
-            // never runs, while streamStarted/streamEnded still fire (that is what lets the proxying
-            // publisher create/delete its mediamtx path).
+            // stands in so StreamPipeline's video-path half (onNext, latestFrame) simply never runs, while
+            // streamStarted/streamEnded still fire (that is what lets the proxying publisher create/delete
+            // its mediamtx path).
             boolean proxied = streamPublisherPort.proxiesSource(device);
             VideoSourcePort source = null;
             SupervisedPublisher<VideoFrame> supervisedSource = null;
@@ -453,43 +428,33 @@ public final class DefaultStreamService implements StreamService {
             DetectionEventEngine eventEngine = detectionEventRepositoryPort == null ? null
                     : new DetectionEventEngine(streamId, deviceId, config.eventRule(), usageTracker,
                             detectionEventRepositoryPort);
-            // docs/plans/done/REALTIME-PLAN.md §4 / telemetry-OSD input: resolved once, here, rather than
-            // re-resolved per completed detection result / per published frame -- a device's owning
-            // asset does not change while its stream runs. Skipped entirely (not just discarded)
-            // unless something could actually read the result -- a configured DetectionLiveUpdatePort
-            // (announces every completed result), or a configured OverlayPort (may need it to build
-            // the telemetry supplier below) -- so a lookup nobody will ever read is never even
-            // attempted.
-            // Telemetry has TWO consumers now, and they are unrelated: the OSD renders it, and
-            // (docs/conclusions/CV-RATE-BUDGET.md gap 3) CameraAttitude turns its heading into
-            // ego-motion compensation. This supplier used to be built only when an OverlayPort was
-            // present, which silently meant a deployment with a configured field of view but no
-            // overlay sent no CameraPose at all -- a defect invisible to any test that injects the
-            // supplier directly, and caught only by watching the wire.
+            // docs/plans/done/REALTIME-PLAN.md §4 / ego-motion telemetry input: resolved once, here, rather
+            // than re-resolved per completed detection result / per published frame -- a device's owning
+            // asset does not change while its stream runs. Skipped entirely (not just discarded) unless
+            // something could actually read the result -- a configured DetectionLiveUpdatePort (announces
+            // every completed result), or a configured field of view (CameraAttitude needs it for
+            // ego-motion compensation) -- so a lookup nobody will ever read is never even attempted.
+            //
+            // INVARIANT (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1): this supplier must be built
+            // unconditionally with respect to overlay -- it once shipped dead because its construction
+            // was gated on an OverlayPort being present, which silently meant a deployment with a
+            // configured field of view but no overlay sent no CameraPose at all (a defect invisible to
+            // any test that injects the supplier directly, caught only by watching the wire). Now that
+            // overlay/OverlayPort do not exist at all, the only gate left is attitudeWanted itself --
+            // removing OverlayPort must never reintroduce a second, accidental gate here.
             boolean attitudeWanted = settings.cameraHfovDegrees() > 0.0;
-            AssetId ownerAssetId = (usageTracker == null
-                    || (liveUpdatePublisherPort == null && overlayPort == null && !attitudeWanted))
+            AssetId ownerAssetId = (usageTracker == null || (liveUpdatePublisherPort == null && !attitudeWanted))
                     ? null : usageTracker.resolveAsset(deviceId).orElse(null);
-            // Still not built when nothing could read it -- the original cost gate is preserved,
-            // widened by exactly the new consumer. StreamPipeline gates the OSD read on
-            // PipelineConfig#overlayTelemetry() and the attitude read on the field of view.
+            // Still not built when nothing could read it -- the original cost gate is preserved.
+            // StreamPipeline gates the attitude read on the field of view (cameraAttitude()).
             Supplier<Telemetry> telemetrySupplier =
-                    (usageTracker != null && ownerAssetId != null && (overlayPort != null || attitudeWanted))
+                    (usageTracker != null && ownerAssetId != null && attitudeWanted)
                             ? () -> usageTracker.latestTelemetry(ownerAssetId).orElse(null)
                             : null;
             StreamPipeline pipeline = new StreamPipeline(streamId, device, config, videoPublisher, detectionPort,
-                    streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort, eventEngine,
+                    streamPublisherPort, detectionRepositoryPort, eventPublisher, eventEngine,
                     ownerAssetId, liveUpdatePublisherPort, telemetrySupplier, System::nanoTime, settings,
                     pullDetection);
-            // docs/plans/active/MEDIA-SOT-PLAN.md §5.4/D9 (corrected -- pull mode does NOT itself suppress
-            // burn-in, see the defect note in that section): false exactly when nothing burns detection
-            // boxes into the published video -- no VideoSourcePort was opened (proxied, so no JVM frame is
-            // ever published for StreamPipeline#overlayIfNeeded to burn into), no OverlayPort is wired at
-            // all, or this stream's own overlayBurnIn is off. Whether detections arrive by push or pull is
-            // irrelevant: overlayIfNeeded burns whatever PipelineConfig.overlayBurnIn() and DetectionExtrapolator
-            // hand it regardless of which driver fed the extrapolator, so a JVM-published, pull-detected
-            // stream (Phase 1's V4L2/MJPEG/sim answer) burns boxes exactly like push mode does.
-            boolean burnedIn = !proxied && overlayPort != null && config.overlayBurnIn();
             // docs/plans/active/CV-DEMAND-PLAN.md §1: seeded to Instant.EPOCH, not Instant.now() -- demand must
             // be observed, never assumed. StreamPipeline#detectionDemand's own fail-open true default
             // already covers a just-started stream until the first poll tick (at most
@@ -498,7 +463,7 @@ public final class DefaultStreamService implements StreamService {
             // backwards for a wave whose point is "many streams started at once must not each burn a
             // grace period of inference for nobody."
             activeStreams.put(streamId, new RunningStream(deviceId, source, supervisedSource, pulledDetectionPort,
-                    supervisedPulledResults, pipeline, Instant.now(), lockSeq, burnedIn,
+                    supervisedPulledResults, pipeline, Instant.now(), lockSeq,
                     new AtomicReference<>(Instant.EPOCH)));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,
@@ -604,8 +569,7 @@ public final class DefaultStreamService implements StreamService {
     public List<ActiveStream> streams() {
         return activeStreams.entrySet().stream()
                 .map(e -> new ActiveStream(e.getKey(), e.getValue().deviceId(), e.getValue().startedAt(),
-                        e.getValue().burnedIn(), stateOf(e.getValue()),
-                        e.getValue().pipeline().config().detectionEnabled()))
+                        stateOf(e.getValue()), e.getValue().pipeline().config().detectionEnabled()))
                 .toList();
     }
 
@@ -647,13 +611,6 @@ public final class DefaultStreamService implements StreamService {
         StreamPipeline pipeline = active.pipeline();
         return StreamState.resolve(sourceObservable, sourceObservable && supervisedSource.reconnecting(),
                 pipeline.framesObserved(), pipeline.nanosSinceLastFrame(), settings.videoStaleAfter().toNanos());
-    }
-
-    @Override
-    public boolean burnedIn(StreamId streamId) {
-        Objects.requireNonNull(streamId, "streamId must not be null");
-        RunningStream active = activeStreams.get(streamId);
-        return active != null && active.burnedIn();
     }
 
     @Override
@@ -808,9 +765,8 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Folds {@code patch}'s present fields onto {@code current}, leaving every absent field (and
-     * every non-PATCH-able field — {@code maxInFlightInferences}, {@code overlayTelemetry}, {@code
-     * eventRule}, {@code overlayBurnIn}, and the model's own {@code version}, frozen contract
-     * &sect;3) exactly as {@code current} has it.
+     * every non-PATCH-able field — {@code maxInFlightInferences}, {@code eventRule}, and the
+     * model's own {@code version}, frozen contract &sect;3) exactly as {@code current} has it.
      *
      * <p>The tracking component folds <b>per field</b> through {@link TrackingConfigPatch#foldOnto}
      * (docs/plans/done/TRACKING-PLAN.md &sect;4.D): an absent {@code tracking} leaves it entirely alone, and a
@@ -819,6 +775,10 @@ public final class DefaultStreamService implements StreamService {
      * the patch has its {@code lockSeq} stamped from this stream's own {@link AtomicLong}, lazily:
      * cv-service applies a restated lock only when its sequence exceeds the last it applied, so a
      * client that could choose the number could replay an abandoned target back into existence.
+     *
+     * <p>{@code labelFilter}/{@code labelDenyFilter} each replace their running set wholesale when
+     * present (docs/plans/active/CV-CLEAN-FEED-PLAN.md &sect;2, D-2) — same "absent = unchanged,
+     * present = replace" semantics, independent of one another.
      */
     private static PipelineConfig mergeConfig(PipelineConfig current, PipelineConfigPatch patch,
                                                AtomicLong lockSeq) {
@@ -829,14 +789,15 @@ public final class DefaultStreamService implements StreamService {
                 patch.confidenceThreshold() == null ? current.confidenceThreshold() : patch.confidenceThreshold();
         int inferenceFps = patch.inferenceFps() == null ? current.inferenceFps() : patch.inferenceFps();
         Set<String> labelFilter = patch.labelFilter() == null ? current.labelFilter() : patch.labelFilter();
+        Set<String> labelDenyFilter =
+                patch.labelDenyFilter() == null ? current.labelDenyFilter() : patch.labelDenyFilter();
         boolean detectionEnabled =
                 patch.detectionEnabled() == null ? current.detectionEnabled() : patch.detectionEnabled();
         TrackingConfig tracking = patch.tracking() == null
                 ? current.tracking()
                 : patch.tracking().foldOnto(current.tracking(), lockSeq::incrementAndGet);
         return new PipelineConfig(model, confidenceThreshold, inferenceFps, current.maxInFlightInferences(),
-                current.overlayTelemetry(), labelFilter, current.eventRule(), current.overlayBurnIn(),
-                detectionEnabled, tracking);
+                labelFilter, current.eventRule(), detectionEnabled, tracking, labelDenyFilter);
     }
 
     /** {@code config} with its tracking component replaced; {@code config} itself when unchanged. */
@@ -845,8 +806,8 @@ public final class DefaultStreamService implements StreamService {
             return config;
         }
         return new PipelineConfig(config.model(), config.confidenceThreshold(), config.inferenceFps(),
-                config.maxInFlightInferences(), config.overlayTelemetry(), config.labelFilter(), config.eventRule(),
-                config.overlayBurnIn(), config.detectionEnabled(), tracking);
+                config.maxInFlightInferences(), config.labelFilter(), config.eventRule(),
+                config.detectionEnabled(), tracking, config.labelDenyFilter());
     }
 
     /**
@@ -867,14 +828,6 @@ public final class DefaultStreamService implements StreamService {
      *                                 again. Created by {@link #start} before the config is composed,
      *                                 since a start request could in principle carry a lock and would
      *                                 then need the first number
-     * @param burnedIn                whether server-side overlay burn-in is actually active for this
-     *                                 stream (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4): {@code
-     *                                 !proxiesSource && overlayPort != null && overlayBurnIn} — the
-     *                                 pull/push detection transport plays no part, since {@link
-     *                                 StreamPipeline}'s overlay render is driven by the published video
-     *                                 frame, not by how detections arrived. Computed once at start since
-     *                                 neither {@code proxiesSource} nor {@code overlayBurnIn} can change
-     *                                 over a running stream's life
      * @param lastDemandAt            the instant {@link #evaluateDetectionDemand} last observed real
      *                                 demand for this stream (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3);
      *                                 seeded to {@link Instant#EPOCH} by {@link #start}, deliberately
@@ -901,7 +854,7 @@ public final class DefaultStreamService implements StreamService {
     private record RunningStream(DeviceId deviceId, VideoSourcePort source, SupervisedPublisher<VideoFrame> supervisedSource,
                                   PulledDetectionPort pulledDetectionPort,
                                   SupervisedPublisher<DetectionResult> supervisedPulledResults,
-                                  StreamPipeline pipeline, Instant startedAt, AtomicLong lockSeq, boolean burnedIn,
+                                  StreamPipeline pipeline, Instant startedAt, AtomicLong lockSeq,
                                   AtomicReference<Instant> lastDemandAt) {
     }
 }

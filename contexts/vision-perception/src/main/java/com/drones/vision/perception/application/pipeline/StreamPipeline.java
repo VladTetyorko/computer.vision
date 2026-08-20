@@ -1,6 +1,5 @@
 package com.drones.vision.perception.application.pipeline;
 
-import com.drones.vision.perception.domain.model.AnnotatedFrame;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.Detection;
@@ -22,7 +21,6 @@ import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
-import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 
 import java.time.Duration;
@@ -64,45 +62,14 @@ import com.drones.vision.perception.application.stream.StreamService;
  *       regardless of whether it is sampled for inference, and regardless of
  *       whether a detection outage (see below) is in progress — the video
  *       path never depends on the CV service being healthy.</li>
- *   <li><b>Overlay burn-in</b> (docs/plans/done/MVP1-PLAN.md §C8, smoothed per
- *       docs/main/CYCLES-PLAN.md §12 CP-c; optional per docs/plans/done/MVP2-PLAN.md §V,
- *       V-e; telemetry OSD input added later): when an {@link OverlayPort}
- *       is configured (constructor argument, nullable — {@code null} keeps
- *       today's raw-publish behavior everywhere) and {@link
- *       PipelineConfig#overlayBurnIn()} is {@code true} (the default) and
- *       either {@link #extrapolator}'s boxes at this frame's capture time
- *       are non-empty or a telemetry sample resolves (see below), the frame
- *       is rendered through {@link OverlayPort#render} — as an {@link
- *       AnnotatedFrame} carrying the extrapolated detections and that
- *       telemetry sample — before being published. The extrapolator tracks
- *       the two most recently completed results and, between them, moves
- *       each matched box toward where it is predicted to be at the
- *       publishing frame's timestamp instead of freezing it at its last
- *       detected position — see {@link DetectionExtrapolator} for the
- *       matching/velocity/cap details; {@link #latestDetections()} (the
- *       REST-facing surface) is unaffected, it always returns the raw
- *       latest result. The telemetry sample burned in — activating {@link
- *       PipelineConfig#overlayTelemetry()}'s OSD gate — comes from an
- *       optional {@code telemetrySupplier} (constructor argument, nullable):
- *       when {@link #overlayPort} is configured, {@link
- *       PipelineConfig#overlayTelemetry()} is {@code true}, and a supplier
- *       was given, it is invoked once per published frame — it must
- *       therefore be cheap (an in-memory read, never I/O) — and its result
- *       (possibly {@code null}, meaning "no sample right now") is what's
- *       passed as {@link AnnotatedFrame#telemetry()}; any of the three
- *       absent yields {@code null} exactly as before this input existed. A
- *       supplier that throws is treated exactly like "no sample available"
- *       (caught, {@code null} used instead) — never a pipeline failure —
- *       with the same once-per-failure-run {@code WARNING} throttling the
- *       renderer itself uses (see below). Without an {@code OverlayPort}
- *       (the default), before any detection has completed and with no
- *       telemetry sample either, the raw frame is published unchanged,
- *       exactly as before this feature. A renderer that throws is treated
- *       as a purely cosmetic failure, never a pipeline failure: the raw
- *       frame is published instead, and at most one {@code WARNING} is
- *       logged per failure run (a boolean latch, reset the next time
- *       rendering succeeds) so a persistently broken renderer never spams
- *       logs on every frame.</li>
+ *   <li><b>Published video is always clean pixels</b> (docs/plans/active/CV-CLEAN-FEED-PLAN.md
+ *       D-1): the frame handed to {@link StreamPublisherPort#publish} is exactly the frame this
+ *       source produced — there is no server-side burn-in of detections or a telemetry OSD
+ *       anymore. Boxes are data only, fanned out via {@link #latestDetections()}/{@link
+ *       #tracks()}/{@link DetectionLiveUpdatePort} — a consuming client (the SPA's own vector
+ *       overlay) decides whether and how to render them. This removed the JPEG decode + annotate
+ *       + re-encode this pipeline used to pay per published frame per stream, and the double-draw
+ *       defect a server-burned box plus a client-drawn one produced together.</li>
  * </ul>
  *
  * <h2>Inference sampling</h2>
@@ -140,15 +107,17 @@ import com.drones.vision.perception.application.stream.StreamService;
  *
  * <p>The most recently <b>published</b> frame is likewise kept in a {@code volatile} field ({@link
  * #latestFrame()}, docs/plans/done/MVP3-PLAN.md C-a) — the same instance {@link StreamPublisherPort#publish}
- * was just handed (post-overlay burn-in when one was drawn), a latest-wins reference swap with no
- * per-frame copy. This is what backs the manager dashboard's per-stream JPEG snapshot endpoint.
+ * was just handed, exactly the source's own pixels (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1 —
+ * there is no server-side rendering stage anymore), a latest-wins reference swap with no
+ * per-frame copy. This is what backs the manager dashboard's per-stream JPEG snapshot endpoint and
+ * training-sample capture alike, since a clean published frame is exactly what both want.
  *
  * <p><b>Debounced detection events</b> (docs/plans/done/MVP2-PLAN.md §E, E-a): every completed result —
  * empty or not — also feeds an optional {@link DetectionEventEngine} ({@code eventEngine},
- * nullable, same convention as {@code overlayPort}), which collapses a tracked label's
+ * nullable, same convention as {@code usageTracker}), which collapses a tracked label's
  * consecutive-qualifying-results streak into an open/close {@code DetectionEvent} lifecycle. This
- * is a separate concern from {@link #latestDetections()}/overlay burn-in: the engine only ever
- * reads results, it never influences what gets published or returned from this class.
+ * is a separate concern from {@link #latestDetections()}: the engine only ever reads results, it
+ * never influences what gets published or returned from this class.
  *
  * <p><b>Tracking</b> (docs/plans/done/TRACKING-PLAN.md &sect;5.D/&sect;5.E): two further consumers on that same
  * fan-out. {@link TrackBook} keeps this stream's tracks by id with their lifetimes ({@link
@@ -220,7 +189,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /**
      * Live-swappable per docs/plans/done/CV-CONTROL-PLAN.md &sect;A — every per-frame read below (sampling's
      * {@code inferenceFps}, {@link #maybeDetect}'s {@code maxInFlightInferences}/{@code
-     * detectionEnabled}, {@link #overlayIfNeeded}'s overlay flags, and the {@code config} passed
+     * detectionEnabled}, and the {@code config} passed
      * into {@link #detectionPort}{@code .detect}) re-reads this field directly, so a write from
      * {@link #updateConfig} is visible to the very next frame with no lock and no restart. See
      * {@link #updateConfig}'s own javadoc for the model-id re-arm case.
@@ -265,7 +234,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final StreamPublisherPort streamPublisherPort;
     private final DetectionRepositoryPort detectionRepositoryPort;
     private final EventPublisherPort eventPublisher;
-    private final OverlayPort overlayPort;
     private final DetectionEventEngine eventEngine;
     private final AssetId assetId;
     private final DetectionLiveUpdatePort liveUpdatePublisherPort;
@@ -353,26 +321,11 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private volatile List<Detection> latestDetections = List.of();
     private volatile VideoFrame latestFrame;
 
-    /**
-     * The most recently arrived frame <b>before</b> {@link #overlayIfNeeded} runs (docs/plans/done/CV-TRAINING-PLAN.md
-     * §2/§D) — a sibling snapshot to {@link #latestFrame}, kept purely additively: written once per
-     * {@link #onNext}, alongside {@link #latestFrame}, and read only by {@link #latestRawFrame()}. No
-     * other behavior in this class reads or depends on it, so it cannot perturb the publish/detect
-     * path. Training capture wants clean, un-annotated, full-resolution pixels — {@link #latestFrame}
-     * may carry burned-in detection boxes/OSD when overlay rendering is configured, which would
-     * contaminate a captured training image.
-     */
-    private volatile VideoFrame latestRawFrame;
-
     // Only ever touched from within onNext(), which Flow.Subscriber's contract serializes
-    // (signals are never delivered concurrently) -- a plain (non-volatile) boolean latch is
-    // enough, exactly like the frame-cadence fields below. Suppresses repeated WARNING logs for
-    // a renderer that keeps throwing, without needing outage/backoff machinery: overlay failures
-    // are cosmetic, not a resilience concern like detection failures are.
-    private boolean overlayFailureLogged = false;
-
-    // Same latch idiom as overlayFailureLogged above, for a throwing telemetrySupplier: reading a
-    // telemetry sample for OSD burn-in is likewise cosmetic, never a resilience concern.
+    // (signals are never delivered concurrently) -- a plain (non-volatile) boolean latch,
+    // suppressing repeated WARNING logs for a telemetry supplier that keeps throwing while
+    // being read for ego-motion compensation (see readTelemetry()/cameraAttitude()) -- cosmetic,
+    // not a resilience concern like a detection failure is.
     private boolean telemetrySupplierFailureLogged = false;
 
     // Frame-arrival cadence measurement state. Only ever touched from within
@@ -417,45 +370,27 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Same as the 8-argument constructor, plus an {@link OverlayPort} collaborator.
-     *
-     * @param overlayPort nullable — {@code null} (the other constructor's default) means overlay
-     *                     rendering never runs and every frame is published raw, exactly as
-     *                     before this collaborator existed; the caller ({@link
-     *                     DefaultStreamService}) follows the same nullable-collaborator
-     *                     convention as its own {@code usageTracker}.
-     */
-    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
-                           Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
-                           StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                           EventPublisherPort eventPublisher, OverlayPort overlayPort) {
-        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, null);
-    }
-
-    /**
-     * Same as the 9-argument constructor, plus a {@link DetectionEventEngine} collaborator
+     * Same as the 8-argument constructor, plus a {@link DetectionEventEngine} collaborator
      * (docs/plans/done/MVP2-PLAN.md §E, E-a) fed every completed detection result alongside {@link
      * #extrapolator}.
      *
      * @param eventEngine nullable — {@code null} (the other constructors' default) means no
      *                     debounced {@code DetectionEvent} tracking runs for this pipeline, the
-     *                     same nullable-collaborator convention as {@code overlayPort}/{@code
-     *                     usageTracker}. Deliberately a single bundled collaborator rather than
-     *                     three more raw ports (asset/usage/event-store) on this constructor —
-     *                     see {@code DefaultStreamService}'s wiring for why.
+     *                     same nullable-collaborator convention as {@code usageTracker}.
+     *                     Deliberately a single bundled collaborator rather than three more raw
+     *                     ports (asset/usage/event-store) on this constructor — see {@code
+     *                     DefaultStreamService}'s wiring for why.
      */
     public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                            Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                            StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                           EventPublisherPort eventPublisher, OverlayPort overlayPort,
-                           DetectionEventEngine eventEngine) {
+                           EventPublisherPort eventPublisher, DetectionEventEngine eventEngine) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, eventEngine, null, null);
+                eventPublisher, eventEngine, null, null);
     }
 
     /**
-     * Same as the 10-argument constructor, plus the collaborators needed to announce completed
+     * Same as the 9-argument constructor, plus the collaborators needed to announce completed
      * detection results as live updates (docs/plans/done/REALTIME-PLAN.md §4).
      *
      * @param assetId                 nullable — the owning asset of the device streaming, resolved
@@ -465,41 +400,38 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *                                 UsageTracker}'s own "untracked device" convention)
      * @param liveUpdatePublisherPort nullable — {@code null} (every other constructor's default)
      *                                 means no live-update announcements for this pipeline, the
-     *                                 same nullable-collaborator convention as {@code
-     *                                 overlayPort}/{@code eventEngine}
+     *                                 same nullable-collaborator convention as {@code eventEngine}
      */
     public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                            Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                            StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                           EventPublisherPort eventPublisher, OverlayPort overlayPort,
-                           DetectionEventEngine eventEngine, AssetId assetId,
+                           EventPublisherPort eventPublisher, DetectionEventEngine eventEngine, AssetId assetId,
                            DetectionLiveUpdatePort liveUpdatePublisherPort) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, null);
+                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, null);
     }
 
     /**
-     * Same as the 12-argument constructor, plus a {@link Supplier} of the telemetry sample to burn
-     * into the OSD (see the class javadoc's "Overlay burn-in" section).
+     * Same as the 11-argument constructor, plus a {@link Supplier} of the telemetry sample used for
+     * ego-motion compensation (see {@link #cameraAttitude()}).
      *
      * @param telemetrySupplier nullable — {@code null} (every other constructor's default) means
-     *                           {@link PipelineConfig#overlayTelemetry()}'s OSD gate can never
-     *                           activate for this pipeline, exactly as before this constructor
-     *                           existed. When given, it is called at most once per published frame
-     *                           (only when {@link #overlayPort} is configured and {@code
-     *                           overlayTelemetry()} is {@code true}) and must therefore be cheap —
-     *                           an in-memory read of the freshest known sample, never blocking I/O.
-     *                           A {@code null} result (or a thrown exception, caught and treated the
-     *                           same way) means "no sample right now," not a failure.
+     *                           {@link #cameraAttitude()} can never resolve for this pipeline,
+     *                           exactly as before this constructor existed. When given, it is
+     *                           called at most once per submitted detection (only when a field of
+     *                           view is configured, see {@link StreamPipelineSettings#cameraHfovDegrees()})
+     *                           and must therefore be cheap — an in-memory read of the freshest
+     *                           known sample, never blocking I/O. A {@code null} result (or a
+     *                           thrown exception, caught and treated the same way) means "no
+     *                           sample right now," not a failure.
      */
     public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                            Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                            StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                           EventPublisherPort eventPublisher, OverlayPort overlayPort,
-                           DetectionEventEngine eventEngine, AssetId assetId,
+                           EventPublisherPort eventPublisher, DetectionEventEngine eventEngine, AssetId assetId,
                            DetectionLiveUpdatePort liveUpdatePublisherPort, Supplier<Telemetry> telemetrySupplier) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
+                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
                 System::nanoTime, StreamPipelineSettings.defaults());
     }
 
@@ -513,16 +445,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
+                   EventPublisherPort eventPublisher, DetectionEventEngine eventEngine,
                    AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
                    Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
+                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
                 nanoTimeSource, StreamPipelineSettings.defaults());
     }
 
     /**
-     * Test/wiring seam: same as the 14-argument constructor, plus an explicit {@link
+     * Test/wiring seam: same as the 13-argument constructor, plus an explicit {@link
      * StreamPipelineSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction) instead
      * of relying on {@link StreamPipelineSettings#defaults()} — lets a test drive the frame-cadence/
      * detection-backoff/extrapolation tuning deterministically, and lets {@link
@@ -536,19 +468,19 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
+                   EventPublisherPort eventPublisher, DetectionEventEngine eventEngine,
                    AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
                    Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
                    StreamPipelineSettings settings) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
+                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
                 nanoTimeSource, settings, System::nanoTime);
     }
 
     /**
-     * Wiring seam: same as the 15-argument constructor, plus an optional pull-mode detection driver
+     * Wiring seam: same as the 14-argument constructor, plus an optional pull-mode detection driver
      * (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5/D6) — see {@link PullDetectionBinding}. Public, for the
-     * same reason the 15-argument constructor is: {@code DefaultStreamService} supplies its own
+     * same reason the 14-argument constructor is: {@code DefaultStreamService} supplies its own
      * resolved collaborators from a different feature package.
      *
      * @param pullDetection nullable — {@code null} (every other constructor's default) means push-mode
@@ -563,40 +495,40 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
+                   EventPublisherPort eventPublisher, DetectionEventEngine eventEngine,
                    AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
                    Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
                    StreamPipelineSettings settings, PullDetectionBinding pullDetection) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
+                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
                 nanoTimeSource, settings, System::nanoTime, pullDetection);
     }
 
     /**
      * Package-private seam adding {@code latencyNanoSource} — see {@link #latencyNanoSource} for why
      * it is separate from {@code nanoTimeSource}. Only the same-package latency test injects it.
-     * Delegates to the 17-argument master constructor with {@code pullDetection=null} (push mode).
+     * Delegates to the master constructor with {@code pullDetection=null} (push mode).
      */
     StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
+                   EventPublisherPort eventPublisher, DetectionEventEngine eventEngine,
                    AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
                    Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
                    StreamPipelineSettings settings, LongSupplier latencyNanoSource) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
+                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
                 nanoTimeSource, settings, latencyNanoSource, null);
     }
 
     /**
-     * Master constructor: same as the 16-argument (latency-seam) constructor, plus {@code
-     * pullDetection} — see the public 16-argument (settings + pullDetection) constructor's own javadoc.
+     * Master constructor: same as the 15-argument (latency-seam) constructor, plus {@code
+     * pullDetection} — see the public 15-argument (settings + pullDetection) constructor's own javadoc.
      */
     StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
+                   EventPublisherPort eventPublisher, DetectionEventEngine eventEngine,
                    AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
                    Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
                    StreamPipelineSettings settings, LongSupplier latencyNanoSource,
@@ -611,11 +543,10 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.detectionRepositoryPort =
                 Objects.requireNonNull(detectionRepositoryPort, "detectionRepositoryPort must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
-        this.overlayPort = overlayPort; // nullable: no-op overlay rendering when absent
         this.eventEngine = eventEngine; // nullable: no detection-event tracking when absent
         this.assetId = assetId; // nullable: no owning asset, or live updates not wired
         this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
-        this.telemetrySupplier = telemetrySupplier; // nullable: no telemetry-OSD input when absent
+        this.telemetrySupplier = telemetrySupplier; // nullable: no ego-motion telemetry input when absent
         this.nanoTimeSource = Objects.requireNonNull(nanoTimeSource, "nanoTimeSource must not be null");
         this.pullDetection = pullDetection; // nullable: push-mode detection when absent (D5/D6)
         Objects.requireNonNull(settings, "settings must not be null");
@@ -818,10 +749,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         never see stale boxes past the point a tracked object
      *         disappeared. Left untouched while a detection outage withholds
      *         frames from the detector, since no inference actually ran.
-     *         This is the raw, un-extrapolated result — the REST-facing
-     *         surface; overlay burn-in renders {@link #extrapolator}'s
-     *         smoothed boxes instead (docs/main/CYCLES-PLAN.md §12, CP-c), not
-     *         this method's output.
      */
     public List<Detection> latestDetections() {
         return latestDetections;
@@ -874,28 +801,31 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * @return the most recently published frame — post-overlay burn-in when one was drawn, exactly
-     *         the instance handed to {@link StreamPublisherPort#publish} (docs/plans/done/MVP3-PLAN.md C-a) —
-     *         or {@link Optional#empty()} before the first frame has published. A latest-wins
-     *         reference swap, same single-{@code volatile}-field convention as {@link
-     *         #latestDetections()}: no copy per frame, no buffering, and safe to read from any
-     *         thread (e.g. the HTTP thread serving a snapshot request) concurrently with {@link
-     *         #onNext}.
+     * @return the most recently published frame — exactly the source's own pixels
+     *         (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1: there is no server-side rendering stage
+     *         anymore), the same instance handed to {@link StreamPublisherPort#publish}
+     *         (docs/plans/done/MVP3-PLAN.md C-a) — or {@link Optional#empty()} before the first
+     *         frame has published. A latest-wins reference swap, same single-{@code
+     *         volatile}-field convention as {@link #latestDetections()}: no copy per frame, no
+     *         buffering, and safe to read from any thread (e.g. the HTTP thread serving a
+     *         snapshot request) concurrently with {@link #onNext}. Backs both the manager
+     *         dashboard's per-stream JPEG snapshot endpoint and training-sample capture — the two
+     *         used to want different frames (post- vs. pre-overlay); with no overlay stage they are
+     *         the same frame, so {@link #latestRawFrame()} simply mirrors this one.
      */
     public Optional<VideoFrame> latestFrame() {
         return Optional.ofNullable(latestFrame);
     }
 
     /**
-     * @return the most recently arrived frame exactly as the source produced it — before overlay
-     *         burn-in, at full resolution (docs/plans/done/CV-TRAINING-PLAN.md §2/§D), or {@link
-     *         Optional#empty()} before the first frame has arrived. Backs training-sample capture,
-     *         which wants clean pixels to label, never the (possibly overlay-rendered) frame {@link
-     *         #latestFrame()} exposes. Same latest-wins, no-copy, any-thread-safe convention as
-     *         {@link #latestFrame()}.
+     * @return the most recently published frame — an alias for {@link #latestFrame()}, kept as its
+     *         own named method because training-sample capture (docs/plans/done/CV-TRAINING-PLAN.md
+     *         §2/§D) reaches this API by this name specifically. Frames are always clean now
+     *         (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1) — there is no separate pre-overlay
+     *         instance to distinguish anymore.
      */
     public Optional<VideoFrame> latestRawFrame() {
-        return Optional.ofNullable(latestRawFrame);
+        return Optional.ofNullable(latestFrame);
     }
 
     @Override
@@ -911,10 +841,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         }
         long now = recordArrival();
         try {
-            latestRawFrame = frame;
-            VideoFrame published = overlayIfNeeded(frame);
-            latestFrame = published;
-            streamPublisherPort.publish(streamId, published);
+            latestFrame = frame;
+            streamPublisherPort.publish(streamId, frame);
             maybeDetect(frame, now);
         } catch (RuntimeException e) {
             handleError(e);
@@ -926,93 +854,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Renders {@code frame} through {@link #overlayPort} when one is configured, {@link
-     * PipelineConfig#overlayBurnIn()} is {@code true}, and either {@link #extrapolator}'s boxes at
-     * {@code frame}'s capture time or {@link #telemetrySampleFor()} have something to draw,
-     * returning the raw {@code frame} otherwise (no overlay configured, burn-in disabled, or
-     * nothing to draw at all yet). Detection is always run against the raw {@code frame}, never the
-     * rendered one — overlay is purely a publish-time presentation concern.
-     *
-     * <p><b>What {@code overlayBurnIn=false} actually skips</b> (docs/plans/done/MVP2-PLAN.md §V, V-e): the
-     * {@link #extrapolator}{@code .at(...)}/{@link #telemetrySampleFor()} lookups below, {@link
-     * OverlayPort#render}'s Java2D work (decode/allocate a fresh image, draw boxes/OSD, re-encode),
-     * and the extra {@link VideoFrame} instance {@code render} returns — every publish falls
-     * straight through to the raw, already-decoded frame. This is the pipeline's only burn-in
-     * decision point, gating telemetry-OSD burn-in identically to detection-box burn-in. What it
-     * does <b>not</b> skip: {@link #extrapolator}{@code .accept} (called from {@link
-     * #onDetectionResult}, independent of this method) keeps running either way — it is cheap
-     * (bookkeeping over at most two results) and turning it off per-config would only save that
-     * bookkeeping, not the Java2D/copy cost this flag exists to avoid.
-     *
-     * <p>The detections passed to the renderer are {@link #extrapolator}'s output at {@code
-     * frame.capturedAt()} (docs/main/CYCLES-PLAN.md &sect;12, CP-c), not the raw {@link
-     * #latestDetections}, so burned-in boxes track between completed inferences instead of jumping
-     * — same source-timestamp timebase as {@code DetectionResult.capturedAt}, never mixed with wall
-     * clock. {@link #latestDetections()} (the REST-facing surface) is unaffected — it always
-     * returns the raw latest result. The telemetry sample comes from {@link #telemetrySampleFor()}
-     * — see that method's own javadoc for its own failure-handling.
-     *
-     * <p>A renderer exception is swallowed: overlay is cosmetic and must never be able to disrupt
-     * the video path. The raw frame is published in that case, and at most one {@code WARNING} is
-     * logged per run of failures (a simple boolean latch, reset the next time rendering
-     * succeeds) — never per frame — so a persistently broken renderer doesn't spam logs.
-     */
-    private VideoFrame overlayIfNeeded(VideoFrame frame) {
-        if (overlayPort == null || !config.overlayBurnIn()) {
-            return frame;
-        }
-        List<Detection> detections = extrapolator.at(frame.capturedAt());
-        Telemetry telemetry = telemetrySampleFor();
-        if (detections.isEmpty() && telemetry == null) {
-            return frame;
-        }
-        try {
-            VideoFrame rendered = overlayPort.render(new AnnotatedFrame(frame, detections, telemetry));
-            overlayFailureLogged = false;
-            return rendered;
-        } catch (RuntimeException e) {
-            if (!overlayFailureLogged) {
-                overlayFailureLogged = true;
-                LOG.log(System.Logger.Level.WARNING, () -> "stream " + streamId.value()
-                        + " overlay rendering failed, publishing raw frames until it recovers: " + e.getMessage());
-            }
-            return frame;
-        }
-    }
-
-    /**
-     * Resolves the telemetry sample to burn into this frame's OSD ({@link
-     * PipelineConfig#overlayTelemetry()}), or {@code null} when it cannot/should not run: {@link
-     * #config}{@code .overlayTelemetry()} is {@code false}, or no {@link #telemetrySupplier} was
-     * configured (both mirror how {@link #overlayIfNeeded} itself is skipped when {@link
-     * #overlayPort} is absent — this method is only ever called from there, once per published
-     * frame, so {@link #telemetrySupplier} must be cheap, an in-memory read, never blocking I/O).
-     *
-     * <p>A supplier that throws is treated exactly like "no sample right now," never a pipeline
-     * failure — telemetry burn-in is cosmetic, same as overlay rendering itself. At most one {@code
-     * WARNING} is logged per run of failures (a boolean latch, reset the next time the supplier
-     * succeeds, mirroring {@link #overlayFailureLogged}'s own throttling) so a persistently broken
-     * supplier never spams logs on every frame.
-     */
-    private Telemetry telemetrySampleFor() {
-        if (!config.overlayTelemetry()) {
-            return null;
-        }
-        return readTelemetry();
-    }
-
-    /**
      * This frame's camera attitude for ego-motion compensation, or {@code null} when none can be
      * built (docs/conclusions/CV-RATE-BUDGET.md &sect;5, gap 3).
      *
      * <p>Short-circuits on an unconfigured field of view <b>before</b> touching the supplier: with
      * no optics described the attitude could not drive compensation anyway, so the default
-     * deployment pays nothing at all for this feature.
-     *
-     * <p>Deliberately not routed through {@link #telemetrySampleFor()}: that one is gated on {@link
-     * PipelineConfig#overlayTelemetry()}, which is a <i>presentation</i> switch. Turning the OSD off
-     * must not silently disable ego-motion compensation — they are unrelated concerns that happen to
-     * read the same supplier.
+     * deployment pays nothing at all for this feature. This is {@link #telemetrySupplier}'s only
+     * remaining consumer (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1 removed the telemetry-OSD
+     * burn-in that used to be its other one) — see {@code DefaultStreamService}'s wiring for the
+     * INVARIANT that this supplier is still built unconditionally with respect to overlay, gated
+     * only on this field of view being configured.
      */
     private CameraAttitude cameraAttitude() {
         if (cameraHfovDegrees <= 0.0) {
@@ -1034,7 +885,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             if (!telemetrySupplierFailureLogged) {
                 telemetrySupplierFailureLogged = true;
                 LOG.log(System.Logger.Level.WARNING, () -> "stream " + streamId.value()
-                        + " telemetry supplier failed, publishing without an OSD sample until it recovers: "
+                        + " telemetry supplier failed, camera attitude stays unknown until it recovers: "
                         + e.getMessage());
             }
             return null;
@@ -1239,8 +1090,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Clears every piece of detection-derived state a consumer could otherwise read as fresh: the
-     * raw result ({@link #latestDetections}), the smoothed burn-in view ({@link #extrapolator}), the
-     * track book/stats, and the rate/latency windows. Shared by two call sites that reach it for
+     * raw result ({@link #latestDetections}), the extrapolator's own bookkeeping ({@link
+     * #extrapolator}), the track book/stats, and the rate/latency windows. Shared by two call sites
+     * that reach it for
      * different reasons — {@link #updateConfig}'s model-id re-arm and {@link
      * #handleDetectionGateTransition}'s gate close — both boiling down to the same fact: nothing
      * already held describes what this pipeline is about to (or will never again) produce.
@@ -1428,13 +1280,15 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Fans out one completed result — after enforcing {@link PipelineConfig#labelFilter()} exactly
-     * once, centrally, here (docs/plans/done/CV-CONTROL-PLAN.md &sect;A, the dormant-field fix) — to every
-     * downstream consumer: {@link #latestDetections()}, {@link #extrapolator} (and therefore
-     * overlay burn-in), {@link #trackBook}, {@link #trackingStats}, {@link #eventEngine}, {@link
-     * #liveUpdatePublisherPort}, and persistence/the {@code DETECTION} event. Filtering once here,
-     * before any of those, is what makes every consumer see the same filtered set uniformly instead
-     * of each having to know about {@code labelFilter} itself.
+     * Fans out one completed result — after enforcing {@link PipelineConfig#labelFilter()}/{@link
+     * PipelineConfig#labelDenyFilter()} exactly once, centrally, here (docs/plans/done/CV-CONTROL-PLAN.md
+     * &sect;A, the dormant-field fix; deny-list joined docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) —
+     * to every downstream consumer: {@link #latestDetections()}, {@link #extrapolator}, {@link
+     * #trackBook}, {@link #trackingStats}, {@link #eventEngine}, {@link #liveUpdatePublisherPort},
+     * and persistence/the {@code DETECTION} event. Filtering once here, before any of those, is what
+     * makes every consumer see the same filtered set uniformly instead of each having to know about
+     * {@code labelFilter}/{@code labelDenyFilter} itself — screen, alerts and recording all stay
+     * consistent because there is exactly one drop site.
      *
      * <p>This list is a <b>fan-out of consumers by design</b>: adding one is not a new
      * responsibility for this class (TRACKING-ORCHESTRATION.md &sect;2.3). The tracking work
@@ -1458,7 +1312,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         if (!detectionGateOpen()) {
             return;
         }
-        DetectionResult filtered = applyLabelFilter(result);
+        DetectionResult filtered = applyLabelFilters(result);
         latestDetections = filtered.detections();
         extrapolator.accept(filtered);
         trackBook.accept(filtered);
@@ -1478,11 +1332,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Drops every detection whose label is not in {@link PipelineConfig#labelFilter()} — an empty
-     * filter keeps everything, the same semantics an empty filter already has on {@link
-     * PipelineConfig} itself. Returns {@code result} unchanged (same instance) when nothing was
-     * actually dropped, so the common case (no filter configured, or every detection already
-     * matches) allocates nothing new.
+     * Drops every detection whose label either fails a non-empty {@link PipelineConfig#labelFilter()}
+     * or matches {@link PipelineConfig#labelDenyFilter()} (docs/plans/active/CV-CLEAN-FEED-PLAN.md
+     * D-2) — an empty allowlist keeps everything (unchanged semantics), an empty deny-list denies
+     * nothing. The two answer different questions: the allowlist, when non-empty, is the model-intent
+     * seed ("only these labels ever exist for this stream"); the deny-list is the everyday "hide this
+     * class" act, and writing to it never touches the allowlist — a class not yet observed keeps
+     * appearing instead of being silently swept into an enumerated allowlist complement (the defect
+     * docs/plans/active/CV-UX-RESEARCH.md &sect;4.4 diagnosed). Returns {@code result} unchanged
+     * (same instance) when nothing was actually dropped, so the common case (neither filter
+     * configured, or every detection already matches) allocates nothing new.
      *
      * <p>The rebuilt result carries {@link DetectionResult#tracking()} through unchanged: a label
      * filter drops <i>detections</i>, and per-frame tracking facts (whether the detector ran, why,
@@ -1490,12 +1349,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * boxes survived filtering. Dropping them here would silently zero the duty-cycle stats of every
      * stream that happens to use a label filter.
      */
-    private DetectionResult applyLabelFilter(DetectionResult result) {
+    private DetectionResult applyLabelFilters(DetectionResult result) {
         Set<String> labelFilter = config.labelFilter();
-        if (labelFilter.isEmpty()) {
+        Set<String> labelDenyFilter = config.labelDenyFilter();
+        if (labelFilter.isEmpty() && labelDenyFilter.isEmpty()) {
             return result;
         }
-        List<Detection> kept = result.detections().stream().filter(d -> labelFilter.contains(d.label())).toList();
+        List<Detection> kept = result.detections().stream()
+                .filter(d -> (labelFilter.isEmpty() || labelFilter.contains(d.label()))
+                        && !labelDenyFilter.contains(d.label()))
+                .toList();
         if (kept.size() == result.detections().size()) {
             return result;
         }

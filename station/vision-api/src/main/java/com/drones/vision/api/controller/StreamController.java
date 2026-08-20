@@ -137,7 +137,7 @@ public class StreamController {
         StreamId streamId = streamService.start(DeviceId.of(deviceId),
                 body.mergeOnto(streamDetectionSupport.defaultConfig()), body.trackingPatch());
         StartStreamResponse response = new StartStreamResponse(streamId.value().toString(), viewUrl(streamId),
-                whepUrl(streamId), streamService.burnedIn(streamId));
+                whepUrl(streamId));
         LOG.log(System.Logger.Level.INFO, () -> "Started stream " + response.streamId() + " for device " + deviceId
                 + " viewUrl=" + response.viewUrl() + " whepUrl=" + response.whepUrl());
         return response;
@@ -331,7 +331,8 @@ public class StreamController {
 
     /**
      * A JPEG snapshot of the latest published frame on a running stream (docs/plans/done/MVP3-PLAN.md C-a) —
-     * post-overlay burn-in when it's on, since {@link StreamService#latestFrame} returns exactly
+     * always the clean, undecorated frame (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1: server-side overlay
+     * burn-in no longer exists), since {@link StreamService#latestFrame} returns exactly
      * the instance the pipeline last handed to {@link StreamPublisherPort#publish}. Downscaled to
      * at most {@value SnapshotJpegEncoder#MAX_SNAPSHOT_WIDTH}px wide (aspect-preserving, see {@link
      * SnapshotJpegEncoder}) so a manager dashboard polling many thumbnails at once (docs/plans/done/MVP3-PLAN.md

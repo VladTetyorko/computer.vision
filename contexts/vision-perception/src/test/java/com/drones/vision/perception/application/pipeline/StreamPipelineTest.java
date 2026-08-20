@@ -1,6 +1,5 @@
 package com.drones.vision.perception.application.pipeline;
 
-import com.drones.vision.perception.domain.model.AnnotatedFrame;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.BoundingBox;
 import com.drones.vision.kernel.Capability;
@@ -30,7 +29,6 @@ import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
-import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -95,13 +93,8 @@ class StreamPipelineTest {
     // detectionEnabled=true explicitly rather than relying on a default this suite never meant to
     // depend on.
     private static PipelineConfig config(int inferenceFps, int maxInFlight) {
-        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, maxInFlight, true, Set.of(),
-                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
-    }
-
-    private static PipelineConfig config(int inferenceFps, int maxInFlight, boolean overlayBurnIn) {
-        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, maxInFlight, true, Set.of(),
-                EventRuleConfig.defaults(), overlayBurnIn, true);
+        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, maxInFlight, Set.of(),
+                EventRuleConfig.defaults(), true);
     }
 
     private VideoFrame frame(long sequence) {
@@ -141,21 +134,16 @@ class StreamPipelineTest {
                 detectionRepositoryPort, eventPublisher);
     }
 
-    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, OverlayPort overlayPort) {
-        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, overlayPort);
-    }
-
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
                                      DetectionEventEngine eventEngine) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, eventEngine);
+                detectionRepositoryPort, eventPublisher, eventEngine);
     }
 
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, AssetId assetId,
                                      DetectionLiveUpdatePort liveUpdatePublisherPort) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, assetId, liveUpdatePublisherPort);
+                detectionRepositoryPort, eventPublisher, null, assetId, liveUpdatePublisherPort);
     }
 
     /**
@@ -165,38 +153,37 @@ class StreamPipelineTest {
      * and every delivered frame serves a deadline; the default {@code System::nanoTime} cannot,
      * because a synchronous publisher delivers its whole script inside one sample interval.
      */
-    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
-                                     OverlayPort overlayPort, double sourceFps) {
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, double sourceFps) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, overlayPort, null, null, null, null,
+                detectionRepositoryPort, eventPublisher, null, null, null, null,
                 fixedFpsClock(sourceFps));
     }
 
-    /** @see #pipeline(ScriptedVideoPublisher, PipelineConfig, OverlayPort, double) */
+    /** @see #pipeline(ScriptedVideoPublisher, PipelineConfig, double) */
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
                                      DetectionEventEngine eventEngine, double sourceFps) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, eventEngine, null, null, null,
+                detectionRepositoryPort, eventPublisher, eventEngine, null, null, null,
                 fixedFpsClock(sourceFps));
     }
 
-    /** @see #pipeline(ScriptedVideoPublisher, PipelineConfig, OverlayPort, double) */
+    /** @see #pipeline(ScriptedVideoPublisher, PipelineConfig, double) */
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, AssetId assetId,
                                      DetectionLiveUpdatePort liveUpdatePublisherPort, double sourceFps) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, assetId, liveUpdatePublisherPort, null,
+                detectionRepositoryPort, eventPublisher, null, assetId, liveUpdatePublisherPort, null,
                 fixedFpsClock(sourceFps));
     }
 
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, LongSupplier clock) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, null, null, clock);
+                detectionRepositoryPort, eventPublisher, null, null, null, null, clock);
     }
 
-    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, OverlayPort overlayPort,
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
                                      Supplier<Telemetry> telemetrySupplier) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, overlayPort, null, null, null, telemetrySupplier);
+                detectionRepositoryPort, eventPublisher, null, null, null, telemetrySupplier);
     }
 
     /**
@@ -212,7 +199,7 @@ class StreamPipelineTest {
      */
     private StreamPipeline manualPipeline(PipelineConfig config, LongSupplier clock) {
         StreamPipeline pipeline = new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null, null, clock);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null, clock);
         pipeline.onSubscribe(NOOP_SUBSCRIPTION);
         return pipeline;
     }
@@ -224,7 +211,7 @@ class StreamPipelineTest {
     private StreamPipeline latencyPipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
                                             LongSupplier latencyClock) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, null, null,
+                detectionRepositoryPort, eventPublisher, null, null, null, null,
                 fixedFpsClock(30), StreamPipelineSettings.defaults(), latencyClock);
     }
 
@@ -244,7 +231,7 @@ class StreamPipelineTest {
                                              Supplier<Telemetry> telemetrySupplier,
                                              StreamPipelineSettings settings) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, null, telemetrySupplier,
+                detectionRepositoryPort, eventPublisher, null, null, null, telemetrySupplier,
                 fixedFpsClock(30), settings, System::nanoTime);
     }
 
@@ -301,19 +288,25 @@ class StreamPipelineTest {
     }
 
     @Test
-    void turningTheTelemetryOsdOffDoesNotDisableEgoMotionCompensation() {
+    void aThrowingTelemetrySupplierIsSwallowedAndDetectionKeepsFlowingWithAnUnknownAttitude() {
+        // CRITICAL INVARIANT (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1): with the telemetry-OSD burn-in
+        // gone, cameraAttitude()/readTelemetry() is telemetrySupplier's only remaining consumer --
+        // this pins that a failing supplier still cannot break the pipeline (video/detection keep
+        // flowing) with nothing overlay-shaped anywhere in the call. CameraAttitude.from(null, ...)
+        // returns null rather than a zeroed/"unknown" instance (see its own javadoc), so a failed
+        // read falls all the way back to the plain two-argument detect() overload -- exactly the
+        // call a port never told about attitude would see.
         ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0)));
-        when(detectionPort.detect(any(), any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
-        PipelineConfig base = config(60, 5);
-        PipelineConfig osdOff = new PipelineConfig(base.model(), base.confidenceThreshold(),
-                base.inferenceFps(), base.maxInFlightInferences(), false, base.labelFilter(),
-                base.eventRule(), base.overlayBurnIn(), base.detectionEnabled(), base.tracking());
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+        Supplier<Telemetry> throwingSupplier = () -> {
+            throw new RuntimeException("gps glitch");
+        };
 
-        attitudePipeline(publisher, osdOff, () -> telemetryWithHeading(137.5), settingsWithHfov(62.0)).start();
+        assertDoesNotThrow(() -> attitudePipeline(publisher, config(60, 5), throwingSupplier,
+                settingsWithHfov(62.0)).start());
 
-        // overlayTelemetry is a PRESENTATION switch; compensation is a perception concern. They
-        // happen to read the same supplier and must not be coupled through it.
-        verify(detectionPort).detect(any(), any(), any());
+        verify(detectionPort).detect(any(), any());
+        verify(detectionPort, never()).detect(any(), any(), any());
     }
 
     /** Returns each scripted reading in order, then repeats the last one. */
@@ -506,23 +499,23 @@ class StreamPipelineTest {
     }
 
     @Test
-    void latestRawFrameStaysTheRawFrameEvenWhenOverlayBurnInPublishesADifferentRenderedFrame() {
-        // docs/plans/done/CV-TRAINING-PLAN.md §2/§D: latestRawFrame() must expose the pre-overlay frame, never
-        // the (possibly burned-in) instance latestFrame()/streamPublisherPort see -- this is the one
-        // thing that actually distinguishes the two seams, so it is the load-bearing assertion here.
+    void latestRawFrameMirrorsLatestFrameNowThatThereIsNoOverlayStage() {
+        // docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1: published video is always clean pixels -- there is no
+        // server-side render stage to distinguish a "pre-overlay" instance from a "post-overlay" one
+        // anymore. latestRawFrame() is kept as its own named method only because training-sample
+        // capture (docs/plans/done/CV-TRAINING-PLAN.md §2/§D) reaches this API by that name specifically; this
+        // pins that it now simply mirrors latestFrame().
         VideoFrame f0 = frame(0);
         VideoFrame f1 = frame(1);
         ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        VideoFrame rendered = frame(99);
-        when(overlayPort.render(any())).thenReturn(rendered);
 
-        StreamPipeline pipeline = pipeline(publisher, config(30, 2), overlayPort);
+        StreamPipeline pipeline = pipeline(publisher, config(30, 2));
         pipeline.start();
 
-        assertEquals(Optional.of(rendered), pipeline.latestFrame(), "latestFrame() sees the rendered instance");
-        assertEquals(Optional.of(f1), pipeline.latestRawFrame(), "latestRawFrame() must stay the clean source frame");
+        assertEquals(Optional.of(f1), pipeline.latestFrame(), "latestFrame() sees exactly the source's own pixels");
+        assertEquals(pipeline.latestFrame(), pipeline.latestRawFrame(),
+                "latestRawFrame() must mirror latestFrame() -- there is no separate rendered instance anymore");
     }
 
     @Test
@@ -659,7 +652,7 @@ class StreamPipelineTest {
 
         // 30fps clock against inferenceFps=30: every frame serves a deadline, so all three reach
         // the in-flight bound and exactly one gets through it.
-        StreamPipeline pipeline = pipeline(publisher, config(30, 1), (OverlayPort) null, 30.0);
+        StreamPipeline pipeline = pipeline(publisher, config(30, 1), 30.0);
         pipeline.start();
 
         verify(detectionPort, times(1)).detect(any(), any());
@@ -953,303 +946,6 @@ class StreamPipelineTest {
         verify(streamPublisherPort, times(1)).streamEnded(streamId);
     }
 
-    @Test
-    void rawFramePublishedWhenNoOverlayPortConfiguredEvenWithNonEmptyDetections() {
-        // Baseline/regression: the 8-argument (no-overlay) constructor must behave exactly as it
-        // did before this feature -- overlayPort defaults to null, so a completed non-empty
-        // detection result never changes what gets published.
-        VideoFrame f0 = frame(0);
-        VideoFrame f1 = frame(1);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
-        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
-
-        pipeline(publisher, config(30, 2)).start();
-
-        verify(streamPublisherPort).publish(streamId, f0);
-        verify(streamPublisherPort).publish(streamId, f1);
-    }
-
-    @Test
-    void rawFramePublishedWhenOverlayConfiguredButNoDetectionHasCompletedYet() {
-        VideoFrame f = frame(0);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
-        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>()); // never completes
-        OverlayPort overlayPort = mock(OverlayPort.class);
-
-        pipeline(publisher, config(30, 2), overlayPort).start();
-
-        verify(streamPublisherPort).publish(streamId, f);
-        verifyNoInteractions(overlayPort);
-    }
-
-    @Test
-    void overlayRendersOntoFrameOnceLatestDetectionsAreNonEmptyAndPublisherReceivesRendererOutput() {
-        VideoFrame f0 = frame(0);
-        VideoFrame f1 = frame(1);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
-        DetectionResult result = nonEmptyResult(0);
-        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        VideoFrame rendered = frame(99); // a distinct instance standing in for the renderer's output
-        when(overlayPort.render(any())).thenReturn(rendered);
-
-        pipeline(publisher, config(30, 2), overlayPort).start();
-
-        // f0: published raw -- no detection has completed yet when it is published.
-        verify(streamPublisherPort).publish(streamId, f0);
-        // f1: latestDetections is non-empty by now (f0's detection completed synchronously), so
-        // the publisher receives the renderer's output instance, not the raw frame.
-        verify(streamPublisherPort).publish(streamId, rendered);
-        verify(streamPublisherPort, never()).publish(streamId, f1);
-
-        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
-        verify(overlayPort).render(captor.capture());
-        assertEquals(f1, captor.getValue().frame());
-        assertEquals(result.detections(), captor.getValue().detections());
-        assertNull(captor.getValue().telemetry(), "no telemetrySupplier was configured on this pipeline");
-    }
-
-    // --- Telemetry-OSD input (closes adapter-overlay/MODULE.md's "OSD gate not reachable" gap) ---
-
-    private Telemetry telemetrySample() {
-        return new Telemetry(device.id(), Instant.now(), 50.45, 30.52, 100.0, 90.0, 77.0, Map.of());
-    }
-
-    @Test
-    void overlayReceivesTheSuppliedTelemetrySampleWhenOverlayTelemetryIsEnabledAndASupplierIsConfigured() {
-        VideoFrame f = frame(0);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
-        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>()); // never completes
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        VideoFrame rendered = frame(99);
-        when(overlayPort.render(any())).thenReturn(rendered);
-        Telemetry sample = telemetrySample();
-        Supplier<Telemetry> telemetrySupplier = () -> sample;
-
-        // config(30, 2) defaults overlayTelemetry=true; no detections have completed, so the
-        // telemetry sample alone is what makes overlayIfNeeded render at all -- proving the "either
-        // detections or telemetry" condition, not just "both present".
-        pipeline(publisher, config(30, 2), overlayPort, telemetrySupplier).start();
-
-        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
-        verify(overlayPort).render(captor.capture());
-        assertEquals(sample, captor.getValue().telemetry());
-        assertTrue(captor.getValue().detections().isEmpty());
-        verify(streamPublisherPort).publish(streamId, rendered);
-    }
-
-    @Test
-    void overlayTelemetryStaysNullWhenOverlayTelemetryFlagIsDisabledEvenWithASupplierConfigured() {
-        VideoFrame f0 = frame(0);
-        VideoFrame f1 = frame(1);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
-        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        when(overlayPort.render(any())).thenReturn(frame(99));
-        Supplier<Telemetry> telemetrySupplier = this::telemetrySample;
-
-        // overlayTelemetry=false, detectionEnabled=true explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped
-        // the convenience-ctor default) -- detections still drive rendering (non-empty), but the OSD
-        // gate itself must stay shut.
-        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, false, Set.of(),
-                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
-        pipeline(publisher, config, overlayPort, telemetrySupplier).start();
-
-        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
-        verify(overlayPort, atLeastOnce()).render(captor.capture());
-        assertTrue(captor.getAllValues().stream().allMatch(a -> a.telemetry() == null),
-                "overlayTelemetry=false must keep every AnnotatedFrame's telemetry null regardless of the supplier");
-    }
-
-    @Test
-    void telemetrySupplierThrowingIsSwallowedAndOverlayStillRendersWithNullTelemetry() {
-        VideoFrame f0 = frame(0);
-        VideoFrame f1 = frame(1);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
-        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        when(overlayPort.render(any())).thenReturn(frame(99));
-        Supplier<Telemetry> throwingSupplier = () -> {
-            throw new RuntimeException("telemetry backend unavailable");
-        };
-
-        assertDoesNotThrow(
-                () -> pipeline(publisher, config(30, 2), overlayPort, throwingSupplier).start(),
-                "a throwing telemetrySupplier must never break the frame path");
-
-        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
-        verify(overlayPort, atLeastOnce()).render(captor.capture());
-        assertTrue(captor.getAllValues().stream().allMatch(a -> a.telemetry() == null),
-                "a throwing supplier must be treated exactly like 'no sample available'");
-        verify(streamPublisherPort, never()).streamEnded(streamId);
-    }
-
-    @Test
-    void overlayNeverInvokedWhenNoDetectionsAndNoTelemetrySampleAreAvailable() {
-        VideoFrame f = frame(0);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
-        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>()); // never completes
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        Supplier<Telemetry> emptySupplier = () -> null;
-
-        pipeline(publisher, config(30, 2), overlayPort, emptySupplier).start();
-
-        verify(streamPublisherPort).publish(streamId, f);
-        verifyNoInteractions(overlayPort);
-    }
-
-    @Test
-    void latestFrameReflectsTheRenderedFrameWhenOverlayBurnInProducesOne() {
-        // docs/plans/done/MVP3-PLAN.md C-a: latestFrame() must expose the exact instance streamPublisherPort
-        // was handed, so a snapshot request sees the same post-overlay picture a viewer does.
-        VideoFrame f0 = frame(0);
-        VideoFrame f1 = frame(1);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
-        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        VideoFrame rendered = frame(99);
-        when(overlayPort.render(any())).thenReturn(rendered);
-
-        StreamPipeline pipeline = pipeline(publisher, config(30, 2), overlayPort);
-        pipeline.start();
-
-        assertEquals(Optional.of(rendered), pipeline.latestFrame());
-    }
-
-    @Test
-    void overlayNeverInvokedAndFramesPublishRawWhenOverlayBurnInIsDisabled() {
-        // docs/plans/done/MVP2-PLAN.md §V, V-e: an OverlayPort is configured and detections are non-empty --
-        // exactly the condition overlayRendersOntoFrame...() above proves triggers rendering -- but
-        // PipelineConfig#overlayBurnIn() is false, so the renderer must never even be called and
-        // every frame publishes as the raw, unmodified instance the source produced.
-        VideoFrame f0 = frame(0);
-        VideoFrame f1 = frame(1);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
-        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-
-        pipeline(publisher, config(30, 2, false), overlayPort).start();
-
-        verify(streamPublisherPort).publish(streamId, f0);
-        verify(streamPublisherPort).publish(streamId, f1);
-        verifyNoInteractions(overlayPort);
-    }
-
-    @Test
-    void rendererThrowIsSwallowedAndRawFrameKeepsPublishingWithoutClosingThePipeline() {
-        VideoFrame f0 = frame(0);
-        VideoFrame f1 = frame(1);
-        VideoFrame f2 = frame(2);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1, f2));
-        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        when(overlayPort.render(any())).thenThrow(new RuntimeException("boom"));
-
-        pipeline(publisher, config(30, 2), overlayPort).start();
-
-        // f1 and f2 both attempt overlay (latestDetections is non-empty by then) and both throw,
-        // yet every frame is still published raw and the pipeline never closes -- overlay
-        // rendering is cosmetic and must never disrupt the video path.
-        verify(streamPublisherPort).publish(streamId, f0);
-        verify(streamPublisherPort).publish(streamId, f1);
-        verify(streamPublisherPort).publish(streamId, f2);
-        verify(streamPublisherPort, never()).streamEnded(streamId);
-        // Rendering is retried on every frame (unlike detection's outage/backoff skip policy) --
-        // only the WARNING log is throttled to once per failure run via an internal latch, not
-        // observed directly here since this suite doesn't assert on System.Logger output anywhere.
-        verify(overlayPort, times(2)).render(any());
-    }
-
-    @Test
-    void overlayReceivesRawSingleResultDetectionsUnchangedWhenOnlyOneResultHasCompleted() {
-        // docs/main/CYCLES-PLAN.md §12 CP-c: with only one completed result (no "previous" yet), the
-        // DetectionExtrapolator passes it through as-is -- overlay behavior is unchanged from
-        // before the extrapolator existed.
-        VideoFrame f0 = frame(0);
-        VideoFrame f1 = frame(1);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
-        DetectionResult result = nonEmptyResult(0);
-        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        VideoFrame rendered = frame(99);
-        when(overlayPort.render(any())).thenReturn(rendered);
-
-        pipeline(publisher, config(1000, 5), overlayPort, 1000.0).start();
-
-        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
-        verify(overlayPort).render(captor.capture());
-        assertEquals(result.detections(), captor.getValue().detections());
-    }
-
-    @Test
-    void overlayExtrapolatesTheMatchedBoxBetweenTwoCompletedResultsInsteadOfFreezingAtTheLatestRawPosition() {
-        // docs/main/CYCLES-PLAN.md §12 CP-c: once a second result completes, the overlay for a
-        // subsequently-published frame shows a box moved along the measured velocity toward that
-        // frame's own capture time, not L's raw (now-stale) box position.
-        Instant t0 = Instant.parse("2024-01-01T00:00:00Z");
-        VideoFrame f0 = frameAt(0, t0);
-        VideoFrame f1 = frameAt(1, t0.plusMillis(100));
-        VideoFrame f2 = frameAt(2, t0.plusMillis(150));
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1, f2));
-        DetectionResult previousResult = resultWithBoxX(0, t0, 0.10); // box center x = 0.20
-        DetectionResult latestResult = resultWithBoxX(1, t0.plusMillis(100), 0.14); // box center x = 0.24
-        when(detectionPort.detect(any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(previousResult))
-                .thenReturn(CompletableFuture.completedFuture(latestResult))
-                .thenReturn(CompletableFuture.completedFuture(latestResult)); // f2's own detect(): irrelevant here
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        VideoFrame rendered = frame(99);
-        when(overlayPort.render(any())).thenReturn(rendered);
-
-        pipeline(publisher, config(1000, 5), overlayPort, 1000.0).start();
-
-        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
-        verify(overlayPort, atLeastOnce()).render(captor.capture());
-        AnnotatedFrame forF2 = captor.getAllValues().stream()
-                .filter(annotated -> annotated.frame() == f2)
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("overlay was never rendered for f2"));
-
-        // velocity = (0.24 - 0.20) / 0.1s = 0.4 units/s; 50ms past L -> center x + 0.02 -> box x = 0.16,
-        // strictly between L's raw box x (0.14) and a naive full-step continuation.
-        assertEquals(1, forF2.detections().size());
-        assertEquals(0.16, forF2.detections().get(0).box().x(), 1e-9);
-    }
-
-    @Test
-    void overlayFreezesExtrapolationAtTheCapForAFrameFarPastTheLatestResult() {
-        // docs/main/CYCLES-PLAN.md §12 CP-c: a frame published long after L (e.g. a stalled/outaged
-        // detector) must not run the box off screen -- extrapolation freezes at
-        // DetectionExtrapolator.MAX_EXTRAPOLATION_MILLIS past L's capture time.
-        Instant t0 = Instant.parse("2024-01-01T00:00:00Z");
-        VideoFrame f0 = frameAt(0, t0);
-        VideoFrame f1 = frameAt(1, t0.plusMillis(100));
-        VideoFrame f2 = frameAt(2, t0.plusSeconds(30)); // far beyond L.capturedAt + 800ms
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1, f2));
-        DetectionResult previousResult = resultWithBoxX(0, t0, 0.10); // box center x = 0.20
-        DetectionResult latestResult = resultWithBoxX(1, t0.plusMillis(100), 0.14); // box center x = 0.24
-        when(detectionPort.detect(any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(previousResult))
-                .thenReturn(CompletableFuture.completedFuture(latestResult))
-                .thenReturn(CompletableFuture.completedFuture(latestResult));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        VideoFrame rendered = frame(99);
-        when(overlayPort.render(any())).thenReturn(rendered);
-
-        pipeline(publisher, config(1000, 5), overlayPort, 1000.0).start();
-
-        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
-        verify(overlayPort, atLeastOnce()).render(captor.capture());
-        AnnotatedFrame forF2 = captor.getAllValues().stream()
-                .filter(annotated -> annotated.frame() == f2)
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("overlay was never rendered for f2"));
-
-        // velocity 0.4 units/s, capped at 800ms past L -> center x + 0.32 -> box x = 0.46.
-        assertEquals(1, forF2.detections().size());
-        assertEquals(0.46, forF2.detections().get(0).box().x(), 1e-9);
-    }
-
     // --- docs/plans/done/CV-CONTROL-PLAN.md Wave C: live config update, skip-detect, label-filter enforcement ---
 
     private DetectionResult resultWithLabels(long sequence, String... labels) {
@@ -1267,7 +963,7 @@ class StreamPipelineTest {
 
         assertEquals(30, pipeline.config().inferenceFps());
 
-        PipelineConfig next = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 15, 2, true, Set.of());
+        PipelineConfig next = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 15, 2, Set.of());
         pipeline.updateConfig(next);
 
         assertEquals(15, pipeline.config().inferenceFps());
@@ -1292,8 +988,8 @@ class StreamPipelineTest {
         // Same model id ("yolo"): a hot-knob-only patch must never behave like a re-arm. detectionEnabled
         // stated explicitly (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default) since
         // this test's whole point is that detection keeps running across the swap.
-        PipelineConfig hotter = new PipelineConfig(new ModelRef("yolo", "latest"), 0.75, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
+        PipelineConfig hotter = new PipelineConfig(new ModelRef("yolo", "latest"), 0.75, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true);
         pipeline.updateConfig(hotter);
 
         assertEquals(firstResult.detections(), pipeline.latestDetections(),
@@ -1313,8 +1009,8 @@ class StreamPipelineTest {
     void detectionEnabledFalseSkipsDetectEntirelyWhileVideoKeepsPublishing() {
         List<VideoFrame> frames = List.of(frame(0), frame(1), frame(2));
         ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
-        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of(),
-                EventRuleConfig.defaults(), true, false);
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, Set.of(),
+                EventRuleConfig.defaults(), false);
         StreamPipeline pipeline = pipeline(publisher, detectionOff);
 
         pipeline.start();
@@ -1329,8 +1025,8 @@ class StreamPipelineTest {
 
     @Test
     void detectionResumesOnTheNextSampledFrameAfterReEnabling() {
-        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), true, false);
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), false);
         StreamPipeline pipeline = manualPipeline(detectionOff, () -> 0L);
 
         pipeline.onNext(frame(0));
@@ -1339,8 +1035,8 @@ class StreamPipelineTest {
         verify(streamPublisherPort, times(2)).publish(eq(streamId), any());
 
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(2)));
-        PipelineConfig detectionOn = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), true, true);
+        PipelineConfig detectionOn = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true);
         pipeline.updateConfig(detectionOn);
         pipeline.onNext(frame(2));
 
@@ -1402,8 +1098,8 @@ class StreamPipelineTest {
     @Test
     void detectionStaysOffWhenBothDetectionEnabledAndDetectionDemandAreFalse() {
         ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0), frame(1)));
-        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of(),
-                EventRuleConfig.defaults(), true, false);
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, Set.of(),
+                EventRuleConfig.defaults(), false);
         StreamPipeline pipeline = pipeline(publisher, detectionOff);
         pipeline.updateDetectionDemand(false);
 
@@ -1446,8 +1142,8 @@ class StreamPipelineTest {
 
     @Test
     void detectionStateIsOffWhenDetectionEnabledIsFalseRegardlessOfDemandAndTakesPrecedenceOverIdleNoViewers() {
-        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of(),
-                EventRuleConfig.defaults(), true, false);
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, Set.of(),
+                EventRuleConfig.defaults(), false);
         StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()), detectionOff);
 
         assertEquals(DetectionState.OFF, pipeline.detectionState(),
@@ -1478,8 +1174,8 @@ class StreamPipelineTest {
 
         // Same model id ("yolo"): this is a hot-knob-only patch except for detectionEnabled, so any
         // clearing observed below is attributable to the gate closing, not to a model re-arm.
-        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), true, false);
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), false);
         pipeline.updateConfig(detectionOff);
 
         assertTrue(pipeline.latestDetections().isEmpty(),
@@ -1491,8 +1187,8 @@ class StreamPipelineTest {
         assertEquals(0L, pipeline.pipelineLatency().samples());
 
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(1)));
-        PipelineConfig detectionOn = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), true, true);
+        PipelineConfig detectionOn = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true);
         pipeline.updateConfig(detectionOn);
         pipeline.onNext(frame(1));
 
@@ -1566,8 +1262,8 @@ class StreamPipelineTest {
         when(detectionPort.detect(any(), any())).thenReturn(pending);
         pipeline.onNext(frame(1)); // submitted while the gate is still open; its completion is delayed
 
-        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), true, false);
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), false);
         pipeline.updateConfig(detectionOff); // gate closes -- clears the boxes established above
         assertTrue(pipeline.latestDetections().isEmpty());
 
@@ -1601,11 +1297,11 @@ class StreamPipelineTest {
         DetectionEventEngine eventEngine = mock(DetectionEventEngine.class);
         AssetId assetId = AssetId.random();
         DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
-        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of("person"),
-                EventRuleConfig.defaults(), true, true);
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, Set.of("person"),
+                EventRuleConfig.defaults(), true);
 
         StreamPipeline pipeline = new StreamPipeline(streamId, device, config, publisher, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, eventEngine, assetId,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, eventEngine, assetId,
                 liveUpdatePublisherPort);
         pipeline.start();
 
@@ -1625,27 +1321,6 @@ class StreamPipelineTest {
     }
 
     @Test
-    void labelFilterAppliesToTheExtrapolatedOverlayViewToo() {
-        VideoFrame f0 = frame(0);
-        VideoFrame f1 = frame(1);
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
-        DetectionResult result = resultWithLabels(0, "person", "car");
-        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        when(overlayPort.render(any())).thenReturn(frame(99));
-        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of("person"),
-                EventRuleConfig.defaults(), true, true);
-
-        StreamPipeline pipeline = new StreamPipeline(streamId, device, config, publisher, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort);
-        pipeline.start();
-
-        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
-        verify(overlayPort).render(captor.capture());
-        assertEquals(List.of("person"), captor.getValue().detections().stream().map(Detection::label).toList());
-    }
-
-    @Test
     void updateConfigWithADifferentModelIdClearsStaleModelBoundDetectionStateAndAppliesTheNewModelOnTheNextSample() {
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
         StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
@@ -1656,8 +1331,8 @@ class StreamPipelineTest {
         // detectionEnabled stated explicitly (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor
         // default) since this test's whole point is that the next sampled frame still detects, on
         // the new model.
-        PipelineConfig newModel = new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
+        PipelineConfig newModel = new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true);
         pipeline.updateConfig(newModel);
 
         assertTrue(pipeline.latestDetections().isEmpty(),
@@ -1706,7 +1381,7 @@ class StreamPipelineTest {
 
         new StreamPipeline(streamId, device, trackingConfig(10, TrackingConfig.defaults()), publisher,
                 detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
-                null, null, fixedFpsClock(60), settingsWithAdaptiveRate(adaptiveRate), System::nanoTime).start();
+                null, fixedFpsClock(60), settingsWithAdaptiveRate(adaptiveRate), System::nanoTime).start();
 
         return mockingDetails(detectionPort).getInvocations().size();
     }
@@ -1733,8 +1408,8 @@ class StreamPipelineTest {
     }
 
     private static PipelineConfig trackingConfig(int inferenceFps, TrackingConfig tracking) {
-        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, 5, true, Set.of(),
-                EventRuleConfig.defaults(), true, true, tracking);
+        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, 5, Set.of(),
+                EventRuleConfig.defaults(), true, tracking);
     }
 
     private static TrackingConfig mode(TrackingMode trackingMode, int followFps) {
@@ -1781,7 +1456,7 @@ class StreamPipelineTest {
         when(port.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
         StreamPipeline pipeline = new StreamPipeline(streamId, device, trackingConfig(10, mode(trackingMode, 15)),
                 NO_OP_SOURCE, port, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
-                null, null, thirtyFpsClock());
+                null, thirtyFpsClock());
         pipeline.onSubscribe(NOOP_SUBSCRIPTION);
         for (int i = 0; i < 30; i++) {
             pipeline.onNext(frame(i));
@@ -1844,8 +1519,8 @@ class StreamPipelineTest {
         pipeline.onNext(frame(0));
         assertFalse(pipeline.tracks().isEmpty());
 
-        pipeline.updateConfig(new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), true, true, mode(TrackingMode.ASSOCIATE, 15)));
+        pipeline.updateConfig(new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true, mode(TrackingMode.ASSOCIATE, 15)));
 
         assertTrue(pipeline.tracks().isEmpty(), "track ids are bound to the model that produced them");
         assertEquals(0L, pipeline.trackingStats().trackerFrames());
@@ -1871,8 +1546,8 @@ class StreamPipelineTest {
         // about the frame that survive the filter.
         when(detectionPort.detect(any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(trackedResult(0, 7, TrackState.CONFIRMED)));
-        PipelineConfig filtered = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true,
-                Set.of("person"), EventRuleConfig.defaults(), true, true, mode(TrackingMode.FOLLOW, 15));
+        PipelineConfig filtered = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5,
+                Set.of("person"), EventRuleConfig.defaults(), true, mode(TrackingMode.FOLLOW, 15));
         StreamPipeline pipeline = manualPipeline(filtered, () -> 0L);
 
         pipeline.onNext(frame(0));

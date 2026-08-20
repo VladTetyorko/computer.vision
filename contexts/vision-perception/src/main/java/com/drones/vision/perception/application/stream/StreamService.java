@@ -109,8 +109,9 @@ public interface StreamService {
     Set<DeviceId> activeDeviceIds();
 
     /**
-     * The most recently published frame on a running stream (docs/plans/done/MVP3-PLAN.md C-a) — post-overlay
-     * burn-in when one was drawn, exactly the instance the pipeline last handed to {@link
+     * The most recently published frame on a running stream (docs/plans/done/MVP3-PLAN.md C-a) —
+     * exactly the source's own pixels (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1: there is no
+     * server-side rendering stage anymore), the instance the pipeline last handed to {@link
      * com.drones.vision.perception.domain.port.StreamPublisherPort#publish}. Backs the per-stream JPEG
      * snapshot endpoint.
      *
@@ -121,35 +122,18 @@ public interface StreamService {
     Optional<VideoFrame> latestFrame(StreamId streamId);
 
     /**
-     * The most recently arrived frame on a running stream, before overlay burn-in and at full
-     * resolution (docs/plans/done/CV-TRAINING-PLAN.md &sect;2/&sect;D) — exactly {@link
-     * StreamPipeline#latestRawFrame()}. Backs training-sample capture, which wants clean pixels to
-     * label, never {@link #latestFrame}'s possibly-annotated one.
+     * The most recently published frame on a running stream, at full resolution
+     * (docs/plans/done/CV-TRAINING-PLAN.md &sect;2/&sect;D) — an alias for {@link
+     * #latestFrame(StreamId)}, exactly {@link StreamPipeline#latestRawFrame()}, kept as its own
+     * named method because training-sample capture reaches this API by this name specifically.
+     * Frames are always clean now (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1) — there is no
+     * separate pre-overlay instance to distinguish from {@link #latestFrame} anymore.
      *
      * @param streamId the stream to inspect
      * @return the frame, or {@link Optional#empty()} if {@code streamId} is unknown/not running on
      *         this instance, or it is but hasn't received a frame yet
      */
     Optional<VideoFrame> latestRawFrame(StreamId streamId);
-
-    /**
-     * Whether server-side overlay burn-in is actually active for a running stream
-     * (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.4) — {@code false} exactly when nothing burns detection
-     * boxes into the published video (this device's source is proxied, D4 — no {@code
-     * VideoSourcePort} was opened at all, so no JVM frame is ever published for the overlay renderer
-     * to burn into — or no {@code OverlayPort} is wired, or this stream's own {@code overlayBurnIn} is
-     * off), {@code true} otherwise. Whether this stream's <em>detections</em> arrive by push or pull
-     * plays no part: the overlay render is driven by the published video frame, not by the detection
-     * transport, so a JVM-published, pull-detected stream (Phase 1's V4L2/MJPEG/sim answer) burns
-     * boxes exactly like push mode does. Computed once at start, since neither fact it depends on can
-     * change over a running stream's life.
-     *
-     * @param streamId the stream to inspect
-     * @return whether burn-in is active, or {@code false} for an unknown/not-running stream — the
-     *         same honest "nothing burns boxes here" answer a proxied stream already gives, never an
-     *         error
-     */
-    boolean burnedIn(StreamId streamId);
 
     /**
      * The most recently completed detection result's detections on a running stream — exactly {@link

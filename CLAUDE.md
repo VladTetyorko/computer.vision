@@ -33,7 +33,6 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 | adapter-publish-hls | `video-output/publish-hls/` | H.264 RTSP push → mediamtx (HLS viewing) |
 | adapter-discovery | `device-discovery/onvif-mdns-v4l2/` | ONVIF / mDNS / V4L2 scanners |
 | adapter-cv-grpc | `cv/grpc/` | DetectionPort via gRPC to cv-service |
-| adapter-overlay | `video-output/overlay/` | Detection/OSD overlay burn-in (Java2D) |
 | adapter-persistence | `storage/persistence/` | JPA/Postgres repositories (unconditional; Postgres is the only store) |
 | vision-api | `station/vision-api/` | REST + static web console (driving adapter) |
 | vision-app | `station/vision-app/` | Spring Boot assembly, wiring, devsupport, ArchUnit |
