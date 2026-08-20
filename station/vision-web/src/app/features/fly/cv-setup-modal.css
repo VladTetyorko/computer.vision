@@ -1,0 +1,380 @@
+/* A true `position: fixed` modal — mirrors `shared/map/fleet-plan-dialog/flight-plan-dialog.css`/
+   `features/command/geofence-zone-dialog.css`'s own backdrop/dialog mechanics (z-index: 150, a
+   scrollable card) rather than `shared/ui/confirm-dialog.css`/`arm-confirm-dialog.css`'s narrower,
+   no-dismiss shape — see `cv-setup-modal.ts`'s own class doc comment for why backdrop-click/`Esc`
+   dismissal is the right default here. `:host { display: contents }` keeps this component from
+   introducing its own box in `cockpit.html`'s `.grid-main` layout, the same convention every other
+   dialog component in this app already follows. */
+
+:host {
+  display: contents;
+}
+
+/* Dims, does not blank, the video behind it — `--scrim-strong` is the frontend-style skill's own
+   "compositing wash over live video/map" token (§2), the deliberate choice over `--hud-bg-strong`
+   (the near-opaque wash every non-video-adjacent dialog in this app uses): this dialog opens
+   directly over the cockpit's live stage-video (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 — "the
+   video stays visible behind the scrim"), so the backdrop itself must stay legible-but-dim rather
+   than reading as opaque. No `backdrop-filter` blur for the same reason — a blur this strong over
+   video reads as "blanked", not "dimmed". */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150; /* above the app header (20) and the toast host (100) is fine to overlap briefly */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  background: var(--scrim-strong);
+}
+
+.dialog {
+  width: min(34rem, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-16) var(--space-24);
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-16);
+}
+
+.dialog-head h2 {
+  margin: 0 0 var(--space-4);
+  font-size: 1.05rem;
+}
+
+.dialog-head .hint {
+  margin: 0;
+}
+
+.cv-section {
+  margin-bottom: var(--space-16);
+}
+
+.cv-section:last-child {
+  margin-bottom: 0;
+}
+
+.hint {
+  font-size: 0.74rem;
+  margin: var(--space-2) 0 var(--space-8);
+  color: var(--text-muted);
+}
+
+/* ---- "Looking for" intent cards (docs/plans/active/CV-UX-RESEARCH.md §5, wave U2) ------------ */
+
+.intent-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.intent-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-8);
+}
+
+.intent-card.selected {
+  border-color: var(--color-info);
+  background: var(--color-info-soft);
+}
+
+.intent-card-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  cursor: pointer;
+  /* Comfortable tap target on touch, not just a thin text row. */
+  min-height: 2.5rem;
+}
+
+.intent-card-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.intent-card-preset {
+  align-self: flex-start;
+}
+
+/* The intent card's own one-sentence "what it finds" + the selected open-vocab card's shrunk CPU
+   line (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §1 item 2) — plain `.hint` sizing/color, just
+   scoped to sit inside a card instead of a whole section. */
+.intent-card-sentence {
+  margin: 0;
+}
+
+/* ---- Class-filter chip checklist ------------------------------------------------------------ */
+
+.chip-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-8);
+}
+
+.class-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--panel-raised);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  min-height: 1.9rem;
+}
+
+.class-chip.checked {
+  background: var(--color-info-soft);
+  border-color: var(--color-info);
+  color: var(--color-info-text);
+}
+
+/* Hidden classes (deny-list) management, with un-hide (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2
+   §5) — mirrors `detections-strip.css`'s identical `.strip-chip-hidden` treatment (soft-amber
+   `.chip.warn` tokens: a deliberate operator choice worth flagging at a glance, not an error) so
+   the two surfaces read the same "hidden, click to un-hide" state the same way. Takes precedence
+   over `.checked` — a denied label never reads as selected, regardless of the allowlist. */
+.class-chip.hidden {
+  background: var(--color-warn-soft);
+  border-color: var(--color-warn-line);
+  color: var(--color-warn-text);
+}
+
+.chip-label-hidden {
+  text-decoration: line-through;
+  text-decoration-color: var(--color-warn-text);
+}
+
+.chip-check {
+  width: 0.85em;
+  display: inline-block;
+  text-align: center;
+}
+
+.chip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-8);
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+}
+
+.chip-label:hover {
+  text-decoration: underline;
+}
+
+.chip-label:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: -2px;
+}
+
+.chip-remove {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  margin: 0 var(--space-4) 0 0;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.65;
+}
+
+.chip-remove:hover {
+  opacity: 1;
+  background: var(--color-info);
+  color: var(--panel-raised);
+}
+
+.chip-remove:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: 1px;
+}
+
+.chip-search-row,
+.chip-action-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-8);
+}
+
+.chip-search-row input {
+  flex: 1;
+  width: 100%;
+}
+
+.chip-add-button {
+  margin-bottom: var(--space-8);
+}
+
+/* The staged **allowlist** edit's own "count + Submit + Discard" row — a plain `.notice` shell, no
+   `.warn`/`.danger` intent: unapplied work in progress is not bad news, just a fact that must stay
+   visible per the frontend-style skill's "unapplied state must be visible" rule. Rendered once, in
+   the merged Classes section (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5 — the pre-P2 "Seen
+   now" mini-checklist used to render an identical second copy of this row; merging the two sections
+   into one removed the duplicate along with it). */
+.cv-pending-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* ---- "Expert" disclosure (docs/plans/active/CV-UX-RESEARCH.md §3/§7, wave U1) — the same native
+   `<details>` idiom `app-sidebar.css`'s own `.disclosure` established for "Advanced"/"Upcoming"; a
+   feature-local rule set rather than reusing that class directly, since Angular's view
+   encapsulation scopes `app-sidebar.css` to `AppSidebar`'s own template. */
+
+.cv-disclosure {
+  margin-bottom: var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.cv-disclosure:last-child {
+  margin-bottom: 0;
+}
+
+.cv-disclosure summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-8);
+  padding: var(--space-8);
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  /* Comfortable tap target on touch, not just a thin text row. */
+  min-height: 2.5rem;
+}
+
+.cv-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.cv-disclosure-chevron {
+  display: inline-block;
+  flex: none;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.cv-disclosure[open] .cv-disclosure-chevron {
+  transform: rotate(90deg);
+}
+
+.cv-disclosure-hint {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 0.74rem;
+  text-align: right;
+}
+
+.cv-disclosure-body {
+  padding: 0 var(--space-8) var(--space-8);
+  border-top: 1px solid var(--border);
+}
+
+.cv-disclosure-body .cv-section:first-child {
+  margin-top: var(--space-8);
+}
+
+/* ---- Served capability + detection-lag readout (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
+   §4, wave J4) — a quiet hairline card; a downgrade (`.downgraded`) borrows the shared
+   `--color-warn-*` intent tokens rather than inventing a new color, the same way `.notice.warn`/
+   `.chip.warn` already do everywhere else in this app. */
+.capability-readout {
+  margin-top: var(--space-8);
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.capability-readout.downgraded {
+  border-color: var(--color-warn-line);
+  background: var(--color-warn-soft);
+}
+
+.capability-readout-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.capability-readout-label {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.capability-readout-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.capability-readout-value.lag-over-budget {
+  color: var(--color-danger-text);
+  font-weight: 600;
+}
+
+/* The flow strip (docs/extracts/TRACKING-ORCHESTRATION.md §7) — telemetry-shaped text, so `.mono` +
+   tabular-nums like every other ticking number in this app; a hairline card rather than plain text
+   so it reads as one instrument reading, not a stray caption. */
+.tracking-flow-strip {
+  margin-top: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  /* Below --bp-sm: the dialog gives up its own side margins and reads as a near-full-bleed sheet —
+     large touch targets stay reachable with a thumb rather than crowding a centered card. */
+  .backdrop {
+    padding: var(--space-8);
+  }
+
+  .dialog {
+    width: 100%;
+    padding: var(--space-16);
+  }
+}

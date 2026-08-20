@@ -202,20 +202,24 @@ describe('isAllDronesOption (docs/plans/done/UX-REWORK-PLAN.md §U-a bullet 4 �
 });
 
 describe('nextCollapseAction (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2 D-D — Esc\'s "closest thing open, first")', () => {
-  it('closes an open tool-rail drawer first, even if the stop-confirm/map are also open', () => {
-    expect(nextCollapseAction({ panelOpen: true, stopConfirmOpen: true, mapVisible: true })).toBe('panel');
+  it('closes the CV setup modal first, even if a drawer/stop-confirm/map are also open (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1)', () => {
+    expect(nextCollapseAction({ cvSetupOpen: true, panelOpen: true, stopConfirmOpen: true, mapVisible: true })).toBe('cv-setup');
   });
 
-  it('closes the stop-confirm next once no drawer is open', () => {
-    expect(nextCollapseAction({ panelOpen: false, stopConfirmOpen: true, mapVisible: true })).toBe('stop-confirm');
+  it('closes an open tool-rail drawer next, once the setup modal is closed, even if the stop-confirm/map are also open', () => {
+    expect(nextCollapseAction({ cvSetupOpen: false, panelOpen: true, stopConfirmOpen: true, mapVisible: true })).toBe('panel');
+  });
+
+  it('closes the stop-confirm next once no modal or drawer is open', () => {
+    expect(nextCollapseAction({ cvSetupOpen: false, panelOpen: false, stopConfirmOpen: true, mapVisible: true })).toBe('stop-confirm');
   });
 
   it('hides the map inset last, once nothing else is open', () => {
-    expect(nextCollapseAction({ panelOpen: false, stopConfirmOpen: false, mapVisible: true })).toBe('map');
+    expect(nextCollapseAction({ cvSetupOpen: false, panelOpen: false, stopConfirmOpen: false, mapVisible: true })).toBe('map');
   });
 
   it('is a no-op when nothing is open', () => {
-    expect(nextCollapseAction({ panelOpen: false, stopConfirmOpen: false, mapVisible: false })).toBeNull();
+    expect(nextCollapseAction({ cvSetupOpen: false, panelOpen: false, stopConfirmOpen: false, mapVisible: false })).toBeNull();
   });
 });
 

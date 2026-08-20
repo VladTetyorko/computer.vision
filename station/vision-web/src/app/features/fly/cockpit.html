@@ -236,8 +236,10 @@
            operator's persisted open-panel id still opens this same drawer). Top: the detections
            strip, now the class-level remote control (hover-highlights a class on the stage, click
            hides it via `labelDenyFilter` — docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.5).
-           Below: `<vision-cv-control-panel>`'s own body, content unchanged from before the merge
-           (its internal restructure is CV-UX-RESEARCH's scope, not this wave's).
+           Below: `<vision-cv-control-panel>`'s own body — as of docs/plans/active/CV-PANEL-SPLIT-
+           PLAN.md P1, the slimmed seven-item fly-time surface; its own "Change…"/"Detection setup…"
+           buttons open `<vision-cv-setup-modal>` (mounted separately, near the Stop confirm below,
+           since it is a stage-level overlay, not drawer content) via `(setupRequested)="requestCvSetup()"`.
            **Mounted whenever there is something to show, not only `!facade.watchMode()`**: the strip
            has always been reachable in watch mode (`facade.live()` was its only gate, before this
            merge) — a viewer keeps the "what's on screen" strip even though the mutating CV controls
@@ -262,6 +264,7 @@
               [detectionEnabled]="facade.detectionOn()"
               [detectionPending]="facade.detectionPending()"
               (detectionEnabledChange)="facade.setDetection($event)"
+              (setupRequested)="requestCvSetup()"
             />
           }
         </vision-side-panel>
@@ -491,6 +494,24 @@
           </div>
         </div>
       </div>
+    }
+
+    <!-- ---- CV setup modal (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) — a centered dialog over
+         this whole `.cockpit` stage, video visible-but-dimmed behind it. Only ever opened by
+         `<vision-cv-control-panel>`'s own "Change…"/"Detection setup…" buttons above, which are
+         themselves only rendered while the Vision drawer is open and `!facade.watchMode()` — so this
+         `@if` does not additionally gate on `isPanelOpen('cv')`: nothing can reach `requestCvSetup()`
+         without the drawer already open. `expertOpen`/`expertOpenChange` round-trip
+         `facade.cvExpertOpen` (facade-owned, not a component boolean — see that signal's own doc
+         comment) so the Expert disclosure's open state survives this component being destroyed and
+         recreated on every close/reopen. -->
+    @if (isDialogOpen('cv-setup') && !facade.watchMode()) {
+      <vision-cv-setup-modal
+        [streamId]="facade.stream()?.streamId"
+        [expertOpen]="facade.cvExpertOpen()"
+        (expertOpenChange)="facade.cvExpertOpen.set($event)"
+        (closed)="closeCvSetup()"
+      />
     }
   </div>
 } @else if (facade.loadError()) {

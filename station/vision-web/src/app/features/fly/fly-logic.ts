@@ -128,20 +128,29 @@ export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'marks' | 'map' | 'help';
 
 /**
  * `Esc`'s own "closest thing open, first" priority (docs/plans/done/UI-REDESIGN-PLAN.md D-D: "Esc calls
- * `panels.close()`") — extracted from `fly.ts#collapseOverlays()` so the cascade order itself (any
- * open tool-rail drawer, then the Stop-stream confirm, then the map inset) is unit-testable without
- * a real `PanelState`/DOM. Mirrors the pre-Wave-2 cascade's own order (shortcuts/CV/detections were
- * already the drawers-in-training even then, just modeled as separate flags) with one change: the
- * map inset moves to *last* rather than sharing the old detections-strip slot, since it's the one
- * overlay this wave deliberately keeps outside `PanelState` (D-D: "the map inset stays a separate
- * persisted toggle … since it is glanceable, not a modal drawer") and is the least "in the way" of
- * the three.
+ * `panels.close()`") — extracted from `fly.ts#collapseOverlays()` so the cascade order itself (the
+ * CV setup modal, then any open tool-rail drawer, then the Stop-stream confirm, then the map inset)
+ * is unit-testable without a real `PanelState`/DOM. Mirrors the pre-Wave-2 cascade's own order
+ * (shortcuts/CV/detections were already the drawers-in-training even then, just modeled as separate
+ * flags) with one change: the map inset moves to *last* rather than sharing the old detections-strip
+ * slot, since it's the one overlay this wave deliberately keeps outside `PanelState` (D-D: "the map
+ * inset stays a separate persisted toggle … since it is glanceable, not a modal drawer") and is the
+ * least "in the way" of the three.
+ *
+ * **`cvSetupOpen` is checked first** (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) — the setup
+ * modal is the topmost overlay in the stack (it opens *over* the still-open Vision drawer, per the
+ * plan's "opening it must not close the tool-rail drawer"), so `Esc` must close it alone on the
+ * first press, leaving the drawer beneath it open for a second `Esc` to then close via `'panel'`.
  */
 export function nextCollapseAction(state: {
+  readonly cvSetupOpen: boolean;
   readonly panelOpen: boolean;
   readonly stopConfirmOpen: boolean;
   readonly mapVisible: boolean;
-}): 'panel' | 'stop-confirm' | 'map' | null {
+}): 'cv-setup' | 'panel' | 'stop-confirm' | 'map' | null {
+  if (state.cvSetupOpen) {
+    return 'cv-setup';
+  }
   if (state.panelOpen) {
     return 'panel';
   }
