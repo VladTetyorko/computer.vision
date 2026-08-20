@@ -1663,6 +1663,34 @@ one-stop index the plan asked H4 to keep.
 Everything else in §3/§4 (wire shapes, gate order, gate thresholds, the §4.4 Change 1/2/3 sequence
 filter logic) ported as frozen, with no further deviation found.
 
+### 9.11 H7 outcome (2026-08-20) — executed; two silent defects found
+
+The demo ran against a live stack (host-venv cv-service, mediamtx, Postgres, the built jar) and is
+transcribed in [VISUAL-GEO-V2-DEMO.md](VISUAL-GEO-V2-DEMO.md). Steps 1, 2, 3, 5 and 7 executed: the
+six endpoints answer D9's 409 verbatim with no runner bean and no thread while the flag is off; a
+real `kyiv-maidan` region was ingested from live Esri imagery to `READY` (49 tiles, `holdoutRecallAt1`
+0.25, `holdoutMedianErrorMeters` 194.5 — reproducing H0's spike numbers through the production path),
+and §9.10 items 6 and 8 were verified on disk (full tile set persisted, 8 never-accept cells on
+pozniaky); SSE `geo:<assetId>` delivered the frozen envelope; the replay query returned 323 rows
+oldest→newest with correct 400/404 boundaries. Step 4 was **half executed** — the clip streamed
+through mediamtx exactly as O12 describes, but `infra/sitl` armed without ever obtaining a position
+estimate and streamed only `HEARTBEAT`, so §9.9 amendment 5's fiction deepened: telemetry came from a
+scripted `pymavlink` sender, and real footage with real logged telemetry remains unmeasured. Step 6
+is **unreachable on this footage** and `EventType.POSITION_DIVERGENCE` has still never been emitted by
+a running system: no sequence convergence → no `CONFIRMED` → the alarm cannot arm, each link
+deliberate. The headline measurement is that the gate held — **353 of 353 frames refused**
+(`G-b_inlier_ratio`, mean inlier ratio 0.061 against a 0.35 floor), precisely as O1 and amendment 3
+predicted for XFeat on real footage; nothing wrong was ever published. Two defects for H8, both
+invisible to the test suite: (1) `VisualGeoRunner.LatestFixSubscriber.onError` only logs and never
+clears `openSessions`, so `ensureSessionOpen`'s early return makes a cv-service bounce end
+geolocation *permanently and silently* even after `CvChannelSupervisor` recovers the channel; and
+(2) `GeoFixCodec` sources `camera_pitch_deg` only from `Attitude.gimbalPitchDegrees()`, which MAVLink
+`ATTITUDE` (#30) never populates — so every gimbal-less aircraft is silently modelled as nadir and
+rectification never runs (proven: `rectified` false 323/323 with #30 only, true 41/41 once #285 was
+emitted, mean inlier ratio +36%). D6 and §1.3 freeze the #285/#265 sources without ever saying what a
+fixed-camera platform does, and the kernel's own `GeoProjection.aimFrom` already carries the
+`fallbackDepressionDegrees` knob that `GeoFixCodec` lacks.
+
 ## 10. Open choices left to the implementer — each with a default
 
 | # | Choice | Default if nobody decides | Who decides, when |
