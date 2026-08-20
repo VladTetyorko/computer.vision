@@ -43,3 +43,11 @@ geometric re-rank → sequence fuse), mostly already built-but-unwired on the br
 (XFeat+LightGlue on OpenVINO + DEM ray-cast + robust smoothing, corrected-track stream) first; light-1
 (dead-reckon + periodic tile-template correction → GPS_INPUT, corridor pack via MISSIONS) second.
 Five user decisions listed in the synthesis §3. Next artefact: VISUAL-GEO-V2-PLAN.md (not started).
+
+## Cycle executed (2026-08-19/20)
+`VISUAL-GEO-V2-PLAN.md` authored and fully executed on `feat/visual-geo-v2` (21 commits, unmerged):
+H0/H0b/H0c gate (two instrument defects found: holdout tiles never indexed, IPM never wired; §9.9
+architect ruling PROCEED), H1–H6 built by wave agents, H7 demo executed (353/353 honest NO_FIX,
+4 defects found), H8 fixed 3 of them; reactor 3961 + Python 1218 + web 2301 tests green.
+Open: SITL position-estimate defect, real-footage+real-telemetry fixture, GB4005 provisioning,
+§9.6/§9.7 measurements, POSITION_DIVERGENCE never observed end-to-end. Merge to master: user's call.
