@@ -15,9 +15,13 @@
     </header>
 
     <!-- ---- "Looking for" — model choice reframed as intent, not a filename (docs/plans/active/
-         CV-UX-RESEARCH.md §5, wave U2). Roster-driven: every card's name and cost word comes from
-         `models()`, nothing hardcoded per model id. Relocated verbatim from the pre-split panel
-         (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1). -->
+         CV-UX-RESEARCH.md §5; docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §1 item 2). Roster-driven:
+         every card's name, one-sentence "what it finds", and cost word come from `models()`/
+         `intentSentence` — nothing hardcoded per model id, only per the roster's own `kind` enum.
+         The removed `kind` taxonomy chip stays removed (never rendered here). The open-vocab CPU
+         line and the people/vehicles/buildings preset both live *inside* the selected open-vocab
+         card now, not a section-level paragraph below the whole grid — "one line shown only when
+         that card is selected" reads as belonging to the card, not the section. -->
     <section class="cv-section">
       <span class="label">Looking for</span>
       @if (models().length === 0) {
@@ -40,7 +44,11 @@
                 <span class="intent-card-name">{{ m.displayName }}</span>
                 <span class="chip" [class.warn]="m.openVocab">{{ costWord(m.openVocab) }}</span>
               </label>
+              @if (intentSentence(m.kind); as sentence) {
+                <p class="muted hint intent-card-sentence">{{ sentence }}</p>
+              }
               @if (m.openVocab && m.id === settings.effective().model) {
+                <p class="muted hint intent-card-sentence">{{ perfHintText() }}</p>
                 <button
                   type="button"
                   class="btn secondary small intent-card-preset"
@@ -57,58 +65,16 @@
       @if (modelBusy()) {
         <p class="muted hint">Applying — re-arming detection…</p>
       }
-      @if (isOpenVocab()) {
-        <p class="muted hint">{{ perfHintText() }}</p>
-      }
     </section>
 
-    <!-- ---- "Seen now" — capped, click to stage (docs/plans/active/CV-UX-RESEARCH.md §4.1, wave U4;
-         staged-selection rework, direct user request). Relocated verbatim from the pre-split panel
-         (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) — this is a different mechanism from the
-         Vision drawer's own `<vision-detections-strip>` sibling (wave W5, class-level hover/one-
-         click-hide via the deny-list): this checklist stages the **allowlist**
-         ({@link pendingLabels}), submitted only once via {@link submitLabelFilter}. -->
+    <!-- ---- Confidence, reworded as a symptom axis rather than a bare number (docs/plans/active/
+         CV-PANEL-SPLIT-PLAN.md P2 §1 item 3) — the label names the trade-off in plain language; the
+         live number sits in mono beside it, not embedded mid-sentence. -->
     <section class="cv-section">
-      <span class="label">Seen now</span>
-      @if (seenNowChips().length > 0) {
-        <div class="chip-checklist" role="group" aria-label="Recently seen classes">
-          @for (label of seenNowChips(); track label) {
-            <span class="class-chip" [class.checked]="isChecked(label)">
-              <button
-                type="button"
-                class="chip-label"
-                [attr.aria-pressed]="isChecked(label)"
-                (click)="toggleChip(label)"
-                [title]="isChecked(label) ? 'Selected — click to remove from the selection' : 'Click to add to the selection'"
-              >
-                <span class="chip-check" aria-hidden="true">{{ isChecked(label) ? '✓' : '' }}</span>
-                {{ label }}
-              </button>
-            </span>
-          }
-        </div>
-        @if (pendingLabels(); as pending) {
-          <p class="notice cv-pending-row">
-            <span class="chip accent mono">{{ pending.length > 0 ? pending.length + ' staged' : 'cleared' }}</span>
-            <button type="button" class="btn small" (click)="submitLabelFilter()">{{ submitButtonText(pending) }}</button>
-            <button type="button" class="btn secondary small" (click)="discardStagedLabels()" title="Discard the staged edit — keep what's currently applied">
-              Discard
-            </button>
-          </p>
-        }
-        <p class="muted hint">{{ hiddenClassTruth }}</p>
-      } @else {
-        <p class="muted hint">No classes observed yet — waiting for the first detections.</p>
-      }
-    </section>
-
-    <!-- ---- Confidence, reworded as a symptom axis rather than a bare number. Relocated verbatim
-         from the former "Tune" disclosure (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) — the
-         modal itself is now the calm-hands surface, so this no longer needs its own collapse. -->
-    <section class="cv-section">
-      <label class="label" for="cv-confidence">
-        Fewer false boxes <span class="mono">{{ settings.effective().confidenceThreshold.toFixed(2) }}</span> find more
-      </label>
+      <div class="row spread">
+        <label class="label" for="cv-confidence">Fewer false boxes ←→ Find more</label>
+        <span class="mono">{{ settings.effective().confidenceThreshold.toFixed(2) }}</span>
+      </div>
       <input
         id="cv-confidence"
         type="range"
@@ -120,12 +86,20 @@
       />
     </section>
 
-    <!-- ---- Full class checklist — search, individual toggle/remove, add, clear. Relocated
-         verbatim from the former "Tune" disclosure. Same staged selection as "Seen now" above:
-         every control here calls the exact same `toggleChip`/`addClass`/`clearLabelFilter`
-         methods, so this checklist and "Seen now" can never disagree about what's staged. -->
+    <!-- ---- Classes — one merged section (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5). P1 had
+         moved the pre-split panel's staged "Seen now" mini-checklist AND its full "All classes"
+         checklist into this modal *verbatim, as two separate sections* sharing one `pendingLabels`
+         stage — two apparatuses for one decision, the exact overload this whole plan exists to cut.
+         Merged into one: the full search/toggle/add/clear checklist below, with
+         {@link recentLabels}' recency order promoted to the front ({@link filteredChips}'
+         `sortRecentFirst` — "Seen now"'s one real value, kept as a sort key instead of a second
+         list), plus the hidden-classes (deny-list) management W5 added — {@link isHidden} marks a
+         denied chip in place (mirrors `detections-strip.html`'s "— hidden" treatment) rather than a
+         separate rendered list, since {@link chipCandidates} already unions denied labels into this
+         one checklist so there is nothing a second list would add. The one drop-everywhere sentence
+         renders exactly once, at the foot of this section — not once per former section. -->
     <section class="cv-section">
-      <span class="label">All classes</span>
+      <span class="label">Classes</span>
       @if (settings.effective().labelFilter.length === 0) {
         <p class="muted hint">Applied: every class this model detects.</p>
       } @else {
@@ -165,16 +139,20 @@
       @if (filteredChips().length > 0) {
         <div class="chip-checklist" role="group" aria-label="Classes seen">
           @for (label of filteredChips(); track label) {
-            <span class="class-chip" [class.checked]="isChecked(label)">
+            <span class="class-chip" [class.checked]="isChecked(label)" [class.hidden]="isHidden(label)">
               <button
                 type="button"
                 class="chip-label"
                 [attr.aria-pressed]="isChecked(label)"
                 (click)="toggleChip(label)"
-                [title]="isChecked(label) ? 'Selected — click to remove from the selection' : 'Click to add to the selection'"
+                [title]="isHidden(label) ? 'Hidden — click to show ' + label + ' again' : (isChecked(label) ? 'Selected — click to hide' : 'Click to hide')"
               >
                 <span class="chip-check" aria-hidden="true">{{ isChecked(label) ? '✓' : '' }}</span>
-                {{ label }}
+                @if (isHidden(label)) {
+                  <span class="chip-label-hidden">{{ label }} — hidden</span>
+                } @else {
+                  {{ label }}
+                }
               </button>
               @if (isChecked(label)) {
                 <button
@@ -278,11 +256,15 @@
           <p class="muted hint">Start a stream to see rate, ceiling, engine and flow diagnostics.</p>
         } @else {
           <!-- Detector floor — the fps slider's old "this is the rate" label is false since the
-               adaptive rate controller shipped (it only ever raises above this number). -->
+               adaptive rate controller shipped (it only ever raises above this number, never holds
+               it exactly or drops below it); the label itself now says so (docs/plans/active/
+               CV-PANEL-SPLIT-PLAN.md P2 §1 item 4), so the old separate hint paragraph saying the
+               same thing a second time is gone. -->
           <section class="cv-section">
-            <label class="label" for="cv-fps">
-              Detector floor {{ settings.effective().inferenceFps }} fps
-            </label>
+            <div class="row spread">
+              <label class="label" for="cv-fps">Detector floor — adaptive rate raises above this, never below</label>
+              <span class="mono">{{ settings.effective().inferenceFps }} fps</span>
+            </div>
             <input
               id="cv-fps"
               type="range"
@@ -292,7 +274,6 @@
               [value]="settings.effective().inferenceFps"
               (input)="onFps($any($event.target).value)"
             />
-            <p class="muted hint">Adaptive rate raises above this floor, never below it.</p>
             @if (!isOpenVocab()) {
               <p class="muted hint">{{ perfHintText() }}</p>
             }

@@ -6,8 +6,10 @@
   }
 </p>
 
-<!-- ---- 1. Detect hero — the primary act (docs/plans/active/CV-UX-RESEARCH.md §3; unchanged by the
-     P1 split). A measured-rate line is deferred to P2 per docs/plans/active/CV-PANEL-SPLIT-PLAN.md. -->
+<!-- ---- 1. Detect hero — the primary act (docs/plans/active/CV-UX-RESEARCH.md §3). The status line
+     is the plan's own P2 §1 item 1 wording: a measured rate + classes-on-screen while running, a
+     plain "no detector passes" sentence while stalled, "Off — zero CPU. Video unaffected." while
+     off — see `detectionStatus` (`cv-control-panel-logic.ts`) for the full state table. -->
 <section class="cv-section cv-hero">
   <label class="toggle">
     <!-- Bound to the stream's own server-side intent while one is running, the draft otherwise

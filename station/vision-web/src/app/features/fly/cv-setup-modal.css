@@ -115,6 +115,13 @@
   align-self: flex-start;
 }
 
+/* The intent card's own one-sentence "what it finds" + the selected open-vocab card's shrunk CPU
+   line (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §1 item 2) — plain `.hint` sizing/color, just
+   scoped to sit inside a card instead of a whole section. */
+.intent-card-sentence {
+  margin: 0;
+}
+
 /* ---- Class-filter chip checklist ------------------------------------------------------------ */
 
 .chip-checklist {
@@ -139,6 +146,22 @@
   background: var(--color-info-soft);
   border-color: var(--color-info);
   color: var(--color-info-text);
+}
+
+/* Hidden classes (deny-list) management, with un-hide (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2
+   §5) — mirrors `detections-strip.css`'s identical `.strip-chip-hidden` treatment (soft-amber
+   `.chip.warn` tokens: a deliberate operator choice worth flagging at a glance, not an error) so
+   the two surfaces read the same "hidden, click to un-hide" state the same way. Takes precedence
+   over `.checked` — a denied label never reads as selected, regardless of the allowlist. */
+.class-chip.hidden {
+  background: var(--color-warn-soft);
+  border-color: var(--color-warn-line);
+  color: var(--color-warn-text);
+}
+
+.chip-label-hidden {
+  text-decoration: line-through;
+  text-decoration-color: var(--color-warn-text);
 }
 
 .chip-check {
@@ -218,9 +241,10 @@
 
 /* The staged **allowlist** edit's own "count + Submit + Discard" row — a plain `.notice` shell, no
    `.warn`/`.danger` intent: unapplied work in progress is not bad news, just a fact that must stay
-   visible per the frontend-style skill's "unapplied state must be visible" rule. Rendered
-   identically in both the "Seen now" section and "All classes" — the two surfaces share one
-   `pendingLabels` signal, so their own pending rows must read the same too. */
+   visible per the frontend-style skill's "unapplied state must be visible" rule. Rendered once, in
+   the merged Classes section (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5 — the pre-P2 "Seen
+   now" mini-checklist used to render an identical second copy of this row; merging the two sections
+   into one removed the duplicate along with it). */
 .cv-pending-row {
   display: flex;
   align-items: center;

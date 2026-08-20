@@ -156,7 +156,7 @@ export class CvControlPanel {
       this.detectionEnabled(),
       this.hasStream(),
       this.detections.tracks()?.detectionState,
-      this.detections.tracks()?.rate?.submittedFps,
+      this.detections.tracks()?.rate,
       this.classesOnScreen(),
     ),
   );

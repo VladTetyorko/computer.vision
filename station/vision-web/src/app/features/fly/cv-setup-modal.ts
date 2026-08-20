@@ -30,6 +30,7 @@ import {
   formatDetectionLag,
   formatFlowStrip,
   hasExactLabelMatch,
+  intentCardSentence,
   isCapabilityDowngraded,
   isDetectionLagOverBudget,
   isLabelChecked,
@@ -40,7 +41,7 @@ import {
   reArmHint,
   recentObservedLabels,
   seedLabelFilterForModel,
-  sortSelectedFirst,
+  sortRecentFirst,
   stagedLabelSeed,
   submitLabelFilterButtonText,
 } from './cv-control-panel-logic';
@@ -49,13 +50,16 @@ import {
  * The Fly cockpit's **Detection setup modal** (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1, §1
  * "Surface 2 — calm hands: decisions") — a centered dialog over the cockpit holding every
  * set-once/expert CV knob that used to live inside `cv-control-panel.ts`'s own "Tune"/"Expert"
- * disclosures: the "Looking for" model intent cards, the class checklist (both the tier-0 "Seen
- * now" capped chips and the full search/add/clear apparatus), confidence, tracking mode, and the
- * collapsed Expert tier (fps floor, capability ceiling, engine, cadences, flow strip, Serving/lag
- * readouts). Opened by the panel's own "Change…"/"Detection setup…" buttons
- * ({@link CvControlPanel#setupRequested}); the panel keeps the seconds-matter controls (Detect
- * hero, a "Looking for" summary row, Boxes, the "Following #N" lock chip, the two conditional
- * honesty notices) — see that class's own doc comment for the full split.
+ * disclosures: the "Looking for" model intent cards (each with a one-sentence "what it finds" plus
+ * the honest cost word, P2 §1 item 2), one merged Classes section (search/toggle/add/clear over the
+ * full roster, observed-recently labels sorted first, hidden/deny-listed labels marked and
+ * un-hideable in place — P2 §5; **not** a separate "Seen now" list any more, see that section's own
+ * doc comment below for why), confidence (reworded as a symptom axis, P2 §1 item 3), tracking mode,
+ * and the collapsed Expert tier (fps floor — relabeled "Detector floor", P2 §1 item 4 — capability
+ * ceiling, engine, cadences, flow strip, Serving/lag readouts). Opened by the panel's own
+ * "Change…"/"Detection setup…" buttons ({@link CvControlPanel#setupRequested}); the panel keeps the
+ * seconds-matter controls (Detect hero, a "Looking for" summary row, Boxes, the "Following #N" lock
+ * chip, the two conditional honesty notices) — see that class's own doc comment for the full split.
  *
  * **Not a form.** Every control here PATCHes live through the exact same debounced hot-knob path
  * (`{@link applyHotKnob}`) or immediate PATCH the old single panel used — there is no local Save/
@@ -140,8 +144,9 @@ export class CvSetupModal {
 
   protected readonly hasStream = computed(() => !!this.streamId());
 
-  /** The honest "hidden classes drop everywhere" sentence — shown verbatim in both class sections
-   *  below, exactly as it was in the pre-split panel. */
+  /** The honest "hidden classes drop everywhere" sentence — shown verbatim once, at the foot of
+   *  the merged Classes section (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5 — the pre-P2 split
+   *  across "Seen now" and "All classes" rendered this twice; the merge is also what fixed that). */
   protected readonly hiddenClassTruth = HIDDEN_CLASS_TRUTH;
 
   protected readonly classQuery = signal('');
@@ -165,13 +170,22 @@ export class CvSetupModal {
     return modelCostWord(openVocab);
   }
 
+  /** The intent card's own "what it finds" sentence — `null` degrades to no line at all (never a
+   *  fabricated description) for a `kind` this app doesn't recognize. */
+  protected intentSentence(kind: string): string | null {
+    return intentCardSentence(kind);
+  }
+
   protected readonly chips = computed(() =>
     chipCandidates(this.labelFilterSeed(), this.settings.effective().labelDenyFilter, observedLabels(this.detections.results())),
   );
-  /** The capped "Seen now" chips — unchanged from the pre-split panel's own tier-0 section. */
-  protected readonly seenNowChips = computed(() => recentObservedLabels(this.detections.results()));
+  /** The most-recently-observed labels, in recency order — {@link filteredChips}' own sort
+   *  priority (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5). This is all that survives of the
+   *  pre-P2 "Seen now" mini-checklist once it merged into the one full checklist below: recency was
+   *  its real value, kept here as a sort key instead of a second rendered list. */
+  protected readonly recentLabels = computed(() => recentObservedLabels(this.detections.results()));
   protected readonly filteredChips = computed(() =>
-    sortSelectedFirst(filterLabelsByQuery(this.chips(), this.classQuery()), this.labelFilterSeed()),
+    sortRecentFirst(filterLabelsByQuery(this.chips(), this.classQuery()), this.recentLabels()),
   );
   protected readonly showAddClass = computed(
     () => this.classQuery().trim().length > 0 && !hasExactLabelMatch(this.chips(), this.classQuery()),
@@ -288,6 +302,15 @@ export class CvSetupModal {
     return isLabelChecked(this.labelFilterSeed(), label) && !isLabelDenied(this.settings.effective().labelDenyFilter, label);
   }
 
+  /** Whether `label` is on the operator's own deny-list — the merged Classes checklist's explicit
+   *  "hidden, click to un-hide" indicator (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5's "hidden
+   *  classes (deny-list) management … with un-hide"), mirroring `detections-strip.html`'s identical
+   *  `chip.hidden` treatment so an operator sees the same "— hidden" wording in both places. The
+   *  same {@link toggleChip} click both hides and un-hides — this only changes what the chip *says*. */
+  protected isHidden(label: string): boolean {
+    return isLabelDenied(this.settings.effective().labelDenyFilter, label);
+  }
+
   protected onConfidence(value: string): void {
     this.applyHotKnob({ confidenceThreshold: Number(value) });
   }
@@ -296,9 +319,9 @@ export class CvSetupModal {
     this.applyHotKnob({ inferenceFps: Number(value) });
   }
 
-  /** One chip's click/× action — immediately toggles the deny-list, never the staged allowlist.
-   *  Shared verbatim by "Seen now" and "All classes" (both call this same method), same as before
-   *  the split. */
+  /** One chip's click/× action — immediately toggles the deny-list, never the staged allowlist. The
+   *  single merged Classes checklist's only click handler as of P2 (pre-P2, the now-deleted "Seen
+   *  now" mini-checklist called this same method too — one apparatus, not two, from the start). */
   protected toggleChip(label: string): void {
     this.applyHotKnob({ labelDenyFilter: toggleLabelDeny(this.settings.effective().labelDenyFilter, label) });
   }

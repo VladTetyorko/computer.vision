@@ -12747,3 +12747,166 @@ cv-control-panel-logic.ts` (+`.spec.ts`, two new exports), `src/app/features/fly
   same finding W5's own changelog recorded), and the new "Change…"/"Detection setup…" buttons are
   text-labeled, not icon-only, matching this app's existing precedent that only icon-only controls earn
   a Help-drawer entry.
+
+## Status — CV-PANEL-SPLIT-PLAN wave P2: measured-rate hero, intent cards, symptom-framed confidence, honest expert copy, one merged Classes section (docs/plans/active/CV-PANEL-SPLIT-PLAN.md §1.1/§1.2/§2/§3 P2, docs/plans/active/CV-UX-RESEARCH.md §1/§5) — 2026-08-20
+
+### What shipped
+
+- **Measured-rate hero line** (`detectionStatus`/`formatMeasuredRate`, `cv-control-panel-logic.ts`) —
+  now takes the whole `DetectionRate | undefined` object (was a bare `submittedFps` number), so it can
+  tell apart three distinct wire states instead of collapsing them: **`rate === undefined`** ("never
+  sampled yet", per `StreamTracksResponse`'s own javadoc) → `"On — rate not yet measured."`, never a
+  fabricated number; **`rate` present but `submittedFps <= 0`** (a genuine stall in the trailing
+  window, `DetectionRate.empty()`'s own all-zero shape) → new `'stalled'` status kind, `"On — no
+  detector passes in the last {rate.windowSeconds}s."` (the window itself, not a hardcoded figure);
+  **`rate.submittedFps > 0`** → `formatMeasuredRate(rate.submittedFps)` + a classes-on-screen clause,
+  e.g. `"9.9/s measured · 3 classes on screen"` (singular `"1 class on screen"`, clause omitted
+  entirely at zero). The operator's own off choice still wins first, now with the plan's exact wording
+  `"Off — zero CPU. Video unaffected."`. `cv-control-panel.ts`'s `detectionStatusInfo` computed now
+  passes `this.detections.tracks()?.rate` (the object) through unchanged.
+- **Intent cards** (`cv-setup-modal.html`) — each of the three radio cards (general/specialized/
+  open-vocab, `CvWiring#cvModelRoster`'s three hardcoded roster entries) now shows a new
+  `intentCardSentence(kind)` one-liner under its name (`"Finds people, cars, trucks and other everyday
+  vehicles."` / `"Finds military vehicle types — tanks, APCs and similar."` / `"Finds anything
+  nameable, including buildings — a much wider net."`) — hand-written, since the wire roster
+  (`CvModelResponse.java`) carries no description field, only `id, displayName, kind, openVocab,
+  defaultLabelFilter`, and the three `kind` values are fixed. The open-vocab card's CPU line
+  (`perfHintText()`, shrunk — see below) and the people/vehicles/buildings preset button both moved
+  inside that card's own `@if (m.openVocab && m.id === settings.effective().model)` block — no
+  section-level paragraph competing with the grid anymore. No `kind` taxonomy chip was found still
+  rendering (already gone by P1). Selecting a card is still today's `onModelChange` + seed-path
+  behavior, unchanged; the re-arm honesty toast is untouched.
+- **Confidence reframed as a symptom** (`cv-setup-modal.html`) — the slider's `<label>` now reads
+  `"Fewer false boxes ←→ Find more"` with the numeric value in `.mono` beside it
+  (`settings.effective().confidenceThreshold.toFixed(2)`); identical `[value]`/`(input)` wiring, only
+  the copy changed.
+- **Expert honesty** — the fps slider's label is now `"Detector floor — adaptive rate raises above
+  this, never below"` (folding the old separate hint paragraph into the label itself, so the claim
+  isn't stated twice); `perfHint(openVocabSelected)` shrank to exactly one sentence per branch and no
+  longer folds in `HIDDEN_CLASS_TRUTH` verbatim (confirmed by a new spec assertion) — the class-filter-
+  steers-model/saves-CPU claim now appears at most once per surface, in its own dedicated place (the
+  merged Classes section's own foot line, see below), never duplicated into the fps hint too. **The
+  capability-ceiling `<select>` was checked against CV-UX-RESEARCH §1's render-bug report (rendering
+  outside the `trackingMode() !== 'OFF'` guard) and found already correctly inside that guard in the
+  current modal — no fix was needed; this is a verified-fine finding, not a silent no-op.**
+- **Classes apparatus merged into one section** — P1 had moved both the old panel's staged-allowlist
+  "Seen now" mini-checklist *and* the full "All classes" search/toggle/add/clear checklist into the
+  modal side by side, sharing `pendingLabels` but rendering as two separate lists (flagged in P1's own
+  "Design choices" as a decision worth revisiting, and independently reported as a duplicate-apparatus
+  mismatch in this task's brief). P2 deletes the "Seen now" section's markup entirely and repurposes
+  its one distinguishing signal — which labels were recently observed — as a **sort priority** inside
+  the single remaining checklist instead of a second rendered list: new `sortRecentFirst(candidates,
+  recentLabels)` (replaces `sortSelectedFirst`) promotes recently-observed labels to the front, in
+  their own recency order, leaving everything else in place; a candidate no longer in scope (filtered
+  out by search) is silently dropped rather than kept as an orphan. The modal's `filteredChips`
+  computed now reads `sortRecentFirst(filterLabelsByQuery(...), this.recentLabels())` where
+  `recentLabels = computed(() => recentObservedLabels(this.detections.results()))`. **Hidden-classes
+  (deny-list) management, added by wave W5, now lives inside this same merged checklist** rather than
+  a separate concept: a new `isHidden(label)` method (wraps `isLabelDenied`) drives `.class-chip.hidden`
+  styling — soft-amber `--color-warn-*` tokens, a "label — hidden" strikethrough treatment, and a
+  `title` of `'Hidden — click to show {label} again'` — mirroring `detections-strip.css`'s identical
+  `.strip-chip-hidden` precedent exactly, so the two surfaces read "hidden, click to un-hide" the same
+  way. Section order is now Looking for → Confidence → Classes → Tracking → Expert, matching the plan.
+- **Pure logic**: `cv-control-panel-logic.ts` gains `intentCardSentence(kind)` and `sortRecentFirst`
+  (replacing `sortSelectedFirst`), and rewrites `formatMeasuredRate`/`detectionStatus`/`perfHint` per
+  above; `DetectionStatusKind` widens with a new `'stalled'` member. All new/changed behavior is pure
+  functions with vitest coverage in `cv-control-panel-logic.spec.ts` — no new component spec, matching
+  this repo's established precedent.
+
+### Design choices
+
+- **A plan-vs-code mismatch in P1's own MODULE.md entry, found and corrected here, reported not
+  silently fixed.** P1's "Left incomplete / deferred" section states: *"The measured-rate line for the
+  Detect hero's status text is explicitly P2 scope... the hero's status line is otherwise unchanged
+  from pre-split."* This is false. `git show dd3274b6^:.../cv-control-panel-logic.ts` and `git show
+  dd3274b6^:.../core/api/models.ts` both confirm `formatMeasuredRate`, `detectionStatus`, and the full
+  `DetectionRate`/`PipelineLatency`/`DetectionState`/`StreamTracksResponse.rate` TS typing **already
+  existed, working, before the P1 commit** — they predate the split entirely (their own doc comments
+  cite `docs/plans/active/CV-DEMAND-PLAN.md §3.6` and wave U3+U5 of `CV-UX-RESEARCH.md`, both older
+  than CV-PANEL-SPLIT-PLAN). What P2 actually did was **rework** an already-shipped measured-rate line
+  to add the `'stalled'` vs `'never sampled'` distinction and switch its text to the plan's exact
+  wording — not build one from scratch. Left as history in P1's own entry above (not rewritten) per
+  this task's "report, don't improvise" instruction; this entry is the correction.
+- **`intentCardSentence` sentences are hand-written prose keyed on `kind`, not a wire field** — the
+  roster has no description field and the wire is frozen for this task (`station/vision-api` is out of
+  scope). Keying on `kind` rather than `id` means a future fourth roster entry with a `kind` already
+  covered here gets a sentence automatically; an entirely new `kind` value falls through to `null` (no
+  sentence rendered) rather than a stale/wrong guess — checked directly in the spec.
+- **Recency becomes a sort key, not a second list, to actually delete the duplicate apparatus** — the
+  brief's own instruction was "merge into ONE classes section... drop duplicate apparatus" while "keep
+  the recency signal". A capped 5-item mini-list and a full search/toggle/add/clear checklist cannot
+  be merged into literally one `@for` without picking one shape; sorting was chosen over, e.g., a
+  recency badge/section-divider inside the full list, because it needed no new markup at all — the
+  existing chip template already handles arbitrary list order, so "recent first" falls out of changing
+  only the array passed into the same `@for`.
+- **Old `formatMeasuredRate`/`detectionStatus` spec cases asserting the *previous* text (`'Running at
+  9.9 fps · 3 classes on screen'`, `'Off — video only, zero detection cost.'`) were replaced, not kept
+  alongside the new ones** — they exercised text this task explicitly rewrote, so keeping them would
+  either fail (asserting stale copy) or require the old copy to still be produced by some code path,
+  which would reintroduce exactly the duplication P2 is asked to remove. A new `rate()` test-factory
+  (mirrors the file's existing `model()`/`settings()`/`capability()` pattern) builds `DetectionRate`
+  fixtures for the new signature.
+
+### Degrade / role-gate / dev-parity
+
+- **Never a fabricated number, in either direction.** `rate === undefined` and `rate.submittedFps <= 0`
+  are now visibly different sentences (`"rate not yet measured"` vs. `"no detector passes in the last
+  Ns"`) instead of collapsing to the same `null`-swallowing branch pre-P2 did — a genuine stall now
+  reads as a stall, not silently as "still warming up". A negative `submittedFps` (should never occur
+  on the wire, defensive only) still reads as `'stalled'`, never a fabricated negative rate — covered
+  by a spec case.
+- **Hidden classes still degrade honestly**: `chipCandidates()` (unchanged, W5) unions `labelFilter` +
+  `labelDenyFilter` + observed labels, so a hidden/denied label never silently disappears from the one
+  merged checklist — it renders struck through with an explicit un-hide affordance, same invariant the
+  detections-strip precedent already established.
+- **No role-gating touched.** Both components are reached exactly where P1 left them — gated on
+  `!facade.watchMode()` — unaffected by this wave; nothing here reads `MeResponse.topRole`.
+  `vision.auth.enabled=false` dev parity is unaffected — every change in this wave is client-side
+  copy/logic/layout only, no auth/role code touched; the unbounded dev admin sees the identical rework
+  every other ADMIN does.
+- **Failed enrichment reads unchanged**: a failed `GET /api/cv/models` still degrades the "Looking for"
+  summary row to the raw model id (`mono`, no fabricated display name) exactly as before — untouched
+  by this wave's intent-card work, which only changes what renders once the roster *does* resolve.
+
+### Tests
+
+`npm run test:ci`: **132 test files, 2381 tests, all passing** (up from 132/2374 at the close of P1 —
+net +7, 0 new spec files): `sortRecentFirst` replaces the `sortSelectedFirst` describe block (3 cases,
+rewritten for recency semantics); `perfHint`'s describe block drops the old "folds in
+`HIDDEN_CLASS_TRUTH` verbatim" case and gains a "does not fold it in" + a one-line-length case; a new
+`intentCardSentence` describe block (4 cases: general/specialized/open-vocab/unknown-kind→`null`); the
+`formatMeasuredRate`/`detectionStatus` describe blocks are rewritten in place for the new
+`DetectionRate`-object signature (a new local `rate()` fixture factory; new cases for the `'stalled'`
+kind, the exact window-seconds text, and the negative-`submittedFps` defensive case). `npx tsc --noEmit`
+clean on `tsconfig.app.json`, `tsconfig.spec.json`, and the default `tsconfig.json`.
+`architecture.spec.ts` green — no new store injected, no new bare-signal overlay flag;
+`cv-control-panel.ts`/`cv-setup-modal.ts` stay non-routed presentational children, unaffected.
+
+### Build
+
+`ng build --configuration production` — green. Same two pre-existing budget warnings as every prior
+wave (initial bundle over its 390 kB threshold by ~19 kB, `tactical-map.css` over its 8 kB budget by
+~1.86 kB), neither introduced nor worsened. **Bundle delta**, measured the same way P1's own entry did
+— `git stash -u` back to this branch's P1 tip (`dd3274b6`), rebuild, `git stash pop` to restore:
+
+- **Initial (eager) bundle: 409.08 kB → 409.08 kB raw (unchanged) / 115.12 kB → 115.09 kB transfer
+  (−0.03 kB) — noise-level, effectively unchanged.** Expected: every file this wave touched lives in
+  the lazy-loaded `cockpit` chunk.
+- **`cockpit` lazy chunk: 132.49 kB → 132.09 kB raw (−0.40 kB, −0.3%) / 28.50 kB → 28.64 kB transfer
+  (+0.14 kB, +0.5%)** — essentially a wash: deleting the "Seen now" section's markup roughly offsets the
+  new intent-card sentences, `isHidden`/`.class-chip.hidden` styling, and the `rate`-object plumbing.
+  No net growth from this wave despite adding new copy/behavior, because it net-deletes more markup
+  (one whole checklist section) than it adds.
+
+### Files touched
+
+Modified only (no new files): `src/app/features/fly/cv-control-panel-logic.ts` (+`.spec.ts`),
+`src/app/features/fly/cv-control-panel.ts`, `src/app/features/fly/cv-control-panel.html` (comment
+only, no behavioral change), `src/app/features/fly/cv-setup-modal.ts`, `src/app/features/fly/
+cv-setup-modal.html` (major restructure), `src/app/features/fly/cv-setup-modal.css`.
+
+### Left incomplete / deferred, named honestly
+
+- **Nothing from this task's 8 numbered items was found incomplete or skipped.** The one item expected
+  to require a fix (the capability-ceiling render-bug from CV-UX-RESEARCH §1) was checked directly and
+  found already correct in the modal — reported as verified-fine rather than assumed.
