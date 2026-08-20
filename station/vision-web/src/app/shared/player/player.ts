@@ -30,6 +30,9 @@ import {
   detectionModelKey,
   detectionTiers,
   distinctModelKeys,
+  estimatedOnScreenAtMs,
+  extrapolateDetections,
+  findPredecessorResult,
   formatDetectionLabel,
   formatTierLabel,
   modelHue,
@@ -1903,15 +1906,43 @@ export class Player {
 
     const content = this.letterboxRect(width, height, video.videoWidth, video.videoHeight);
 
+    // Forward-projection (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave W7): `result`'s own boxes
+    // are up to one poll/arrival cycle stale relative to the instant actually on screen — mirrors the
+    // server's deleted `DetectionExtrapolator` (see `detection-overlay-logic.ts`'s own "Forward-
+    // projection" section header) so a moving object's box tracks the picture instead of trailing it.
+    // `onScreenAtMs` is the exact instant `selectDetectionResult` itself synced `result` against
+    // (`estimatedOnScreenAtMs`, shared rather than re-derived); `predecessor` is the batch immediately
+    // before it in `results`, giving the pair a velocity to project from.
+    const onScreenAtMs = estimatedOnScreenAtMs(Date.now(), this.overlaySyncLatency());
+    const predecessor = findPredecessorResult(results, result);
+    const projected = extrapolateDetections(result, predecessor, onScreenAtMs);
+
     // Priority tiers (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2) — a pure function of what
     // this component already knows: the FOLLOW lock (fed in from the host, see `lockedTrackId`'s own
     // doc comment), the hovered box, and each track's recent trail (reused below for the trail layer
-    // too, so the scan over `results` only runs once per redraw).
-    const trails = trackTrails(results, Date.now(), TRAIL_WINDOW_MS);
-    const hovered = this.hoveredDetection();
+    // too, so the scan over `results` only runs once per redraw). Trails consume `projected` too — the
+    // newest batch's own entry (found by reference; `result` is one of `results`' own elements) is
+    // swapped for its projected geometry before the scan, so a T0 trail's last point always lands
+    // exactly where the box drawn below actually is, never one raw capture behind it.
+    const trailResults = results.map((entry) => (entry === result ? { ...entry, detections: projected } : entry));
+    const trails = trackTrails(trailResults, Date.now(), TRAIL_WINDOW_MS);
+
+    // A held hover reference is re-anchored against this tick's freshly projected objects: a matched
+    // detection gets a brand-new object every redraw (its box center advances with `onScreenAtMs`), so
+    // a plain `===` against a reference captured a tick or more ago would silently stop matching for
+    // exactly the moving objects this wave exists to track. Track id survives projection unchanged, so
+    // it's the stable key; an untracked hover has no such anchor and simply clears — an honest degrade
+    // (no fabricated match), not a bug.
+    const rawHovered = this.hoveredDetection();
+    const hovered =
+      rawHovered === null
+        ? null
+        : (projected.find((detection) =>
+            rawHovered.track && detection.track ? detection.track.id === rawHovered.track.id : detection === rawHovered,
+          ) ?? null);
     const lockedTrackId = this.lockedTrackId();
     const lockActive = lockedTrackId !== 0;
-    const tiers = detectionTiers(result.detections, {
+    const tiers = detectionTiers(projected, {
       lockedTrackId,
       hoveredDetection: hovered,
       trails,
@@ -1923,7 +1954,7 @@ export class Player {
     // >1 model actually mixed in *this* frame (`showModelLegend`'s own gate) — composite streams keep
     // per-model color instead of the class-bucket hue (research disposition table: "keep `modelHue`
     // for the multi-model legend case").
-    const composite = distinctModelKeys(result.detections).length >= 2;
+    const composite = distinctModelKeys(projected).length >= 2;
 
     // Trails are T0-only now (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/D8 — twelve parked
     // cars' trails were pure noise); `trackTrails` itself is unchanged, this is a filter at the call
@@ -1931,7 +1962,7 @@ export class Player {
     // `drawTrails` resets `ctx.globalAlpha` to `1` at its own end, so the staleness fade below starts
     // clean.
     const t0TrackIds = new Set<number>();
-    for (const detection of result.detections) {
+    for (const detection of projected) {
       if (tiers.get(detection) === 'T0' && detection.track) {
         t0TrackIds.add(detection.track.id);
       }
@@ -1954,7 +1985,7 @@ export class Player {
 
     // Draw order: ambient → notable → committed, so a higher tier's box always ends up visually on
     // top of a lower tier's — the accent target is never buried under an ambient outline.
-    const drawOrder = [...result.detections]
+    const drawOrder = [...projected]
       .filter((detection) => allowedTiers.has(tiers.get(detection) ?? 'T2'))
       .sort((a, b) => TIER_DRAW_RANK[tiers.get(a) ?? 'T2'] - TIER_DRAW_RANK[tiers.get(b) ?? 'T2']);
 
@@ -1972,13 +2003,13 @@ export class Player {
 
       const alpha = staleAlphaFraction * (tierAlphaPercent(tier, lockActive) / 100);
       ctx.globalAlpha = alpha;
-      if (this.drawTierBox(ctx, rect, detection, tier, composite)) {
+      if (this.drawTierBox(ctx, rect, detection, tier, composite, hovered)) {
         labelCandidates.push({ detection, tier, rect, alpha });
       }
     }
     ctx.globalAlpha = 1;
 
-    this.paintLabels(ctx, labelCandidates, composite);
+    this.paintLabels(ctx, labelCandidates, composite, hovered);
     this.drawnBoxes = drawn;
   }
 
@@ -2015,6 +2046,10 @@ export class Player {
    * box at all — the honest-UI doctrine made pixel-level (docs/extracts/TRACKING-ORCHESTRATION.md
    * §3.3's same doctrine, applied to a box instead of a lock); `T3`'s dot has no stroke to dash, so it
    * carries no such signal — an accepted, documented gap (research §3.2 doesn't ask for one).
+   *
+   * `hovered` is `redrawOverlay`'s own re-anchored hover reference (docs/plans/active/CV-CLEAN-FEED-
+   * PLAN.md §7, wave W7), not `this.hoveredDetection()` read directly — see `paintLabels`'s own doc
+   * comment for why the raw signal can no longer be compared against a freshly projected `detection`.
    */
   private drawTierBox(
     ctx: CanvasRenderingContext2D,
@@ -2022,11 +2057,12 @@ export class Player {
     detection: Detection,
     tier: DetectionTier,
     composite: boolean,
+    hovered: Detection | null,
   ): boolean {
-    const hovered = this.hoveredDetection() === detection;
+    const isHovered = hovered === detection;
     const track = detection.track;
     const color = tier === 'T0' ? modelHue(DEFAULT_MODEL_KEY) : tierBoxColor(detection, composite);
-    const strokeColor = hovered ? '#ffd479' : color;
+    const strokeColor = isHovered ? '#ffd479' : color;
 
     if (tier === 'T3') {
       ctx.fillStyle = strokeColor;
@@ -2102,12 +2138,17 @@ export class Player {
    * through to its label draw, so a dimmed box's label dims with it rather than popping back to full
    * opacity. `this.labelSlotByKey` is this component's own hysteresis map — `placeLabels` reads it to
    * prefer last frame's slot per track id and this method overwrites it with the fresh placement
-   * right after, so the map only ever reflects the most recently painted frame.
+   * right after, so the map only ever reflects the most recently painted frame. `hovered` is
+   * `redrawOverlay`'s own re-anchored hover reference (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave
+   * W7), not `this.hoveredDetection()` read directly — the candidates here already carry this tick's
+   * freshly projected objects, and only the re-anchored reference is guaranteed to compare equal
+   * against them.
    */
   private paintLabels(
     ctx: CanvasRenderingContext2D,
     candidates: readonly TierLabelCandidate[],
     composite: boolean,
+    hovered: Detection | null,
   ): void {
     const ordered = [...candidates].sort((a, b) => (a.tier === b.tier ? 0 : a.tier === 'T0' ? -1 : 1));
     const byKey = new Map<string, TierLabelCandidate>();
@@ -2132,11 +2173,11 @@ export class Player {
         continue;
       }
       const text = formatTierLabel(candidate.detection, candidate.tier);
-      const hovered = this.hoveredDetection() === candidate.detection;
+      const isHovered = hovered === candidate.detection;
       const color =
         candidate.tier === 'T0' ? modelHue(DEFAULT_MODEL_KEY, 85) : tierBoxColor(candidate.detection, composite, 85);
       ctx.globalAlpha = candidate.alpha;
-      ctx.fillStyle = hovered ? 'rgb(255 212 121 / 90%)' : color;
+      ctx.fillStyle = isHovered ? 'rgb(255 212 121 / 90%)' : color;
       const y = Math.max(0, label.rect.y);
       ctx.fillRect(label.rect.x, y, label.rect.width, label.rect.height);
       ctx.fillStyle = '#04101f';

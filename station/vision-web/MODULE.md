@@ -12910,3 +12910,228 @@ cv-setup-modal.html` (major restructure), `src/app/features/fly/cv-setup-modal.c
 - **Nothing from this task's 8 numbered items was found incomplete or skipped.** The one item expected
   to require a fix (the capability-ceiling render-bug from CV-UX-RESEARCH §1) was checked directly and
   found already correct in the modal — reported as verified-fine rather than assumed.
+
+
+## Status — CV-CLEAN-FEED-PLAN wave W7: client-side box extrapolation closes the burn-in gap W1 opened (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7) — 2026-08-20
+
+### What shipped
+
+W6's own live smoke test (owner-observed) found boxes visibly trailing moving objects — "the flow
+of detections is much slower than video". Root cause: the burn-in path W1 deleted used to call
+`DetectionExtrapolator.at(frame.capturedAt())` server-side per published frame, velocity-projecting
+every box onto the exact frame being encoded; the client overlay only *selects* a batch by video
+latency (`selectDetectionResult`), it never projected one — so whenever video latency is shorter
+than detection arrival lag (WHEP especially; the 2 s poll fallback worst of all) the newest batch on
+hand is inherently behind the picture on screen. This wave ports the deleted server logic into the
+client, unchanged in semantics, so the wire stays frozen.
+
+- **`shared/player/detection-overlay-logic.ts` gains a new "Forward-projection" section** (between
+  `overlaySyncLatencySeconds` and `shouldDrawOverlay`): `EXTRAPOLATION_MAX_MS = 800` and
+  `EXTRAPOLATION_MATCH_GATE = 0.15`, each doc-commented with the exact server default they mirror
+  (`StreamPipelineSettings#defaults().extrapolationMaxMillis()`/`.extrapolationMatchGate()`,
+  `application.yaml`'s `vision.application.pipeline.extrapolation.max-millis`/`.match-gate`,
+  `DetectionExtrapolator.MAX_EXTRAPOLATION_MILLIS`/`.MATCH_GATE_DISTANCE`) — hand-mirrored, not
+  server-fetched, with the doc comment naming that risk explicitly (a future tuning change on one
+  side without the other quietly reintroduces this wave's own defect, in reverse). The exported
+  `extrapolateDetections(selected, previous, targetMs, maxExtrapolationMs?, matchGate?)` ports
+  `DetectionExtrapolator#match`/`#extrapolate` two-pass-for-two-pass:
+  1. **Track id, exact, ungated** (`matchDetections`'s pass 1) — equal non-`undefined` track ids on
+     both sides are the same object per the tracker's own decision, no distance heuristic involved
+     (this is what keeps velocity correct through an occlusion or a same-label crossing pair a
+     distance gate would confidently swap).
+  2. **Same-label nearest normalized-center, gated at `matchGate`**, over whatever pass 1 left
+     unmatched — closest pairs assigned first, each side used at most once, **except** a pair whose
+     two sides *both* carry a track id (the tracker already declared those different objects; gate-
+     matching them on proximity would reintroduce the exact swap pass 1 prevents).
+  - `extrapolateOne` (private) projects a matched box's center by its per-pair velocity
+    (`(selectedCenter − previousCenter) / deltaMs`), `extrapolateMs` further ahead — already capped
+    by the caller — leaving width/height and every other field (label, confidence, model, track)
+    untouched; each resulting coordinate is clamped back into `[0,1]` (the box's *origin* after
+    subtracting half-width/height back off the center, mirroring the server's exact clamp point, not
+    the center itself).
+  - `extrapolateDetections` returns `selected.detections` **raw, unchanged, same references** when
+    `previous` is `undefined`, when `previous.capturedAt` is not strictly before `selected.capturedAt`
+    (degenerate/duplicate dt — mirrors the server's `deltaSeconds <= 0` guard), or when `targetMs` is
+    at or before `selected`'s own capture time. Otherwise the horizon is capped at
+    `maxExtrapolationMs` past `selected.capturedAt` — a `targetMs` further out **freezes** at exactly
+    the capped projection rather than running boxes off into the distance forever, byte-identical to
+    the server's own freeze rule. Unmatched detections in `selected` (including every detection when
+    there is nothing to match against) pass through completely unchanged, same object reference.
+  - New `findPredecessorResult(results, selected)` — the newest batch in `results` (newest-first, per
+    `selectDetectionResult`'s own contract) strictly older than `selected`, found from `selected`'s
+    own position (by reference) onward; `selected` being absent from `results` altogether is itself
+    "no predecessor," not license to match some unrelated entry by timestamp alone; a duplicate-
+    timestamp neighbor is skipped rather than matched, since `extrapolateDetections` would immediately
+    fall back to raw on it anyway — better to look one batch further back for an actual velocity.
+- **`selectDetectionResult`'s inline latency-to-on-screen-instant math is extracted**, not
+  duplicated: new exported `estimatedOnScreenAtMs(nowMs, latencySeconds)` (the same
+  `null`-degrades-to-`0`-latency rule `selectDetectionResult` already had), placed right before
+  `averageBatchIntervalMs`; `selectDetectionResult`'s own body now calls it instead of inlining the
+  computation — a behavior-preserving refactor, not a new rule.
+- **`player.ts#redrawOverlay`** now computes `onScreenAtMs = estimatedOnScreenAtMs(Date.now(),
+  this.overlaySyncLatency())` (the identical latency figure `selectDetectionResult` already used to
+  pick `result`, reused rather than re-derived), finds `predecessor = findPredecessorResult(results,
+  result)`, and produces `projected = extrapolateDetections(result, predecessor, onScreenAtMs)`.
+  Every downstream consumer of the frame's detections was switched from `result.detections` to
+  `projected`: the tier computation (`detectionTiers(projected, ...)`), `composite`'s multi-model
+  check (`distinctModelKeys(projected)`), the `t0TrackIds` trail-eligibility scan, the box draw-order
+  array (`drawOrder = [...projected]`), and the trail layer — `trails` is now computed from a copy of
+  `results` with the newest entry's `detections` swapped for `projected` (`trailResults`), so a T0
+  trail's last point always lands exactly where the box drawn below actually is, never one raw
+  capture behind it.
+- **Hover identity re-anchored, not left on stale references** — a matched detection gets a brand-new
+  object every redraw (its box center advances with `onScreenAtMs`), so the pre-existing
+  `this.hoveredDetection() === detection` comparisons `drawTierBox` (box stroke highlight) and
+  `paintLabels` (label highlight) both independently did would have silently stopped matching for
+  exactly the moving objects this wave exists to track. `redrawOverlay` now resolves `hovered` once —
+  `rawHovered.track && detection.track ? track.id match : rawHovered === detection` against
+  `projected` — and passes it into both methods as a new explicit parameter (`drawTierBox`'s 6th,
+  `paintLabels`'s 4th), replacing their internal `this.hoveredDetection()` reads. An untracked hover
+  has no stable anchor and simply clears on the next redraw — an honest degrade (no fabricated
+  match), not a regression; this was found by grepping every `this.hoveredDetection()` call site
+  after the initial edit, not assumed complete from the brief alone.
+
+### Design choices
+
+- **Extraction (`estimatedOnScreenAtMs`), not duplication.** `redrawOverlay` needs the identical
+  on-screen instant `selectDetectionResult` already computed to pick `result` in the first place — a
+  second, differently-written computation of the same value would have been a silent way for the two
+  to drift (e.g. one handling `latencySeconds === null` differently than the other). Extracting it
+  keeps exactly one place that answers "what instant is actually on screen right now."
+- **`extrapolateDetections` takes `DetectionResult`, not a bare `Detection[]`, for both `selected` and
+  `previous`.** The function needs each batch's own `capturedAt` to compute `deltaMs` and to apply the
+  cap/freeze/degenerate-dt rules — passing detections and captured-at timestamps as separate
+  parameters would let a caller mismatch them (e.g. `previous`'s detections against `selected`'s
+  timestamp) in a way the type system can't catch. Taking the whole `DetectionResult` for each side
+  makes that pairing structurally impossible to get wrong.
+- **Trail substitution via a mapped copy (`trailResults`), not a `trackTrails` signature change.**
+  `trackTrails` already has its own well-tested contract (scan `results`, build per-track point
+  history over `TRAIL_WINDOW_MS`) untouched by every prior wave; teaching it about projection would
+  couple a general trail-history function to this wave's specific concern. Building a
+  `results`-shaped array with only the newest entry's detections swapped keeps `trackTrails` itself
+  unaware anything changed, while still giving trails the same projected geometry the boxes use.
+- **Hover re-anchoring lives in `redrawOverlay`, resolved once, not re-derived separately inside
+  `drawTierBox`/`paintLabels`.** Both methods used to read `this.hoveredDetection()` directly and
+  compare by reference; once boxes are regenerated every redraw that comparison silently breaks for
+  a moving hovered object. Resolving `hovered` once per redraw (against `projected`, by track id when
+  possible) and threading it in as a parameter keeps both draw methods pure functions of what they're
+  given, and keeps the identity-reconciliation logic in exactly one place instead of two copies that
+  could drift.
+- **No component-level test harness for `player.ts`.** `redrawOverlay`'s wiring (canvas context,
+  `requestAnimationFrame`/`setInterval` loop, DOM measurement) stays untested territory, consistent
+  with every prior wave touching this file — the pure `extrapolateDetections`/`findPredecessorResult`/
+  `estimatedOnScreenAtMs` functions are the contract, verified directly.
+
+### Degrade / role-gate / dev-parity
+
+- **No predecessor, no velocity to project — draws raw, not a fabricated guess.** A fresh stream
+  (only one batch ever received), a paused/resumed detector, or a batch whose predecessor has a
+  degenerate/equal/later `capturedAt` all fall back to `selected.detections` completely unchanged,
+  same object references — never an invented position.
+- **The freeze, not a drop, at the 800 ms cap — this is the wave's explicit answer to the 2 s poll-
+  fallback staleness bound named in the plan.** With SSE/WHEP the predecessor is typically well within
+  the 800 ms window and projection tracks the picture closely. With the 2 s poll fallback (no SSE),
+  consecutive batches can be up to ~2 s apart, so `targetMs` (the current on-screen instant) can land
+  well past `selected.capturedAt + 800ms`; `extrapolateDetections` computes `cappedTargetMs =
+  min(targetMs, selectedCapturedAtMs + maxExtrapolationMs)` unconditionally, so the projected box
+  simply **stops advancing at the 800 ms mark and holds there** — it does not keep extrapolating
+  motion for a stale detector, and it never disappears or snaps backward either. This matches the
+  server's original freeze behavior exactly; the plan itself names §6.2 (tracks/detections folded into
+  the SSE topic) as the real fix for poll staleness, not a client-side tuning knob.
+- **An untracked hover clears honestly rather than staying wrongly pinned** — see "What shipped"'s
+  hover re-anchoring: a hover with no `track.id` to survive projection by simply degrades to `null`
+  the next redraw a matched box moves, rather than keeping a highlight glued to a stale, no-longer-
+  correct screen position.
+- **The projection target degrades the same way `selectDetectionResult`'s own batch-selection already
+  does** — `onScreenAtMs` resolves the identical instant `selectDetectionResult` already used, so the
+  two never disagree even when `overlaySyncLatency()` itself degrades (e.g. `null` on a stream with no
+  latency figure yet); `estimatedOnScreenAtMs`'s own `null`-degrades-to-`0`-latency rule is shared, not
+  reimplemented.
+- **No role-gating change** — this wave touches only how already-visible detection boxes are
+  positioned on screen; it adds no new capability or surface for role-gating to cover, and no wire
+  field. `vision.auth.enabled=false`'s unbounded dev admin sees byte-identical projection behavior to
+  every other role, since the projection runs entirely client-side against data every role already
+  receives.
+- **Wire frozen, dev parity untouched** — no DTO, no REST call, no `core/api/vision-api.ts` change;
+  the server's own detection payload shape is exactly what W1 left it as.
+
+### Tests
+
+`npm run test:ci`: **132 test files, 2400 tests, all passing** (up from 132/2371 at the close of P2 —
+net +29 tests, no new files: all additions landed in the existing
+`shared/player/detection-overlay-logic.spec.ts`). New coverage: a 3-case `estimatedOnScreenAtMs`
+describe block (subtracts latency; `null` degrades to 0; negative degrades to 0); a 13-case
+`extrapolateDetections` describe block — track-id match projects center by velocity; track-id match
+still applies even when centers are implausibly far apart (proving pass 1 is exact and ungated, not
+gated by distance); same-label gate match works when one side is untracked; outside-gate same-label
+pair draws raw; two detections that both carry a (different) track id never gate-match even when
+close; the cap freezes at exactly `maxExtrapolationMs` past `capturedAt` and a target far beyond the
+cap produces the identical frozen value; no predecessor draws raw (exact reference equality); a
+degenerate/duplicate dt (two sub-cases: equal timestamps, predecessor after selected) draws raw; a
+target at or before the capture instant draws raw (two sub-cases: exactly at, 10 ms before); a
+projected center clamps back into `[0,1]`; an unmatched detection newly present in `selected` passes
+through raw (same reference) alongside a matched one that does not (`not.toBe`); custom
+`matchGate`/`maxExtrapolationMs` override the exported defaults. A 4-case `findPredecessorResult`
+describe block: a strictly-older predecessor is found; `undefined` when `selected` is the oldest
+entry; `undefined` when `selected` is absent from `results` altogether (this case caught a real bug —
+see below); a duplicate-timestamp neighbor is skipped. Two authoring bugs caught and fixed during this
+wave's own verification, not left in: (1) the same-label gate-match test's expected value was
+copy-pasted from the track-id test above it and implied the wrong velocity — recomputed correctly
+(0.225, not 0.3) once vitest's own assertion failure surfaced the mismatch; (2) `findPredecessorResult`
+originally still scanned from array index 0 when `selected` was absent from `results` (index `-1`),
+silently returning an unrelated result as a false "predecessor" instead of the documented `undefined`
+— fixed by returning `undefined` immediately on `index === -1`, before any scanning. `npx tsc --noEmit`
+clean on both `tsconfig.app.json` and `tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` — green (confirmed twice in direct succession). **Note on this
+environment specifically**: an earlier attempt in this same sandbox crashed instantly with `panic:
+aborting due to terminal initialize failure` (SIGABRT) — traced toward a Rust-native `rolldown`
+binding `@angular/build`'s `chunk-optimizer.js` can invoke, but confirmed **not actually the cause**:
+that path is gated by `environment_options.js#shouldOptimizeChunks`, which only turns on when
+`NG_BUILD_OPTIMIZE_CHUNKS` is set in the environment (`parseTristate` — unset means `false`), and it
+was unset throughout. Re-running the identical command minutes later succeeded cleanly (exit 0) and
+did so again on a second, independent run — the crash did not reproduce a third time and its root
+cause was not conclusively isolated beyond "not this wave's code, not the rolldown chunk-optimizer
+path." Same two pre-existing budget warnings as every prior wave (initial bundle over its 390 kB
+threshold by ~19 kB, `tactical-map.css` over its 8 kB budget by ~1.86 kB), neither introduced nor
+worsened. **Bundle delta**, measured via `git stash -u` back to this branch's pre-W7 tip (`a8f12b6a`),
+rebuild, `git stash pop` to restore:
+
+- **Initial (eager) bundle: 409.08 kB raw both (unchanged) / 115.09 kB → 115.11 kB transfer
+  (+0.02 kB) — noise-level.** Expected: every file this wave touched is reachable only from
+  lazy-loaded routes.
+- **The unnamed shared chunk carrying `player.ts`/`detection-overlay-logic.ts`** (confirmed by
+  grepping the built output for a marker string unique to `player.ts`, since this chunk is not one of
+  the named feature chunks — `player.ts` is `<vision-player>`, embedded by several lazy routes, so it
+  splits into its own shared chunk rather than living inside any single named one; hashes differ per
+  build so the file is identified by content, not name — `chunk-CZLXCLQV.js` before this wave,
+  `chunk-H6S32OSP.js` after): **43.11 kB → 44.74 kB raw (+1.63 kB, +3.8%) / 12.65 kB → 13.23 kB
+  transfer (+0.58 kB, +4.6%)** — the new matching/extrapolation logic and its doc comments account for
+  the growth; no other chunk in the build (named or unnamed) changed size at all between the two
+  builds, confirming this is the only chunk this wave's code landed in.
+- **`cockpit`/`live`/`command`/`asset-detail` lazy chunks: unchanged** — `player.ts` is embedded by
+  each of these, not duplicated into them; the shared chunk above is where its added weight actually
+  lives.
+
+### Files touched
+
+Modified only (no new files): `src/app/shared/player/detection-overlay-logic.ts` (+`.spec.ts`),
+`src/app/shared/player/player.ts`.
+
+### Left incomplete / deferred, named honestly
+
+- **Nothing from the W7 spec was found incomplete.** The hover-identity re-anchoring for
+  `drawTierBox`'s box-stroke highlight (as distinct from `paintLabels`'s label highlight) was not
+  spelled out item-by-item in the brief but was a necessary elaboration to satisfy its own "everything
+  downstream must consume the projected geometry" requirement — found by grepping every
+  `this.hoveredDetection()` call site after the first edit, not left as a latent reference-equality
+  bug.
+- **The 2 s poll-fallback staleness bound is handled by design (freeze at the cap), not eliminated** —
+  the plan itself defers the actual fix (folding tracks/detections into the SSE topic, so `/fly` never
+  needs the poll fallback at all) to §6.2, out of this wave's scope by name.
+- **The production-build crash observed once in this session was not conclusively root-caused** — see
+  "Build" above. It did not reproduce on either of two subsequent identical runs, is not gated behind
+  any code this wave touched, and left no indication it depends on wave-specific state; reported here
+  in the interest of completeness rather than as a known defect requiring a fix.

@@ -94,8 +94,7 @@ export function selectDetectionResult(
   if (results.length === 0) {
     return undefined;
   }
-  const latencyMs = latencySeconds !== null && latencySeconds >= 0 ? latencySeconds * 1000 : 0;
-  const onScreenAtMs = nowMs - latencyMs;
+  const onScreenAtMs = estimatedOnScreenAtMs(nowMs, latencySeconds);
   const slackMs = averageBatchIntervalMs(results) * Math.max(0, slackBatches);
 
   for (const result of results) {
@@ -110,6 +109,20 @@ export function selectDetectionResult(
   // would draw a genuinely old batch as if it were fresh forever.
   const oldest = results[results.length - 1];
   return isDetectionStale(nowMs - Date.parse(oldest.capturedAt)) ? undefined : oldest;
+}
+
+/**
+ * The estimated on-screen instant — `nowMs` minus the sync latency, a `null` or negative latency
+ * degrading to `0` (`overlaySyncLatencySeconds`'s own "not yet measured" rule). {@link
+ * selectDetectionResult} (picking the right batch) and `shared/player/player.ts#redrawOverlay`'s own
+ * extrapolation target (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave W7 — projecting the picked
+ * batch's boxes forward to this same instant) both call this one function rather than each re-deriving
+ * the null/negative guard, so the two can never quietly disagree about which instant is "on screen
+ * right now".
+ */
+export function estimatedOnScreenAtMs(nowMs: number, latencySeconds: number | null): number {
+  const latencyMs = latencySeconds !== null && latencySeconds >= 0 ? latencySeconds * 1000 : 0;
+  return nowMs - latencyMs;
 }
 
 /** The observed average gap between consecutive `capturedAt` values — one "batch" of `slackBatches`,
@@ -154,6 +167,254 @@ export function overlaySyncLatencySeconds(
   whepLatencySeconds: number | null,
 ): number | null {
   return transport === 'webrtc' ? (whepLatencySeconds ?? 0) : behindLiveSeconds;
+}
+
+// --- Forward-projection (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave W7) ------------------------------
+// W1 deleted the server-side `DetectionExtrapolator` that used to velocity-project every burned-in
+// box onto the exact frame being published; the client overlay `selectDetectionResult` picked above
+// only *selects* a batch by latency, it never moves anything — so whenever video latency runs behind
+// detection arrival lag (WHEP especially; the 2s poll fallback worst of all) the newest batch on hand
+// is inherently stale relative to the picture. `extrapolateDetections` ports the deleted server
+// behavior client-side, mirroring `DetectionExtrapolator`'s matching/velocity/freeze semantics exactly
+// (see that class's own javadoc, `git show a4735f24^:contexts/vision-perception/.../DetectionExtrapolator.java`
+// for the reference this was ported from).
+
+/**
+ * How far past a batch's own `capturedAt` {@link extrapolateDetections} projects a matched box's
+ * center before freezing (not dropping — a stalled/outaged detector holds its last known position
+ * rather than vanishing). Mirrors the server default this wave ports:
+ * `StreamPipelineSettings#defaults().extrapolationMaxMillis()` / `application.yaml`'s
+ * `vision.application.pipeline.extrapolation.max-millis` (`DetectionExtrapolator
+ * .MAX_EXTRAPOLATION_MILLIS`). Hand-mirrored, not fetched from the server at runtime — nothing
+ * enforces the two stay equal, so a tuning change on one side without the other quietly reintroduces
+ * this wave's own defect (in reverse: over- or under-projecting relative to the server's old behavior).
+ */
+export const EXTRAPOLATION_MAX_MS = 800;
+
+/**
+ * Max normalized (0-1) box-center distance for a same-label match in {@link extrapolateDetections}'s
+ * second matching pass, used only where at least one side is untracked. Mirrors
+ * `StreamPipelineSettings#defaults().extrapolationMatchGate()` / `application.yaml`'s
+ * `vision.application.pipeline.extrapolation.match-gate` (`DetectionExtrapolator
+ * .MATCH_GATE_DISTANCE`) — see {@link EXTRAPOLATION_MAX_MS}'s own comment on why this is hand-mirrored
+ * rather than server-fetched.
+ */
+export const EXTRAPOLATION_MATCH_GATE = 0.15;
+
+function boxCenter(box: Detection['box']): { readonly x: number; readonly y: number } {
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+function centerDistance(a: { readonly x: number; readonly y: number }, b: { readonly x: number; readonly y: number }): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Matches `selectedDetections` to `previousDetections` — {@link extrapolateDetections}'s own two
+ * passes, ported from `DetectionExtrapolator#match` unchanged:
+ *  1. **By track id, exactly, with no gate.** Equal, non-`undefined` track ids on both sides are the
+ *     same object — cv-service's tracker already decided that, and no distance heuristic can improve
+ *     on an identity (this is what keeps velocity correct through an occlusion, or across two
+ *     same-label objects that cross, where a distance gate would confidently swap them).
+ *  2. **By nearest normalized box-center, gated**, over whatever pass 1 left unmatched: same `label`,
+ *     within `matchGate` center distance, closest pairs assigned first, each detection used at most
+ *     once — **except** a pair whose two sides both carry a track id, which the tracker has already
+ *     declared to be different objects (matching them on proximity would reintroduce exactly the swap
+ *     pass 1 exists to prevent). With tracking off, `track` is `undefined` everywhere, pass 1 matches
+ *     nothing and only this pass runs — byte-identical to how this behaved before tracking existed.
+ *
+ * @returns one entry per `selectedDetections` index: the matched `previousDetections` index, or `-1`
+ */
+function matchDetections(
+  selectedDetections: readonly Detection[],
+  previousDetections: readonly Detection[],
+  matchGate: number,
+): number[] {
+  const matchedPreviousIndex = new Array<number>(selectedDetections.length).fill(-1);
+  const previousUsed = new Array<boolean>(previousDetections.length).fill(false);
+
+  // Pass 1: track id.
+  const previousIndexByTrackId = new Map<number, number>();
+  previousDetections.forEach((detection, index) => {
+    const trackId = detection.track?.id;
+    if (trackId !== undefined && !previousIndexByTrackId.has(trackId)) {
+      previousIndexByTrackId.set(trackId, index);
+    }
+  });
+  if (previousIndexByTrackId.size > 0) {
+    selectedDetections.forEach((detection, index) => {
+      const trackId = detection.track?.id;
+      if (trackId === undefined) {
+        return;
+      }
+      const previousIndex = previousIndexByTrackId.get(trackId);
+      if (previousIndex !== undefined && !previousUsed[previousIndex]) {
+        matchedPreviousIndex[index] = previousIndex;
+        previousUsed[previousIndex] = true;
+      }
+    });
+  }
+
+  // Pass 2: gated nearest-center, over what pass 1 left unmatched.
+  interface Candidate {
+    readonly selectedIndex: number;
+    readonly previousIndex: number;
+    readonly distance: number;
+  }
+  const candidates: Candidate[] = [];
+  selectedDetections.forEach((detection, selectedIndex) => {
+    if (matchedPreviousIndex[selectedIndex] >= 0) {
+      return;
+    }
+    const center = boxCenter(detection.box);
+    previousDetections.forEach((previousDetection, previousIndex) => {
+      if (
+        previousUsed[previousIndex] ||
+        previousDetection.label !== detection.label ||
+        (detection.track && previousDetection.track)
+      ) {
+        return;
+      }
+      const distance = centerDistance(center, boxCenter(previousDetection.box));
+      if (distance <= matchGate) {
+        candidates.push({ selectedIndex, previousIndex, distance });
+      }
+    });
+  });
+  candidates.sort((a, b) => a.distance - b.distance);
+  for (const candidate of candidates) {
+    if (matchedPreviousIndex[candidate.selectedIndex] < 0 && !previousUsed[candidate.previousIndex]) {
+      matchedPreviousIndex[candidate.selectedIndex] = candidate.previousIndex;
+      previousUsed[candidate.previousIndex] = true;
+    }
+  }
+
+  return matchedPreviousIndex;
+}
+
+/**
+ * Extrapolates `selected`'s box center along the velocity implied by `previous` → `selected` over
+ * `deltaMs`, `extrapolateMs` further ahead (already capped by the caller) — ported from
+ * `DetectionExtrapolator#extrapolate`. `selected`'s width/height and every other field (label,
+ * confidence, model, track) are kept as-is; only the box's `x`/`y` move, each independently clamped
+ * back into `[0,1]` after subtracting half the box's own width/height back off the projected center
+ * (mirrors the server's exact clamp — the box's *origin*, not its center, is what gets clamped, so a
+ * box already touching an edge can still project its far edge past `[0,1]`, byte-identical to the
+ * server's own behavior).
+ */
+function extrapolateOne(selected: Detection, previous: Detection, deltaMs: number, extrapolateMs: number): Detection {
+  const selectedCenter = boxCenter(selected.box);
+  const previousCenter = boxCenter(previous.box);
+  const velocityXPerMs = (selectedCenter.x - previousCenter.x) / deltaMs;
+  const velocityYPerMs = (selectedCenter.y - previousCenter.y) / deltaMs;
+
+  const newCenterX = selectedCenter.x + velocityXPerMs * extrapolateMs;
+  const newCenterY = selectedCenter.y + velocityYPerMs * extrapolateMs;
+
+  return {
+    ...selected,
+    box: {
+      x: clampUnit(newCenterX - selected.box.width / 2),
+      y: clampUnit(newCenterY - selected.box.height / 2),
+      width: selected.box.width,
+      height: selected.box.height,
+    },
+  };
+}
+
+/**
+ * Forward-projects `selected`'s detections to `targetMs` (typically {@link estimatedOnScreenAtMs}'s
+ * own output) using the velocity implied by `previous` → `selected`, mirroring the deleted server-side
+ * `DetectionExtrapolator.at(Instant)` (see this section's own header comment). Matched detections
+ * (see {@link matchDetections}) get a new, velocity-projected box center; unmatched ones — including
+ * every detection in `selected` when there is nothing to match against — pass through completely
+ * unchanged, same object reference included.
+ *
+ * Returns `selected.detections` verbatim (raw, no projection) when:
+ *  - `previous` is `undefined` — nothing to derive a velocity from;
+ *  - `previous.capturedAt` is not strictly before `selected.capturedAt` — a degenerate or duplicate
+ *    timestamp pair has no meaningful velocity (mirrors `DetectionExtrapolator`'s own `deltaSeconds
+ *    <= 0` guard);
+ *  - `targetMs` is at or before `selected`'s own capture time — there is nothing to project *forward*
+ *    to yet.
+ *
+ * Otherwise, the projection horizon is capped at `maxExtrapolationMs` past `selected.capturedAt` — a
+ * `targetMs` further out than that **freezes** at exactly the capped projection rather than running
+ * boxes off into the distance forever (a stalled/outaged detector holds its last known trajectory, it
+ * doesn't keep inventing motion).
+ */
+export function extrapolateDetections(
+  selected: DetectionResult,
+  previous: DetectionResult | undefined,
+  targetMs: number,
+  maxExtrapolationMs: number = EXTRAPOLATION_MAX_MS,
+  matchGate: number = EXTRAPOLATION_MATCH_GATE,
+): readonly Detection[] {
+  const selectedDetections = selected.detections;
+  if (previous === undefined) {
+    return selectedDetections;
+  }
+
+  const selectedCapturedAtMs = Date.parse(selected.capturedAt);
+  const previousCapturedAtMs = Date.parse(previous.capturedAt);
+  if (previousCapturedAtMs >= selectedCapturedAtMs) {
+    return selectedDetections;
+  }
+  if (targetMs <= selectedCapturedAtMs) {
+    return selectedDetections;
+  }
+
+  const deltaMs = selectedCapturedAtMs - previousCapturedAtMs;
+  const cappedTargetMs = Math.min(targetMs, selectedCapturedAtMs + maxExtrapolationMs);
+  const extrapolateMs = cappedTargetMs - selectedCapturedAtMs;
+
+  const previousDetections = previous.detections;
+  const matchedPreviousIndex = matchDetections(selectedDetections, previousDetections, matchGate);
+
+  return selectedDetections.map((detection, index) => {
+    const previousIndex = matchedPreviousIndex[index];
+    return previousIndex < 0
+      ? detection
+      : extrapolateOne(detection, previousDetections[previousIndex], deltaMs, extrapolateMs);
+  });
+}
+
+/**
+ * The newest batch in `results` (newest-first, {@link selectDetectionResult}'s own contract) strictly
+ * older than `selected` — {@link extrapolateDetections}'s own `previous` argument, resolved by
+ * `shared/player/player.ts#redrawOverlay` right after `selectDetectionResult` picks `selected`.
+ * `selected` is expected to be one of `results`' own elements (whatever `selectDetectionResult`
+ * returned) — the search starts right after its position, and `selected` being absent from `results`
+ * altogether (found via reference equality) is itself treated as "no predecessor" rather than matching
+ * some unrelated entry by timestamp alone. Skips over any duplicate-timestamp neighbor (`capturedAt`
+ * not *strictly* older) rather than matching it, since {@link extrapolateDetections} already treats a
+ * non-positive delta as degenerate and would fall back to raw regardless — better to look one batch
+ * further back for an actual velocity than settle for a `previous` that can only ever produce "no
+ * projection".
+ *
+ * @returns `undefined` when `selected` is the oldest entry present, or absent from `results`
+ *          altogether — both of which {@link extrapolateDetections} already treats as "no predecessor,
+ *          draw raw"
+ */
+export function findPredecessorResult(
+  results: readonly DetectionResult[],
+  selected: DetectionResult,
+): DetectionResult | undefined {
+  const index = results.indexOf(selected);
+  if (index === -1) {
+    return undefined;
+  }
+  const selectedCapturedAtMs = Date.parse(selected.capturedAt);
+  for (let i = index + 1; i < results.length; i++) {
+    if (Date.parse(results[i].capturedAt) < selectedCapturedAtMs) {
+      return results[i];
+    }
+  }
+  return undefined;
 }
 
 /**

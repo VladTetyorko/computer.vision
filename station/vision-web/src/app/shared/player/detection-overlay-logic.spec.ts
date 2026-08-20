@@ -4,6 +4,8 @@ import {
   DEFAULT_DECLUTTER_LEVEL,
   DEFAULT_MODEL_KEY,
   DETECTION_STALE_CUTOFF_SECONDS,
+  EXTRAPOLATION_MATCH_GATE,
+  EXTRAPOLATION_MAX_MS,
   LOCK_DIM_ALPHA_PERCENT,
   MAX_PAINTED_LABELS,
   MOVING_DISPLACEMENT_THRESHOLD,
@@ -24,6 +26,9 @@ import {
   detectionTiers,
   detectionsPausedNotice,
   distinctModelKeys,
+  estimatedOnScreenAtMs,
+  extrapolateDetections,
+  findPredecessorResult,
   formatDetectionLabel,
   formatTierLabel,
   isDetectionStale,
@@ -118,6 +123,20 @@ describe('selectDetectionResult', () => {
     const nowMs = Date.parse('2026-07-22T00:00:10.000Z');
     const freshOldest = result({ capturedAt: '2026-07-22T00:00:08.000Z' }); // 2s old, absolute
     expect(selectDetectionResult([freshOldest], nowMs, 1000, 0)).toBe(freshOldest);
+  });
+});
+
+describe('estimatedOnScreenAtMs', () => {
+  it('subtracts the latency (in seconds, converted to ms) from now', () => {
+    expect(estimatedOnScreenAtMs(10_000, 2.5)).toBe(7_500);
+  });
+
+  it('degrades a null latency (not yet measured) to 0', () => {
+    expect(estimatedOnScreenAtMs(10_000, null)).toBe(10_000);
+  });
+
+  it('degrades a negative latency to 0 rather than adding time', () => {
+    expect(estimatedOnScreenAtMs(10_000, -1)).toBe(10_000);
   });
 });
 
@@ -639,6 +658,215 @@ describe('detectionTiers', () => {
     const ambient = fullDetection({ label: 'ambient', confidence: 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } });
     const tiers = detectionTiers([...strong, ambient], tierContext({ hoveredClass: null }));
     expect(tiers.get(ambient)).toBe('T2');
+  });
+});
+
+// --- Forward-projection (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave W7) ------------------------------
+
+describe('extrapolateDetections', () => {
+  it('matches by track id and projects the center along the implied velocity', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [trackedDetection({ box: { x: 0.15, y: 0.15, width: 0.1, height: 0.1 } }, 5)],
+    });
+    const selected = result({
+      capturedAt: '2026-07-22T00:00:01.000Z', // 1000ms later, center +0.1 in x -> 0.1/s, y unchanged
+      detections: [trackedDetection({ box: { x: 0.25, y: 0.15, width: 0.1, height: 0.1 } }, 5)],
+    });
+    const targetMs = Date.parse(selected.capturedAt) + 500; // 500ms further
+
+    const [projected] = extrapolateDetections(selected, previous, targetMs);
+    expect(projected.box.x).toBeCloseTo(0.3, 10); // center 0.35 minus half-width
+    expect(projected.box.y).toBeCloseTo(0.15, 10); // no y velocity -> unchanged
+    expect(projected.box.width).toBe(0.1);
+    expect(projected.box.height).toBe(0.1);
+    expect(projected.track?.id).toBe(5); // identity survives projection
+  });
+
+  it('matches by track id even when centers are far apart — pass 1 is exact, not gated by distance', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [trackedDetection({ box: { x: 0, y: 0, width: 0.05, height: 0.05 } }, 3)],
+    });
+    const selected = result({
+      capturedAt: '2026-07-22T00:00:01.000Z',
+      detections: [trackedDetection({ box: { x: 0.9, y: 0.9, width: 0.05, height: 0.05 } }, 3)],
+    });
+    // Center jump of ~1.27 normalized units, far beyond EXTRAPOLATION_MATCH_GATE (0.15) — pass 1
+    // (track id) still fires regardless, since the tracker itself already vouches for the identity.
+    const [projected] = extrapolateDetections(selected, previous, Date.parse(selected.capturedAt) + 1);
+    expect(projected.box.x).toBeCloseTo(0.9009, 6);
+    expect(projected.box.y).toBeCloseTo(0.9009, 6);
+  });
+
+  it('same-label gate match works when one side is untracked', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [fullDetection({ box: { x: 0.15, y: 0.15, width: 0.1, height: 0.1 } })], // untracked
+    });
+    const selected = result({
+      capturedAt: '2026-07-22T00:00:01.000Z',
+      // Tracking just picked this object up this frame — selected carries a track, previous doesn't;
+      // center distance 0.05 is inside EXTRAPOLATION_MATCH_GATE (0.15), same label ('car' default).
+      // Center moves 0.2 -> 0.25 over 1s -> 0.05/s velocity.
+      detections: [trackedDetection({ box: { x: 0.2, y: 0.15, width: 0.1, height: 0.1 } }, 9)],
+    });
+    const targetMs = Date.parse(selected.capturedAt) + 500;
+
+    const [projected] = extrapolateDetections(selected, previous, targetMs);
+    expect(projected.box.x).toBeCloseTo(0.225, 10); // center 0.275 (0.25 + 0.05/s * 0.5s) minus half-width
+    expect(projected.track?.id).toBe(9);
+  });
+
+  it('outside the gate, a same-label pair does not match — the detection draws raw', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [fullDetection({ box: { x: 0, y: 0, width: 0.1, height: 0.1 } })],
+    });
+    // Center distance ~0.71, far beyond the 0.15 default gate.
+    const selectedDetection = fullDetection({ box: { x: 0.5, y: 0.5, width: 0.1, height: 0.1 } });
+    const selected = result({ capturedAt: '2026-07-22T00:00:01.000Z', detections: [selectedDetection] });
+
+    const projected = extrapolateDetections(selected, previous, Date.parse(selected.capturedAt) + 500);
+    expect(projected[0]).toBe(selectedDetection); // same reference — untouched
+  });
+
+  it('never gate-matches two detections that both carry a track id — the tracker already said "different objects"', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [trackedDetection({ box: { x: 0.15, y: 0.15, width: 0.1, height: 0.1 } }, 100)],
+    });
+    // Different track id, well within the gate (distance 0.05) — must still not match.
+    const selectedDetection = trackedDetection({ box: { x: 0.2, y: 0.15, width: 0.1, height: 0.1 } }, 200);
+    const selected = result({ capturedAt: '2026-07-22T00:00:01.000Z', detections: [selectedDetection] });
+
+    const projected = extrapolateDetections(selected, previous, Date.parse(selected.capturedAt) + 500);
+    expect(projected[0]).toBe(selectedDetection);
+  });
+
+  it('caps the projection at maxExtrapolationMs past capturedAt and freezes there, not beyond', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [trackedDetection({ box: { x: 0.15, y: 0.15, width: 0.1, height: 0.1 } }, 1)],
+    });
+    const selected = result({
+      capturedAt: '2026-07-22T00:00:01.000Z', // 1000ms delta, velocity 0.0001/ms in x
+      detections: [trackedDetection({ box: { x: 0.25, y: 0.15, width: 0.1, height: 0.1 } }, 1)],
+    });
+    const selectedCapturedAtMs = Date.parse(selected.capturedAt);
+
+    const atCap = extrapolateDetections(selected, previous, selectedCapturedAtMs + EXTRAPOLATION_MAX_MS);
+    const wayBeyondCap = extrapolateDetections(selected, previous, selectedCapturedAtMs + 10 * EXTRAPOLATION_MAX_MS);
+
+    expect(atCap[0].box.x).toBeCloseTo(0.33, 10); // (0.3 center + 0.0001/ms * 800ms) - 0.05 half-width
+    expect(wayBeyondCap[0].box.x).toBeCloseTo(atCap[0].box.x, 10); // frozen at exactly the cap, no further
+  });
+
+  it('no predecessor draws raw, unchanged', () => {
+    const selected = result({ detections: [fullDetection()] });
+    expect(extrapolateDetections(selected, undefined, Date.parse(selected.capturedAt) + 500)).toBe(
+      selected.detections,
+    );
+  });
+
+  it('a degenerate/duplicate dt (previous not strictly before selected) draws raw', () => {
+    const selected = result({ capturedAt: '2026-07-22T00:00:01.000Z', detections: [fullDetection()] });
+    const samInstant = result({ capturedAt: '2026-07-22T00:00:01.000Z' });
+    expect(extrapolateDetections(selected, samInstant, Date.parse(selected.capturedAt) + 500)).toBe(
+      selected.detections,
+    );
+
+    const previousAfterSelected = result({ capturedAt: '2026-07-22T00:00:02.000Z' });
+    expect(extrapolateDetections(selected, previousAfterSelected, Date.parse(selected.capturedAt) + 500)).toBe(
+      selected.detections,
+    );
+  });
+
+  it('a target at or before the capture instant draws raw — nothing to project forward to yet', () => {
+    const previous = result({ capturedAt: '2026-07-22T00:00:00.000Z', detections: [trackedDetection({}, 1)] });
+    const selected = result({ capturedAt: '2026-07-22T00:00:01.000Z', detections: [trackedDetection({}, 1)] });
+    expect(extrapolateDetections(selected, previous, Date.parse(selected.capturedAt))).toBe(selected.detections);
+    expect(extrapolateDetections(selected, previous, Date.parse(selected.capturedAt) - 10)).toBe(selected.detections);
+  });
+
+  it('clamps a projected center back into [0,1]', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [trackedDetection({ box: { x: 0.8, y: 0.4, width: 0.1, height: 0.1 } }, 1)],
+    });
+    const selected = result({
+      capturedAt: '2026-07-22T00:00:01.000Z',
+      // Center moves 0.85 -> 0.98 over 1s (0.13/s); projecting the full 800ms horizon pushes the
+      // resulting box origin past 1.
+      detections: [trackedDetection({ box: { x: 0.93, y: 0.4, width: 0.1, height: 0.1 } }, 1)],
+    });
+    const [projected] = extrapolateDetections(
+      selected,
+      previous,
+      Date.parse(selected.capturedAt) + EXTRAPOLATION_MAX_MS,
+    );
+    expect(projected.box.x).toBe(1);
+  });
+
+  it('an unmatched detection newly present in `selected` passes through raw alongside a matched one', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [trackedDetection({ box: { x: 0.15, y: 0.15, width: 0.1, height: 0.1 } }, 1)],
+    });
+    const matched = trackedDetection({ box: { x: 0.25, y: 0.15, width: 0.1, height: 0.1 } }, 1);
+    const newlyAppeared = fullDetection({ label: 'bicycle', box: { x: 0.6, y: 0.6, width: 0.1, height: 0.1 } });
+    const selected = result({ capturedAt: '2026-07-22T00:00:01.000Z', detections: [matched, newlyAppeared] });
+
+    const projected = extrapolateDetections(selected, previous, Date.parse(selected.capturedAt) + 500);
+    expect(projected[1]).toBe(newlyAppeared); // raw, same reference — nothing in `previous` matches it
+    expect(projected[0]).not.toBe(matched); // the matched detection was projected into a new object
+  });
+
+  it('honors a custom matchGate/maxExtrapolationMs instead of the exported defaults', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [fullDetection({ box: { x: 0.15, y: 0.15, width: 0.1, height: 0.1 } })],
+    });
+    // Center distance 0.05 — inside the default gate, outside a tightened one.
+    const selectedDetection = fullDetection({ box: { x: 0.2, y: 0.15, width: 0.1, height: 0.1 } });
+    const selected = result({ capturedAt: '2026-07-22T00:00:01.000Z', detections: [selectedDetection] });
+    const targetMs = Date.parse(selected.capturedAt) + 500;
+
+    expect(extrapolateDetections(selected, previous, targetMs, EXTRAPOLATION_MAX_MS, 0.01)[0]).toBe(
+      selectedDetection,
+    );
+
+    // A 1ms max horizon still projects (default gate matches), but freezes almost immediately past capturedAt.
+    const [tinyHorizon] = extrapolateDetections(selected, previous, targetMs, 1, EXTRAPOLATION_MATCH_GATE);
+    expect(tinyHorizon.box.x).toBeCloseTo(0.20005, 8); // rawX (0.2) + velocity(0.00005/ms) * 1ms
+    expect(tinyHorizon.box.x).not.toBe(selectedDetection.box.x);
+  });
+});
+
+describe('findPredecessorResult', () => {
+  it('returns the newest batch strictly older than the selected one', () => {
+    const newest = result({ capturedAt: '2026-07-22T00:00:02.000Z' });
+    const selected = result({ capturedAt: '2026-07-22T00:00:01.000Z' });
+    const oldest = result({ capturedAt: '2026-07-22T00:00:00.000Z' });
+    expect(findPredecessorResult([newest, selected, oldest], selected)).toBe(oldest);
+  });
+
+  it('returns undefined when selected is already the oldest entry', () => {
+    const selected = result({ capturedAt: '2026-07-22T00:00:00.000Z' });
+    expect(findPredecessorResult([selected], selected)).toBeUndefined();
+  });
+
+  it('returns undefined when selected is not present in results at all', () => {
+    const elsewhere = result({ capturedAt: '2026-07-22T00:00:05.000Z' });
+    const results = [result({ capturedAt: '2026-07-22T00:00:00.000Z' })];
+    expect(findPredecessorResult(results, elsewhere)).toBeUndefined();
+  });
+
+  it('skips a duplicate-timestamp neighbor (not strictly older) and finds the next one back', () => {
+    const selected = result({ capturedAt: '2026-07-22T00:00:01.000Z' });
+    const duplicate = result({ capturedAt: '2026-07-22T00:00:01.000Z' }); // same instant, not "older"
+    const actualPredecessor = result({ capturedAt: '2026-07-22T00:00:00.000Z' });
+    expect(findPredecessorResult([selected, duplicate, actualPredecessor], selected)).toBe(actualPredecessor);
   });
 });
 
