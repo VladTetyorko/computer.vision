@@ -81,16 +81,6 @@
                   >
                     Overlay
                   </button>
-                  @if (facade.showBurnedInOption()) {
-                    <button
-                      type="button"
-                      class="btn secondary small"
-                      [class.active]="facade.boxesMode() === 'burned'"
-                      (click)="facade.setBoxesMode('burned')"
-                    >
-                      Burned
-                    </button>
-                  }
                   <button
                     type="button"
                     class="btn secondary small"

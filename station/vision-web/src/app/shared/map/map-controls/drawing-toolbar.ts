@@ -67,8 +67,8 @@ export class DrawingToolbar {
    * brand-new `MapDrawing` object on every SSE event and 30s safety-net poll (`drawings-store.ts`)
    * even when the selection hasn't moved — seeding straight off that object (as this used to) silently
    * discarded an in-progress label edit whenever a poll landed mid-edit. Mirrors `MarkPalette`'s
-   * identical fix and `CockpitFacade#streamBurnedIn`'s "guard on a derived primitive" precedent — see
-   * `vision-web/MODULE.md` Gotchas ("`linkedSignal` over an object input").
+   * identical fix — "guard a `linkedSignal`'s re-seed on a derived primitive, never the enclosing
+   * object" — see `vision-web/MODULE.md` Gotchas ("`linkedSignal` over an object input").
    */
   protected readonly editLabel = linkedSignal<string | undefined, string>({
     source: this.drawings.selectedDrawingId,

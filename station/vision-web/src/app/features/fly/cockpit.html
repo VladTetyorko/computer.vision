@@ -53,6 +53,17 @@
             }
             <span>{{ videoState.text }}</span>
           </div>
+        } @else if (facade.detectionsPausedNotice(); as pausedText) {
+          <!-- ---- Detections-staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4) ------
+               Detection is meant to be on ({@link detectionsPausedNotice} is `null` whenever it isn't —
+               see `CockpitFacade`'s own doc comment), but nothing has arrived recently — the same amber
+               `.notice` chrome as a stalled video feed above, since a batch that stopped arriving is an
+               equally genuine fault. Mutually exclusive with the video-notice branch above (a stalled
+               *video* feed already explains why detections stopped too) and with the "Detection off"
+               chip below (that one only ever shows once this is `null`). -->
+          <div class="stage-notice notice">
+            <span>{{ pausedText }}</span>
+          </div>
         } @else if (detectionOffChipVisible()) {
           <!-- ---- Detection-off affordance (docs/plans/active/CV-DEMAND-PLAN.md wave D3) --------------------
                Detection now defaults off, both here and server-side, so a stream with no boxes is the
@@ -229,7 +240,6 @@
           [detectionResults]="facade.detections.results()"
           [boxesMode]="facade.boxesMode()"
           (boxesModeChange)="facade.boxesMode.set($event)"
-          [burnedIn]="facade.stream()?.burnedIn"
           [detectionEnabled]="facade.detectionOn()"
           [detectionPending]="facade.detectionPending()"
           (detectionEnabledChange)="facade.setDetection($event)"
@@ -305,7 +315,7 @@
             <dt>M</dt>
             <dd>Toggle the map inset</dd>
             <dt>B</dt>
-            <dd>Cycle detection boxes — overlay / burned / off</dd>
+            <dd>Cycle detection boxes — overlay / off</dd>
             <dt>F</dt>
             <dd>Fullscreen</dd>
             <dt>Esc</dt>

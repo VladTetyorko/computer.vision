@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { AssetSummary, AssetUsage, GeoPosition, Membership, Role } from '../../core/api/models';
 import {
   ALL_DRONES_OPTION_VALUE,
-  cycleBoxesMode,
   isAllDronesOption,
   isSwitcherOptionSelected,
   isWatchMode,
@@ -122,14 +121,6 @@ describe('showDetectionOffChip (docs/plans/active/CV-DEMAND-PLAN.md wave D3 — 
 
   it('stays hidden before Start even if the draft would start dark — no video yet to call "video only"', () => {
     expect(showDetectionOffChip(false, false)).toBe(false);
-  });
-});
-
-describe('cycleBoxesMode', () => {
-  it('cycles overlay -> burned -> off -> overlay', () => {
-    expect(cycleBoxesMode('overlay')).toBe('burned');
-    expect(cycleBoxesMode('burned')).toBe('off');
-    expect(cycleBoxesMode('off')).toBe('overlay');
   });
 });
 

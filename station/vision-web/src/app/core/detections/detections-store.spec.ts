@@ -130,6 +130,10 @@ describe('DetectionsStore', () => {
     expect(store.results()).toEqual([]);
     expect(store.chips()).toEqual([]);
     expect(store.status()).toBe('off');
+    // pausedNotice reads the *raw* last-seen capturedAt (docs/plans/active/CV-FLY-INTERACTION-
+    // RESEARCH.md §3.4, D7) — unlike results()/chips()/status() above, it still has something to
+    // report even once the entry has aged out of the freshness-filtered list entirely.
+    expect(store.pausedNotice()).toMatch(/^Detections paused — last seen \d+s ago$/);
 
     store.reset();
   });

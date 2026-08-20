@@ -18,7 +18,9 @@ import type { Detection, DetectionResult } from '../../core/api/models';
 import {
   DEFAULT_SLACK_BATCHES,
   TRAIL_WINDOW_MS,
+  averageBatchIntervalMs,
   canvasBackingSize,
+  detectionAlphaPercent,
   detectionModelKey,
   distinctModelKeys,
   formatDetectionLabel,
@@ -261,11 +263,13 @@ interface DrawnBox {
  * input pair draws a canvas overlay of the freshest detection batch matched against this player's
  * own measured live-edge latency (`shared/player/detection-overlay-logic.ts#selectDetectionResult`,
  * fed via `overlaySyncLatencySeconds` — HLS's `behindLive`, WHEP's own `whepLatencySeconds`, see that
- * function's own doc comment and docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8) — crisp at any video
- * bitrate (backing store scaled to `devicePixelRatio`, §8 wave M8), and hoverable (label +
- * confidence), unlike the server's burned-in boxes (which stay; this is additive, see that module's
- * doc comment on `'burned'`/`'off'`). Callers that never pass `detections` simply never see the
- * canvas draw anything.
+ * function's own doc comment) — crisp at any video bitrate (backing store scaled to
+ * `devicePixelRatio`), and hoverable (label + confidence). Server-side burn-in no longer exists at
+ * all (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1) — this overlay is the only way boxes ever reach
+ * the screen now. Callers that never pass `detections` simply never see the canvas draw anything.
+ * Batches older than `STALE_FADE_BATCH_MULTIPLIER` observed intervals fade to reduced alpha, and
+ * anything older than `DETECTION_STALE_CUTOFF_SECONDS` is not drawn at all (staleness honesty,
+ * docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4 — a paused feed must never look like a live one).
  *
  * **Always a dark video surface, wherever it's mounted** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4): the
  * `.frame` host carries `.surface-dark` itself rather than depending on an ambient enclave, because
@@ -314,12 +318,12 @@ export class Player {
   /** Recent detection batches (newest first) to draw as a vector overlay — see class doc. */
   readonly detections = input<readonly DetectionResult[]>([]);
 
-  /** `'overlay'` (draw boxes), `'burned'`/`'off'` (draw nothing — see `shouldDrawOverlay`'s doc).
-   * Defaults to `'burned'` (per direct user request) for a caller that never binds this input at
-   * all — every page that offers a boxes-mode control of its own (Fly/Live/Wall) seeds its own
-   * signal to `'burned'` too, so this default only matters for the callers that don't (asset-detail,
-   * Command's asset panel, replay). */
-  readonly boxesMode = input<BoxesMode>('burned');
+  /** `'overlay'` (draw boxes) or `'off'` (draw nothing — see `shouldDrawOverlay`'s doc). Defaults to
+   * `'overlay'` — the only mode there is anything left to draw at all, now that server-side burn-in
+   * is gone (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1). Matters only for callers that never bind
+   * this input (asset-detail, Command's asset panel, replay) — every page with its own boxes-mode
+   * control (Fly/Live/Wall) seeds its own signal to `'overlay'` too. */
+  readonly boxesMode = input<BoxesMode>('overlay');
 
   /** Emits the measured seconds-behind-live on every sample, `null` while unknown/not playing. */
   readonly latencyChanged = output<number | null>();
@@ -1827,8 +1831,18 @@ export class Player {
 
     const content = this.letterboxRect(width, height, video.videoWidth, video.videoHeight);
     // Trails first, so every box (drawn next) sits visually on top of its own tail rather than
-    // under it — docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #3.
+    // under it — docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #3. `drawTrails` resets
+    // `ctx.globalAlpha` to `1` at its own end, so the staleness fade below always starts clean.
     this.drawTrails(ctx, content, results);
+
+    // Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4) — the whole batch fades
+    // together once it's aged past `STALE_FADE_BATCH_MULTIPLIER` observed intervals; a batch old enough
+    // to count as paused outright (`isDetectionStale`) never reaches here at all — `selectDetectionResult`'s
+    // own bounded fallback already excludes it from `result`, so this only ever dims, never decides
+    // "draw nothing" itself.
+    const ageMs = Math.max(0, Date.now() - Date.parse(result.capturedAt));
+    ctx.globalAlpha = detectionAlphaPercent(ageMs, averageBatchIntervalMs(results)) / 100;
+
     const drawn: DrawnBox[] = [];
     for (const detection of result.detections) {
       const box = detection.box;
@@ -1842,6 +1856,7 @@ export class Player {
       drawn.push(rect);
       this.drawBox(ctx, rect, detection);
     }
+    ctx.globalAlpha = 1;
     this.drawnBoxes = drawn;
   }
 

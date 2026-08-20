@@ -23,7 +23,7 @@ import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner 
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
 import type { BoxesMode, Transport } from '../../shared/player/player';
-import { cycleBoxesMode, defaultBoxesMode } from '../../shared/player/detection-overlay-logic';
+import { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
 import { followMarkers, type DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import { canShowCommandPanel } from './flight-command-panel-logic';
 import { buildFollowLockPatch, buildHotKnobPatch } from './cv-control-panel-logic';
@@ -197,17 +197,12 @@ export class CockpitFacade {
   });
   readonly live = computed(() => this.stream() !== undefined);
 
-  /** `stream()#burnedIn` projected to a primitive (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) —
-   * `stream()` itself is a fresh object every ~5s poll tick even when nothing changed (this file's
-   * own recurring "guarded on a derived primitive" convention, e.g. `lastTelemetryDeviceId` below),
-   * so `boxesMode`'s `linkedSignal` below re-derives its default only when this value actually
-   * changes, never on every poll. */
-  private readonly streamBurnedIn = computed(() => this.stream()?.burnedIn);
-
-  /** `stream()#state` projected to a primitive, same reason as {@link streamBurnedIn} above —
-   * whether this stream's *video* is actually flowing, measured server-side
-   * (docs/plans/active/STREAM-STATE-PLAN.md §2.3). `undefined` with nothing running, or against a backend
-   * that predates the field; `stream-state-logic.ts#videoNotice` degrades both to silence. */
+  /** `stream()#state` projected to a primitive — `stream()` itself is a fresh object every ~5s poll
+   * tick even when nothing changed (this file's own recurring "guarded on a derived primitive"
+   * convention, e.g. `lastTelemetryDeviceId` below); whether this stream's *video* is actually
+   * flowing, measured server-side (docs/plans/active/STREAM-STATE-PLAN.md §2.3). `undefined` with
+   * nothing running, or against a backend that predates the field; `stream-state-logic.ts#videoNotice`
+   * degrades both to silence. */
   readonly streamState = computed(() => this.stream()?.state);
 
   /** What the operator is told about the video right now — `null` for "say nothing", which covers
@@ -229,6 +224,16 @@ export class CockpitFacade {
   /** True while a Detect on/off request is in flight — the switch is bound to server truth, so
    * without this there is a round-trip during which a click appears to have done nothing. */
   readonly detectionPending = signal(false);
+
+  /** Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4) — "Detections paused —
+   * last seen Ns ago" once the newest batch is older than `DETECTION_STALE_CUTOFF_SECONDS`, or `null`
+   * to say nothing (mirrors {@link videoNotice}'s own shape). Gated on {@link detectionOn}: a stream
+   * the operator has turned detection off for already has its own honest "off" chip
+   * (`detectionOffChipVisible` in `cockpit.ts`) — this notice is only for "detection is meant to be
+   * on but nothing has arrived recently", never a second, contradictory read on the same fact. */
+  readonly detectionsPausedNotice = computed(() =>
+    this.detectionOn() ? this.detections.pausedNotice() : null,
+  );
 
   // --- Deliberately-stopped state (docs/plans/done/MVP2-PLAN.md §S, S-b) — identical pair/rule to
   // `LivePage`/`AssetDetailPage`; reset whenever the primary device changes since that's
@@ -377,16 +382,11 @@ export class CockpitFacade {
 
   readonly latencySeconds = signal<number | null>(null);
   readonly transport = signal<Transport>('hls');
-  /** Defaults to `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s
-   * own `boxesMode` input default matches for the same reason) **unless this stream is confirmed
-   * burn-in-free** (`ActiveStream#burnedIn === false`), in which case `'overlay'` is the only mode
-   * that shows anything (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8). A `linkedSignal`, not a
-   * plain one, so the default re-derives whenever {@link streamBurnedIn} changes (a fresh device/
-   * asset selection, or the moment a pre-M5 backend's `undefined` resolves to a real value) while
-   * still letting the operator's own pick — `B`, or a click in `cv-control-panel.html` — stick for as
-   * long as that same burned-in state holds, mirroring {@link preflightCollapsed}'s identical
-   * "re-derive on transition, editable within it" shape. */
-  readonly boxesMode = linkedSignal<BoxesMode>(() => defaultBoxesMode(this.streamBurnedIn()));
+  /** Defaults to `'overlay'` — burn-in no longer exists at all (docs/plans/active/CV-CLEAN-FEED-PLAN.md
+   * D-1), so there is nothing left for this to re-derive against; a plain `signal`, not the old
+   * `linkedSignal` over `streamBurnedIn`. The operator's own pick — `B`, or a click in
+   * `cv-control-panel.html` — sticks across device/asset switches exactly like `transport` above. */
+  readonly boxesMode = signal<BoxesMode>('overlay');
 
   /** Persisted, non-mutually-exclusive toggle (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — see this class's own
    * doc comment above `MAP_VISIBLE_KEY`. */
@@ -832,7 +832,7 @@ export class CockpitFacade {
   }
 
   cycleBoxes(): void {
-    this.boxesMode.update((current) => cycleBoxesMode(current, this.streamBurnedIn()));
+    this.boxesMode.update((current) => cycleBoxesMode(current));
   }
 
   /** Fed from `CockpitPage`'s own route-bound `watch` input — see this class's own doc comment. */

@@ -9,8 +9,9 @@ import { DetectionsStore } from '../../core/detections/detections-store';
  * host lists it in its own `providers`, mirroring `TelemetryOsd`/`TelemetryStore`) rather than
  * polling independently. No inputs, no state of its own.
  *
- * Boxes themselves are never drawn here — they are burned into the frame server-side
- * (`Java2DOverlayRenderer`); this strip only lists what is currently being seen.
+ * Boxes themselves are never drawn here — `shared/player/player.ts`'s own canvas overlay owns that
+ * (server-side burn-in no longer exists at all, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1); this
+ * strip only lists what is currently being seen.
  *
  * Moved here from `pages/live/` (docs/plans/done/MVP3-PLAN.md §C-b) when the Fly cockpit needed the identical
  * strip — this codebase has no precedent for one page importing another page's module (see

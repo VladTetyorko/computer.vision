@@ -1,5 +1,6 @@
 import type { Detection, DetectionResult } from '../../core/api/models';
 import type { Transport } from './player-recovery';
+import { CV_STATUS_FRESH_SECONDS } from '../../core/detections/detections-logic';
 
 /**
  * Pure logic behind the client-side vector detection overlay (docs/main/CYCLES-PLAN.md §11, CD-b item
@@ -8,54 +9,19 @@ import type { Transport } from './player-recovery';
  * hls.js, or a poller — mirrors `shared/player/player-recovery.ts`.
  */
 
-/** The per-tile toggle's three states — see `shouldDrawOverlay`'s doc comment for what each means. */
-export type BoxesMode = 'overlay' | 'burned' | 'off';
+/** The per-tile toggle's two states — see `shouldDrawOverlay`'s doc comment for what each means.
+ *  `'burned'` is gone (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3): server-side burn-in no
+ *  longer exists, so there is nothing left for it to name. */
+export type BoxesMode = 'overlay' | 'off';
 
-// --- Burn-in awareness (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§8 wave M8) --------------------------------
-// The client used to claim `'burned'` unconditionally — every reader of `ActiveStream#burnedIn`
-// funnels through the three functions below so "the video may render nothing" is a single, tested
-// rule rather than three ad hoc `?? true`/`!== false` checks scattered across the facades that own
-// a `BoxesMode` signal (`CockpitFacade`, `LiveFacade`, `WallTile`).
+const BOXES_CYCLE: readonly BoxesMode[] = ['overlay', 'off'];
 
-/** Every mode a stream whose video actually carries burned-in boxes may offer. */
-const BOXES_CYCLE_WITH_BURN_IN: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
-/** Once a stream is confirmed burn-in-free, offering `'burned'` would draw nothing and read as a
- *  choice rather than an absence — dropped from both the cycle and the default. */
-const BOXES_CYCLE_WITHOUT_BURN_IN: readonly BoxesMode[] = ['overlay', 'off'];
-
-/**
- * Whether this stream's video itself carries burned-in boxes — `undefined` (a pre-M5 backend, which
- * never sends `ActiveStream#burnedIn`/`StartStreamResult#burnedIn` at all) means `true`, matching
- * `PipelineConfig.overlayBurnIn`'s own server-side default and, therefore, every deployment's actual
- * behaviour today (MEDIA-SOT-PLAN.md D1). Only an explicit `false` means the picture is clean.
- */
-export function resolveBurnedIn(burnedIn: boolean | undefined): boolean {
-  return burnedIn !== false;
-}
-
-/** The `BoxesMode`s worth offering for a stream with this burned-in state — see the two cycle
- *  constants' own doc comments. */
-export function boxesModeCycle(burnedIn: boolean | undefined): readonly BoxesMode[] {
-  return resolveBurnedIn(burnedIn) ? BOXES_CYCLE_WITH_BURN_IN : BOXES_CYCLE_WITHOUT_BURN_IN;
-}
-
-/** The mode a fresh stream selection should start from — `'burned'` (today's default, unchanged)
- *  unless this stream is confirmed burn-in-free, in which case `'overlay'` is the only mode that
- *  actually shows anything. */
-export function defaultBoxesMode(burnedIn: boolean | undefined): BoxesMode {
-  return resolveBurnedIn(burnedIn) ? 'burned' : 'overlay';
-}
-
-/** `B` (Fly) / the wall tile's own toggle button cycle through whichever modes {@link boxesModeCycle}
- *  offers for `burnedIn`, in order. `burnedIn` defaults to `undefined` (today's full three-mode
- *  cycle) so every pre-existing call site — including this app's own unit tests — keeps working
- *  unchanged. A `current` no longer present in the cycle (a stale `'burned'` read the instant
- *  `burnedIn` resolves `false` out from under it) restarts from the cycle's first entry rather than
- *  throwing or standing still. */
-export function cycleBoxesMode(current: BoxesMode, burnedIn?: boolean): BoxesMode {
-  const cycle = boxesModeCycle(burnedIn);
-  const index = cycle.indexOf(current);
-  return index === -1 ? cycle[0] : cycle[(index + 1) % cycle.length];
+/** `B` (Fly) / the wall tile's own toggle button — cycles `'overlay'` <-> `'off'`. A `current` no
+ *  longer present in the cycle (a stale value from before this wave) restarts from the cycle's
+ *  first entry rather than throwing or standing still. */
+export function cycleBoxesMode(current: BoxesMode): BoxesMode {
+  const index = BOXES_CYCLE.indexOf(current);
+  return index === -1 ? BOXES_CYCLE[0] : BOXES_CYCLE[(index + 1) % BOXES_CYCLE.length];
 }
 
 /**
@@ -101,12 +67,17 @@ export function selectDetectionResult(
     }
   }
   // Every result appears "in the future" relative to the on-screen frame (e.g. the latency
-  // estimate hasn't settled yet, right after attach) — the oldest available beats showing nothing.
-  return results[results.length - 1];
+  // estimate hasn't settled yet, right after attach) — the oldest available beats showing nothing,
+  // UNLESS that oldest result is itself stale in absolute wall-clock terms (research §3.4's staleness
+  // bound, `isDetectionStale`): a fallback exists for attach jitter, not as an unbounded policy that
+  // would draw a genuinely old batch as if it were fresh forever.
+  const oldest = results[results.length - 1];
+  return isDetectionStale(nowMs - Date.parse(oldest.capturedAt)) ? undefined : oldest;
 }
 
-/** The observed average gap between consecutive `capturedAt` values — one "batch" of `slackBatches`. */
-function averageBatchIntervalMs(results: readonly DetectionResult[]): number {
+/** The observed average gap between consecutive `capturedAt` values — one "batch" of `slackBatches`,
+ *  and the unit {@link detectionAlphaPercent} scales its own fade threshold off. */
+export function averageBatchIntervalMs(results: readonly DetectionResult[]): number {
   if (results.length < 2) {
     return 0;
   }
@@ -149,17 +120,82 @@ export function overlaySyncLatencySeconds(
 }
 
 /**
- * Whether the canvas overlay should actually draw boxes right now.
- *
- * `'burned'` and `'off'` both suppress the client canvas — disabling the server's own burn-in is
- * out of scope for this cycle (docs/main/CYCLES-PLAN.md §11 item 6: "no server change"), so there is no
- * way to make the video itself show *zero* boxes; the two states differ only in what they claim
- * about intent (trusting the baked-in boxes vs. wanting no detection UI, including no hover/click)
- * and in whichever future cycle does add a server-side burn-in toggle, that is where `'off'` would
- * start doing more than `'burned'`.
+ * Whether the canvas overlay should actually draw boxes right now — `'off'` suppresses it, `'overlay'`
+ * draws once a result is available. The video itself is always clean pixels now (docs/plans/active/
+ * CV-CLEAN-FEED-PLAN.md D-1: server-side burn-in is deleted, not defaulted off), so `'off'` means
+ * genuinely no boxes anywhere, not merely "hide the client canvas over the server's own baked-in ones"
+ * the way it used to.
  */
 export function shouldDrawOverlay(mode: BoxesMode, hasResult: boolean): boolean {
   return mode === 'overlay' && hasResult;
+}
+
+// --- Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7) -----------------------
+// The renderer already knows a batch's age (`capturedAt` vs `now`) — this turns that age into an
+// honest signal instead of drawing a stale batch at full confidence forever. Two thresholds, both
+// scaled off the stream's own observed cadence rather than one flat guess:
+//  - past `STALE_FADE_BATCH_MULTIPLIER` observed batch-intervals, a batch still draws, but dimmed —
+//    "probably fine, trust it a little less";
+//  - past `DETECTION_STALE_CUTOFF_SECONDS`, a batch doesn't draw at all and the stage says so instead
+//    (`detectionsPausedNotice`) — the same freshness window `DetectionsStore`'s own status dot already
+//    uses (`core/detections/detections-logic.ts#CV_STATUS_FRESH_SECONDS`, imported rather than
+//    redeclared) so the canvas, the status dot, and this notice can never quietly disagree about what
+//    "too old to call live" means.
+
+/** A batch older than this many observed batch-intervals still draws, but at
+ *  {@link STALE_FADE_ALPHA_PERCENT} instead of full alpha. */
+export const STALE_FADE_BATCH_MULTIPLIER = 2;
+
+/** Alpha percent applied once a batch crosses the fade threshold — dimmed, not gone. */
+export const STALE_FADE_ALPHA_PERCENT = 40;
+
+/** Detections older than this hard cutoff stop drawing entirely — the exact window `DetectionsStore`
+ *  already prunes its own results to (`CV_STATUS_FRESH_SECONDS`), imported so the two can never drift
+ *  apart and disagree. */
+export const DETECTION_STALE_CUTOFF_SECONDS = CV_STATUS_FRESH_SECONDS;
+
+/**
+ * The alpha percent a batch this old should draw at, scaled off the stream's own observed batch
+ * cadence ({@link averageBatchIntervalMs}) — 100% while fresh, {@link STALE_FADE_ALPHA_PERCENT} once
+ * older than {@link STALE_FADE_BATCH_MULTIPLIER} batch-intervals. A `batchIntervalMs` of `0` (a
+ * single-batch history — nothing to measure a cadence from yet) never fades; there's no baseline to
+ * call this batch old *relative to*. Not called once a batch has crossed
+ * {@link DETECTION_STALE_CUTOFF_SECONDS} — {@link isDetectionStale} gates that first, and the caller
+ * stops drawing entirely rather than fading to invisible.
+ */
+export function detectionAlphaPercent(ageMs: number, batchIntervalMs: number): number {
+  if (batchIntervalMs <= 0) {
+    return 100;
+  }
+  return ageMs > batchIntervalMs * STALE_FADE_BATCH_MULTIPLIER ? STALE_FADE_ALPHA_PERCENT : 100;
+}
+
+/** Whether a batch this old (milliseconds) has crossed the hard cutoff and should stop drawing
+ *  entirely, handing off to {@link detectionsPausedNotice}. */
+export function isDetectionStale(ageMs: number): boolean {
+  return ageMs > DETECTION_STALE_CUTOFF_SECONDS * 1000;
+}
+
+/**
+ * "Detections paused — last seen Ns ago" (research §3.4) once the feed has gone stale — mirrors
+ * `stream-state-logic.ts#videoNotice`'s own shape/honesty rule for the sibling *video* axis, applied
+ * here to the *detection* feed instead. `null` means "say nothing", covering both "detections are
+ * fresh" and "nothing has ever arrived to report a pause from" (no honest age to show).
+ *
+ * `latestCapturedAt` must be the **unfiltered** last-seen timestamp (e.g. `DetectionsStore`'s own raw
+ * latest result, not the freshness-pruned `results()` list) — once a batch ages past
+ * {@link DETECTION_STALE_CUTOFF_SECONDS} it is no longer present in a freshness-filtered list at all,
+ * which is exactly the moment this notice needs to start reporting how long ago it was.
+ */
+export function detectionsPausedNotice(latestCapturedAt: string | undefined, nowMs: number): string | null {
+  if (latestCapturedAt === undefined) {
+    return null;
+  }
+  const ageMs = Math.max(0, nowMs - Date.parse(latestCapturedAt));
+  if (!isDetectionStale(ageMs)) {
+    return null;
+  }
+  return `Detections paused — last seen ${Math.round(ageMs / 1000)}s ago`;
 }
 
 // --- Composite-model box hues (docs/plans/done/OPS-CORE-PLAN.md §Q3b) --------------------------------------

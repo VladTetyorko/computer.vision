@@ -89,13 +89,10 @@ export interface RegisterDeviceRequest {
  * reverse-proxies HLS byte fetches), WHEP is a POST/SDP + ICE exchange a stateless proxy cannot
  * forward, so this is never app-relative and must never be proxied — POST straight to it.
  *
- * `burnedIn` (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§8 wave M8) says whether this stream's video
- * itself actually carries burned-in detection boxes (`PipelineConfig.overlayBurnIn` at start time,
- * wave M5's own addition to the wire — this field does not exist on the wire yet as of M8). **An
- * absent field means `true`** — that is today's behaviour (`overlayBurnIn` defaults `true`
- * server-side, and a pre-M5 backend never sends this key at all), so every reader of this field goes
- * through `detection-overlay-logic.ts#resolveBurnedIn` rather than a bare truthiness check, per
- * MEDIA-SOT-PLAN.md D1's "defaults reproduce today's behaviour exactly" rule.
+ * **`burnedIn` is gone** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3) — server-side burn-in
+ * itself is deleted, not defaulted off, so there is no longer a wire field to mirror; the video is
+ * always clean pixels and the client canvas overlay (`shared/player/detection-overlay-logic.ts`) is
+ * simply the product now.
  */
 export interface ActiveStream {
   readonly streamId: string;
@@ -103,7 +100,6 @@ export interface ActiveStream {
   readonly startedAt: string;
   readonly viewUrl?: string;
   readonly whepUrl?: string;
-  readonly burnedIn?: boolean;
   readonly state?: StreamState;
   readonly detectionEnabled?: boolean;
   readonly detectionState?: DetectionState;
@@ -586,13 +582,12 @@ export interface CvTrackersResponse {
 }
 
 /** Mirrors `dto.StartStreamResponse`. `whepUrl` follows the same absolute-origin rule as
- *  `ActiveStream#whepUrl`; `burnedIn` follows the same "absent means true" rule as
- *  `ActiveStream#burnedIn` — see that field's own doc comment. */
+ *  `ActiveStream#whepUrl`; `burnedIn` is gone for the same reason — see that field's own doc
+ *  comment (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3). */
 export interface StartStreamResult {
   readonly streamId: string;
   readonly viewUrl?: string;
   readonly whepUrl?: string;
-  readonly burnedIn?: boolean;
 }
 
 /**

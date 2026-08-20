@@ -133,19 +133,15 @@
     <!-- ---- Boxes rendering — merged in from the former standalone `layers` drawer (per direct user
          request); a client-side rendering preference (`FlyPage`'s `facade.boxesMode`), not part of
          the `PipelineSettings` wire contract, so it round-trips via {@link boxesMode}/
-         {@link boxesModeChange} rather than `SettingsStore`. "Burned in" is omitted entirely once
-         {@link burnedIn} is confirmed `false` (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8). -->
+         {@link boxesModeChange} rather than `SettingsStore`. Server-side burn-in no longer exists at
+         all (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1) — Overlay is the only mode that draws
+         anything. -->
     <section class="cv-section">
       <span class="label">Boxes (shortcut: B)</span>
       <div class="segmented" role="tablist" aria-label="Detection boxes rendering">
         <button type="button" role="tab" class="btn secondary small" [class.active]="boxesMode() === 'overlay'" [attr.aria-selected]="boxesMode() === 'overlay'" (click)="boxesModeChange.emit('overlay')">
           Overlay
         </button>
-        @if (showBurnedInOption()) {
-          <button type="button" role="tab" class="btn secondary small" [class.active]="boxesMode() === 'burned'" [attr.aria-selected]="boxesMode() === 'burned'" (click)="boxesModeChange.emit('burned')">
-            Burned in
-          </button>
-        }
         <button type="button" role="tab" class="btn secondary small" [class.active]="boxesMode() === 'off'" [attr.aria-selected]="boxesMode() === 'off'" (click)="boxesModeChange.emit('off')">
           Off
         </button>

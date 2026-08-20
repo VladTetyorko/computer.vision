@@ -2,17 +2,21 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_BOX_COLOR,
   DEFAULT_MODEL_KEY,
+  DETECTION_STALE_CUTOFF_SECONDS,
+  STALE_FADE_ALPHA_PERCENT,
+  STALE_FADE_BATCH_MULTIPLIER,
   TRAIL_WINDOW_MS,
-  boxesModeCycle,
+  averageBatchIntervalMs,
   canvasBackingSize,
   cycleBoxesMode,
-  defaultBoxesMode,
+  detectionAlphaPercent,
   detectionModelKey,
+  detectionsPausedNotice,
   distinctModelKeys,
   formatDetectionLabel,
+  isDetectionStale,
   modelHue,
   overlaySyncLatencySeconds,
-  resolveBurnedIn,
   selectDetectionResult,
   shouldDrawOverlay,
   trackHue,
@@ -83,6 +87,21 @@ describe('selectDetectionResult', () => {
     const nowMs = Date.parse('2026-07-22T00:00:00.500Z');
     expect(selectDetectionResult([only], nowMs, 0, 1)).toBe(only);
   });
+
+  it('a fallback-eligible oldest result that is itself stale in absolute terms draws nothing (§3.4 bound)', () => {
+    // A huge latency estimate pushes the on-screen instant far into the past, so `staleOldest`
+    // still looks "in the future" relative to it — the fallback branch fires, but the batch it
+    // would return is actually DETECTION_STALE_CUTOFF_SECONDS+ old in real wall-clock terms.
+    const nowMs = Date.parse('2026-07-22T00:00:10.000Z');
+    const staleOldest = result({ capturedAt: '2026-07-22T00:00:03.000Z' }); // 7s old, absolute
+    expect(selectDetectionResult([staleOldest], nowMs, 1000, 0)).toBeUndefined();
+  });
+
+  it('a fallback-eligible oldest result within the cutoff still wins, unchanged', () => {
+    const nowMs = Date.parse('2026-07-22T00:00:10.000Z');
+    const freshOldest = result({ capturedAt: '2026-07-22T00:00:08.000Z' }); // 2s old, absolute
+    expect(selectDetectionResult([freshOldest], nowMs, 1000, 0)).toBe(freshOldest);
+  });
 });
 
 describe('shouldDrawOverlay', () => {
@@ -94,73 +113,90 @@ describe('shouldDrawOverlay', () => {
     expect(shouldDrawOverlay('overlay', false)).toBe(false);
   });
 
-  it('never draws in burned or off mode', () => {
-    expect(shouldDrawOverlay('burned', true)).toBe(false);
+  it('never draws in off mode', () => {
     expect(shouldDrawOverlay('off', true)).toBe(false);
   });
 });
 
-// --- Burn-in awareness (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§8 wave M8) ---------------------------------
-// D1's "defaults reproduce today's behaviour exactly": every deployment this app talks to today
-// never sends `burnedIn` at all (a pre-M5 backend), so `undefined` is by far the most load-bearing
-// case in this whole group — it must behave byte-identically to the pre-wave M8 code.
-
-describe('resolveBurnedIn', () => {
-  it('treats an absent field as burned-in (dev-parity default, D1)', () => {
-    expect(resolveBurnedIn(undefined)).toBe(true);
-  });
-
-  it('trusts an explicit true', () => {
-    expect(resolveBurnedIn(true)).toBe(true);
-  });
-
-  it('only an explicit false means the picture is clean', () => {
-    expect(resolveBurnedIn(false)).toBe(false);
-  });
-});
-
-describe('boxesModeCycle', () => {
-  it('offers the full three-mode cycle when burned-in (including undefined, the pre-M5 default)', () => {
-    expect(boxesModeCycle(undefined)).toEqual(['overlay', 'burned', 'off']);
-    expect(boxesModeCycle(true)).toEqual(['overlay', 'burned', 'off']);
-  });
-
-  it('drops burned from the cycle once a stream is confirmed burn-in-free', () => {
-    expect(boxesModeCycle(false)).toEqual(['overlay', 'off']);
-  });
-});
-
-describe('defaultBoxesMode', () => {
-  it('defaults to burned when burned-in (including undefined — dev parity, D1)', () => {
-    expect(defaultBoxesMode(undefined)).toBe('burned');
-    expect(defaultBoxesMode(true)).toBe('burned');
-  });
-
-  it('defaults to overlay once a stream is confirmed burn-in-free — burned would show nothing', () => {
-    expect(defaultBoxesMode(false)).toBe('overlay');
-  });
-});
+// --- Boxes mode cycle (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3) --------------------------------
+// 'burned' is gone — server-side burn-in no longer exists, so the interactive overlay is simply the
+// default and the only other state is 'off'.
 
 describe('cycleBoxesMode', () => {
-  it('cycles overlay -> burned -> off -> overlay when burnedIn is omitted (byte-identical to before wave M8)', () => {
-    expect(cycleBoxesMode('overlay')).toBe('burned');
-    expect(cycleBoxesMode('burned')).toBe('off');
+  it('cycles overlay -> off -> overlay', () => {
+    expect(cycleBoxesMode('overlay')).toBe('off');
     expect(cycleBoxesMode('off')).toBe('overlay');
   });
 
-  it('cycles the same three-step loop for an explicitly burned-in stream', () => {
-    expect(cycleBoxesMode('overlay', true)).toBe('burned');
-    expect(cycleBoxesMode('burned', true)).toBe('off');
-    expect(cycleBoxesMode('off', true)).toBe('overlay');
+  it('a stale/unrecognized mode restarts from the front of the cycle', () => {
+    expect(cycleBoxesMode('burned' as never)).toBe('overlay');
+  });
+});
+
+describe('averageBatchIntervalMs', () => {
+  it('is zero for fewer than two results — nothing to derive a cadence from', () => {
+    expect(averageBatchIntervalMs([])).toBe(0);
+    expect(averageBatchIntervalMs([result()])).toBe(0);
   });
 
-  it('skips burned for a confirmed burn-in-free stream — overlay <-> off only', () => {
-    expect(cycleBoxesMode('overlay', false)).toBe('off');
-    expect(cycleBoxesMode('off', false)).toBe('overlay');
+  it('averages the gaps between consecutive newest-first capturedAt values', () => {
+    const results = [
+      result({ capturedAt: '2026-07-22T00:00:01.000Z' }),
+      result({ capturedAt: '2026-07-22T00:00:00.800Z' }),
+      result({ capturedAt: '2026-07-22T00:00:00.600Z' }),
+    ];
+    expect(averageBatchIntervalMs(results)).toBe(200);
+  });
+});
+
+// --- Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7) ---------------------------
+
+describe('detectionAlphaPercent', () => {
+  it('is full alpha while within the fade threshold', () => {
+    expect(detectionAlphaPercent(0, 500)).toBe(100);
+    expect(detectionAlphaPercent(1_000, 500)).toBe(100); // exactly 2 batch-intervals — not yet past
   });
 
-  it('a stale burned reading (burnedIn just resolved false out from under it) restarts from the front of the cycle', () => {
-    expect(cycleBoxesMode('burned', false)).toBe('overlay');
+  it('fades once older than STALE_FADE_BATCH_MULTIPLIER batch-intervals', () => {
+    expect(detectionAlphaPercent(1_001, 500)).toBe(STALE_FADE_ALPHA_PERCENT);
+  });
+
+  it('never fades with no observed cadence to compare against (a single-batch history)', () => {
+    expect(detectionAlphaPercent(10_000, 0)).toBe(100);
+  });
+});
+
+describe('isDetectionStale', () => {
+  it('is not stale within the cutoff, including exactly at it', () => {
+    expect(isDetectionStale(0)).toBe(false);
+    expect(isDetectionStale(DETECTION_STALE_CUTOFF_SECONDS * 1000)).toBe(false);
+  });
+
+  it('is stale once older than the cutoff', () => {
+    expect(isDetectionStale(DETECTION_STALE_CUTOFF_SECONDS * 1000 + 1)).toBe(true);
+  });
+});
+
+describe('detectionsPausedNotice', () => {
+  const now = Date.parse('2026-07-22T00:00:20.000Z');
+
+  it('says nothing when nothing has ever arrived', () => {
+    expect(detectionsPausedNotice(undefined, now)).toBeNull();
+  });
+
+  it('says nothing while the last-seen batch is still within the freshness window', () => {
+    const capturedAt = new Date(now - DETECTION_STALE_CUTOFF_SECONDS * 1000).toISOString();
+    expect(detectionsPausedNotice(capturedAt, now)).toBeNull();
+  });
+
+  it('reports how long ago detections were last seen, rounded to the second, once stale', () => {
+    const capturedAt = new Date(now - 12_000).toISOString();
+    expect(detectionsPausedNotice(capturedAt, now)).toBe('Detections paused — last seen 12s ago');
+  });
+
+  it('clamps a future-dated capturedAt (clock skew) to age zero rather than reporting a negative age', () => {
+    const capturedAt = new Date(now + 1_000).toISOString();
+    expect(detectionsPausedNotice(capturedAt, now)).toBeNull();
   });
 });
 

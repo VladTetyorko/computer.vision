@@ -119,7 +119,8 @@ dd {
     margin: var(--space-8) 0 var(--space-8);
 }
 
-/* The "boxes: Overlay/Burned/Off" toggle group used to carry its own local `.boxes-toggle`
+/* The "boxes: Overlay/Off" toggle group (originally Overlay/Burned/Off, until burn-in was deleted
+   entirely — docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1) used to carry its own local `.boxes-toggle`
    active-state CSS here (mirrored verbatim in `asset-detail.css`); both were removed in favor of
    the shared global `.segmented` (docs/plans/done/UX-REWORK-PLAN.md §U-b item 5, `src/styles.css`) once the
    template's wrapper class changed from `boxes-toggle` to `segmented` — same promotion-to-global

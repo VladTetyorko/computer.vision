@@ -148,9 +148,8 @@
           </p>
           @if (!facade.training.disabled()) {
             <p class="muted hint">
-              Replay frames come from the recorded stream. If detection overlay burn-in was on during
-              the flight, those boxes are baked into these pixels — turn burn-in off on streams you
-              plan to capture training frames from.
+              Replay frames come from the recorded stream — detection boxes are always drawn client-side,
+              never baked into the recording, so captured training frames are clean.
             </p>
           }
         } @else {

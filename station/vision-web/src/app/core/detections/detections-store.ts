@@ -5,6 +5,7 @@ import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
 import { cvStatus, deriveChips, freshResults } from './detections-logic';
 import { type AssetScopedTransport, resolveAssetScopedTransport, trackSessionKey } from '../live/live-fallback-logic';
+import { detectionsPausedNotice } from '../../shared/player/detection-overlay-logic';
 
 /** How often a tracked stream's recent detections are re-read while **polling** (the fallback) is active. */
 const POLL_INTERVAL_MS = 2_000;
@@ -112,6 +113,23 @@ export class DetectionsStore {
 
   /** `'on'` (green) when the most recent result is fresh, `'off'` (grey) otherwise. */
   readonly status = computed(() => cvStatus(this.results()[0]?.capturedAt, this.nowSignal()));
+
+  /**
+   * The most recently arrived result's `capturedAt`, regardless of freshness — unlike {@link results}
+   * (which drops anything that has aged out), this keeps tracking "when did we last actually see
+   * something" so a stalled feed can report *how long* it's been silent instead of merely going
+   * blank (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7). Reads the same raw
+   * poll/live accumulator {@link results} itself reads before filtering.
+   */
+  private readonly lastSeenAt = computed(() =>
+    (this.transportSignal() === 'live' ? this.liveResultsSignal() : this.pollResultsSignal())[0]?.capturedAt,
+  );
+
+  /** "Detections paused — last seen Ns ago" once the feed has gone stale — `null` while fresh or
+   *  before anything has ever arrived. Callers that only mean this while detection is actually
+   *  supposed to be on (vs. deliberately switched off) gate on that separately — this store has no
+   *  opinion on operator intent, only on what has and hasn't arrived. */
+  readonly pausedNotice = computed(() => detectionsPausedNotice(this.lastSeenAt(), this.nowSignal()));
 
   constructor() {
     this.stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));

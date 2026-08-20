@@ -7,12 +7,11 @@ import {
   effect,
   inject,
   input,
-  linkedSignal,
   signal,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Player, type BoxesMode } from '../../shared/player/player';
-import { cycleBoxesMode, defaultBoxesMode } from '../../shared/player/detection-overlay-logic';
+import { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import type { ActiveStream, Device } from '../../core/api/models';
@@ -33,8 +32,8 @@ const PREROLL_MARGIN = '250px';
  * the tile's stream is live" is automatic — what this component adds is gating both polls on
  * on-screen visibility too, the same idea as suspending the player, so a 30-tile wall doesn't run
  * 30 telemetry/detections pollers for tiles nobody is looking at (the O(visible) posture item 4
- * asks for). The per-tile "boxes: overlay/burned/off" toggle (item 6) is a tiny cycling button
- * rather than three buttons — there is no room for a labeled toggle group at wall-tile scale.
+ * asks for). The per-tile "boxes: overlay/off" toggle (item 6) is a tiny cycling button rather
+ * than a labeled toggle group — there is no room for one at wall-tile scale.
  */
 @Component({
   selector: 'vision-wall-tile',
@@ -52,25 +51,18 @@ export class WallTile {
   protected readonly telemetry = inject(TelemetryStore);
   protected readonly detections = inject(DetectionsStore);
 
-  /** `stream()#burnedIn` projected to a primitive (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) —
-   * `stream` is a plain input, re-bound (not necessarily re-identical) on every `WallPage` poll tick,
-   * so this mirrors `CockpitFacade#streamBurnedIn`'s identical "guard `boxesMode`'s default on a
-   * primitive, not the whole object" reasoning. */
-  private readonly streamBurnedIn = computed(() => this.stream().burnedIn);
-
-  /** Defaults to `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s
-   * own `boxesMode` input default matches for the same reason) **unless this stream is confirmed
-   * burn-in-free**, in which case `'overlay'` is the only mode that shows anything
-   * (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) — see `CockpitFacade#boxesMode`'s identical
-   * `linkedSignal` doc comment for the full reasoning. */
-  protected readonly boxesMode = linkedSignal<BoxesMode>(() => defaultBoxesMode(this.streamBurnedIn()));
+  /** Defaults to `'overlay'` — burn-in no longer exists at all (docs/plans/active/CV-CLEAN-FEED-PLAN.md
+   * D-1), so there is nothing left to re-derive against the stream. A plain `signal`, not the old
+   * `linkedSignal` over a derived `streamBurnedIn` primitive — see `CockpitFacade#boxesMode`'s
+   * identical simplification. */
+  protected readonly boxesMode = signal<BoxesMode>('overlay');
 
   private readonly hasTelemetryCapability = computed(() =>
     (this.device()?.capabilities ?? []).includes('TELEMETRY'),
   );
 
   protected cycleBoxesMode(): void {
-    this.boxesMode.update((current) => cycleBoxesMode(current, this.streamBurnedIn()));
+    this.boxesMode.update((current) => cycleBoxesMode(current));
   }
 
   protected readonly batteryLabel = computed(() => {
