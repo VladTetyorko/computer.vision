@@ -116,6 +116,29 @@
     accent-color: var(--color-info);
 }
 
+/* ---- Corrected-track divergence band (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) ----
+   A separate strip below the native range track, not overlaid on it — a browser's own range-input
+   track has no stable cross-browser height/position to paint over pixel-for-pixel. `--color-warn`,
+   never `--color-danger` (§3.8's "never red for PROBABLE", extended to divergence generally, same
+   rule the cockpit's divergence chip follows). */
+
+.divergence-strip {
+    position: relative;
+    height: 6px;
+    margin-top: var(--space-4);
+    border-radius: 3px;
+    background: var(--panel-raised);
+    overflow: hidden;
+}
+
+.divergence-band {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: var(--color-warn);
+    opacity: 0.55;
+}
+
 /* ---- Facts grid (mirrors asset-detail.css / shared/player/stream-info-panel.ts's own) -------------------- */
 
 .facts {

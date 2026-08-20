@@ -7,7 +7,15 @@ import { TrainingStore } from '../../core/training/training-store';
 import { findVideoDevice } from '../../core/fleet/device-logic';
 import { deriveTrail, groupTelemetryByDevice, telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { formatDuration } from '../../core/stream-info-logic';
-import type { AfterActionManifest, AssetDetails, TelemetrySample, UsageRecording, UsageTimeline } from '../../core/api/models';
+import type {
+  AfterActionManifest,
+  AssetDetails,
+  CorrectionResponse,
+  TelemetrySample,
+  UsageRecording,
+  UsageTimeline,
+} from '../../core/api/models';
+import { correctedTrailPoints, divergenceBands, type DivergenceBand } from '../../core/geo/geo-logic';
 import {
   advancePlaybackClock,
   buildClipDownloadUrl,
@@ -122,6 +130,21 @@ export class ReplayFacade {
     const usageId = this.effectiveUsageId();
     return assetId && usageId ? this.api.afterActionArchiveUrl(assetId, usageId) : undefined;
   });
+
+  // --- Visual-geolocation corrected track (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) ----------
+  // Fetched independently of `timeline`/`recording`/`afterAction` above (own `effect()`, own
+  // try/catch) via `GET /api/geo/corrections?usageId=` — "no new backend surface" per §3.8's own
+  // Replay row. A failed/disabled read degrades to an empty corrected track and no divergence bands,
+  // never a blocked replay page — the raw trail/timeline this page already renders is unaffected
+  // either way.
+  readonly geoCorrections = signal<readonly CorrectionResponse[]>([]);
+  readonly geoCorrectionsLoading = signal(false);
+  readonly geoCorrectionsErrorMessage = signal<string | undefined>(undefined);
+
+  /** `<vision-replay-map>`'s own second polyline — every fixed row at or before the current scrub, oldest→newest. */
+  readonly correctedTrail = computed(() => correctedTrailPoints(this.geoCorrections(), this.atMs()));
+  /** The scrub bar's divergence band(s) — every `divergent: true` span across the *whole* corrected track, not just the scrubbed prefix (a viewer should see an upcoming divergent stretch before scrubbing into it). */
+  readonly geoDivergenceBands = computed<readonly DivergenceBand[]>(() => divergenceBands(this.geoCorrections()));
 
   // --- Clip export (docs/plans/done/OPS-CORE-PLAN.md §R, R-c) ---------------------------------------------
   readonly clipSelectionStartMs = signal<number | undefined>(undefined);
@@ -244,6 +267,13 @@ export class ReplayFacade {
       void this.loadAfterAction(this.effectiveAssetId(), this.effectiveUsageId());
     });
 
+    // Visual-geolocation corrected track (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — its own
+    // independent effect/try-catch, same posture as after-action above; only needs `usageId` (the
+    // endpoint is usage-scoped, not asset-scoped, unlike after-action's).
+    effect(() => {
+      void this.loadGeoCorrections(this.effectiveUsageId());
+    });
+
     // Mirrors `DatasetsFacade`'s own unconditional `training.refresh()` on construction — a viewer
     // may land on `/replay` without ever having visited `/manage/training` first, and `TrainingStore`
     // is lazy (`providedIn: 'root'`, not self-initializing), so nothing else guarantees this runs.
@@ -335,6 +365,31 @@ export class ReplayFacade {
       this.afterActionErrorMessage.set(describeHttpError(error));
     } finally {
       this.afterActionLoading.set(false);
+    }
+  }
+
+  /**
+   * `GET /api/geo/corrections?usageId=` — "no new backend surface" (§3.8's own Replay row). A
+   * disabled flag (D9 409) or any other failure degrades to an empty corrected track (via
+   * `isVisualGeoDisabledError`-agnostic silent catch, mirroring `loadRecording`'s own posture above)
+   * rather than blocking the raw trail this page already renders regardless.
+   */
+  private async loadGeoCorrections(usageId: string | undefined): Promise<void> {
+    if (!usageId) {
+      this.geoCorrections.set([]);
+      this.geoCorrectionsErrorMessage.set(undefined);
+      return;
+    }
+    this.geoCorrectionsLoading.set(true);
+    this.geoCorrectionsErrorMessage.set(undefined);
+    try {
+      const response = await this.api.geoCorrections(usageId);
+      this.geoCorrections.set(response.corrections);
+    } catch (error) {
+      this.geoCorrections.set([]);
+      this.geoCorrectionsErrorMessage.set(describeHttpError(error));
+    } finally {
+      this.geoCorrectionsLoading.set(false);
     }
   }
 
@@ -445,6 +500,18 @@ export class ReplayFacade {
   bucketPercent(bucket: DetectionDensityBucket): number {
     const span = this.toMs() - this.fromMs();
     return span <= 0 ? 0 : ((bucket.atMs - this.fromMs()) / span) * 100;
+  }
+
+  /** The divergence strip's own left-edge percent for `band` — mirrors {@link bucketPercent}'s identical span math. */
+  bandLeftPercent(band: DivergenceBand): number {
+    const span = this.toMs() - this.fromMs();
+    return span <= 0 ? 0 : ((band.fromMs - this.fromMs()) / span) * 100;
+  }
+
+  /** The divergence strip's own width percent for `band`. */
+  bandWidthPercent(band: DivergenceBand): number {
+    const span = this.toMs() - this.fromMs();
+    return span <= 0 ? 0 : ((band.toMs - band.fromMs) / span) * 100;
   }
 
   elapsedLabel(): string {

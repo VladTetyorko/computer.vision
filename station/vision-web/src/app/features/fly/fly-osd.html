@@ -1,0 +1,102 @@
+<div class="osd-groups">
+  <div class="osd-group surface-hud">
+    <span class="osd-group-label">Power</span>
+    <div class="osd-group-body">
+      @if (store.hasTelemetry()) {
+        <span class="osd-metric" [class]="'batt-' + batterySeverityTier()">
+          <vision-icon name="battery" [size]="14" /><span class="v">{{ batteryLabel() }}</span>
+        </span>
+        @if (armed() !== undefined) {
+          <span class="osd-metric" [class.armed]="armed()" [class.disarmed]="!armed()">
+            <vision-icon name="power" [size]="14" /><span class="v">{{ armed() ? 'ARMED' : 'DISARMED' }}</span>
+          </span>
+        }
+      } @else {
+        <span class="osd-metric dim">No telemetry</span>
+      }
+    </div>
+  </div>
+
+  @if (store.hasTelemetry()) {
+    <div class="osd-group surface-hud">
+      <span class="osd-group-label">Nav</span>
+      <div class="osd-group-body">
+        @if (positionText(); as position) {
+          <span class="osd-metric">
+            <vision-icon name="map" [size]="14" /><span class="v">{{ position }}</span>
+          </span>
+        }
+        <span class="osd-metric">
+          <vision-icon name="ruler" [size]="14" /><span class="v">{{ altitudeLabel() }}</span>
+        </span>
+        <span class="osd-metric">
+          <vision-icon name="compass" [size]="14" /><span class="v">{{ headingLabel() }}</span>
+        </span>
+        @if (groundSpeedLabel(); as speed) {
+          <span class="osd-metric">
+            <vision-icon name="gauge" [size]="14" /><span class="v">{{ speed }}</span>
+          </span>
+        }
+        @if (modeLabel(); as mode) {
+          <span class="osd-metric">
+            <vision-icon name="list" [size]="14" /><span class="v">{{ mode }}</span>
+          </span>
+        }
+        @if (gpsFixType() !== undefined) {
+          <span class="osd-metric" [class]="'gps-' + gpsSeverityTier()">
+            <vision-icon name="satellite" [size]="14" /><span class="v">{{ gpsLabel() }}</span>
+          </span>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- Link — the one group that always renders (the transport/latency chip is meaningful with
+       or without telemetry, and so is the geo divergence chip — a vision-derived position needs no
+       flight-controller link at all); the age/RSSI chips join it once a telemetry sample actually
+       exists. -->
+  <div class="osd-group surface-hud">
+    <span class="osd-group-label">Link</span>
+    <div class="osd-group-body">
+      @if (store.hasTelemetry()) {
+        <span class="osd-metric" [class]="'age-' + ageSeverityTier()">
+          <vision-icon name="signal" [size]="14" /><span class="v">{{ ageLabel() }}</span>
+        </span>
+        @if (rssiPercent() !== undefined) {
+          <span class="osd-metric">
+            <vision-icon name="signal" [size]="14" /><span class="v">{{ rssiPercent() }}%</span>
+          </span>
+        }
+      }
+      <span class="osd-metric dim">
+        <span class="v">{{ transportLabelText() }}</span>
+      </span>
+      <vision-geo-chip />
+    </div>
+  </div>
+
+  <!-- Env — the least flight-critical cluster (ambient wind/weather advisory), behind a compact
+       disclosure chevron (reuses diagnostics-card.ts's own expand/collapse idiom). Defaults
+       open, same as that component's own precedent. -->
+  <button type="button" class="osd-group-toggle" (click)="expanded.set(!expanded())" [attr.aria-expanded]="expanded()">
+    <vision-icon [name]="expanded() ? 'chevron-up' : 'chevron-down'" [size]="14" />
+    {{ expanded() ? 'Less' : 'Env' }}
+  </button>
+
+  @if (expanded()) {
+    <div class="osd-group surface-hud">
+      <span class="osd-group-label">Env</span>
+      <div class="osd-group-body">
+        @if (windSpeedLabel(); as wind) {
+          <span class="osd-metric">
+            <vision-icon name="wind" [size]="14" /><span class="v">{{ wind }}</span>
+            @if (windDirectionDegrees(); as direction) {
+              <span class="wind-arrow" [style.transform]="'rotate(' + direction + 'deg)'" aria-hidden="true">➤</span>
+            }
+          </span>
+        }
+        <vision-weather-chip [limitMps]="windLimitMps()" />
+      </div>
+    </div>
+  }
+</div>

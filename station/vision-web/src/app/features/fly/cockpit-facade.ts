@@ -8,6 +8,7 @@ import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
+import { GeoStore } from '../../core/geo/geo-store';
 import { LiveStore } from '../../core/live/live-store';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import { MarksStore } from '../../core/map-data/marks-store';
@@ -111,6 +112,9 @@ export class CockpitFacade {
   readonly detections = inject(DetectionsStore);
   readonly events = inject(EventsStore);
   readonly geofence = inject(GeofenceStore);
+  /** Visual-geolocation corrections (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3/§3.4/§3.8, wave H6) — the
+   * divergence chip/detail popover (`fly-osd.ts`) and `mapCorrections` below both read this directly. */
+  readonly geo = inject(GeoStore);
   /**
    * The three halves of the Common Operational Picture (docs/plans/done/MAP-REWORK-PLAN.md §5.2) — exposed as
    * whole stores (not thin passthroughs), mirroring `geofence` above: `cockpit.html` wires
@@ -332,6 +336,18 @@ export class CockpitFacade {
     });
   });
 
+  /**
+   * `<vision-tactical-map>`'s `[corrections]` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — 0
+   * or 1 rows, the followed asset's own latest visual-geolocation correction. `GeoStore.latest()`
+   * reads `undefined` on a `NO_FIX`/not-yet-computed row (and always while `vision.geo.visual.enabled`
+   * is off, since the poll then either 404s silently or never returns this asset) — either way an
+   * empty array here, so the map layer is simply absent, never a fabricated marker.
+   */
+  readonly mapCorrections = computed(() => {
+    const latest = this.geo.latest();
+    return latest ? [latest] : [];
+  });
+
   readonly latencySeconds = signal<number | null>(null);
   readonly transport = signal<Transport>('hls');
   /** Defaults to `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s
@@ -448,6 +464,19 @@ export class CockpitFacade {
         this.detections.track(streamId, this.activeAssetId());
       } else {
         this.detections.reset();
+      }
+    });
+
+    // Visual-geolocation corrections (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, wave H6) — keyed
+    // directly on `activeAssetId()`, no device/stream indirection to guard on (unlike telemetry/
+    // detections above): `GeoStore.track()` is already a no-op for an unchanged assetId (its own
+    // `lastTrackAssetId` field), so this effect needs no derived-primitive guard of its own.
+    effect(() => {
+      const assetId = this.activeAssetId();
+      if (assetId) {
+        this.geo.track(assetId);
+      } else {
+        this.geo.reset();
       }
     });
 

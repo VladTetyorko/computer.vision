@@ -1,0 +1,173 @@
+<div class="page">
+  <vision-section-header
+    title="Geo regions"
+    subtitle="Reference-imagery regions for visual geolocation — ingest a bounding box, then watch it index."
+  />
+
+  @if (facade.disabled()) {
+    <vision-empty
+      icon="alert"
+      title="Visual geolocation isn't enabled here"
+      message="This deployment hasn't turned on visual geolocation yet. Ask an administrator to enable vision.geo.visual.enabled if you need to ingest a region."
+    />
+  } @else {
+    @if (facade.canManage()) {
+      <div class="card">
+        <header>
+          <h2>Ingest a region</h2>
+        </header>
+        <div class="form-grid">
+          <label>
+            <span class="label">Name</span>
+            <input
+              type="text"
+              [ngModel]="facade.draft().name"
+              (ngModelChange)="facade.updateDraft({ name: $event })"
+              placeholder="e.g. Site A perimeter"
+            />
+          </label>
+          <label>
+            <span class="label">Zoom</span>
+            <input
+              type="text"
+              inputmode="numeric"
+              class="mono"
+              [ngModel]="facade.draft().zoom"
+              (ngModelChange)="facade.updateDraft({ zoom: $event })"
+            />
+          </label>
+          <label>
+            <span class="label">North</span>
+            <input
+              type="text"
+              inputmode="decimal"
+              class="mono"
+              [ngModel]="facade.draft().north"
+              (ngModelChange)="facade.updateDraft({ north: $event })"
+            />
+          </label>
+          <label>
+            <span class="label">South</span>
+            <input
+              type="text"
+              inputmode="decimal"
+              class="mono"
+              [ngModel]="facade.draft().south"
+              (ngModelChange)="facade.updateDraft({ south: $event })"
+            />
+          </label>
+          <label>
+            <span class="label">East</span>
+            <input
+              type="text"
+              inputmode="decimal"
+              class="mono"
+              [ngModel]="facade.draft().east"
+              (ngModelChange)="facade.updateDraft({ east: $event })"
+            />
+          </label>
+          <label>
+            <span class="label">West</span>
+            <input
+              type="text"
+              inputmode="decimal"
+              class="mono"
+              [ngModel]="facade.draft().west"
+              (ngModelChange)="facade.updateDraft({ west: $event })"
+            />
+          </label>
+        </div>
+        <div class="row submit-row">
+          <button type="button" class="btn" [disabled]="!facade.canSubmit()" (click)="facade.submitIngest()">
+            <vision-icon name="plus" [size]="14" />
+            {{ facade.submitting() ? 'Ingesting…' : 'Ingest region' }}
+          </button>
+        </div>
+      </div>
+    }
+
+    @if (facade.loading() && !facade.loaded()) {
+      <p class="muted">Loading regions…</p>
+    } @else if (facade.regions().length === 0) {
+      <vision-empty
+        icon="satellite"
+        title="No regions yet"
+        [message]="facade.canManage() ? 'Ingest one above — draw a bounding box in real coordinates and it will index in the background.' : 'Ask a manager to ingest one for the area you fly.'"
+      />
+    } @else {
+      <div class="region-grid">
+        @for (r of facade.regions(); track r.regionId) {
+          <div class="card region-card">
+            <header>
+              <div>
+                <h2>{{ r.name }}</h2>
+                <span class="muted mono">zoom {{ r.zoom }}</span>
+              </div>
+              <span
+                class="chip"
+                [class.ok]="regionStatusTone(r.status) === 'ok'"
+                [class.warn]="regionStatusTone(r.status) === 'warn'"
+                [class.danger]="regionStatusTone(r.status) === 'danger'"
+              >
+                {{ regionStatusLabel(r.status) }}
+              </span>
+            </header>
+
+            @if (facade.progressByRegionId().get(r.regionId); as progress) {
+              <div class="progress-row">
+                <div class="progress-track">
+                  <div
+                    class="progress-fill"
+                    [class.failed]="progress.state === 'FAILED'"
+                    [style.width.%]="regionProgressPercent(progress) ?? 100"
+                  ></div>
+                </div>
+                <span class="progress-label mono">{{ progress.done }} / {{ progress.total }}</span>
+              </div>
+              <p class="muted phase-line">{{ regionPhaseLabel(progress.phase) }} — {{ progress.message }}</p>
+            }
+
+            <dl class="facts">
+              <div class="fact">
+                <dt>Tiles</dt>
+                <dd class="mono">{{ r.tileCount ?? '—' }}</dd>
+              </div>
+              <div class="fact">
+                <dt>Never-accept cells</dt>
+                <dd class="mono">{{ r.neverAcceptCells ?? '—' }}</dd>
+              </div>
+              <div class="fact">
+                <dt>Holdout recall@1</dt>
+                <dd class="mono">{{ r.holdoutRecallAt1 !== undefined ? (r.holdoutRecallAt1 * 100).toFixed(0) + '%' : '—' }}</dd>
+              </div>
+              <div class="fact">
+                <dt>Holdout median error</dt>
+                <dd class="mono">{{ r.holdoutMedianErrorMeters !== undefined ? r.holdoutMedianErrorMeters.toFixed(1) + ' m' : '—' }}</dd>
+              </div>
+            </dl>
+
+            @if (facade.canManage()) {
+              <div class="row region-actions">
+                <vision-icon-button
+                  icon="trash"
+                  label="Delete this region"
+                  variant="danger"
+                  (activated)="facade.confirmDelete(r.regionId)"
+                />
+              </div>
+              @if (facade.dialogs.isOpen(r.regionId)) {
+                <vision-confirm-dialog
+                  [message]="'Delete “' + r.name + '”? Its reference imagery and index are removed; any asset tracked against it falls back to no correction.'"
+                  confirmLabel="Delete region"
+                  [busy]="facade.deletingRegionId() === r.regionId"
+                  (confirmed)="facade.deleteConfirmed(r.regionId, r.name)"
+                  (cancelled)="facade.cancelDelete()"
+                />
+              }
+            }
+          </div>
+        }
+      </div>
+    }
+  }
+</div>

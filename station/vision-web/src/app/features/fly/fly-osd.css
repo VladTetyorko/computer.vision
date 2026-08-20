@@ -1,0 +1,113 @@
+/* A bottom bar now (fly.css's own telemetry grid row, below the video, not an overlay column
+   beside it) — clusters lay out left-to-right and wrap/center as the row narrows, rather than
+   stacking top-to-bottom down a fixed-width column. pointer-events: none on the row itself
+   still matters: the row's own empty gaps between cluster pills must never intercept clicks
+   meant for whatever renders below it (the controls row sits right after this one), only the
+   pills/Env toggle/weather chip re-enable it. */
+.osd-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8) var(--space-16);
+  pointer-events: none;
+}
+
+.osd-group {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-sm);
+  min-width: 5.25rem;
+}
+
+.osd-group-label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: color-mix(in srgb, var(--text) 58%, transparent);
+}
+
+.osd-group-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-8);
+}
+
+.osd-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: 0.78rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.osd-metric .v {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.osd-metric.dim {
+  color: color-mix(in srgb, var(--text) 78%, transparent);
+}
+
+.osd-metric.batt-low .v,
+.osd-metric.age-amber .v {
+  color: var(--color-warn);
+}
+
+.osd-metric.batt-critical .v,
+.osd-metric.age-red .v {
+  color: var(--color-danger-text);
+}
+
+.osd-metric.gps-warn .v {
+  color: var(--color-warn);
+}
+
+.osd-metric.gps-critical .v {
+  color: var(--color-danger-text);
+}
+
+/* Armed/disarmed are both routine states, not a severity tier (a mild green-ish tint, not the
+   saturated --ok fill, so it doesn't compete with --live/--danger for attention) — disarmed is
+   dimmed rather than colored at all, a grounded drone being the normal, safe state. */
+.osd-metric.armed .v {
+  color: var(--color-success-text);
+}
+
+.osd-metric.disarmed {
+  opacity: 0.7;
+}
+
+.wind-arrow {
+  display: inline-block;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.osd-group-toggle {
+  pointer-events: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-pill);
+  background: none;
+  border: var(--hud-border);
+  color: color-mix(in srgb, var(--text) 70%, transparent);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.osd-group-toggle:hover {
+  background: var(--hud-bg);
+  color: var(--text);
+}

@@ -25,6 +25,7 @@ import {
   markMapLayerExplicit,
   mapLayerTileLayer,
 } from '../../shared/map/tile-cache/leaflet-loader';
+import { FALLBACK_MAP_COLORS, resolveMapColors, type MapColors } from '../../shared/map/tactical-map/tactical-map-logic';
 
 const DEFAULT_ZOOM = 17;
 
@@ -59,6 +60,13 @@ const DEFAULT_ZOOM = 17;
  * was silently discarded the moment `/command` (or any other host) recomputed its own theme-aware
  * default over that same raw signal. Fixed so this is one shared basemap contract, not five slightly
  * different ones.
+ *
+ * **Corrected track (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6)** — `[correctedTrail]`
+ * draws a second, dashed polyline over the raw one whenever `GET /api/geo/corrections?usageId=` has
+ * anything to show; empty (the default) simply draws nothing, the honest "absent, not empty" degrade
+ * §3.8's own Off-state row requires. Colored from the live theme (`resolveMapColors`, reused from
+ * `TacticalMap`'s own module) rather than a hardcoded literal, unlike the pre-existing raw
+ * `trailLine` beside it — out of this wave's scope to also migrate.
  */
 @Component({
   selector: 'vision-replay-map',
@@ -74,6 +82,15 @@ export class ReplayMap {
   /** The marker's position at the scrub time, or `undefined` before any positioned sample exists. */
   readonly markerPosition = input<GeoPosition | undefined>(undefined);
   readonly markerHeadingDegrees = input<number | undefined>(undefined);
+
+  /**
+   * The visual-geolocation corrected track, up to the scrub position (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+   * §3.8, wave H6) — `ReplayFacade#correctedTrail`, itself `core/geo/geo-logic.ts#correctedTrailPoints`
+   * over `GET /api/geo/corrections?usageId=`. Empty on a flight with no corrections (disabled flag,
+   * or none computed) — `applyScrub` below then simply clears the second polyline to nothing, the
+   * same "absent, not empty" degrade every other geo surface in this wave follows.
+   */
+  readonly correctedTrail = input<readonly GeoPosition[]>([]);
 
   protected readonly settings = inject(SettingsStore);
   protected readonly theme = inject(ThemeStore);
@@ -95,8 +112,17 @@ export class ReplayMap {
   private tileLayer: Leaflet.TileLayer | null = null;
   private marker: Leaflet.Marker | null = null;
   private trailLine: Leaflet.Polyline | null = null;
+  /** The corrected-track polyline (§3.8) — dashed, `colors.trail`, visually secondary to the raw
+   * `trailLine` above, same "hollow ring, not a filled dot" secondary treatment `TacticalMap`'s own
+   * correction marker uses, translated to a line. */
+  private correctedTrailLine: Leaflet.Polyline | null = null;
   private hasFitRoute = false;
   private generation = 0;
+
+  /** Read from the live theme, never a frozen import-time snapshot — same reasoning as
+   * `TacticalMap#mapColors`'s own doc comment. Only the corrected-track line reads this; the raw
+   * trail/marker keep their pre-existing literal styling unchanged (out of this wave's scope). */
+  protected readonly mapColors = signal<MapColors>(FALLBACK_MAP_COLORS);
 
   constructor() {
     afterNextRender(() => void this.initMap());
@@ -112,6 +138,20 @@ export class ReplayMap {
     effect(() => this.fitRoute(this.fullTrail()));
 
     effect(() => this.applyLayer(this.activeLayerId()));
+
+    // The corrected track (§3.8) is its own independent overlay — scrubs alongside the raw trail
+    // but never gates on it (a flight with a raw trail and no corrections, or vice versa, still
+    // draws whichever it actually has).
+    effect(() => this.applyCorrectedTrail(this.correctedTrail()));
+
+    // Theme flips recolor the corrected line — mirrors `TacticalMap`'s own dedicated theme effect
+    // (its own doc comment has the full "why a separate effect, not folded into applyLayer" case).
+    effect(() => {
+      this.theme.theme();
+      if (this.leaflet && this.map) {
+        this.refreshMapColors();
+      }
+    });
 
     inject(DestroyRef).onDestroy(() => this.teardown());
   }
@@ -145,12 +185,20 @@ export class ReplayMap {
     const map = L.map(this.mapHost().nativeElement, { center: [0, 0], zoom: 2 });
     this.map = map;
     this.applyLayer(this.activeLayerId());
+    this.refreshMapColors();
 
     this.trailLine = L.polyline([], { color: '#4f8cff', weight: 3, opacity: 0.85 }).addTo(map);
+    this.correctedTrailLine = L.polyline([], {
+      color: this.mapColors().trail,
+      weight: 2,
+      opacity: 0.75,
+      dashArray: '6 5',
+    }).addTo(map);
     this.marker = L.marker([0, 0], { icon: droneDivIcon(L, 0), opacity: 0, keyboard: false }).addTo(map);
 
     this.fitRoute(this.fullTrail());
     this.applyScrub(this.trail(), this.markerPosition(), this.markerHeadingDegrees(), this.autoFollow());
+    this.applyCorrectedTrail(this.correctedTrail());
   }
 
   private applyScrub(
@@ -177,6 +225,26 @@ export class ReplayMap {
     if (follow) {
       this.map.panTo(point, { animate: false });
     }
+  }
+
+  /** The corrected track (§3.8) — a second, dashed polyline; no marker/heading of its own (the raw
+   * marker above already shows "where the drone is now" — this line only ever needs to show the
+   * corrected *path*, not a second aircraft icon). */
+  private applyCorrectedTrail(correctedTrail: readonly GeoPosition[]): void {
+    const L = this.leaflet;
+    if (!L || !this.correctedTrailLine) {
+      return; // map chunk/instance not ready yet — initMap() re-applies once it is
+    }
+    this.correctedTrailLine.setLatLngs(correctedTrail.map((position) => L.latLng(position.latitude, position.longitude)));
+  }
+
+  /** Re-resolves {@link mapColors} from the live theme and repaints the corrected line with it — mirrors `TacticalMap#refreshMapColors`. */
+  private refreshMapColors(): void {
+    const el = this.mapHost().nativeElement;
+    const readVar = (name: string): string => getComputedStyle(el).getPropertyValue(name);
+    const colors = resolveMapColors(readVar);
+    this.mapColors.set(colors);
+    this.correctedTrailLine?.setStyle({ color: colors.trail });
   }
 
   /** Fits the view to the whole route once it first has ≥1 point — a no-op on later, smaller changes. */
@@ -212,5 +280,6 @@ export class ReplayMap {
     this.tileLayer = null;
     this.marker = null;
     this.trailLine = null;
+    this.correctedTrailLine = null;
   }
 }

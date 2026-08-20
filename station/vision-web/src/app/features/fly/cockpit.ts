@@ -3,6 +3,7 @@ import { RouterLink } from '@angular/router';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { WeatherStore } from '../../core/weather/weather-store';
+import { GeoStore } from '../../core/geo/geo-store';
 import { UiStore } from '../../core/ui/ui-store';
 import { Player } from '../../shared/player/player';
 import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
@@ -104,7 +105,7 @@ type CockpitDialog = 'stop';
   // comment for why it can't be a shared root singleton. `CockpitFacade` shares this same injector
   // so its own `inject(TelemetryStore)`/`inject(DetectionsStore)`/`inject(WeatherStore)` resolve to
   // these exact instances (see `CockpitFacade`'s own doc comment).
-  providers: [TelemetryStore, DetectionsStore, WeatherStore, CockpitFacade],
+  providers: [TelemetryStore, DetectionsStore, WeatherStore, GeoStore, CockpitFacade],
 })
 export class CockpitPage {
   /** Bound from the route by `withComponentInputBinding()` (`cockpit.routes.ts` names the segment

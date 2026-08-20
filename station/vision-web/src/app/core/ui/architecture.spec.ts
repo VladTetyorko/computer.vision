@@ -55,6 +55,8 @@ const ROUTED_PAGES = [
   // they're guarded from day one rather than grandfathered in later.
   'preflight/preflight',
   'readiness/readiness',
+  // Visual geolocation v2 region manager (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6).
+  'geo/region-manager',
 ];
 
 // All feature .ts sources, inlined as raw strings at build time. Keys look like

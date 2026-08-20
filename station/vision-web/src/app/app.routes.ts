@@ -27,6 +27,7 @@ import { SYSTEM_STATUS_ROUTES } from './features/system-status/system-status.rou
 import { LABELING_ROUTES } from './features/labeling/labeling.routes';
 import { MODELS_ROUTES } from './features/models/models.routes';
 import { TRAINING_JOB_ROUTES } from './features/training-jobs/training-jobs.routes';
+import { GEO_ROUTES } from './features/geo/geo.routes';
 import { authGuard } from './core/auth/auth-guard';
 import { landingGuard } from './core/shell/landing-guard';
 
@@ -72,6 +73,7 @@ export const routes: Routes = [
       ...AUDIT_ROUTES,
       ...CATEGORIES_ROUTES,
       ...REPORTS_ROUTES,
+      ...GEO_ROUTES,
       ...SYSTEM_STATUS_ROUTES,
       // MODELS_ROUTES' static 'manage/training/models' must precede LABELING_ROUTES' param route
       // 'manage/training/:datasetId' — see MODELS_ROUTES' own doc comment. TRAINING_JOB_ROUTES has
