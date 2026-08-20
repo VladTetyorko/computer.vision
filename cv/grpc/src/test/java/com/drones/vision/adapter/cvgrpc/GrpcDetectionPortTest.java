@@ -668,8 +668,8 @@ class GrpcDetectionPortTest {
         StreamId streamId = StreamId.random();
         TargetLock lock = new TargetLock(3, 7L, null, null, false);
         TrackingConfig tracking = new TrackingConfig(TrackingMode.FOLLOW, "lk", 1500, 20, 45, 25, 4, 3, 800, lock);
-        PipelineConfig config = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true,
-                java.util.Set.of(), EventRuleConfig.defaults(), true, true, tracking);
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2,
+                java.util.Set.of(), EventRuleConfig.defaults(), true, tracking);
 
         port.detect(frame(streamId, 0, PixelFormat.BGR24), config).toCompletableFuture().get(5, TimeUnit.SECONDS);
 

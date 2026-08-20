@@ -71,8 +71,8 @@ class GrpcPulledDetectionPortTest {
     }
 
     private static PipelineConfig config(String modelId, String modelVersion, double confidence, int fps) {
-        return new PipelineConfig(new ModelRef(modelId, modelVersion), confidence, fps, 2, true, Set.of(),
-                EventRuleConfig.defaults(), true, true, TrackingConfig.defaults());
+        return new PipelineConfig(new ModelRef(modelId, modelVersion), confidence, fps, 2, Set.of(),
+                EventRuleConfig.defaults(), true, TrackingConfig.defaults());
     }
 
     private static CameraAttitude attitude(double yaw) {
