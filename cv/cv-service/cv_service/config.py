@@ -286,19 +286,33 @@ DEFAULT_TRACK_SESSION_CAPACITY = 64
 # deployment-only knob, same "resolved straight from Settings" shape as
 # `track_max_age_millis` before it).
 #
-# `1` -- today's exact single-target behaviour -- is the shipped default,
-# same "ship the less-proven behaviour opt-in" posture `DEFAULT_TRACK_
-# ASSOCIATE_ENGINE`'s own comment documents for `cost`: multi-target FOLLOW
-# is new code, and while its OWN risk is low (P2 still holds -- K tracker
-# updates is K x ~0.3ms, never a YOLO pass -- and a wrong "extra" box is
-# cosmetic, not a mis-identified lock), it is still an operator-visible
-# behaviour change (more boxes on screen, more per-target engine instances)
-# that deserves the same "prove it, then flip the fleet default" discipline
-# rather than changing what every existing deployment sees for free. An
-# operator sets `CV_TRACK_FOLLOW_TOP_K=3` (or higher) to opt a fleet into
-# situational awareness between verify passes -- review finding C6's own
-# complaint ("the operator's display holds one target and NOTHING ELSE").
-DEFAULT_TRACK_FOLLOW_TOP_K = 1
+# TRACK-IDENTITY-PLAN wave L4 raised the default from `1` to `2` -- ONE
+# extra target alongside the locked one, not the "opt a fleet into full
+# situational awareness" `3+` the comment above used to gate behind. Two
+# measurements on the dev box justify the move (both via `tools.trackeval`
+# and a direct `time.perf_counter()` probe against a real `StreamTracking
+# Session`, `clutter`/`crowd_recall`/`pan_step` scenarios, `lk` engine):
+#   - Cost: a tracker-only FOLLOW frame at K=2 costs one MORE `lk` `update()`
+#     call than K=1 -- MODULE.md's own benchmark puts that at 0.525ms mean /
+#     0.619ms p95 on this box. Measured end-to-end (200-frame direct probe,
+#     `perf_counter`, not the harness's own ms-quantized column) K=1 vs K=2
+#     were statistically indistinguishable (~2.4-2.6ms mean, ~3.0ms p95
+#     either way) -- the marginal cost is noise against total per-frame
+#     overhead, and trivial against the default 2000ms verify cadence and a
+#     23ms YOLO pass (GB4005 is CPU-only/OpenVINO -- no budget headroom to
+#     lose, but this does not touch it).
+#   - Safety: the LOCKED target's own `locked_track_id` and box geometry are
+#     byte-identical between K=1 and K=2 runs of the full `tools.trackeval`
+#     harness on every scenario checked (`clutter`, `crowd_recall`,
+#     `pan_step`) -- an extra fails independently of the lock (P2, unchanged
+#     by L4). `clutter`'s IDSW/FM columns DO move at K=2; that is the same
+#     greedy-IoU-matcher harness limitation already proven for K=3 (this
+#     file's "Multi-target FOLLOW" section) re-confirmed here, not a real
+#     regression -- the locked box itself never moves.
+# `3+` still needs its own opt-in per the reasoning below (more engine
+# instances, more on-screen boxes) -- L4 only asked whether ONE extra fits
+# the budget, and it measurably does.
+DEFAULT_TRACK_FOLLOW_TOP_K = 2
 
 # TRACKING-V2-PLAN wave C5c (review §4.6, "detection recall -- the other
 # half of the complaint"): whether a CONFIRMED track the full-frame pass

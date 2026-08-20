@@ -82,13 +82,13 @@ server's own defaults: `cost` for ASSOCIATE, `lk` for FOLLOW (`CV_TRACK_ASSOCIAT
 scenario         | mode                    | engine | frames | gt | IDSW | FM | MT | PT | ML | gaps | recov | recov% | life_mean | life_med | det/s | trk_ms_avg | trk_ms_p95 | coast_n | cADE  | cFDE  | cADE_px | cFDE_px | implaus_n
 -----------------+-------------------------+--------+--------+----+------+----+----+----+----+------+-------+--------+-----------+----------+-------+------------+------------+---------+-------+-------+---------+---------+----------
 clutter          | TRACKING_MODE_ASSOCIATE | cost   | 60     | 10 | 0    | 0  | 10 | 0  | 0  | 0    | 0     | n/a    | 55.8      | 60.0     | 10.00 | ~4         | ~5         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-clutter          | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 60.0      | 60.0     | 0.83  | ~1         | ~1         | 55      | 0.218 | 0.324 | 69.9    | 103.8   | 0        
+clutter          | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 3    | 3  | 0  | 1  | 0  | 3    | 0     | 0%     | 24.0      | 20.0     | 0.83  | ~1         | ~3         | 55      | 0.069 | 0.096 | 22.1    | 30.6    | 0        
 crossing         | TRACKING_MODE_ASSOCIATE | cost   | 50     | 2  | 0    | 0  | 2  | 0  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-crossing         | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 0.80  | ~0.4       | ~1         | 48      | 0.194 | 0.228 | 62.1    | 72.9    | 0        
+crossing         | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 49.0      | 49.0     | 0.80  | ~1         | ~2         | 48      | 0.194 | 0.228 | 62.1    | 72.9    | 0        
 crossing_similar | TRACKING_MODE_ASSOCIATE | cost   | 50     | 2  | 0    | 2  | 2  | 0  | 0  | 2    | 2     | 100%   | 44.0      | 44.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-crossing_similar | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 0.80  | ~0.4       | ~1         | 48      | 0.357 | 0.752 | 95.9    | 196.8   | 0        
+crossing_similar | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 36.0      | 36.0     | 0.80  | ~1         | ~1         | 48      | 0.357 | 0.752 | 95.9    | 196.8   | 0        
 crowd_recall     | TRACKING_MODE_ASSOCIATE | cost   | 150    | 6  | 0    | 6  | 6  | 0  | 0  | 6    | 6     | 100%   | 60.0      | 60.0     | 10.00 | ~0.8       | ~2         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-crowd_recall     | TRACKING_MODE_FOLLOW    | lk     | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 101.0     | 101.0    | 1.47  | ~0.4       | ~1         | 98      | 0.016 | 0.022 | 4.9     | 6.8     | 0        
+crowd_recall     | TRACKING_MODE_FOLLOW    | lk     | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 53.3      | 40.0     | 1.47  | ~0.5       | ~2         | 98      | 0.016 | 0.022 | 4.9     | 6.8     | 0        
 dropout          | TRACKING_MODE_ASSOCIATE | cost   | 50     | 1  | 0    | 4  | 1  | 0  | 0  | 4    | 4     | 100%   | 41.0      | 41.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
 dropout          | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 35.0      | 35.0     | 1.40  | ~0.7       | ~1         | 33      | 0.002 | 0.003 | 0.6     | 0.8     | 0        
 latency          | TRACKING_MODE_ASSOCIATE | cost   | 60     | 1  | 0    | 4  | 0  | 1  | 0  | 4    | 4     | 100%   | 52.0      | 52.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
@@ -106,7 +106,7 @@ pan              | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 0  | 
 pan_occlusion    | TRACKING_MODE_ASSOCIATE | cost   | 90     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 65.0      | 65.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
 pan_occlusion    | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 87.0      | 87.0     | 0.78  | ~0.3       | ~1         | 84      | 0.260 | 0.328 | 83.3    | 104.8   | 0        
 pan_step         | TRACKING_MODE_ASSOCIATE | cost   | 90     | 2  | 0    | 2  | 2  | 0  | 0  | 2    | 2     | 100%   | 60.0      | 60.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-pan_step         | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 3  | 1  | 0  | 0  | 3    | 3     | 100%   | 90.0      | 90.0     | 0.56  | ~1         | ~1         | 87      | 0.013 | 0.016 | 3.8     | 4.9     | 0        
+pan_step         | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 3  | 1  | 0  | 0  | 3    | 3     | 100%   | 46.3      | 30.0     | 0.56  | ~1         | ~1         | 87      | 0.013 | 0.016 | 3.8     | 4.9     | 0        
 small_target     | TRACKING_MODE_ASSOCIATE | cost   | 80     | 1  | 0    | 2  | 1  | 0  | 0  | 2    | 2     | 100%   | 78.0      | 78.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
 small_target     | TRACKING_MODE_FOLLOW    | lk     | 80     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 80.0      | 80.0     | 0.50  | ~1         | ~1         | 78      | 0.001 | 0.001 | 0.3     | 0.3     | 0        
 tiny_fast        | TRACKING_MODE_ASSOCIATE | cost   | 70     | 3  | 2    | 0  | 3  | 0  | 0  | 0    | 0     | n/a    | 19.0      | 19.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
@@ -475,3 +475,103 @@ knobs pin behaviour around the DEFAULT value, not its literal number, so none ne
 line 73) and this file's own §1 reproduction note ("Both engines are the server's own
 defaults: `cost` for ASSOCIATE") already said otherwise -- fixed to state the correct
 direction, no behaviour change.
+
+## 7. TRACK-IDENTITY-PLAN wave L4 (2026-08-20) -- FOLLOW's memory path, measured
+
+`docs/plans/active/TRACK-IDENTITY-PLAN.md`'s L4, after L1 (track-level label election) and
+L2 (association hardening, §6 above). D-B's own diagnosis
+(`TRACK-IDENTITY-RESEARCH.md` §2): FOLLOW's re-acquire is geometry-only
+(`lock.py`'s `best_iou_match`/`select_by_point`), so once the lost track's prediction has
+drifted too far to clear `redetect_iou_threshold`, the lock is dead until the operator
+re-clicks -- `ObjectMemory` (the dormant re-ID gallery, wave C4) was consulted only from
+ASSOCIATE's unmatched-target path. This wave adds the missing half.
+
+**What shipped.** (1) `_settle_followed` (`session.py`) now remembers the followed track to
+`ObjectMemory` the instant it settles LOST, before unbinding -- not merely a nice-to-have:
+`TrackBook.apply()` is the only thing that ages a track towards the book's own automatic
+expiry-driven remember (`_retire`), and FOLLOW stops calling `apply()` for an unbound target
+entirely, so without this explicit call the automatic path is unreachable for a single-target
+FOLLOW session that never re-acquires. (2) A new `ObjectMemory.match_identity(track_id, ...)`
+(`memory.py`) scores ONE requested dormant identity through the same four gates `match()`
+already applies, rather than `match()`'s own whole-gallery best-match -- required because
+FOLLOW's re-acquire wants a specific id back, and letting a different, better-scoring dormant
+identity win would silently redirect the lock to an object nobody asked to follow. A new
+`_attempt_follow_recovery` (`session.py`) calls it from `_follow_verify`'s "nothing to
+re-anchor to" branch, gated to a TRACK-ID-ONLY lock target (the one shape with no geometric
+reference of its own left to retry -- a point/box lock keeps retrying its original click/box
+every pass and never reaches this code). The claim is deferred until `engine.init()` on the
+winning box has actually succeeded (mirroring `_attempt_recovery`'s own read-only match/claim
+split, one step further), so a rare tracker I/O failure never burns the one dormant identity
+for nothing. (3) `DEFAULT_TRACK_FOLLOW_TOP_K` 1 -> 2 -- see below.
+
+**The top_k measurement.** Two questions, both required before flipping a fleet-wide default
+this codebase's own "prove it, then flip" discipline (§6's L2 write-up is the precedent):
+does ONE extra tracked target fit FOLLOW's own frame budget, and does it touch the LOCKED
+target's own behaviour at all.
+
+*Cost.* A tracker-only FOLLOW frame at `top_k=2` costs exactly one more `SingleObjectTracker.
+update()` call than `top_k=1` -- this file's own "measured on this box" table (§1's own repo,
+`MODULE.md`) puts `lk.update()` at 0.525ms mean / 0.619ms p95. A direct `time.perf_counter()`
+probe (200 tracker-only frames, `clutter`'s own geometry, real `StreamTrackingSession`, not
+`tools.trackeval`'s own ms-quantized `trk_ms_*` columns -- this file's own §1 note on why
+those are display-only) measured `top_k=1` at 2.588ms mean / 3.058ms p95 and `top_k=2` at
+2.394ms mean / 3.047ms p95 on this box -- statistically indistinguishable, the marginal cost
+lost in run-to-run noise. Trivial either way against the default 2000ms verify cadence and a
+23ms `yolo26n.pt` detector pass, and the GB4005 deployment profile (Intel-only/OpenVINO CPU
+inference, no CUDA headroom to lose) has no scenario where a sub-millisecond extra tracker
+update is what breaks a frame budget a 23ms detector pass did not already threaten.
+
+*Safety.* Ran `tools.trackeval --scenario {clutter,crowd_recall,pan_step} --mode FOLLOW
+--engine lk` at `CV_TRACK_FOLLOW_TOP_K=1` and `=2`, then a direct script comparing
+`outcome.locked_track_id` and the locked box's own geometry, frame by frame, between the two
+runs (the same proof this file's "Multi-target FOLLOW" section in `MODULE.md` already made
+for `top_k=3`, re-run here specifically for `2`): **byte-identical on all three scenarios.**
+The locked target's own id and box never move; only the SECOND, extra tracked box is new.
+
+**`clutter`/FOLLOW's own §1 row moving is that same already-documented harness limitation,
+not a regression -- re-confirmed, not merely inferred from the `top_k=3` precedent.** At
+`top_k=2` the row now reads `IDSW=3, FM=3, gaps=3, recov%=0%, life_mean=24.0` (was `IDSW=0,
+FM=0, gaps=0, recov%=n/a, life_mean=60.0`) -- but the locked-only comparison above proves the
+LOCK's own outcome is unchanged; `metrics.py`'s greedy IoU matcher cannot tell a locked box
+from an extra one and lets the extra win a ground-truth match slot the locked box would have
+gotten, registering spurious churn against an object nobody's lock ever left. The same
+contamination was independently caught (and fixed) in `tests/trackeval/test_ego_motion_
+outcome.py`'s own `follow_counts()` helper below. Four other rows (`crossing`, `crossing_
+similar`, `crowd_recall`, `pan_step`) move on `life_mean`/`life_med` alone -- an extra
+surviving in the frame longer than `MOT`'s single-target-shaped `life_*` columns were ever
+designed to summarize when a second box is now also in play, not an IDSW/FM change. All ten
+other columns on those four rows, and all fifteen ASSOCIATE rows, are unchanged.
+
+**§1's table above is updated to this wave's fresh numbers** (the five FOLLOW rows named
+above) -- `tests/trackeval/test_baseline_consistency.py` passes against the new table.
+`recov%` (the column that would show wave L4's OWN new recovery mechanism working) is
+UNCHANGED on every row: none of the harness's fifteen scenarios ever construct a
+track-id-only lock (`tools/trackeval/replay.py`'s own `_lock_onto` always locks by point, "the
+same thing an operator's click does in production"), so `_attempt_follow_recovery`'s new code
+path is never exercised by `--all` at all -- it is proven instead by three new session-level
+tests (`tests/tracking/test_session.py`) built specifically to construct that lock shape: a
+followed track lost then reappearing too far away for geometry alone recovers under the same
+id with no new `lock_seq`; the same reappearance past the gallery's TTL stays honestly
+unrecovered; a label-incompatible impostor at the same plausible position and timing does not
+steal the lock. `memory.py`'s own `match_identity` gates (label/appearance/motion/TTL, and the
+no-descriptor neutral-0.5 reading FOLLOW always exercises, since it never resolves an
+appearance extractor) are pinned directly in `tests/tracking/test_memory.py`.
+
+**Test fixes required by the default change, not by a defect.** `follow_session()`
+(`tests/tracking/test_session.py`'s own single-target FOLLOW helper) now pins
+`Settings(track_follow_top_k=1)` explicitly rather than relying on the (previously accidental)
+production default -- its single shared `FakeFollower` corrupts multi-target state
+(`multi_follow_session`'s own docstring already warned of this), so every test built on it is
+implicitly single-target and should not depend on a global default that can change.
+`test_follow_top_k_defaults_to_one` (`test_params.py`) is now `..._to_two`, pinning the new
+line. `test_a_raising_engine_degrades_one_frame_and_the_stream_survives`
+(`tests/grpc/test_detect_stream_tracking.py`) fed two detections per frame from the start (its
+own `FakeDetector` docstring, "one steady detection plus a distractor") and asserted the
+id sequence produced by ONE id minted per acquisition; at `top_k=2` an acquisition now mints
+two (locked + extra), so the post-reset re-acquire is the third id handed out, not the second
+-- updated, comment included, not a behaviour regression.
+
+**Full cv-service pytest, before and after this wave.** `PYTHONPATH="$PWD" .venv/bin/python
+-m pytest -q`, foreground: **1227 passed / 1 skipped before this wave's edits (§6's own
+closing count), 1238 passed / 1 skipped after** -- eleven new tests (eight `memory.py`
+`match_identity` gate tests, three `session.py` memory-recovery scenarios), zero regressions.

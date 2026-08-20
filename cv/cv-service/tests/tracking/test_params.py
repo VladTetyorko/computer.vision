@@ -435,11 +435,16 @@ def test_resolve_takes_follow_top_k_from_settings():
     assert resolved.follow_top_k == 5
 
 
-def test_follow_top_k_defaults_to_one():
-    # The wave's own safety net: shipping opt-in (see `config.py`'s
-    # `DEFAULT_TRACK_FOLLOW_TOP_K` for why) means today's exact single-
-    # target FOLLOW behaviour must be what a fresh deployment gets.
-    assert Settings().track_follow_top_k == 1
+def test_follow_top_k_defaults_to_two():
+    # TRACK-IDENTITY-PLAN wave L4 raised this 1 -> 2 (`config.py`'s
+    # `DEFAULT_TRACK_FOLLOW_TOP_K` own comment has the measurement): ONE
+    # extra alongside the locked target, proven cheap (noise-level on a
+    # direct `perf_counter` probe) and proven not to touch the LOCKED
+    # target's own id/geometry (byte-identical between top_k=1 and top_k=2
+    # across the harness's own scenarios). `3+` -- "opt a fleet into full
+    # situational awareness" -- still ships opt-in; this safety net now
+    # pins THAT line instead.
+    assert Settings().track_follow_top_k == 2
 
 
 def test_settings_read_the_wave_c5b_env_vars(monkeypatch):

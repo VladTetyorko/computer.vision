@@ -851,8 +851,13 @@ def test_a_raising_engine_degrades_one_frame_and_the_stream_survives(clock):
     survived = subject._handle_request(frame_request(2, config), session)
     assert survived.detector_ran is True  # re-acquires, stream still alive
     # A reset engine re-numbers from its own beginning, so the book retires
-    # the old id rather than letting a new object inherit it.
-    assert survived.locked_track_id == 2
+    # the old id rather than letting a new object inherit it. `FakeDetector`
+    # feeds two detections every frame (its own docstring, "one steady
+    # detection plus a distractor") and `DEFAULT_TRACK_FOLLOW_TOP_K` is 2
+    # (TRACK-IDENTITY-PLAN wave L4), so frame 0's acquisition mints id 1 for
+    # the LOCKED target and id 2 for the promoted extra -- the re-acquire
+    # here is the THIRD id handed out, not the second.
+    assert survived.locked_track_id == 3
 
 
 def test_no_tracker_registry_serves_detections_without_track_ids(clock):

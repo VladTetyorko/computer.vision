@@ -919,6 +919,16 @@ def follow_session(
     settings=None,
     **lock_kwargs,
 ):
+    # `follow_top_k` is deployment-only (no wire field, `params.py`'s own
+    # comment), so it cannot be pinned via `TrackingRequest` below -- and
+    # this helper's single `engine` is shared between the locked target and
+    # any promoted extra (`multi_follow_session`'s own docstring, right
+    # below, spells out why that corrupts multi-target state). Every caller
+    # of THIS helper is testing single-target behaviour, so it stays
+    # decoupled from whatever `DEFAULT_TRACK_FOLLOW_TOP_K` production ships
+    # (TRACK-IDENTITY-PLAN wave L4 raised it 1 -> 2) unless a caller
+    # supplies its own `settings` to opt into something else.
+    settings = settings or Settings(track_follow_top_k=1)
     engine = follower or FakeFollower()
     subject = session(FakeRegistry(follower=engine, compensator=compensator), settings=settings)
     subject.apply_config(
@@ -1248,6 +1258,124 @@ def test_a_re_acquired_target_recovers_the_id_it_had_before_it_was_lost():
 
     assert recovered.locked_track_id == born.locked_track_id
     assert recovered.boxes[0].track.state == STATE_CONFIRMED
+
+
+# -- FOLLOW's memory path (TRACK-IDENTITY-PLAN wave L4) ----------------------
+#
+# The test above (and `_select_target`'s own OCR/history fallback) already
+# cover geometric re-acquisition -- the object reappears close enough to the
+# frozen prediction to IoU-match it directly. These tests are for the case
+# geometry cannot bridge: the object reappears far enough away that no
+# candidate clears `redetect_iou_threshold`, and the dormant gallery is the
+# only thing left before FOLLOW gives up and coasts to the honest `-1`.
+#
+# The gallery path only exists for a TRACK-ID-ONLY lock target -- the one
+# shape `lock.py`'s own `select_target` reaches through `box_of_track`
+# (`_select_target`'s own docstring). A point/box lock keeps its ORIGINAL
+# click/box to keep retrying every pass and never reaches this code at all,
+# so every test below explicitly re-pins the lock to the numeric id once it
+# is known, the same way an operator picking a "recently lost" target by its
+# number would.
+
+
+def _lock_to_track_id(subject, track_id, lock_seq, *, max_age_frames=2):
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            verify_every_millis=1,
+            min_hits=1,
+            max_age_frames=max_age_frames,
+            lock=LockRequest(lock_seq=lock_seq, track_id=track_id),
+        )
+    )
+
+
+def _acquire_then_lose_a_track_id_locked_target(subject, *, max_age_frames=2):
+    """Acquire a target by point, drive it to genuinely LOST while still
+    point-locked (so `_settle_followed` remembers it to `ObjectMemory` --
+    wave L4 item 1), then re-pin the lock explicitly to its now-dormant
+    numeric id -- the same "resume following #N" gesture an operator
+    picking a recently-lost target from a list would make. `generation`
+    bumps on every accepted lock (`LockArbiter.generation`'s own docstring),
+    so this re-pin's `TrackBook` key is a FRESH one the book has never used
+    -- exactly what makes the recovery attempt below go through `_adopt`,
+    not a same-key `_observe` of a still-present stale entry.
+
+    Returns the track id, now both dormant in `ObjectMemory` AND the lock's
+    own (track-id-only) target -- the shared setup every memory-recovery
+    test below needs before geometry has anything to give up on.
+    """
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            verify_every_millis=1,
+            min_hits=1,
+            max_age_frames=max_age_frames,
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+    born = run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+    track_id = born.locked_track_id
+
+    # Occluded long enough to go LOST (`max_age_frames=2` -> 3 consecutive
+    # unconfirmed verify passes, same shape as
+    # `test_a_target_lost_past_max_age_drops_the_lock`).
+    lost = None
+    for frame in range(1, 5):
+        lost = run(subject, now_millis=frame * 10.0, detections=[])
+    assert lost.locked_track_id == 0
+
+    _lock_to_track_id(subject, track_id, lock_seq=2, max_age_frames=max_age_frames)
+    return track_id
+
+
+def test_follow_memory_recovery_rebinds_the_same_id_within_ttl_without_a_new_lock_seq():
+    subject = session(FakeRegistry(follower=FakeFollower()))
+    track_id = _acquire_then_lose_a_track_id_locked_target(subject)
+
+    # Reappears far enough away that the frozen (near-zero-velocity)
+    # prediction cannot IoU-match it (IoU 0 against `redetect_iou_
+    # threshold`'s default 0.3) -- geometry alone has already given up by
+    # the time this runs. No THIRD `LockRequest`/`lock_seq` is issued
+    # anywhere in this test: the plan's own "rebind without a new lock_seq".
+    recovered = run(subject, now_millis=2000.0, detections=[det("car", x=0.6)])
+
+    assert recovered.locked_track_id == track_id  # the SAME id, not a fresh one
+    assert recovered.boxes[0].track.track_id == track_id
+    assert recovered.boxes[0].track.state == STATE_CONFIRMED
+    assert recovered.boxes[0].identity_confidence > 0.0
+    # FOLLOW never resolves an appearance extractor, so the recovery is
+    # scored on label + motion alone -- never full confidence.
+    assert recovered.boxes[0].identity_confidence < 1.0
+    assert recovered.boxes[0].dormant_millis > 0
+
+
+def test_follow_memory_recovery_stays_honest_past_the_ttl():
+    settings = Settings(track_memory_ttl_millis=500)
+    subject = session(FakeRegistry(follower=FakeFollower()), settings)
+    track_id = _acquire_then_lose_a_track_id_locked_target(subject)
+
+    # Same reappearance as the test above, just late enough (~1.95s after
+    # the LOST transition) to have already cleared this stream's own
+    # 500ms TTL -- the identity is gone from the gallery by the time this
+    # detection arrives.
+    outcome = run(subject, now_millis=2000.0, detections=[det("car", x=0.6)])
+
+    assert outcome.locked_track_id == 0
+    assert all(box.track is None for box in outcome.boxes)
+
+
+def test_follow_memory_recovery_refuses_a_label_incompatible_impostor():
+    subject = session(FakeRegistry(follower=FakeFollower()))
+    track_id = _acquire_then_lose_a_track_id_locked_target(subject)
+
+    # Plausible geometry (same reappearance position/timing the first test
+    # recovers from), but the WRONG class -- the label gate must refuse it
+    # even though nothing else here would.
+    outcome = run(subject, now_millis=2000.0, detections=[det("bus", x=0.6)])
+
+    assert outcome.locked_track_id == 0
+    assert all(box.track is None for box in outcome.boxes)
 
 
 def test_releasing_a_lock_then_re_acquiring_yields_a_new_id():

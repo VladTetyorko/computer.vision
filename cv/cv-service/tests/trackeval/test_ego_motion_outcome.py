@@ -32,7 +32,22 @@ FIRST_FRAME_AFTER_THE_BAR = PAN_STEP_STATIC_FRAMES + PAN_STEP_GAP_FRAMES
 
 
 def follow_counts(engine: str) -> dict[int, int]:
-    """Frames after the bar clears on which the locked id sits on each object."""
+    """Frames after the bar clears on which the LOCKED id sits on each object.
+
+    TRACK-IDENTITY-PLAN wave L4 raised `DEFAULT_TRACK_FOLLOW_TOP_K` 1 -> 2,
+    so a FOLLOW outcome can now carry a second, EXTRA tracked box alongside
+    the locked one (`session.py`'s own multi-target FOLLOW, MODULE.md's
+    "Multi-target FOLLOW" section). This function's docstring -- and both
+    tests below -- are about the locked id specifically ("WHICH OBJECT THE
+    LOCKED ID ends up on"), so it filters to `outcome.locked_track_id`
+    explicitly rather than scoring every tracked box: an extra's own
+    independent tracker can legitimately latch onto either object on a given
+    frame without that meaning anything about the LOCK's own correctness --
+    the same "harness can't tell locked from extra apart" limitation
+    MODULE.md already documents for the `clutter` scenario at higher
+    `follow_top_k` values, caught here before it could silently flip these
+    two outcome-level assertions.
+    """
     sequence = pan_step()
     settings = dataclasses.replace(Settings(), track_motion_engine=engine)
     result = replay.run_replay(sequence, mode=MODE_FOLLOW, settings=settings)
@@ -40,16 +55,21 @@ def follow_counts(engine: str) -> dict[int, int]:
     for frame, outcome in zip(sequence.frames, result.outcomes):
         if frame.index < FIRST_FRAME_AFTER_THE_BAR:
             continue
-        for _track_id, box in metrics._tracked_boxes(outcome):
-            best_iou, best_gt = 0.0, None
-            for obj in frame.ground_truth:
-                if not obj.visible:
-                    continue
-                overlap = box.iou(obj.box)
-                if overlap > best_iou:
-                    best_iou, best_gt = overlap, obj.gt_id
-            if best_gt is not None and best_iou >= MATCH_IOU:
-                counts[best_gt] += 1
+        locked_box = next(
+            (box for track_id, box in metrics._tracked_boxes(outcome) if track_id == outcome.locked_track_id),
+            None,
+        )
+        if locked_box is None:
+            continue
+        best_iou, best_gt = 0.0, None
+        for obj in frame.ground_truth:
+            if not obj.visible:
+                continue
+            overlap = locked_box.iou(obj.box)
+            if overlap > best_iou:
+                best_iou, best_gt = overlap, obj.gt_id
+        if best_gt is not None and best_iou >= MATCH_IOU:
+            counts[best_gt] += 1
     return counts
 
 
