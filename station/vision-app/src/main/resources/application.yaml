@@ -581,6 +581,70 @@ vision:
         # over-confident pose.
         max-rms-error-pixels: 25.0
 
+    # --- Visual (single-camera, moving-aircraft) geolocation (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.6, D9) ---
+    visual:
+      # false (default, D9 -- "ships off, and off means invisible"): no VisualGeoRunner bean is
+      # scheduled, no gRPC geo session is ever opened, no `geo` SSE event is ever published, and
+      # every §3.3 endpoint answers 409 naming this flag. true: the runner reconciles every flying
+      # asset with a resolvable stream against an open localization session, on its own cadence
+      # below.
+      enabled: false
+      # mediamtx base URL the worker pulls keyframes from (D2, pull-only transport -- no frame ever
+      # crosses the Java wire); O12: a session's source URL is this + "/" + the streamId.
+      rtsp-base: rtsp://localhost:8554
+      # RTSP transport hint restated on every control message.
+      rtsp-transport: tcp
+      # The worker's own geo sampling rate, frames/sec.
+      keyframe-fps: 1.0
+      # VisualGeoRunner's own tick cadence, milliseconds -- session reconcile + telemetry pump +
+      # prune, all on one cadence.
+      runner-interval-millis: 2000
+      # Telemetry older than this is withheld rather than sent stale (PullControl doctrine -- a
+      # one-shot message can be lost with no error/retry).
+      telemetry-max-age: PT2S
+      region:
+        # Tile zoom level -- z16 measured a 0.75-0.96 false-fix rate; do not lower.
+        zoom: 17
+        # Per-region tile ceiling before an ingest is refused.
+        max-tiles: 4000
+      tiles:
+        url-template: https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+        attribution: Esri World Imagery
+        concurrency: 4
+        requests-per-second: 20
+        timeout: PT10S
+        max-retries: 5
+        user-agent: vision-geo/0.0.2
+        # O6: WaybackTileSource vs. HttpTileSource -- off until occlusion (not appearance-domain
+        # gap) is the bottleneck.
+        wayback-multi-date: false
+      upload:
+        timeout: PT30M
+        chunk-bytes: 262144
+      gate:
+        # D5 -- the Java half only. A fix claiming better than this is not believed.
+        min-radius-meters: 5.0
+        # Above this, downgraded to PROBABLE, never CONFIRMED.
+        max-radius-meters: 120.0
+        # Consecutive fixes agreeing before CONFIRMED.
+        confirm-consecutive: 3
+        confirm-agreement-meters: 60.0
+        # The consecutive run must fit inside this.
+        confirm-window: PT10S
+      divergence:
+        # Separation > sigma * combined 1-sigma qualifies.
+        sigma: 3.0
+        # Qualifying CONFIRMED fixes before the alarm latches.
+        consecutive-fixes: 4
+        # No qualifying fix for this long clears the alarm.
+        clear-after: PT30S
+        # Used when the raw fix reports no HDOP-derived radius.
+        default-raw-radius-meters: 10.0
+      # track_corrections prune horizon.
+      retention: PT12H
+      # Per-usage cap, trimmed by the runner.
+      max-rows-per-usage: 20000
+
   # --- Vehicle onboarding: probe / readiness / remediation (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1, Wave O5) ---
   onboarding:
     probe:

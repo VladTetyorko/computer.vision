@@ -104,4 +104,16 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE)
                 .body(new ErrorResponse("PAYLOAD_TOO_LARGE", ex.getMessage()));
     }
+
+    /**
+     * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3 — a region-index call ({@code GET}/{@code DELETE
+     * /api/geo/regions}) that could not reach cv-service maps to {@code 503}, distinct from every
+     * other mapping here: the request itself was well-formed and authorized, but the collaborator
+     * this endpoint proxies to is down.
+     */
+    @ExceptionHandler(GeoServiceUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handleServiceUnavailable(GeoServiceUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ErrorResponse("SERVICE_UNAVAILABLE", ex.getMessage()));
+    }
 }

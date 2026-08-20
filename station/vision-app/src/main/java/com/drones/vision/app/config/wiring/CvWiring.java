@@ -63,10 +63,13 @@ public class CvWiring {
      *
      * <p>Present whenever any property enables a consumer: {@link VisionCvProperties#enabled()}
      * (live push-mode detection), {@code VisionTrainingProperties#enabled()} (the model registry
-     * <em>and</em> training port), <strong>or</strong> {@link VisionCvProperties#pullEnabled()}
+     * <em>and</em> training port), {@link VisionCvProperties#pullEnabled()}
      * (docs/plans/active/MEDIA-SOT-PLAN.md wave M7, switch B — {@link #pulledDetectionPort} needs the
-     * same channel {@code DetectPulled} rides on). With every flag off (the default), no channel is
-     * built at all.
+     * same channel {@code DetectPulled} rides on), <strong>or</strong> {@code vision.geo.visual.enabled}
+     * (docs/plans/active/VISUAL-GEO-V2-PLAN.md D3 — visual geolocation's {@code GeoLocate}/{@code
+     * BuildReferenceIndex} calls reuse this same channel and {@link #cvChannelSupervisor} rather than
+     * opening a second one; see {@code VisualGeoWiringConfiguration} in {@code station/vision-app}).
+     * With every flag off (the default), no channel is built at all.
      *
      * <h2>Shutdown ownership</h2>
      * This bean — not either port — owns the channel's lifecycle ({@code destroyMethod =
@@ -88,7 +91,7 @@ public class CvWiring {
      */
     @Bean(destroyMethod = "shutdown")
     @ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false} "
-            + "or '${vision.cv.frame-transport:push}' == 'pull'")
+            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false}")
     public ManagedChannel cvGrpcChannel(VisionCvProperties cvProperties) {
         GrpcCvSettings settings = toGrpcCvSettings(cvProperties);
         ManagedChannelBuilder<?> builder = ManagedChannelBuilder.forAddress(cvProperties.host(), cvProperties.port());
@@ -150,7 +153,8 @@ public class CvWiring {
      */
     @Bean(initMethod = "start", destroyMethod = "close")
     @ConditionalOnExpression("(${vision.cv.enabled:false} or ${vision.training.enabled:false} "
-            + "or '${vision.cv.frame-transport:push}' == 'pull') and ${vision.cv.reconnect.enabled:true}")
+            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false}) "
+            + "and ${vision.cv.reconnect.enabled:true}")
     public CvChannelSupervisor cvChannelSupervisor(VisionCvProperties cvProperties,
                                                     ObjectProvider<ManagedChannel> cvGrpcChannel) {
         return new CvChannelSupervisor(cvGrpcChannel.getObject(), toGrpcCvSettings(cvProperties));

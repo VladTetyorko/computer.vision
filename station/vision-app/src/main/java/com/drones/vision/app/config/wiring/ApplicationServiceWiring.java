@@ -14,6 +14,7 @@ import com.drones.vision.flight.domain.port.ManualControlPort;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
+import com.drones.vision.flight.domain.port.TrackCorrectionLiveUpdatePort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
@@ -93,12 +94,14 @@ import java.util.concurrent.TimeUnit;
  * no-op when that feature is switched off — see {@code devsupport}'s remaining classes. The live
  * server-push data plane (docs/plans/done/REALTIME-PLAN.md
  * §4): {@link #fleetLiveUpdatePort}/{@link #telemetryLiveUpdatePort}/{@link
- * #detectionLiveUpdatePort}/{@link #mapLiveUpdatePort}/{@link #eventLiveUpdatePort} each select
- * between the real {@code LiveUpdateRegistry} (vision-api, which implements all five — one of the
- * five ports the former god-port {@code LiveUpdatePublisherPort} split into,
- * docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b) and {@code NoopLiveUpdatePublisher} (same
- * five-interface shape) per {@link VisionLiveProperties#enabled()} (default {@code true}); when
- * enabled, every one of the five bean methods resolves to the same {@code LiveUpdateRegistry}
+ * #detectionLiveUpdatePort}/{@link #mapLiveUpdatePort}/{@link #eventLiveUpdatePort}/{@link
+ * #trackCorrectionLiveUpdatePort} each select between the real {@code LiveUpdateRegistry}
+ * (vision-api, which implements all six — five ports the former god-port {@code
+ * LiveUpdatePublisherPort} split into, docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b, plus a
+ * sixth added for visual geolocation's {@code geo:<assetId>} topic,
+ * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5) and {@code NoopLiveUpdatePublisher} (same
+ * six-interface shape) per {@link VisionLiveProperties#enabled()} (default {@code true}); when
+ * enabled, every one of the six bean methods resolves to the same {@code LiveUpdateRegistry}
  * singleton, so a call through any one port still lands on the one shared dispatcher. {@link
  * #telemetryLiveUpdatePort}/{@link #detectionLiveUpdatePort} are threaded unconditionally into
  * {@link #usageTracker}/{@link #streamService}; {@link #auditTrailPort}/{@link
@@ -194,6 +197,23 @@ public class ApplicationServiceWiring {
     /** Selects the {@link EventLiveUpdatePort} implementation — see {@link #fleetLiveUpdatePort}. */
     @Bean
     public EventLiveUpdatePort eventLiveUpdatePort(VisionLiveProperties properties,
+                                                    @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
+        if (properties.enabled()) {
+            return registry.getObject();
+        }
+        return new NoopLiveUpdatePublisher();
+    }
+
+    /**
+     * Selects the {@link TrackCorrectionLiveUpdatePort} implementation — see {@link
+     * #fleetLiveUpdatePort}; the sixth selector, added for visual geolocation's {@code
+     * geo:<assetId>} topic (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5), gated on the same
+     * {@link VisionLiveProperties#enabled()} flag as the other five rather than a new one — {@code
+     * vision.geo.visual.enabled} decides whether the feature runs at all; whether its SSE topic
+     * exists is the live registry's own concern.
+     */
+    @Bean
+    public TrackCorrectionLiveUpdatePort trackCorrectionLiveUpdatePort(VisionLiveProperties properties,
                                                     @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
         if (properties.enabled()) {
             return registry.getObject();
