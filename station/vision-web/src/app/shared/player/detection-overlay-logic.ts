@@ -681,6 +681,171 @@ export function trackTrails(
   return byTrack;
 }
 
+// --- Sticky labels per track (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1) ---------------------------
+// TRACK-IDENTITY-RESEARCH.md §1's six-layer chain (item 6, "SPA"): an open-vocabulary detector rolls a
+// ~4585-class die on every pass, and every downstream layer — including this one, before this wave —
+// repeated the newest roll verbatim: the painted text, the class-bucket hue ({@link classBucketHue}
+// below), and the hover tooltip all flipped in lockstep with the raw per-frame label. L1
+// (docs/plans/active/TRACK-IDENTITY-PLAN.md §L1, `cv/cv-service/cv_service/tracking/track.py`) is the
+// real fix — a server-side election, emitted on the wire — but ships from a different module on a
+// different runtime; this is the **stopgap + defense** for a cv-service deployment that hasn't (yet)
+// picked it up. {@link electStickyLabels} mirrors L1's contract (confidence-weighted tally,
+// switch-margin + switch-streak hysteresis) purely, client-side, over the batch history
+// `DetectionsStore` already retains (`core/detections/detections-store.ts#DETECTIONS_LIMIT`, up to 50)
+// — no new poll, no persisted per-track state of its own (see {@link electFromObservations}'s own doc
+// comment for why a from-scratch replay beats a stateful accumulator here). **Once L1 deploys and the
+// wire already carries elected labels, this converges to a no-op**: electing over an already-stable
+// input never finds a real challenger, so the incumbent never moves — the two ends do not fight, and
+// this wave never needs a removal step once L1 ships. Untracked detections have no track id to elect
+// over and pass through {@link applyStickyLabels} completely unchanged — raw label, same object
+// reference (`classBucket`'s own "no identity to elect over" case, `detections-strip-logic.ts#stripChips`
+// shares this exact election for its own sliding-window chips — see that module).
+
+/** Observations retained per track for the election tally — mirrors cv-service's own
+ *  `CV_TRACK_LABEL_VOTE_WINDOW` (docs/plans/active/TRACK-IDENTITY-PLAN.md §L1 item 1), same default
+ *  (10) so both ends of the wire reason about "recent" identically. */
+export const STICKY_LABEL_VOTE_WINDOW = 10;
+
+/** A challenger's confidence-weighted tally must exceed the incumbent's by this multiple before it can
+ *  even start a switch streak — mirrors `CV_TRACK_LABEL_SWITCH_MARGIN` (default 1.5). */
+export const STICKY_LABEL_SWITCH_MARGIN = 1.5;
+
+/** Consecutive observations the challenger must keep leading by {@link STICKY_LABEL_SWITCH_MARGIN}
+ *  before the elected label actually switches — mirrors `CV_TRACK_LABEL_SWITCH_STREAK` (default 3).
+ *  "Consecutive" here means over the observation replay in {@link electFromObservations}, not a
+ *  frame/wall-clock count — an observation that doesn't favor the challenger (including one of the
+ *  incumbent's own label) breaks the streak, exactly as a vote against it would server-side. */
+export const STICKY_LABEL_SWITCH_STREAK = 3;
+
+interface TrackObservation {
+  readonly label: string;
+  readonly confidence: number;
+}
+
+/**
+ * Replays one track's observations, oldest-first, through L1's own tally + margin + streak rule —
+ * purely, from scratch, on every call. Deliberately **not** a running accumulator with its own
+ * lifecycle: `DetectionsStore.results()` is already the persisted history, and a second stateful copy
+ * would just be a second thing that could drift out of sync with it (docs/plans/active/
+ * TRACK-IDENTITY-PLAN.md §L3 item 1's own "prefer a pure function… not a stateful class" guidance). At
+ * the bound window size (10 observations) and typical on-screen track counts this recomputes cheaply
+ * every redraw — the same "full rescan every call" trade `trackTrails` above already makes over the
+ * identical `results` history.
+ *
+ * Election starts at the first observation in the window (L1's own "starts as the first confirmed
+ * observation's label"). After each later observation, the tally is updated and the single
+ * highest-scoring non-incumbent label is checked against the margin; a label that clears it extends a
+ * streak (reset to 1 whenever a *different* label clears it, and to 0 whenever nothing clears it), and
+ * once the streak reaches {@link STICKY_LABEL_SWITCH_STREAK} the election switches — the tally then
+ * resets to just the new incumbent's own score, mirroring L1's "an old identity fades rather than
+ * anchors forever" rather than letting a long-dead label's accumulated weight keep contesting every
+ * future observation.
+ */
+function electFromObservations(observationsOldestFirst: readonly TrackObservation[]): string {
+  const windowed = observationsOldestFirst.slice(
+    Math.max(0, observationsOldestFirst.length - STICKY_LABEL_VOTE_WINDOW),
+  );
+  let elected = windowed[0].label;
+  const tally = new Map<string, number>();
+  let streakLabel: string | null = null;
+  let streakLength = 0;
+
+  for (const observation of windowed) {
+    tally.set(observation.label, (tally.get(observation.label) ?? 0) + observation.confidence);
+
+    let challenger: string | null = null;
+    let challengerScore = 0;
+    for (const [label, score] of tally) {
+      if (label !== elected && score > challengerScore) {
+        challenger = label;
+        challengerScore = score;
+      }
+    }
+    if (challenger === null || challengerScore <= (tally.get(elected) ?? 0) * STICKY_LABEL_SWITCH_MARGIN) {
+      streakLabel = null;
+      streakLength = 0;
+      continue;
+    }
+
+    streakLength = challenger === streakLabel ? streakLength + 1 : 1;
+    streakLabel = challenger;
+    if (streakLength >= STICKY_LABEL_SWITCH_STREAK) {
+      elected = challenger;
+      tally.clear();
+      tally.set(elected, challengerScore);
+      streakLabel = null;
+      streakLength = 0;
+    }
+  }
+  return elected;
+}
+
+/**
+ * Elects a display label per track id from `results` (`DetectionsStore`'s own newest-first batch
+ * history) — {@link electFromObservations}'s own per-track replay, grouped once per call. Every
+ * distinct track id present *anywhere* in `results` gets an entry, not only the ones in whichever
+ * single batch is currently on screen — cheap at this data size (mirrors {@link trackTrails}'s
+ * identical "scan the whole history every call" choice above) and means a track that briefly drops out
+ * of the drawn batch (a coast, a matching-pass shortfall) doesn't lose its election the instant it
+ * reappears.
+ */
+export function electStickyLabels(results: readonly DetectionResult[]): ReadonlyMap<number, string> {
+  const observationsByTrack = new Map<number, TrackObservation[]>();
+  // `results` is newest-first; walk back-to-front once so each track's own list comes out
+  // oldest-first without a second reverse pass — the same idiom `trackTrails` above already uses.
+  for (let i = results.length - 1; i >= 0; i--) {
+    for (const detection of results[i].detections) {
+      const trackId = detection.track?.id;
+      if (trackId === undefined) {
+        continue;
+      }
+      const observation: TrackObservation = { label: detection.label, confidence: detection.confidence };
+      const existing = observationsByTrack.get(trackId);
+      if (existing) {
+        existing.push(observation);
+      } else {
+        observationsByTrack.set(trackId, [observation]);
+      }
+    }
+  }
+  const elected = new Map<number, string>();
+  for (const [trackId, observations] of observationsByTrack) {
+    elected.set(trackId, electFromObservations(observations));
+  }
+  return elected;
+}
+
+/**
+ * Swaps a tracked detection's `label` for its {@link electStickyLabels} entry — the one call every
+ * painted-text/color consumer needs (`formatDetectionLabel`, `formatTierLabel`, `classBucketHue` via
+ * `tierBoxColor`, and the hover tooltip — `shared/player/player.ts#hoveredLabel` — which all read
+ * `detection.label` and nothing else) rather than each threading a second "which label to actually
+ * paint" argument through. An untracked detection (no track id to elect over) and a tracked one with no
+ * election entry yet (its very first observation, before {@link electFromObservations} has anything to
+ * replay) both pass through **unchanged, same object reference** — matching
+ * {@link extrapolateDetections}'s own "unmatched detections pass through completely unchanged"
+ * convention just above. A tracked detection whose sticky label happens to equal its raw one (the
+ * common case once a track has settled, and the *only* case once cv-service's own L1 election is live —
+ * see this section's header comment) also keeps its original reference: this is what "converges to a
+ * no-op" means concretely, not merely in effect.
+ */
+export function applyStickyLabels(
+  detections: readonly Detection[],
+  stickyLabels: ReadonlyMap<number, string>,
+): readonly Detection[] {
+  return detections.map((detection) => {
+    const trackId = detection.track?.id;
+    if (trackId === undefined) {
+      return detection;
+    }
+    const sticky = stickyLabels.get(trackId);
+    if (sticky === undefined || sticky === detection.label) {
+      return detection;
+    }
+    return { ...detection, label: sticky };
+  });
+}
+
 // --- HiDPI canvas backing store (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) -----------------------------
 // The overlay canvas used to size its backing store 1:1 with its CSS box (`canvas.width =
 // video.clientWidth`), so every box/trail/label drew at 1 device pixel per CSS pixel — soft/blurry on

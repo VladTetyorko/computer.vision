@@ -25,7 +25,14 @@ import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-l
  *   ({@link hiddenClassTruth}) is shown once, at rest, whenever this mode is active. **Never** touches
  *   `labelFilter` (the allowlist) — see `toggleLabelDeny`'s own doc comment
  *   (`core/detections/detections-logic.ts`) for why a deny-list needs no staging the way the
- *   allowlist does.
+ *   allowlist does. `chip.label` is now (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 2) the
+ *   sticky/elected label for a tracked class, not necessarily cv-service's raw per-frame label — the
+ *   PATCH deliberately sends that **displayed** string, since it is what the operator is actually
+ *   pointing at when they click. Until cv-service's own L1 election ships, this can transiently
+ *   under-suppress a still-flipping track (a raw label the operator never saw as a chip keeps slipping
+ *   through the server-side deny filter for a beat) — an accepted, honestly-scoped gap of a
+ *   client-side stopgap, closed for free once L1 lands (see `detection-overlay-logic.ts`'s own sticky-
+ *   label section header for why the two converge).
  *
  * A denied label can never reappear in `DetectionsStore.results()` at all — `StreamPipeline`'s single
  * drop site runs pre-fan-out (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) — so the candidate set

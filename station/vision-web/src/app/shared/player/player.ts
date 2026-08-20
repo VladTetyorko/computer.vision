@@ -24,12 +24,14 @@ import {
   T1_STROKE_WIDTH_PX,
   T2_STROKE_WIDTH_PX,
   TRAIL_WINDOW_MS,
+  applyStickyLabels,
   averageBatchIntervalMs,
   canvasBackingSize,
   detectionAlphaPercent,
   detectionModelKey,
   detectionTiers,
   distinctModelKeys,
+  electStickyLabels,
   estimatedOnScreenAtMs,
   extrapolateDetections,
   findPredecessorResult,
@@ -538,6 +540,9 @@ export class Player {
       : 'Distance behind the live edge, measured continuously from the HLS buffer position.',
   );
 
+  /** Set from `drawnBoxes` (`onOverlayMouseMove`'s own hit-test) — already sticky-relabeled
+   *  (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1: `redrawOverlay`'s `displayed` array, not the
+   *  raw `detections` input), so `hoveredLabel` below inherits the stable label with no further work. */
   protected readonly hoveredDetection = signal<Detection | null>(null);
   /** The hover tooltip's own text — `formatDetectionLabel` so the tooltip and the canvas-drawn box
    * label always agree on whether a box is carrying a track id (docs/plans/done/TRACKING-PLAN.md §10). */
@@ -1917,32 +1922,44 @@ export class Player {
     const predecessor = findPredecessorResult(results, result);
     const projected = extrapolateDetections(result, predecessor, onScreenAtMs);
 
+    // Sticky labels (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1): elected once per redraw
+    // from the *full* batch history (`results`, not just `projected`'s single batch — a track's recent
+    // votes span more than one batch), then swapped onto `projected`'s own tracked detections. Every
+    // downstream reader of `detection.label` — the box color (`tierBoxColor`/`classBucketHue` below),
+    // `formatDetectionLabel`/`formatTierLabel` (painted text + the hover tooltip, both fed straight
+    // off `displayed`/`drawnBoxes`), `detectionModelKey` (composite-mode color key) — inherits the
+    // stable label for free from this one substitution, with zero changes of its own; an untracked
+    // detection keeps its raw label and its original object reference, unchanged from before this wave.
+    const stickyLabels = electStickyLabels(results);
+    const displayed = applyStickyLabels(projected, stickyLabels);
+
     // Priority tiers (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2) — a pure function of what
     // this component already knows: the FOLLOW lock (fed in from the host, see `lockedTrackId`'s own
     // doc comment), the hovered box, and each track's recent trail (reused below for the trail layer
-    // too, so the scan over `results` only runs once per redraw). Trails consume `projected` too — the
+    // too, so the scan over `results` only runs once per redraw). Trails consume `displayed` too — the
     // newest batch's own entry (found by reference; `result` is one of `results`' own elements) is
-    // swapped for its projected geometry before the scan, so a T0 trail's last point always lands
-    // exactly where the box drawn below actually is, never one raw capture behind it.
-    const trailResults = results.map((entry) => (entry === result ? { ...entry, detections: projected } : entry));
+    // swapped for its projected+relabeled geometry before the scan, so a T0 trail's last point always
+    // lands exactly where the box drawn below actually is, never one raw capture behind it.
+    const trailResults = results.map((entry) => (entry === result ? { ...entry, detections: displayed } : entry));
     const trails = trackTrails(trailResults, Date.now(), TRAIL_WINDOW_MS);
 
-    // A held hover reference is re-anchored against this tick's freshly projected objects: a matched
-    // detection gets a brand-new object every redraw (its box center advances with `onScreenAtMs`), so
-    // a plain `===` against a reference captured a tick or more ago would silently stop matching for
-    // exactly the moving objects this wave exists to track. Track id survives projection unchanged, so
-    // it's the stable key; an untracked hover has no such anchor and simply clears — an honest degrade
-    // (no fabricated match), not a bug.
+    // A held hover reference is re-anchored against this tick's freshly projected+relabeled objects: a
+    // matched detection gets a brand-new object every redraw (its box center advances with
+    // `onScreenAtMs`, and now possibly its label too), so a plain `===` against a reference captured a
+    // tick or more ago would silently stop matching for exactly the moving objects this wave exists to
+    // track. Track id survives both projection and relabeling unchanged, so it's the stable key; an
+    // untracked hover has no such anchor and simply clears — an honest degrade (no fabricated match),
+    // not a bug.
     const rawHovered = this.hoveredDetection();
     const hovered =
       rawHovered === null
         ? null
-        : (projected.find((detection) =>
+        : (displayed.find((detection) =>
             rawHovered.track && detection.track ? detection.track.id === rawHovered.track.id : detection === rawHovered,
           ) ?? null);
     const lockedTrackId = this.lockedTrackId();
     const lockActive = lockedTrackId !== 0;
-    const tiers = detectionTiers(projected, {
+    const tiers = detectionTiers(displayed, {
       lockedTrackId,
       hoveredDetection: hovered,
       trails,
@@ -1953,8 +1970,12 @@ export class Player {
     const allowedTiers = tiersForDeclutterLevel(this.boxesMode());
     // >1 model actually mixed in *this* frame (`showModelLegend`'s own gate) — composite streams keep
     // per-model color instead of the class-bucket hue (research disposition table: "keep `modelHue`
-    // for the multi-model legend case").
-    const composite = distinctModelKeys(projected).length >= 2;
+    // for the multi-model legend case"). Reads `displayed` (sticky-relabeled) rather than `projected` —
+    // a composite-mode `"model:label"` prefix survives election untouched (the election operates on
+    // whichever label string cv-service actually emitted, prefix included), so this gate is unaffected
+    // either way; using `displayed` here is about staying consistent with every other reader below, not
+    // a behavior change of its own.
+    const composite = distinctModelKeys(displayed).length >= 2;
 
     // Trails are T0-only now (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/D8 — twelve parked
     // cars' trails were pure noise); `trackTrails` itself is unchanged, this is a filter at the call
@@ -1962,7 +1983,7 @@ export class Player {
     // `drawTrails` resets `ctx.globalAlpha` to `1` at its own end, so the staleness fade below starts
     // clean.
     const t0TrackIds = new Set<number>();
-    for (const detection of projected) {
+    for (const detection of displayed) {
       if (tiers.get(detection) === 'T0' && detection.track) {
         t0TrackIds.add(detection.track.id);
       }
@@ -1985,7 +2006,7 @@ export class Player {
 
     // Draw order: ambient → notable → committed, so a higher tier's box always ends up visually on
     // top of a lower tier's — the accent target is never buried under an ambient outline.
-    const drawOrder = [...projected]
+    const drawOrder = [...displayed]
       .filter((detection) => allowedTiers.has(tiers.get(detection) ?? 'T2'))
       .sort((a, b) => TIER_DRAW_RANK[tiers.get(a) ?? 'T2'] - TIER_DRAW_RANK[tiers.get(b) ?? 'T2']);
 

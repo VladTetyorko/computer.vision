@@ -12,9 +12,13 @@ import {
   NOTABLE_TOP_K,
   STALE_FADE_ALPHA_PERCENT,
   STALE_FADE_BATCH_MULTIPLIER,
+  STICKY_LABEL_SWITCH_MARGIN,
+  STICKY_LABEL_SWITCH_STREAK,
+  STICKY_LABEL_VOTE_WINDOW,
   SUB_SCALE_PX,
   T2_ALPHA_PERCENT,
   TRAIL_WINDOW_MS,
+  applyStickyLabels,
   averageBatchIntervalMs,
   canvasBackingSize,
   classBucket,
@@ -26,6 +30,7 @@ import {
   detectionTiers,
   detectionsPausedNotice,
   distinctModelKeys,
+  electStickyLabels,
   estimatedOnScreenAtMs,
   extrapolateDetections,
   findPredecessorResult,
@@ -503,6 +508,133 @@ function tierContext(partial: Partial<DetectionTierContext> = {}): DetectionTier
     ...partial,
   };
 }
+
+// --- Sticky labels per track (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1) ---------------------------
+
+/** Builds a `results` batch list (newest-first) from oldest-first `(label, confidence)` observations for
+ *  one track — {@link electStickyLabels}/{@link electFromObservations}'s own replay direction, reversed
+ *  here once so every test can state its scenario in the natural "what happened, in order" reading. */
+function observationBatches(trackId: number, observationsOldestFirst: readonly [string, number][]): DetectionResult[] {
+  return [...observationsOldestFirst]
+    .reverse()
+    .map(([label, confidence], index) =>
+      result({
+        frameSequence: index,
+        detections: [trackedDetection({ label, confidence }, trackId)],
+      }),
+    );
+}
+
+describe('electStickyLabels', () => {
+  it('a track with a single observation elects its own raw label', () => {
+    const elected = electStickyLabels(observationBatches(7, [['plant', 0.7]]));
+    expect(elected.get(7)).toBe('plant');
+  });
+
+  it('incumbent holds under alternating noise — no single challenger ever leads by the margin', () => {
+    // Mirrors L1's own "incumbent holds under alternating noise" case (docs/plans/active/
+    // TRACK-IDENTITY-PLAN.md §L1 item 5): a die-roll label alternates every pass, but the two
+    // candidates' tallies stay within STICKY_LABEL_SWITCH_MARGIN of each other throughout, so the
+    // very first observation's label — "plant" — never actually gets out-voted.
+    const observations: [string, number][] = [
+      ['plant', 0.5],
+      ['helicopter', 0.5],
+      ['plant', 0.5],
+      ['helicopter', 0.5],
+      ['plant', 0.5],
+      ['helicopter', 0.5],
+    ];
+    const elected = electStickyLabels(observationBatches(7, observations));
+    expect(elected.get(7)).toBe('plant');
+  });
+
+  it('switches after a genuine streak — a challenger leading by the margin for STICKY_LABEL_SWITCH_STREAK passes in a row', () => {
+    expect(STICKY_LABEL_SWITCH_STREAK).toBe(3);
+    expect(STICKY_LABEL_SWITCH_MARGIN).toBe(1.5);
+    const observations: [string, number][] = [
+      ['plant', 0.3], // incumbent, low weight
+      ['helicopter', 0.9], // streak 1 (0.9 > 0.3 * 1.5)
+      ['helicopter', 0.9], // streak 2
+      ['helicopter', 0.9], // streak 3 — switches
+    ];
+    const elected = electStickyLabels(observationBatches(7, observations));
+    expect(elected.get(7)).toBe('helicopter');
+  });
+
+  it('does not switch one pass short of the required streak', () => {
+    const observations: [string, number][] = [
+      ['plant', 0.3],
+      ['helicopter', 0.9],
+      ['helicopter', 0.9], // only streak 2 — one short of STICKY_LABEL_SWITCH_STREAK (3)
+    ];
+    const elected = electStickyLabels(observationBatches(7, observations));
+    expect(elected.get(7)).toBe('plant');
+  });
+
+  it('only the most recent STICKY_LABEL_VOTE_WINDOW observations count', () => {
+    expect(STICKY_LABEL_VOTE_WINDOW).toBe(10);
+    // The true oldest observation ("phantom", high weight) falls outside the 10-observation window;
+    // if it were wrongly included, its weight would never be out-voted by the low-confidence "steady"
+    // run that follows (0.1 * 10 = 1.0 never exceeds 1.0 * 1.5), so the test only passes once windowing
+    // is applied correctly.
+    const observations: [string, number][] = [
+      ['phantom', 1.0],
+      ...Array.from({ length: 10 }, (): [string, number] => ['steady', 0.1]),
+    ];
+    const elected = electStickyLabels(observationBatches(7, observations));
+    expect(elected.get(7)).toBe('steady');
+  });
+
+  it('elects independently per track — one track cannot influence another', () => {
+    const trackSeven = observationBatches(7, [['plant', 0.5]]);
+    const trackNine = observationBatches(9, [['car', 0.5]]);
+    const merged: DetectionResult[] = trackSeven.map((batch, index) => ({
+      ...batch,
+      detections: [...batch.detections, ...trackNine[index].detections],
+    }));
+    const elected = electStickyLabels(merged);
+    expect(elected.get(7)).toBe('plant');
+    expect(elected.get(9)).toBe('car');
+  });
+
+  it('returns an empty map for no results', () => {
+    expect(electStickyLabels([]).size).toBe(0);
+  });
+
+  it('ignores untracked detections entirely — nothing to elect over', () => {
+    const untracked = result({ detections: [fullDetection({ label: 'car' })] });
+    expect(electStickyLabels([untracked]).size).toBe(0);
+  });
+});
+
+describe('applyStickyLabels', () => {
+  it('leaves an untracked detection completely unchanged — same object reference', () => {
+    const untracked = fullDetection({ label: 'car' });
+    const [result0] = applyStickyLabels([untracked], new Map([[7, 'truck']]));
+    expect(result0).toBe(untracked);
+  });
+
+  it('swaps a tracked detection\'s label for its election entry, keeping every other field', () => {
+    const tracked = trackedDetection({ label: 'plant', confidence: 0.6 }, 7);
+    const [displayed] = applyStickyLabels([tracked], new Map([[7, 'helicopter']]));
+    expect(displayed.label).toBe('helicopter');
+    expect(displayed.confidence).toBe(0.6);
+    expect(displayed.box).toBe(tracked.box);
+    expect(displayed.track).toBe(tracked.track);
+  });
+
+  it('keeps the same object reference once the sticky label already equals the raw one — the L1-deployed no-op case', () => {
+    const tracked = trackedDetection({ label: 'car' }, 7);
+    const [displayed] = applyStickyLabels([tracked], new Map([[7, 'car']]));
+    expect(displayed).toBe(tracked);
+  });
+
+  it('keeps the same object reference when the track has no election entry yet', () => {
+    const tracked = trackedDetection({ label: 'car' }, 7);
+    const [displayed] = applyStickyLabels([tracked], new Map());
+    expect(displayed).toBe(tracked);
+  });
+});
 
 describe('detectionTiers', () => {
   it('the hovered box promotes to T0 unconditionally — even a sub-scale box that would otherwise be T3', () => {
