@@ -159,3 +159,33 @@ before/after: published-frame CPU (burn-in gone), overlay draw stats. Update
 3. **`alerting` flag per detection on the wire** — event-engine-driven T1 promotion.
 4. **Deleting `labelFilter` allowlist from the operator UI entirely** — after intent cards
    (CV-UX-RESEARCH U2) own model seeding, the allowlist may become invisible plumbing.
+
+## 7. W7 — client-side box extrapolation (defect found by W6 live smoke)
+
+**Defect (2026-08-20, owner-observed):** with burn-in gone, boxes visibly trail moving objects —
+"the flow of detections is much slower than video". Root cause: the deleted burn-in path called
+`DetectionExtrapolator.at(frame.capturedAt())` per published frame, velocity-projecting every box
+onto the exact frame being encoded; the client overlay draws raw batches and only *selects* by
+video latency, so whenever video latency < detection arrival lag (WHEP especially; 2 s poll
+fallback worst) the newest batch on hand is inherently behind the picture. W1 removed the server's
+catching-up without replacing it client-side.
+
+**Fix (pure frontend, wire frozen):** port forward-projection into
+`shared/player/detection-overlay-logic.ts`, mirroring the server's semantics and tuning
+(`StreamPipelineSettings` defaults, `application.yaml` `extrapolation:` block):
+- `extrapolateDetections(selected, previous, targetMs, maxMs, gate)` — match by track id when both
+  sides carry tracks, else same-label nearest normalized-center within gate **0.15**; project each
+  matched box's center by its per-pair velocity, capped at **800 ms** past `selected.capturedAt`
+  (then freeze, exactly the server's freeze rule); unmatched boxes draw raw; centers clamp to
+  [0,1]; box size unchanged (the server projected centers only).
+- `redrawOverlay` projects the selected batch to the on-screen instant
+  (`now − overlaySyncLatency`), taking the predecessor batch from the already-held results list;
+  the per-video-frame redraw loop animates it. `drawnBoxes` gets projected geometry, so
+  hover/click-to-follow stay consistent with what is painted.
+- Constants exported + cited to the server defaults so the two ends cannot silently diverge.
+- Known bound, stated: with the 2 s poll fallback (no SSE), batches can be older than the 800 ms
+  cap — boxes freeze at the cap rather than invent motion; §6.2 (tracks/detections into SSE)
+  remains the real fix for poll staleness.
+
+Specs for the pure functions (track match, gate match, cap/freeze, no-predecessor → raw,
+degenerate dt → raw, clamping); `npm run test:ci` + `tsc` + prod build green.
