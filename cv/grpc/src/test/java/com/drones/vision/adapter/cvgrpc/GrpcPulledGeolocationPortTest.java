@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -335,6 +336,39 @@ class GrpcPulledGeolocationPortTest {
         assertTrue(subscriber.results.isEmpty());
     }
 
+    @Test
+    void aStreamKilledMidSessionIsReopenableForTheSameStreamIdAndFixesFlowAgain() throws Exception {
+        // H8, VISUAL-GEO-V2-PLAN.md §9.11 defect 1: a cv-service bounce must not wedge geolocation.
+        // This half of the fix is the adapter's -- GeolocationSession#failAndDrop drops itself from
+        // the port's session map, so the caller's next open() for the SAME id builds a fresh session
+        // rather than silently reusing (or refusing) the dead one. The composition half, which
+        // notices the termination and calls open() again, is VisualGeoRunnerTest's.
+        BouncingServicer servicer = new BouncingServicer();
+        GrpcPulledGeolocationPort port = newPort(servicer);
+        StreamId id = StreamId.random();
+        URI sourceUrl = URI.create("rtsp://localhost:8554/" + id.value());
+
+        CapturingSubscriber killed = new CapturingSubscriber();
+        port.open(id, sourceUrl, CONFIG).subscribe(killed);
+        assertTrue(killed.terminal.await(AWAIT_SECONDS, TimeUnit.SECONDS), "the first stream must be killed");
+        assertInstanceOf(StatusRuntimeException.class, killed.error.get());
+
+        CapturingSubscriber reopened = new CapturingSubscriber();
+        port.open(id, sourceUrl, CONFIG).subscribe(reopened);
+        servicer.awaitSecondStream();
+        servicer.pushResponse(fixResponse(id, 50.45, 30.52));
+
+        assertTrue(reopened.atLeastOne.await(AWAIT_SECONDS, TimeUnit.SECONDS),
+                "a fix must reach the subscriber of the reopened session for the same stream id");
+        assertEquals(50.45, reopened.results.get(0).position().latitude(), 1e-9);
+        assertEquals(1, reopened.terminal.getCount(), "the reopened session must still be open");
+
+        // Telemetry now targets the live session, not the dead one -- the port's map holds only the
+        // second session, so this must reach the server rather than vanish into a torn-down observer.
+        port.telemetry(id, telemetry(50.45, 30.52));
+        servicer.awaitSecondStreamControls(2);
+    }
+
     private static GeoFix fixResponse(StreamId id, double latitude, double longitude) {
         return GeoFix.newBuilder()
                 .setStreamId(id.value().toString())
@@ -399,6 +433,67 @@ class GrpcPulledGeolocationPortTest {
 
         void pushResponse(GeoFix response) {
             responseObserver.onNext(response);
+        }
+    }
+
+    /**
+     * Kills the FIRST {@code LocalizeStream} call with {@code UNAVAILABLE} (a cv-service bounce) and
+     * serves every later one normally — the fixture for the reopen test above.
+     */
+    private static final class BouncingServicer extends GeolocationGrpc.GeolocationImplBase {
+        private final AtomicInteger streams = new AtomicInteger();
+        private final List<GeoControl> secondStreamControls = Collections.synchronizedList(new ArrayList<>());
+        private final CountDownLatch secondStreamOpened = new CountDownLatch(1);
+        private volatile StreamObserver<GeoFix> secondResponseObserver;
+
+        @Override
+        public StreamObserver<GeoControl> localizeStream(StreamObserver<GeoFix> responseObserver) {
+            boolean first = streams.incrementAndGet() == 1;
+            if (!first) {
+                secondResponseObserver = responseObserver;
+            }
+            return new StreamObserver<>() {
+                @Override
+                public void onNext(GeoControl value) {
+                    if (first) {
+                        responseObserver.onError(Status.UNAVAILABLE
+                                .withDescription("simulated: cv-service bounced").asRuntimeException());
+                        return;
+                    }
+                    secondStreamControls.add(value);
+                    secondStreamOpened.countDown();
+                }
+
+                @Override
+                public void onError(Throwable t) {
+                    // unused
+                }
+
+                @Override
+                public void onCompleted() {
+                    responseObserver.onCompleted();
+                }
+            };
+        }
+
+        void awaitSecondStream() throws InterruptedException {
+            assertTrue(secondStreamOpened.await(AWAIT_SECONDS, TimeUnit.SECONDS),
+                    "the reopened session must reach the server");
+        }
+
+        void awaitSecondStreamControls(int count) throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(AWAIT_SECONDS);
+            while (secondStreamControls.size() < count) {
+                if (System.nanoTime() > deadline) {
+                    throw new AssertionError("expected at least " + count
+                            + " GeoControl message(s) on the reopened stream, got " + secondStreamControls.size());
+                }
+                Thread.sleep(10);
+            }
+        }
+
+        void pushResponse(GeoFix response) {
+            secondResponseObserver.onNext(response);
         }
     }
 

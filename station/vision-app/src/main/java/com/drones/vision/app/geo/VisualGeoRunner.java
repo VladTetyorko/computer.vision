@@ -98,6 +98,21 @@ import java.util.stream.Collectors;
  * Each tick, {@link #submitLatestFix} takes-and-clears whatever is currently held; if nothing arrived
  * since the previous tick, nothing is submitted for that asset this tick — never a duplicate, never a
  * fabricated "no update" row.
+ *
+ * <h2>A terminated session is not an open one (H8)</h2>
+ * A cv-service bounce ends the underlying bidi call, which {@code GeolocationSession#failAndDrop}
+ * surfaces as {@link Flow.Subscriber#onError} after dropping itself from the adapter's own session
+ * map. H7 found that this runner then wedged permanently: the dead {@link OpenSession} stayed in
+ * {@link #openSessions}, so {@link #ensureSessionOpen}'s "already open for this stream" early return
+ * kept firing forever and geolocation ended silently even after {@code CvChannelSupervisor} recovered
+ * the channel (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11, defect 1). {@link LatestFixSubscriber}
+ * now latches its own termination, and a terminated subscriber makes {@link #ensureSessionOpen} treat
+ * the session as closed: it runs {@link #closeSafely} — which clears {@code
+ * GeolocationSessionService}'s own open-session bookkeeping too, so a fresh {@code start} is legal
+ * again — and opens a new one in the same tick. No backoff is coded here on purpose: the reopen
+ * attempt goes through {@code GrpcPulledGeolocationPort#open}, which is already gated fail-fast by
+ * {@code CvChannelSupervisor#available()}, so this tick cadence <em>is</em> the retry cadence and the
+ * session only actually reopens once the supervisor reports the channel healthy.
  */
 public final class VisualGeoRunner implements AutoCloseable {
 
@@ -231,12 +246,14 @@ public final class VisualGeoRunner implements AutoCloseable {
 
     private void ensureSessionOpen(AssetId assetId, UsageId usageId, StreamId streamId) {
         OpenSession existing = openSessions.get(assetId);
-        if (existing != null && existing.streamId().equals(streamId)) {
+        if (existing != null && existing.streamId().equals(streamId) && !existing.subscriber().terminated()) {
             return;
         }
         if (existing != null) {
-            // the asset's active stream changed under us -- close the stale session honestly rather
-            // than silently keep pumping telemetry into a session pointed at the wrong mediamtx path.
+            // Either the asset's active stream changed under us, or the session's own fix stream has
+            // terminated (a cv-service bounce). Both are closed honestly rather than kept in the map:
+            // keeping a stale one would either pump telemetry at the wrong mediamtx path or -- the H8
+            // defect -- make this method's early return end geolocation permanently and silently.
             closeSafely(assetId);
         }
         try {
@@ -321,6 +338,7 @@ public final class VisualGeoRunner implements AutoCloseable {
     private static final class LatestFixSubscriber implements Flow.Subscriber<VisualFix> {
         private final StreamId streamId;
         private final AtomicReference<VisualFix> latest = new AtomicReference<>();
+        private final AtomicBoolean terminated = new AtomicBoolean(false);
 
         LatestFixSubscriber(StreamId streamId) {
             this.streamId = streamId;
@@ -328,6 +346,18 @@ public final class VisualGeoRunner implements AutoCloseable {
 
         VisualFix takeLatest() {
             return latest.getAndSet(null);
+        }
+
+        /**
+         * Whether this session's fix stream has ended, by error or by completion — the signal {@link
+         * #ensureSessionOpen} reads to tell a live session from a dead one. Set from the publisher's
+         * own delivery thread, read from the runner's tick thread, hence the {@link AtomicBoolean}.
+         * A graceful {@code onComplete} counts too: a live geolocation session is never expected to
+         * complete on its own (the adapter treats an unrequested server-side completion as a failure),
+         * so either terminal signal means the same thing here — no more fixes are coming.
+         */
+        boolean terminated() {
+            return terminated.get();
         }
 
         @Override
@@ -342,12 +372,15 @@ public final class VisualGeoRunner implements AutoCloseable {
 
         @Override
         public void onError(Throwable throwable) {
+            terminated.set(true);
             LOG.log(System.Logger.Level.WARNING,
-                    () -> "visual-geo session errored for stream " + streamId.value(), throwable);
+                    () -> "visual-geo session errored for stream " + streamId.value()
+                            + "; the next tick will reopen it once cv-service is reachable", throwable);
         }
 
         @Override
         public void onComplete() {
+            terminated.set(true);
             LOG.log(System.Logger.Level.INFO, () -> "visual-geo session completed for stream " + streamId.value());
         }
     }
