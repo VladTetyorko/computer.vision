@@ -2801,6 +2801,82 @@ against the real codebase (D7's detections-truncation gap, the structurally-unre
 `FORBIDDEN` state, the `scopedTo` display-name substitution, the plan's imprecise `@PreAuthorize`
 wording, and the ABSENT/FORBIDDEN-file-shape judgment call).
 
+## docs/plans/active/VISUAL-GEO-V2-PLAN.md Wave H5 done (visual geolocation, wiring half)
+
+`VisualGeoWiringConfiguration` — a **new file**, not an edit to a shared one (the plan's own H5
+deliverable line is explicit about this), mirroring `FixedCameraGeoWiringConfiguration`'s shape:
+unconditional beans for the driven ports and application services, so `GeoRegionController`/
+`GeoCorrectionController` (component-scanned from `vision-api`) always resolve, plus exactly one
+flag-gated bean.
+
+**`VisionGeoVisualProperties`** (`config/properties/`, `@ConfigurationProperties(prefix =
+"vision.geo.visual")`) — every `vision.geo.visual.*` key from §3.6, nested `Region`/`Tiles`/`Upload`/
+`Gate`/`Divergence` records, each with `@DefaultValue` matching the yaml exactly; conversion methods
+onto `TrackCorrectionSettings`/`ReferenceRegionSettings`/`TileSourceSettings`/`GeoUploadSettings`/
+`GeoSessionConfig`, the application-layer settings records those services actually take.
+
+**Bean graph** (8 `@Bean` methods):
+- `visualGeoApiProperties(VisionGeoVisualProperties)` → `vision-api`'s framework-free
+  `VisualGeoProperties` bridge (same "vision-api may not depend on vision-app" pattern
+  `FixedCameraGeoProperties` uses).
+- `referenceTileSourcePort` — real `HttpTileSource`/`WaybackTileSource` selection (O6:
+  `wayback-multi-date`), no no-op counterpart needed (see below).
+- `pulledGeolocationPort`/`referenceIndexPort` — real vs. no-op selection **evaluated in this class
+  itself**, not via `@ConditionalOnProperty`: the controllers need *some* `ReferenceRegionService`/
+  `GeolocationSessionService` bean unconditionally, which in turn need *some* port underneath.
+  `NoopGeolocationPort` (already existed in `adapter-cv-grpc`, anticipating exactly this) and
+  `NoopReferenceIndexPort` (new, this wave) fill that role when the flag is off. The real path reuses
+  `CvWiring`'s shared `ManagedChannel`/`CvChannelSupervisor` (D3 — one channel to cv-service, not
+  two); `CvWiring`'s own `@ConditionalOnExpression` for that channel/supervisor pair was extended to
+  include `vision.geo.visual.enabled`, so either flag alone is enough to stand the channel up.
+- `referenceRegionService`, `geolocationSessionService`, `trackCorrectionService` — unconditional
+  application-service beans.
+- `visualGeoRunner` — `@Bean(initMethod = "start", destroyMethod = "close")`, the **one** flag-gated
+  bean (`@ConditionalOnProperty(prefix = "vision.geo.visual", name = "enabled", havingValue =
+  "true")`) — the only thing D9 actually requires to not exist when the flag is off.
+
+**`referenceTileSourcePort` needs no no-op counterpart**: `GeoRegionController.ingest()` always calls
+`VisualGeoProperties#requireEnabled()` first, so the tile source is never reached while the feature is
+off — the "unconditional bean, but the runner is gated" posture the rest of this class follows.
+
+**`NoopReferenceIndexPort`** (`devsupport/`, new) — a single terminal `FAILED` progress event via a
+hand-rolled `Flow.Publisher`, matching `NoopGeolocationPort`'s existing shape.
+**`NoopLiveUpdatePublisher`** — extended to also implement `TrackCorrectionLiveUpdatePort` (now six
+ports on one no-op class, the `LiveUpdateRegistry`-mirroring precedent already documented on that
+class).
+
+**`VisualGeoRunner`** (`geo/`, new) — `AutoCloseable`, the D7 composition point (perception owns the
+localization session, flight owns `TrackCorrection`/gating, kernel holds the pure value — this class
+is where they meet, never a direct perception→flight call). Per tick: reconciles the desired
+session set against every flying asset with a resolvable stream, opens/closes sessions, pumps
+telemetry (withheld past `telemetry-max-age` — PullControl doctrine, a one-shot message can be lost
+with no retry), samples the latest fix via `LatestFixSubscriber`, submits it to
+`TrackCorrectionService`, and prunes `track_corrections` past `retention`/`max-rows-per-usage`.
+
+**`PersistenceWiringConfiguration`** gained one unconditional bean, `trackCorrectionRepositoryPort` —
+no flag, since D12 (`track_corrections` is append-only, excluded from `db_audit_log`) applies
+regardless of whether the runner ever writes a row. **`ApplicationServiceWiring`** gained a 6th
+live-update-port selector bean, `trackCorrectionLiveUpdatePort` (real `LiveUpdateRegistry` vs.
+`NoopLiveUpdatePublisher`, mirroring the other five).
+
+*Tests:* `VisualGeoWiringTest` (+4, new, `@SpringBootTest`) — asserts no `VisualGeoRunner` bean exists
+at the default config, every other service/port bean is still wired (real vs. no-op is invisible from
+outside), the `vision-api` bridge reports `enabled=false`, and the frozen D9 message is exact.
+`ArchitectureTest`/`ContextArchitectureTest` both still green — the new wiring class's imports
+(`vision-flight`, `vision-perception`, `vision-warehouse`, `vision-platform`, `adapter-cv-grpc`,
+`adapter-tiles`) are all already-allowed dependencies of `vision-app`, so no dependency-rule
+violation. `pom.xml` gained one new dependency, `adapter-tiles` (the H3 module this wave's tile-source
+beans need).
+
+**Before/after**: vision-app **237 → 241 (+4: `VisualGeoWiringTest`)**, measured as part of the same
+27/27-module `BUILD SUCCESS` that landed this wave (real Postgres 16 container via Testcontainers;
+Docker ran, not skipped) — see `station/vision-api/MODULE.md`'s own H5 entry for the REST/SSE half and
+the full cross-module figures.
+
+**Deferred, out of this wave's scope**: none identified against §3.6/§4.3/§4.5 — every settings field
+bound, every bean graph decision matched the plan's own D3/D7/D9/D10 rulings. H7 (per §5) is the next
+wave, not scoped here.
+
 **docs/plans/active/STREAM-STATE-PLAN.md wave S4 — wiring the idle-stream policy.**
 
 - **`VisionStreamsProperties`** (`vision.streams.*`) — `idle.enabled` (**default `true`**),
