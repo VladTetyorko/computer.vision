@@ -11,6 +11,7 @@ import com.drones.vision.events.application.UsageTimeline;
 import com.drones.vision.warehouse.application.usage.DefaultUsageService;
 import com.drones.vision.warehouse.application.usage.UsageService;
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 
 /**
@@ -26,9 +28,10 @@ import java.util.Objects;
  * #recent}, docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/extracts/design/10-replay.md), flight replay
  * (docs/plans/done/MVP2-PLAN.md §R, R-a) — a downsampled, time-windowed view over one {@code AssetUsage}'s
  * telemetry/detection history — plus (docs/plans/done/OPS-CORE-PLAN.md §R, R-b) that same usage's
- * recorded-clip URL, if one is available. All three are usage-scoped reads that belong together on
- * one controller rather than standing up a new class per endpoint (see {@code
- * .claude/skills/java-clean-code/SKILL.md}: "can an existing service/controller own this method
+ * recorded-clip URL, if one is available, plus (docs/plans/active/STREAM-STATE-PLAN.md §2.6) the
+ * reverse lookup {@link #byStream} — the usage one stream opened. All four are usage-scoped reads
+ * that belong together on one controller rather than standing up a new class per endpoint (see
+ * {@code .claude/skills/java-clean-code/SKILL.md}: "can an existing service/controller own this method
  * instead of a new type?") — {@link #recent} and {@link #timeline}/{@link #recording} do lean on
  * different application-layer collaborators ({@link UsageService} vs. {@link ReplayService}, see
  * {@link UsageService}'s own javadoc for why they're separate services), so this controller simply
@@ -41,9 +44,10 @@ import java.util.Objects;
  * (harmless but slightly inconsistent) split of usage-scoped endpoints across two classes.
  *
  * <h2>Visibility scoping (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
- * {@link #recent} is scoped to {@link CurrentUser#scope()}, exactly like {@link
- * AssetController#list}: a usage whose owning asset the caller may not see is silently excluded,
- * never revealed. {@link #timeline}/{@link #recording} are unchanged by this task and remain
+ * {@link #recent} and {@link #byStream} are scoped to {@link CurrentUser#scope()}, exactly like
+ * {@link AssetController#list}: a usage whose owning asset the caller may not see is silently
+ * excluded (or, for the single-result {@link #byStream}, indistinguishable from absent), never
+ * revealed. {@link #timeline}/{@link #recording} are unchanged by this task and remain
  * unscoped — a pre-existing gap (any authenticated caller who already knows/guesses a usage id may
  * replay it), out of this task's scope to close.
  *
@@ -138,5 +142,31 @@ public class UsageTimelineController {
     @GetMapping("/api/usages/{usageId}/recording")
     public UsageRecordingResponse recording(@PathVariable String usageId) {
         return UsageRecordingResponse.from(replayService.recordingFor(UsageId.of(usageId)));
+    }
+
+    /**
+     * Serves the usage one stream opened — "what happened to stream X"
+     * (docs/plans/active/STREAM-STATE-PLAN.md §2.6).
+     *
+     * <p>A running stream is in {@code GET /api/streams} with a {@code StreamState}; a stopped one
+     * is not, deliberately — {@code StreamState} has no {@code STOPPED} member because a stopped
+     * stream is a <em>record</em>, not a state. This is where that record is read from, so a client
+     * holding a stream id that vanished from the list can find out what it was instead of only that
+     * it is gone.
+     *
+     * <p>Scoped like {@link #recent}: a usage whose owning asset the caller may not see is
+     * <b>404</b>, the same answer as a stream that never opened one — never a 403, which would
+     * confirm the usage exists. A malformed UUID surfaces as {@link IllegalArgumentException}
+     * (→400) via {@link ApiExceptionHandler}, same idiom as every other id path parameter here.
+     *
+     * @param streamId the stream id, as a canonical UUID string
+     * @return the usage that stream opened
+     * @throws java.util.NoSuchElementException if no visible usage carries that stream id (→404)
+     */
+    @GetMapping("/api/usages/by-stream/{streamId}")
+    public UsageSummaryResponse byStream(@PathVariable String streamId) {
+        return usageService.byStream(currentUser.scope(), StreamId.of(streamId))
+                .map(UsageSummaryResponse::from)
+                .orElseThrow(() -> new NoSuchElementException("No usage for stream " + streamId));
     }
 }

@@ -5,6 +5,7 @@ import com.drones.vision.adapter.persistence.entity.AssetUsageEntity;
 import com.drones.vision.adapter.persistence.mapper.AssetUsageMapper;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
@@ -31,6 +32,16 @@ import java.util.Optional;
  * written once per start/stop and a handful of times in between (position/sample-count updates),
  * not once per incoming sample, so it is not the "append-heavy" table docs/plans/done/MVP2-PLAN.md P-b's
  * retention guard targets.
+ *
+ * <p>{@link #findByStream(StreamId)} (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.6) queries the
+ * <b>existing</b> {@code stream_id} column ({@code V4__usage_stream_id.sql}) &mdash; that wave adds no
+ * migration, and therefore no index: {@code stream_id} is unindexed, so this is a sequential scan.
+ * That is deliberate at this table's size (one row per flight, not one per sample) and for this
+ * query's frequency (a single lookup when a caller asks what became of one stream, never a hot
+ * path). Add {@code idx_asset_usages_stream_id} in a future migration if either of those stops
+ * being true. {@code setMaxResults(1)} plus a {@code started_at desc} order makes the result
+ * deterministic rather than relying on the "one usage per stream id" invariant holding for rows
+ * written by some future caller that reuses an id.
  */
 public final class JpaAssetUsageRepository implements AssetUsageRepositoryPort {
 
@@ -75,6 +86,17 @@ public final class JpaAssetUsageRepository implements AssetUsageRepositoryPort {
                 .stream()
                 .map(AssetUsageMapper::toDomain)
                 .toList();
+    }
+
+    @Override
+    public Optional<AssetUsage> findByStream(StreamId streamId) {
+        List<AssetUsageEntity> matches = jpa.read(em -> em.createQuery(
+                        "select u from AssetUsageEntity u where u.streamId = :streamId order by u.startedAt desc",
+                        AssetUsageEntity.class)
+                .setParameter("streamId", streamId.value())
+                .setMaxResults(1)
+                .getResultList());
+        return matches.stream().findFirst().map(AssetUsageMapper::toDomain);
     }
 
     @Override

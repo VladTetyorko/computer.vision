@@ -27,6 +27,7 @@ import { cycleBoxesMode, defaultBoxesMode } from '../../shared/player/detection-
 import { followMarkers, type DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import { canShowCommandPanel } from './flight-command-panel-logic';
 import { buildFollowLockPatch, buildHotKnobPatch } from './cv-control-panel-logic';
+import { resolveDetectionEnabled, videoNotice } from './stream-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
@@ -202,6 +203,32 @@ export class CockpitFacade {
    * so `boxesMode`'s `linkedSignal` below re-derives its default only when this value actually
    * changes, never on every poll. */
   private readonly streamBurnedIn = computed(() => this.stream()?.burnedIn);
+
+  /** `stream()#state` projected to a primitive, same reason as {@link streamBurnedIn} above —
+   * whether this stream's *video* is actually flowing, measured server-side
+   * (docs/plans/active/STREAM-STATE-PLAN.md §2.3). `undefined` with nothing running, or against a backend
+   * that predates the field; `stream-state-logic.ts#videoNotice` degrades both to silence. */
+  readonly streamState = computed(() => this.stream()?.state);
+
+  /** What the operator is told about the video right now — `null` for "say nothing", which covers
+   * both "it is fine" and "we could not measure it". Never speaks about detection. */
+  readonly videoNotice = computed(() => videoNotice(this.live(), this.streamState()));
+
+  /**
+   * **The one place this cockpit decides where a detection control's position comes from**
+   * (docs/plans/active/STREAM-STATE-PLAN.md §3.1) — the running stream's own server-side intent while
+   * something is running, this browser's draft otherwise. The rail's off-dot, the video-surface
+   * "Turn on" chip and the drawer's Detect switch all read this one value, so they cannot disagree
+   * with each other or with the backend; before this plan all three rendered the draft, i.e. a
+   * localStorage value that had nothing to do with the stream on screen.
+   */
+  readonly detectionOn = computed(() =>
+    resolveDetectionEnabled(this.stream()?.detectionEnabled, this.settings.effective().detectionEnabled),
+  );
+
+  /** True while a Detect on/off request is in flight — the switch is bound to server truth, so
+   * without this there is a round-trip during which a click appears to have done nothing. */
+  readonly detectionPending = signal(false);
 
   // --- Deliberately-stopped state (docs/plans/done/MVP2-PLAN.md §S, S-b) — identical pair/rule to
   // `LivePage`/`AssetDetailPage`; reset whenever the primary device changes since that's
@@ -718,19 +745,39 @@ export class CockpitFacade {
 
   /**
    * The "Turn on" action on `cockpit.html`'s own video-surface affordance (docs/plans/active/CV-DEMAND-PLAN.md
-   * wave D3) — the honest chip shown over the video whenever `settings.effective().detectionEnabled`
-   * is `false` and a stream is actually live (`fly-logic.ts#showDetectionOffChip`). Mirrors
-   * `CvControlPanel#onDetectionEnabledToggle`'s own "draft first, then also PATCH the live stream"
-   * rule (that component's own class doc comment, "Live vs. draft, one rule") so this quick action can
-   * never drift from what the drawer's own toggle would have sent — same draft write, same
-   * `buildHotKnobPatch` body, just fired immediately rather than debounced (a single explicit click,
-   * not a slider drag that might still be mid-gesture).
+   * wave D3) — the honest chip shown over the video whenever {@link detectionOn} is `false` and a
+   * stream is actually live (`fly-logic.ts#showDetectionOffChip`). A thin alias for
+   * {@link setDetection}, which is the one write path the drawer's own switch also emits into, so
+   * this quick action cannot drift from it.
    */
   enableDetection(): void {
-    this.settings.adjust({ detectionEnabled: true });
+    void this.setDetection(true);
+  }
+
+  /**
+   * The single write path behind every Detect on/off affordance in this cockpit — the chip above and
+   * `CvControlPanel#onDetectionEnabledToggle` alike (docs/plans/active/STREAM-STATE-PLAN.md §3.1), so the
+   * two can never apply the same operator intent under two different rules.
+   *
+   * Two writes, deliberately unequal in status. The draft is updated because it is what the next
+   * `Start` will post. The running stream is PATCHed and then **re-read** ({@link FleetStore.refresh})
+   * rather than assumed: {@link detectionOn} renders the wire, so the switch moves when the backend
+   * says it moved and not a moment sooner. A failed PATCH therefore leaves the control exactly where
+   * the stream really is — the draft still carries the operator's preference for the next start, but
+   * nothing on screen claims a live change that did not happen.
+   */
+  async setDetection(enabled: boolean): Promise<void> {
+    this.settings.adjust({ detectionEnabled: enabled });
     const streamId = this.stream()?.streamId;
-    if (streamId) {
-      void this.fleet.patchStreamConfig(streamId, buildHotKnobPatch(this.settings.effective()));
+    if (!streamId) {
+      return;
+    }
+    this.detectionPending.set(true);
+    try {
+      await this.fleet.patchStreamConfig(streamId, buildHotKnobPatch(this.settings.effective()));
+      await this.fleet.refresh({ quiet: true });
+    } finally {
+      this.detectionPending.set(false);
     }
   }
 

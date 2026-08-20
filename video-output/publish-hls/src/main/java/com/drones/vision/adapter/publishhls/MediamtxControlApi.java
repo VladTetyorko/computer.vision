@@ -47,6 +47,13 @@ final class MediamtxControlApi {
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
 
     private static final Pattern READY_FIELD = Pattern.compile("\"ready\"\\s*:\\s*(true|false)");
+    /**
+     * mediamtx reports readers as an array of session objects; this captures the array's contents so
+     * "at least one reader" is a non-blank capture. Deliberately a presence test, not a count — the
+     * idle policy only asks whether <i>anyone</i> is watching, and counting would mean parsing the
+     * session objects this thin client has no other reason to understand.
+     */
+    private static final Pattern READERS_FIELD = Pattern.compile("\"readers\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
     private static final Pattern ERROR_FIELD = Pattern.compile("\"error\"\\s*:\\s*\"([^\"]*)\"");
     private static final String PATH_ALREADY_EXISTS_ERROR = "path already exists";
 
@@ -121,6 +128,42 @@ final class MediamtxControlApi {
             throw unexpectedStatus("readiness check", pathName, response);
         }
         return extractReadyField(response.body());
+    }
+
+    /**
+     * Whether mediamtx currently has at least one reader on the path
+     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2).
+     *
+     * <p>This is the only term of the idle policy's video demand that can see a <b>WHEP/WebRTC</b>
+     * viewer: those connect straight to mediamtx and never touch this application, so without asking
+     * mediamtx itself the app would confidently conclude "nobody is watching" about a stream being
+     * watched right now, and stop it.
+     *
+     * <p>A 404 means mediamtx has no such path, so nothing can be reading it — {@code false}, not an
+     * error. Any other non-200, and a 200 whose body has no {@code readers} field, throws: the caller
+     * must be able to tell "no readers" apart from "could not ask", because it fails open on the
+     * latter and stops a stream on the former.
+     */
+    boolean hasReaders(String pathName) {
+        HttpResponse<String> response =
+                send(pathName, "reader check", authorized(HttpRequest.newBuilder(getPathUri(pathName))).GET());
+        if (response.statusCode() == 404) {
+            return false;
+        }
+        if (response.statusCode() != 200) {
+            throw unexpectedStatus("reader check", pathName, response);
+        }
+        return extractHasReaders(pathName, response.body());
+    }
+
+    /** Package-private test seam, mirroring {@link #extractReadyField}. */
+    static boolean extractHasReaders(String pathName, String body) {
+        Matcher matcher = READERS_FIELD.matcher(body == null ? "" : body);
+        if (!matcher.find()) {
+            throw new MediamtxControlApiException("mediamtx Control API reader check for path '" + pathName
+                    + "' returned a body with no \"readers\" array: " + body);
+        }
+        return !matcher.group(1).isBlank();
     }
 
     /**

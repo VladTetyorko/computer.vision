@@ -368,7 +368,7 @@ export class FleetStore {
   }
 
   async stop(streamId: string): Promise<boolean> {
-    console.info(`${LOG_PREFIX} POST /api/streams/${streamId}/stop`);
+    console.info(`${LOG_PREFIX} DELETE /api/streams/${streamId}`);
     const result = await this.run(async () => {
       await this.api.stopStream(streamId);
       await this.refresh({ quiet: true });

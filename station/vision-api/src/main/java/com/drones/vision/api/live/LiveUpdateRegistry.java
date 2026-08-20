@@ -582,6 +582,29 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     }
 
     /**
+     * Whether any open connection is subscribed to <b>any</b> topic scoped to this asset — telemetry
+     * or detections (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2). Read by {@code
+     * LiveHlsAndReaderVideoDemand} as its "a cockpit is open on this asset" term.
+     *
+     * <p>Deliberately broader than {@link #watchingDetections(AssetId)}: that one asks whether
+     * anyone wants <i>boxes</i>, which since docs/plans/active/CV-DEMAND-PLAN.md is off by default and so
+     * says nothing about whether the video is being watched. Video has no SSE topic of its own — it
+     * travels over HLS/WHEP — so an asset-scoped subscription is the closest thing this registry can
+     * honestly offer, and it is only ever one OR-term among several.
+     *
+     * @param assetId the asset to check
+     * @return {@code true} if at least one connection carries a topic scoped to it
+     */
+    public boolean watchingAsset(AssetId assetId) {
+        if (assetId == null) {
+            return false;
+        }
+        return connections.values().stream()
+                .flatMap(connection -> connection.topics().stream())
+                .anyMatch(topic -> assetId.equals(topic.assetId()));
+    }
+
+    /**
      * How many SSE connections are currently open — {@code live-updates}'s {@code
      * SubsystemStatusPort} plumbing (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2), read by {@code
      * LiveUpdateStatusProvider} (same package). This class has no external dependency to fail
@@ -939,15 +962,17 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * Builds a fresh {@code devices} snapshot from {@link DeviceService#devices()} (default,
      * non-archived — matching {@code GET /api/devices}'s own default) + {@link
      * StreamService#streams()}, mapping each active stream's viewer URLs through {@link
-     * #streamPublisherPort} exactly like {@code StreamController#list} already does.
+     * #streamPublisherPort} exactly like {@code StreamController#list} already does — both now via
+     * {@link ActiveStreamResponse#from}, so a field added to the REST poll can no longer go missing
+     * from the snapshot the SPA actually prefers (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5).
      */
     private LiveEnvelopeResponse freshDevicesEnvelope() {
         List<DeviceResponse> devices =
                 deviceService.getObject().devices().stream().map(DeviceResponse::from).toList();
-        List<ActiveStreamResponse> streams = streamService.getObject().streams().stream()
-                .map(stream -> new ActiveStreamResponse(stream.streamId().value().toString(),
-                        stream.deviceId().value().toString(), stream.startedAt(), viewUrl(stream.streamId()),
-                        whepUrl(stream.streamId()), stream.burnedIn()))
+        StreamService streams0 = streamService.getObject();
+        List<ActiveStreamResponse> streams = streams0.streams().stream()
+                .map(stream -> ActiveStreamResponse.from(stream, viewUrl(stream.streamId()),
+                        whepUrl(stream.streamId()), streams0.detectionState(stream.streamId()).orElse(null)))
                 .toList();
         DevicesSnapshotResponse snapshot = new DevicesSnapshotResponse(devices, streams);
         return new LiveEnvelopeResponse(sequencer.incrementAndGet(), null, LiveTopicKind.DEVICES.wire(), snapshot);

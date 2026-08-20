@@ -123,6 +123,29 @@ public final class SupervisedPublisher<T> implements Flow.Publisher<T> {
         }
     }
 
+    /**
+     * Whether this publisher is currently between a terminal signal and the next successfully
+     * delivered item (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.2) — i.e. the source failed or
+     * completed, and nothing has flowed since.
+     *
+     * <p>Derived entirely from the existing outage latch, which is set when an outage begins and
+     * cleared by the first item after recovery: <b>no new field, and nothing added to the hot
+     * path.</b> The window it reports deliberately spans both the backoff wait <i>and</i> a reopened
+     * source that has not yet produced anything — from a consumer's seat those are the same fact
+     * ("still not receiving"), and splitting them would report a recovery that has not been
+     * demonstrated.
+     *
+     * <p>An explicitly {@link #stop() stopped} publisher always answers {@code false}: retries are
+     * permanently disabled, so whatever the latch happens to hold, nothing is reconnecting. That
+     * case does not arise in practice — a stopped supervisor belongs to a stream already removed
+     * from every listing — but the honest answer costs one read.
+     *
+     * @return {@code true} while an outage is in progress and retries are still enabled
+     */
+    public boolean reconnecting() {
+        return !stopped.get() && outageAnnounced;
+    }
+
     private void openAndSubscribe(Flow.Subscriber<? super T> downstream) {
         if (stopped.get()) {
             return; // an explicit stop raced ahead of this (re)open attempt: do nothing

@@ -104,6 +104,16 @@ const TRACKS_POLL_INTERVAL_MS = 2_000;
  * "re-arming detection" toast only ever fires off the server's own `modelReArmed` field, never
  * assumed client-side (`cv-control-panel-logic.ts#reArmHint`).
  *
+ * **`detectionEnabled` is the one knob that left that rule** (docs/plans/active/STREAM-STATE-PLAN.md §3.1).
+ * It is the only knob with a *read* surface — `GET /api/streams` now carries the running stream's own
+ * value — so rendering the draft for it was a measurable lie, not merely an approximation: a second
+ * browser, a reload, or switching drone could each show a switch position that was false for the
+ * stream on screen. It is now an `input`/`output` pair ({@link detectionEnabled} /
+ * {@link detectionEnabledChange}) whose write the host owns (`CockpitFacade#setDetection`), because
+ * the rail's off-dot and the video-surface "Turn on" chip must resolve it identically. Every other
+ * knob here keeps the draft-first rule above: none of them can be read back, so the draft remains
+ * the only answer anyone has.
+ *
  * **Class-filter chips are a checklist built from real data, not a hardcoded class list**
  * (docs/plans/done/CV-CONTROL-PLAN.md Wave E, coordinator amendment after cv-service Wave A's real-vocabulary
  * measurement: prompt-free YOLOE's true vocabulary is ~4585 classes with many synonym/scene labels
@@ -170,6 +180,18 @@ export class CvControlPanel {
   /** The primary device's currently-running stream id, or `undefined` before the first Start —
    * gates whether an edit also PATCHes live (see class doc). */
   readonly streamId = input<string | undefined>(undefined);
+
+  /** The running stream's own server-side detect intent (`CockpitFacade`'s `facade.detectionOn()`,
+   * docs/plans/active/STREAM-STATE-PLAN.md §3.1) — already resolved by the facade against the draft, so
+   * this component renders it rather than re-deciding the rule. See {@link onDetectionEnabledToggle}
+   * for why the switch never renders local intent. */
+  readonly detectionEnabled = input<boolean>(false);
+
+  /** True while the host's Detect on/off request is in flight — see {@link onDetectionEnabledToggle}. */
+  readonly detectionPending = input<boolean>(false);
+
+  /** Emitted by the Detect switch; the host (`CockpitFacade#setDetection`) owns the actual write. */
+  readonly detectionEnabledChange = output<boolean>();
 
   /** Recent detection results for the running stream (`FlyPage`'s own `detections.results()`, the
    * same signal the player's overlay already reads) — feeds the class-filter chip checklist's
@@ -430,7 +452,11 @@ export class CvControlPanel {
   );
   protected readonly detectionStatusInfo = computed(() =>
     detectionStatus(
-      this.settings.effective().detectionEnabled,
+      // Server truth while a stream runs, the draft otherwise — the same {@link detectionEnabled}
+      // the switch above renders, so the switch position and this sentence can never disagree
+      // (docs/plans/active/STREAM-STATE-PLAN.md §3.1). Reading the draft here was how "Off — video only"
+      // could sit under a switch the backend had on.
+      this.detectionEnabled(),
       this.hasStream(),
       this.tracksResponse()?.detectionState,
       this.tracksResponse()?.rate?.submittedFps,
@@ -536,8 +562,20 @@ export class CvControlPanel {
     this.applyHotKnob({ inferenceFps: Number(value) });
   }
 
+  /**
+   * **Not** an `applyHotKnob` edit, unlike its slider siblings above
+   * (docs/plans/active/STREAM-STATE-PLAN.md §3.1). Two differences, both deliberate:
+   *
+   * <ul>
+   *   <li>it is not debounced — a single explicit click is not a gesture that might still be
+   *       mid-drag, and the facade's own "Turn on" chip has always fired this immediately;</li>
+   *   <li>it does not write what the operator clicked into the rendered value. {@link detectionEnabled}
+   *       is server truth, so the switch moves once the wire says it moved. Emitting rather than
+   *       self-applying is what keeps that single rule in one place (the facade) instead of two.</li>
+   * </ul>
+   */
   protected onDetectionEnabledToggle(checked: boolean): void {
-    this.applyHotKnob({ detectionEnabled: checked });
+    this.detectionEnabledChange.emit(checked);
   }
 
   // --- Staged class-filter edits (see {@link pendingLabels}'s own doc comment) — every handler

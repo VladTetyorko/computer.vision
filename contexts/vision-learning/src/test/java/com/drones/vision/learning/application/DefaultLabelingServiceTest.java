@@ -761,6 +761,11 @@ class DefaultLabelingServiceTest {
         public Optional<AssetUsage> findOpenByAsset(AssetId assetId) {
             throw new UnsupportedOperationException("not exercised by this suite");
         }
+
+        @Override
+        public Optional<AssetUsage> findByStream(StreamId streamId) {
+            throw new UnsupportedOperationException("not exercised by this suite");
+        }
     }
 
     private static final class FakeDetectionRepositoryPort implements DetectionRepositoryPort {

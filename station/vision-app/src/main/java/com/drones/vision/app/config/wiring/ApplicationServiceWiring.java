@@ -505,6 +505,12 @@ public class ApplicationServiceWiring {
      * #streamService} has actually wired a {@code DetectionDemandPort}, but are threaded through
      * unconditionally since {@link StreamPipelineSettings}'s own compact constructor requires both
      * regardless.
+     *
+     * <p>{@code pipeline.videoStaleAfter()} (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.4) supplies
+     * {@link StreamPipelineSettings#videoStaleAfter()} — how long a stream may go without a frame
+     * before its {@code StreamState} reads {@code STALLED}. It sits with the other per-stream
+     * read-model tunables here rather than under a lifecycle root, because that is what it is: a
+     * threshold over the pipeline's own frame cadence.
      */
     static StreamPipelineSettings streamPipelineSettings(VisionApplicationProperties properties,
                                                           VisionTrackingProperties tracking,
@@ -525,7 +531,7 @@ public class ApplicationServiceWiring {
                 pipeline.cameraHfovDegrees(),
                 new AdaptiveRateSettings(pipeline.adaptiveRate().enabled(), pipeline.adaptiveRate().maxFps(),
                         pipeline.adaptiveRate().ewmaAlpha()),
-                demand.pollInterval(), demand.grace());
+                demand.pollInterval(), demand.grace(), pipeline.videoStaleAfter());
     }
 
     /**

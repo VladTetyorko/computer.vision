@@ -104,7 +104,26 @@ export interface ActiveStream {
   readonly viewUrl?: string;
   readonly whepUrl?: string;
   readonly burnedIn?: boolean;
+  readonly state?: StreamState;
+  readonly detectionEnabled?: boolean;
+  readonly detectionState?: DetectionState;
 }
+
+/**
+ * Mirrors the Java `StreamState` enum (docs/plans/active/STREAM-STATE-PLAN.md §2.3) — whether a running
+ * stream's **video** is actually flowing, measured server-side from frame arrivals rather than
+ * inferred here from "the player has not errored yet".
+ *
+ * There is deliberately no `'STOPPED'`: this union describes streams that `GET /api/streams`
+ * returned, and a stopped stream is not in that list at all — it is an `AssetUsage` row on a
+ * different axis. A stream that vanishes from the list has ended; that is the signal, not a state.
+ *
+ * `'UNOBSERVED'` is the honest answer for a proxied source (docs/plans/active/MEDIA-SOT-PLAN.md D4): no
+ * `VideoSourcePort` runs inside the JVM, so the backend counts zero frames forever and must say
+ * "cannot judge" instead of reporting a fault that is not there. Absent (old server) degrades the
+ * same way — see `stream-state-logic.ts`.
+ */
+export type StreamState = 'STARTING' | 'LIVE' | 'STALLED' | 'RECONNECTING' | 'UNOBSERVED';
 
 /**
  * Mirrors `dto.StartStreamRequest` — every field falls back to `PipelineConfig.defaults()`.
