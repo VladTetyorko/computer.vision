@@ -12149,3 +12149,201 @@ burn-in-era training-capture warning rewritten), `src/app/core/detections/detect
   is scoped to the two-state mode switch and staleness honesty only, per the plan's own wave
   boundaries.
 
+## Status — CV-CLEAN-FEED-PLAN wave W4: priority tiers, label collision-yield, four-state declutter — 2026-08-20
+
+### What shipped
+
+W3 left the overlay a flat, undifferentiated draw: every detection got the same box, the same
+always-on label, the same per-track hash hue, and every tracked object grew a trail — noise at any
+real object count (research §3.2's own "12 parked cars" example). This wave is the priority-tier
+render model docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/§3.3/§3.6 designed for it.
+
+- **`shared/player/detection-overlay-logic.ts`** gained, as pure functions with full specs:
+  - **Priority tiers** (`DetectionTier = 'T0'|'T1'|'T2'|'T3'`, `detectionTiers`) — T0 (hover or the
+    FOLLOW-locked track, unconditional, checked first) → T3 (sub-scale, under `SUB_SCALE_PX` (12) on
+    *both* axes, checked before the top-K budget is spent) → T1 (tracked-and-moving, displacement ≥
+    `MOVING_DISPLACEMENT_THRESHOLD` (0.02, normalized) across the trail window — uncapped, always
+    promoted — **or** in the top `NOTABLE_TOP_K` (5) of the size-eligible remainder by box-area ×
+    confidence; the two routes share one budget, a mover just spends its slot without going through
+    the ranking) → T2 (everything left). Alert-rule promotion (the research table's third T1
+    criterion) is deliberately omitted — no `alerting` field exists on the wire yet (§8.3), and
+    nothing here fabricates one client-side.
+  - **Tiered rendering weights** — `tierAlphaPercent(tier, lockActive)`: T2 draws at its own
+    `T2_ALPHA_PERCENT` (55%) base; once a FOLLOW lock is active, every non-T0 tier additionally dims
+    to `LOCK_DIM_ALPHA_PERCENT` (40%) of its own base (T0 is exempt — it usually *is* the lock).
+    Combined *multiplicatively*, never additively, with the pre-existing staleness fade at the
+    `Player#redrawOverlay` call site. Stroke widths named (`T0_STROKE_WIDTH_PX`=3,
+    `T1_STROKE_WIDTH_PX`=2, `T2_STROKE_WIDTH_PX`=1); T3 draws a filled dot,
+    `SUB_SCALE_DOT_RADIUS_PX`=3, no box, no label.
+  - **Class-bucket box colors** — `trackHue` (per-track hash hue) is **deleted outright**: at real
+    object counts it read as confetti and encoded nothing a viewer could actually use (identity was
+    already the `#id` text and box constancy, never the color). `classBucketHue`/`classBucket`/
+    `tierBoxColor` replace it — three fixed, non-hashed hues (`person`=340°/`--rose-500`,
+    `vehicle`=146°/`--green-500`, `other`=275°, each ≥56° from the reserved T0-blue/hover-amber/
+    danger-red hues), a keyword-substring heuristic over the (composite-prefix-stripped) label text.
+    `tierBoxColor(detection, composite)` picks `modelHue` instead when the batch actually mixes ≥2
+    models this frame (`distinctModelKeys(...).length >= 2`) — the multi-model legend case, kept
+    unchanged per the research disposition table. T0 reserves the original accent
+    (`modelHue(DEFAULT_MODEL_KEY)`, byte-identical `#4f8cff`) regardless of class or composite mode;
+    hover keeps its own amber override on every tier that draws a box.
+  - **Label collision-yield** (`placeLabels`) — a pure greedy placer: for each candidate, in
+    caller-supplied priority order (T0 first), try its previous-frame slot first if collision-free
+    (hysteresis, via a caller-owned `Map<string, LabelSlot>`), else `above → below → inside-top`; a
+    candidate that collides in all three paints no label at all (the box still draws — identity stays
+    recoverable by hover). Capped at `MAX_PAINTED_LABELS` (10) painted labels per frame, across every
+    tier combined. `formatTierLabel` drops the confidence percent for T1 (research §3.2/D4) — T0's
+    label and the hover tooltip both keep the full `formatDetectionLabel` text, confidence included.
+  - **Declutter levels** — `BoxesMode` widens from W3's two-state `'overlay'|'off'` to
+    `'all'|'priority'|'locked'|'off'` (identifier kept — every consumer already names its own
+    signal/input `boxesMode`, only the *values* changed shape). `tiersForDeclutterLevel` is the one
+    place the mapping lives: `'all'` → every tier, `'priority'` (new `DEFAULT_DECLUTTER_LEVEL`) → T0+
+    T1+T3 (ambient T2 hidden), `'locked'` → T0 only, `'off'` → nothing (`shouldDrawOverlay` still
+    short-circuits the whole canvas before tiers are even consulted). `cycleBoxesMode`/
+    `DECLUTTER_LEVELS` (newly exported, the segmented controls' own `@for` source) cycle
+    All → Priority → Locked-only → Off → All; a stale/unrecognized value (e.g. `'overlay'` surviving
+    in a pre-wave persisted signal) restarts from the front, the same degrade W3 already established.
+    `declutterLevelLabel` is the one place the four display names live.
+- **`shared/player/player.ts`** — `redrawOverlay` rewritten around the tier pipeline: computes
+  `trails` once (reused by both the trail layer and `detectionTiers`, one scan per redraw, not two),
+  builds a `DetectionTierContext` from the new `lockedTrackId` input + `hoveredDetection` + `trails` +
+  the letterboxed content size, filters/sorts the draw list by `tiersForDeclutterLevel` and tier rank
+  (ambient → notable → committed, so a higher tier's box always paints on top), applies the combined
+  staleness × tier × lock-dim alpha per detection, then a separate `paintLabels` pass over the T0/T1
+  candidates collected during the box pass. `drawBox` → `drawTierBox` (returns whether the caller
+  should queue a label candidate; draws a dot for T3, a stroke for everything else, `COASTING` still
+  dashed on every tier that draws a box at all). `drawTrails` now takes the precomputed `trails` map
+  plus a `t0TrackIds` filter — trails are **T0-only** as of this wave (research §3.2/D8: a
+  twelve-parked-cars trail was pure noise); `trackTrails` itself is unchanged, this is a filter at the
+  call site. `drawnBoxes` (and therefore hover/click hit-testing) now only ever contains
+  declutter-visible detections — an operator on `'locked'` can't hover a T2 box that isn't drawn.
+- **The FOLLOW-locked track id reaches the renderer via a new plumbing chain**, since `player.ts` had
+  no tracking poll of its own: `CvControlPanel` (which already owns the honest tracks-poll-derived
+  `lockedTrackId` computed, feeding its "Following #N" chip) gained a `lockedTrackIdChange` output,
+  emitted by a constructor `effect` on every change. `CockpitFacade` gained a plain `lockedTrackId`
+  signal (seeded `0`, the wire's own "no lock" sentinel), and `cockpit.html` wires
+  `(lockedTrackIdChange)="facade.lockedTrackId.set($event)"` on the panel and
+  `[lockedTrackId]="facade.lockedTrackId()"` on the primary `<vision-player>`. This keeps tracks-poll
+  ownership exactly where it already was (no relocation, preserving W5's future "one feed owner"
+  boundary) while still getting the value where the research spec wants it read from — the wire's own
+  echo, never a local optimistic guess (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule,
+  the same doctrine the dashed `COASTING` stroke already expresses at the pixel level). `Player`'s own
+  `lockedTrackId` input defaults to `0` and is simply never bound by Live or the wall tile — neither
+  page has a Follow/lock control at all, so T0 there stays hover-only: an honest degrade, not a broken
+  one, since there is genuinely no lock to report from those surfaces.
+- **Every consumer migrated to the four-state model**: `cv-control-panel.html`'s "Boxes rendering"
+  section and `live.html`'s segmented control both now `@for` over the shared `DECLUTTER_LEVELS`
+  constant, naming each button via `declutterLevelLabel`/a thin `boxesModeLabel` wrapper (matching the
+  file's existing `capabilityLevelName` precedent) rather than restating four literals per template.
+  `wall-tile.html`'s tiny toggle button keeps a one-glyph-per-state design (no room for a labeled
+  control at wall scale, per that component's own doc comment) — `▦`/`▢`/`◉`/`▢×` for
+  all/priority/locked/off, with `priority`/`off` keeping the *exact* glyphs the old two-state toggle
+  always drew, so an untouched wall looks byte-identical. `cockpit.html`'s help drawer B-key text
+  updated to name all four states. `CockpitFacade`/`LiveFacade`/`WallTile` all reseed their
+  `boxesMode` signal default from `DEFAULT_DECLUTTER_LEVEL` instead of the now-invalid literal
+  `'overlay'`.
+
+### Design choices
+
+- **`BoxesMode` keeps its name despite the semantic shift** (a rendering toggle → a density level) —
+  every consumer already names its own signal/input `boxesMode`, and the control still answers the
+  same question ("how are boxes drawn"); renaming the type would have forced a mechanical rename
+  across 9 files for no behavioral gain. Flagged here as a deliberate call, not a missed rename.
+  `DECLUTTER_LEVELS`/`DEFAULT_DECLUTTER_LEVEL`/`declutterLevelLabel`/`tiersForDeclutterLevel` all use
+  the "declutter" vocabulary the research doc itself uses for the *concept*, while the *type* stays
+  `BoxesMode` for exactly that consumer-continuity reason.
+- **A moving track and the top-K ranking share one `NOTABLE_TOP_K` budget, not two independent ones**
+  — the research doc's own "doesn't consume a second slot" phrasing. A batch of movers alone can
+  still exceed 5 T1 detections (movement is never itself capped), but each mover claims one of the 5
+  nominal slots before the ranking loop runs, so a scene with many genuine movers *and* many strong
+  static detections will show more than 5 T1 boxes in the mover-heavy case and fewer than 5
+  ranking-based promotions in that same case — an intentional shared-budget design, not a bug,
+  verified directly by `detectionTiers.spec.ts`'s own "shared budget" and "movement is never capped"
+  cases.
+- **Sub-scale (T3) is checked before the top-K ranking, not after** — a tiny, high-confidence box
+  would otherwise trivially win a top-K slot and then render as a box too small to read; checking size
+  first means the budget is never spent on something that's going to be a dot regardless.
+- **Class-bucket hues over a richer taxonomy**: three buckets (person/vehicle/other) rather than
+  per-class hues — the research table asks for "one stable hue each" at the *tier* system's color
+  budget, and an open-vocab model's ~4585-class real vocabulary (docs/plans/done/CV-CONTROL-PLAN.md
+  Wave E's own measurement) makes a hue-per-class scheme both infeasible (colorblind-safe hue budgets
+  are small) and not what the research doc asked for.
+- **Draw order is ambient → notable → committed** (not detection-array order) so a T0 box's stroke is
+  never visually buried under a T2 outline that happens to overlap it on screen — matters most exactly
+  when the operator has committed to a target, the one moment layering should least be left to chance.
+
+### Degrade / role-gate / dev-parity
+
+- **Honest lock-id sourcing, not a client guess**: `Player#lockedTrackId` only ever reflects
+  `CvControlPanel`'s own wire-confirmed poll read, mirroring the "Following #N" chip's own rule
+  (docs/extracts/TRACKING-ORCHESTRATION.md §3.3) — a click-to-follow never paints T0 optimistically
+  ahead of the server actually confirming the lock.
+- **Watch mode has no lock plumbing at all**: `cockpit.html` only mounts `<vision-cv-control-panel>`
+  `@if (!facade.watchMode())`, so in watch mode `facade.lockedTrackId` never receives a poll-derived
+  value and stays its seeded `0` — the overlay's T0 tier there is hover-only, same honest "nothing to
+  report" degrade as Live/Wall, not a silently-broken lock indicator.
+- **Detection controls remain ungated by role**, unchanged from every prior wave — nothing in this
+  wave introduces a new role-sensitive surface, so there is nothing for `vision.auth.enabled=false`'s
+  unbounded dev admin to lose; every viewer, dev or real, sees the identical four-state control and
+  identical tier rendering.
+- **A failed/absent tracks poll degrades honestly**: `tracksResponse` (and therefore `lockedTrackId`)
+  already falls back to `null`/`0` on any transport failure (`CvControlPanel#pollTracks`'s existing
+  catch block, unchanged this wave) — the overlay simply never promotes a lock-based T0 in that case,
+  never fabricating one.
+
+### Tests
+
+`npm run test:ci`: **131 test files, 2341 tests, all passing** (up from 131/2304 at the close of Wave
+W3 — net +37, entirely in `detection-overlay-logic.spec.ts`, whose own `it(` count went 56 → 93: the
+`trackHue` describe block removed (4 cases, the function is gone), `shouldDrawOverlay`/`cycleBoxesMode`
+rewritten for the four-state values, and new describe blocks added for `detectionTiers` (11 cases,
+including the shared-budget/movement-uncapped/sub-scale-before-top-K edge cases named above),
+`tierAlphaPercent`, `classBucket`, `classBucketHue`, `tierBoxColor`, `formatTierLabel`, `placeLabels`
+(7 cases, including all-three-slots-collide and stale-hysteresis-slot fallback), `tiersForDeclutterLevel`,
+and `declutterLevelLabel`. `npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json`
+(verified independently). No new component specs — this module tests pure logic, not templates/wiring
+(the codebase's own stated precedent), and every consumer edit here is thin wiring already exercised
+end-to-end by the full suite passing.
+
+### Build
+
+`ng build --configuration production` — green. Same two pre-existing budget warnings as Waves H8/W3
+(initial bundle over its 390 kB warning threshold, `tactical-map.css` over its 8 kB budget), neither
+introduced nor worsened by this wave. **Bundle delta**, measured via `git worktree add --detach` at
+the pre-wave commit (adc66bc1, Wave W3) with `node_modules` symlinked in (no dependency changes this
+wave, so no reinstall needed) — a parallel agent was mid-edit on Java files in the primary working
+tree at measurement time, so a worktree was used instead of `git stash`, matching W3's own
+methodology:
+
+- **Initial (eager) bundle: unchanged — 408.85 kB raw / 115.08 kB transfer, byte-identical.** Every
+  file this wave touched lives in a lazy-loaded feature chunk; nothing reaches the eager bundle.
+- **`cockpit` lazy chunk: 129.64 kB → 130.05 kB raw (+0.41 kB) / 28.13 kB → 28.19 kB transfer
+  (+0.06 kB).**
+- **`live` lazy chunk: 21.57 kB → 21.68 kB raw (+0.11 kB) / 5.90 kB → 5.97 kB transfer (+0.07 kB).**
+- **`wall` lazy chunk: 9.55 kB → 9.74 kB raw (+0.19 kB) / 3.22 kB → 3.31 kB transfer (+0.09 kB).**
+- **Every lazy chunk summed: 1591.39 kB → 1596.07 kB raw (+4.68 kB, +0.29%) / 419.10 kB → 420.68 kB
+  transfer (+1.58 kB, +0.38%).** The tier/label/color logic and its extra rendering branches are the
+  entire cost — no new dependency was added or upgraded.
+
+### Files touched
+
+`src/app/shared/player/detection-overlay-logic.ts` (+`.spec.ts`), `src/app/shared/player/player.ts`,
+`src/app/features/fly/cv-control-panel.ts`/`.html`, `src/app/features/fly/cockpit-facade.ts`,
+`src/app/features/fly/cockpit.html`, `src/app/features/live/live-facade.ts`,
+`src/app/features/live/live.ts`/`.html`, `src/app/features/wall/wall-tile.ts`/`.html`.
+
+### Left incomplete / deferred, named honestly
+
+- **Alert-rule T1 promotion (research §3.2's third T1 criterion) is not implemented.** There is no
+  `alerting`/similar field on the detection wire contract yet (research §8.3 lists it as an open
+  backend candidate) — `detectionTiers` only ever promotes on lock/hover, sub-scale, movement, and
+  top-K ranking. Left for whichever wave lands the backend field.
+- **`fly-logic.ts` needed no change** — grep-confirmed before and after this wave to carry no
+  `BoxesMode`/`boxesMode` reference at all; `ToolRailPanelId` never named a boxes-specific rail entry.
+- **No new component-level spec** for `player.ts`'s rewritten `redrawOverlay`/`drawTierBox`/
+  `drawTrails`/`paintLabels` — this module has never unit-tested `<canvas>` drawing directly (matching
+  W3's own stated precedent); every piece of decision logic those methods call is itself covered by
+  `detection-overlay-logic.spec.ts`'s 93 cases.
+- **W5's Vision-drawer merge and the honest label-filter-driven declutter interaction are unstarted**
+  — this wave is scoped to priority tiers, label collision-yield, and the four-state declutter control
+  only, per the plan's own wave boundaries.
+

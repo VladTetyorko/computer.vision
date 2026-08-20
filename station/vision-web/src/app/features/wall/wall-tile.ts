@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Player, type BoxesMode } from '../../shared/player/player';
-import { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
+import { DEFAULT_DECLUTTER_LEVEL, cycleBoxesMode, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import type { ActiveStream, Device } from '../../core/api/models';
@@ -51,11 +51,14 @@ export class WallTile {
   protected readonly telemetry = inject(TelemetryStore);
   protected readonly detections = inject(DetectionsStore);
 
-  /** Defaults to `'overlay'` — burn-in no longer exists at all (docs/plans/active/CV-CLEAN-FEED-PLAN.md
-   * D-1), so there is nothing left to re-derive against the stream. A plain `signal`, not the old
-   * `linkedSignal` over a derived `streamBurnedIn` primitive — see `CockpitFacade#boxesMode`'s
-   * identical simplification. */
-  protected readonly boxesMode = signal<BoxesMode>('overlay');
+  /** Defaults to {@link DEFAULT_DECLUTTER_LEVEL} ('priority') — burn-in no longer exists at all
+   * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1), so there is nothing left to re-derive against the
+   * stream. A plain `signal`, not the old `linkedSignal` over a derived `streamBurnedIn` primitive —
+   * see `CockpitFacade#boxesMode`'s identical simplification. Widened from a two-state toggle to four
+   * named declutter levels as of wave W4 (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.6); this
+   * tile has no FOLLOW-lock plumbing at all (no `CvControlPanel` at wall scale), so `<vision-player>`'s
+   * `lockedTrackId` input is simply never bound here — it stays its own default `0`. */
+  protected readonly boxesMode = signal<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
 
   private readonly hasTelemetryCapability = computed(() =>
     (this.device()?.capabilities ?? []).includes('TELEMETRY'),
@@ -63,6 +66,30 @@ export class WallTile {
 
   protected cycleBoxesMode(): void {
     this.boxesMode.update((current) => cycleBoxesMode(current));
+  }
+
+  /** The current declutter level's own display name — the toggle button's title (`wall-tile.html`);
+   *  the wording every other surface uses, never a locally-invented abbreviation. */
+  protected boxesModeLabel(mode: BoxesMode): string {
+    return declutterLevelLabel(mode);
+  }
+
+  /** The toggle button's own tiny glyph — at wall-tile scale there is no room for a labeled control
+   *  (this class's own doc comment), so the button shows one character and {@link boxesModeLabel}
+   *  carries the real name in its `title` tooltip instead. `'priority'` (the default) and `'off'`
+   *  keep the exact glyphs this button always drew for its old two-state "overlay"/"off" toggle — a
+   *  wall the operator hasn't touched since before this wave looks byte-identical. */
+  protected boxesModeGlyph(mode: BoxesMode): string {
+    switch (mode) {
+      case 'all':
+        return '▦';
+      case 'priority':
+        return '▢';
+      case 'locked':
+        return '◉';
+      case 'off':
+        return '▢×';
+    }
   }
 
   protected readonly batteryLabel = computed(() => {

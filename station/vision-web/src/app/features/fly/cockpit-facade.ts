@@ -23,7 +23,7 @@ import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner 
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
 import type { BoxesMode, Transport } from '../../shared/player/player';
-import { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
+import { DEFAULT_DECLUTTER_LEVEL, cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
 import { followMarkers, type DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import { canShowCommandPanel } from './flight-command-panel-logic';
 import { buildFollowLockPatch, buildHotKnobPatch } from './cv-control-panel-logic';
@@ -382,11 +382,24 @@ export class CockpitFacade {
 
   readonly latencySeconds = signal<number | null>(null);
   readonly transport = signal<Transport>('hls');
-  /** Defaults to `'overlay'` — burn-in no longer exists at all (docs/plans/active/CV-CLEAN-FEED-PLAN.md
-   * D-1), so there is nothing left for this to re-derive against; a plain `signal`, not the old
-   * `linkedSignal` over `streamBurnedIn`. The operator's own pick — `B`, or a click in
-   * `cv-control-panel.html` — sticks across device/asset switches exactly like `transport` above. */
-  readonly boxesMode = signal<BoxesMode>('overlay');
+  /** Defaults to {@link DEFAULT_DECLUTTER_LEVEL} ('priority') — burn-in no longer exists at all
+   * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1), so there is nothing left for this to re-derive
+   * against; a plain `signal`, not the old `linkedSignal` over `streamBurnedIn`. The operator's own
+   * pick — `B`, or a click in `cv-control-panel.html` — sticks across device/asset switches exactly
+   * like `transport` above. Widened from a two-state toggle to four named declutter levels as of wave
+   * W4 (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.6) — see {@link cycleBoxes}. */
+  readonly boxesMode = signal<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
+
+  /**
+   * The FOLLOW-locked track id, echoed up from `CvControlPanel`'s own honest tracks-poll read
+   * (`lockedTrackIdChange`, wave W4) — the one plumbing path that gets the lock id from where it's
+   * actually known (the panel's poll) to `shared/player/player.ts`'s new `lockedTrackId` input,
+   * without relocating tracks-poll ownership. `0` is the wire's own "no lock" sentinel
+   * (`StreamTracksResponse#lockedTrackId`), never `null`/`undefined` — this signal seeds at that same
+   * sentinel so a player bound to it before the panel's first poll settles reads "no lock", not a
+   * false positive.
+   */
+  readonly lockedTrackId = signal(0);
 
   /** Persisted, non-mutually-exclusive toggle (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — see this class's own
    * doc comment above `MAP_VISIBLE_KEY`. */

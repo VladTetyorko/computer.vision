@@ -9,19 +9,56 @@ import { CV_STATUS_FRESH_SECONDS } from '../../core/detections/detections-logic'
  * hls.js, or a poller — mirrors `shared/player/player-recovery.ts`.
  */
 
-/** The per-tile toggle's two states — see `shouldDrawOverlay`'s doc comment for what each means.
- *  `'burned'` is gone (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3): server-side burn-in no
- *  longer exists, so there is nothing left for it to name. */
-export type BoxesMode = 'overlay' | 'off';
+/**
+ * Declutter levels (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.6, wave W4) — the per-tile
+ * density control, extended from W3's two-state `'overlay' | 'off'` to four named states. Avionics
+ * practice (research §4.6): discrete, named declutter modes, never a slider. `'all'` draws every
+ * tier (T0-T3, today's old `'overlay'` posture); `'priority'` draws T0+T1 (full boxes) plus T3 (dots)
+ * but hides T2 (ambient); `'locked'` draws only T0 (the FOLLOW-locked track and/or the hovered box);
+ * `'off'` draws nothing at all — see `shouldDrawOverlay`'s own doc comment for what that means beyond
+ * "no boxes" (no hover/click either). The type keeps the name `BoxesMode` — every consumer already
+ * names its own signal/input `boxesMode`, and the control still answers the same question ("how are
+ * boxes drawn") — only the *values* changed shape, from a rendering toggle to a density level. See
+ * {@link tiersForDeclutterLevel} for which tiers each level actually draws.
+ */
+export type BoxesMode = 'all' | 'priority' | 'locked' | 'off';
 
-const BOXES_CYCLE: readonly BoxesMode[] = ['overlay', 'off'];
+/** Every declutter level, in cycle order — exported so a segmented-control template (`cv-control-
+ *  panel.html`, `live.html`) can `@for` over one typed source of truth instead of each restating the
+ *  four literals (and risking one drifting out of sync with {@link cycleBoxesMode}'s own order). */
+export const DECLUTTER_LEVELS: readonly BoxesMode[] = ['all', 'priority', 'locked', 'off'];
+const DECLUTTER_CYCLE = DECLUTTER_LEVELS;
 
-/** `B` (Fly) / the wall tile's own toggle button — cycles `'overlay'` <-> `'off'`. A `current` no
- *  longer present in the cycle (a stale value from before this wave) restarts from the cycle's
- *  first entry rather than throwing or standing still. */
+/** The declutter level every fresh player/tile/facade seeds its own signal to — research §3.6's own
+ *  "Priority is the sane default", not `'all'` (the undifferentiated everything-draws posture the
+ *  whole tier system in this wave exists to move away from). */
+export const DEFAULT_DECLUTTER_LEVEL: BoxesMode = 'priority';
+
+/** `B` (Fly) / the wall tile's own toggle button / the Live and cv-control-panel segmented controls —
+ *  cycles All → Priority → Locked-only → Off → All (research §3.6). A `current` no longer present in
+ *  the cycle (a stale value from before this wave, e.g. `'overlay'`/`'burned'` surviving in a
+ *  pre-wave persisted signal) restarts from the cycle's first entry rather than throwing or standing
+ *  still — the same degrade choice W3's own two-state cycle already made. */
 export function cycleBoxesMode(current: BoxesMode): BoxesMode {
-  const index = BOXES_CYCLE.indexOf(current);
-  return index === -1 ? BOXES_CYCLE[0] : BOXES_CYCLE[(index + 1) % BOXES_CYCLE.length];
+  const index = DECLUTTER_CYCLE.indexOf(current);
+  return index === -1 ? DECLUTTER_CYCLE[0] : DECLUTTER_CYCLE[(index + 1) % DECLUTTER_CYCLE.length];
+}
+
+/** The declutter level's own display name — every control that renders the four states
+ *  (`cv-control-panel.html`'s "Boxes rendering" section, `live.html`'s segmented control, the wall
+ *  tile's toggle button title) reads this instead of restating the four labels as literals in three
+ *  different templates. */
+export function declutterLevelLabel(mode: BoxesMode): string {
+  switch (mode) {
+    case 'all':
+      return 'All';
+    case 'priority':
+      return 'Priority';
+    case 'locked':
+      return 'Locked only';
+    case 'off':
+      return 'Off';
+  }
 }
 
 /**
@@ -120,14 +157,37 @@ export function overlaySyncLatencySeconds(
 }
 
 /**
- * Whether the canvas overlay should actually draw boxes right now — `'off'` suppresses it, `'overlay'`
- * draws once a result is available. The video itself is always clean pixels now (docs/plans/active/
- * CV-CLEAN-FEED-PLAN.md D-1: server-side burn-in is deleted, not defaulted off), so `'off'` means
- * genuinely no boxes anywhere, not merely "hide the client canvas over the server's own baked-in ones"
- * the way it used to.
+ * Whether the canvas overlay should actually draw *anything* right now — `'off'` suppresses it
+ * entirely, every other declutter level draws once a result is available (which tiers, specifically,
+ * is {@link tiersForDeclutterLevel}'s job, not this function's — this is only the top-level "is the
+ * canvas live at all" gate, unchanged in shape since W3). The video itself is always clean pixels now
+ * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1: server-side burn-in is deleted, not defaulted off), so
+ * `'off'` means genuinely no boxes anywhere — and, per `Player#overlayInteractive`'s own use of this
+ * function, no hover/click either, not merely "hide the client canvas over the server's own baked-in
+ * ones" the way it used to.
  */
 export function shouldDrawOverlay(mode: BoxesMode, hasResult: boolean): boolean {
-  return mode === 'overlay' && hasResult;
+  return mode !== 'off' && hasResult;
+}
+
+/**
+ * Which draw tiers a given declutter level actually renders (research §3.6) — the one place this
+ * rule lives; `Player#redrawOverlay` filters every detection through this before drawing, and the
+ * label-candidate pass reuses it rather than re-deriving which tiers are even on screen. `'off'`
+ * returns an empty set — `shouldDrawOverlay` already short-circuits the whole canvas before this is
+ * ever consulted for that mode, but an empty set is the semantically correct answer regardless.
+ */
+export function tiersForDeclutterLevel(mode: BoxesMode): ReadonlySet<DetectionTier> {
+  switch (mode) {
+    case 'all':
+      return new Set<DetectionTier>(['T0', 'T1', 'T2', 'T3']);
+    case 'priority':
+      return new Set<DetectionTier>(['T0', 'T1', 'T3']);
+    case 'locked':
+      return new Set<DetectionTier>(['T0']);
+    case 'off':
+      return new Set<DetectionTier>();
+  }
 }
 
 // --- Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7) -----------------------
@@ -294,21 +354,13 @@ export function formatDetectionLabel(detection: Detection): string {
 }
 
 /**
- * Stable per-track box color (docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #1) — the same hash-to-hue
- * mechanism as {@link modelHue}, keyed on `trackId` instead of a model key, so one tracked object
- * keeps one color across every frame **even as its label flips** (composite-mode member handoff,
- * docs/plans/done/TRACKING-PLAN.md §5.I risk R9) — a track's identity is its id, never its current label.
- * `drawBox` calls this instead of `modelHue` whenever `detection.track` is present; the two never
- * mix on the same box. A distinct hash seed (`"track-"` prefix) from `modelHue`'s own model-key hash
- * is deliberate, not load-bearing — the two are never compared or blended, only each internally
- * stable.
+ * **`trackHue` (per-track hash hue) is gone as of this wave** (docs/plans/active/
+ * CV-FLY-INTERACTION-RESEARCH.md §3.2/D5, wave W4): with 15 tracked objects on screen, 15 saturated
+ * hash-derived colors read as confetti, encoding nothing a viewer could actually use — identity was
+ * already carried by the `#id` text and box constancy, never the color. Color now carries *tier* and
+ * *class* instead — see {@link tierBoxColor}/{@link classBucketHue} below for the replacement, and
+ * `shared/player/player.ts#drawBox` for how a box's color is actually chosen per tier.
  */
-export function trackHue(trackId: number, alphaPercent = 100): string {
-  const hue = hashHue(`track-${trackId}`);
-  return alphaPercent >= 100
-    ? `hsl(${hue} ${MODEL_HUE_SATURATION}% ${MODEL_HUE_LIGHTNESS}%)`
-    : `hsl(${hue} ${MODEL_HUE_SATURATION}% ${MODEL_HUE_LIGHTNESS}% / ${alphaPercent}%)`;
-}
 
 /** One point of a per-track trail — a tracked box's normalized center, `[0,1]` against frame dimensions. */
 export interface TrailPoint {
@@ -392,4 +444,369 @@ export function canvasBackingSize(
     width: Math.round(cssWidth * ratio),
     height: Math.round(cssHeight * ratio),
   };
+}
+
+// --- Priority tiers (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2, wave W4) --------------------------
+// Every detection gets a computed draw tier, a pure function of what the client already knows (lock
+// state, hover, track/trail history, box geometry) — fixes D2 (always-on labels), D3 (no priority
+// model — a locked target looks like a tree), D5 (per-track confetti hues), D8 (trails scale with
+// track count). Recomputed fresh every redraw, same "no stateful accumulator" posture as
+// `trackTrails` above.
+
+export type DetectionTier = 'T0' | 'T1' | 'T2' | 'T3';
+
+/**
+ * How many non-committed detections {@link detectionTiers} promotes to T1 purely by (box area ×
+ * confidence) — research §3.2's own "top-K by (area × confidence) among the remainder". The
+ * FOLLOW-locked track and the hovered box (T0) are excluded before this budget is spent, and a
+ * detection already promoted by movement ({@link MOVING_DISPLACEMENT_THRESHOLD}) doesn't consume a
+ * second slot — the two promotion routes are an *or*, not two independent budgets. `5`, named rather
+ * than left as a literal, matches the "~5" the research doc itself proposes.
+ */
+export const NOTABLE_TOP_K = 5;
+
+/**
+ * Minimum normalized (0-1, against frame width/height) displacement a tracked object's trail must
+ * cover across {@link TRAIL_WINDOW_MS} to count as "moving" for T1 promotion (research §3.2), rather
+ * than sensor/detector jitter on a parked object. Deliberately low: a false promotion costs little
+ * (one more full-weight box in a tier that already draws up to {@link NOTABLE_TOP_K} boxes besides),
+ * while a genuinely stationary tracked car (the research doc's own "12 parked cars" example)
+ * flickering between T1 and T2 across a tight threshold would be worse than an occasional early
+ * promotion.
+ */
+export const MOVING_DISPLACEMENT_THRESHOLD = 0.02;
+
+/**
+ * A box smaller than this on *both* axes (CSS px, at the canvas's current letterboxed video size)
+ * draws as a T3 dot instead of a box+label — research §3.2's own "a label would be bigger than the
+ * object". This check runs *before* movement/top-K promotion and wins regardless: a moving or
+ * high-score detection this small still degrades to a dot ({@link detectionTiers} never spends the
+ * {@link NOTABLE_TOP_K} budget on a detection that will render as a dot anyway). The FOLLOW-locked
+ * track and the hovered box (T0) are the only tiers exempt — checked first, with no size caveat of
+ * their own in the research table's T0 row: the one thing the operator explicitly chose to look at is
+ * never shrunk away.
+ */
+export const SUB_SCALE_PX = 12;
+
+/** Inputs {@link detectionTiers} needs beyond the detection list itself — everything the client
+ *  already knows without a new poll (research §3.2's own framing: "pure function of what the client
+ *  already knows"). */
+export interface DetectionTierContext {
+  /** `0` = no lock held — the exact wire sentinel `StreamTracksResponse#lockedTrackId` already uses
+   *  (`core/api/models.ts`), passed straight through rather than translated to `undefined`. */
+  readonly lockedTrackId: number;
+  /** Reference-identity match against one entry of the same `detections` array — mirrors
+   *  `shared/player/player.ts#drawBox`'s own pre-existing `hoveredDetection === detection` check. */
+  readonly hoveredDetection: Detection | null;
+  /** {@link trackTrails}'s own output, already computed once per redraw for the trail layer — reused
+   *  here rather than recomputed, so one redraw never runs the trail scan twice. */
+  readonly trails: ReadonlyMap<number, readonly TrailPoint[]>;
+  /** The letterboxed video rect's CSS-pixel size ({@link SUB_SCALE_PX}'s own comparison unit) —
+   *  `redrawOverlay`'s own `content.width`/`content.height`. */
+  readonly contentWidthPx: number;
+  readonly contentHeightPx: number;
+}
+
+function isMovingTrack(detection: Detection, trails: ReadonlyMap<number, readonly TrailPoint[]>): boolean {
+  const trackId = detection.track?.id;
+  if (trackId === undefined) {
+    return false;
+  }
+  const points = trails.get(trackId);
+  if (!points || points.length < 2) {
+    return false;
+  }
+  const first = points[0];
+  const last = points[points.length - 1];
+  return Math.hypot(last.x - first.x, last.y - first.y) >= MOVING_DISPLACEMENT_THRESHOLD;
+}
+
+function isSubScale(detection: Detection, context: DetectionTierContext): boolean {
+  const widthPx = detection.box.width * context.contentWidthPx;
+  const heightPx = detection.box.height * context.contentHeightPx;
+  return widthPx < SUB_SCALE_PX && heightPx < SUB_SCALE_PX;
+}
+
+/**
+ * Assigns every detection in one batch a draw tier (research §3.2) — priority order, matching the
+ * research table read top-to-bottom:
+ *  1. **T0** — the hovered box, or the box carrying the FOLLOW-locked track id. Checked first and
+ *     unconditionally (no size/movement test): the one thing the operator is actively pointing at or
+ *     has committed to never demotes.
+ *  2. **T3** — everything else under {@link SUB_SCALE_PX} on both axes. Checked before T1 so the
+ *     {@link NOTABLE_TOP_K} budget is never spent on a detection that will render as a dot regardless.
+ *  3. **T1** — tracked-and-moving ({@link isMovingTrack}), or in the top {@link NOTABLE_TOP_K} of the
+ *     size-eligible remainder by (box area × confidence).
+ *  4. **T2** — everything left.
+ * Alert-rule promotion (the research table's third T1 criterion) is deliberately absent: there is no
+ * `alerting` field on the wire yet (research §8.3 lists it as an open backend candidate) — nothing
+ * here fabricates one client-side.
+ */
+export function detectionTiers(
+  detections: readonly Detection[],
+  context: DetectionTierContext,
+): ReadonlyMap<Detection, DetectionTier> {
+  const tiers = new Map<Detection, DetectionTier>();
+  const remainder: Detection[] = [];
+
+  for (const detection of detections) {
+    const isLocked = context.lockedTrackId !== 0 && detection.track?.id === context.lockedTrackId;
+    if (detection === context.hoveredDetection || isLocked) {
+      tiers.set(detection, 'T0');
+    } else {
+      remainder.push(detection);
+    }
+  }
+
+  const subScale: Detection[] = [];
+  const sizeEligible: Detection[] = [];
+  for (const detection of remainder) {
+    (isSubScale(detection, context) ? subScale : sizeEligible).push(detection);
+  }
+  for (const detection of subScale) {
+    tiers.set(detection, 'T3');
+  }
+
+  const notable = new Set<Detection>();
+  for (const detection of sizeEligible) {
+    if (isMovingTrack(detection, context.trails)) {
+      notable.add(detection);
+    }
+  }
+  const ranked = sizeEligible
+    .filter((detection) => !notable.has(detection))
+    .map((detection) => ({ detection, score: detection.box.width * detection.box.height * detection.confidence }))
+    .sort((a, b) => b.score - a.score);
+  for (const { detection } of ranked) {
+    if (notable.size >= NOTABLE_TOP_K) {
+      break;
+    }
+    notable.add(detection);
+  }
+
+  for (const detection of sizeEligible) {
+    tiers.set(detection, notable.has(detection) ? 'T1' : 'T2');
+  }
+
+  return tiers;
+}
+
+// --- Tiered rendering weights (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2, wave W4) -----------------
+
+/** T2's own base alpha — "1px stroke at ~55% alpha, no label" (research §3.2's own T2 row). */
+export const T2_ALPHA_PERCENT = 55;
+
+/**
+ * T1/T2/T3 additionally dim to this alpha (multiplicatively against their own base) once a FOLLOW
+ * lock is active — "lock-dims-rest" (research §3.2), the adaptive-declutter rule every avionics/DJI
+ * analog in §4 uses: committing to a target *is* the escalation. T0 is exempt (it usually *is* the
+ * lock, and the hovered box should never dim either way). Releasing the lock is not a separate code
+ * path — {@link tierAlphaPercent} is a pure function of the current lock state, re-evaluated every
+ * redraw, so the very next frame after a release already renders at full presence.
+ */
+export const LOCK_DIM_ALPHA_PERCENT = 40;
+
+/** The alpha percent a detection in `tier` should draw at, before staleness fade — combine
+ *  multiplicatively with {@link detectionAlphaPercent} at the call site (`shared/player/player.ts`),
+ *  never additively (two independent dimming reasons compound, they don't override each other). */
+export function tierAlphaPercent(tier: DetectionTier, lockActive: boolean): number {
+  const base = tier === 'T2' ? T2_ALPHA_PERCENT : 100;
+  if (tier === 'T0' || !lockActive) {
+    return base;
+  }
+  return Math.round((base * LOCK_DIM_ALPHA_PERCENT) / 100);
+}
+
+/** T3's own dot marker radius (CSS px) — small enough to read as "a marker, not a box" beside a real
+ *  box at the same scale. */
+export const SUB_SCALE_DOT_RADIUS_PX = 3;
+
+/** Stroke widths per tier — `shared/player/player.ts#drawBox`'s own `lineWidth` switch, named rather
+ *  than bare literals scattered across that file. T2's is also its own "thin box" per research §3.2. */
+export const T0_STROKE_WIDTH_PX = 3;
+export const T1_STROKE_WIDTH_PX = 2;
+export const T2_STROKE_WIDTH_PX = 1;
+
+// --- Class-bucket box colors (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/D5, wave W4) ---------------
+// Per-track hash hues made a dense scene read as confetti (D5, see `trackHue`'s own removal note
+// above) — color now carries *class*, not *identity* (identity stays the `#id` text and box
+// constancy, unchanged). Three buckets, each a **fixed** hue (never hashed — research's own "one
+// stable hue each"), at the identical `MODEL_HUE_SATURATION`/`MODEL_HUE_LIGHTNESS` vivid/legible band
+// `modelHue` already uses. Hues are picked from this app's own palette ramps (`styles.css`,
+// docs/plans/done/VISUAL-REFRESH-PLAN.md F1) and kept ≥56° from every hue this file already draws
+// with meaning elsewhere: `DEFAULT_BOX_COLOR`/`--blue-500` (≈219°, reserved for T0 below), the hover
+// amber / `--amber-500` family (≈38-41°), and `--red-500` (≈0°, reserved for danger/critical
+// everywhere else in this app — matching the dataviz "status colors are reserved, never reused for a
+// plain series" rule this app's own token file already follows).
+
+export type ClassBucket = 'person' | 'vehicle' | 'other';
+
+/** `--rose-500`'s own hue (`styles.css`) — reused here as a fixed categorical color, not for its
+ *  usual "live/happening now" meaning; the canvas overlay and a "LIVE" badge never share a visual
+ *  context, so the two meanings never collide on screen. */
+const PERSON_BUCKET_HUE = 340;
+/** `--green-500`'s own hue (`styles.css`). */
+const VEHICLE_BUCKET_HUE = 146;
+/** Not tied to any named token — the catch-all for every class that isn't recognizably a person or a
+ *  vehicle (the overwhelming majority of an open-vocab model's ~4585-class vocabulary,
+ *  docs/plans/done/CV-CONTROL-PLAN.md Wave E's own measurement). */
+const OTHER_BUCKET_HUE = 275;
+
+const PERSON_LABEL_KEYWORDS: readonly string[] = ['person', 'pedestrian', 'human', 'man', 'woman', 'child', 'rider'];
+const VEHICLE_LABEL_KEYWORDS: readonly string[] = [
+  'car', 'truck', 'bus', 'van', 'motorcycle', 'motorbike', 'bicycle', 'bike', 'vehicle',
+  'boat', 'ship', 'airplane', 'aircraft', 'plane', 'train', 'tank', 'drone', 'uav', 'scooter', 'trailer',
+];
+
+/** Strips a composite-mode `"model:label"` prefix the same way {@link detectionModelKey} does, so a
+ *  bucket decision is made against the bare class name regardless of which member model tagged it. */
+function bareClassLabel(label: string): string {
+  const separatorIndex = label.indexOf(':');
+  return separatorIndex > 0 ? label.slice(separatorIndex + 1) : label;
+}
+
+/**
+ * A simple keyword heuristic over the label text — deliberately lenient (substring match against a
+ * short list, not an exact enum) since an open-vocab model's real vocabulary is thousands of synonym/
+ * scene labels, not a fixed COCO-style list. A label matching neither keyword set reads as
+ * {@link ClassBucket} `'other'`, never a fabricated guess at a more specific bucket.
+ */
+export function classBucket(label: string): ClassBucket {
+  const lower = bareClassLabel(label).toLowerCase();
+  if (PERSON_LABEL_KEYWORDS.some((keyword) => lower.includes(keyword))) {
+    return 'person';
+  }
+  if (VEHICLE_LABEL_KEYWORDS.some((keyword) => lower.includes(keyword))) {
+    return 'vehicle';
+  }
+  return 'other';
+}
+
+function bucketHue(bucket: ClassBucket): number {
+  switch (bucket) {
+    case 'person':
+      return PERSON_BUCKET_HUE;
+    case 'vehicle':
+      return VEHICLE_BUCKET_HUE;
+    case 'other':
+      return OTHER_BUCKET_HUE;
+  }
+}
+
+/** The stable, fixed-hue color for one {@link ClassBucket} — same shape/alpha contract as
+ *  {@link modelHue} (an `hsl()` string, alpha embedded once `alphaPercent < 100`). */
+export function classBucketHue(bucket: ClassBucket, alphaPercent = 100): string {
+  const hue = bucketHue(bucket);
+  return alphaPercent >= 100
+    ? `hsl(${hue} ${MODEL_HUE_SATURATION}% ${MODEL_HUE_LIGHTNESS}%)`
+    : `hsl(${hue} ${MODEL_HUE_SATURATION}% ${MODEL_HUE_LIGHTNESS}% / ${alphaPercent}%)`;
+}
+
+/**
+ * The stroke/fill color for one non-T0, non-hovered detection — {@link modelHue} when the batch
+ * actually mixes ≥2 models this frame (`composite` — composite mode, `distinctModelKeys`'s own gate,
+ * the multi-model legend case the research disposition table says to keep unchanged),
+ * {@link classBucketHue} otherwise. T0 and hover are **not** decided here —
+ * `shared/player/player.ts#drawBox` branches those first (the committed-target accent and the amber
+ * hover override both take priority over this function entirely, never blended with it).
+ */
+export function tierBoxColor(detection: Detection, composite: boolean, alphaPercent = 100): string {
+  return composite
+    ? modelHue(detectionModelKey(detection), alphaPercent)
+    : classBucketHue(classBucket(detection.label), alphaPercent);
+}
+
+/** T1's own label text — {@link formatDetectionLabel} minus the confidence percent (research
+ *  §3.2/D4: confidence leaves every label but T0's and the hover tooltip's, which both keep the full,
+ *  unchanged {@link formatDetectionLabel}). Not called for T2/T3, which never draw a label at all. */
+export function formatTierLabel(detection: Detection, tier: DetectionTier): string {
+  if (tier === 'T0') {
+    return formatDetectionLabel(detection);
+  }
+  return detection.track ? `#${detection.track.id} ${detection.label}` : detection.label;
+}
+
+// --- Label collision-yield (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.3, wave W4) --------------------
+
+/** Total labels {@link placeLabels} paints per frame, across every tier combined — research §3.3's
+ *  own "cap total painted labels (~10)". T0's label is not specially exempted from this cap in code,
+ *  but in practice never collides with it: {@link detectionTiers} only ever promotes the hovered box
+ *  and/or the one FOLLOW-locked track to T0, so as long as the caller places T0 candidates first
+ *  (every call site in this file does), the T0 label is placed before the cap could ever be reached. */
+export const MAX_PAINTED_LABELS = 10;
+
+export type LabelSlot = 'above' | 'below' | 'inside-top';
+
+const LABEL_SLOT_ORDER: readonly LabelSlot[] = ['above', 'below', 'inside-top'];
+
+export interface LabelBoxRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** One label {@link placeLabels} is asked to place — `key` is what {@link PlacedLabel}'s own
+ *  hysteresis map is keyed on, stable across frames only for a tracked detection (its track id
+ *  namespaced by the caller, e.g. `"#7"`); an untracked detection's key simply never benefits from
+ *  hysteresis — there's nothing frame-to-frame-stable to key it on. */
+export interface LabelCandidate {
+  readonly key: string;
+  readonly box: LabelBoxRect;
+  readonly labelWidth: number;
+  readonly labelHeight: number;
+}
+
+export interface PlacedLabel {
+  readonly key: string;
+  readonly rect: LabelBoxRect;
+  readonly slot: LabelSlot;
+}
+
+function slotRect(slot: LabelSlot, box: LabelBoxRect, width: number, height: number): LabelBoxRect {
+  switch (slot) {
+    case 'above':
+      return { x: box.x, y: box.y - height, width, height };
+    case 'below':
+      return { x: box.x, y: box.y + box.height, width, height };
+    case 'inside-top':
+      return { x: box.x, y: box.y, width, height };
+  }
+}
+
+function rectsOverlap(a: LabelBoxRect, b: LabelBoxRect): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+/**
+ * Greedy, priority-ordered label placement (research §3.3) — `candidates` must already be in
+ * draw-priority order (T0 first; `shared/player/player.ts#redrawOverlay`, this function's only
+ * caller, sorts its T0/T1 candidates that way before calling). For each candidate in turn: try its
+ * {@link previousSlots} entry first if it has one (hysteresis — "prefer last frame's placement if
+ * still valid", avoiding a label hopping position every frame off a marginal box move), then fall
+ * through `above → below → inside-top`; a candidate that collides in all three positions against
+ * every already-placed label this frame paints no label at all (the box itself still draws — identity
+ * is recoverable by hover, per the research doc's own "the box still draws" rule). Stops once
+ * {@link MAX_PAINTED_LABELS} labels have been placed.
+ */
+export function placeLabels(
+  candidates: readonly LabelCandidate[],
+  previousSlots: ReadonlyMap<string, LabelSlot>,
+): readonly PlacedLabel[] {
+  const placed: PlacedLabel[] = [];
+  for (const candidate of candidates) {
+    if (placed.length >= MAX_PAINTED_LABELS) {
+      break;
+    }
+    const preferred = previousSlots.get(candidate.key);
+    const order = preferred ? [preferred, ...LABEL_SLOT_ORDER.filter((slot) => slot !== preferred)] : LABEL_SLOT_ORDER;
+    for (const slot of order) {
+      const rect = slotRect(slot, candidate.box, candidate.labelWidth, candidate.labelHeight);
+      if (!placed.some((existing) => rectsOverlap(existing.rect, rect))) {
+        placed.push({ key: candidate.key, rect, slot });
+        break;
+      }
+    }
+  }
+  return placed;
 }

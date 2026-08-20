@@ -8,6 +8,7 @@ import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { SidePanel } from '../../shared/ui/side-panel';
 import type { DetectionResult, StreamTracksResponse, TrackingMode, UpdateStreamConfigRequest } from '../../core/api/models';
 import type { BoxesMode } from '../../shared/player/player';
+import { DECLUTTER_LEVELS, DEFAULT_DECLUTTER_LEVEL, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
 import {
   CAPABILITY_LEVEL_OPTIONS,
   DEFAULT_FOLLOW_FPS,
@@ -197,14 +198,24 @@ export class CvControlPanel {
    * observed-label half; `[]` before a stream has produced any detections yet. */
   readonly detectionResults = input<readonly DetectionResult[]>([]);
 
-  /** The detection-boxes rendering mode (`FlyPage`'s own `facade.boxesMode`, formerly the standalone
+  /** The detection-boxes declutter level (`FlyPage`'s own `facade.boxesMode`, formerly the standalone
    * `layers` drawer's only control) — a client-side rendering preference, not part of
    * `PipelineSettings`/the wire contract, so it round-trips via a plain input/output pair rather than
-   * `SettingsStore`. */
-  readonly boxesMode = input<BoxesMode>('overlay');
-  /** Emitted when the operator picks a different boxes rendering mode — the host (`fly.ts`/`fly.html`)
+   * `SettingsStore`. Defaults to {@link DEFAULT_DECLUTTER_LEVEL} ('priority') rather than the old
+   * literal `'overlay'`, which is no longer a valid `BoxesMode` value as of wave W4. */
+  readonly boxesMode = input<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
+  /** Emitted when the operator picks a different declutter level — the host (`fly.ts`/`fly.html`)
    * owns the actual signal and writes it back via `facade.boxesMode.set($event)`. */
   readonly boxesModeChange = output<BoxesMode>();
+  /** The four declutter levels, in cycle order — the segmented control's own `@for` source, so the
+   *  template names each level via {@link boxesModeLabel} instead of restating literals. */
+  protected readonly declutterLevels = DECLUTTER_LEVELS;
+  /** The declutter level's own display name — thin wrapper so the template calls it as a method,
+   *  matching this file's existing `capabilityLevelName` precedent. Named distinctly from the
+   *  imported {@link declutterLevelLabel} pure function it wraps, rather than shadowing it. */
+  protected boxesModeLabel(mode: BoxesMode): string {
+    return declutterLevelLabel(mode);
+  }
 
   /** Whether the drawer is open — driven by the host's `PanelState` (`fly.ts`'s `panels`), not this
    * component's own state (docs/plans/done/UI-REDESIGN-PLAN.md D-E). */
@@ -420,6 +431,17 @@ export class CvControlPanel {
    */
   protected readonly lockedTrackId = computed(() => this.tracksResponse()?.lockedTrackId ?? 0);
 
+  /**
+   * Mirrors {@link lockedTrackId} out to the host, for `shared/player/player.ts`'s new `lockedTrackId`
+   * input (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2, wave W4) — the overlay's T0 tier
+   * needs the same honest, wire-confirmed-only lock id the "Following #N" chip already reads, and this
+   * component is the only place that owns the tracks poll (see class doc, "Tracking" field group). An
+   * `effect` rather than a template binding: this component has no direct reference to the player, only
+   * `fly.html`/`cockpit.html` do, so the value has to leave via an output for the host to re-bind onto
+   * `<vision-player [lockedTrackId]>`.
+   */
+  readonly lockedTrackIdChange = output<number>();
+
   /** The flow strip's own text, or `null` to hide it entirely (`stats` absent — docs/plans/done/TRACKING-PLAN.md
    * §10 touchable outcome #2). */
   protected readonly flowStripText = computed(() => {
@@ -482,6 +504,10 @@ export class CvControlPanel {
 
     const stopTracksPoll = inject(PollScheduler).schedule(TRACKS_POLL_INTERVAL_MS, () => this.pollTracks());
     inject(DestroyRef).onDestroy(stopTracksPoll);
+
+    // See {@link lockedTrackIdChange}'s own doc comment — re-emits on every change, including back to
+    // `0` the instant a poll confirms the lock was released (never a stale "still locked" echo).
+    effect(() => this.lockedTrackIdChange.emit(this.lockedTrackId()));
   }
 
   private async pollTracks(): Promise<void> {

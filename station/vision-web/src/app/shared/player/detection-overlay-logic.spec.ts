@@ -1,26 +1,43 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_BOX_COLOR,
+  DEFAULT_DECLUTTER_LEVEL,
   DEFAULT_MODEL_KEY,
   DETECTION_STALE_CUTOFF_SECONDS,
+  LOCK_DIM_ALPHA_PERCENT,
+  MAX_PAINTED_LABELS,
+  MOVING_DISPLACEMENT_THRESHOLD,
+  NOTABLE_TOP_K,
   STALE_FADE_ALPHA_PERCENT,
   STALE_FADE_BATCH_MULTIPLIER,
+  SUB_SCALE_PX,
+  T2_ALPHA_PERCENT,
   TRAIL_WINDOW_MS,
   averageBatchIntervalMs,
   canvasBackingSize,
+  classBucket,
+  classBucketHue,
   cycleBoxesMode,
+  declutterLevelLabel,
   detectionAlphaPercent,
   detectionModelKey,
+  detectionTiers,
   detectionsPausedNotice,
   distinctModelKeys,
   formatDetectionLabel,
+  formatTierLabel,
   isDetectionStale,
   modelHue,
   overlaySyncLatencySeconds,
+  placeLabels,
   selectDetectionResult,
   shouldDrawOverlay,
-  trackHue,
+  tierAlphaPercent,
+  tierBoxColor,
+  tiersForDeclutterLevel,
   trackTrails,
+  type DetectionTierContext,
+  type LabelCandidate,
 } from './detection-overlay-logic';
 import type { Detection, DetectionResult } from '../../core/api/models';
 
@@ -105,12 +122,14 @@ describe('selectDetectionResult', () => {
 });
 
 describe('shouldDrawOverlay', () => {
-  it('draws only in overlay mode with a result available', () => {
-    expect(shouldDrawOverlay('overlay', true)).toBe(true);
+  it('draws in every non-off declutter level with a result available', () => {
+    expect(shouldDrawOverlay('all', true)).toBe(true);
+    expect(shouldDrawOverlay('priority', true)).toBe(true);
+    expect(shouldDrawOverlay('locked', true)).toBe(true);
   });
 
-  it('never draws without a result, even in overlay mode', () => {
-    expect(shouldDrawOverlay('overlay', false)).toBe(false);
+  it('never draws without a result, even at the "all" level', () => {
+    expect(shouldDrawOverlay('all', false)).toBe(false);
   });
 
   it('never draws in off mode', () => {
@@ -118,18 +137,53 @@ describe('shouldDrawOverlay', () => {
   });
 });
 
-// --- Boxes mode cycle (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3) --------------------------------
-// 'burned' is gone — server-side burn-in no longer exists, so the interactive overlay is simply the
-// default and the only other state is 'off'.
+// --- Declutter levels (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.6, wave W4) ------------------------
+// 'overlay'/'off' (W3) is now a four-state density cycle: 'all' -> 'priority' -> 'locked' -> 'off'.
 
 describe('cycleBoxesMode', () => {
-  it('cycles overlay -> off -> overlay', () => {
-    expect(cycleBoxesMode('overlay')).toBe('off');
-    expect(cycleBoxesMode('off')).toBe('overlay');
+  it('cycles all -> priority -> locked -> off -> all', () => {
+    expect(cycleBoxesMode('all')).toBe('priority');
+    expect(cycleBoxesMode('priority')).toBe('locked');
+    expect(cycleBoxesMode('locked')).toBe('off');
+    expect(cycleBoxesMode('off')).toBe('all');
   });
 
   it('a stale/unrecognized mode restarts from the front of the cycle', () => {
-    expect(cycleBoxesMode('burned' as never)).toBe('overlay');
+    expect(cycleBoxesMode('overlay' as never)).toBe('all');
+    expect(cycleBoxesMode('burned' as never)).toBe('all');
+  });
+});
+
+describe('declutterLevelLabel', () => {
+  it('names every level', () => {
+    expect(declutterLevelLabel('all')).toBe('All');
+    expect(declutterLevelLabel('priority')).toBe('Priority');
+    expect(declutterLevelLabel('locked')).toBe('Locked only');
+    expect(declutterLevelLabel('off')).toBe('Off');
+  });
+});
+
+describe('DEFAULT_DECLUTTER_LEVEL', () => {
+  it('is priority, not the undifferentiated "all" level', () => {
+    expect(DEFAULT_DECLUTTER_LEVEL).toBe('priority');
+  });
+});
+
+describe('tiersForDeclutterLevel', () => {
+  it('"all" draws every tier', () => {
+    expect(tiersForDeclutterLevel('all')).toEqual(new Set(['T0', 'T1', 'T2', 'T3']));
+  });
+
+  it('"priority" draws T0+T1+T3 but hides ambient T2', () => {
+    expect(tiersForDeclutterLevel('priority')).toEqual(new Set(['T0', 'T1', 'T3']));
+  });
+
+  it('"locked" draws only T0', () => {
+    expect(tiersForDeclutterLevel('locked')).toEqual(new Set(['T0']));
+  });
+
+  it('"off" draws nothing', () => {
+    expect(tiersForDeclutterLevel('off').size).toBe(0);
   });
 });
 
@@ -341,28 +395,6 @@ describe('formatDetectionLabel', () => {
   });
 });
 
-describe('trackHue', () => {
-  it('is stable — the same track id always hashes to the same color', () => {
-    expect(trackHue(7)).toBe(trackHue(7));
-  });
-
-  it('is distinct across a sample of different track ids', () => {
-    const ids = [1, 2, 3, 7, 42];
-    const colors = ids.map((id) => trackHue(id));
-    expect(new Set(colors).size).toBe(colors.length);
-  });
-
-  it('a track id never collides with modelHue\'s own default box color', () => {
-    expect(trackHue(1)).not.toBe(DEFAULT_BOX_COLOR);
-  });
-
-  it('embeds the alpha in the hsl() string at partial alpha, mirroring modelHue', () => {
-    const opaque = trackHue(7);
-    const translucent = trackHue(7, 85);
-    expect(translucent).toBe(`${opaque.slice(0, -1)} / 85%)`);
-  });
-});
-
 describe('trackTrails', () => {
   function trackedResult(capturedAt: string, points: readonly { trackId: number; cx: number; cy: number }[]): DetectionResult {
     return result({
@@ -423,5 +455,295 @@ describe('trackTrails', () => {
     // DetectionsStore.results() resets to [] the instant track() targets a new stream/asset
     // (DetectionsStore#track's own doc comment) — this function has no state of its own to reset.
     expect(trackTrails([], Date.now()).size).toBe(0);
+  });
+});
+
+// --- Priority tiers (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2, wave W4) ---------------------------
+
+function trackedDetection(partial: Partial<Detection> = {}, trackId = 1): Detection {
+  return fullDetection({
+    track: { id: trackId, state: 'CONFIRMED', source: 'TRACKER', velocityX: 0, velocityY: 0, reupdated: false },
+    ...partial,
+  });
+}
+
+/** At `tierContext()`'s default 200x200 content size, a fraction safely under/over SUB_SCALE_PX
+ *  on a given axis — named rather than restating the arithmetic in every test that needs a
+ *  deliberately tiny or deliberately large box. */
+const UNDER_SUB_SCALE_FRACTION = (SUB_SCALE_PX - 2) / 200;
+const OVER_SUB_SCALE_FRACTION = (SUB_SCALE_PX + 8) / 200;
+
+function tierContext(partial: Partial<DetectionTierContext> = {}): DetectionTierContext {
+  return {
+    lockedTrackId: 0,
+    hoveredDetection: null,
+    trails: new Map(),
+    contentWidthPx: 200,
+    contentHeightPx: 200,
+    ...partial,
+  };
+}
+
+describe('detectionTiers', () => {
+  it('the hovered box promotes to T0 unconditionally — even a sub-scale box that would otherwise be T3', () => {
+    const hovered = fullDetection({
+      label: 'tiny',
+      box: { x: 0, y: 0, width: UNDER_SUB_SCALE_FRACTION, height: UNDER_SUB_SCALE_FRACTION },
+    });
+    const tiers = detectionTiers([hovered], tierContext({ hoveredDetection: hovered }));
+    expect(tiers.get(hovered)).toBe('T0');
+  });
+
+  it('the FOLLOW-locked track promotes to T0 unconditionally', () => {
+    const locked = trackedDetection({ label: 'locked-target' }, 7);
+    const tiers = detectionTiers([locked], tierContext({ lockedTrackId: 7 }));
+    expect(tiers.get(locked)).toBe('T0');
+  });
+
+  it('lockedTrackId 0 (the wire "no lock" sentinel) never promotes a track to T0 by itself', () => {
+    const tracked = trackedDetection({}, 7);
+    const tiers = detectionTiers([tracked], tierContext({ lockedTrackId: 0 }));
+    expect(tiers.get(tracked)).not.toBe('T0');
+  });
+
+  it('a box under SUB_SCALE_PX on both axes draws as T3, checked before the top-K budget is spent', () => {
+    // confidence .99 would otherwise trivially win a top-K slot — sub-scale wins regardless.
+    const tiny = fullDetection({
+      label: 'tiny',
+      confidence: 0.99,
+      box: { x: 0, y: 0, width: UNDER_SUB_SCALE_FRACTION, height: UNDER_SUB_SCALE_FRACTION },
+    });
+    const tiers = detectionTiers([tiny], tierContext());
+    expect(tiers.get(tiny)).toBe('T3');
+  });
+
+  it('sub-scale requires BOTH axes under the threshold — a thin-but-tall box stays size-eligible', () => {
+    const thin = fullDetection({
+      label: 'thin',
+      box: { x: 0, y: 0, width: UNDER_SUB_SCALE_FRACTION, height: OVER_SUB_SCALE_FRACTION },
+    });
+    const tiers = detectionTiers([thin], tierContext());
+    expect(tiers.get(thin)).not.toBe('T3');
+  });
+
+  it('a tracked, moving detection promotes to T1 regardless of its own confidence', () => {
+    const mover = trackedDetection({ label: 'mover', confidence: 0.01 }, 9);
+    const trails = new Map([[9, [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }]]]);
+    const tiers = detectionTiers([mover], tierContext({ trails }));
+    expect(tiers.get(mover)).toBe('T1');
+  });
+
+  it('a tracked detection under MOVING_DISPLACEMENT_THRESHOLD is not treated as moving — it competes on ranking alone', () => {
+    const stillish = trackedDetection({ label: 'jitter', confidence: 0.01 }, 9);
+    const trails = new Map([[9, [{ x: 0.5, y: 0.5 }, { x: 0.5 + MOVING_DISPLACEMENT_THRESHOLD / 2, y: 0.5 }]]]);
+    const stronger = Array.from({ length: NOTABLE_TOP_K }, (_, i) =>
+      fullDetection({ label: `s${i}`, confidence: 0.9 - i * 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } }),
+    );
+    const tiers = detectionTiers([stillish, ...stronger], tierContext({ trails }));
+    // if displacement-under-threshold were wrongly treated as "moving" it would bypass ranking and
+    // still land T1 regardless of its rock-bottom confidence; instead it competes on (area x
+    // confidence) alone against `stronger`'s own NOTABLE_TOP_K detections and loses every slot.
+    expect(tiers.get(stillish)).toBe('T2');
+  });
+
+  it('promotes the top NOTABLE_TOP_K non-moving detections by (area × confidence), demoting the rest to T2', () => {
+    const detections = Array.from({ length: NOTABLE_TOP_K + 2 }, (_, i) =>
+      fullDetection({
+        label: `d${i}`,
+        confidence: 0.9 - i * 0.05, // strictly decreasing -> unambiguous rank order
+        box: { x: 0, y: 0, width: 0.2, height: 0.2 },
+      }),
+    );
+    const tiers = detectionTiers(detections, tierContext());
+    expect(detections.slice(0, NOTABLE_TOP_K).every((d) => tiers.get(d) === 'T1')).toBe(true);
+    expect(detections.slice(NOTABLE_TOP_K).every((d) => tiers.get(d) === 'T2')).toBe(true);
+  });
+
+  it('a moving track claims a slot from the shared NOTABLE_TOP_K budget, not a separate one', () => {
+    const mover = trackedDetection({ label: 'mover', confidence: 0.01 }, 9);
+    const stationary = Array.from({ length: NOTABLE_TOP_K }, (_, i) =>
+      fullDetection({ label: `s${i}`, confidence: 0.9 - i * 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } }),
+    );
+    const trails = new Map([[9, [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }]]]);
+    const tiers = detectionTiers([mover, ...stationary], tierContext({ trails }));
+    expect(tiers.get(mover)).toBe('T1');
+    // the mover already spent one of the NOTABLE_TOP_K slots, so only the strongest
+    // (NOTABLE_TOP_K - 1) stationary detections also make T1 — the weakest is demoted to T2.
+    expect(stationary.slice(0, NOTABLE_TOP_K - 1).every((d) => tiers.get(d) === 'T1')).toBe(true);
+    expect(tiers.get(stationary[NOTABLE_TOP_K - 1])).toBe('T2');
+  });
+
+  it('movement itself is never capped — a batch of movers alone can exceed NOTABLE_TOP_K', () => {
+    const movers = Array.from({ length: NOTABLE_TOP_K + 2 }, (_, i) =>
+      trackedDetection({ label: `m${i}`, box: { x: 0, y: 0, width: 0.2, height: 0.2 } }, i + 1),
+    );
+    const trails = new Map(movers.map((d) => [d.track!.id, [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }]]));
+    const tiers = detectionTiers(movers, tierContext({ trails }));
+    expect(movers.every((d) => tiers.get(d) === 'T1')).toBe(true);
+  });
+
+  it('everything left after T0/T3/T1 is T2', () => {
+    const strong = Array.from({ length: NOTABLE_TOP_K }, (_, i) =>
+      fullDetection({ label: `strong${i}`, confidence: 0.9 - i * 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } }),
+    );
+    const ambient = fullDetection({ label: 'ambient', confidence: 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } });
+    const tiers = detectionTiers([...strong, ambient], tierContext());
+    expect(strong.every((d) => tiers.get(d) === 'T1')).toBe(true);
+    expect(tiers.get(ambient)).toBe('T2');
+  });
+});
+
+describe('tierAlphaPercent', () => {
+  it('T0 always draws at full alpha, locked or not', () => {
+    expect(tierAlphaPercent('T0', false)).toBe(100);
+    expect(tierAlphaPercent('T0', true)).toBe(100);
+  });
+
+  it('T1 is full alpha unlocked, dimmed to LOCK_DIM_ALPHA_PERCENT once a lock is active', () => {
+    expect(tierAlphaPercent('T1', false)).toBe(100);
+    expect(tierAlphaPercent('T1', true)).toBe(LOCK_DIM_ALPHA_PERCENT);
+  });
+
+  it('T2 carries its own thinner base alpha, further dimmed once locked', () => {
+    expect(tierAlphaPercent('T2', false)).toBe(T2_ALPHA_PERCENT);
+    expect(tierAlphaPercent('T2', true)).toBe(Math.round((T2_ALPHA_PERCENT * LOCK_DIM_ALPHA_PERCENT) / 100));
+  });
+
+  it('T3 mirrors T1 — full base alpha, dimmed once locked', () => {
+    expect(tierAlphaPercent('T3', false)).toBe(100);
+    expect(tierAlphaPercent('T3', true)).toBe(LOCK_DIM_ALPHA_PERCENT);
+  });
+});
+
+// --- Class-bucket box colors (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/D5, wave W4) ---------------
+
+describe('classBucket', () => {
+  it('recognizes person-like labels', () => {
+    expect(classBucket('person')).toBe('person');
+    expect(classBucket('pedestrian')).toBe('person');
+  });
+
+  it('recognizes vehicle-like labels', () => {
+    expect(classBucket('car')).toBe('vehicle');
+    expect(classBucket('bicycle')).toBe('vehicle');
+  });
+
+  it('defaults everything else to "other" rather than fabricating a bucket', () => {
+    // 'tank' is deliberately a vehicle-bucket keyword in this app's own list (a drone/military
+    // context), so this test picks labels genuinely absent from either keyword list instead.
+    expect(classBucket('building')).toBe('other');
+    expect(classBucket('backpack')).toBe('other');
+  });
+
+  it('matches case-insensitively', () => {
+    expect(classBucket('PERSON')).toBe('person');
+  });
+
+  it('strips a composite-mode "model:label" prefix before matching', () => {
+    expect(classBucket('orion12l:person')).toBe('person');
+    expect(classBucket('yolo11n:car')).toBe('vehicle');
+  });
+});
+
+describe('classBucketHue', () => {
+  it('is a fixed hue per bucket — stable across calls, unlike the old per-track hash', () => {
+    expect(classBucketHue('person')).toBe(classBucketHue('person'));
+    expect(classBucketHue('vehicle')).toBe(classBucketHue('vehicle'));
+  });
+
+  it('all three buckets get distinct hues', () => {
+    const hues = (['person', 'vehicle', 'other'] as const).map((bucket) => classBucketHue(bucket));
+    expect(new Set(hues).size).toBe(3);
+  });
+
+  it('never collides with the T0/default accent color', () => {
+    const hues = (['person', 'vehicle', 'other'] as const).map((bucket) => classBucketHue(bucket));
+    expect(hues).not.toContain(DEFAULT_BOX_COLOR);
+  });
+
+  it('embeds the alpha in the hsl() string at partial alpha, mirroring modelHue', () => {
+    const opaque = classBucketHue('person');
+    const translucent = classBucketHue('person', 85);
+    expect(translucent).toBe(`${opaque.slice(0, -1)} / 85%)`);
+  });
+});
+
+describe('tierBoxColor', () => {
+  it('uses the class-bucket hue in single-model mode', () => {
+    const detection = fullDetection({ label: 'person' });
+    expect(tierBoxColor(detection, false)).toBe(classBucketHue('person'));
+  });
+
+  it('uses the per-model hue in composite mode, ignoring class entirely', () => {
+    const detection = fullDetection({ label: 'orion12l:person' });
+    expect(tierBoxColor(detection, true)).toBe(modelHue('orion12l'));
+  });
+});
+
+describe('formatTierLabel', () => {
+  it('T0 keeps the full label — track id, class, and confidence — byte-identical to formatDetectionLabel', () => {
+    const tracked = trackedDetection({}, 7);
+    expect(formatTierLabel(tracked, 'T0')).toBe(formatDetectionLabel(tracked));
+    expect(formatTierLabel(tracked, 'T0')).toBe('#7 car 82%');
+  });
+
+  it('T1 drops the confidence percent (research §3.2/D4 — confidence stays on T0 and the hover tooltip only)', () => {
+    const tracked = trackedDetection({}, 7);
+    expect(formatTierLabel(tracked, 'T1')).toBe('#7 car');
+  });
+
+  it('T1 for an untracked detection is just the bare class name', () => {
+    expect(formatTierLabel(fullDetection(), 'T1')).toBe('car');
+  });
+});
+
+// --- Label collision-yield (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.3, wave W4) --------------------
+
+describe('placeLabels', () => {
+  function candidate(key: string, box: { x: number; y: number; width: number; height: number }): LabelCandidate {
+    return { key, box, labelWidth: 40, labelHeight: 14 };
+  }
+
+  it('places a single candidate above its box by default', () => {
+    const placed = placeLabels([candidate('a', { x: 0, y: 100, width: 20, height: 20 })], new Map());
+    expect(placed).toEqual([{ key: 'a', rect: { x: 0, y: 86, width: 40, height: 14 }, slot: 'above' }]);
+  });
+
+  it('falls through above -> below -> inside-top as each slot collides', () => {
+    const overlappingBox = { x: 0, y: 100, width: 20, height: 20 };
+    const candidates = [candidate('a', overlappingBox), candidate('b', overlappingBox), candidate('c', overlappingBox)];
+    const placed = placeLabels(candidates, new Map());
+    expect(placed.map((p) => p.slot)).toEqual(['above', 'below', 'inside-top']);
+  });
+
+  it('a candidate that collides in all three slots paints no label at all — the box itself still draws separately', () => {
+    const overlappingBox = { x: 0, y: 100, width: 20, height: 20 };
+    const candidates = Array.from({ length: 4 }, (_, i) => candidate(`k${i}`, overlappingBox));
+    const placed = placeLabels(candidates, new Map());
+    expect(placed.length).toBe(3); // above/below/inside-top all consumed; the 4th has nowhere left
+  });
+
+  it('prefers a candidate\'s own previous-frame slot (hysteresis) when it is still collision-free', () => {
+    const c = candidate('a', { x: 0, y: 100, width: 20, height: 20 });
+    const placed = placeLabels([c], new Map([['a', 'below']]));
+    expect(placed[0].slot).toBe('below');
+  });
+
+  it('falls back off a stale hysteresis slot when it now collides', () => {
+    const overlappingBox = { x: 0, y: 100, width: 20, height: 20 };
+    const first = candidate('a', overlappingBox);
+    const second = candidate('b', overlappingBox);
+    // 'b' preferred 'above' last frame, but 'a' (placed first this frame) already holds it.
+    const placed = placeLabels([first, second], new Map([['b', 'above']]));
+    expect(placed[0]).toMatchObject({ key: 'a', slot: 'above' });
+    expect(placed[1]).toMatchObject({ key: 'b', slot: 'below' });
+  });
+
+  it('caps total painted labels at MAX_PAINTED_LABELS, even with room for more', () => {
+    const candidates = Array.from({ length: MAX_PAINTED_LABELS + 5 }, (_, i) =>
+      candidate(`k${i}`, { x: i * 100, y: 100, width: 20, height: 20 }), // spaced far apart, never collide
+    );
+    const placed = placeLabels(candidates, new Map());
+    expect(placed.length).toBe(MAX_PAINTED_LABELS);
   });
 });

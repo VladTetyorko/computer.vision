@@ -1,7 +1,8 @@
 import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { Player } from '../../shared/player/player';
+import { Player, type BoxesMode } from '../../shared/player/player';
 import { StreamInfoPanel } from '../../shared/player/stream-info-panel';
+import { DECLUTTER_LEVELS, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { TelemetryOsd } from './telemetry-osd';
@@ -38,6 +39,14 @@ export class LivePage {
   readonly deviceId = input.required<string>();
 
   protected readonly facade = inject(LiveFacade);
+
+  /** The four declutter levels, in cycle order — the segmented control's own `@for` source, shared
+   *  with `cv-control-panel.ts`'s identical field so the two never drift apart. */
+  protected readonly declutterLevels = DECLUTTER_LEVELS;
+  /** The declutter level's own display name — thin wrapper so the template calls it as a method. */
+  protected boxesModeLabel(mode: BoxesMode): string {
+    return declutterLevelLabel(mode);
+  }
 
   constructor() {
     effect(() => this.facade.setDeviceId(this.deviceId()));
