@@ -57,6 +57,24 @@ Deliverable: a research/design `.md` (this task produces `CV-FLY-INTERACTION-RES
 
 Delivered `docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md` (2026-08-20): diagnosis of 9 clutter/
 interaction defects D1–D9, analog survey (Frigate, DJI, Lattice/ATAK, HUD declutter, broadcast),
-proposed model "boxes are the index, one target is the story" (priority tiers at draw time,
-label-collision yield, focus-on-hover/lock dimming, strip↔box linkage, click-to-hide), waves V1–V6
-all pure frontend, 3 backend candidates listed separately. Not implemented — research only.
+proposed model "boxes are the index, one target is the story", waves V1–V6, 3 backend candidates.
+
+**Escalated same day by owner decision** into `docs/plans/active/CV-CLEAN-FEED-PLAN.md` (remove
+burn-in entirely; two streams video+data; fix the filter; compact drawers/feeds) and **implemented**
+on `feat/cv-clean-feed`:
+
+- `283df88e` docs — research + plan
+- `adc66bc1` W3 web — burned mode removed, overlay default, staleness fade + paused notice
+- `8eaa4253` W4 web — priority tiers, label collision-yield, All/Priority/Locked-only/Off
+- `a4735f24` W1 backend — adapter-overlay module deleted, OverlayPort/burnedIn off the wire,
+  labelDenyFilter added + enforced pre-fan-out; CameraPose telemetry supplier kept unconditional
+- `2148c773` cv/grpc test follow-up (155/155; label filtering confirmed off the gRPC wire)
+- `2b3237d8` W5 web — one Vision drawer (rail 7→6), deny-list strip chips (counts/hover/click-hide),
+  DetectionsStore owns the tracks poll
+
+Per-module verification all green: perception 560, api 753, app 242 (Docker), cv/grpc 155,
+web 2371 tests + tsc + prod build. **W6 still open at close of this session:** full-reactor verify
+(first attempt was killed externally) and the live `/fly` wire smoke (no `burnedIn` on wire,
+labelDenyFilter drop observed live, poses flowing without overlay). Known follow-ups: replay box
+overlay (plan §6.1), tracks-in-SSE (§6.2), `alerting` wire flag (§6.3), `DetectionExtrapolator#at()`
+now dead code (perception MODULE.md gotcha).
