@@ -201,6 +201,25 @@ class DetectorNoiseConfig:
     # same reasoning `_miss_probability`'s "draw taken only when in play"
     # comment gives for `reliable_size`.
     lag_jitter_seed: int = 0
+    # TRACK-IDENTITY-PLAN wave L1's own harness addition -- models an open-
+    # vocabulary model re-rolling its one argmax label independently of
+    # position/confidence (`TRACK-IDENTITY-RESEARCH.md` §1), the exact
+    # defect `track.elected_label` exists to smooth over. 0.0 (default, no
+    # relabeling) reproduces every scenario written before this existed
+    # byte-for-byte; the draw is taken ONLY when > 0.0, the SAME "draw only
+    # when in play" idiom `reliable_size`'s own comment documents above for
+    # the recall model, so enabling label noise can never re-roll an
+    # existing scenario's position-jitter/dropout/false-positive sequence.
+    label_noise_probability: float = 0.0
+    # The alternate labels a noisy pass may report instead of the object's
+    # own true label -- drawn uniformly via this detector's OWN `_rng`, not
+    # a separate stream (unlike `detection_lag_jitter_millis`'s deliberately
+    # independent one): a label re-roll is exactly the kind of per-pass
+    # noise the position/confidence draws already model, not an external
+    # measurement-error source that needs isolating from them. Empty (the
+    # default) with noise enabled falls back to the object's own label -- a
+    # no-op relabeling, never a crash on a misconfigured scenario.
+    label_noise_pool: "tuple[str, ...]" = ()
 
 
 # A false positive's box: small, and placed uniformly within this leading
@@ -315,13 +334,28 @@ class SyntheticDetector:
         dx = self._rng.uniform(-jitter, jitter)
         dy = self._rng.uniform(-jitter, jitter)
         return _SyntheticDetection(
-            obj.label,
+            self._label_for(obj.label),
             confidence,
             obj.box.x + dx,
             obj.box.y + dy,
             obj.box.width,
             obj.box.height,
         )
+
+    def _label_for(self, true_label: str) -> str:
+        """This detection's reported label -- `true_label` unless the L1
+        noise model rerolls it. The draw is taken ONLY when `label_noise_
+        probability > 0.0` (`DetectorNoiseConfig.label_noise_probability`'s
+        own comment: the SAME "draw only when in play" idiom `reliable_
+        size` uses), so a scenario that never enables label noise draws
+        nothing extra from `self._rng` and stays byte-identical to before
+        this method existed."""
+        if self._config.label_noise_probability <= 0.0:
+            return true_label
+        if self._rng.random() >= self._config.label_noise_probability:
+            return true_label
+        pool = self._config.label_noise_pool or (true_label,)
+        return self._rng.choice(pool)
 
     def _false_positive(self) -> _SyntheticDetection:
         return _SyntheticDetection(
@@ -386,6 +420,18 @@ class ReplayResult:
     # hand-built `ReplayResult`s predating this field keep constructing
     # unchanged.
     track_velocities: tuple[dict[int, tuple[float, float]], ...] = ()
+    # TRACK-IDENTITY-PLAN wave L1 -- `track_labels[i]` is
+    # `{track_id: elected_label}` for every box `outcome.boxes[i]` emitted,
+    # captured the SAME way and for the SAME reason `coast_track_ids`/
+    # `track_velocities` are: `track.elected_label` lives on the identical
+    # mutable, aliased `Track` object those two fields' own docstrings
+    # describe, so reading it back out of `FrameOutcome.boxes[i].track`
+    # after the whole replay finished would report only the LAST frame's
+    # elected label for every frame that track ever appeared in --
+    # `metrics.py`'s flip counter needs each frame's OWN value. Defaults to
+    # `()`, read by `metrics.py` as "no label data" (count 0), so hand-built
+    # `ReplayResult`s predating this field keep constructing unchanged.
+    track_labels: tuple[dict[int, str], ...] = ()
 
 
 def _ground_truth_for_detection(
@@ -477,6 +523,27 @@ def _track_velocities_this_frame(outcome: FrameOutcome) -> dict[int, tuple[float
     }
 
 
+def _track_labels_this_frame(outcome: FrameOutcome) -> dict[int, str]:
+    """`{emitted track_id: label}` on this ALREADY-RETURNED `FrameOutcome` --
+    see `ReplayResult.track_labels` for why this must be read right after
+    `process()` returns, not later (the same `Track`-aliasing trap
+    `_coast_ids_this_frame` above exists to avoid).
+
+    Reads `tracked.label` -- the box's OWN emitted label -- not
+    `tracked.track.elected_label` directly: TRACK-IDENTITY-PLAN wave L1 has
+    `session.py`'s `_box_for`/`_from_track` put the elected label on the box
+    for tracked detections, so `tracked.label` already IS the elected label
+    here and matches exactly what went out on the wire (metrics.py's flip
+    counter counts flips in the emitted stream, not in `Track` internals)."""
+    if outcome.boxes is None:
+        return {}
+    return {
+        tracked.track.track_id: tracked.label
+        for tracked in outcome.boxes
+        if tracked.track is not None
+    }
+
+
 def run_replay(
     sequence: Sequence,
     *,
@@ -514,6 +581,7 @@ def run_replay(
     outcomes: list[FrameOutcome] = []
     coast_track_ids: list[frozenset[int]] = []
     track_velocities: list[dict[int, tuple[float, float]]] = []
+    track_labels: list[dict[int, str]] = []
     # One stream for the WHOLE replay, not one per frame -- a fresh
     # `Random()` every frame would make every draw independent of the ones
     # around it, which is not what "spread around a slowly-drifting skew
@@ -554,6 +622,9 @@ def run_replay(
         # Same reasoning, same frame, same reason it cannot wait -- see
         # `ReplayResult.track_velocities`'s own docstring.
         track_velocities.append(_track_velocities_this_frame(outcome))
+        # Same reasoning, same frame, same reason it cannot wait -- see
+        # `ReplayResult.track_labels`'s own docstring.
+        track_labels.append(_track_labels_this_frame(outcome))
 
     engine_id_served = next((outcome.engine_id for outcome in reversed(outcomes) if outcome.engine_id), "")
     scored_gt_ids = frozenset({sequence.primary_gt_id}) if mode == MODE_FOLLOW else sequence.gt_ids
@@ -570,6 +641,7 @@ def run_replay(
         height=sequence.height,
         coast_track_ids=tuple(coast_track_ids),
         track_velocities=tuple(track_velocities),
+        track_labels=tuple(track_labels),
     )
 
 

@@ -841,7 +841,14 @@ class StreamTrackingSession:
             Candidate(
                 key=track.key,
                 box=predict(track, now).box,
-                label=track.label,
+                # TRACK-IDENTITY-PLAN wave L1: the ELECTED label, not the
+                # raw one -- `assign.py`'s `_labels_compatible`/label
+                # penalty (L2) both get a stable operand instead of
+                # re-rolling every pass, the same "recovery gates and the
+                # L2 label penalty both get a stable operand" plan item 3
+                # names. `track.label` (raw) keeps its own unconditional-
+                # overwrite semantics for every OTHER reader.
+                label=track.elected_label,
                 descriptor=track.descriptor,
                 confirmed=track.state != STATE_TENTATIVE,
             )
@@ -1168,6 +1175,13 @@ class StreamTrackingSession:
             first_seen=identity.first_seen_millis / 1000.0,
             descriptor=identity.descriptor,
             velocity=identity.velocity,
+            # TRACK-IDENTITY-PLAN wave L1: `identity.label` is the ELECTED
+            # label `_retire` remembered (`track.py`'s own `_retire` now
+            # passes `track.elected_label`, not the raw one) -- `_adopt`
+            # re-seeds the recovered track's election around it, so the
+            # operator sees the same stable name they lost, not a fresh
+            # guess from this one recovering detection.
+            elected_label=identity.label,
         )
         return recovered, recovery
 
@@ -2166,9 +2180,18 @@ def _box_for(
     `Observation.box` is ITS post-Kalman estimate, deliberately never shown
     here even absent this wave -- passing `track.box` there would be a
     genuine, unrelated behaviour change this wave does not intend to make.
+
+    TRACK-IDENTITY-PLAN wave L1 (plan item 3): `label` is `track.elected_
+    label` whenever a `track` is given (a TRACKED detection -- this frame's
+    box has an identity behind it whose stable, hysteresis-gated name is
+    what the operator should read), and the raw `detection.label` only for
+    an UNTRACKED one (`track=None` -- ASSOCIATE below `min_hits`, or any
+    detection this frame never bound to a track at all): there is no
+    identity yet to elect a label over, so the newest roll is the only
+    opinion that exists.
     """
     return TrackedBox(
-        label=detection.label,
+        label=track.elected_label if track is not None else detection.label,
         confidence=detection.confidence,
         box=box if box is not None else Box(detection.x, detection.y, detection.width, detection.height),
         track=track,
@@ -2178,7 +2201,11 @@ def _box_for(
 
 
 def _from_track(track: Track) -> TrackedBox:
-    return TrackedBox(label=track.label, confidence=track.confidence, box=track.box, track=track)
+    # TRACK-IDENTITY-PLAN wave L1 (plan item 3): a coast frame already has
+    # nothing BUT the track to read from, so the elected label was always
+    # the more honest choice available here -- this call site simply picks
+    # it explicitly now instead of echoing `track.label`'s raw newest roll.
+    return TrackedBox(label=track.elected_label, confidence=track.confidence, box=track.box, track=track)
 
 
 def _clamp01(value: float) -> float:

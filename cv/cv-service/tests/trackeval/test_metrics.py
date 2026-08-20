@@ -85,6 +85,7 @@ def _result(
     mode: str = MODE_ASSOCIATE,
     coast_track_ids: tuple[frozenset[int], ...] = (),
     track_velocities: tuple[dict[int, tuple[float, float]], ...] = (),
+    track_labels: tuple[dict[int, str], ...] = (),
     width: int = 100,
     height: int = 100,
 ) -> ReplayResult:
@@ -98,6 +99,7 @@ def _result(
         scored_gt_ids=gt_ids,
         coast_track_ids=coast_track_ids,
         track_velocities=track_velocities,
+        track_labels=track_labels,
         width=width,
         height=height,
     )
@@ -522,3 +524,105 @@ def test_implausible_velocity_count_sums_every_track_every_frame() -> None:
     )
 
     assert metrics.implausible_velocity_count == 3
+
+
+# -- label flips (TRACK-IDENTITY-PLAN wave L1 item 5) --------------------------
+
+
+def test_label_flip_count_is_zero_without_label_data() -> None:
+    """`track_labels` defaulting to `()` (older/hand-built `ReplayResult`s
+    that predate this metric, or a length mismatch) must read as "nothing
+    to report" -- zero, the same convention `track_velocities`'s own guard
+    uses, never an error."""
+    gt = [[_gt(1)]] * 3
+    outcomes = [_outcome({1: 1}) for _ in range(3)]
+    metrics = compute(_result(gt, outcomes, gt_ids=frozenset({1})))
+
+    assert metrics.label_flip_count == 0
+    assert metrics.label_flips_per_track_per_minute == 0.0
+
+
+def test_label_flip_count_is_zero_when_the_label_never_changes() -> None:
+    gt = [[_gt(1)]] * 3
+    outcomes = [_outcome({1: 1}) for _ in range(3)]
+    track_labels = ({1: "car"}, {1: "car"}, {1: "car"})
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), track_labels=track_labels)
+    )
+
+    assert metrics.label_flip_count == 0
+
+
+def test_label_flip_count_fires_once_per_change() -> None:
+    gt = [[_gt(1)]] * 4
+    outcomes = [_outcome({1: 1}) for _ in range(4)]
+    track_labels = ({1: "car"}, {1: "car"}, {1: "truck"}, {1: "truck"})
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), track_labels=track_labels)
+    )
+
+    assert metrics.label_flip_count == 1
+
+
+def test_label_flip_count_counts_every_change_not_just_the_first() -> None:
+    """Flapping back and forth is TWO flips, not one -- a plain count of
+    (track, transition) occurrences, the same "not a per-frame flag"
+    convention `test_implausible_velocity_count_sums_every_track_every_
+    frame` documents for its own metric."""
+    gt = [[_gt(1)]] * 3
+    outcomes = [_outcome({1: 1}) for _ in range(3)]
+    track_labels = ({1: "car"}, {1: "truck"}, {1: "car"})
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), track_labels=track_labels)
+    )
+
+    assert metrics.label_flip_count == 2
+
+
+def test_label_flip_count_sums_every_track_independently() -> None:
+    gt = [[_gt(1)], [_gt(1)]]
+    outcomes = [_outcome({1: 1}), _outcome({1: 1})]
+    track_labels = (
+        {1: "car", 2: "dog"},
+        {1: "truck", 2: "cat"},
+    )
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), track_labels=track_labels)
+    )
+
+    assert metrics.label_flip_count == 2
+
+
+def test_label_flip_count_walks_each_track_s_own_timeline_not_adjacent_frames() -> None:
+    """Track 1 flips on its own third appearance while track 2 sits between
+    its first two frames with a constant label -- the two timelines must
+    not cross-contaminate each other's "previous label" bookkeeping."""
+    gt = [[_gt(1)]] * 3
+    outcomes = [_outcome({1: 1}) for _ in range(3)]
+    track_labels = (
+        {1: "car"},
+        {2: "dog"},
+        {1: "truck"},
+    )
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), track_labels=track_labels)
+    )
+
+    assert metrics.label_flip_count == 1
+
+
+def test_label_flips_per_track_per_minute_normalizes_by_track_minutes() -> None:
+    """One flip over a track that appeared for 30 frames at 10fps (=0.05
+    minutes) is 20 flips/track/minute -- `total track-minutes` is the sum
+    of every track's own appearance-frame count (`_track_lifetimes`'s own
+    "appearance count" idiom), not a first-to-last span or a fixed replay
+    duration."""
+    gt = [[_gt(1)]] * 30
+    outcomes = [_outcome({1: 1}) for _ in range(30)]
+    track_labels = tuple({1: "car"} for _ in range(29)) + ({1: "truck"},)
+    metrics = compute(
+        _result(gt, outcomes, gt_ids=frozenset({1}), fps=10.0, track_labels=track_labels)
+    )
+
+    assert metrics.label_flip_count == 1
+    assert metrics.label_flips_per_track_per_minute == pytest.approx(20.0)

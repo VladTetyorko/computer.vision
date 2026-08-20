@@ -36,8 +36,8 @@ from cv_service.tracking.params import (
 )
 from cv_service.tracking.registry import MOTION_ENGINE_FLOW, MOTION_ENGINE_POSE
 from cv_service.tracking.scheduler import REASON_ALWAYS, REASON_CADENCE, REASON_NO_LOCK
-from cv_service.tracking.session import StreamTrackingSession
-from cv_service.tracking.track import STATE_CONFIRMED
+from cv_service.tracking.session import StreamTrackingSession, _box_for, _from_track
+from cv_service.tracking.track import STATE_CONFIRMED, Track
 
 FRAME = object()  # the session never looks at a frame; only engines do.
 
@@ -2368,3 +2368,58 @@ def test_late_detection_lag_correction_imports_no_cv_stack_at_l1():
 
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
     assert "P8_OK" in result.stdout
+
+
+# -- TRACK-IDENTITY-PLAN wave L1: emission reads the elected label ----------
+#
+# Plan item 3: "`_box_for` uses the elected label for tracked detections
+# (raw label for untracked); `_from_track` (coast) ... echoes the elected
+# label now." Both are plain module-level functions -- no `StreamTracking
+# Session`, no engine, no frame needed to exercise them directly.
+
+
+def _minimal_track(elected_label: str, *, label: str = "dog") -> Track:
+    """A `Track` with only the fields `_box_for`/`_from_track` ever read
+    populated meaningfully -- `label`/`elected_label` deliberately DIFFER
+    here so a test that reads the wrong one is caught, not accidentally
+    passed by coincidence."""
+    return Track(
+        track_id=1,
+        key="k",
+        box=Box(0.2, 0.2, 0.1, 0.1),
+        label=label,
+        confidence=0.9,
+        first_seen=0.0,
+        last_seen=0.0,
+        last_confirmed=0.0,
+        elected_label=elected_label,
+    )
+
+
+def test_box_for_reports_the_elected_label_for_a_tracked_detection():
+    detection = det(label="dog")  # this frame's own raw roll
+    tracked_box = _box_for(detection, _minimal_track("car", label="dog"))
+
+    assert tracked_box.label == "car"
+
+
+def test_box_for_reports_the_raw_label_for_an_untracked_detection():
+    # No `track` given (`track=None`, the default) -- ASSOCIATE below
+    # `min_hits`, or any detection this frame never bound to a track at
+    # all. There is no identity yet to elect a label over.
+    detection = det(label="dog")
+
+    tracked_box = _box_for(detection)
+
+    assert tracked_box.label == "dog"
+
+
+def test_from_track_echoes_the_elected_label_on_a_coast_frame():
+    # Plan item 5's "coast echoes elected": `_from_track` is FOLLOW's coast
+    # path (no fresh detection this frame at all, only the track itself),
+    # so the elected label is the ONLY opinion available -- and it must be
+    # the elected one, not the raw `track.label` a stray tracker-only touch
+    # could otherwise have left behind.
+    tracked_box = _from_track(_minimal_track("car", label="dog"))
+
+    assert tracked_box.label == "car"

@@ -44,6 +44,15 @@ FORBIDDEN = float("inf")
 # arrive as `orion12l:tank` and `yolo11n:truck` on the same pass -- charging
 # that a full label penalty would split it into two tracks, which is exactly
 # the outcome TRACKING-PLAN R9 predicted and accepted.
+#
+# R9's blanket "a flipping label is cosmetic -- do not special-case" is
+# OVERTURNED for the open-vocabulary (prompt-free, ~4585-class) path by
+# `docs/plans/active/TRACK-IDENTITY-PLAN.md` -- there the flip is semantic
+# noise, not a naming variant across composite-mode models, and wave L1
+# (`track.py`'s per-track label election) is the special-casing R9 declined,
+# now owner-ordered. This composite-prefix tolerance stands unchanged; the
+# `Candidate.label` this function now compares is the ELECTED label
+# (`session.py`'s `_run_cost_associate`), not the raw per-frame one.
 _UNKNOWN_LABEL = ""
 
 

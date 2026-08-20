@@ -541,6 +541,47 @@ DEFAULT_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO = 0.40
 # concluding anything general.
 DEFAULT_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE = 0.0
 
+# TRACK-IDENTITY-PLAN wave L1: backs `track.py`'s per-track label election
+# (`_seed_label_election`/`_update_label_election`) -- the fix for
+# TRACK-IDENTITY-RESEARCH.md's six-layer causal chain, where an open-
+# vocabulary model's one-argmax-per-pass label re-rolls every observation
+# and every downstream layer repeats the newest roll verbatim. No wire
+# field exists for any of the three -- deployment-only, same "resolved
+# straight from Settings" shape as `track_follow_top_k`/`track_roi_enabled`
+# above -- because election is a *deployment* posture (how patient the
+# fleet is with a challenger label), not a per-request tuning the operator
+# UI exposes.
+#
+# How many of a track's most recent SOURCE_DETECTOR observations feed the
+# label tally (older votes fall off the ring AND are exponentially
+# decayed -- see `track.py`'s `_LABEL_VOTE_DECAY` -- so this bounds memory,
+# not just history depth). `10` mirrors the shipped
+# `CV_TRACK_VERIFY_MILLIS`-adjacent cadence: at the detector's own pass
+# rate this is roughly a second of evidence, long enough to outvote a
+# single-pass mis-class, short enough that a genuine identity change (the
+# tracked object itself changes) is not held hostage for many seconds.
+DEFAULT_TRACK_LABEL_VOTE_WINDOW = 10
+# A challenger label must out-score the incumbent elected label by this
+# multiple before it is even eligible to start a switch streak (see
+# `DEFAULT_TRACK_LABEL_SWITCH_STREAK` below) -- a >1.0 margin so a
+# challenger barely ahead of decayed noise cannot immediately contest the
+# incumbent every single pass. `1.5` -- not a bare majority (`1.0`, which a
+# single strong-confidence outlier could clear) and not a landslide
+# (`3.0`+, which would make legitimate identity changes sluggish) -- the
+# same "clearly ahead, not merely ahead" posture `DEFAULT_TRACK_COST_GATE_
+# HIGH_CONFIDENCE` takes for its own threshold.
+DEFAULT_TRACK_LABEL_SWITCH_MARGIN = 1.5
+# The challenger must hold the margin above for this many CONSECUTIVE
+# SOURCE_DETECTOR passes before the election actually switches -- a single
+# lucky pass (even a decisive one) never flips the emitted label; the
+# streak resets to zero the moment any other label leads. `3` consecutive
+# passes is the same order of magnitude as `DEFAULT_TRACK_MIN_HITS` (the
+# gate a brand-new track's own existence must clear before CONFIRMED) --
+# long enough that transient noise cannot win, short enough that a real
+# identity change is visible in under a second at the detector's own pass
+# rate.
+DEFAULT_TRACK_LABEL_SWITCH_STREAK = 3
+
 # --- pull (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
 #
 # Back `cv_service.pull.{source,clock,loop}` -- the worker's own decode loop
@@ -1017,6 +1058,9 @@ class Settings:
     track_reupdate_max_motion_center_distance: float = (
         DEFAULT_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE
     )
+    track_label_vote_window: int = DEFAULT_TRACK_LABEL_VOTE_WINDOW
+    track_label_switch_margin: float = DEFAULT_TRACK_LABEL_SWITCH_MARGIN
+    track_label_switch_streak: int = DEFAULT_TRACK_LABEL_SWITCH_STREAK
     pull_decoder: str = DEFAULT_PULL_DECODER
     pull_rtsp_transport: str = DEFAULT_PULL_RTSP_TRANSPORT
     pull_target_fps: float = DEFAULT_PULL_TARGET_FPS
@@ -1262,6 +1306,21 @@ class Settings:
                 os.environ.get("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE"),
                 DEFAULT_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE,
                 "CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE",
+            ),
+            track_label_vote_window=_parse_positive_int(
+                os.environ.get("CV_TRACK_LABEL_VOTE_WINDOW"),
+                DEFAULT_TRACK_LABEL_VOTE_WINDOW,
+                "CV_TRACK_LABEL_VOTE_WINDOW",
+            ),
+            track_label_switch_margin=_parse_positive_float(
+                os.environ.get("CV_TRACK_LABEL_SWITCH_MARGIN"),
+                DEFAULT_TRACK_LABEL_SWITCH_MARGIN,
+                "CV_TRACK_LABEL_SWITCH_MARGIN",
+            ),
+            track_label_switch_streak=_parse_positive_int(
+                os.environ.get("CV_TRACK_LABEL_SWITCH_STREAK"),
+                DEFAULT_TRACK_LABEL_SWITCH_STREAK,
+                "CV_TRACK_LABEL_SWITCH_STREAK",
             ),
             pull_decoder=_parse_string(os.environ.get("CV_PULL_DECODER"), DEFAULT_PULL_DECODER),
             pull_rtsp_transport=_parse_string(
