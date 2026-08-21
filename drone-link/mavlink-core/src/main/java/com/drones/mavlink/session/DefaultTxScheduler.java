@@ -6,6 +6,7 @@ import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -14,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The one {@link TxScheduler} implementation: one shared {@link ScheduledExecutorService} for
- * every registered {@link #repeat} task, named threads, and a small fixed pool size (2 — an
+ * every registered {@link #repeat}/{@link #submit} task, named threads, and a small fixed pool size (2 — an
  * internal implementation choice, not a spec- or config-pinned value: enough that one slow/blocked
  * TX task cannot delay every other periodic task sharing this scheduler, while still being
  * unambiguously "one shared pool," not one thread per feature, per plan §3.3).
@@ -58,6 +59,18 @@ public final class DefaultTxScheduler implements TxScheduler {
         ScheduledFuture<?> future = executor.scheduleAtFixedRate(
                 () -> runSafely(name, task), 0, periodMillis, TimeUnit.MILLISECONDS);
         return new HandleImpl(future);
+    }
+
+    @Override
+    public void submit(String name, Runnable task) {
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(task, "task");
+        try {
+            executor.execute(() -> runSafely(name, task));
+        } catch (RejectedExecutionException e) {
+            // Raced close() -- see TxScheduler#submit's own "dropped, not thrown" contract.
+            LOG.log(Level.DEBUG, "TxScheduler one-shot '" + name + "' dropped; the scheduler is shut down");
+        }
     }
 
     private void runSafely(String name, Runnable task) {

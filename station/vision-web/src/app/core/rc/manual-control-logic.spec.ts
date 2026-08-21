@@ -7,7 +7,10 @@ import {
   parseManualControlServerMessage,
   pushLatencySample,
   rollingAverageMs,
-  sendIntervalMs,
+  MIN_SEND_GAP_MS,
+  channelsEqual,
+  keepaliveIntervalMs,
+  shouldSendChannels,
 } from './manual-control-logic';
 
 describe('manual-control-logic', () => {
@@ -147,17 +150,52 @@ describe('manual-control-logic', () => {
     });
   });
 
-  describe('sendIntervalMs', () => {
+  describe('keepaliveIntervalMs', () => {
     it('the plan default (33Hz) rounds to ~30ms', () => {
-      expect(sendIntervalMs(33)).toBe(Math.round(1000 / 33));
+      expect(keepaliveIntervalMs(33)).toBe(Math.round(1000 / 33));
     });
 
     it('clamps below 10Hz to the 10Hz floor', () => {
-      expect(sendIntervalMs(1)).toBe(100);
+      expect(keepaliveIntervalMs(1)).toBe(100);
     });
 
     it('clamps above 50Hz to the 50Hz ceiling', () => {
-      expect(sendIntervalMs(1000)).toBe(20);
+      expect(keepaliveIntervalMs(1000)).toBe(20);
+    });
+
+    it('stays far under the 300ms input-loss watchdog even at the slowest clamp', () => {
+      expect(keepaliveIntervalMs(1)).toBeLessThan(300 / 2);
+    });
+  });
+
+  describe('channelsEqual', () => {
+    it('is true for the same values', () => {
+      expect(channelsEqual([0.5, -0.5], [0.5, -0.5])).toBe(true);
+    });
+
+    it('is false for a different value or a different length', () => {
+      expect(channelsEqual([0.5, -0.5], [0.5, -0.4])).toBe(false);
+      expect(channelsEqual([0.5], [0.5, 0])).toBe(false);
+    });
+  });
+
+  describe('shouldSendChannels', () => {
+    const KEEPALIVE = 30;
+
+    it('sends an unchanged frame once the keepalive floor is due', () => {
+      expect(shouldSendChannels(false, KEEPALIVE, KEEPALIVE)).toBe(true);
+    });
+
+    it('holds an unchanged frame before the floor is due', () => {
+      expect(shouldSendChannels(false, KEEPALIVE - 1, KEEPALIVE)).toBe(false);
+    });
+
+    it('sends a change as soon as the wire ceiling allows, without waiting for the floor', () => {
+      expect(shouldSendChannels(true, MIN_SEND_GAP_MS, KEEPALIVE)).toBe(true);
+    });
+
+    it('holds a change that arrives inside the ceiling — the next sample re-offers it', () => {
+      expect(shouldSendChannels(true, MIN_SEND_GAP_MS - 1, KEEPALIVE)).toBe(false);
     });
   });
 });

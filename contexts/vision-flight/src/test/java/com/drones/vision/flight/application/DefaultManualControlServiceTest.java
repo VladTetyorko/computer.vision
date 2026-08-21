@@ -411,6 +411,14 @@ class DefaultManualControlServiceTest {
         }
 
         private static final class FakeLink implements ManualControlLink {
+
+            /** Any positive value -- these tests assert plumbing, not a particular cadence. */
+            static final int RATE_HZ = 33;
+
+            @Override
+            public int rateHz() {
+                return RATE_HZ;
+            }
             private boolean active = true;
 
             @Override

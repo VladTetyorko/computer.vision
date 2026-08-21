@@ -1,7 +1,6 @@
 package com.drones.vision.api.dto;
 
 import java.util.List;
-import com.drones.vision.api.ws.ManualControlWebSocketHandler;
 
 /**
  * Server&rarr;client {@code /ws/manual-control} frame confirming an {@code engage} request
@@ -9,20 +8,16 @@ import com.drones.vision.api.ws.ManualControlWebSocketHandler;
  *
  * @param type       always {@code "engaged"}
  * @param assetId    the engaged asset, as a canonical UUID string
- * @param rateHz     the informational fixed override send rate the client may throttle its own
- *                   {@code channels} send rate toward; matches {@code
- *                   com.drones.vision.adapter.mavlink.MavlinkManualControlSender}'s own default
- *                   ({@value #DEFAULT_RATE_HZ}Hz) but is <b>not</b> read live from that adapter's
- *                   {@code VISION_RC_OVERRIDE_HZ} env knob (vision-api may not depend on
- *                   adapter-mavlink) — a documented rough edge, see {@code
- *                   ManualControlWebSocketHandler}'s own javadoc
+ * @param rateHz     the engaged link's own keepalive cadence, in whole Hz, read live from the
+ *                   adapter via {@code ManualControlSession#rateHz()} (docs/plans/active/
+ *                   RC-LATENCY-PLAN.md §2 C). It is a <b>floor</b>, not a ceiling: the adapter
+ *                   transmits sooner when new input arrives, so a client should treat this as how
+ *                   often it must send an unchanged frame to keep the session alive, not as a cap
+ *                   on how fast it may report a change
  * @param channelMap the channel map this session was engaged with, for display
  */
 public record ManualControlEngagedFrame(String type, String assetId, int rateHz,
                                          List<ManualControlChannelBindingResponse> channelMap) {
-
-    /** {@code MavlinkManualControlSender.DEFAULT_OVERRIDE_HZ}'s value, mirrored here (see {@link #rateHz}). */
-    public static final int DEFAULT_RATE_HZ = 33;
 
     /** Convenience constructor: fills in the fixed {@code type} literal. */
     public ManualControlEngagedFrame(String assetId, int rateHz, List<ManualControlChannelBindingResponse> channelMap) {

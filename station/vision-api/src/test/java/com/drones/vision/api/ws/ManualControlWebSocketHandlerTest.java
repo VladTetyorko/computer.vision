@@ -80,6 +80,16 @@ class ManualControlWebSocketHandlerTest {
     }
 
     @Test
+    void engagedFrameReportsTheSessionsOwnRateNotAHardcodedDefault() throws Exception {
+        handler.afterConnectionEstablished(session);
+
+        handler.handleMessage(session, engageFrame(AssetId.random()));
+
+        assertEquals(FakeManualControlSession.RATE_HZ, lastFrame().get("rateHz").asInt(),
+                "rateHz must come from the engaged session (and so from the adapter), not a mirrored constant");
+    }
+
+    @Test
     void channelsFrameForwardsToSessionAndAcksWithSeqTSentAndTServer() throws Exception {
         handler.afterConnectionEstablished(session);
         handler.handleMessage(session, engageFrame(AssetId.random()));
@@ -292,6 +302,15 @@ class ManualControlWebSocketHandlerTest {
 
     /** Hand-fake {@link ManualControlSession}: records every {@code onChannels} call, tracks release/active. */
     private static final class FakeManualControlSession implements ManualControlSession {
+
+        /** Deliberately unlike any hardcoded default, so a regression to a mirrored constant fails
+         * loudly instead of coincidentally matching. */
+        static final int RATE_HZ = 41;
+
+        @Override
+        public int rateHz() {
+            return RATE_HZ;
+        }
         private final ChannelMap channelMap = ChannelMap.defaultMap();
         private final List<Object[]> channelCalls = Collections.synchronizedList(new ArrayList<>());
         private volatile boolean active = true;

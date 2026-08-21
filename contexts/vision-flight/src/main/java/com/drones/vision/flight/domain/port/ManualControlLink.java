@@ -17,4 +17,17 @@ public interface ManualControlLink {
      *         failed on its own)
      */
     boolean active();
+
+    /**
+     * The cadence, in whole Hz, at which this link's implementation guarantees to keep transmitting
+     * — its keepalive floor, not a ceiling: an implementation may transmit sooner when new input
+     * arrives (docs/plans/active/RC-LATENCY-PLAN.md §2 C).
+     *
+     * <p>Exists so a caller can report the <em>real</em> rate rather than mirror a constant. The
+     * value is resolved at {@link ManualControlPort#engage engage} time and does not change for the
+     * life of the link.
+     *
+     * @return a positive whole-Hz cadence
+     */
+    int rateHz();
 }

@@ -294,7 +294,7 @@ class MavlinkManualControlSenderTest {
     @Test
     void sendRejectsALinkNotCreatedByThisPort() {
         MavlinkManualControlSender sender = sender(new MavlinkTelemetrySource());
-        ManualControlLink foreignLink = () -> true;
+        ManualControlLink foreignLink = new ForeignLink();
 
         assertThrows(IllegalArgumentException.class,
                 () -> sender.send(foreignLink, new RcChannels(List.of(1500))));
@@ -303,9 +303,24 @@ class MavlinkManualControlSenderTest {
     @Test
     void releaseRejectsALinkNotCreatedByThisPort() {
         MavlinkManualControlSender sender = sender(new MavlinkTelemetrySource());
-        ManualControlLink foreignLink = () -> true;
+        ManualControlLink foreignLink = new ForeignLink();
 
         assertThrows(IllegalArgumentException.class, () -> sender.release(foreignLink));
+    }
+
+    /** A {@link ManualControlLink} this port did not create -- no longer expressible as a lambda now
+     * that the port also reports its cadence. */
+    private static final class ForeignLink implements ManualControlLink {
+
+        @Override
+        public boolean active() {
+            return true;
+        }
+
+        @Override
+        public int rateHz() {
+            return 1;
+        }
     }
 
     private static MavlinkManualControlSender sender(MavlinkTelemetrySource telemetrySource) {

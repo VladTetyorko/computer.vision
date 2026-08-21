@@ -10,7 +10,10 @@ import {
   parseManualControlServerMessage,
   pushLatencySample,
   rollingAverageMs,
-  sendIntervalMs,
+  SEND_CHECK_INTERVAL_MS,
+  channelsEqual,
+  keepaliveIntervalMs,
+  shouldSendChannels,
 } from './manual-control-logic';
 
 /** Same-origin endpoint (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4) — a relative `WebSocket` URL resolves
@@ -34,6 +37,19 @@ export type ManualControlEngageState = 'idle' | 'engaging' | 'engaged' | 'denied
  * `providers` array carries both) — this class injects `RcInputService` directly, DI-sharing
  * whichever instance the host provided, the same "one page-scoped service injects another"
  * idiom `FlyFacade` uses for `TelemetryStore`/`DetectionsStore`/`WeatherStore`.
+ *
+ * <h2>Sending is driven by the input, not by a clock of its own</h2>
+ * `RcInputService` writes `axes`/`buttons` from its `requestAnimationFrame` loop; this class sends
+ * from an `effect()` over those signals, so a stick that moves reaches the socket in the same frame
+ * it was sampled instead of waiting out a `setInterval` that had no relationship to when the input
+ * arrived (docs/plans/active/RC-LATENCY-PLAN.md §2 B — that free-running timer cost a mean 15ms of
+ * the old ~39ms glass-to-stick budget).
+ *
+ * A backstop timer still ticks, but its job is now the *keepalive*: both paths funnel through the
+ * one {@link shouldSendChannels} rule, which sends an unchanged frame at the server-confirmed
+ * `rateHz` floor (so the 300ms input-loss watchdog keeps seeing input from a motionless stick) and
+ * refuses to exceed the wire ceiling however fast the input arrives. Because both paths share the
+ * rule and the same `lastSentAt`, the combined rate is bounded by the ceiling, not their sum.
  *
  * <h2>The deadman — every trigger funnels through {@link release}</h2>
  * `release()` is idempotent (a no-op once {@link state} is already `'idle'`/`'denied'`/
@@ -91,6 +107,10 @@ export class ManualControlClient {
   private sendTimer: ReturnType<typeof setInterval> | null = null;
   private seq = 0;
   private latencyWindow: readonly number[] = [];
+  private keepaliveMs = 0;
+  private lastSentAt = 0;
+  private lastSentAxes: readonly number[] = [];
+  private lastSentButtons: readonly number[] = [];
 
   constructor() {
     document.addEventListener('visibilitychange', this.onVisibilityChange);
@@ -106,6 +126,14 @@ export class ManualControlClient {
       if (!this.rc.connected() && this.isSessionLive()) {
         this.release();
       }
+    });
+
+    // The send path — every new rAF sample is offered to the one send rule. See this class's own
+    // "Sending is driven by the input" doc section.
+    effect(() => {
+      const axes = this.rc.axes();
+      const buttons = this.rc.buttons();
+      this.offerChannels(axes, buttons);
     });
   }
 
@@ -137,6 +165,9 @@ export class ManualControlClient {
     this._latencyMs.set(undefined);
     this.latencyWindow = [];
     this.seq = 0;
+    this.lastSentAt = 0;
+    this.lastSentAxes = [];
+    this.lastSentButtons = [];
     this._state.set('engaging');
 
     const ws = new WebSocket(MANUAL_CONTROL_WS_URL);
@@ -215,9 +246,15 @@ export class ManualControlClient {
     }
   }
 
+  /** The keepalive backstop: re-offers the current reading often enough that a parked stick still
+   * lands its keepalive within one ceiling-gap of the deadline, with no input events at all. */
   private startSendLoop(rateHz: number): void {
     this.stopSendLoop();
-    this.sendTimer = setInterval(() => this.sendChannelsFrame(), sendIntervalMs(rateHz));
+    this.keepaliveMs = keepaliveIntervalMs(rateHz);
+    this.sendTimer = setInterval(
+      () => this.offerChannels(this.rc.axes(), this.rc.buttons()),
+      SEND_CHECK_INTERVAL_MS,
+    );
   }
 
   private stopSendLoop(): void {
@@ -227,16 +264,25 @@ export class ManualControlClient {
     }
   }
 
-  /** One `channels` frame per tick while engaged — always the *current* `RcInputService` reading
-   * (latest-wins is the server's own job per §4/the adapter's mailbox; this client just samples). */
-  private sendChannelsFrame(): void {
+  /** Offers one reading to {@link shouldSendChannels}; sends it only if the rule says so. Called
+   * from both the input effect and the keepalive backstop — latest-wins beyond this point is the
+   * server's own job (§4/the adapter's mailbox), so this client never queues. */
+  private offerChannels(axes: readonly number[], buttons: readonly number[]): void {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN || this._state() !== 'engaged') {
       return;
     }
+    const changed =
+      !channelsEqual(axes, this.lastSentAxes) || !channelsEqual(buttons, this.lastSentButtons);
+    const now = Date.now();
+    if (!shouldSendChannels(changed, now - this.lastSentAt, this.keepaliveMs)) {
+      return;
+    }
+    this.lastSentAt = now;
+    this.lastSentAxes = axes;
+    this.lastSentButtons = buttons;
     this.seq += 1;
-    const frame = buildChannelsFrame(this.rc.axes(), this.rc.buttons(), this.seq, Date.now());
-    ws.send(JSON.stringify(frame));
+    ws.send(JSON.stringify(buildChannelsFrame(axes, buttons, this.seq, now)));
   }
 
   private teardownSocket(): void {

@@ -157,10 +157,40 @@ export function rollingAverageMs(window: readonly number[]): number | undefined 
 
 // --- Send cadence ---------------------------------------------------------------------------------
 
-/** `channels`-frame send interval in ms for a server-confirmed `rateHz` — clamped to
- * [{@link MIN_SEND_HZ}, {@link MAX_SEND_HZ}] (mirrors the plan's own adapter-side
- * `VISION_RC_OVERRIDE_HZ` clamp, 10..50) so a malformed/extreme `rateHz` from a mismatched backend
- * can never spin the browser's own `setInterval` unreasonably fast/slow. */
-export function sendIntervalMs(rateHz: number): number {
+/** Keepalive interval in ms for a server-confirmed `rateHz` — how long an *unchanged* stick may go
+ * without sending, clamped to [{@link MIN_SEND_HZ}, {@link MAX_SEND_HZ}] (mirroring the adapter's own
+ * `vision.rc.override-hz` clamp, 10..50) so a malformed/extreme `rateHz` from a mismatched backend
+ * can never spin the browser's own timer unreasonably fast/slow. Well under the server's 300ms
+ * input-loss watchdog by design — a motionless stick is not input loss. */
+export function keepaliveIntervalMs(rateHz: number): number {
   return Math.round(1000 / clamp(rateHz, MIN_SEND_HZ, MAX_SEND_HZ));
+}
+
+/** Smallest gap between two `channels` frames, mirroring the adapter's own wire ceiling
+ * (`vision.rc.max-override-hz`). A change that arrives inside this gap is not dropped — the next
+ * sampling tick re-offers it, so the cost is at most one animation frame. */
+export const MIN_SEND_GAP_MS = Math.round(1000 / MAX_SEND_HZ);
+
+/** How often the backstop timer re-evaluates {@link shouldSendChannels} — the ceiling gap, so a
+ * parked stick's keepalive still lands within one gap of its deadline even with no input at all. */
+export const SEND_CHECK_INTERVAL_MS = MIN_SEND_GAP_MS;
+
+export function channelsEqual(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/**
+ * The one send rule, shared by the input-driven path and the backstop timer
+ * (docs/plans/active/RC-LATENCY-PLAN.md §2 B). A stick that moved reaches the socket in the frame it
+ * was sampled, subject only to the wire ceiling; a stick that did not still reports at the keepalive
+ * floor so the server's watchdog keeps seeing input.
+ *
+ * Because both callers share this rule and both update `msSinceLastSend`, the combined send rate is
+ * bounded by the ceiling rather than being the sum of the two paths.
+ */
+export function shouldSendChannels(changed: boolean, msSinceLastSend: number, keepaliveMs: number): boolean {
+  if (msSinceLastSend >= keepaliveMs) {
+    return true; // floor: the watchdog must keep seeing frames from a motionless stick
+  }
+  return changed && msSinceLastSend >= MIN_SEND_GAP_MS; // ceiling: never faster than the wire allows
 }

@@ -146,7 +146,12 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   TARGET_COMPONENT_AUTOPILOT = 1` (referenced by `VehicleClaimPolicy` and `MavlinkManualControlSender`
   — single source of truth, same idiom as before W4). Constructors unchanged:
   `MavlinkFlightCommander(MavlinkTelemetrySource)`, `MavlinkFlightCommander(MavlinkTelemetrySource, Duration ackTimeout)`.
-- `final class MavlinkManualControlSender implements ManualControlPort` — `engage`/`send`/`release`,
+- `final class MavlinkManualControlSender implements ManualControlPort` — `engage`/`send`/`release`, its
+  `AdapterLink` now also carrying **`rateHz()`** = `coreRc.clampedOverrideHz()` (docs/plans/active/RC-LATENCY-PLAN.md
+  §2 C — the real keepalive rate, so `vision-api` stops mirroring a constant). Latency behaviour follows
+  `mavlink-core`'s reworked `ManualControlService`: a stick that moves reaches the wire on arrival
+  (bounded by `vision.rc.max-override-hz`) instead of waiting out a fixed tick, while `vision.rc.override-hz`
+  becomes the keepalive floor for an unchanged stick.
   unchanged v1-scope/latest-wins/release-burst rules. Delegates to a per-engage
   `com.drones.mavlink.service.ManualControlService`, sharing one `com.drones.mavlink.session.DefaultTxScheduler`
   (two daemon threads total) across every engaged link from one sender instance — replaces the

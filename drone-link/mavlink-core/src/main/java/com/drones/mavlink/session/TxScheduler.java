@@ -20,6 +20,22 @@ public interface TxScheduler {
      */
     Handle repeat(String name, Duration period, Runnable task);
 
+    /**
+     * Runs {@code task} once, as soon as a pool thread is free — the latency-sensitive counterpart
+     * to {@link #repeat} for a TX path that must not wait for the next tick of a periodic task
+     * (docs/plans/active/RC-LATENCY-PLAN.md §2 A: a stick that moves 1 ms after a tick should not
+     * pay a full period for a clock that had no reason to be where it was). Same catch-and-log
+     * contract as {@link #repeat} — a task that throws is logged and never reaches the pool — and
+     * the same "already shut down" tolerance: a submission racing scheduler shutdown is dropped,
+     * not thrown, since callers submit from threads that must not fail on teardown.
+     *
+     * <p>No {@link Handle} is returned: a one-shot that has already been handed to the pool cannot
+     * usefully be cancelled, and every caller re-checks its own state when the task actually runs.
+     *
+     * @param name used only for diagnostics (log messages) — not an identity key
+     */
+    void submit(String name, Runnable task);
+
     /** A live {@link #repeat} registration. */
     interface Handle {
 

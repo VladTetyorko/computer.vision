@@ -28,7 +28,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -209,7 +211,8 @@ class ManualControlServiceTest {
         RecordingFrameSink sink = new RecordingFrameSink();
         FakePeerDirectory peers = FakePeerDirectory.knowing(TARGET, LINK);
         ManualTxScheduler scheduler = new ManualTxScheduler();
-        ManualControlService service = new ManualControlService(sink, scheduler, peers, TICK, RELEASE_FRAMES);
+        ManualNanoClock clock = new ManualNanoClock();
+        ManualControlService service = new ManualControlService(sink, scheduler, peers, TICK, RELEASE_FRAMES, clock);
 
         ManualControlService.ManualControlLink link = service.engage(TARGET);
         service.send(link, new RcChannels(List.of(1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500)));
@@ -217,14 +220,82 @@ class ManualControlServiceTest {
         assertEquals(1, sink.sentCount());
 
         peers.forget(TARGET); // simulate the target going silent / claim lost
+        clock.advance(TICK);
         scheduler.tick(); // must pause, not throw, not stop the schedule
+        clock.advance(TICK);
         scheduler.tick();
         assertEquals(1, sink.sentCount(), "no frame should be sent while the target is unreachable");
         assertTrue(link.active(), "a lost target pauses -- it does not release or kill the link");
 
         peers.knowAgain(TARGET, LINK); // target reachable again
+        clock.advance(TICK);
         scheduler.tick();
         assertEquals(2, sink.sentCount(), "sending must resume once the target is reachable again");
+    }
+
+    @Test
+    void aWriteAfterTheCeilingHasElapsedReachesTheWireWithoutWaitingForATick() {
+        RecordingFrameSink sink = new RecordingFrameSink();
+        FakePeerDirectory peers = FakePeerDirectory.knowing(TARGET, LINK);
+        ManualTxScheduler scheduler = new ManualTxScheduler();
+        ManualNanoClock clock = new ManualNanoClock();
+        ManualControlService service = new ManualControlService(sink, scheduler, peers, TICK, RELEASE_FRAMES, clock);
+
+        ManualControlService.ManualControlLink link = service.engage(TARGET);
+        service.send(link, new RcChannels(List.of(1600, 1600, 1600, 1600, 1600, 1600, 1600, 1600)));
+
+        assertEquals(1, scheduler.runSubmitted(), "the write should have scheduled a one-shot transmit");
+        assertEquals(1, sink.sentCount(), "the frame must reach the wire without any tick firing");
+        RcChannelsOverride frame = (RcChannelsOverride) sink.sent.peek();
+        assertEquals(1600, frame.chan1Raw());
+    }
+
+    @Test
+    void aSecondWriteInsideTheCeilingIsCoalescedRatherThanTransmitted() {
+        RecordingFrameSink sink = new RecordingFrameSink();
+        FakePeerDirectory peers = FakePeerDirectory.knowing(TARGET, LINK);
+        ManualTxScheduler scheduler = new ManualTxScheduler();
+        ManualNanoClock clock = new ManualNanoClock();
+        ManualControlService service = new ManualControlService(sink, scheduler, peers, TICK, RELEASE_FRAMES, clock);
+
+        ManualControlService.ManualControlLink link = service.engage(TARGET);
+        service.send(link, new RcChannels(List.of(1600, 1600, 1600, 1600, 1600, 1600, 1600, 1600)));
+        scheduler.runSubmitted();
+        assertEquals(1, sink.sentCount());
+
+        // No clock movement: still inside the ceiling.
+        service.send(link, new RcChannels(List.of(1700, 1700, 1700, 1700, 1700, 1700, 1700, 1700)));
+        assertEquals(0, scheduler.submittedCount(), "a write inside the ceiling must not schedule a transmit");
+        scheduler.tick();
+        assertEquals(1, sink.sentCount(), "the ceiling must hold even when a tick fires inside it");
+
+        clock.advance(TICK);
+        scheduler.tick();
+        assertEquals(2, sink.sentCount(), "the coalesced value goes out on the first tick past the ceiling");
+        RcChannelsOverride latest = sink.lastOverride();
+        assertEquals(1700, latest.chan1Raw(), "and it is the latest value, not the one it replaced");
+    }
+
+    @Test
+    void anUnchangedMailboxStillTransmitsOnceTheKeepaliveFloorIsDue() {
+        RecordingFrameSink sink = new RecordingFrameSink();
+        FakePeerDirectory peers = FakePeerDirectory.knowing(TARGET, LINK);
+        ManualTxScheduler scheduler = new ManualTxScheduler();
+        ManualNanoClock clock = new ManualNanoClock();
+        ManualControlService service = new ManualControlService(sink, scheduler, peers, TICK, RELEASE_FRAMES, clock);
+
+        ManualControlService.ManualControlLink link = service.engage(TARGET);
+        service.send(link, new RcChannels(List.of(1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500)));
+        scheduler.runSubmitted();
+        assertEquals(1, sink.sentCount());
+
+        scheduler.tick(); // nothing new, floor not due
+        assertEquals(1, sink.sentCount(), "an unchanged mailbox must not transmit before the floor is due");
+
+        clock.advance(TICK); // floor due
+        scheduler.tick();
+        assertEquals(2, sink.sentCount(), "an aircraft must never see a gap longer than the keepalive floor");
+        assertEquals(1500, sink.lastOverride().chan1Raw(), "the keepalive repeats the last value");
     }
 
     @Test
@@ -290,11 +361,13 @@ class ManualControlServiceTest {
         }
     }
 
-    /** A {@link TxScheduler} that never fires on its own -- the test drives {@link #tick()} manually. */
+    /** A {@link TxScheduler} that never fires on its own -- the test drives {@link #tick()} and
+     * {@link #runSubmitted()} manually. */
     private static final class ManualTxScheduler implements TxScheduler {
         private volatile Runnable task;
         private volatile boolean started;
         private volatile boolean closed;
+        private final ConcurrentLinkedQueue<Runnable> submitted = new ConcurrentLinkedQueue<>();
 
         @Override
         public Handle repeat(String name, Duration period, Runnable task) {
@@ -303,8 +376,42 @@ class ManualControlServiceTest {
             return () -> closed = true;
         }
 
+        @Override
+        public void submit(String name, Runnable task) {
+            submitted.add(task);
+        }
+
         void tick() {
             task.run();
+        }
+
+        /** Drains and runs every queued one-shot, returning how many ran. */
+        int runSubmitted() {
+            int ran = 0;
+            for (Runnable next = submitted.poll(); next != null; next = submitted.poll()) {
+                next.run();
+                ran++;
+            }
+            return ran;
+        }
+
+        int submittedCount() {
+            return submitted.size();
+        }
+    }
+
+    /** A monotonic clock the test advances by hand -- lets a manually driven scheduler step past the
+     * ceiling/keepalive without real sleeps. */
+    private static final class ManualNanoClock implements LongSupplier {
+        private final AtomicLong nanos = new AtomicLong(0);
+
+        @Override
+        public long getAsLong() {
+            return nanos.get();
+        }
+
+        void advance(Duration by) {
+            nanos.addAndGet(by.toNanos());
         }
     }
 
@@ -328,6 +435,16 @@ class ManualControlServiceTest {
 
         void clear() {
             sent.clear();
+        }
+
+        RcChannelsOverride lastOverride() {
+            RcChannelsOverride last = null;
+            for (Object next : sent) {
+                if (next instanceof RcChannelsOverride override) {
+                    last = override;
+                }
+            }
+            return last;
         }
 
         Object pollAny(Duration timeout) {

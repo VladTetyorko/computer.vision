@@ -141,7 +141,7 @@ public final class MavlinkManualControlSender implements ManualControlPort {
 
         LOG.log(System.Logger.Level.INFO, () -> "Engaged MAVLink RC override link for device " + device.id()
                 + " (sysid " + target.sysid() + ") at " + coreRc.clampedOverrideHz() + "Hz");
-        return new AdapterLink(service, coreLink, device.id());
+        return new AdapterLink(service, coreLink, device.id(), coreRc.clampedOverrideHz());
     }
 
     @Override
@@ -182,16 +182,25 @@ public final class MavlinkManualControlSender implements ManualControlPort {
         private final ManualControlService service;
         private final ManualControlService.ManualControlLink coreLink;
         private final DeviceId deviceId;
+        private final int rateHz;
 
-        AdapterLink(ManualControlService service, ManualControlService.ManualControlLink coreLink, DeviceId deviceId) {
+        AdapterLink(ManualControlService service, ManualControlService.ManualControlLink coreLink, DeviceId deviceId,
+                    int rateHz) {
             this.service = service;
             this.coreLink = coreLink;
             this.deviceId = deviceId;
+            this.rateHz = rateHz;
         }
 
         @Override
         public boolean active() {
             return coreLink.active();
+        }
+
+        /** The clamped keepalive rate this link was engaged with -- the real number vision-api reports. */
+        @Override
+        public int rateHz() {
+            return rateHz;
         }
     }
 }
