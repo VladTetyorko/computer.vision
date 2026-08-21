@@ -7,6 +7,7 @@ import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import org.springframework.stereotype.Component;
 
@@ -74,10 +75,18 @@ public final class StreamAccess {
     }
 
     /**
-     * Guards a device-level operation (today, only {@link StreamController#start}) directly against
-     * the device the caller named, before any stream exists for it.
+     * Guards a device-level operation directly against the device the caller named, before any
+     * stream exists for it — {@code StreamController#start}, and (LIVE-SCOPE W5) {@link
+     * DeviceController#update}/{@link DeviceController#setState}. Deliberately the same {@code
+     * includes}-gated policy for all three, not {@link
+     * VisibilityScope#canManage(com.drones.vision.kernel.Ownership) canManage}: {@code canManage} is
+     * hardcoded {@code false} for every {@link VisibilityScope.Kind#ASSIGNED_ASSETS} scope regardless
+     * of the asset, which would 403 a PILOT editing or retiring their own assigned camera — exactly
+     * the case this wave must keep working. Reusing this one method for both controllers keeps the
+     * device-write gate and the stream-write gate answering the same question the same way.
      *
-     * @param deviceId the device the caller wants to start a stream on
+     * @param deviceId the device the caller wants to start a stream on, edit, or move between
+     *                 {@code ACTIVE}/{@code DEACTIVATED}
      * @throws NoSuchElementException if the caller's scope may not reach this device's asset — the
      *                                 same 404 an unknown device already produces, so existence is
      *                                 never revealed
@@ -114,6 +123,19 @@ public final class StreamAccess {
      */
     public List<ActiveStream> filterVisible(List<ActiveStream> streams) {
         return streams.stream().filter(s -> visible(s.deviceId())).toList();
+    }
+
+    /**
+     * Filters {@code devices} down to the ones the caller's scope may reach — the read half of
+     * {@link DeviceController#list} (LIVE-SCOPE W5), mirroring {@link #filterVisible(List)}'s
+     * stream-list narrowing so a scoped device list is filtered rather than all-or-nothing 403'd
+     * (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2).
+     *
+     * @param devices the candidate devices, as reported by {@code DeviceService#devices}
+     * @return {@code devices}, filtered to the ones visible to {@link CurrentUser#scope()}
+     */
+    public List<Device> filterVisibleDevices(List<Device> devices) {
+        return devices.stream().filter(d -> visible(d.id())).toList();
     }
 
     /**

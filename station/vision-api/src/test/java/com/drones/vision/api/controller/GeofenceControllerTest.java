@@ -1,12 +1,19 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.flight.application.geofence.GeofenceService;
 import com.drones.vision.flight.application.geofence.GeofenceZoneSpec;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.flight.domain.model.GeofenceZone;
 import com.drones.vision.flight.domain.model.ZoneId;
 import com.drones.vision.flight.domain.model.ZoneKind;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.platform.VisibilityScope;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -16,6 +23,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Set;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -23,7 +31,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -37,10 +47,22 @@ class GeofenceControllerTest {
     private GeofenceService geofenceService;
     private MockMvc mockMvc;
 
+    /** Unbounded (auth-off-equivalent) by default, so every pre-existing test below is unaffected. */
+    private final CurrentUser currentUser = new CurrentUser(new Ownership(UserId.random(), GroupId.random()));
+
     @BeforeEach
     void setUp() {
         geofenceService = mock(GeofenceService.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new GeofenceController(geofenceService))
+        mockMvc = mockMvcFor(currentUser);
+    }
+
+    /**
+     * A {@link MockMvc} bound to a fresh {@link GeofenceController} acting as {@code user} — same
+     * mocked {@link #geofenceService}, only the acting {@link CurrentUser} changes
+     * (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2, W5's {@code canAdminister()} authority tests below).
+     */
+    private MockMvc mockMvcFor(CurrentUser user) {
+        return MockMvcBuilders.standaloneSetup(new GeofenceController(geofenceService, user))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -256,5 +278,161 @@ class GeofenceControllerTest {
         mockMvc.perform(delete("/api/geofences/{id}", "not-a-uuid"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    // ---- docs/plans/active/LIVE-SCOPE-PLAN.md §2.2, W5: authority --------------------------------
+    //
+    // Every test above runs under the class-level `currentUser` (unbounded scope, matching how a
+    // deployment with `vision.auth.enabled=false` behaves today) and is untouched by this wave --
+    // that is the "default-config suites stay green" bar. The tests below prove the write gate: a
+    // geofence zone is global no-fly-zone data with no owning asset/group (GeofenceService's own
+    // javadoc), so `canAdminister()` gates every write uniformly -- a MANAGER's `canManageOrg()`
+    // authority over their own group's assets does not extend to a boundary every group's aircraft
+    // must obey. `list` stays open to every scope, proved by the identical body the class-level
+    // (unbounded) tests above already exercise.
+
+    private static final String CREATE_BODY = """
+            {
+              "name": "New zone",
+              "kind": "keep_out",
+              "polygon": [
+                {"latitude": 10.0, "longitude": 20.0},
+                {"latitude": 10.0, "longitude": 21.0},
+                {"latitude": 11.0, "longitude": 20.5}
+              ],
+              "enabled": true
+            }
+            """;
+
+    /**
+     * A {@link CurrentUser} answering with a caller-supplied {@link VisibilityScope} — the same
+     * idiom {@code StreamControllerTest#currentUserWithScope} uses. {@link PrincipalResolver#viewer()}
+     * is never called by {@link GeofenceController}, so it throws rather than fake a map viewer no
+     * test here needs.
+     */
+    private CurrentUser currentUserWithScope(VisibilityScope scope) {
+        return new CurrentUser(new PrincipalResolver() {
+            @Override
+            public UserId userId() {
+                return UserId.random();
+            }
+
+            @Override
+            public Ownership ownership() {
+                return new Ownership(UserId.random(), GroupId.random());
+            }
+
+            @Override
+            public VisibilityScope scope() {
+                return scope;
+            }
+
+            @Override
+            public MapAccessPolicy.Viewer viewer() {
+                throw new UnsupportedOperationException("GeofenceController never calls viewer()");
+            }
+        });
+    }
+
+    private MockMvc pilotMvc() {
+        return mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of())));
+    }
+
+    private MockMvc managerMvc() {
+        return mockMvcFor(currentUserWithScope(VisibilityScope.groups(Set.of(GroupId.random()))));
+    }
+
+    private MockMvc adminMvc() {
+        return mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()));
+    }
+
+    @Test
+    void createReturns403ForAPilotScope() throws Exception {
+        pilotMvc().perform(post("/api/geofences").contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verifyNoInteractions(geofenceService);
+    }
+
+    @Test
+    void createReturns403ForAManagerScope() throws Exception {
+        // A no-fly zone binds every group's aircraft, not just the manager's own -- canManageOrg()
+        // (true for a manager) is deliberately not enough; only canAdminister() is.
+        managerMvc().perform(post("/api/geofences").contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verifyNoInteractions(geofenceService);
+    }
+
+    @Test
+    void createSucceedsForAnAdminScope() throws Exception {
+        ZoneId created = ZoneId.random();
+        when(geofenceService.create(any(GeofenceZoneSpec.class)))
+                .thenReturn(zone(created, "New zone", ZoneKind.KEEP_OUT, null, true));
+
+        adminMvc().perform(post("/api/geofences").contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
+                .andExpect(status().isCreated());
+
+        verify(geofenceService).create(any(GeofenceZoneSpec.class));
+    }
+
+    @Test
+    void updateReturns403ForAPilotScope() throws Exception {
+        ZoneId id = ZoneId.random();
+
+        pilotMvc().perform(put("/api/geofences/{id}", id.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(geofenceService, never()).update(any(), any());
+    }
+
+    @Test
+    void updateReturns403ForAManagerScope() throws Exception {
+        ZoneId id = ZoneId.random();
+
+        managerMvc().perform(put("/api/geofences/{id}", id.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(geofenceService, never()).update(any(), any());
+    }
+
+    @Test
+    void deleteReturns403ForAPilotScope() throws Exception {
+        ZoneId id = ZoneId.random();
+
+        pilotMvc().perform(delete("/api/geofences/{id}", id.value()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(geofenceService, never()).delete(any());
+    }
+
+    @Test
+    void deleteReturns403ForAManagerScope() throws Exception {
+        ZoneId id = ZoneId.random();
+
+        managerMvc().perform(delete("/api/geofences/{id}", id.value()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(geofenceService, never()).delete(any());
+    }
+
+    @Test
+    void listIsUnfilteredForAPilotScope() throws Exception {
+        // Zones carry no asset/group -- every scope sees every zone (see class javadoc's
+        // `@OpenByDesign` reasoning).
+        when(geofenceService.zones()).thenReturn(List.of(
+                zone(ZoneId.random(), "Airport keep-out", ZoneKind.KEEP_OUT, 50.0, true)));
+
+        pilotMvc().perform(get("/api/geofences"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)));
     }
 }

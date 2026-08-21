@@ -43,16 +43,6 @@ class EndpointAuthorizationTest {
     private static final Set<String> TEMPORARY_UNSCOPED = new TreeSet<>(Set.of(
             // W4 — HLS/mediamtx (this plan)
             "HlsProxyController#proxy",
-            // W5 — device + geofence (this plan)
-            "DeviceController#delete",
-            "DeviceController#list",
-            "DeviceController#register",
-            "DeviceController#setState",
-            "DeviceController#update",
-            "GeofenceController#create",
-            "GeofenceController#delete",
-            "GeofenceController#list",
-            "GeofenceController#update",
             // NOT in LIVE-SCOPE — the other T1 holes, still unowned (see PLATFORM-AUDIT-SCOPE.md)
             "AssetController#telemetry",
             "DemoController#status",

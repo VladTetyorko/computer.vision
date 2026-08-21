@@ -5,6 +5,8 @@ import com.drones.vision.api.dto.RegisterDeviceRequest;
 import com.drones.vision.api.dto.SetLifecycleStateRequest;
 import com.drones.vision.api.dto.UpdateDeviceRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.StreamAccess;
+import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -28,13 +30,43 @@ import com.drones.vision.api.security.CurrentUser;
  * Driving REST adapter for the life of a device: registering, listing,
  * editing, taking out of service, and deleting.
  *
- * <p>Constructor-injected with {@link DeviceService} and {@link CurrentUser} only. Per the
- * hexagonal dependency rule (ARCHITECTURE.md §2, enforced by ArchUnit), this module depends only
- * on {@code vision-domain} and {@code vision-application} — never on an adapter.
+ * <p>Constructor-injected with {@link DeviceService}, {@link CurrentUser} and {@link StreamAccess}.
+ * Per the hexagonal dependency rule (ARCHITECTURE.md §2, enforced by ArchUnit), this module depends
+ * only on {@code vision-domain} and {@code vision-application} — never on an adapter.
  *
  * <h2>Who the change is attributed to</h2>
  * The acting user comes from {@link CurrentUser} and is passed to every mutating call, so the
  * audit trail records a principal without {@link DeviceService} knowing how it was authenticated.
+ * That attribution is not authorization — the platform audit behind
+ * docs/plans/active/LIVE-SCOPE-PLAN.md §2 (W1) found every handler here passing {@code userId()}
+ * and concluding, wrongly, that this controller was already guarded. It was not: see below.
+ *
+ * <h2>Authority (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2, W5)</h2>
+ * {@link #register}/{@link #delete} require {@link com.drones.vision.platform.VisibilityScope#canManageOrg()
+ * scope().canManageOrg()} — the same org-level gate {@code AssetController#create} uses, not the
+ * deployment-global {@code canAdminister()}. Both operations act on the device row's existence, not
+ * on any specific asset's group: {@link Device} carries no {@code Ownership} field of its own (only
+ * an {@code Asset} does, once a device is assigned to one), so there is no per-group boundary to
+ * check against a device that may not even be assigned yet.
+ *
+ * <p>{@link #update}/{@link #setState} instead require the caller be able to <em>reach</em> the
+ * device through {@link StreamAccess#requireVisible(DeviceId)} — the device→asset→owner resolution
+ * {@link StreamAccess} already performs for the live-operations surface (LIVE-SCOPE W2), reused
+ * here rather than a second lookup. Deliberately not {@code canManage(ownership)}: that predicate is
+ * hardcoded {@code false} for every {@code ASSIGNED_ASSETS} (PILOT) scope regardless of the asset,
+ * which would 403 a PILOT editing or retiring their own assigned camera — exactly the case this wave
+ * must keep working (mirrors the identical W2 correction {@link StreamAccess}'s own javadoc
+ * documents for stream writes).
+ *
+ * <p>{@link #list} is filtered via {@link StreamAccess#filterVisibleDevices(List)} rather than
+ * all-or-nothing 403'd, matching {@code StreamController#list}'s own precedent. A device that
+ * belongs to no asset at all is reachable only by a caller whose scope {@code canAdminister()} —
+ * {@link StreamAccess}'s own pre-existing ruling for an unowned device (LIVE-SCOPE W2), reused
+ * rather than re-decided here.
+ *
+ * <p>No {@code VisibilityScope} reaches {@link DeviceService} itself — every check above runs in
+ * this controller, before the service is ever called, the same layering {@code AssetController}
+ * already uses (its mutate methods take no scope either; only its scoped <em>reads</em> do).
  *
  * <h2>Status codes for lifecycle operations</h2>
  * Unknown ids surface as {@link java.util.NoSuchElementException} from {@link DeviceService} and
@@ -48,10 +80,12 @@ public class DeviceController {
 
     private final DeviceService deviceService;
     private final CurrentUser currentUser;
+    private final StreamAccess streamAccess;
 
-    public DeviceController(DeviceService deviceService, CurrentUser currentUser) {
+    public DeviceController(DeviceService deviceService, CurrentUser currentUser, StreamAccess streamAccess) {
         this.deviceService = Objects.requireNonNull(deviceService, "deviceService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
+        this.streamAccess = Objects.requireNonNull(streamAccess, "streamAccess must not be null");
     }
 
     /**
@@ -65,20 +99,24 @@ public class DeviceController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public DeviceResponse register(@RequestBody RegisterDeviceRequest request) {
+        requireManageOrg();
         Device device = deviceService.register(request.toRegistration(), currentUser.userId());
         return DeviceResponse.from(device);
     }
 
     /**
-     * Lists registered devices.
+     * Lists registered devices, filtered to the ones {@link CurrentUser#scope()} may reach
+     * (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2, W5) — a PILOT sees their own assigned assets'
+     * devices, never the whole fleet.
      *
      * @param includeDeleted whether to include soft-deleted devices; excluded by default, so
      *                       "deleted" behaves as deleted unless a view explicitly asks otherwise
-     * @return the currently registered devices
+     * @return the currently registered devices visible to the caller
      */
     @GetMapping
     public List<DeviceResponse> list(@RequestParam(defaultValue = "false") boolean includeDeleted) {
-        return deviceService.devices(includeDeleted).stream().map(DeviceResponse::from).toList();
+        List<Device> devices = deviceService.devices(includeDeleted);
+        return streamAccess.filterVisibleDevices(devices).stream().map(DeviceResponse::from).toList();
     }
 
     /**
@@ -95,8 +133,12 @@ public class DeviceController {
     @PatchMapping("/{id}")
     public DeviceResponse update(@PathVariable String id,
                                   @RequestBody(required = false) UpdateDeviceRequest request) {
-        Device updated = deviceService.update(DeviceId.of(id),
-                (request == null ? UpdateDeviceRequest.EMPTY : request).toEdit(), currentUser.userId());
+        DeviceId deviceId = DeviceId.of(id);
+        // Parse/validate the body (a malformed edit is a 400) before the scope guard's 404, so a
+        // bad request never depends on the caller's scope.
+        var edit = (request == null ? UpdateDeviceRequest.EMPTY : request).toEdit();
+        streamAccess.requireVisible(deviceId);
+        Device updated = deviceService.update(deviceId, edit, currentUser.userId());
         return DeviceResponse.from(updated);
     }
 
@@ -116,7 +158,10 @@ public class DeviceController {
      */
     @PostMapping("/{id}/state")
     public DeviceResponse setState(@PathVariable String id, @RequestBody SetLifecycleStateRequest request) {
-        Device updated = deviceService.setState(DeviceId.of(id), request.toLifecycleState(), currentUser.userId());
+        DeviceId deviceId = DeviceId.of(id);
+        var state = request.toLifecycleState(); // an unrecognized state is a 400, before the scope 404
+        streamAccess.requireVisible(deviceId);
+        Device updated = deviceService.setState(deviceId, state, currentUser.userId());
         return DeviceResponse.from(updated);
     }
 
@@ -133,6 +178,19 @@ public class DeviceController {
      */
     @DeleteMapping("/{id}")
     public DeviceResponse delete(@PathVariable String id) {
-        return DeviceResponse.from(deviceService.delete(DeviceId.of(id), currentUser.userId()));
+        DeviceId deviceId = DeviceId.of(id);
+        requireManageOrg();
+        return DeviceResponse.from(deviceService.delete(deviceId, currentUser.userId()));
+    }
+
+    /**
+     * Guards {@link #register}/{@link #delete}: fleet-administration actions over the device
+     * inventory itself, gated on org-level management authority rather than on any one group's
+     * ownership (see class javadoc for why a device has no group of its own to check).
+     */
+    private void requireManageOrg() {
+        if (!currentUser.scope().canManageOrg()) {
+            throw new AccessDeniedException("Not permitted to manage devices");
+        }
     }
 }

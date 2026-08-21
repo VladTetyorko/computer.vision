@@ -2604,3 +2604,96 @@ history. `LiveControllerTest`/`LiveMapScopingTest`/`LiveUpdateRegistryTest` upda
 from Mockito mocks of `StreamAccess`/`ScopeResolver`/`UserRepositoryPort`, added to each). Module
 **785/785** (778 + the 7 new `LiveAssetScopingTest` cases), unbounded (default-config) scope untouched
 throughout — the guardrail bar holds.
+
+### Device + geofence CRUD authority (LIVE-SCOPE W5)
+
+Closes the last two holes the W1 audit found: `DeviceController`'s five handlers and
+`GeofenceController`'s four passed `userId()` for the audit trail (attribution) but ran no authority
+check at all — the exact trap the guard exists to catch, and the case that motivated W1 in the first
+place. `DeviceService` itself carries no `VisibilityScope` reference and gained none this wave — see
+"Where the check lives" below.
+
+**Device authority — three different gates for three different questions:**
+
+- **`register`/`delete` require `scope().canManageOrg()`** (the same org-level gate
+  `AssetController#create` uses), not the deployment-global `canAdminister()` the plan's §2.2 table
+  names for a "global" resource. Reasoning specific to this type: `Device` carries no `Ownership`
+  field of its own — only an `Asset` does, once a device is assigned to one — so a freshly-registered
+  or about-to-be-deleted device row has no per-group boundary to check yet (`register`) or
+  independent of (`delete`, which removes the row itself, not any one asset's membership in it).
+  `canManageOrg()` mirrors `AssetController#create`'s own reasoning exactly: team-scoped management,
+  not deployment-global administration.
+- **`update`/`setState` reach the device through `StreamAccess#requireVisible(DeviceId)`** — the
+  identical device→asset→owner resolution W2 built for `StreamController#start`, reused verbatim
+  rather than re-implemented. Deliberately **not** `canManage(ownership)`: that predicate is
+  hardcoded `false` for every `ASSIGNED_ASSETS` (PILOT) scope regardless of the asset (see
+  `VisibilityScope`'s own javadoc), which would 403 a PILOT editing or retiring their own assigned
+  camera — exactly the case this wave's "a PILOT must keep working" constraint forbids. This is the
+  same W2 correction applied a second time: `includes`, not `canManage`, is the only predicate that
+  does not contradict "a PILOT may still operate their own assigned asset." `StreamAccess`'s own
+  javadoc on `requireVisible(DeviceId)` now documents both call sites side by side, so the next
+  reader sees the shared reasoning in one place rather than two independent copies of it.
+- **`list` filters via a new `StreamAccess#filterVisibleDevices(List<Device>)`** (mirroring
+  `filterVisible(List<ActiveStream>)`'s existing shape exactly), narrowing rather than 403ing the
+  whole list — the identical "filtered, not all-or-nothing" posture `StreamController#list` already
+  established.
+- **An unowned device (belongs to no asset at all) is reachable only by a caller whose scope
+  `canAdminister()`** — `StreamAccess`'s own pre-existing W2 ruling for this exact case, reused
+  unchanged rather than re-decided; `requireVisible`/`filterVisibleDevices` both fall through to it
+  via the existing private `visible(DeviceId)`.
+
+**Where the check lives — controller, not service.** `DeviceService`/`DefaultDeviceService` gained no
+`VisibilityScope` parameter. Every check above runs in `DeviceController`, before the service is ever
+called — the same layering `AssetController` already uses (its mutate methods — `update`/`setState`/
+`delete`/`assignDevice`/`unassignDevice` — take no scope either; only its scoped *reads* do). Adding a
+scope parameter to `DeviceService` would have meant threading `VisibilityScope` through
+`contexts/vision-warehouse` for a check `StreamAccess` already resolves entirely at the vision-api
+edge with data warehouse already publishes (`AssetRepositoryPort#findByDeviceId`) — no context-module
+signature changed, no port changed, no ArchUnit boundary touched.
+
+**Geofence authority — every zone is the plan's "global" case, so `canAdminister()` gates every
+write.** The plan's §2.2 table splits geofence writes into "scoped to the zone's owning asset/group"
+(`canManage()`) versus "a global zone… requires `canAdminister()`," conditional on whether the model
+has a notion of an asset-bound zone at all. It does not: `GeofenceZone` carries no asset/group field,
+and `GeofenceService`'s own pre-existing javadoc already states zones are "global reference data — no
+ownership, no per-user scoping, no audit trail." Every zone in this codebase is therefore the plan's
+"global" case with no narrower one to fall back from, so `create`/`update`/`delete` all require
+`scope().canAdminister()` uniformly — **a MANAGER's `canManageOrg()` does not reach a boundary every
+group's aircraft must obey**, consistent with this wave's framing of geofences as flight-safety data,
+not per-group inventory. `GeofenceService` itself needed no change (it already takes no scope), so no
+`contexts/vision-flight` file changed this wave.
+
+**`list` stays fully open, `@OpenByDesign`, not filtered — a deliberate departure from the plan's
+literal "filter to zones the caller may see."** Since no zone has an owning asset/group, "the zones a
+caller may see" is unconditionally every zone, for every scope — there is nothing to filter *by*.
+Two ways to express that: call `currentUser.scope()` and discard the result (satisfies the guard
+without meaning anything), or say so honestly via `@OpenByDesign`, the same annotation
+`CategoryController#list` already carries for identical structural reasons ("deployment-wide
+reference data… carries no per-asset or per-user information"). Chosen over the first option because
+it is dishonest theater to call a check that decides nothing, and chosen over literally filtering
+because there is no field to filter on without inventing one. Sharpened here by a safety argument
+`CategoryController` does not need: hiding a keep-out zone from a PILOT because it "isn't theirs"
+would create the exact hazard this endpoint exists to prevent, not close an information leak.
+**Flagging this back to the plan** as a second defect worth correcting at the source (after W2's
+`canManage`-vs-`includes` one) — §2.2's conditional assumed a model this codebase does not have.
+
+**Guard-satisfaction:** `DeviceController#register`/`#delete` call `requireManageOrg()` →
+`currentUser.scope().canManageOrg()`, reaching the guard's `CurrentUser.scope()` seam transitively;
+`#update`/`#setState` call `streamAccess.requireVisible(...)` directly (`owner.endsWith("Access")`);
+`#list` calls `streamAccess.filterVisibleDevices(...)` directly. `GeofenceController#create`/`#update`/
+`#delete` call `requireAdminister()` → `currentUser.scope().canAdminister()`; `#list` carries
+`@OpenByDesign` and needs no call at all. All nine handlers should be removable from
+`EndpointAuthorizationTest`'s `TEMPORARY_UNSCOPED` ledger.
+
+**Tests:** `DeviceControllerTest` (+12) — register/delete 403 for PILOT and success for MANAGER
+in-group; update/setState 200 for a PILOT on their own assigned device's device, 404 for a PILOT
+assigned elsewhere, 404 for a PILOT when the device belongs to no asset at all, 200/404 for a MANAGER
+in/outside the asset's group subtree; list filters out a device belonging to another group's asset.
+`GeofenceControllerTest` (+8) — create/update/delete 403 for both PILOT and MANAGER scopes, 201 for
+UNBOUNDED (ADMIN/auth-off); list unfiltered for a PILOT scope. Every pre-existing test in both files
+runs under the unchanged class-level unbounded `CurrentUser` and is untouched. **Before/after: vision-api
+785 → 805 (+20)**; `vision-app`'s full suite (245/245, including `EndpointAuthorizationTest`) re-run
+against real Postgres via Testcontainers — Docker ran, not skipped.
+
+**Deferred, not silently dropped:** `HlsProxyController#proxy` (W4, separate wave, not in this
+wave's file scope) is the one live-surface `TEMPORARY_UNSCOPED` entry this wave does not touch.

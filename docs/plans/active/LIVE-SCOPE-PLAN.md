@@ -64,11 +64,18 @@ flowchart LR
 | `PATCH /api/live/{connectionId}/topics` | caller owns the connection | change their own connection |
 | `/hls/{streamId}/**` | `includes(...)` via signed path token | watch their own |
 | device CRUD | `canManageOrg()` create/delete, `canManage()` edit | read their own devices |
-| geofence CRUD | `canManage()`; global zones `canAdminister()` | read zones affecting their assets |
+| geofence CRUD | `canAdminister()` for **all** writes — **corrected in W5** | **read every zone** (see note) |
 
 **Stop-authority is deliberately narrow here.** This plan makes stop *scoped*; it does **not** resolve
 two authorized operators contending for one aircraft. That is `CREW-CONTROL-PLAN.md` §2.6/§4.5
 (`AssignmentRole{PIC,OBSERVER}` + TTL control claim), which stays the owner of multi-operator arbitration.
+
+> **Correction (W5, 2026-08-21).** §2.2 assumed geofence zones carry ownership. They do not —
+> `GeofenceZone` has no asset, group or owner field, so every zone is the "global" case and all three
+> writes take `canAdminister()` uniformly; a MANAGER's org authority does not extend to a boundary
+> every group's aircraft must obey. `list` is deliberately left **open** rather than filtered: with
+> nothing to filter on, filtering would be theater, and hiding a no-fly zone from a pilot would create
+> the flight-safety hazard the endpoint exists to prevent.
 
 ## 3. Waves
 
