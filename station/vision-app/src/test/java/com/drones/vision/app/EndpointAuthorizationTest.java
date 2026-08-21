@@ -41,18 +41,6 @@ class EndpointAuthorizationTest {
 
     /** Handlers known to be unscoped when LIVE-SCOPE W1 landed. Waves W2-W5 empty this. */
     private static final Set<String> TEMPORARY_UNSCOPED = new TreeSet<>(Set.of(
-            // W2 — streams (this plan)
-            "AssetStreamController#stopStream",
-            "SimulationController#simulate",
-            "SimulationController#stop",
-            "StreamController#config",
-            "StreamController#detections",
-            "StreamController#list",
-            "StreamController#snapshot",
-            "StreamController#start",
-            "StreamController#stop",
-            "StreamController#tracks",
-            "StreamController#updateConfig",
             // W3 — SSE (this plan)
             "LiveController#updateTopics",
             // W4 — HLS/mediamtx (this plan)

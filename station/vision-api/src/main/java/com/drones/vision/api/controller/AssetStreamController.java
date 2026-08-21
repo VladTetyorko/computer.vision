@@ -55,10 +55,16 @@ import com.drones.vision.api.security.CurrentUser;
  * <h2>Visibility scoping</h2>
  * {@link #startStream} re-reads the asset through {@link CurrentUser#scope()} before mutating —
  * the same "read-scope guards the write" posture {@link AssetController} documents at length.
- * {@link #stopStream} is unscoped, mirroring {@link AssetService#stopStream}'s own no-op-for-
- * unknown-asset contract (there is nothing to hide — an out-of-scope caller stopping a stream they
- * cannot otherwise see is not yet gated, matching {@code AssetController}'s pre-existing posture
- * for this same endpoint before the split).
+ * {@link #stopStream} now does too (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2) — before this
+ * wave it was deliberately unscoped, mirroring {@link AssetService#stopStream}'s own no-op-for-
+ * unknown-asset contract; the audit that produced LIVE-SCOPE-PLAN.md found that posture let any
+ * caller stop any asset's stream regardless of scope. It is scoped narrowly, on purpose: "may this
+ * caller touch this asset at all" (visibility, {@link #requireInScope}), <b>not</b> "does this
+ * caller have exclusive claim to it" — two authorized operators contending for the same aircraft is
+ * deliberately out of scope here and stays with {@code CREW-CONTROL-PLAN.md} §2.6/§4.5
+ * ({@code AssignmentRole{PIC,OBSERVER}} + a TTL control claim), which owns multi-operator
+ * arbitration. An out-of-scope or unknown asset now 404s instead of the previous unconditional
+ * no-op/204 — existence hidden, matching every other scoped read in this codebase.
  *
  * <h2>Status codes</h2>
  * An unknown/out-of-scope asset surfaces as {@link java.util.NoSuchElementException} from {@link
@@ -119,25 +125,29 @@ public class AssetStreamController {
     }
 
     /**
-     * Stops the asset's active stream(s), if any. Idempotent — an asset with
-     * no active stream (or an unknown asset id) is a no-op, mirroring {@link
-     * AssetService#stopStream(AssetId)}'s contract, so there is no 404 case
-     * here.
+     * Stops the asset's active stream(s), if any. Idempotent for an asset the caller can see — a
+     * visible asset with no active stream is a no-op — but 404s for an out-of-scope or unknown asset
+     * (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2), which {@link AssetService#stopStream(AssetId)}'s
+     * own no-op contract does not by itself provide; see this class's own "Visibility scoping"
+     * section for the scoped-not-exclusive distinction and the deliberate CREW-CONTROL boundary.
      *
      * @param id the asset to stop streaming, as a canonical UUID string
+     * @throws java.util.NoSuchElementException if the caller's scope may not reach this asset
      */
     @DeleteMapping("/api/assets/{id}/stream")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void stopStream(@PathVariable String id) {
-        assetService.stopStream(AssetId.of(id));
+        AssetId assetId = AssetId.of(id);
+        requireInScope(assetId);
+        assetService.stopStream(assetId);
     }
 
     /**
-     * Guards {@link #startStream}: re-reads {@code id} through the caller's scope so an
-     * out-of-scope (or unknown) asset 404s ({@link java.util.NoSuchElementException}) before the
-     * mutation runs. Cheap — the same scoped read {@link AssetController#details} does — and the
-     * deliberate write-path posture until the asset services take a {@code VisibilityScope} on
-     * writes directly (see {@link AssetController}'s own class javadoc).
+     * Guards {@link #startStream}/{@link #stopStream}: re-reads {@code id} through the caller's
+     * scope so an out-of-scope (or unknown) asset 404s ({@link java.util.NoSuchElementException})
+     * before the mutation runs. Cheap — the same scoped read {@link AssetController#details} does —
+     * and the deliberate write-path posture until the asset services take a {@code VisibilityScope}
+     * on writes directly (see {@link AssetController}'s own class javadoc).
      */
     private void requireInScope(AssetId id) {
         assetService.details(currentUser.scope(), id);

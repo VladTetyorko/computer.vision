@@ -46,7 +46,7 @@ literal it replaced (see `VisionApiProperties` below).
 | AssetController | POST | `/api/assets/{id}/devices` | 200 `AssetDetailsResponse` | 404 unknown/out-of-visibility asset, unknown device, 400 blank deviceId, 409 device already owned (docs/main/CYCLES-PLAN.md §8), 403 asset visible but `!scope.canManage(ownership)` |
 | AssetController | DELETE | `/api/assets/{id}/devices/{deviceId}` | 200 `AssetDetailsResponse` | 404 unknown/out-of-visibility asset, 400 device not on this asset, 409 last remaining device (docs/main/CYCLES-PLAN.md §8), 403 asset visible but `!scope.canManage(ownership)` |
 | AssetStreamController | POST | `/api/assets/{id}/stream` | 201 `StartStreamResponse` | 404 unknown asset, 400 ambiguous device/bad UUID |
-| AssetStreamController | DELETE | `/api/assets/{id}/stream` | 204 | idempotent no-op |
+| AssetStreamController | DELETE | `/api/assets/{id}/stream` | 204 | idempotent no-op for a visible asset with no active stream; 404 unknown-or-out-of-scope asset (LIVE-SCOPE W2, was an unconditional no-op before), 400 bad UUID |
 | AssetController | GET | `/api/usages/{usageId}/telemetry?limit=` | 200 `List<TelemetrySampleResponse>` | — (unknown usage → empty list) |
 | AssetStatsController | GET | `/api/assets/{id}/stats` | 200 `AssetStatsResponse` | 404 unknown id, 400 bad UUID (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md Wave A; the manager page's KPI tile row — total flight time, flight count, first/last flown, average flight length, last-known battery, in-progress flag) |
 | AssetImageController | PUT | `/api/assets/{id}/image` | 204 | 400 missing/unsupported `Content-Type`, empty body; 413 body over `AssetImageController.MAX_IMAGE_BYTES` (2MB) (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2) |
@@ -64,13 +64,13 @@ literal it replaced (see `VisionApiProperties` below).
 | DeviceController | PATCH | `/api/devices/{id}` | 200 `DeviceResponse` | 404 unknown id, 400 bad UUID/partial-stream fields (docs/main/CYCLES-PLAN.md §8's pinned contract) |
 | DeviceController | POST | `/api/devices/{id}/state` | 200 `DeviceResponse` | 404 unknown id, 400 unrecognized state, 409 `DELETED`→`ACTIVE` (docs/main/CYCLES-PLAN.md §8; idempotent; `DEACTIVATED` on a `DELETED` device restores it) |
 | DeviceController | DELETE | `/api/devices/{id}` | 200 `DeviceResponse` | 404 unknown id (soft delete/archive, idempotent; docs/main/CYCLES-PLAN.md §8) |
-| StreamController | POST | `/api/devices/{deviceId}/stream` | 201 `StartStreamResponse` | 400 bad UUID/validation, 404 unknown device, 409 already streaming |
-| StreamController | GET | `/api/streams` | 200 `List<ActiveStreamResponse>` | — |
-| StreamController | DELETE | `/api/streams/{streamId}` | 204 | never fails (documented no-op) |
-| StreamController | GET | `/api/streams/{streamId}/detections?limit=` | 200 `List<DetectionResultResponse>`, newest first | 400 non-positive `limit` (docs/plans/done/MVP1-PLAN.md §C8 bullet 3; unknown stream → empty list, `limit` defaults 50) |
-| StreamController | GET | `/api/streams/{streamId}/snapshot` | 200 `image/jpeg` bytes, `Cache-Control: no-store` | 404 unknown stream or no frame published yet, 400 bad UUID (docs/plans/done/MVP3-PLAN.md C-a; downscaled to `SnapshotJpegEncoder.MAX_SNAPSHOT_WIDTH`=480px wide, aspect-preserving; the one binary, non-JSON response in this module) |
-| StreamController | PATCH | `/api/streams/{streamId}/config` | 200 `{streamId, modelReArmed, trackingChanged}` | 404 unknown/not-running stream, 400 invalid merged value (docs/plans/done/CV-CONTROL-PLAN.md §3's frozen wire contract — live per-stream detection control: confidence/inference-fps/labelFilter/detectionEnabled apply hot with no video interruption; a changed `model` briefly re-arms detection instead, reported via `modelReArmed`; body is a true partial patch, every field optional/absent-means-unchanged, whole body may be absent (no-op); no acting user threaded, same stance as every other endpoint on this controller; **docs/plans/done/TRACKING-PLAN.md §4.D** adds an optional `tracking` object — mode/engineId/verifyEveryMillis/followFps/redetectIouPercent/maxAgeFrames/minHits/lock — which is a **hot knob like the rest: it never re-arms the detector**, reported via the new `trackingChanged`; an unknown `mode` and a `lock` that is not exactly one of `{trackId}`/`{pointX,pointY}`/`{release:true}` are both 400, and a client never sends `lockSeq`. **Click-to-follow is this call**, not a new endpoint) |
-| StreamController | GET | `/api/streams/{streamId}/tracks` | 200 `{streamId, lockedTrackId, tracks:[...], stats?, latency?}` | 400 bad UUID only (docs/plans/done/TRACKING-PLAN.md §4.E's frozen wire contract — the running stream's track book plus the duty-cycle counters; **never errors**: an unknown/stopped stream is a 200 with `tracks:[]`, `lockedTrackId:0` and no `stats`, the same forgiving idiom `GET .../detections` uses. `lockedTrackId` is hoisted **above** `stats`, and `stats` is omitted entirely until the window has recorded a detector pass — see the DTO paragraph) |
+| StreamController | POST | `/api/devices/{deviceId}/stream` | 201 `StartStreamResponse` | 400 bad UUID/validation, 404 unknown-or-out-of-scope device (LIVE-SCOPE W2), 409 already streaming |
+| StreamController | GET | `/api/streams` | 200 `List<ActiveStreamResponse>` | filtered to the caller's visible streams, not all-or-nothing 403'd (LIVE-SCOPE W2) |
+| StreamController | DELETE | `/api/streams/{streamId}` | 204 | idempotent no-op for an unknown/already-stopped stream; 404 if currently running but out of the caller's scope (LIVE-SCOPE W2) |
+| StreamController | GET | `/api/streams/{streamId}/detections?limit=` | 200 `List<DetectionResultResponse>`, newest first | 400 non-positive `limit` (docs/plans/done/MVP1-PLAN.md §C8 bullet 3; unknown stream → empty list, `limit` defaults 50); 404 if currently running but out of the caller's scope (LIVE-SCOPE W2) |
+| StreamController | GET | `/api/streams/{streamId}/snapshot` | 200 `image/jpeg` bytes, `Cache-Control: no-store` | 404 unknown stream, no frame published yet, or (LIVE-SCOPE W2) currently running but out of the caller's scope; 400 bad UUID (docs/plans/done/MVP3-PLAN.md C-a; downscaled to `SnapshotJpegEncoder.MAX_SNAPSHOT_WIDTH`=480px wide, aspect-preserving; the one binary, non-JSON response in this module) |
+| StreamController | PATCH | `/api/streams/{streamId}/config` | 200 `{streamId, modelReArmed, trackingChanged}` | 404 unknown/not-running stream, or (LIVE-SCOPE W2) running but out of the caller's scope; 400 invalid merged value (docs/plans/done/CV-CONTROL-PLAN.md §3's frozen wire contract — live per-stream detection control: confidence/inference-fps/labelFilter/detectionEnabled apply hot with no video interruption; a changed `model` briefly re-arms detection instead, reported via `modelReArmed`; body is a true partial patch, every field optional/absent-means-unchanged, whole body may be absent (no-op); no acting user threaded, same stance as every other endpoint on this controller; **docs/plans/done/TRACKING-PLAN.md §4.D** adds an optional `tracking` object — mode/engineId/verifyEveryMillis/followFps/redetectIouPercent/maxAgeFrames/minHits/lock — which is a **hot knob like the rest: it never re-arms the detector**, reported via the new `trackingChanged`; an unknown `mode` and a `lock` that is not exactly one of `{trackId}`/`{pointX,pointY}`/`{release:true}` are both 400, and a client never sends `lockSeq`. **Click-to-follow is this call**, not a new endpoint) |
+| StreamController | GET | `/api/streams/{streamId}/tracks` | 200 `{streamId, lockedTrackId, tracks:[...], stats?, latency?}` | 400 bad UUID; 404 if currently running but out of the caller's scope (LIVE-SCOPE W2 — the one case this handler is not forgiving about) (docs/plans/done/TRACKING-PLAN.md §4.E's frozen wire contract — the running stream's track book plus the duty-cycle counters; **never errors for an unknown/stopped stream**: that case is a 200 with `tracks:[]`, `lockedTrackId:0` and no `stats`, the same forgiving idiom `GET .../detections` uses. `lockedTrackId` is hoisted **above** `stats`, and `stats` is omitted entirely until the window has recorded a detector pass — see the DTO paragraph) |
 | CvTrackersController | GET | `/api/cv/trackers` | 200 `{trackers:[{id, displayName, modes, needsAssets, costHint}]}` | — (docs/plans/done/TRACKING-PLAN.md §4.F's frozen wire contract; never errors; a static, config-backed `vision-app` bean exactly like `GET /api/cv/models`' roster — the engine list changes at deploy time, not runtime) |
 | CvModelsController | GET | `/api/cv/models` | 200 `{models:[{id, displayName, kind, openVocab, defaultLabelFilter}]}` | — (docs/plans/done/CV-CONTROL-PLAN.md §4's frozen wire contract; never errors; `yolo26n.pt` listed first, the default; roster is a static, config-backed `vision-app` bean, not the dormant `ModelRegistryPort`) |
 | UsageTimelineController | GET | `/api/usages?limit&assetId` | 200 `List<UsageSummaryResponse>`, newest first | 400 malformed `assetId` UUID (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/extracts/design/10-replay.md's frozen contract — the "replay library" list; scoped to `CurrentUser#scope()`, an unknown/out-of-scope `assetId` yields `[]`, never an error; `limit` defaults 50, clamped to `DefaultUsageService.MAX_LIMIT`=500) |
@@ -86,8 +86,8 @@ literal it replaced (see `VisionApiProperties` below).
 | FleetController | GET | `/api/fleet/summary?includeArchived=` | 200 `FleetSummaryResponse` | — (docs/plans/done/MVP3-PLAN.md C-a; `includeArchived` defaults `false`, mirrors `AssetService#assets(boolean)`'s `includeDeleted` — see Conventions for the deliberate naming difference) |
 | LiveController | GET | `/api/live?topics=` | 200 `text/event-stream` (`SseEmitter`) | 400 a malformed `topics` entry (docs/plans/done/REALTIME-PLAN.md §4 — server-push data plane; see its own subsection below); gated by `vision.live.enabled` (default `true`) — `false` removes this controller (and `LiveUpdateRegistry`) as beans entirely, so the route 404s like any other unmapped path |
 | LiveController | PATCH | `/api/live/{connectionId}/topics` | 200 `LiveSubscriptionResponse` | 404 unknown `connectionId`, 400 a malformed topic entry |
-| SimulationController | POST | `/api/simulations` | 201 `SimulationResponse` (absent/blank `videoPath` with the default `direct` transport is a fully synthetic simulation, docs/main/CYCLES-PLAN.md §9, CU-a — not an error) | 400 a non-null `videoPath` failing `SimulationService`'s filesystem checks, unrecognized `transport`, (docs/main/CYCLES-PLAN.md §9, CU-a) a `null`/blank `videoPath` combined with `transport=rtsp`/`mjpeg`, (docs/main/CYCLES-PLAN.md §3, §5) a `transport=rtsp`/`mjpeg` spec no registered `FeedTransmitterPort` supports, or (docs/main/CYCLES-PLAN.md §7) an invalid `telemetry` object (fewer than 2 waypoints, an out-of-range coordinate, a non-positive `speedMps`, or an unrecognized `routeMode`); 409 `simulated` category not seeded |
-| SimulationController | DELETE | `/api/simulations/{assetId}` | 204 | idempotent no-op (unknown/already-stopped asset); 400 bad UUID |
+| SimulationController | POST | `/api/simulations` | 201 `SimulationResponse` (absent/blank `videoPath` with the default `direct` transport is a fully synthetic simulation, docs/main/CYCLES-PLAN.md §9, CU-a — not an error) | 400 a non-null `videoPath` failing `SimulationService`'s filesystem checks, unrecognized `transport`, (docs/main/CYCLES-PLAN.md §9, CU-a) a `null`/blank `videoPath` combined with `transport=rtsp`/`mjpeg`, (docs/main/CYCLES-PLAN.md §3, §5) a `transport=rtsp`/`mjpeg` spec no registered `FeedTransmitterPort` supports, or (docs/main/CYCLES-PLAN.md §7) an invalid `telemetry` object (fewer than 2 waypoints, an out-of-range coordinate, a non-positive `speedMps`, or an unrecognized `routeMode`); 409 `simulated` category not seeded; 403 if the caller's scope may not `canManageOrg()` (LIVE-SCOPE W2, closes the asymmetry with `AssetController#create`'s own gate — previously ungated) |
+| SimulationController | DELETE | `/api/simulations/{assetId}` | 204 | idempotent no-op for a visible asset; 404 unknown-or-out-of-scope asset (LIVE-SCOPE W2, was an unconditional no-op before); 400 bad UUID |
 | DiscoveryController | POST | `/api/discovery/scan` | 200 `ScanResultResponse` | 400 unknown method name |
 | HlsProxyController | GET | `/hls/{streamId}/**` | proxied upstream status (typically 200 or 206 for a `Range` request), `Content-Type`/`Cache-Control`/`Set-Cookie`/`Content-Range`/`Accept-Ranges`/`Content-Length` passed through (docs/plans/done/MVP2-PLAN.md V-a: `Cache-Control` forwarding added, was previously dropped; docs/plans/active/SCALE-100-PLAN.md §5 S1: streamed rather than buffered, `Range` forwarded) | 502 upstream unreachable or a redirect chain longer than `maxRedirectHops` (default 5, `vision.api.hls-proxy.max-redirect-hops` as of §5 S7); 404 if no `{streamId}` segment (unmapped, Spring's default) |
 | AuthController | POST | `/api/auth/login` | 200 `MeResponse` (+ session cookie when auth enabled) | 401 bad credentials (auth enabled); with auth **disabled** always 200 dev admin, no-op (docs/plans/done/U-AUTH-PLAN.md wave 3) |
@@ -2460,3 +2460,79 @@ authorized for precisely that reason and was not.
 **Status 2026-08-21 (LIVE-SCOPE W1):** guard in place; 46 handlers had no authority check, 8 were
 verified genuinely open and annotated, 38 sit in the test's `TEMPORARY_UNSCOPED` ledger. Waves W2–W5
 empty it; entries outside the live surface are named there as still unowned.
+
+### `com.drones.vision.api.security.StreamAccess` — the live-operations authority seam (LIVE-SCOPE W2)
+
+Closes the gap the W1 audit found on the live surface: none of `StreamController`'s eight handlers
+checked the caller's `VisibilityScope` at all, so a PILOT scoped to two assets could list, read,
+snapshot and reconfigure any stream in the fleet. `StreamAccess` (new, `final`, one `@Component`,
+constructor-injected — no interface, since nothing else implements or substitutes it) composes:
+
+- **Device → asset → owner:** `AssetRepositoryPort.findByDeviceId(DeviceId): Optional<Asset>`
+  (already published by warehouse — no context/port change was needed for this wave).
+- **Stream → device:** `StreamService.streams()` filtered by `streamId`, the same list `GET
+  /api/streams` is already built from — there was no dedicated `streamId → deviceId` lookup, and
+  adding one would have duplicated data `streams()` already carries.
+- **The visibility check itself:** `VisibilityScope.includes(AssetId, Ownership)`.
+
+**Two decisions worth flagging:**
+
+1. **Includes, not `canManage`, gates all eight handlers — including the three "writes" (start,
+   stop, updateConfig).** The plan's §2.2 table calls for `canManage(ownership)` on the writes, but
+   `canManage` is hardcoded `false` for every `ASSIGNED_ASSETS` scope *regardless of the asset* (see
+   `VisibilityScope`'s own javadoc: seeing-and-flying the assigned aircraft "is the whole of a
+   pilot's authority"). Read literally, the plan's own table would 403 a PILOT starting or stopping
+   their *own* assigned stream — directly contradicting its "a PILOT may still start+stop their own
+   assigned asset" clause, and the hard constraint this wave was built against. Since `canManage`
+   and `includes` agree for every other `Kind` (both `true` for `UNBOUNDED`; identical group test for
+   `GROUPS`), `includes` is the only reading that does not self-contradict, and is what all eight
+   handlers use — one check, no read/write split, nothing to call by mistake. **Flagging this back
+   to the plan as a defect worth correcting at the source**, not just worked around here.
+2. **A device that belongs to no asset at all is visible only to a caller whose scope
+   `canAdminister()`** (the same "deployment-global, no group boundary" gate `AssetController#create`
+   uses) — an unowned device is a fleet-administration concern, not any one group's, so it neither
+   fails open nor blanket-fails the request.
+
+`requireVisible(StreamId)` is a **no-op** when the id does not currently name a running stream (no
+device to resolve, hence nothing to check) — every handler's pre-existing "unknown/stopped stream"
+behavior (404 for `config`/`snapshot`/`updateConfig`, forgiving empty/idempotent result for
+`tracks`/`detections`/`stop`) is unchanged; this leaks nothing, since those responses already say
+nothing ownership-specific. `list` calls `filterVisible`, not `requireVisible` — filtered, not
+all-or-nothing 403'd, per the plan's §2.2.
+
+**Constructor ceiling.** `StreamController` now takes six constructor parameters, one past this
+codebase's five-parameter target (`.claude/skills/java-clean-code/SKILL.md` §3). None of the other
+five collaborators (URL resolution, JPEG encoding, detection-demand bookkeeping) can absorb
+`StreamAccess` without conflating an authorization concern into an unrelated one, so the sixth
+parameter is accepted deliberately — documented in the class's own javadoc — rather than forced into
+a false merge.
+
+**Also scoped this wave, same "visible, not exclusive-claim" posture:**
+
+- `AssetStreamController#stopStream` — previously unscoped by design (mirroring
+  `AssetService#stopStream`'s no-op-for-unknown-asset contract); now re-reads the asset through
+  `CurrentUser.scope()` first, exactly like `startStream`'s pre-existing `requireInScope`. An
+  out-of-scope or unknown asset now 404s instead of the previous unconditional no-op/204.
+- `SimulationController#stop` — same `assetService.details(scope, id)` re-read before
+  `simulationService.stop(id)`.
+- `SimulationController#simulate` — closes a separate asymmetry: it registers a brand-new asset
+  exactly like `AssetController#create`, but had no gate at all. Now requires
+  `scope().canManageOrg()` (true for `UNBOUNDED`/`GROUPS`, false for `ASSIGNED_ASSETS`) — a caller
+  that fails it gets 403 via `AccessDeniedException`, matching `create`'s own gate.
+
+All four of the above are deliberately **scoped, not exclusive-claim/arbitration**: two authorized
+operators contending for the same aircraft's stream is out of scope here and stays with
+`CREW-CONTROL-PLAN.md` §2.6/§4.5 (`AssignmentRole{PIC,OBSERVER}` + a TTL control claim).
+
+**Guard-satisfaction, for the orchestrator's `EndpointAuthorizationTest` ledger:** all eleven
+handlers touched this wave now reach the guard — the eight `StreamController` handlers call a method
+on `StreamAccess` directly (satisfies `owner.endsWith("Access")`); `AssetStreamController#stopStream`,
+`SimulationController#stop` and `SimulationController#simulate` all reach `CurrentUser.scope()`
+directly or one call away. They should be removable from `TEMPORARY_UNSCOPED`.
+
+**Tests:** `StreamControllerTest` (+22), `AssetStreamControllerTest` (+2), `SimulationControllerTest`
+(+4) — for every one of the eleven handlers, a PILOT scoped to a different asset gets 404/403 (proved
+against the pre-W2 code first: 756/756 green with **no** such case existing) and a PILOT scoped to
+the stream/asset's own owner keeps working (the hard constraint). Module **778/778**, unbounded
+(default-config, `vision.auth.enabled=false`-equivalent) scope untouched throughout — the guardrail
+bar.

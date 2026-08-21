@@ -42,6 +42,14 @@ flowchart LR
   V -->|yes| OK["handler proceeds"]
 ```
 
+> **Correction (W2, 2026-08-21).** §2.2 originally specified `canManage(ownership)` for stream writes.
+> That is wrong: `VisibilityScope.canManage` returns `false` for **every** `ASSIGNED_ASSETS` scope
+> (`VisibilityScope.java:202`), so it would have 403'd a PILOT starting their own assigned aircraft —
+> contradicting this plan's own "a PILOT may still start+stop their own assigned asset" clause. Since
+> `canManage` and `includes` agree for `UNBOUNDED` and `GROUPS`, `includes` is the only self-consistent
+> gate, and all 8 stream handlers use it uniformly. The read/write split survives only where a
+> genuinely org-level action exists (`SimulationController#simulate` → `canManageOrg()`).
+
 **404-not-403 for invisible reads** is not a new idea here — `AssetController:285` already documents it
 ("an asset outside scope 404s exactly as an unknown id does"). Existence is itself information.
 
@@ -51,7 +59,7 @@ flowchart LR
 |---|---|---|
 | `GET /api/streams` | filter to visible | see their assigned assets' streams |
 | stream config/tracks/detections/snapshot read | `includes(assetId, ownership)` | read their own |
-| stream **start / stop / config write** | `canManage(ownership)` | start+stop their own assigned asset |
+| stream **start / stop / config write** | `includes(...)` — **corrected in W2**, see note | start+stop their own assigned asset |
 | SSE `telemetry:<id>` / `detections:<id>` | `includes(...)` **per topic, per delivery** | subscribe to their own |
 | `PATCH /api/live/{connectionId}/topics` | caller owns the connection | change their own connection |
 | `/hls/{streamId}/**` | `includes(...)` via signed path token | watch their own |
