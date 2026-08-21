@@ -2438,3 +2438,25 @@ collaborators — no new dependency: `UsageService` was already injected for `GE
 
 *Tests:* `UsageTimelineControllerTest` (+4, 25 total) — the mapped 200 body, scope and parsed
 `StreamId` passed through, 404 on empty, 400 on a malformed UUID. Module **734/734**.
+
+### Endpoint authorization: the two seams and the guard (LIVE-SCOPE W1)
+
+Authorization here is hand-written — there are **no** Spring Security role annotations anywhere in the
+repo, and the filter chain only asserts `.authenticated()`. A handler that forgets to check is not
+caught by anything at runtime, so it is caught at build time instead: `EndpointAuthorizationTest`
+(vision-app) requires every `@RestController` handler to reach one of the two authority seams through
+its own call graph, or to carry `@OpenByDesign(reason = …)`.
+
+| Call | Answers | Counts as authorization? |
+|---|---|---|
+| `CurrentUser.scope()` | may they? (assets) | **yes** |
+| `CurrentUser.viewer()` → `MapAccessPolicy` | may they? (map — deliberately not `VisibilityScope`) | **yes** |
+| `CurrentUser.userId()` / `.ownership()` | who is this? | **no — attribution for the audit trail** |
+
+That last row is the trap this guard exists to catch: every write already passes `userId()` for the
+audit trail, which reads exactly like a permission check without being one. Device CRUD looked
+authorized for precisely that reason and was not.
+
+**Status 2026-08-21 (LIVE-SCOPE W1):** guard in place; 46 handlers had no authority check, 8 were
+verified genuinely open and annotated, 38 sit in the test's `TEMPORARY_UNSCOPED` ledger. Waves W2–W5
+empty it; entries outside the live surface are named there as still unowned.

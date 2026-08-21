@@ -1,5 +1,6 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.security.OpenByDesign;
 import com.drones.vision.api.dto.AssignmentResponse;
 import com.drones.vision.api.dto.PilotResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
@@ -104,6 +105,7 @@ public class AssignmentController {
      *
      * @return the caller's assigned assets
      */
+    @OpenByDesign(reason = "Self-scoped: takes no user parameter and filters by currentUser.userId().")
     @GetMapping("/api/me/assignments")
     public List<AssignmentResponse> myAssignments() {
         return assignmentService.assignmentsFor(currentUser.userId()).stream()

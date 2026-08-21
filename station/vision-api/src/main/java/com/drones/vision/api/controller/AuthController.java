@@ -1,5 +1,6 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.security.OpenByDesign;
 import com.drones.vision.api.dto.LoginRequest;
 import com.drones.vision.api.dto.MeResponse;
 import com.drones.vision.identity.application.AuthService;
@@ -73,6 +74,7 @@ public class AuthController {
      * @param httpResponse current response (session cookie written to it)
      * @return {@code 200} + {@link MeResponse} on success; {@code 401} on bad credentials
      */
+    @OpenByDesign(reason = "The login endpoint itself — it must be reachable with no session, or nobody can ever get one.")
     @PostMapping("/api/auth/login")
     public ResponseEntity<MeResponse> login(@RequestBody LoginRequest request, HttpServletRequest httpRequest,
                                             HttpServletResponse httpResponse) {
@@ -92,6 +94,7 @@ public class AuthController {
      * @param httpResponse current response
      * @return {@code 204 No Content}
      */
+    @OpenByDesign(reason = "Ends the caller's own session; owning a session is the only authority it needs.")
     @PostMapping("/api/auth/logout")
     public ResponseEntity<Void> logout(HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         if (authEnabled) {
@@ -106,6 +109,7 @@ public class AuthController {
      *
      * @return {@code 200} + {@link MeResponse}
      */
+    @OpenByDesign(reason = "Returns the caller's own identity, resolved from the session — takes no id and can address nobody else.")
     @GetMapping("/api/auth/me")
     public ResponseEntity<MeResponse> me() {
         if (!authEnabled) {

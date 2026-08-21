@@ -2939,3 +2939,14 @@ reverting the production condition and watching them fail.
 real Postgres 16 via Testcontainers, Docker ran). ArchUnit stayed green (`ArchitectureTest` 14,
 `ContextArchitectureTest` 4) — nothing here crosses a layer that was not already crossed.
 
+
+### EndpointAuthorizationTest (LIVE-SCOPE W1)
+
+Build-time proof that every REST handler answers "who may do this?". Walks each handler's call graph
+(transitively, within vision-api) for `CurrentUser.scope()`/`.viewer()` or an `*Access` collaborator;
+`@OpenByDesign(reason)` is the documented escape hatch, and `TEMPORARY_UNSCOPED` is a ledger of the
+holes the 2026-08-21 audit found, which fails on stale entries so it cannot outlive the problem.
+Deliberately rejects `userId()`/`ownership()` as evidence of a check — those are attribution.
+
+**Status 2026-08-21:** green with 38 ledgered holes. Negative-tested (removing a ledger entry fails
+the build), so the rule is known to be able to fail.

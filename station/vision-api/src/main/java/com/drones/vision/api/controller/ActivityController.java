@@ -1,5 +1,6 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.security.OpenByDesign;
 import com.drones.vision.api.dto.AuditEntryResponse;
 import com.drones.vision.identity.application.ActivityService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -44,6 +45,7 @@ public class ActivityController {
      *              than rejected — an activity feed has no meaningful empty-page error)
      * @return the caller's activity
      */
+    @OpenByDesign(reason = "Self-scoped: takes no user parameter and filters by currentUser.userId(), so it can only ever return the caller's own rows.")
     @GetMapping("/api/me/activity")
     public List<AuditEntryResponse> myActivity(@RequestParam(defaultValue = "" + DEFAULT_LIMIT) int limit) {
         int effective = Math.min(Math.max(limit, 1), MAX_LIMIT);

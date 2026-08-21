@@ -1,5 +1,6 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.security.OpenByDesign;
 import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.api.dto.CvModelsResponse;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,6 +41,7 @@ public class CvModelsController {
      *
      * @return the roster wrapped per the frozen wire contract
      */
+    @OpenByDesign(reason = "Reference list of CV models the service can load — a capability list, not fleet data.")
     @GetMapping("/api/cv/models")
     public CvModelsResponse models() {
         return new CvModelsResponse(cvModelRoster);

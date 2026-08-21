@@ -1,5 +1,6 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.security.OpenByDesign;
 import com.drones.vision.api.dto.CvTrackerResponse;
 import com.drones.vision.api.dto.CvTrackersResponse;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -48,6 +49,7 @@ public class CvTrackersController {
      *
      * @return the roster wrapped per the frozen wire contract
      */
+    @OpenByDesign(reason = "Reference list of tracker engines the service supports — a capability list, not fleet data.")
     @GetMapping("/api/cv/trackers")
     public CvTrackersResponse trackers() {
         return new CvTrackersResponse(cvTrackerRoster);
