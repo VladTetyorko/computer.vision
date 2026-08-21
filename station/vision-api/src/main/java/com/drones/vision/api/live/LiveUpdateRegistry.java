@@ -19,6 +19,7 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.platform.Event;
@@ -458,26 +459,42 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * and bounded (unlike the hot pipeline/telemetry paths {@link #publishDetections}/{@link
      * #publishTelemetryAppended} must never block).
      *
-     * @param topicsParam   the raw {@code topics} query parameter value — comma-separated {@code
-     *                       telemetry:<assetId>}/{@code detections:<assetId>} entries; {@code
-     *                       null}/blank means none requested. {@link LiveTopic#FLEET}/{@link
-     *                       LiveTopic#EVENT}/{@link LiveTopic#DEVICES}/{@link
-     *                       LiveTopic#DETECTION_EVENTS}/{@link LiveTopic#MAP} are added
-     *                       automatically regardless.
-     * @param lastEventId   the {@code Last-Event-ID} header value, parsed to a {@code seq}, or
-     *                       {@code null} if absent (a fresh connection, not a resume)
-     * @param mapVisibility whether this connection's viewer may see a {@code map} event about a
-     *                       given {@code layerId} — supplied by the caller ({@code LiveController})
-     *                       so this class never resolves an identity itself; applied to the
-     *                       snapshot/resume burst below exactly as it is to every later broadcast
+     * @param topicsParam     the raw {@code topics} query parameter value — comma-separated {@code
+     *                        telemetry:<assetId>}/{@code detections:<assetId>} entries; {@code
+     *                        null}/blank means none requested. {@link LiveTopic#FLEET}/{@link
+     *                        LiveTopic#EVENT}/{@link LiveTopic#DEVICES}/{@link
+     *                        LiveTopic#DETECTION_EVENTS}/{@link LiveTopic#MAP} are added
+     *                        automatically regardless. {@code LiveController} has already filtered
+     *                        this down to topics the caller may see (docs/plans/active/LIVE-SCOPE-PLAN.md
+     *                        §2, W3, via {@code LiveAssetAccess#filterTopicsParam}) before calling
+     *                        this method — this class trusts that filtering rather than repeating it.
+     * @param lastEventId     the {@code Last-Event-ID} header value, parsed to a {@code seq}, or
+     *                        {@code null} if absent (a fresh connection, not a resume)
+     * @param userId          who this connection belongs to (docs/plans/active/LIVE-SCOPE-PLAN.md
+     *                        §2, W3) — bound to the connection so a later {@link
+     *                        #updateTopics(String, UpdateLiveTopicsRequest, UserId)} can refuse a
+     *                        caller who does not own it. A plain identity value, not a live handle;
+     *                        this class still never reads a security context of its own.
+     * @param mapVisibility   whether this connection's viewer may see a {@code map} event about a
+     *                        given {@code layerId} — supplied by the caller ({@code LiveController})
+     *                        so this class never resolves an identity itself; applied to the
+     *                        snapshot/resume burst below exactly as it is to every later broadcast
+     * @param assetVisibility whether this connection's viewer may currently see a per-asset topic's
+     *                        {@link AssetId} — supplied by the caller ({@code LiveController} via
+     *                        {@code LiveAssetAccess#deliveryPredicate}, docs/plans/active/LIVE-SCOPE-PLAN.md
+     *                        §2, W3), same treatment as {@code mapVisibility}: applied to the
+     *                        snapshot/resume burst below and to every later broadcast, so a scope
+     *                        change mid-connection (an assignment revoked) is enforced within the
+     *                        predicate's own staleness bound rather than only at subscribe time
      * @return the emitter to return from the controller method
      * @throws IllegalArgumentException if {@code topicsParam} contains a malformed entry
      */
-    public SseEmitter connect(String topicsParam, Long lastEventId, Predicate<String> mapVisibility) {
+    public SseEmitter connect(String topicsParam, Long lastEventId, UserId userId, Predicate<String> mapVisibility,
+                               Predicate<AssetId> assetVisibility) {
         Set<LiveTopic> requestedTopics = LiveTopic.parseTopicsParam(topicsParam);
         String connectionId = UUID.randomUUID().toString();
         SseEmitter emitter = new SseEmitter(0L);
-        LiveConnection connection = new LiveConnection(connectionId, emitter, mapVisibility);
+        LiveConnection connection = new LiveConnection(connectionId, emitter, userId, mapVisibility, assetVisibility);
         connection.topics().add(LiveTopic.FLEET);
         connection.topics().add(LiveTopic.EVENT);
         connection.topics().add(LiveTopic.DEVICES);
@@ -516,9 +533,10 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      *
      * @return the new connection's id
      */
-    String register(SseEmitter emitter, Set<LiveTopic> topics, Predicate<String> mapVisibility) {
+    String register(SseEmitter emitter, Set<LiveTopic> topics, UserId userId, Predicate<String> mapVisibility,
+                     Predicate<AssetId> assetVisibility) {
         String connectionId = UUID.randomUUID().toString();
-        LiveConnection connection = new LiveConnection(connectionId, emitter, mapVisibility);
+        LiveConnection connection = new LiveConnection(connectionId, emitter, userId, mapVisibility, assetVisibility);
         connection.topics().addAll(topics);
         connections.put(connectionId, connection);
         return connectionId;
@@ -530,14 +548,24 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * #connect}, so a tile entering the screen catches up without reconnecting.
      *
      * @param connectionId the connection to update
-     * @param request      topics to add/remove
+     * @param request      topics to add/remove — {@code LiveController} has already filtered
+     *                     {@code add} down to topics the caller may see (docs/plans/active/LIVE-SCOPE-PLAN.md
+     *                     §2, W3, via {@code LiveAssetAccess#filterAdditions}) before calling this
+     *                     method
+     * @param callerUserId who is making this request (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3)
      * @return the connection's full topic set afterward
      * @throws NoSuchElementException if {@code connectionId} is unknown (already disconnected, or
-     *                                 never existed)
+     *                                 never existed), <b>or if it belongs to a different user</b> —
+     *                                 collapsed into the same 404 so a caller who has merely learned
+     *                                 another connection's id cannot distinguish "doesn't exist" from
+     *                                 "isn't yours" (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3
+     *                                 defect 2 — the same "existence hides itself" idiom W2 uses)
      */
-    public LiveSubscriptionResponse updateTopics(String connectionId, UpdateLiveTopicsRequest request) {
+    public LiveSubscriptionResponse updateTopics(String connectionId, UpdateLiveTopicsRequest request,
+                                                  UserId callerUserId) {
+        Objects.requireNonNull(callerUserId, "callerUserId must not be null");
         LiveConnection connection = connections.get(connectionId);
-        if (connection == null) {
+        if (connection == null || !connection.ownerUserId().equals(callerUserId)) {
             throw new NoSuchElementException("Unknown live connection: " + connectionId);
         }
         for (String raw : request.remove()) {

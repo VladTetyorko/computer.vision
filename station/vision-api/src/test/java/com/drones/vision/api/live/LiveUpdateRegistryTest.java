@@ -531,7 +531,8 @@ class LiveUpdateRegistryTest {
         LiveUpdateRegistry registry = registry();
 
         assertThrows(NoSuchElementException.class,
-                () -> registry.updateTopics("no-such-connection", com.drones.vision.api.dto.UpdateLiveTopicsRequest.EMPTY));
+                () -> registry.updateTopics("no-such-connection", com.drones.vision.api.dto.UpdateLiveTopicsRequest.EMPTY,
+                        UserId.random()));
     }
 
     @Test
@@ -551,7 +552,7 @@ class LiveUpdateRegistryTest {
         when(assetService.assets()).thenReturn(List.of());
         LiveUpdateRegistry registry = registry();
 
-        registry.connect("detections:" + assetId.value(), null, layerId -> true);
+        registry.connect("detections:" + assetId.value(), null, UserId.random(), layerId -> true, id -> true);
 
         assertEquals(true, registry.watchingDetections(assetId));
         assertEquals(false, registry.watchingDetections(otherAssetId), "only the subscribed asset counts");
@@ -570,11 +571,12 @@ class LiveUpdateRegistryTest {
     void aBlockedConnectionDoesNotStopOthersFromReceivingEnvelopes() {
         LiveUpdateRegistry registry = registry();
         CountDownLatch neverReleased = new CountDownLatch(1);
-        registry.register(new BlockingSseEmitter(neverReleased), Set.of(LiveTopic.EVENT), layerId -> true);
+        registry.register(new BlockingSseEmitter(neverReleased), Set.of(LiveTopic.EVENT), UserId.random(), layerId -> true,
+                id -> true);
         RecordingSseEmitter first = new RecordingSseEmitter();
         RecordingSseEmitter second = new RecordingSseEmitter();
-        registry.register(first, Set.of(LiveTopic.EVENT), layerId -> true);
-        registry.register(second, Set.of(LiveTopic.EVENT), layerId -> true);
+        registry.register(first, Set.of(LiveTopic.EVENT), UserId.random(), layerId -> true, id -> true);
+        registry.register(second, Set.of(LiveTopic.EVENT), UserId.random(), layerId -> true, id -> true);
 
         registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STARTED, "started"));
 
@@ -592,7 +594,7 @@ class LiveUpdateRegistryTest {
         CountDownLatch neverReleased = new CountDownLatch(1);
         AssetId assetId = AssetId.random();
         registry.register(new BlockingSseEmitter(neverReleased), Set.of(LiveTopic.EVENT, LiveTopic.detections(assetId)),
-                layerId -> true);
+                UserId.random(), layerId -> true, id -> true);
         assertTrue(registry.watchingDetections(assetId), "sanity: the connection is registered and subscribed before anything blocks");
 
         registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STARTED, "started"));
@@ -615,7 +617,7 @@ class LiveUpdateRegistryTest {
         for (int i = 0; i < connectionCount; i++) {
             RecordingSseEmitter emitter = new RecordingSseEmitter();
             emitters.add(emitter);
-            registry.register(emitter, Set.of(LiveTopic.EVENT), layerId -> true);
+            registry.register(emitter, Set.of(LiveTopic.EVENT), UserId.random(), layerId -> true, id -> true);
         }
 
         for (int i = 0; i < envelopeCount; i++) {
@@ -636,7 +638,8 @@ class LiveUpdateRegistryTest {
     void resumeStaysCorrectWhileAnotherConnectionsWriteIsStuckInFlight() {
         LiveUpdateRegistry registry = registry();
         CountDownLatch neverReleased = new CountDownLatch(1);
-        registry.register(new BlockingSseEmitter(neverReleased), Set.of(LiveTopic.EVENT), layerId -> true);
+        registry.register(new BlockingSseEmitter(neverReleased), Set.of(LiveTopic.EVENT), UserId.random(), layerId -> true,
+                id -> true);
 
         registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STARTED, "first"));
         long firstSeq = registry.bufferFor(LiveTopic.EVENT).snapshot().get(0).seq();
@@ -680,7 +683,7 @@ class LiveUpdateRegistryTest {
         AssetId assetId = AssetId.random();
         when(assetService.assets()).thenReturn(List.of());
         LiveUpdateRegistry registry = registry();
-        registry.connect("telemetry:" + assetId.value(), null, layerId -> true);
+        registry.connect("telemetry:" + assetId.value(), null, UserId.random(), layerId -> true, id -> true);
         registry.publishTelemetryAppended(assetId, telemetry(1.0));
         registry.flushPending();
 

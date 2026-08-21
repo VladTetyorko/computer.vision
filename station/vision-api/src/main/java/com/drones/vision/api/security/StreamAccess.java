@@ -1,5 +1,6 @@
 package com.drones.vision.api.security;
 
+import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.application.stream.ActiveStream;
@@ -113,6 +114,32 @@ public final class StreamAccess {
      */
     public List<ActiveStream> filterVisible(List<ActiveStream> streams) {
         return streams.stream().filter(s -> visible(s.deviceId())).toList();
+    }
+
+    /**
+     * Whether {@code scope} may see the asset identified by {@code assetId} directly — the same
+     * ownership rule {@link #visible(DeviceId)} applies, resolved from the asset itself rather than
+     * by first walking a device to its asset. Exposed for {@code LiveAssetAccess}
+     * (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3), which must judge visibility for a connection
+     * captured at SSE-connect time — possibly re-checked minutes later, from the shared dispatcher
+     * thread rather than that connection's own request thread — so it cannot read {@link
+     * CurrentUser#scope()} (request-bound) and instead re-derives a fresh {@link VisibilityScope} of
+     * its own and passes it in here explicitly.
+     *
+     * @param assetId the asset a per-asset live topic (telemetry/detections/geo) names
+     * @param scope   the scope to test against — supplied by the caller rather than read from
+     *                {@link #currentUser}, since it may not be this request's own scope
+     * @return {@code true} iff {@code scope} may see this asset, or — for an asset id that does not
+     *         currently exist — iff {@code scope} can administer the deployment; see {@link
+     *         #visible(DeviceId)}'s own javadoc for why an unresolvable target favors that fallback
+     *         over failing open or hard-failing the caller
+     */
+    public boolean visibleAsset(AssetId assetId, VisibilityScope scope) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        Objects.requireNonNull(scope, "scope must not be null");
+        return assetRepositoryPort.findById(assetId)
+                .map(asset -> scope.includes(asset.id(), asset.ownership()))
+                .orElseGet(scope::canAdminister);
     }
 
     private Optional<DeviceId> deviceIdOf(StreamId streamId) {

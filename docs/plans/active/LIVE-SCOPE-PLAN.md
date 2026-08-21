@@ -60,7 +60,7 @@ flowchart LR
 | `GET /api/streams` | filter to visible | see their assigned assets' streams |
 | stream config/tracks/detections/snapshot read | `includes(assetId, ownership)` | read their own |
 | stream **start / stop / config write** | `includes(...)` — **corrected in W2**, see note | start+stop their own assigned asset |
-| SSE `telemetry:<id>` / `detections:<id>` | `includes(...)` **per topic, per delivery** | subscribe to their own |
+| SSE `telemetry:<id>` / `detections:<id>` / **`geo:<id>`** | `includes(...)` **per topic, per delivery** | subscribe to their own |
 | `PATCH /api/live/{connectionId}/topics` | caller owns the connection | change their own connection |
 | `/hls/{streamId}/**` | `includes(...)` via signed path token | watch their own |
 | device CRUD | `canManageOrg()` create/delete, `canManage()` edit | read their own devices |
