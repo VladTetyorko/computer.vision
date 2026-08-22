@@ -1,5 +1,6 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.security.OpenByDesign;
 import com.drones.vision.api.dto.CategoryResponse;
 import com.drones.vision.warehouse.application.category.CategoryService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,6 +32,7 @@ public class CategoryController {
      *
      * @return the currently defined categories
      */
+    @OpenByDesign(reason = "Deployment-wide reference data (the category taxonomy); carries no per-asset or per-user information.")
     @GetMapping("/api/categories")
     public List<CategoryResponse> list() {
         return categoryService.categories().stream().map(CategoryResponse::from).toList();

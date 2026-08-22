@@ -3,6 +3,8 @@ package com.drones.vision.api.live;
 import com.drones.vision.api.dto.LiveConnectedResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.MapEventPayload;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.UserId;
 import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -20,8 +22,11 @@ import java.util.function.Predicate;
 /**
  * One open {@code GET /api/live} connection: its {@link SseEmitter}, the mutable set of topics it
  * currently cares about (docs/plans/done/REALTIME-PLAN.md §4, item 2 — grown/shrunk in place by {@code PATCH
- * /api/live/{connectionId}/topics} without reconnecting), and the map-visibility predicate captured
- * for its viewer at connect time (docs/plans/done/MAP-REWORK-PLAN.md §4.3).
+ * /api/live/{connectionId}/topics} without reconnecting), the {@link UserId} it belongs to
+ * (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3 — so {@code LiveUpdateRegistry#updateTopics} can
+ * refuse a caller who does not own it), and the map-visibility/asset-visibility predicates captured
+ * for its viewer at connect time (docs/plans/done/MAP-REWORK-PLAN.md §4.3; docs/plans/active/LIVE-SCOPE-PLAN.md
+ * §2, W3).
  *
  * <h2>Threading</h2>
  * {@link #topics()} is a concurrent set — safe to read/mutate from the connecting request thread,
@@ -51,24 +56,36 @@ final class LiveConnection {
 
     private final String id;
     private final SseEmitter emitter;
+    private final UserId ownerUserId;
     private final Predicate<String> mapVisibility;
+    private final Predicate<AssetId> assetVisibility;
     private final Set<LiveTopic> topics = ConcurrentHashMap.newKeySet();
     private final ReentrantLock sendLock = new ReentrantLock();
     private final AtomicReference<CompletableFuture<Void>> writeChain =
             new AtomicReference<>(CompletableFuture.completedFuture(null));
 
     /**
-     * @param mapVisibility whether this connection's viewer may see a {@code map} event about a given
-     *                      {@code layerId} — supplied by {@code LiveController} from {@link
-     *                      MapVisibility#deliveryPredicate}, so the registry never has to resolve an
-     *                      identity itself. Evaluated fresh on every event and every resume replay,
-     *                      not snapshotted, so a grant change takes effect within the predicate's own
-     *                      staleness bound.
+     * @param ownerUserId     who opened this connection (docs/plans/active/LIVE-SCOPE-PLAN.md §2,
+     *                        W3) — a plain identity value, never a live handle back to the request;
+     *                        used only for {@code LiveUpdateRegistry#updateTopics}'s ownership check
+     * @param mapVisibility   whether this connection's viewer may see a {@code map} event about a
+     *                        given {@code layerId} — supplied by {@code LiveController} from {@link
+     *                        MapVisibility#deliveryPredicate}, so the registry never has to resolve
+     *                        an identity itself. Evaluated fresh on every event and every resume
+     *                        replay, not snapshotted, so a grant change takes effect within the
+     *                        predicate's own staleness bound.
+     * @param assetVisibility whether this connection's viewer may currently see a per-asset topic's
+     *                        {@link AssetId} — supplied by {@code LiveController} from {@code
+     *                        LiveAssetAccess#deliveryPredicate} (docs/plans/active/LIVE-SCOPE-PLAN.md
+     *                        §2, W3), same evaluated-fresh contract as {@code mapVisibility}
      */
-    LiveConnection(String id, SseEmitter emitter, Predicate<String> mapVisibility) {
+    LiveConnection(String id, SseEmitter emitter, UserId ownerUserId, Predicate<String> mapVisibility,
+                   Predicate<AssetId> assetVisibility) {
         this.id = Objects.requireNonNull(id, "id must not be null");
         this.emitter = Objects.requireNonNull(emitter, "emitter must not be null");
+        this.ownerUserId = Objects.requireNonNull(ownerUserId, "ownerUserId must not be null");
         this.mapVisibility = Objects.requireNonNull(mapVisibility, "mapVisibility must not be null");
+        this.assetVisibility = Objects.requireNonNull(assetVisibility, "assetVisibility must not be null");
     }
 
     String id() {
@@ -76,18 +93,45 @@ final class LiveConnection {
     }
 
     /**
+     * @return the {@link UserId} that opened this connection — {@code LiveUpdateRegistry#updateTopics}'s
+     *         ownership check (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3)
+     */
+    UserId ownerUserId() {
+        return ownerUserId;
+    }
+
+    /**
      * Whether this connection should receive {@code envelope} at all.
      *
-     * <p>Every topic except {@code map} broadcasts to everyone subscribed, so anything that is not a
-     * {@link MapEventPayload} passes unconditionally — the check is keyed off the payload type
-     * rather than the topic so a buffered envelope carries its own filtering information with it,
-     * which is what makes {@code Last-Event-ID} resume re-filterable with no parallel bookkeeping.
+     * <p>Two independent filters, keyed off what the envelope actually carries rather than which
+     * topic it arrived on — so a buffered envelope carries its own filtering information with it,
+     * which is what makes {@code Last-Event-ID} resume re-filterable with no parallel bookkeeping:
+     * <ul>
+     *   <li>a {@link MapEventPayload} is gated by {@link #mapVisibility} on its {@code layerId}
+     *       (docs/plans/done/MAP-REWORK-PLAN.md §4.3);</li>
+     *   <li>anything else carrying a non-null {@link LiveEnvelopeResponse#assetId()} (a {@code
+     *       telemetry}/{@code detections}/{@code geo} envelope) is gated by {@link #assetVisibility}
+     *       (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3) — this is the defense against a scope
+     *       changing mid-connection (an assignment revoked) after a topic was legitimately
+     *       subscribed to: {@code LiveController}/{@code LiveAssetAccess} already keep an
+     *       unauthorized topic from ever being added (see their own javadoc), so this check is what
+     *       keeps enforcing that decision for the rest of the connection's life, not only at the
+     *       moment the topic was added.</li>
+     * </ul>
+     * Everything else (no asset id, not a map payload — {@code fleet}/{@code event}/{@code
+     * devices}/{@code detection-events}) passes unconditionally.
      *
      * @param envelope the envelope about to be sent
      * @return {@code true} if this connection's viewer may see it
      */
     boolean mayReceive(LiveEnvelopeResponse envelope) {
-        return !(envelope.payload() instanceof MapEventPayload payload) || mapVisibility.test(payload.layerId());
+        if (envelope.payload() instanceof MapEventPayload payload) {
+            return mapVisibility.test(payload.layerId());
+        }
+        if (envelope.assetId() != null) {
+            return assetVisibility.test(AssetId.of(envelope.assetId()));
+        }
+        return true;
     }
 
     /**

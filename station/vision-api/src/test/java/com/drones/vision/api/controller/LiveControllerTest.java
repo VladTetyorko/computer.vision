@@ -1,10 +1,16 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.live.LiveAssetAccess;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.api.live.MapVisibility;
 import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.StreamAccess;
+import com.drones.vision.identity.application.scope.ScopeResolver;
+import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.identity.domain.port.UserRepositoryPort;
 import com.drones.vision.map.application.MapLayerService;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
@@ -34,6 +40,7 @@ import tools.jackson.databind.json.JsonMapper;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -78,7 +85,7 @@ class LiveControllerTest {
         MapLayerService mapLayerService = mock(MapLayerService.class);
         when(mapLayerService.layers(any())).thenReturn(List.of());
         mockMvc = MockMvcBuilders.standaloneSetup(new LiveController(registry, new MapVisibility(mapLayerService),
-                        new CurrentUser(new Ownership(UserId.random(), GroupId.random()))))
+                        alwaysVisibleAssetAccess(), new CurrentUser(new Ownership(UserId.random(), GroupId.random()))))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -90,6 +97,21 @@ class LiveControllerTest {
                 return value;
             }
         };
+    }
+
+    /**
+     * This class is not testing per-asset scoping (see {@code LiveAssetScopingTest} for that) --
+     * only the SSE transport itself -- so every asset is visible regardless of caller.
+     */
+    private static LiveAssetAccess alwaysVisibleAssetAccess() {
+        StreamAccess streamAccess = mock(StreamAccess.class);
+        when(streamAccess.visibleAsset(any(), any())).thenReturn(true);
+        ScopeResolver scopeResolver = mock(ScopeResolver.class);
+        when(scopeResolver.scopeFor(any())).thenReturn(VisibilityScope.unbounded());
+        UserRepositoryPort userRepositoryPort = mock(UserRepositoryPort.class);
+        when(userRepositoryPort.findById(any()))
+                .thenReturn(Optional.of(new User(UserId.random(), "dev", "Dev", "dev@example.com", "hash", true)));
+        return new LiveAssetAccess(streamAccess, scopeResolver, userRepositoryPort, 5000L);
     }
 
     @Test

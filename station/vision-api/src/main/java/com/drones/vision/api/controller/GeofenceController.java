@@ -3,8 +3,11 @@ package com.drones.vision.api.controller;
 import com.drones.vision.api.dto.GeofenceZoneRequest;
 import com.drones.vision.api.dto.GeofenceZoneResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.OpenByDesign;
 import com.drones.vision.flight.application.geofence.GeofenceService;
 import com.drones.vision.flight.domain.model.ZoneId;
+import com.drones.vision.platform.AccessDeniedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,9 +24,30 @@ import java.util.Objects;
 /**
  * Driving REST adapter for geofence zone CRUD (docs/plans/done/OPS-CORE-PLAN.md §G's frozen wire contract).
  *
- * <p>Constructor-injected with {@link GeofenceService} only — zones are global reference data
- * with no ownership/audit concerns (see that service's own javadoc), so this controller needs no
- * second collaborator the way {@link AssetController}/{@link DeviceController} do for auditing.
+ * <p>Constructor-injected with {@link GeofenceService} and {@link CurrentUser}.
+ *
+ * <h2>Authority (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2, W5) — geofences are safety-relevant</h2>
+ * A geofence zone is a no-fly boundary; an unauthorized edit here is not an information leak the way
+ * an unscoped read elsewhere might be, it is a flight-safety event — a keep-out zone silently
+ * widened or a keep-in boundary silently relaxed changes what is safe to fly, for every asset, not
+ * just the editor's own. The plan's §2.2 table gates a write on {@code canManage()} for a
+ * zone scoped to one asset/group, falling back to the deployment-global {@code canAdminister()}
+ * "if the model has such a thing" for a zone bound to no single asset. It does not: {@link
+ * com.drones.vision.flight.domain.model.GeofenceZone} carries no asset/group field at all — {@link
+ * GeofenceService}'s own javadoc states plainly that zones are "global reference data — no
+ * ownership, no per-user scoping, no audit trail." Every zone in this codebase is therefore the
+ * plan's "global zone" case, with no narrower one to fall back from, so {@link #create}/{@link
+ * #update}/{@link #delete} all require {@link
+ * com.drones.vision.platform.VisibilityScope#canAdminister() scope().canAdminister()} uniformly —
+ * a MANAGER's {@code canManageOrg()} authority over their own group's assets does not extend to a
+ * boundary every group's aircraft must obey.
+ *
+ * <p>{@link #list} carries no scope check and is marked {@link OpenByDesign} rather than filtered:
+ * since no zone has an owning asset/group to filter by, "the zones the caller may see" is every
+ * zone, for every scope — the same "deployment-wide reference data" reasoning {@code
+ * CategoryController#list} already uses, sharpened here by a safety argument rather than weakened by
+ * one: a PILOT who cannot see a keep-out zone because it "isn't theirs" is a PILOT who can fly into
+ * it without warning, which is the opposite of what this endpoint exists to prevent.
  *
  * <p>Error mapping is entirely {@link GeofenceService}'s/{@link
  * com.drones.vision.flight.application.geofence.GeofenceZoneSpec}'s own exceptions surfacing through {@link
@@ -40,9 +64,11 @@ import java.util.Objects;
 public class GeofenceController {
 
     private final GeofenceService geofenceService;
+    private final CurrentUser currentUser;
 
-    public GeofenceController(GeofenceService geofenceService) {
+    public GeofenceController(GeofenceService geofenceService, CurrentUser currentUser) {
         this.geofenceService = Objects.requireNonNull(geofenceService, "geofenceService must not be null");
+        this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
     }
 
     /**
@@ -50,6 +76,9 @@ public class GeofenceController {
      *
      * @return every zone, sorted by name (see {@link GeofenceService#zones()})
      */
+    @OpenByDesign(reason = "Deployment-wide reference data with no per-asset/per-group field to filter "
+            + "by (GeofenceZone has no ownership at all) -- and, unlike most global reference data, "
+            + "hiding a no-fly zone from any role would itself be the safety hole, not prevent one.")
     @GetMapping("/api/geofences")
     public List<GeofenceZoneResponse> list() {
         return geofenceService.zones().stream().map(GeofenceZoneResponse::from).toList();
@@ -64,6 +93,7 @@ public class GeofenceController {
     @PostMapping("/api/geofences")
     @ResponseStatus(HttpStatus.CREATED)
     public GeofenceZoneResponse create(@RequestBody GeofenceZoneRequest request) {
+        requireAdminister();
         return GeofenceZoneResponse.from(geofenceService.create(request.toSpec()));
     }
 
@@ -77,7 +107,12 @@ public class GeofenceController {
      */
     @PutMapping("/api/geofences/{id}")
     public GeofenceZoneResponse update(@PathVariable String id, @RequestBody GeofenceZoneRequest request) {
-        return GeofenceZoneResponse.from(geofenceService.update(ZoneId.of(id), request.toSpec()));
+        ZoneId zoneId = ZoneId.of(id);
+        // Parse/validate the body (a malformed kind/polygon is a 400) before the authority 403, so a
+        // bad request never depends on the caller's scope -- same ordering AssetController#update uses.
+        var spec = request.toSpec();
+        requireAdminister();
+        return GeofenceZoneResponse.from(geofenceService.update(zoneId, spec));
     }
 
     /**
@@ -88,6 +123,20 @@ public class GeofenceController {
     @DeleteMapping("/api/geofences/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String id) {
-        geofenceService.delete(ZoneId.of(id));
+        ZoneId zoneId = ZoneId.of(id);
+        requireAdminister();
+        geofenceService.delete(zoneId);
+    }
+
+    /**
+     * Guards every write: a no-fly zone is deployment-global safety data (see class javadoc), so
+     * authoring one requires {@code canAdminister()} rather than the group-scoped {@code
+     * canManageOrg()}/{@code canManage()} this module's other controllers use for group-owned
+     * writes.
+     */
+    private void requireAdminister() {
+        if (!currentUser.scope().canAdminister()) {
+            throw new AccessDeniedException("Not permitted to manage geofence zones");
+        }
     }
 }

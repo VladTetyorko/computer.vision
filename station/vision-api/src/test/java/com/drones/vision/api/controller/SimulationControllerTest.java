@@ -8,12 +8,16 @@ import com.drones.vision.simulation.application.SimulationSpec;
 import com.drones.vision.simulation.application.SimulationTransport;
 import com.drones.vision.simulation.application.TelemetryPlan;
 import com.drones.vision.simulation.application.TelemetryTransport;
+import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
+import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.api.security.PrincipalResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -22,7 +26,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.net.URI;
+import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 import com.drones.vision.api.security.CurrentUser;
 
 import static org.hamcrest.Matchers.allOf;
@@ -32,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -45,19 +52,58 @@ class SimulationControllerTest {
 
     private SimulationService simulationService;
     private StreamPublisherPort streamPublisherPort;
+    /** Backs {@link SimulationController#stop}'s scoped read (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2). */
+    private AssetService assetService;
     private MockMvc mockMvc;
 
     private final UserId ownerId = UserId.random();
     private final Ownership ownership = new Ownership(ownerId, GroupId.random());
+    /** Unbounded (auth-off-equivalent, and {@code canManageOrg() == true}) by default, so every
+     * pre-existing test below is unaffected. */
     private final CurrentUser currentUser = new CurrentUser(ownership);
 
     @BeforeEach
     void setUp() {
         simulationService = mock(SimulationService.class);
         streamPublisherPort = mock(StreamPublisherPort.class);
+        assetService = mock(AssetService.class);
 
-        mockMvc = MockMvcBuilders
-                .standaloneSetup(new SimulationController(simulationService, currentUser, streamPublisherPort))
+        mockMvc = mockMvcFor(currentUser);
+    }
+
+    /**
+     * A {@link CurrentUser} answering with {@link #ownership}/{@link #ownerId} but a caller-supplied
+     * {@link VisibilityScope}, for the docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2 authority tests
+     * below -- same idiom {@code AssetControllerTest} uses. {@link PrincipalResolver#viewer()} is
+     * never called by this controller, so it throws rather than fake a map viewer no test here needs.
+     */
+    private CurrentUser currentUserWithScope(VisibilityScope scope) {
+        return new CurrentUser(new PrincipalResolver() {
+            @Override
+            public UserId userId() {
+                return ownerId;
+            }
+
+            @Override
+            public Ownership ownership() {
+                return ownership;
+            }
+
+            @Override
+            public VisibilityScope scope() {
+                return scope;
+            }
+
+            @Override
+            public MapAccessPolicy.Viewer viewer() {
+                throw new UnsupportedOperationException("SimulationController never calls viewer()");
+            }
+        });
+    }
+
+    private MockMvc mockMvcFor(CurrentUser user) {
+        return MockMvcBuilders
+                .standaloneSetup(new SimulationController(simulationService, user, streamPublisherPort, assetService))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -596,5 +642,63 @@ class SimulationControllerTest {
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
 
         verifyNoInteractions(simulationService);
+    }
+
+    // ---- docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2: authority --------------------------------
+    //
+    // Before this wave, #simulate had no gate at all (any authenticated caller, including a PILOT,
+    // could register and auto-start a fleet asset) and #stop had no scope check either. These tests
+    // fail without the changes made in this wave.
+
+    @Test
+    void simulateReturns403ForAPilotScope() throws Exception {
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of())));
+
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4"}
+                """;
+
+        pilotMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verifyNoInteractions(simulationService);
+    }
+
+    @Test
+    void simulateReturns201ForAManagerScope() throws Exception {
+        // canManageOrg() is true for GROUPS too (a MANAGER), not just UNBOUNDED -- the same
+        // asymmetry AssetController#create's own gate draws.
+        MockMvc managerMvc = mockMvcFor(currentUserWithScope(VisibilityScope.groups(Set.of(ownership.groupId()))));
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), null));
+
+        managerMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"videoPath\":\"/data/clips/drone.mp4\"}"))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void stopReturns404ForAPilotScopedToADifferentAsset() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(assetService.details(any(VisibilityScope.class), eq(assetId)))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of())));
+
+        pilotMvc.perform(delete("/api/simulations/{assetId}", assetId.value()))
+                .andExpect(status().isNotFound());
+
+        verify(simulationService, never()).stop(any());
+    }
+
+    @Test
+    void stopReturns204ForAPilotScopedToTheAsset() throws Exception {
+        AssetId assetId = AssetId.random();
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(assetId))));
+
+        pilotMvc.perform(delete("/api/simulations/{assetId}", assetId.value()))
+                .andExpect(status().isNoContent());
+
+        verify(simulationService).stop(assetId);
     }
 }

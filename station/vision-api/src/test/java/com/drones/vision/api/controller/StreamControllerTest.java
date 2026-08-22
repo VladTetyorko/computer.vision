@@ -1,6 +1,10 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.PrincipalResolver;
+import com.drones.vision.api.security.StreamAccess;
+import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.perception.application.stream.PipelineConfigPatch;
@@ -9,12 +13,19 @@ import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.perception.application.stream.UnsupportedProtocolException;
 import com.drones.vision.perception.application.stream.UpdateOutcome;
 import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.BoundingBox;
+import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.kernel.Ownership;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PixelFormat;
@@ -30,6 +41,7 @@ import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.perception.domain.model.TrackingTelemetry;
 import com.drones.vision.perception.domain.model.DetectionSource;
 import com.drones.vision.perception.domain.model.DetectorReason;
+import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
@@ -83,6 +95,9 @@ class StreamControllerTest {
     private StreamService streamService;
     private StreamPublisherPort streamPublisherPort;
     private DetectionRepositoryPort detectionRepositoryPort;
+    /** Backs {@link StreamAccess}'s device&rarr;asset&rarr;owner resolution (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2). */
+    private AssetRepositoryPort assetRepositoryPort;
+    private StreamDetectionSupport streamDetectionSupport;
     /**
      * A real instance (not a mock -- {@code LiveAndPollDetectionDemand} is {@code final} and this
      * repo carries no inline Mockito mock-maker), constructed with a never-watching SSE predicate so
@@ -94,18 +109,73 @@ class StreamControllerTest {
 
     private final DeviceId deviceId = DeviceId.random();
 
+    private final UserId ownerId = UserId.random();
+    private final Ownership ownership = new Ownership(ownerId, GroupId.random());
+    /** Unbounded (auth-off-equivalent) by default, so every pre-existing test below is unaffected. */
+    private final CurrentUser currentUser = new CurrentUser(ownership);
+    /** The asset {@link #deviceId} belongs to, for the authority tests near the end of this file. */
+    private final Asset ownedAsset = new Asset(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
+            Set.of(deviceId), Map.of());
+    /** An asset the PILOT authority tests below are deliberately NOT scoped to. */
+    private final AssetId otherAssetId = AssetId.random();
+
     @BeforeEach
     void setUp() {
         streamService = mock(StreamService.class);
         streamPublisherPort = mock(StreamPublisherPort.class);
         detectionRepositoryPort = mock(DetectionRepositoryPort.class);
+        assetRepositoryPort = mock(AssetRepositoryPort.class);
+        when(assetRepositoryPort.findByDeviceId(deviceId)).thenReturn(Optional.of(ownedAsset));
         detectionDemand = new LiveAndPollDetectionDemand(assetId -> false, Duration.ofSeconds(10));
-        StreamDetectionSupport streamDetectionSupport =
-                new StreamDetectionSupport(PipelineConfig.defaults(), detectionDemand);
+        streamDetectionSupport = new StreamDetectionSupport(PipelineConfig.defaults(), detectionDemand);
 
-        mockMvc = MockMvcBuilders
+        mockMvc = mockMvcFor(currentUser);
+    }
+
+    /**
+     * A {@link CurrentUser} answering with {@link #ownership}/{@link #ownerId} (so stubs keyed on
+     * them keep working) but a caller-supplied {@link VisibilityScope} — for the authority tests
+     * near the end of this file, which need a PILOT/MANAGER scope rather than the class-level
+     * {@link #currentUser}'s unbounded one. {@link PrincipalResolver#viewer()} is never called by
+     * {@link StreamController}/{@link StreamAccess}, so it throws rather than fake a map viewer no
+     * test here needs — the same idiom {@code AssetControllerTest} uses.
+     */
+    private CurrentUser currentUserWithScope(VisibilityScope scope) {
+        return new CurrentUser(new PrincipalResolver() {
+            @Override
+            public UserId userId() {
+                return ownerId;
+            }
+
+            @Override
+            public Ownership ownership() {
+                return ownership;
+            }
+
+            @Override
+            public VisibilityScope scope() {
+                return scope;
+            }
+
+            @Override
+            public MapAccessPolicy.Viewer viewer() {
+                throw new UnsupportedOperationException("StreamController never calls viewer()");
+            }
+        });
+    }
+
+    /**
+     * A {@link MockMvc} bound to a fresh {@link StreamController} acting as {@code user} — same
+     * mocked {@link #streamService}/{@link #streamPublisherPort}/{@link #detectionRepositoryPort}/
+     * {@link #assetRepositoryPort}/{@link #streamDetectionSupport}, only the {@link StreamAccess}'s
+     * {@link CurrentUser} changes.
+     */
+    private MockMvc mockMvcFor(CurrentUser user) {
+        StreamAccess streamAccess = new StreamAccess(streamService, assetRepositoryPort, user);
+        return MockMvcBuilders
                 .standaloneSetup(new StreamController(streamService, streamPublisherPort, detectionRepositoryPort,
-                        new SnapshotJpegEncoder(VisionApiProperties.defaults()), streamDetectionSupport))
+                        new SnapshotJpegEncoder(VisionApiProperties.defaults()), streamDetectionSupport,
+                        streamAccess))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -1379,5 +1449,202 @@ class StreamControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].detections[0].track").doesNotExist())
                 .andExpect(jsonPath("$[0].tracking").doesNotExist());
+    }
+
+    // ---- docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2: authority --------------------------------
+    //
+    // Every test above runs under the class-level `currentUser` (unbounded scope, matching how a
+    // deployment with `vision.auth.enabled=false` behaves today) and is untouched by this wave --
+    // that is the "default-config suites stay green" bar. The tests below are the ones that fail
+    // before StreamAccess existed: a PILOT scoped to `otherAssetId` must be turned away from
+    // `deviceId`'s stream (404, existence hidden), and a PILOT scoped to `ownedAsset` (the asset
+    // `deviceId` actually belongs to, per `setUp`'s `assetRepositoryPort` stub) must keep working --
+    // "a PILOT must keep working on their own assigned assets" is the hard constraint this whole
+    // wave must not break.
+
+    private ActiveStream runningOnOwnedDevice(StreamId streamId) {
+        return new ActiveStream(streamId, deviceId, Instant.now());
+    }
+
+    private MockMvc pilotScopedTo(AssetId assetId) {
+        return mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(assetId))));
+    }
+
+    @Test
+    void startReturns201ForAPilotAssignedToTheDevicesOwnAsset() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
+
+        pilotScopedTo(ownedAsset.id()).perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void startReturns404ForAPilotAssignedToADifferentAsset() throws Exception {
+        pilotScopedTo(otherAssetId).perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+
+        verify(streamService, never()).start(any(), any(), any());
+    }
+
+    @Test
+    void startReturns404ForAPilotWhenTheDeviceBelongsToNoAssetAtAll() throws Exception {
+        // An unowned device is a fleet-administration concern, not any one PILOT's -- see
+        // StreamAccess's own javadoc for why canAdminister(), not includes(), is the fallback here.
+        DeviceId unowned = DeviceId.random();
+        when(assetRepositoryPort.findByDeviceId(unowned)).thenReturn(Optional.empty());
+
+        pilotScopedTo(ownedAsset.id()).perform(post("/api/devices/{deviceId}/stream", unowned.value()))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void listFiltersOutStreamsThePilotsScopeCannotReach() throws Exception {
+        StreamId visibleStreamId = StreamId.random();
+        StreamId hiddenStreamId = StreamId.random();
+        DeviceId otherDeviceId = DeviceId.random();
+        Asset otherAsset = new Asset(otherAssetId, "someone else's drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(otherDeviceId), Map.of());
+        when(assetRepositoryPort.findByDeviceId(otherDeviceId)).thenReturn(Optional.of(otherAsset));
+        when(streamService.streams()).thenReturn(List.of(
+                new ActiveStream(visibleStreamId, deviceId, Instant.now()),
+                new ActiveStream(hiddenStreamId, otherDeviceId, Instant.now())));
+
+        pilotScopedTo(ownedAsset.id()).perform(get("/api/streams"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].streamId").value(visibleStreamId.value().toString()));
+    }
+
+    @Test
+    void stopReturns404ForAPilotAssignedElsewhereOnARunningStream() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+
+        pilotScopedTo(otherAssetId).perform(delete("/api/streams/{streamId}", streamId.value()))
+                .andExpect(status().isNotFound());
+
+        verify(streamService, never()).stop(any());
+    }
+
+    @Test
+    void stopReturns204ForAPilotAssignedToTheStreamsOwnAsset() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+
+        pilotScopedTo(ownedAsset.id()).perform(delete("/api/streams/{streamId}", streamId.value()))
+                .andExpect(status().isNoContent());
+
+        verify(streamService).stop(eq(streamId));
+    }
+
+    @Test
+    void updateConfigReturns404ForAPilotAssignedElsewhereOnARunningStream() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+
+        pilotScopedTo(otherAssetId).perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isNotFound());
+
+        verify(streamService, never()).updateConfig(any(), any());
+    }
+
+    @Test
+    void updateConfigReturns200ForAPilotAssignedToTheStreamsOwnAsset() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        pilotScopedTo(ownedAsset.id()).perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void configReturns404ForAPilotAssignedElsewhereOnARunningStream() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+
+        pilotScopedTo(otherAssetId).perform(get("/api/streams/{streamId}/config", streamId.value()))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void configReturns200ForAPilotAssignedToTheStreamsOwnAsset() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+        when(streamService.config(streamId)).thenReturn(Optional.of(PipelineConfig.defaults()));
+
+        pilotScopedTo(ownedAsset.id()).perform(get("/api/streams/{streamId}/config", streamId.value()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void tracksReturns404ForAPilotAssignedElsewhereOnARunningStream() throws Exception {
+        // Unlike an unknown/stopped stream (which #tracks forgivingly answers with a 200 of
+        // defaults), a RUNNING-but-invisible stream must 404 -- this is exactly the gap
+        // LIVE-SCOPE-PLAN.md's audit found unguarded, since #tracks was otherwise the most
+        // forgiving of the eight handlers.
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+
+        pilotScopedTo(otherAssetId).perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void tracksReturns200ForAPilotAssignedToTheStreamsOwnAsset() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+
+        pilotScopedTo(ownedAsset.id()).perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void detectionsReturns404ForAPilotAssignedElsewhereOnARunningStream() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+
+        pilotScopedTo(otherAssetId).perform(get("/api/streams/{streamId}/detections", streamId.value()))
+                .andExpect(status().isNotFound());
+
+        verify(detectionRepositoryPort, never()).query(any());
+    }
+
+    @Test
+    void detectionsReturns200ForAPilotAssignedToTheStreamsOwnAsset() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+        when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of());
+
+        pilotScopedTo(ownedAsset.id()).perform(get("/api/streams/{streamId}/detections", streamId.value()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void snapshotReturns404ForAPilotAssignedElsewhereOnARunningStream() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+
+        pilotScopedTo(otherAssetId).perform(get("/api/streams/{streamId}/snapshot", streamId.value()))
+                .andExpect(status().isNotFound());
+
+        verify(streamService, never()).latestFrame(any());
+    }
+
+    @Test
+    void snapshotReturns200ForAPilotAssignedToTheStreamsOwnAsset() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+        byte[] jpegBytes = tinyJpeg(2, 2);
+        VideoFrame frame = new VideoFrame(streamId, 0, Instant.now(), 2, 2, PixelFormat.JPEG,
+                ByteBuffer.wrap(jpegBytes));
+        when(streamService.latestFrame(streamId)).thenReturn(Optional.of(frame));
+
+        pilotScopedTo(ownedAsset.id()).perform(get("/api/streams/{streamId}/snapshot", streamId.value()))
+                .andExpect(status().isOk());
     }
 }

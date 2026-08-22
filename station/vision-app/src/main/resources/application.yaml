@@ -482,6 +482,15 @@ vision:
     # entirely) and the port falls back to a no-op -- steady-state polling is the
     # only way to observe fleet/telemetry/detections/event changes in that case.
     enabled: true
+    # How long LiveAssetAccess (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3) reuses a resolved
+    # "may this caller see this asset's telemetry/detections/geo?" answer before re-deriving it
+    # from a fresh VisibilityScope. This is the staleness window a revoked (or newly granted)
+    # asset assignment buys: for up to this long after the change, a mid-connection viewer may
+    # still receive -- or still be denied -- that asset's live updates. Shorter than
+    # MapVisibility's own 10s cache (docs/plans/done/MAP-REWORK-PLAN.md §4.3): this one bounds
+    # exposure of an aircraft's live position, a narrower and more sensitive fact than a map
+    # layer's mere existence.
+    asset-access-ttl-ms: 5000
 
   # --- vision-api: per-principal request rate limit (docs/plans/active/SCALE-100-PLAN.md S6) ---
   # (the rest of vision.api.* is the commented tunables block further down; this

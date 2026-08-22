@@ -12,9 +12,12 @@ import com.drones.vision.api.dto.TrackResponse;
 import com.drones.vision.api.dto.TrackStatsResponse;
 import com.drones.vision.api.dto.UpdateStreamConfigRequest;
 import com.drones.vision.api.dto.UpdateStreamConfigResponse;
+import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
 import com.drones.vision.perception.application.stream.StreamService;
+import com.drones.vision.perception.application.stream.TrackingConfigPatch;
+import com.drones.vision.perception.application.stream.PipelineConfigPatch;
 import com.drones.vision.perception.application.stream.UpdateOutcome;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
@@ -70,6 +73,22 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  * <p>{@link #snapshot} (docs/plans/done/MVP3-PLAN.md C-a) is the one binary (non-JSON) response in this
  * controller — a JPEG thumbnail of a running stream's latest published frame, cheap enough for a
  * manager dashboard to poll per-visible-tile.
+ *
+ * <h2>Authority (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2)</h2>
+ * "No acting user is threaded through here" (above) was true for attribution, but not for
+ * authorization — before this wave, none of these eight handlers checked whether the caller's
+ * {@link com.drones.vision.platform.VisibilityScope} reached the stream's owning asset at all, so a
+ * PILOT scoped to two assets could list, read, snapshot and reconfigure any stream in the fleet.
+ * {@link #list} now filters to visible streams via {@link StreamAccess#filterVisible}; every other
+ * handler calls {@link StreamAccess#requireVisible(StreamId)} (or, for {@link #start}, the {@code
+ * DeviceId} overload, since no stream exists yet) — an invisible target 404s exactly like an
+ * unknown id, the same "existence hides itself" idiom {@link AssetController#details} uses. See
+ * {@link StreamAccess}'s own javadoc for why this is one check reused for both reads and writes,
+ * not a read/write split. This pushes the constructor one parameter past this codebase's
+ * five-parameter target (.claude/skills/java-clean-code/SKILL.md §3): none of the other five
+ * collaborators can absorb {@link StreamAccess} without conflating an authorization concern into an
+ * unrelated one (URL resolution, JPEG encoding, detection-demand bookkeeping), so the sixth
+ * parameter is accepted deliberately rather than forced into a false merge.
  */
 @RestController
 public class StreamController {
@@ -95,11 +114,14 @@ public class StreamController {
      * rather than each taking its own constructor slot.
      */
     private final StreamDetectionSupport streamDetectionSupport;
+    /** The authority seam every handler below consults — see this class's own "Authority" section. */
+    private final StreamAccess streamAccess;
 
     public StreamController(StreamService streamService, StreamPublisherPort streamPublisherPort,
                              DetectionRepositoryPort detectionRepositoryPort,
                              SnapshotJpegEncoder snapshotJpegEncoder,
-                             StreamDetectionSupport streamDetectionSupport) {
+                             StreamDetectionSupport streamDetectionSupport,
+                             StreamAccess streamAccess) {
         this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
         this.streamPublisherPort =
                 Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
@@ -109,6 +131,7 @@ public class StreamController {
                 Objects.requireNonNull(snapshotJpegEncoder, "snapshotJpegEncoder must not be null");
         this.streamDetectionSupport =
                 Objects.requireNonNull(streamDetectionSupport, "streamDetectionSupport must not be null");
+        this.streamAccess = Objects.requireNonNull(streamAccess, "streamAccess must not be null");
     }
 
     /**
@@ -128,14 +151,23 @@ public class StreamController {
      * @param deviceId the device to stream from
      * @param request  optional overrides; {@code null}/absent means use every default
      * @return the started stream's id and (if available) its viewer URLs
+     * @throws java.util.NoSuchElementException if the caller's scope may not reach this device's
+     *                                            asset (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2)
+     *                                            — the same 404 an unknown device already produces
      */
     @PostMapping("/api/devices/{deviceId}/stream")
     @ResponseStatus(HttpStatus.CREATED)
     public StartStreamResponse start(@PathVariable String deviceId,
                                       @RequestBody(required = false) StartStreamRequest request) {
+        DeviceId device = DeviceId.of(deviceId);
         StartStreamRequest body = request == null ? StartStreamRequest.EMPTY : request;
-        StreamId streamId = streamService.start(DeviceId.of(deviceId),
-                body.mergeOnto(streamDetectionSupport.defaultConfig()), body.trackingPatch());
+        // Body validation (a malformed override is a 400) runs before the scope guard's 404, so a
+        // bad request never depends on the caller's scope -- the same ordering AssetController's
+        // requireManageable documents.
+        PipelineConfig config = body.mergeOnto(streamDetectionSupport.defaultConfig());
+        TrackingConfigPatch tracking = body.trackingPatch();
+        streamAccess.requireVisible(device);
+        StreamId streamId = streamService.start(device, config, tracking);
         StartStreamResponse response = new StartStreamResponse(streamId.value().toString(), viewUrl(streamId),
                 whepUrl(streamId), streamService.burnedIn(streamId));
         LOG.log(System.Logger.Level.INFO, () -> "Started stream " + response.streamId() + " for device " + deviceId
@@ -152,12 +184,15 @@ public class StreamController {
      * mere presence in this list, and had no way at all to learn whether detection was on for a
      * stream — so it rendered its own local guess instead.
      *
-     * @return the active streams, each with its viewer URLs if available, its video-flow state, the
-     *         operator's detect-on/off intent, and which CV gate currently explains its boxes
+     * @return the active streams the caller's scope may reach, each with its viewer URLs if
+     *         available, its video-flow state, the operator's detect-on/off intent, and which CV
+     *         gate currently explains its boxes
      */
     @GetMapping("/api/streams")
     public List<ActiveStreamResponse> list() {
-        return streamService.streams().stream()
+        // Filtered, not all-or-nothing 403'd (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2) -- a PILOT
+        // still sees their own assigned assets' streams, just not the rest of the fleet's.
+        return streamAccess.filterVisible(streamService.streams()).stream()
                 .map(s -> ActiveStreamResponse.from(s, viewUrl(s.streamId()), whepUrl(s.streamId()),
                         streamService.detectionState(s.streamId()).orElse(null)))
                 .toList();
@@ -169,11 +204,18 @@ public class StreamController {
      * still returns 204 — there is no "stream not found" error case.
      *
      * @param streamId the stream to stop
+     * @throws java.util.NoSuchElementException if {@code streamId} currently names a running stream
+     *                                            whose asset the caller's scope may not reach
+     *                                            (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2) — an
+     *                                            id that does not currently resolve to a running
+     *                                            stream keeps its pre-existing no-op/204 behavior
      */
     @DeleteMapping("/api/streams/{streamId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void stop(@PathVariable String streamId) {
-        streamService.stop(StreamId.of(streamId));
+        StreamId id = StreamId.of(streamId);
+        streamAccess.requireVisible(id);
+        streamService.stop(id);
         LOG.log(System.Logger.Level.INFO, () -> "Stopped stream " + streamId);
     }
 
@@ -203,7 +245,10 @@ public class StreamController {
      * @param request  the knobs to change; the whole body may be absent (a no-op patch)
      * @return the updated stream's id, whether the model was re-armed, and whether tracking changed
      * @throws java.util.NoSuchElementException if {@code streamId} is unknown or not running on this
-     *                                            instance (→404)
+     *                                            instance (→404), or is running but the caller's
+     *                                            scope may not reach its asset
+     *                                            (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2 — same
+     *                                            404, existence hidden either way)
      * @throws IllegalArgumentException          if the merged config fails {@link PipelineConfig}'s
      *                                            own validation, e.g. confidence outside [0,1], an
      *                                            unknown tracking {@code mode}, or a {@code lock}
@@ -214,7 +259,11 @@ public class StreamController {
                                                      @RequestBody(required = false) UpdateStreamConfigRequest request) {
         UpdateStreamConfigRequest body = request != null ? request : UpdateStreamConfigRequest.EMPTY;
         StreamId id = StreamId.of(streamId);
-        UpdateOutcome outcome = streamService.updateConfig(id, body.toPatch());
+        // Patch validation (a malformed value is a 400) runs before the scope guard's 404 -- same
+        // ordering as #start.
+        PipelineConfigPatch patch = body.toPatch();
+        streamAccess.requireVisible(id);
+        UpdateOutcome outcome = streamService.updateConfig(id, patch);
         return new UpdateStreamConfigResponse(id.value().toString(), outcome.modelReArmed(),
                 outcome.trackingChanged());
     }
@@ -233,11 +282,15 @@ public class StreamController {
      * @param streamId the running stream to inspect, as a canonical UUID string
      * @return the configuration the pipeline is running right now
      * @throws java.util.NoSuchElementException if {@code streamId} is unknown or not running on this
-     *                                            instance (&rarr;404)
+     *                                            instance (&rarr;404), or is running but the
+     *                                            caller's scope may not reach its asset
+     *                                            (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2 — same
+     *                                            404)
      */
     @GetMapping("/api/streams/{streamId}/config")
     public StreamConfigResponse config(@PathVariable String streamId) {
         StreamId id = StreamId.of(streamId);
+        streamAccess.requireVisible(id);
         return streamService.config(id)
                 .map(StreamConfigResponse::from)
                 .orElseThrow(() -> new NoSuchElementException("Unknown or stopped stream: " + streamId));
@@ -249,10 +302,13 @@ public class StreamController {
      * "Following #N — release" chip, and the flow strip that puts "the detector stopped running and
      * the tracker took over" on screen instead of in {@code htop}.
      *
-     * <p><b>Never errors.</b> An unknown or stopped stream is a 200 with an empty list, {@code
-     * lockedTrackId: 0} and no {@code stats} — the same forgiving idiom {@link #detections} uses,
-     * and the reason a polling client needs one code path instead of two. Only a malformed UUID is a
-     * 400.
+     * <p><b>Never errors for an unknown or stopped stream</b> — that case is a 200 with an empty
+     * list, {@code lockedTrackId: 0} and no {@code stats}, the same forgiving idiom {@link
+     * #detections} uses, and the reason a polling client needs one code path instead of two. Only a
+     * malformed UUID, or a <em>currently running</em> stream whose asset the caller's scope may not
+     * reach (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2), is an error — the latter 404s exactly
+     * like an unknown stream, so a caller polling a stream that just left their scope cannot tell
+     * the two cases apart.
      *
      * <p>{@code lockedTrackId} is hoisted to the top level rather than living inside {@code stats}
      * (§4.E): it is the confirmed-from-the-wire held target, and the chip that reads it must stay
@@ -268,10 +324,13 @@ public class StreamController {
      * @return the stream's tracks, its held target, the window's counters when there are any, and
      *         which detection gate currently explains its boxes-or-no-boxes state (docs/plans/active/CV-DEMAND-PLAN.md
      *         &sect;3.6)
+     * @throws java.util.NoSuchElementException if {@code streamId} is currently running on a device
+     *                                            whose asset the caller's scope may not reach
      */
     @GetMapping("/api/streams/{streamId}/tracks")
     public StreamTracksResponse tracks(@PathVariable String streamId) {
         StreamId id = StreamId.of(streamId);
+        streamAccess.requireVisible(id);
         List<TrackResponse> tracks = streamService.tracks(id).stream()
                 .filter(tracked -> tracked.detection().track() != null)
                 .map(TrackResponse::from)
@@ -312,17 +371,26 @@ public class StreamController {
      *                 {@link DetectionQuery}'s own validation); defaults to {@value
      *                 #DEFAULT_DETECTIONS_LIMIT}
      * @return the stream's recent detection results, newest first
+     * @throws java.util.NoSuchElementException if {@code streamId} is currently running on a device
+     *                                            whose asset the caller's scope may not reach
+     *                                            (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2) — an
+     *                                            unknown/stopped stream keeps its pre-existing empty
+     *                                            200
      */
     @GetMapping("/api/streams/{streamId}/detections")
     public List<DetectionResultResponse> detections(
             @PathVariable String streamId,
             @RequestParam(defaultValue = "" + DEFAULT_DETECTIONS_LIMIT) int limit) {
         StreamId id = StreamId.of(streamId);
+        // limit validation (a non-positive value is a 400) runs before the scope guard's 404, same
+        // ordering as #start/#updateConfig.
+        DetectionQuery query = new DetectionQuery(id, null, null, null, limit);
+        streamAccess.requireVisible(id);
         // This read is itself detection demand (docs/plans/active/CV-DEMAND-PLAN.md §3.5, the
         // poll half): a Wall/Live page polling this endpoint keeps the stream detecting, exactly
-        // like an open SSE `detections:<assetId>` subscription does.
+        // like an open SSE `detections:<assetId>` subscription does. Touched only once the caller is
+        // known to be allowed to read this stream at all.
         streamDetectionSupport.touched(id);
-        DetectionQuery query = new DetectionQuery(id, null, null, null, limit);
         return detectionRepositoryPort.query(query).stream()
                 .sorted(Comparator.comparing(DetectionResult::capturedAt).reversed())
                 .map(DetectionResultResponse::from)
@@ -342,13 +410,17 @@ public class StreamController {
      *
      * @param streamId the stream to snapshot, as a canonical UUID string
      * @return the JPEG bytes
-     * @throws NoSuchElementException if the stream is unknown, or is running but hasn't published a
-     *                                 frame yet (both → 404, same mapping as every other unknown-id
-     *                                 case in this codebase)
+     * @throws NoSuchElementException if the stream is unknown, is running but hasn't published a
+     *                                 frame yet, or is running but the caller's scope may not reach
+     *                                 its asset (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2) — all
+     *                                 three → 404, same mapping as every other unknown-id case in
+     *                                 this codebase
      */
     @GetMapping(value = "/api/streams/{streamId}/snapshot", produces = MediaType.IMAGE_JPEG_VALUE)
     public ResponseEntity<byte[]> snapshot(@PathVariable String streamId) {
-        VideoFrame frame = streamService.latestFrame(StreamId.of(streamId))
+        StreamId id = StreamId.of(streamId);
+        streamAccess.requireVisible(id);
+        VideoFrame frame = streamService.latestFrame(id)
                 .orElseThrow(() -> new NoSuchElementException("No frame available for stream: " + streamId));
         byte[] jpeg = snapshotJpegEncoder.encode(frame);
         return ResponseEntity.ok()

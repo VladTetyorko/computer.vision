@@ -18,6 +18,9 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
+import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.api.security.PrincipalResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -36,6 +39,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -75,6 +79,45 @@ class AssetStreamControllerTest {
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new AssetStreamController(assetService, assetStreamService, currentUser,
                         streamViewerLinks, PipelineConfig.defaults()))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+    }
+
+    /**
+     * A {@link CurrentUser} answering with {@link #ownership}/{@link #ownerId} but a caller-supplied
+     * {@link VisibilityScope}, for the docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2 authority tests
+     * below -- same idiom {@code AssetControllerTest} uses. {@link PrincipalResolver#viewer()} is
+     * never called by this controller, so it throws rather than fake a map viewer no test here needs.
+     */
+    private CurrentUser currentUserWithScope(VisibilityScope scope) {
+        return new CurrentUser(new PrincipalResolver() {
+            @Override
+            public UserId userId() {
+                return ownerId;
+            }
+
+            @Override
+            public Ownership ownership() {
+                return ownership;
+            }
+
+            @Override
+            public VisibilityScope scope() {
+                return scope;
+            }
+
+            @Override
+            public MapAccessPolicy.Viewer viewer() {
+                throw new UnsupportedOperationException("AssetStreamController never calls viewer()");
+            }
+        });
+    }
+
+    private MockMvc mockMvcFor(CurrentUser user) {
+        StreamViewerLinks streamViewerLinks = new StreamViewerLinks(streamPublisherPort, streamService);
+        return MockMvcBuilders
+                .standaloneSetup(new AssetStreamController(assetService, assetStreamService, user, streamViewerLinks,
+                        PipelineConfig.defaults()))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -222,5 +265,36 @@ class AssetStreamControllerTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(assetService);
+    }
+
+    // ---- docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2: authority --------------------------------
+    //
+    // Before this wave, #stopStream ran with no scope check at all -- any caller could stop any
+    // asset's stream. These tests fail without StreamAccess's sibling here, #requireInScope: a
+    // PILOT scoped to no assets (or a different one) must 404 on `assetId`, while a PILOT scoped to
+    // `assetId` itself must keep working, per this wave's hard constraint.
+
+    @Test
+    void stopStreamReturns404ForAPilotScopedToADifferentAsset() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(assetService.details(any(VisibilityScope.class), eq(assetId)))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of())));
+
+        pilotMvc.perform(delete("/api/assets/{id}/stream", assetId.value()))
+                .andExpect(status().isNotFound());
+
+        verify(assetService, never()).stopStream(any());
+    }
+
+    @Test
+    void stopStreamReturns204ForAPilotScopedToTheAsset() throws Exception {
+        AssetId assetId = AssetId.random();
+        MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(assetId))));
+
+        pilotMvc.perform(delete("/api/assets/{id}/stream", assetId.value()))
+                .andExpect(status().isNoContent());
+
+        verify(assetService).stopStream(assetId);
     }
 }
