@@ -111,7 +111,7 @@ class AssetStreamControllerTest {
     }
 
     private MockMvc mockMvcFor(CurrentUser user) {
-        StreamViewerLinks streamViewerLinks = new StreamViewerLinks(streamPublisherPort, streamService);
+        StreamViewerLinks streamViewerLinks = new StreamViewerLinks(streamPublisherPort);
         return MockMvcBuilders
                 .standaloneSetup(new AssetStreamController(assetService, assetStreamService, user, streamViewerLinks,
                         PipelineConfig.defaults()))
