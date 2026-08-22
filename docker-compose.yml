@@ -435,7 +435,28 @@ services:
       # station/vision-app/MODULE.md's "Auth / session security" section).
       VISION_AUTH_ENABLED: "true"
     ports:
-      - "8080:8080"
+      - "8080:8080" # REST + web console + WebSocket (/ws/manual-control) + the HLS proxy
+      # MAVLink telemetry AND commands, both directions, on this ONE UDP port. A
+      # `mavlink` device's `udp://0.0.0.0:14550` URI means BIND, not dial-out: the
+      # vehicle (SITL, an ELRS backpack, a companion Pi's mavlink-router, an ESP32
+      # bridge -- see infra/edge/*.md, every recipe there says 14550) pushes to us,
+      # and MavlinkGateway sends RC_CHANNELS_OVERRIDE / COMMAND_LONG back out of the
+      # same socket to the source address it learned from that vehicle's HEARTBEAT.
+      # Without this publish the container never hears a vehicle at all, so nothing
+      # downstream of it -- telemetry, manual control, arming -- can work: `docker
+      # compose up` was reachable only over TCP 8080 until this line existed.
+      # Second and later vehicles: add "14551:14551/udp" etc., the port-per-vehicle
+      # convention infra/sitl/README.md already uses for multi-instance SITL.
+      - "14550:14550/udp"
+    # Known limitation of publishing ports on a bridge network rather than
+    # `network_mode: host`: ONVIF/WS-Discovery and mDNS are MULTICAST, and multicast
+    # does not cross the bridge, so adapter-discovery finds nothing under compose
+    # even though V4L2 scanning and manual device registration are unaffected.
+    # `network_mode: host` would fix discovery but costs this file the compose DNS
+    # names (`postgres`, `mediamtx` would have to become localhost), collapses the
+    # deliberate 18888/18889/19996/19997 host remapping, and is Linux-only -- so it
+    # is not the default. Video ingest needs NO inbound port either way: RTSP/MJPEG
+    # sources are dialled OUT to (the ESP32-CAM case included).
     healthcheck:
       # docs/plans/active/SYSTEM-STATUS-PLAN.md §4.4: liveness probe against the actuator health
       # endpoint added there (management.endpoints.web.exposure.include: health, application.yaml) --
