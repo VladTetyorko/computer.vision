@@ -1,5 +1,6 @@
 package com.drones.vision.api.live;
 
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
 import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.identity.application.scope.ScopeResolver;
@@ -122,9 +123,10 @@ public class LiveAssetAccess {
      * @param userId who the connection belongs to
      * @return a predicate over a per-asset topic's {@link AssetId}
      */
-    public Predicate<AssetId> deliveryPredicate(UserId userId) {
+    public Predicate<AssetId> deliveryPredicate(UserId userId, VisibilityScope connectScope) {
         Objects.requireNonNull(userId, "userId must not be null");
-        return assetId -> canView(userId, assetId);
+        Objects.requireNonNull(connectScope, "connectScope must not be null");
+        return assetId -> canView(userId, assetId, connectScope);
     }
 
     /**
@@ -139,14 +141,15 @@ public class LiveAssetAccess {
      * @throws IllegalArgumentException if an entry is malformed (unchanged behavior — 400 via
      *                                   {@code ApiExceptionHandler})
      */
-    public String filterTopicsParam(UserId userId, String topicsParam) {
+    public String filterTopicsParam(UserId userId, String topicsParam, VisibilityScope requestScope) {
         Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(requestScope, "requestScope must not be null");
         Set<LiveTopic> requested = LiveTopic.parseTopicsParam(topicsParam);
         if (requested.isEmpty()) {
             return topicsParam; // nothing requested -- nothing to filter, and null/blank stays as-is
         }
         return requested.stream()
-                .filter(topic -> topic.assetId() == null || canView(userId, topic.assetId()))
+                .filter(topic -> topic.assetId() == null || canView(userId, topic.assetId(), requestScope))
                 .map(LiveTopic::wire)
                 .collect(Collectors.joining(","));
     }
@@ -165,13 +168,15 @@ public class LiveAssetAccess {
      * @return {@code request}, with any currently-invisible entry removed from {@code add}
      * @throws IllegalArgumentException if an {@code add} entry is malformed (unchanged behavior)
      */
-    public UpdateLiveTopicsRequest filterAdditions(UserId userId, UpdateLiveTopicsRequest request) {
+    public UpdateLiveTopicsRequest filterAdditions(UserId userId, UpdateLiveTopicsRequest request,
+                                                   VisibilityScope requestScope) {
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(request, "request must not be null");
+        Objects.requireNonNull(requestScope, "requestScope must not be null");
         List<String> keptAdds = request.add().stream()
                 .filter(raw -> {
                     LiveTopic topic = LiveTopic.parse(raw);
-                    return topic.assetId() == null || canView(userId, topic.assetId());
+                    return topic.assetId() == null || canView(userId, topic.assetId(), requestScope);
                 })
                 .toList();
         return new UpdateLiveTopicsRequest(keptAdds, request.remove());
@@ -182,25 +187,37 @@ public class LiveAssetAccess {
      * (userId, assetId)} cache when fresh, otherwise re-derived (docs/plans/active/LIVE-SCOPE-PLAN.md
      * §2, W3's "re-resolve rather than trusting a snapshot").
      */
-    boolean canView(UserId userId, AssetId assetId) {
+    boolean canView(UserId userId, AssetId assetId, VisibilityScope requestScope) {
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(assetId, "assetId must not be null");
+        Objects.requireNonNull(requestScope, "requestScope must not be null");
         Key key = new Key(userId, assetId);
         long now = System.currentTimeMillis();
         Entry cached = cache.get(key);
         if (cached != null && now - cached.resolvedAt() <= ttlMillis) {
             return cached.visible();
         }
-        boolean visible = resolve(userId, assetId);
+        boolean visible = resolve(userId, assetId, requestScope);
         store(key, new Entry(visible, now));
         return visible;
     }
 
-    /** A user that no longer exists (deleted mid-connection) sees nothing -- the same fail-closed stance as an unresolvable target elsewhere in this seam. */
-    private boolean resolve(UserId userId, AssetId assetId) {
+    /**
+     * Re-derives the answer from the repository, because a scope can change mid-connection.
+     *
+     * <p>When the {@link UserId} resolves to no row, the caller's own scope decides — but only if it
+     * is unbounded. That is not a loophole, it is the one principal that has no row <em>by design</em>:
+     * with {@code vision.auth.enabled=false} (the default for a local run) {@code CurrentUser} is a
+     * synthetic dev admin who was never persisted, and re-resolving it from the users table denied
+     * every per-asset topic — which silently took the whole live plane down with it, detection demand
+     * included, since demand is derived from who is subscribed. A real user who was deleted
+     * mid-connection has a bounded scope, so this still fails closed for them.
+     */
+    private boolean resolve(UserId userId, AssetId assetId, VisibilityScope requestScope) {
         return userRepositoryPort.findById(userId)
                 .map(user -> streamAccess.visibleAsset(assetId, scopeResolver.scopeFor(user)))
-                .orElse(false);
+                .orElseGet(() -> requestScope.canAdminister()
+                        && streamAccess.visibleAsset(assetId, requestScope));
     }
 
     private void store(Key key, Entry entry) {

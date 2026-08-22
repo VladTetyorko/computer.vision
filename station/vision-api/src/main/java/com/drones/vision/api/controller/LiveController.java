@@ -99,9 +99,9 @@ public class LiveController {
                               @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
         Long since = (lastEventId == null || lastEventId.isBlank()) ? null : Long.parseLong(lastEventId);
         UserId userId = currentUser.userId();
-        String visibleTopics = assetAccess.filterTopicsParam(userId, topics);
+        String visibleTopics = assetAccess.filterTopicsParam(userId, topics, currentUser.scope());
         return registry.connect(visibleTopics, since, userId, mapVisibility.deliveryPredicate(currentUser.viewer()),
-                assetAccess.deliveryPredicate(userId));
+                assetAccess.deliveryPredicate(userId, currentUser.scope()));
     }
 
     /**
@@ -126,6 +126,6 @@ public class LiveController {
                                                   @RequestBody(required = false) UpdateLiveTopicsRequest request) {
         UserId userId = currentUser.userId();
         UpdateLiveTopicsRequest body = request == null ? UpdateLiveTopicsRequest.EMPTY : request;
-        return registry.updateTopics(connectionId, assetAccess.filterAdditions(userId, body), userId);
+        return registry.updateTopics(connectionId, assetAccess.filterAdditions(userId, body, currentUser.scope()), userId);
     }
 }
