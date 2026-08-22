@@ -41,4 +41,11 @@ public interface ManualControlSession {
 
     /** {@code false} once released, whether explicitly or by the watchdog. */
     boolean active();
+
+    /**
+     * The engaged link's own keepalive cadence in whole Hz — echoed to the client in its {@code
+     * engaged} frame so it can pace its own sends against the rate the adapter actually transmits
+     * at, rather than a number mirrored by hand (docs/plans/active/RC-LATENCY-PLAN.md §2 C).
+     */
+    int rateHz();
 }

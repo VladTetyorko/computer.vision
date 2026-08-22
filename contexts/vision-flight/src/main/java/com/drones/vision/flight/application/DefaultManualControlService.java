@@ -324,6 +324,11 @@ public final class DefaultManualControlService implements ManualControlService {
         }
 
         @Override
+        public int rateHz() {
+            return link.rateHz();
+        }
+
+        @Override
         public ChannelMap channelMap() {
             return channelMap;
         }

@@ -13,6 +13,7 @@ import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongSupplier;
 
 /**
  * MAVLink's manual-control microservice (plan §2.2, Family B — streaming): a fixed-rate
@@ -27,6 +28,23 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * wire (the spec defines no rate and no failsafe-on-silence for RC override — plan §2.2); giving this
  * class a way to await a reply would let a future change quietly grow a request/response dependency
  * where the protocol has none.
+ *
+ * <h2>Two rates, not one: a ceiling and a keepalive</h2>
+ * A single fixed rate used to serve as both "how often we transmit" and "how long a new stick
+ * position waits", which cost a frame up to a full period of dead time for no protocol reason
+ * (docs/plans/active/RC-LATENCY-PLAN.md §1). The rate is now split:
+ * <ul>
+ *   <li><b>{@code coalescePeriod}</b> ({@code 1/maxOverrideHz}) — the wire <em>ceiling</em>. Never
+ *       transmit faster than this, however fast the caller writes.</li>
+ *   <li><b>{@code keepalivePeriod}</b> ({@code 1/clampedOverrideHz}) — the wire <em>floor</em>. An
+ *       unchanged mailbox still transmits this often, so an aircraft never sees a gap long enough
+ *       to expire its own override timeout.</li>
+ * </ul>
+ * A write that arrives at least {@code coalescePeriod} after the last transmit is pushed to the
+ * wire <em>immediately</em>, via a {@link TxScheduler#submit one-shot}, instead of waiting for the
+ * next tick. The periodic task therefore stops being the send loop and becomes the keepalive: it
+ * transmits only when the mailbox is dirty or the floor is due, so the combined wire rate is
+ * bounded by the ceiling rather than being the sum of the two paths.
  *
  * <h2>Re-resolution every tick, never cached</h2>
  * A peer's {@code sourceAddress} refreshes on every inbound datagram and its claim can (rarely)
@@ -48,28 +66,63 @@ public final class ManualControlService {
     private final FrameSink sink;
     private final TxScheduler scheduler;
     private final PeerDirectory peers;
-    private final Duration tickPeriod;
+    private final Duration coalescePeriod;
+    private final Duration keepalivePeriod;
     private final int releaseFrames;
+    private final LongSupplier nanoClock;
 
     public ManualControlService(FrameSink sink, TxScheduler scheduler, PeerDirectory peers, MavlinkCoreSettings.Rc rc) {
-        this(sink, scheduler, peers, Duration.ofMillis(1000L / Objects.requireNonNull(rc, "rc").clampedOverrideHz()),
-                rc.releaseFrames());
+        this(sink, scheduler, peers,
+                Duration.ofMillis(1000L / Objects.requireNonNull(rc, "rc").maxOverrideHz()),
+                Duration.ofMillis(1000L / rc.clampedOverrideHz()),
+                rc.releaseFrames(),
+                System::nanoTime);
     }
 
-    /** Test seam: an explicit tick period/release-frame count, bypassing the Hz clamp. */
+    /**
+     * Test seam: one explicit period serving as both ceiling and keepalive, bypassing the Hz clamp
+     * — reproduces the single-rate behaviour this class had before the split, plus
+     * transmit-on-arrival within that same rate.
+     */
     ManualControlService(FrameSink sink, TxScheduler scheduler, PeerDirectory peers, Duration tickPeriod, int releaseFrames) {
+        this(sink, scheduler, peers, tickPeriod, tickPeriod, releaseFrames, System::nanoTime);
+    }
+
+    /**
+     * Test seam: as above, plus a deterministic monotonic clock, so a manually driven
+     * {@link TxScheduler} can step past the ceiling/keepalive without real sleeps.
+     */
+    ManualControlService(FrameSink sink, TxScheduler scheduler, PeerDirectory peers, Duration tickPeriod,
+                         int releaseFrames, LongSupplier nanoClock) {
+        this(sink, scheduler, peers, tickPeriod, tickPeriod, releaseFrames, nanoClock);
+    }
+
+    private ManualControlService(FrameSink sink, TxScheduler scheduler, PeerDirectory peers,
+                                 Duration coalescePeriod, Duration keepalivePeriod, int releaseFrames,
+                                 LongSupplier nanoClock) {
         this.sink = Objects.requireNonNull(sink, "sink");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.peers = Objects.requireNonNull(peers, "peers");
-        Objects.requireNonNull(tickPeriod, "tickPeriod");
-        if (tickPeriod.isZero() || tickPeriod.isNegative()) {
-            throw new IllegalArgumentException("tickPeriod must be positive, got " + tickPeriod);
+        requirePositive(coalescePeriod, "coalescePeriod");
+        requirePositive(keepalivePeriod, "keepalivePeriod");
+        if (coalescePeriod.compareTo(keepalivePeriod) > 0) {
+            throw new IllegalArgumentException("coalescePeriod must not exceed keepalivePeriod (a ceiling below "
+                    + "the floor would starve the keepalive), got " + coalescePeriod + " > " + keepalivePeriod);
         }
-        this.tickPeriod = tickPeriod;
+        this.coalescePeriod = coalescePeriod;
+        this.keepalivePeriod = keepalivePeriod;
         if (releaseFrames < 1) {
             throw new IllegalArgumentException("releaseFrames must be >= 1, got " + releaseFrames);
         }
         this.releaseFrames = releaseFrames;
+        this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
+    }
+
+    private static void requirePositive(Duration period, String name) {
+        Objects.requireNonNull(period, name);
+        if (period.isZero() || period.isNegative()) {
+            throw new IllegalArgumentException(name + " must be positive, got " + period);
+        }
     }
 
     /**
@@ -90,8 +143,11 @@ public final class ManualControlService {
     }
 
     /**
-     * Overwrites {@code target}'s latest-wins mailbox with {@code channels}. Non-blocking, never
-     * touches the wire itself; a silent no-op once {@code link} has begun releasing.
+     * Overwrites {@code link}'s latest-wins mailbox with {@code channels} and, when the wire
+     * ceiling has already elapsed, schedules an immediate {@link TxScheduler#submit one-shot}
+     * transmit rather than letting the frame wait for the next tick (see the class javadoc's
+     * two-rates section). Non-blocking, and it still never touches the wire on the caller's own
+     * thread; a silent no-op once {@code link} has begun releasing.
      *
      * @throws IllegalArgumentException if {@code link} was not created by this service's own {@link #engage}
      */
@@ -102,7 +158,7 @@ public final class ManualControlService {
 
     /**
      * Writes an all-{@link RcChannels#RELEASE} frame into {@code link}'s mailbox, then blocks the
-     * <b>caller's</b> thread long enough ({@code releaseFrames * tickPeriod}) for the still-ticking
+     * <b>caller's</b> thread long enough ({@code releaseFrames * coalescePeriod}) for the still-ticking
      * relay to actually transmit that burst before the periodic task is stopped. Idempotent — a
      * second {@code release} on an already-releasing link is an immediate no-op.
      *
@@ -129,17 +185,26 @@ public final class ManualControlService {
     private final class RcLinkRuntime implements ManualControlLink {
 
         private final PeerId target;
+        private final String taskName;
         private final TxScheduler.Handle handle;
         private final Object lock = new Object();
+        private final long coalesceNanos = coalescePeriod.toNanos();
+        private final long keepaliveNanos = keepalivePeriod.toNanos();
 
         private RcChannels mailbox = RcChannels.allIgnore(V1_CHANNEL_COUNT); // guarded by lock
+        private boolean dirty = false; // guarded by lock -- mailbox holds a value not yet transmitted
+        private boolean wakePending = false; // guarded by lock -- a one-shot is already queued
+        private long lastTransmitNanos; // guarded by lock -- last frame handed to the sink, or dropped unreachable
         private boolean releasing = false; // guarded by lock
         private int releaseBudgetRemaining = 0; // guarded by lock
         private volatile boolean lastReachable = true;
 
         RcLinkRuntime(PeerId target) {
             this.target = target;
-            this.handle = scheduler.repeat("mavlink-rc-" + target, tickPeriod, this::tick);
+            this.taskName = "mavlink-rc-" + target;
+            // Backdated so the very first tick transmits at once, as this class has always done.
+            this.lastTransmitNanos = nanoClock.getAsLong() - keepaliveNanos;
+            this.handle = scheduler.repeat(taskName, coalescePeriod, this::transmitIfDue);
         }
 
         ManualControlService owner() {
@@ -154,12 +219,34 @@ public final class ManualControlService {
         }
 
         void setChannels(RcChannels channels) {
+            boolean wake;
             synchronized (lock) {
                 if (releasing) {
                     return; // silent no-op once releasing has begun
                 }
                 mailbox = channels;
+                dirty = true;
+                wake = !wakePending && nanoClock.getAsLong() - lastTransmitNanos >= coalesceNanos;
+                if (wake) {
+                    wakePending = true;
+                }
             }
+            if (wake) {
+                // Outside the lock, always: never call foreign code holding this link's monitor.
+                scheduler.submit(taskName, this::coalescedWake);
+            }
+        }
+
+        /**
+         * A {@link TxScheduler#submit} one-shot. The ceiling had already elapsed when the frame was
+         * written, so it reaches the wire now instead of waiting out the rest of a tick it had no
+         * protocol reason to wait for.
+         */
+        private void coalescedWake() {
+            synchronized (lock) {
+                wakePending = false;
+            }
+            transmitIfDue();
         }
 
         void release() {
@@ -174,20 +261,33 @@ public final class ManualControlService {
                 releaseFrame = mailbox;
             }
             LOG.log(Level.INFO, "Releasing manual control for " + target + " -- " + releaseFrames + " release frame(s)");
-            sleepUninterruptibly(releaseFrames * tickPeriod.toMillis());
+            sleepUninterruptibly(releaseFrames * coalescePeriod.toMillis());
             handle.close();
         }
 
-        /** Runs on whatever thread {@link TxScheduler} drives; never overlaps itself (fixed-rate contract). */
-        private void tick() {
+        /**
+         * Runs on whatever thread {@link TxScheduler} drives — either the periodic keepalive tick or
+         * a {@link #coalescedWake} one-shot. The whole decision is taken under {@link #lock}, so the
+         * two paths can never double-send and the combined wire rate stays bounded by the ceiling.
+         */
+        private void transmitIfDue() {
             RcChannels toSend;
             synchronized (lock) {
+                long now = nanoClock.getAsLong();
                 if (releasing) {
                     if (releaseBudgetRemaining <= 0) {
                         return; // burst already spent -- true silence
                     }
                     releaseBudgetRemaining--;
+                } else if (dirty) {
+                    if (now - lastTransmitNanos < coalesceNanos) {
+                        return; // ceiling: something reached the wire too recently
+                    }
+                } else if (now - lastTransmitNanos < keepaliveNanos) {
+                    return; // nothing new to say and the floor is not due yet
                 }
+                dirty = false;
+                lastTransmitNanos = now;
                 toSend = mailbox;
             }
             Peer current = peers.peer(target);

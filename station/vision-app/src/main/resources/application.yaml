@@ -539,17 +539,29 @@ vision:
     #   battery-drain-percent-per-second: 0.05
 
 
-  # --- RC manual-control relay (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md, RC-CONTROL Phase 1) ---
+  # --- RC manual-control relay (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md, RC-CONTROL Phase 1;
+  #     latency structure reworked by docs/plans/active/RC-LATENCY-PLAN.md) ---
   # rc:
   #   Input-loss watchdog timeout (milliseconds) for a /ws/manual-control relay session: a session
   #   with no "channels" frame for this long auto-releases (WiringConfiguration#manualControlService,
-  #   ManualControlWebSocketHandler). SITL-tune this against the measured glass-to-stick latency
-  #   (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md's SITL verification steps 6-7) before relying on it. Commented
-  #   out here to document the default rather than override it.
+  #   ManualControlWebSocketHandler). This is a safety timer, not a latency knob -- the browser keeps
+  #   sending at the keepalive floor below even from a motionless stick, so "no frames" means input
+  #   loss, never "the operator stopped moving". SITL-tune it against the measured glass-to-stick
+  #   latency (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md's SITL verification steps 6-7) before relying
+  #   on it. Commented out here to document the default rather than override it.
   #   watchdog-timeout-ms: 300
   #   MavlinkManualControlSender's RC_CHANNELS_OVERRIDE cadence (docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2,
   #   wave F2) -- replaces the VISION_RC_OVERRIDE_HZ/VISION_RC_RELEASE_FRAMES environment variables that
   #   used to be the only place in the repo bypassing Spring config entirely.
+  #
+  #   These two are a FLOOR and a CEILING, not one rate (RC-LATENCY-PLAN §2 A). A stick that moves
+  #   reaches the wire as soon as the ceiling allows, rather than waiting out a fixed tick:
+  #     override-hz     -- the keepalive floor: how often an UNCHANGED stick is retransmitted, so an
+  #                        aircraft never sees a gap long enough to expire its own override timeout.
+  #     max-override-hz -- the wire ceiling: the fastest this platform will ever transmit, however
+  #                        fast input arrives. Raising it lowers worst-case latency and raises peak
+  #                        UDP rate; it does not change the idle rate.
+  #     min-override-hz -- clamps a misconfigured override-hz up.
   #   override-hz: 33
   #   min-override-hz: 10
   #   max-override-hz: 50

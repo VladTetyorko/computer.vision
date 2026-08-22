@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManualControlClient } from './manual-control-client';
 import { RcInputService } from './rc-input.service';
-import { sendIntervalMs } from './manual-control-logic';
+import { MIN_SEND_GAP_MS, keepaliveIntervalMs } from './manual-control-logic';
 
 /** A minimal `WebSocket` test double — captures every `send()` call and lets a test drive
  * `onopen`/`onmessage`/`onclose`/`onerror` directly, standing in for the real socket lifecycle
@@ -163,17 +163,53 @@ describe('ManualControlClient', () => {
     expect(client.state()).toBe('engaged');
     expect(client.channelMap()).toEqual(channelMap);
     expect(client.rateHz()).toBe(25);
-    expect(ws.sent.length).toBe(1); // only the engage frame so far — the send loop hasn't ticked yet
+    expect(ws.sent.length).toBe(1); // only the engage frame so far — nothing has been sampled yet
 
-    vi.advanceTimersByTime(sendIntervalMs(25));
+    // The first sampling flush carries the reading straight out: the send path is driven by the
+    // input, so it does not sit out a period first (RC-LATENCY-PLAN §2 B).
+    TestBed.tick();
     expect(ws.sent.length).toBe(2);
     const frame1 = JSON.parse(ws.sent[1]);
     expect(frame1).toMatchObject({ type: 'channels', axes: [0.4, -0.2], buttons: [1], seq: 1 });
     expect(typeof frame1.tSent).toBe('number');
 
-    vi.advanceTimersByTime(sendIntervalMs(25));
+    // A motionless stick keeps reporting, but only at the confirmed keepalive floor.
+    vi.advanceTimersByTime(keepaliveIntervalMs(25));
+    expect(ws.sent.length).toBe(3);
     const frame2 = JSON.parse(ws.sent[2]);
-    expect(frame2.seq).toBe(2);
+    expect(frame2).toMatchObject({ type: 'channels', axes: [0.4, -0.2], seq: 2 });
+  });
+
+  it('a stick that moves reaches the socket without waiting for a timer tick', () => {
+    const fakeRc = new FakeRcInputService();
+    const { client } = create(fakeRc);
+    const ws = engageAndConfirm(client);
+    TestBed.tick(); // the engage-time reading goes out
+    const afterEngage = ws.sent.length;
+
+    vi.advanceTimersByTime(MIN_SEND_GAP_MS); // clear the wire ceiling, but not the keepalive floor
+    fakeRc.setAxes([0.9, -0.9]);
+    TestBed.tick();
+
+    expect(ws.sent.length).toBe(afterEngage + 1);
+    expect(JSON.parse(ws.sent[ws.sent.length - 1])).toMatchObject({
+      type: 'channels',
+      axes: [0.9, -0.9],
+    });
+  });
+
+  it('a stick that has not moved is not resent inside the keepalive floor', () => {
+    const fakeRc = new FakeRcInputService();
+    const { client } = create(fakeRc);
+    const ws = engageAndConfirm(client);
+    TestBed.tick();
+    const afterEngage = ws.sent.length;
+
+    vi.advanceTimersByTime(MIN_SEND_GAP_MS);
+    fakeRc.setAxes([0, 0]); // a fresh array, same values — the rAF loop does exactly this every frame
+    TestBed.tick();
+
+    expect(ws.sent.length).toBe(afterEngage);
   });
 
   it('an ack updates a rolling latencyMs computed as Date.now() minus tSent (not tServer minus tSent)', () => {

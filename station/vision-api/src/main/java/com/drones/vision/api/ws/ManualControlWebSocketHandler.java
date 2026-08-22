@@ -65,11 +65,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link #sendFrame}, which synchronizes on {@link ConnectionState#sendLock} — exactly the guard
  * {@code LiveConnection} uses around {@code SseEmitter#send}.
  *
- * <h2>{@code rateHz} is informational only</h2>
- * See {@link ManualControlEngagedFrame}'s own javadoc: this module may not depend on
- * adapter-mavlink, so the {@code engaged} frame's {@code rateHz} is a fixed constant mirroring
- * {@code MavlinkManualControlSender}'s own default, not read live from its {@code
- * VISION_RC_OVERRIDE_HZ} env knob. A documented rough edge, not a bug.
+ * <h2>{@code rateHz} is read live, through the port</h2>
+ * This module still may not depend on adapter-mavlink, so the number does not come from there
+ * directly — it rides the seam the port already owns: the adapter stamps its clamped keepalive rate
+ * on the {@code ManualControlLink} it returns from {@code engage}, {@link ManualControlSession}
+ * exposes it, and this handler echoes it (docs/plans/active/RC-LATENCY-PLAN.md §2 C). The
+ * hand-mirrored constant this class used to send is gone.
  */
 @Component
 public class ManualControlWebSocketHandler extends TextWebSocketHandler {
@@ -190,7 +191,7 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
             ManualControlSession mcSession = manualControlService.engage(assetId, actor, scope, onWatchdog);
             state.session = mcSession;
             sendFrame(session, state, new ManualControlEngagedFrame(assetId.value().toString(),
-                    ManualControlEngagedFrame.DEFAULT_RATE_HZ, toChannelMapResponse(mcSession.channelMap())));
+                    mcSession.rateHz(), toChannelMapResponse(mcSession.channelMap())));
         } catch (AccessDeniedException e) {
             sendFrame(session, state, new ManualControlDeniedFrame(CODE_OUT_OF_SCOPE, e.getMessage()));
         } catch (IllegalStateException e) {
