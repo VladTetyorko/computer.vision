@@ -330,6 +330,21 @@ class TrackingParams:
     # independently disable-able, so a fleet (or the sweep itself) can run
     # A alone, B alone, both, or neither, and compare.
     reupdate_max_motion_center_distance: float
+    # TRACK-IDENTITY-PLAN wave L1 addition. Deployment-only, no wire field --
+    # same "no per-request override to fall back FROM" shape as `follow_
+    # top_k`/`roi_enabled`/`detection_lag_correction_enabled` above.
+    # `track.py`'s `_update_label_election` reads all three straight: how
+    # many of a track's own recent `SOURCE_DETECTOR` observations feed its
+    # per-label tally (older votes fall off the ring AND are exponentially
+    # decayed), how far a challenger label's decayed score must exceed the
+    # incumbent elected label's before it is even eligible, and how many
+    # CONSECUTIVE passes it must hold that lead before the election
+    # actually switches. See `config.py`'s `DEFAULT_TRACK_LABEL_VOTE_
+    # WINDOW`/`_SWITCH_MARGIN`/`_SWITCH_STREAK` for why those three
+    # numbers, not others, ship.
+    label_vote_window: int
+    label_switch_margin: float
+    label_switch_streak: int
 
     @property
     def active(self) -> bool:
@@ -533,4 +548,9 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
         # depends on the other's value.
         reupdate_max_shape_log_ratio=settings.track_reupdate_max_shape_log_ratio,
         reupdate_max_motion_center_distance=settings.track_reupdate_max_motion_center_distance,
+        # TRACK-IDENTITY-PLAN wave L1 addition -- deployment-only, no wire
+        # field (same shape as `follow_top_k`/`roi_enabled` above).
+        label_vote_window=settings.track_label_vote_window,
+        label_switch_margin=settings.track_label_switch_margin,
+        label_switch_streak=settings.track_label_switch_streak,
     )

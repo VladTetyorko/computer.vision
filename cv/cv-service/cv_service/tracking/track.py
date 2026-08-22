@@ -55,6 +55,7 @@ Pure stdlib.
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import TYPE_CHECKING, Iterable, Optional, Sequence
@@ -108,6 +109,21 @@ _VELOCITY_SMOOTHING = 0.3
 # BLENDED descriptor counts toward the match cost, this tunes how fast it
 # updates.
 _DESCRIPTOR_SMOOTHING = 0.3
+
+# TRACK-IDENTITY-PLAN wave L1 -- how much weight one additional step back in
+# a track's own label-vote ring costs, applied multiplicatively per step
+# (`_update_label_election`'s decayed-tally loop below). Structural, not an
+# operator knob: the same "the number an operator tunes is the WINDOW/
+# MARGIN/STREAK, not the decay curve itself" split `_VELOCITY_SMOOTHING`
+# draws against `CV_TRACK_MAX_AGE_MILLIS` above. `0.85` keeps the oldest
+# vote in a full `DEFAULT_TRACK_LABEL_VOTE_WINDOW=10` ring at ~23% of the
+# newest one's weight (`0.85**9`) -- enough that a genuinely stale identity
+# still fades relative to fresher evidence (the plan's own "an old identity
+# fades rather than anchors forever"), not so aggressive that the WINDOW
+# itself becomes pointless (a much smaller decay would make votes beyond
+# the last 2-3 observations irrelevant regardless of how large the window
+# is configured).
+_LABEL_VOTE_DECAY = 0.85
 
 
 def _blend(previous: float, measured: float) -> float:
@@ -195,6 +211,36 @@ class Track:
     history: ObservationRing = field(default_factory=ObservationRing)
     history_transform: Transform = IDENTITY
     reupdated: bool = False
+    # TRACK-IDENTITY-PLAN wave L1 -- the label the wire actually reports for
+    # this track (`session.py`'s `_box_for`/`_from_track`), elected from a
+    # bounded, confidence-weighted, decayed tally of this track's own recent
+    # `SOURCE_DETECTOR` observations rather than echoed from whichever one
+    # arrived last. `label` (above) keeps its EXISTING unconditional-
+    # overwrite semantics unchanged -- the matcher (`assign.py`'s `_labels_
+    # compatible`) and every raw-observation reader still see the newest
+    # roll -- `elected_label` is the second, hysteresis-gated opinion that
+    # leaves the service. Never blank in practice: `_born`/`_adopt` both
+    # call `_seed_label_election` before handing this `Track` back, and
+    # `_update_label_election` (called from `TrackBook._observe`'s own
+    # `SOURCE_DETECTOR` branch) is what advances it afterward -- see both
+    # functions' own docstrings for the full algorithm and the "why
+    # detector-only" evidence rule.
+    elected_label: str = ""
+    # This track's own bounded ring of `(label, confidence)` votes -- at
+    # most `TrackingParams.label_vote_window` entries, oldest evicted first,
+    # RECOMPUTED into a decayed tally on every `_update_label_election` call
+    # rather than maintained incrementally (cheap at the shipped window
+    # size, and immune to incremental-decay drift). `repr=False`: a 10-entry
+    # deque dump in every test failure/log line would swamp the signal
+    # `elected_label`/`state`/`box` already give.
+    _label_votes: "deque[tuple[str, float]]" = field(default_factory=deque, repr=False)
+    # The current leading NON-incumbent label and how many CONSECUTIVE
+    # `_update_label_election` calls it has held its qualifying lead --
+    # `None`/`0` whenever no challenger currently clears `label_switch_
+    # margin`, or whenever a DIFFERENT challenger took the lead in between
+    # (a challenger cannot bank partial progress across an interruption).
+    _label_challenger: Optional[str] = None
+    _label_challenger_streak: int = 0
     _confirmed: bool = field(default=False, repr=False)
 
 
@@ -214,6 +260,17 @@ class RecoveredIdentity:
     first_seen: float
     descriptor: Optional[Descriptor] = None
     velocity: "tuple[float, float]" = (0.0, 0.0)
+    # TRACK-IDENTITY-PLAN wave L1 -- the identity's own ELECTED label at the
+    # moment it was retired (`_retire` below now remembers `track.elected_
+    # label`, not `track.label`, into `ObjectMemory`), so a recovery resumes
+    # the stable name an operator was already looking at rather than
+    # whatever raw label happened to be attached the instant the track went
+    # dormant. `None` -- rather than a required field -- so a caller built
+    # before this wave (or a test exercising `_adopt` directly) keeps
+    # working unchanged: `_adopt` falls back to the recovering observation's
+    # own raw label, the same value it would have used before this field
+    # existed.
+    elected_label: Optional[str] = None
 
 
 class TrackBook:
@@ -301,7 +358,8 @@ class TrackBook:
 
     def bump_epoch(self) -> None:
         """Namespace future engine keys into a fresh epoch, without touching
-        a single live track (review finding D1/D2, TRACKING-V2-PLAN wave C1).
+        a single live track's id/state/geometry (review finding D1/D2,
+        TRACKING-V2-PLAN wave C1).
 
         Called instead of `forget_keys()` when an engine is reset or rebuilt
         but tracking STAYS active: a restarted engine re-uses its own
@@ -325,8 +383,26 @@ class TrackBook:
         new numbering when the same object reappears -- that correlation is
         wave C3/C4's `assign.py`/`memory.py`; this wave only stops the
         instant amnesia of wiping the whole book on one bad frame.
+
+        TRACK-IDENTITY-PLAN wave L1 addition ("election state clears with
+        the track book epoch, model re-arm"): every live track's label-vote
+        ring and challenger streak are re-seeded fresh around its CURRENT
+        `elected_label` -- deliberately NOT wiped to a blank/unknown value.
+        The event this method answers is "the ENGINE's own internal state
+        is gone, start its bookkeeping over", not "this identity's name is
+        now in doubt" -- the label tally is orthogonal to which optical-
+        flow/ByteTrack instance is running underneath it, and an operator
+        watching the feed must never see a name flicker caused by the RESET
+        itself. Re-seeding (rather than leaving the old ring in place) is
+        still the right defensive posture: a restart is exactly the kind of
+        event that can follow a mis-association, so old votes are asked to
+        re-earn their place rather than carried over uncritically -- the
+        same "start fresh evidence-gathering" spirit `forget_keys()` applies
+        to whole tracks, applied here to one track's own label history.
         """
         self._epoch += 1
+        for track in self._tracks.values():
+            _seed_label_election(track, track.elected_label)
 
     def forget_keys(self) -> None:
         """Retire every live track, keeping the id counter.
@@ -519,6 +595,12 @@ class TrackBook:
         # rather than assumed: see `TrackBook.apply`'s own docstring for why
         # that is a deliberate scope boundary, not an oversight.
         track.history.record(observation, captured_at)
+        # TRACK-IDENTITY-PLAN wave L1 -- same "build, then patch one field
+        # the constructor cannot express cleanly" shape `age_frames = -1`
+        # above already uses. A birth is always `SOURCE_DETECTOR` in
+        # practice (this method's own callers), so the very first vote is
+        # real evidence, not a guess.
+        _seed_label_election(track, observation.label)
         return track
 
     def _adopt(
@@ -598,6 +680,19 @@ class TrackBook:
         # is concerned, never a `_late_corrected_box` candidate, so this is
         # `now` in every real call today.
         track.history.record(observation, captured_at)
+        # TRACK-IDENTITY-PLAN wave L1 (plan item 4, "adoption resumes elected
+        # label and tally"): re-seed the election around the GALLERY's own
+        # remembered elected label, not this frame's raw observation --
+        # `_retire` below remembers `track.elected_label`, so the recovered
+        # track resumes the stable name an operator already saw rather than
+        # restarting from whatever the associator's one recovering
+        # detection happened to roll. `recovery.elected_label` is `None`
+        # only for a caller built before this wave (or a test constructing
+        # `RecoveredIdentity` directly without it), in which case this frame's
+        # own raw label is the best evidence available, same as `_born`.
+        _seed_label_election(
+            track, recovery.elected_label if recovery.elected_label is not None else observation.label
+        )
         return track
 
     def _observe(
@@ -725,6 +820,12 @@ class TrackBook:
             track.last_confirmed = now
             track.hits += 1
             track.misses = 0
+            # TRACK-IDENTITY-PLAN wave L1 -- same evidence-vs-extrapolation
+            # gate `velocity_x`/`_y` and `descriptor` already apply: only a
+            # REAL detector-sourced observation casts a label vote, so a
+            # tracker-only (coasted/predicted) frame never influences WHAT
+            # the object is elected to be, only where it is.
+            _update_label_election(track, observation, self._params)
         elif detector_ran:
             # A verify pass ran and did not re-anchor this track: the box on
             # this frame is the tracker's own extrapolation (TRACKING-PLAN
@@ -818,18 +919,113 @@ class TrackBook:
         `session.py`'s `_resolve_memory`) is the genuine no-op P5 requires:
         no gallery object exists to consult, so this costs one attribute
         check, never a call into an empty gallery.
+
+        TRACK-IDENTITY-PLAN wave L1: remembers `track.elected_label`, not
+        `track.label` -- the gallery's whole point is handing a recovered
+        object back its RECOGNIZABLE identity, and the elected label is the
+        stable one an operator was actually looking at, not whichever raw
+        roll happened to be attached the instant this track went dormant.
+        `session.py`'s `_attempt_recovery` is what threads it back into a
+        fresh `RecoveredIdentity.elected_label` on the other side of a
+        recovery; `memory.py`'s own `label:` field/parameter names are
+        unchanged -- only what callers pass into them shifted.
         """
         if self._memory is None:
             return
         self._memory.remember(
             track_id=track.track_id,
-            label=track.label,
+            label=track.elected_label,
             box=track.box,
             velocity=(track.velocity_x, track.velocity_y),
             descriptor=track.descriptor,
             now_millis=now * 1000.0,
             first_seen_millis=track.first_seen * 1000.0,
         )
+
+
+def _seed_label_election(track: Track, label: str) -> None:
+    """Initialize (or RE-initialize) `track`'s elected label and vote ring.
+
+    TRACK-IDENTITY-PLAN wave L1. Three callers, all in this module:
+    `_born` (a fresh track's first, and only, evidence so far), `_adopt`
+    (a recovery resumes the GALLERY's remembered elected label, per
+    `RecoveredIdentity.elected_label`), and `TrackBook.bump_epoch` (every
+    live track re-seeds around its OWN current `elected_label`, preserving
+    it rather than picking a new one -- see that method's own docstring).
+    Lives here, not inline at each call site, for the same reason
+    `observe_descriptor` below is a free function rather than three copies
+    of the same four lines: one place owns "what does a fresh vote ring
+    look like", so the three callers can never drift out of sync with each
+    other about it.
+    """
+    track.elected_label = label
+    track._label_votes.clear()
+    track._label_votes.append((label, 1.0))
+    track._label_challenger = None
+    track._label_challenger_streak = 0
+
+
+def _update_label_election(track: Track, observation: Observation, params: TrackingParams) -> None:
+    """Fold one `SOURCE_DETECTOR` observation's label into `track`'s tally
+    and re-run the switch hysteresis (TRACK-IDENTITY-PLAN wave L1, plan
+    items 1-2).
+
+    Called ONLY from `TrackBook._observe`'s own `observation.source ==
+    SOURCE_DETECTOR` branch -- the same evidence-vs-extrapolation discipline
+    `observe_descriptor`/`velocity_x`/`_y` already apply (this module's own
+    docstring): a tracker-only, coasted or predicted frame carries no
+    independent evidence about WHAT the object is, only where it currently
+    appears to be, so it never casts a vote.
+
+    The tally is `track`'s own bounded ring of its last `params.label_vote_
+    window` detector-sourced `(label, confidence)` observations, recomputed
+    fresh into a decayed score per label on every call (`_LABEL_VOTE_DECAY`
+    per step back from the newest entry) -- cheap at the shipped window
+    (10 entries) and immune to the drift an incrementally-updated EMA per
+    label would accumulate over a long track life.
+
+    `elected_label` only changes once a single challenger BOTH out-scores
+    the incumbent by `params.label_switch_margin` AND holds that lead for
+    `params.label_switch_streak` CONSECUTIVE calls to this function; a call
+    where a different (or no) label clears the margin resets the streak to
+    zero, so a challenger cannot bank partial progress across an
+    interruption -- deliberately mirroring `assign.py`'s Hungarian solver in
+    spirit: a decisive, sustained majority wins, one lucky frame does not.
+    """
+    track._label_votes.append((observation.label, observation.confidence))
+    window = params.label_vote_window
+    while len(track._label_votes) > window:
+        track._label_votes.popleft()
+
+    tally: dict[str, float] = {}
+    weight = 1.0
+    for voted_label, voted_confidence in reversed(track._label_votes):
+        tally[voted_label] = tally.get(voted_label, 0.0) + voted_confidence * weight
+        weight *= _LABEL_VOTE_DECAY
+
+    incumbent_score = tally.get(track.elected_label, 0.0)
+    challenger_label: Optional[str] = None
+    challenger_score = -1.0
+    for candidate_label, candidate_score in tally.items():
+        if candidate_label == track.elected_label:
+            continue
+        if candidate_score > challenger_score:
+            challenger_label = candidate_label
+            challenger_score = candidate_score
+
+    if challenger_label is not None and challenger_score > incumbent_score * params.label_switch_margin:
+        if track._label_challenger == challenger_label:
+            track._label_challenger_streak += 1
+        else:
+            track._label_challenger = challenger_label
+            track._label_challenger_streak = 1
+        if track._label_challenger_streak >= params.label_switch_streak:
+            track.elected_label = challenger_label
+            track._label_challenger = None
+            track._label_challenger_streak = 0
+    else:
+        track._label_challenger = None
+        track._label_challenger_streak = 0
 
 
 def observe_descriptor(

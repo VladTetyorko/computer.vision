@@ -207,6 +207,13 @@ def _to_results(detections: Sequence[Any]) -> _Results:
     # label as a class would invite two tracks for one object; feeding one
     # class yields one track whose label may flip between members, which is
     # the cosmetic outcome TRACKING-PLAN R9 predicted and accepts.
+    #
+    # R9 is overturned for the open-vocabulary path by `docs/plans/active/
+    # TRACK-IDENTITY-PLAN.md` (wave L1, `track.py`'s label election) -- but
+    # this engine feeds exactly one constant class regardless, so election
+    # has nothing to vote over here and the flip this comment describes is
+    # unaffected by that wave; see the plan's own preamble for why the
+    # `cost` engine, not this one, is where election actually applies.
     cls = np.zeros(count, dtype=np.float32)
     return _Results(xywh, conf, cls)
 

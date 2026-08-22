@@ -13,8 +13,7 @@ import type { StreamState } from '../../core/api/models';
  * @param streamValue `ActiveStream.detectionEnabled` — the running stream's own server-side intent,
  *                    or `undefined` when nothing is running (there is no stream to be truthful
  *                    about) or the backend predates this field. Both degrade to the draft, which is
- *                    exactly today's behaviour — the same "an absent field means today" rule
- *                    `detection-overlay-logic.ts#resolveBurnedIn` already follows
+ *                    exactly today's behaviour — "an absent field means today"
  * @param draft       `settings.effective().detectionEnabled`
  */
 export function resolveDetectionEnabled(streamValue: boolean | undefined, draft: boolean): boolean {

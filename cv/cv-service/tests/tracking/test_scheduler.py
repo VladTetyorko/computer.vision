@@ -62,6 +62,11 @@ def params(mode: str, **overrides) -> TrackingParams:
         # 2026-08-15 bracket-identity check -- inert here too, same reason.
         reupdate_max_shape_log_ratio=0.0,
         reupdate_max_motion_center_distance=0.0,
+        # TRACK-IDENTITY-PLAN wave L1 -- inert here too, same reason
+        # (`DutyCycleScheduler` never reads a `Track`, let alone its label).
+        label_vote_window=10,
+        label_switch_margin=1.5,
+        label_switch_streak=3,
     )
     base.update(overrides)
     return TrackingParams(**base)

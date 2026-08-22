@@ -217,6 +217,31 @@ class ObjectMemory:
                 best = scored
         return best
 
+    def match_identity(
+        self,
+        track_id: int,
+        *,
+        box: Box,
+        label: str,
+        descriptor: Optional[Descriptor],
+        now_millis: float,
+    ) -> Optional[Recovery]:
+        """Score ONE specific dormant identity against a candidate, or `None`.
+
+        `match` searches the whole gallery for the best-scoring entry -- right
+        for ASSOCIATE, where any dormant id is a legitimate answer for an
+        unmatched detection. FOLLOW's re-acquire is a different question: the
+        operator asked for a SPECIFIC track id back, so a different, better-
+        scoring dormant identity winning would silently redirect the lock to
+        an object nobody asked to follow. This method answers only "is THIS
+        the one the operator lost", by reusing the same four gates.
+        """
+        self.forget_expired(now_millis)
+        entry = self._dormant.get(track_id)
+        if entry is None:
+            return None
+        return self._score(entry, box, label, descriptor, now_millis)
+
     def claim(self, track_id: int) -> Optional[DormantIdentity]:
         """Take an identity out of the gallery; it is live again."""
         entry = self._dormant.pop(track_id, None)

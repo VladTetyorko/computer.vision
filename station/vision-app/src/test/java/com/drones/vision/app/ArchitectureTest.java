@@ -108,7 +108,7 @@ class ArchitectureTest {
     // adapter package"): it is not repeated here because `adaptersDoNotDependOnEachOther`
     // above already expresses exactly that check, generically, via
     // `slices().matching("com.drones.vision.adapter.(*)..")` — it covers every adapter
-    // slice (rtsp, mjpeg, mavlink, v4l2, publishhls, overlay, cvgrpc, discovery,
+    // slice (rtsp, mjpeg, mavlink, v4l2, publishhls, cvgrpc, discovery,
     // persistence, simulation) pairwise. Adding a second rule with the same meaning would
     // be redundant, not additive, and that rule is one of the five left unmodified per §6.4.
 

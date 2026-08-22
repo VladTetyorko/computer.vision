@@ -16,7 +16,6 @@ import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.map.application.MapAccessPolicy;
@@ -58,7 +57,6 @@ class AssetStreamControllerTest {
     private AssetService assetService;
     private AssetStreamService assetStreamService;
     private StreamPublisherPort streamPublisherPort;
-    private StreamService streamService;
     private MockMvc mockMvc;
 
     private final UserId ownerId = UserId.random();
@@ -70,11 +68,10 @@ class AssetStreamControllerTest {
         assetService = mock(AssetService.class);
         assetStreamService = mock(AssetStreamService.class);
         streamPublisherPort = mock(StreamPublisherPort.class);
-        streamService = mock(StreamService.class);
-        // StreamViewerLinks is a plain final class wrapping these two ports (docs/plans/active/CV-DEMAND-PLAN.md
-        // §3.8) -- a real instance backed by the mocked ports, matching this codebase's established
+        // StreamViewerLinks is a plain final class wrapping this port (docs/plans/active/CV-DEMAND-PLAN.md
+        // §3.8) -- a real instance backed by the mocked port, matching this codebase's established
         // pattern of not mocking final support classes.
-        StreamViewerLinks streamViewerLinks = new StreamViewerLinks(streamPublisherPort, streamService);
+        StreamViewerLinks streamViewerLinks = new StreamViewerLinks(streamPublisherPort);
 
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new AssetStreamController(assetService, assetStreamService, currentUser,

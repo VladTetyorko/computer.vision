@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CvModel, CvTracker, DetectionResult, FrameTracking, TrackingCapability, TrackStats } from '../../core/api/models';
+import type {
+  CvModel,
+  CvTracker,
+  DetectionRate,
+  DetectionResult,
+  FrameTracking,
+  TrackingCapability,
+  TrackStats,
+} from '../../core/api/models';
 import type { PipelineSettings } from '../../core/settings/settings-store';
+import { HIDDEN_CLASS_TRUTH } from '../../core/detections/detections-logic';
 import {
   CAPABILITY_LEVEL_OPTIONS,
   DETECTION_LAG_BUDGET_MILLIS,
-  FIRST_HIDE_HINT,
-  HIDDEN_CLASS_TRUTH,
   PEOPLE_VEHICLES_BUILDINGS_PRESET,
   SEEN_NOW_CHIP_CAP,
   addLabel,
@@ -33,19 +40,20 @@ import {
   formatFlowStrip,
   formatMeasuredRate,
   hasExactLabelMatch,
+  intentCardSentence,
   isCapabilityDowngraded,
   isDetectionLagOverBudget,
   isLabelChecked,
   latestFrameTracking,
+  modelCostWord,
   observedLabels,
   perfHint,
   reArmHint,
   recentObservedLabels,
   seedLabelFilterForModel,
-  sortSelectedFirst,
+  sortRecentFirst,
   stagedLabelSeed,
   submitLabelFilterButtonText,
-  toggleLabelChip,
 } from './cv-control-panel-logic';
 
 function model(partial: Partial<CvModel> = {}): CvModel {
@@ -81,6 +89,7 @@ function settings(partial: Partial<PipelineSettings> = {}): PipelineSettings {
     inferenceFps: 5,
     model: 'yolo26n.pt',
     labelFilter: [],
+    labelDenyFilter: [],
     detectionEnabled: true,
     ...partial,
   };
@@ -114,6 +123,16 @@ describe('cv-control-panel-logic', () => {
     });
   });
 
+  describe('modelCostWord', () => {
+    it('reads "slower" for an open-vocabulary model', () => {
+      expect(modelCostWord(true)).toBe('slower');
+    });
+
+    it('reads "fast" for a closed-set model', () => {
+      expect(modelCostWord(false)).toBe('fast');
+    });
+  });
+
   describe('observedLabels', () => {
     it('collects distinct labels across results, first-seen order', () => {
       const results = [detectionResult(['person', 'car']), detectionResult(['car', 'building'])];
@@ -126,12 +145,20 @@ describe('cv-control-panel-logic', () => {
   });
 
   describe('chipCandidates', () => {
-    it('unions the current filter with observed labels, sorted', () => {
-      expect(chipCandidates(['zebra'], ['car', 'apple'])).toEqual(['apple', 'car', 'zebra']);
+    it('unions the filter, deny-list and observed labels, sorted', () => {
+      expect(chipCandidates(['zebra'], [], ['car', 'apple'])).toEqual(['apple', 'car', 'zebra']);
     });
 
     it('deduplicates overlapping entries', () => {
-      expect(chipCandidates(['car'], ['car', 'bus'])).toEqual(['bus', 'car']);
+      expect(chipCandidates(['car'], [], ['car', 'bus'])).toEqual(['bus', 'car']);
+    });
+
+    it('keeps a denied label in the checklist even when it is no longer observed — otherwise there is no way back to un-hide it', () => {
+      expect(chipCandidates([], ['truck'], [])).toEqual(['truck']);
+    });
+
+    it('deduplicates a label that is both observed and denied', () => {
+      expect(chipCandidates([], ['car'], ['car'])).toEqual(['car']);
     });
   });
 
@@ -143,25 +170,6 @@ describe('cv-control-panel-logic', () => {
     it('reads only listed labels as checked otherwise', () => {
       expect(isLabelChecked(['person'], 'person')).toBe(true);
       expect(isLabelChecked(['person'], 'car')).toBe(false);
-    });
-  });
-
-  describe('toggleLabelChip', () => {
-    it('unchecking one candidate while "all" narrows to every other known candidate', () => {
-      const next = toggleLabelChip([], 'car', ['person', 'car', 'building']);
-      expect(next).toEqual(['person', 'building']);
-    });
-
-    it('unchecks a label from a concrete filter', () => {
-      expect(toggleLabelChip(['person', 'car'], 'car', ['person', 'car'])).toEqual(['person']);
-    });
-
-    it('checks (adds) a label not yet in a concrete filter', () => {
-      expect(toggleLabelChip(['person'], 'car', ['person', 'car'])).toEqual(['person', 'car']);
-    });
-
-    it('unchecking the last remaining label honestly reverts to "all" ([])', () => {
-      expect(toggleLabelChip(['person'], 'person', ['person'])).toEqual([]);
     });
   });
 
@@ -214,19 +222,23 @@ describe('cv-control-panel-logic', () => {
     });
   });
 
-  describe('sortSelectedFirst', () => {
-    it('promotes selected candidates ahead of unselected ones, keeping each half\'s own order', () => {
-      expect(sortSelectedFirst(['airplane', 'bicycle', 'car', 'person'], ['person', 'car'])).toEqual([
-        'car',
+  describe('sortRecentFirst', () => {
+    it('promotes recently-observed candidates ahead of the rest, in their own recency order', () => {
+      expect(sortRecentFirst(['airplane', 'bicycle', 'car', 'person'], ['person', 'car'])).toEqual([
         'person',
+        'car',
         'airplane',
         'bicycle',
       ]);
     });
 
-    it('is a no-op while the filter is [] ("all") — nothing to promote', () => {
+    it('is a no-op when nothing has been recently observed', () => {
       const candidates = ['airplane', 'bicycle', 'car'];
-      expect(sortSelectedFirst(candidates, [])).toBe(candidates);
+      expect(sortRecentFirst(candidates, [])).toBe(candidates);
+    });
+
+    it('ignores a recently-observed label that is not itself a candidate (filtered out by search)', () => {
+      expect(sortRecentFirst(['airplane', 'bicycle'], ['car', 'airplane'])).toEqual(['airplane', 'bicycle']);
     });
   });
 
@@ -249,12 +261,21 @@ describe('cv-control-panel-logic', () => {
   });
 
   describe('buildHotKnobPatch / buildModelChangePatch', () => {
-    it('carries confidence/fps/labelFilter/detectionEnabled, never model', () => {
-      const patch = buildHotKnobPatch(settings({ confidenceThreshold: 0.6, inferenceFps: 8, labelFilter: ['person'], detectionEnabled: false }));
+    it('carries confidence/fps/labelFilter/labelDenyFilter/detectionEnabled, never model', () => {
+      const patch = buildHotKnobPatch(
+        settings({
+          confidenceThreshold: 0.6,
+          inferenceFps: 8,
+          labelFilter: ['person'],
+          labelDenyFilter: ['dog'],
+          detectionEnabled: false,
+        }),
+      );
       expect(patch).toEqual({
         confidenceThreshold: 0.6,
         inferenceFps: 8,
         labelFilter: ['person'],
+        labelDenyFilter: ['dog'],
         detectionEnabled: false,
       });
       expect(patch).not.toHaveProperty('model');
@@ -280,9 +301,10 @@ describe('cv-control-panel-logic', () => {
   });
 
   describe('perfHint', () => {
-    it('warns more urgently for the open-vocab model', () => {
+    it('warns more urgently for the open-vocab model, in one short line', () => {
       expect(perfHint(true)).toMatch(/open-vocabulary/i);
       expect(perfHint(true)).toMatch(/slower/i);
+      expect(perfHint(true).split('.').filter((s) => s.trim().length > 0).length).toBeLessThanOrEqual(1);
     });
 
     it('never claims the class filter reduces CPU cost', () => {
@@ -294,22 +316,32 @@ describe('cv-control-panel-logic', () => {
       expect(perfHint(false)).not.toMatch(/only trims what.s shown/i);
     });
 
-    it('the closed-set branch folds in the honest drop-everywhere sentence verbatim', () => {
-      expect(perfHint(false)).toContain(HIDDEN_CLASS_TRUTH);
+    it('does not fold in HIDDEN_CLASS_TRUTH — that sentence has exactly one home per surface (the Classes section), and this hint renders alongside it (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §2/§4)', () => {
+      expect(perfHint(false)).not.toContain(HIDDEN_CLASS_TRUTH);
+      expect(perfHint(true)).not.toContain(HIDDEN_CLASS_TRUTH);
     });
   });
 
-  describe('HIDDEN_CLASS_TRUTH / FIRST_HIDE_HINT', () => {
-    it('HIDDEN_CLASS_TRUTH names screen, alerts and recording, and denies a speed change', () => {
-      expect(HIDDEN_CLASS_TRUTH).toMatch(/alerts/i);
-      expect(HIDDEN_CLASS_TRUTH).toMatch(/recording/i);
-      expect(HIDDEN_CLASS_TRUTH).toMatch(/doesn't make it faster/i);
+  // HIDDEN_CLASS_TRUTH's own content is covered by `core/detections/detections-logic.spec.ts` —
+  // this file only asserts `perfHint` never duplicates it (above). FIRST_HIDE_HINT is gone as of
+  // wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3) along with the allowlist-complement toggle
+  // it explained — see `cv-control-panel-logic.ts`'s own "Staged class-filter selection" comment.
+
+  describe('intentCardSentence', () => {
+    it('names what a general-purpose closed-set model finds', () => {
+      expect(intentCardSentence('general')).toMatch(/people/i);
     });
 
-    it('FIRST_HIDE_HINT names the whitelist mechanism and the real consequence of submitting it', () => {
-      expect(FIRST_HIDE_HINT).toMatch(/whitelist/i);
-      expect(FIRST_HIDE_HINT).toMatch(/newly detected/i);
-      expect(FIRST_HIDE_HINT).toMatch(/clear the selection and submit/i);
+    it('names what a specialized model finds', () => {
+      expect(intentCardSentence('specialized')).toMatch(/military/i);
+    });
+
+    it('names what the open-vocab model finds', () => {
+      expect(intentCardSentence('open-vocab')).toMatch(/anything/i);
+    });
+
+    it('degrades to null (no fabricated description) for a kind this app does not recognize', () => {
+      expect(intentCardSentence('mystery-kind')).toBeNull();
     });
   });
 
@@ -664,25 +696,39 @@ describe('cv-control-panel-logic', () => {
     });
   });
 
-  // --- Detection status (docs/plans/active/CV-UX-RESEARCH.md §1.2/§3/§9.2, waves U3+U5) ------------
+  // --- Detection status (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §1, CV-UX-RESEARCH.md
+  // §1.2/§3/§9.2) --------------------------------------------------------------------------------
+
+  function rate(partial: Partial<DetectionRate> = {}): DetectionRate {
+    return {
+      windowSeconds: 30,
+      sourceFps: 10,
+      targetFps: 10,
+      demandFps: 0,
+      submittedFps: 9.9,
+      submitted: 297,
+      droppedInFlight: 0,
+      droppedOutage: 0,
+      missedDeadlines: 0,
+      dropRatio: 0,
+      transport: 'push',
+      decodeMillisP50: 0,
+      ...partial,
+    };
+  }
 
   describe('formatMeasuredRate', () => {
     it('formats a genuine positive reading, one decimal only when not whole', () => {
-      expect(formatMeasuredRate(9.94)).toBe('9.9 fps');
-      expect(formatMeasuredRate(10)).toBe('10 fps');
-    });
-
-    it('is null for undefined, zero, negative, or non-finite — never a fabricated "0 fps"', () => {
-      expect(formatMeasuredRate(undefined)).toBeNull();
-      expect(formatMeasuredRate(0)).toBeNull();
-      expect(formatMeasuredRate(-1)).toBeNull();
-      expect(formatMeasuredRate(Number.NaN)).toBeNull();
+      expect(formatMeasuredRate(9.94)).toBe('9.9/s measured');
+      expect(formatMeasuredRate(10)).toBe('10/s measured');
     });
   });
 
   describe('detectionStatus', () => {
-    it('the operator\'s own off choice always wins, regardless of every other signal', () => {
-      expect(detectionStatus(false, true, 'RUNNING', 12, 3).kind).toBe('off');
+    it('the operator\'s own off choice always wins, regardless of every other signal, with the plan\'s own exact wording', () => {
+      const status = detectionStatus(false, true, 'RUNNING', rate(), 3);
+      expect(status.kind).toBe('off');
+      expect(status.text).toBe('Off — zero CPU. Video unaffected.');
     });
 
     it('reports waiting-to-start when enabled but no stream is running yet', () => {
@@ -697,24 +743,39 @@ describe('cv-control-panel-logic', () => {
       expect(status.text).toMatch(/no cost while idle/i);
     });
 
-    it('reports the measured rate and classes-on-screen count while running', () => {
-      const status = detectionStatus(true, true, 'RUNNING', 9.9, 3);
+    it('reports the measured rate and classes-on-screen count while running, matching the plan\'s own mockup format', () => {
+      const status = detectionStatus(true, true, 'RUNNING', rate({ submittedFps: 9.9 }), 3);
       expect(status.kind).toBe('running');
-      expect(status.text).toBe('Running at 9.9 fps · 3 classes on screen');
+      expect(status.text).toBe('9.9/s measured · 3 classes on screen');
     });
 
     it('running with exactly one class on screen is singular, not "1 classes"', () => {
-      expect(detectionStatus(true, true, 'RUNNING', 5, 1).text).toContain('1 class on screen');
+      expect(detectionStatus(true, true, 'RUNNING', rate({ submittedFps: 5 }), 1).text).toContain('1 class on screen');
     });
 
-    it('running with an unmeasured rate never fabricates a number', () => {
+    it('running with nothing on screen omits the classes clause entirely', () => {
+      expect(detectionStatus(true, true, 'RUNNING', rate({ submittedFps: 5 }), 0).text).toBe('5/s measured');
+    });
+
+    it('running with no rate object yet (no sample has ever completed) never fabricates a number', () => {
       const status = detectionStatus(true, true, 'RUNNING', undefined, 0);
+      expect(status.kind).toBe('running');
       expect(status.text).toContain('rate not yet measured');
       expect(status.text).not.toMatch(/\d/);
     });
 
-    it('running with nothing on screen omits the classes clause entirely', () => {
-      expect(detectionStatus(true, true, 'RUNNING', 5, 0).text).toBe('Running at 5 fps');
+    it('running with a rate object present but zero submitted in the window names a stall plainly, distinct from "not yet measured"', () => {
+      const status = detectionStatus(true, true, 'RUNNING', rate({ submittedFps: 0, windowSeconds: 30 }), 0);
+      expect(status.kind).toBe('stalled');
+      expect(status.text).toBe('On — no detector passes in the last 30s.');
+    });
+
+    it('the stalled sentence names the actual window, never a hardcoded figure', () => {
+      expect(detectionStatus(true, true, 'RUNNING', rate({ submittedFps: 0, windowSeconds: 10 }), 0).text).toContain('last 10s');
+    });
+
+    it('a negative submittedFps (defensive — should never occur on the wire) still reads as stalled, not a fabricated negative rate', () => {
+      expect(detectionStatus(true, true, 'RUNNING', rate({ submittedFps: -1 }), 0).kind).toBe('stalled');
     });
 
     it('names a genuine sync gap rather than echoing the draft as confirmed "on"', () => {

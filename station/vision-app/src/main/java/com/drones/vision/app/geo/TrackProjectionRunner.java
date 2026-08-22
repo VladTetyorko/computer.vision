@@ -202,7 +202,7 @@ public final class TrackProjectionRunner implements AutoCloseable {
 
     /**
      * Finds {@code assetId}'s currently active stream (any of its devices matched against {@link
-     * StreamService#streams()}) and that stream's latest raw (pre-overlay, full-resolution) frame
+     * StreamService#streams()}) and that stream's latest raw, full-resolution frame
      * dimensions. Absent if the asset is unknown (an orphaned pose — its asset was deleted), has no
      * active stream, or has an active stream with no frame decoded yet.
      */

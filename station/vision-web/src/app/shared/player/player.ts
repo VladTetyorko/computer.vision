@@ -16,19 +16,40 @@ import type HlsType from 'hls.js';
 import { WebrtcCertificateService } from './webrtc-certificate';
 import type { Detection, DetectionResult } from '../../core/api/models';
 import {
+  DEFAULT_DECLUTTER_LEVEL,
+  DEFAULT_MODEL_KEY,
   DEFAULT_SLACK_BATCHES,
+  SUB_SCALE_DOT_RADIUS_PX,
+  T0_STROKE_WIDTH_PX,
+  T1_STROKE_WIDTH_PX,
+  T2_STROKE_WIDTH_PX,
   TRAIL_WINDOW_MS,
+  applyStickyLabels,
+  averageBatchIntervalMs,
   canvasBackingSize,
+  detectionAlphaPercent,
   detectionModelKey,
+  detectionTiers,
   distinctModelKeys,
+  electStickyLabels,
+  estimatedOnScreenAtMs,
+  extrapolateDetections,
+  findPredecessorResult,
   formatDetectionLabel,
+  formatTierLabel,
   modelHue,
   overlaySyncLatencySeconds,
+  placeLabels,
   selectDetectionResult,
   shouldDrawOverlay,
-  trackHue,
+  tierAlphaPercent,
+  tierBoxColor,
+  tiersForDeclutterLevel,
   trackTrails,
   type BoxesMode,
+  type DetectionTier,
+  type LabelCandidate,
+  type LabelSlot,
 } from './detection-overlay-logic';
 import {
   COLD_START_RETRY_DELAY_MS,
@@ -176,6 +197,23 @@ interface DrawnBox {
   readonly detection: Detection;
 }
 
+/** Draw order for `redrawOverlay`'s tier loop — ambient (`T2`) first, committed (`T0`) last, so a
+ *  higher tier's box always paints on top of a lower tier's (the accent target is never buried under
+ *  an ambient outline). `T3`'s dot is cheap enough visually that its exact draw position doesn't
+ *  matter, but it's grouped with `T2` — both are "background presence", not something to layer above
+ *  a real box. */
+const TIER_DRAW_RANK: Record<DetectionTier, number> = { T2: 0, T3: 0, T1: 1, T0: 2 };
+
+/** One label candidate collected during the box pass, consumed by `paintLabels` right after —
+ *  carries each detection's already-resolved per-detection alpha (`redrawOverlay`'s own
+ *  `staleAlphaFraction * tierAlphaPercent(...)`), so the label layer never has to recompute it. */
+interface TierLabelCandidate {
+  readonly detection: Detection;
+  readonly tier: DetectionTier;
+  readonly rect: DrawnBox;
+  readonly alpha: number;
+}
+
 /**
  * Self-recovering video player, WebRTC(WHEP)-first with an automatic HLS fallback
  * (docs/plans/done/MVP2-PLAN.md §L / §U3), with an honest status line (docs/main/CYCLES-PLAN.md §11, CD-b item 5)
@@ -261,11 +299,13 @@ interface DrawnBox {
  * input pair draws a canvas overlay of the freshest detection batch matched against this player's
  * own measured live-edge latency (`shared/player/detection-overlay-logic.ts#selectDetectionResult`,
  * fed via `overlaySyncLatencySeconds` — HLS's `behindLive`, WHEP's own `whepLatencySeconds`, see that
- * function's own doc comment and docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8) — crisp at any video
- * bitrate (backing store scaled to `devicePixelRatio`, §8 wave M8), and hoverable (label +
- * confidence), unlike the server's burned-in boxes (which stay; this is additive, see that module's
- * doc comment on `'burned'`/`'off'`). Callers that never pass `detections` simply never see the
- * canvas draw anything.
+ * function's own doc comment) — crisp at any video bitrate (backing store scaled to
+ * `devicePixelRatio`), and hoverable (label + confidence). Server-side burn-in no longer exists at
+ * all (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1) — this overlay is the only way boxes ever reach
+ * the screen now. Callers that never pass `detections` simply never see the canvas draw anything.
+ * Batches older than `STALE_FADE_BATCH_MULTIPLIER` observed intervals fade to reduced alpha, and
+ * anything older than `DETECTION_STALE_CUTOFF_SECONDS` is not drawn at all (staleness honesty,
+ * docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4 — a paused feed must never look like a live one).
  *
  * **Always a dark video surface, wherever it's mounted** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4): the
  * `.frame` host carries `.surface-dark` itself rather than depending on an ambient enclave, because
@@ -314,12 +354,43 @@ export class Player {
   /** Recent detection batches (newest first) to draw as a vector overlay — see class doc. */
   readonly detections = input<readonly DetectionResult[]>([]);
 
-  /** `'overlay'` (draw boxes), `'burned'`/`'off'` (draw nothing — see `shouldDrawOverlay`'s doc).
-   * Defaults to `'burned'` (per direct user request) for a caller that never binds this input at
-   * all — every page that offers a boxes-mode control of its own (Fly/Live/Wall) seeds its own
-   * signal to `'burned'` too, so this default only matters for the callers that don't (asset-detail,
-   * Command's asset panel, replay). */
-  readonly boxesMode = input<BoxesMode>('burned');
+  /** The declutter level — `'all'`/`'priority'`/`'locked'` draw boxes (which tiers, specifically, is
+   * {@link tiersForDeclutterLevel}'s job), `'off'` draws nothing (see `shouldDrawOverlay`'s doc).
+   * Defaults to {@link DEFAULT_DECLUTTER_LEVEL} ('priority') — matters only for callers that never
+   * bind this input (asset-detail, Command's asset panel, replay); every page with its own declutter
+   * control (Fly/Live/Wall) seeds its own signal to the same default too. */
+  readonly boxesMode = input<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
+
+  /**
+   * The FOLLOW-locked track id, `0` = no lock held — the exact wire sentinel
+   * `StreamTracksResponse#lockedTrackId` already uses (`core/api/models.ts`), passed straight
+   * through rather than translated to `undefined`; {@link DetectionTierContext#lockedTrackId} takes
+   * the identical convention. Drives the T0 "committed" tier (docs/plans/active/
+   * CV-FLY-INTERACTION-RESEARCH.md §3.2) alongside the hovered box.
+   *
+   * **Where this comes from**: this component has no tracking poll of its own — the lock's only
+   * honest source is `GET /api/streams/{id}/tracks`' own echo (docs/extracts/TRACKING-ORCHESTRATION.md
+   * §3.3's "reflect the wire, never local intent"), which `CvControlPanel` already polls for its own
+   * "Following #N" chip (`cv-control-panel.ts#lockedTrackId`). Rather than duplicate that poll here,
+   * `CvControlPanel` emits its own read back out (`lockedTrackIdChange`) whenever it changes; the host
+   * (`CockpitFacade`) holds the resulting value in a plain signal and feeds it into this input — see
+   * that facade's own `lockedTrackId` doc comment. A host with no such plumbing (Live, Wall — neither
+   * page has a Follow/lock control at all) simply never binds this, so it stays `0` and T0 there is
+   * hover-only: an honest degrade, not a broken one, since there is genuinely no lock to report.
+   */
+  readonly lockedTrackId = input<number>(0);
+
+  /**
+   * The label currently hovered on the detections strip's remote-control chips
+   * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3, wave W5, research §3.5) — `null` when nothing is
+   * hovered. Passed straight through to {@link DetectionTierContext#hoveredClass}, which temporarily
+   * promotes every box carrying this exact label into T1 for the redraw. Mirrors `lockedTrackId`'s own
+   * "host holds the value, this component only draws it" plumbing: the strip lives outside this
+   * component (`CockpitFacade` relays its `hoveredClassChange` output into a signal fed here) — a host
+   * with no such strip (Live, Wall, replay) simply never binds this, so it stays `null` and hover
+   * promotion never fires there.
+   */
+  readonly hoveredClass = input<string | null>(null);
 
   /** Emits the measured seconds-behind-live on every sample, `null` while unknown/not playing. */
   readonly latencyChanged = output<number | null>();
@@ -469,6 +540,9 @@ export class Player {
       : 'Distance behind the live edge, measured continuously from the HLS buffer position.',
   );
 
+  /** Set from `drawnBoxes` (`onOverlayMouseMove`'s own hit-test) — already sticky-relabeled
+   *  (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1: `redrawOverlay`'s `displayed` array, not the
+   *  raw `detections` input), so `hoveredLabel` below inherits the stable label with no further work. */
   protected readonly hoveredDetection = signal<Detection | null>(null);
   /** The hover tooltip's own text — `formatDetectionLabel` so the tooltip and the canvas-drawn box
    * label always agree on whether a box is carrying a track id (docs/plans/done/TRACKING-PLAN.md §10). */
@@ -479,6 +553,16 @@ export class Player {
   protected readonly tooltipX = signal(0);
   protected readonly tooltipY = signal(0);
   private drawnBoxes: readonly DrawnBox[] = [];
+
+  /**
+   * Label placement hysteresis (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.3) — the previous
+   * redraw's own {@link placeLabels} output, keyed by track id (`"#7"`) or an index fallback for an
+   * untracked candidate; fed back in as `placeLabels`' own `previousSlots` argument so a label prefers
+   * to stay in the same above/below/inside-top slot frame-to-frame instead of hopping on a marginal
+   * box move. A plain mutable field, not a signal — nothing in the template reads it, mirrors
+   * `drawnBoxes`'s own "redraw-loop-private bookkeeping" posture.
+   */
+  private labelSlotByKey: ReadonlyMap<string, LabelSlot> = new Map();
 
   protected readonly overlayInteractive = computed(
     () =>
@@ -1826,13 +1910,110 @@ export class Player {
     }
 
     const content = this.letterboxRect(width, height, video.videoWidth, video.videoHeight);
-    // Trails first, so every box (drawn next) sits visually on top of its own tail rather than
-    // under it — docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #3.
-    this.drawTrails(ctx, content, results);
+
+    // Forward-projection (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave W7): `result`'s own boxes
+    // are up to one poll/arrival cycle stale relative to the instant actually on screen — mirrors the
+    // server's deleted `DetectionExtrapolator` (see `detection-overlay-logic.ts`'s own "Forward-
+    // projection" section header) so a moving object's box tracks the picture instead of trailing it.
+    // `onScreenAtMs` is the exact instant `selectDetectionResult` itself synced `result` against
+    // (`estimatedOnScreenAtMs`, shared rather than re-derived); `predecessor` is the batch immediately
+    // before it in `results`, giving the pair a velocity to project from.
+    const onScreenAtMs = estimatedOnScreenAtMs(Date.now(), this.overlaySyncLatency());
+    const predecessor = findPredecessorResult(results, result);
+    const projected = extrapolateDetections(result, predecessor, onScreenAtMs);
+
+    // Sticky labels (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1): elected once per redraw
+    // from the *full* batch history (`results`, not just `projected`'s single batch — a track's recent
+    // votes span more than one batch), then swapped onto `projected`'s own tracked detections. Every
+    // downstream reader of `detection.label` — the box color (`tierBoxColor`/`classBucketHue` below),
+    // `formatDetectionLabel`/`formatTierLabel` (painted text + the hover tooltip, both fed straight
+    // off `displayed`/`drawnBoxes`), `detectionModelKey` (composite-mode color key) — inherits the
+    // stable label for free from this one substitution, with zero changes of its own; an untracked
+    // detection keeps its raw label and its original object reference, unchanged from before this wave.
+    const stickyLabels = electStickyLabels(results);
+    const displayed = applyStickyLabels(projected, stickyLabels);
+
+    // Priority tiers (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2) — a pure function of what
+    // this component already knows: the FOLLOW lock (fed in from the host, see `lockedTrackId`'s own
+    // doc comment), the hovered box, and each track's recent trail (reused below for the trail layer
+    // too, so the scan over `results` only runs once per redraw). Trails consume `displayed` too — the
+    // newest batch's own entry (found by reference; `result` is one of `results`' own elements) is
+    // swapped for its projected+relabeled geometry before the scan, so a T0 trail's last point always
+    // lands exactly where the box drawn below actually is, never one raw capture behind it.
+    const trailResults = results.map((entry) => (entry === result ? { ...entry, detections: displayed } : entry));
+    const trails = trackTrails(trailResults, Date.now(), TRAIL_WINDOW_MS);
+
+    // A held hover reference is re-anchored against this tick's freshly projected+relabeled objects: a
+    // matched detection gets a brand-new object every redraw (its box center advances with
+    // `onScreenAtMs`, and now possibly its label too), so a plain `===` against a reference captured a
+    // tick or more ago would silently stop matching for exactly the moving objects this wave exists to
+    // track. Track id survives both projection and relabeling unchanged, so it's the stable key; an
+    // untracked hover has no such anchor and simply clears — an honest degrade (no fabricated match),
+    // not a bug.
+    const rawHovered = this.hoveredDetection();
+    const hovered =
+      rawHovered === null
+        ? null
+        : (displayed.find((detection) =>
+            rawHovered.track && detection.track ? detection.track.id === rawHovered.track.id : detection === rawHovered,
+          ) ?? null);
+    const lockedTrackId = this.lockedTrackId();
+    const lockActive = lockedTrackId !== 0;
+    const tiers = detectionTiers(displayed, {
+      lockedTrackId,
+      hoveredDetection: hovered,
+      trails,
+      contentWidthPx: content.width,
+      contentHeightPx: content.height,
+      hoveredClass: this.hoveredClass(),
+    });
+    const allowedTiers = tiersForDeclutterLevel(this.boxesMode());
+    // >1 model actually mixed in *this* frame (`showModelLegend`'s own gate) — composite streams keep
+    // per-model color instead of the class-bucket hue (research disposition table: "keep `modelHue`
+    // for the multi-model legend case"). Reads `displayed` (sticky-relabeled) rather than `projected` —
+    // a composite-mode `"model:label"` prefix survives election untouched (the election operates on
+    // whichever label string cv-service actually emitted, prefix included), so this gate is unaffected
+    // either way; using `displayed` here is about staying consistent with every other reader below, not
+    // a behavior change of its own.
+    const composite = distinctModelKeys(displayed).length >= 2;
+
+    // Trails are T0-only now (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/D8 — twelve parked
+    // cars' trails were pure noise); `trackTrails` itself is unchanged, this is a filter at the call
+    // site. Drawn first, so a box (drawn next) sits visually on top of its own tail, not under it.
+    // `drawTrails` resets `ctx.globalAlpha` to `1` at its own end, so the staleness fade below starts
+    // clean.
+    const t0TrackIds = new Set<number>();
+    for (const detection of displayed) {
+      if (tiers.get(detection) === 'T0' && detection.track) {
+        t0TrackIds.add(detection.track.id);
+      }
+    }
+    this.drawTrails(ctx, content, trails, t0TrackIds);
+
+    // Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4) — the whole batch fades
+    // together once it's aged past `STALE_FADE_BATCH_MULTIPLIER` observed intervals; a batch old enough
+    // to count as paused outright (`isDetectionStale`) never reaches here at all — `selectDetectionResult`'s
+    // own bounded fallback already excludes it from `result`, so this only ever dims, never decides
+    // "draw nothing" itself. Combined *multiplicatively* with each detection's own tier alpha
+    // (`tierAlphaPercent` — T2's own thinner presence, and lock-dims-rest on T1/T2/T3) below, never
+    // additively: two independent dimming reasons compound rather than override each other.
+    const ageMs = Math.max(0, Date.now() - Date.parse(result.capturedAt));
+    const staleAlphaFraction = detectionAlphaPercent(ageMs, averageBatchIntervalMs(results)) / 100;
+
+    ctx.font = '11px ui-monospace, monospace'; // set once — both the box pass and the label-measure pass below read it
     const drawn: DrawnBox[] = [];
-    for (const detection of result.detections) {
+    const labelCandidates: TierLabelCandidate[] = [];
+
+    // Draw order: ambient → notable → committed, so a higher tier's box always ends up visually on
+    // top of a lower tier's — the accent target is never buried under an ambient outline.
+    const drawOrder = [...displayed]
+      .filter((detection) => allowedTiers.has(tiers.get(detection) ?? 'T2'))
+      .sort((a, b) => TIER_DRAW_RANK[tiers.get(a) ?? 'T2'] - TIER_DRAW_RANK[tiers.get(b) ?? 'T2']);
+
+    for (const detection of drawOrder) {
+      const tier = tiers.get(detection) ?? 'T2';
       const box = detection.box;
-      const rect = {
+      const rect: DrawnBox = {
         x: content.x + box.x * content.width,
         y: content.y + box.y * content.height,
         width: box.width * content.width,
@@ -1840,8 +2021,16 @@ export class Player {
         detection,
       };
       drawn.push(rect);
-      this.drawBox(ctx, rect, detection);
+
+      const alpha = staleAlphaFraction * (tierAlphaPercent(tier, lockActive) / 100);
+      ctx.globalAlpha = alpha;
+      if (this.drawTierBox(ctx, rect, detection, tier, composite, hovered)) {
+        labelCandidates.push({ detection, tier, rect, alpha });
+      }
     }
+    ctx.globalAlpha = 1;
+
+    this.paintLabels(ctx, labelCandidates, composite, hovered);
     this.drawnBoxes = drawn;
   }
 
@@ -1865,65 +2054,87 @@ export class Player {
   }
 
   /**
-   * Box color is per-**track** once a detection carries one (docs/plans/done/TRACKING-PLAN.md §10 — `trackHue`,
-   * `detection-overlay-logic.ts`), so one object keeps one color across every frame even as its
-   * label flips (a composite-mode member handoff mid-track); **per-model** otherwise (docs/OPS-CORE-
-   * PLAN.md §Q3b, `modelHue`/`detectionModelKey`) — a single-model, untracked stream's boxes stay
-   * the exact `#4f8cff` this always drew. Hover still overrides to the same amber it always has,
-   * for every box alike — hover means "this box", not "this model" or "this track". A `COASTING`
-   * track (tracker-predicted, not detector-reconfirmed on the most recent pass) draws **dashed** —
-   * the honest-UI doctrine made pixel-level: the system is visibly saying "I am extrapolating, not
-   * seeing" (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's same doctrine, applied to a box instead of a lock).
+   * Draws one detection's box for its assigned tier (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md
+   * §3.2, wave W4) — the caller (`redrawOverlay`) has already set `ctx.globalAlpha` for this
+   * detection (staleness × `tierAlphaPercent`) before calling. Returns whether the caller should also
+   * queue a label candidate for it: `T0`/`T1` always (subject to the collision-yield pass actually
+   * placing it), `T2` never (research §3.2's own "no label"), `T3` never (a dot has nowhere to anchor
+   * a label against). Color is the committed-target accent (`DEFAULT_BOX_COLOR`, via
+   * `modelHue(DEFAULT_MODEL_KEY)`) for `T0`, `tierBoxColor` (class-bucket, or per-model in composite
+   * mode) otherwise — hover still overrides to the same amber it always has, for every drawing tier
+   * alike, since hover means "this box", not "this tier". A `COASTING` track (tracker-predicted, not
+   * detector-reconfirmed on the most recent pass) still draws **dashed** on every tier that draws a
+   * box at all — the honest-UI doctrine made pixel-level (docs/extracts/TRACKING-ORCHESTRATION.md
+   * §3.3's same doctrine, applied to a box instead of a lock); `T3`'s dot has no stroke to dash, so it
+   * carries no such signal — an accepted, documented gap (research §3.2 doesn't ask for one).
+   *
+   * `hovered` is `redrawOverlay`'s own re-anchored hover reference (docs/plans/active/CV-CLEAN-FEED-
+   * PLAN.md §7, wave W7), not `this.hoveredDetection()` read directly — see `paintLabels`'s own doc
+   * comment for why the raw signal can no longer be compared against a freshly projected `detection`.
    */
-  private drawBox(ctx: CanvasRenderingContext2D, rect: DrawnBox, detection: Detection): void {
-    const hovered = this.hoveredDetection() === detection;
+  private drawTierBox(
+    ctx: CanvasRenderingContext2D,
+    rect: DrawnBox,
+    detection: Detection,
+    tier: DetectionTier,
+    composite: boolean,
+    hovered: Detection | null,
+  ): boolean {
+    const isHovered = hovered === detection;
     const track = detection.track;
-    const modelKey = detectionModelKey(detection);
-    const strokeColor = track ? trackHue(track.id) : modelHue(modelKey);
-    const fillColor = track ? trackHue(track.id, 85) : modelHue(modelKey, 85);
+    const color = tier === 'T0' ? modelHue(DEFAULT_MODEL_KEY) : tierBoxColor(detection, composite);
+    const strokeColor = isHovered ? '#ffd479' : color;
 
-    ctx.lineWidth = hovered ? 3 : 2;
-    ctx.strokeStyle = hovered ? '#ffd479' : strokeColor;
+    if (tier === 'T3') {
+      ctx.fillStyle = strokeColor;
+      const centerX = rect.x + rect.width / 2;
+      const centerY = rect.y + rect.height / 2;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, SUB_SCALE_DOT_RADIUS_PX, 0, Math.PI * 2);
+      ctx.fill();
+      return false;
+    }
+
+    ctx.lineWidth = tier === 'T0' ? T0_STROKE_WIDTH_PX : tier === 'T1' ? T1_STROKE_WIDTH_PX : T2_STROKE_WIDTH_PX;
+    ctx.strokeStyle = strokeColor;
     ctx.setLineDash(track?.state === 'COASTING' ? [6, 4] : []);
     ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
-    ctx.setLineDash([]); // never leak dashing into the label fill below, or a later stroke (a trail, another box)
+    ctx.setLineDash([]); // never leak dashing into a later stroke (a trail, another box, a label fill)
 
-    const label = formatDetectionLabel(detection);
-    ctx.font = '11px ui-monospace, monospace';
-    const metrics = ctx.measureText(label);
-    const labelHeight = 14;
-    ctx.fillStyle = hovered ? 'rgb(255 212 121 / 90%)' : fillColor;
-    ctx.fillRect(rect.x, Math.max(0, rect.y - labelHeight), metrics.width + 6, labelHeight);
-    ctx.fillStyle = '#04101f';
-    ctx.fillText(label, rect.x + 3, Math.max(labelHeight - 3, rect.y - 3));
+    return tier === 'T0' || tier === 'T1';
   }
 
   /**
-   * Fading per-track trails (docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #3) — `trackTrails` is a
-   * pure recomputation from `results` on every redraw tick (`detection-overlay-logic.ts`'s own doc
-   * comment on why that's enough to "clear on stream change" with no extra bookkeeping here). A
-   * track with fewer than two points in the window has nothing to connect yet and draws nothing —
-   * a lone dot would just be noise next to the box itself. Segments fade from `0.15` (oldest) to
-   * `0.80` (newest) alpha, the "history, not a snapshot" effect the plan's own touchable outcome
-   * asks for; `content` is the same letterboxed video rect `redrawOverlay` already computed for boxes,
-   * so a trail point and its own box always land on the identical pixel.
+   * Fading per-track trails (docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #3), narrowed to
+   * `T0` tracks only as of wave W4 (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/D8 — twelve
+   * parked cars' trails were pure noise; `trackTrails` itself is unchanged, this is a filter at the
+   * call site). `trails` is `redrawOverlay`'s own precomputed map (one scan over `results` per
+   * redraw, not one per layer). A track with fewer than two points in the window has nothing to
+   * connect yet and draws nothing — a lone dot would just be noise next to the box itself. Segments
+   * fade from `0.15` (oldest) to `0.80` (newest) alpha, the "history, not a snapshot" effect the
+   * plan's own touchable outcome asks for; `content` is the same letterboxed video rect
+   * `redrawOverlay` already computed for boxes, so a trail point and its own box always land on the
+   * identical pixel. Color is the fixed committed-target accent (`modelHue(DEFAULT_MODEL_KEY)`) for
+   * every trail drawn here — `T0` is by definition the one committed target, so there is nothing left
+   * for a trail's color to distinguish (the per-track hash hue `trackHue` used to carry is gone as of
+   * this same wave, see `detection-overlay-logic.ts`'s own removal note).
    */
   private drawTrails(
     ctx: CanvasRenderingContext2D,
     content: { x: number; y: number; width: number; height: number },
-    results: readonly DetectionResult[],
+    trails: ReadonlyMap<number, readonly { x: number; y: number }[]>,
+    t0TrackIds: ReadonlySet<number>,
   ): void {
-    const trails = trackTrails(results, Date.now(), TRAIL_WINDOW_MS);
-    if (trails.size === 0) {
+    if (trails.size === 0 || t0TrackIds.size === 0) {
       return;
     }
     ctx.lineWidth = 2;
     ctx.setLineDash([]);
+    ctx.strokeStyle = modelHue(DEFAULT_MODEL_KEY);
     for (const [trackId, points] of trails) {
-      if (points.length < 2) {
+      if (!t0TrackIds.has(trackId) || points.length < 2) {
         continue;
       }
-      ctx.strokeStyle = trackHue(trackId);
       for (let i = 1; i < points.length; i++) {
         const from = points[i - 1];
         const to = points[i];
@@ -1935,6 +2146,66 @@ export class Player {
       }
     }
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Label collision-yield pass (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.3, wave W4) — runs
+   * once per redraw, after every box in every tier has already been drawn (`redrawOverlay`'s own draw
+   * order), so a placed label always sits on top of every box, never the other way round. `candidates`
+   * arrives already draw-ordered (`redrawOverlay` pushes `T0` last, but that's box z-order, not label
+   * priority — resorted here to `T0` first so a committed target's label is always attempted, and
+   * placed, before the cap ({@link MAX_PAINTED_LABELS}) could ever be spent on a lower tier). Each
+   * candidate's own `alpha` (staleness × tier × lock-dim, already resolved by the box pass) carries
+   * through to its label draw, so a dimmed box's label dims with it rather than popping back to full
+   * opacity. `this.labelSlotByKey` is this component's own hysteresis map — `placeLabels` reads it to
+   * prefer last frame's slot per track id and this method overwrites it with the fresh placement
+   * right after, so the map only ever reflects the most recently painted frame. `hovered` is
+   * `redrawOverlay`'s own re-anchored hover reference (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave
+   * W7), not `this.hoveredDetection()` read directly — the candidates here already carry this tick's
+   * freshly projected objects, and only the re-anchored reference is guaranteed to compare equal
+   * against them.
+   */
+  private paintLabels(
+    ctx: CanvasRenderingContext2D,
+    candidates: readonly TierLabelCandidate[],
+    composite: boolean,
+    hovered: Detection | null,
+  ): void {
+    const ordered = [...candidates].sort((a, b) => (a.tier === b.tier ? 0 : a.tier === 'T0' ? -1 : 1));
+    const byKey = new Map<string, TierLabelCandidate>();
+    const labelHeight = 14;
+    const inputs: LabelCandidate[] = ordered.map((candidate) => {
+      const label = formatTierLabel(candidate.detection, candidate.tier);
+      const key = candidate.detection.track ? `#${candidate.detection.track.id}` : label;
+      byKey.set(key, candidate);
+      const metrics = ctx.measureText(label);
+      return {
+        key,
+        box: candidate.rect,
+        labelWidth: metrics.width + 6,
+        labelHeight,
+      };
+    });
+
+    const placed = placeLabels(inputs, this.labelSlotByKey);
+    for (const label of placed) {
+      const candidate = byKey.get(label.key);
+      if (!candidate) {
+        continue;
+      }
+      const text = formatTierLabel(candidate.detection, candidate.tier);
+      const isHovered = hovered === candidate.detection;
+      const color =
+        candidate.tier === 'T0' ? modelHue(DEFAULT_MODEL_KEY, 85) : tierBoxColor(candidate.detection, composite, 85);
+      ctx.globalAlpha = candidate.alpha;
+      ctx.fillStyle = isHovered ? 'rgb(255 212 121 / 90%)' : color;
+      const y = Math.max(0, label.rect.y);
+      ctx.fillRect(label.rect.x, y, label.rect.width, label.rect.height);
+      ctx.fillStyle = '#04101f';
+      ctx.fillText(text, label.rect.x + 3, Math.max(labelHeight - 3, y + labelHeight - 3));
+    }
+    ctx.globalAlpha = 1;
+    this.labelSlotByKey = new Map(placed.map((label) => [label.key, label.slot]));
   }
 
   protected onOverlayMouseMove(event: MouseEvent): void {

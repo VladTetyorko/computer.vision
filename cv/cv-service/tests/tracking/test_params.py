@@ -435,11 +435,16 @@ def test_resolve_takes_follow_top_k_from_settings():
     assert resolved.follow_top_k == 5
 
 
-def test_follow_top_k_defaults_to_one():
-    # The wave's own safety net: shipping opt-in (see `config.py`'s
-    # `DEFAULT_TRACK_FOLLOW_TOP_K` for why) means today's exact single-
-    # target FOLLOW behaviour must be what a fresh deployment gets.
-    assert Settings().track_follow_top_k == 1
+def test_follow_top_k_defaults_to_two():
+    # TRACK-IDENTITY-PLAN wave L4 raised this 1 -> 2 (`config.py`'s
+    # `DEFAULT_TRACK_FOLLOW_TOP_K` own comment has the measurement): ONE
+    # extra alongside the locked target, proven cheap (noise-level on a
+    # direct `perf_counter` probe) and proven not to touch the LOCKED
+    # target's own id/geometry (byte-identical between top_k=1 and top_k=2
+    # across the harness's own scenarios). `3+` -- "opt a fleet into full
+    # situational awareness" -- still ships opt-in; this safety net now
+    # pins THAT line instead.
+    assert Settings().track_follow_top_k == 2
 
 
 def test_settings_read_the_wave_c5b_env_vars(monkeypatch):
@@ -916,3 +921,78 @@ def test_garbage_motion_bound_env_var_falls_back_and_never_raises(monkeypatch):
         settings.track_reupdate_max_motion_center_distance
         == Settings().track_reupdate_max_motion_center_distance
     )
+
+
+# -- TRACK-IDENTITY-PLAN wave L1 additions: label election knobs -------------
+#
+# All three deployment-only, same "no wire field, straight from Settings"
+# shape as `follow_top_k`/`roi_enabled` above -- `track.py`'s
+# `_update_label_election` is the only reader; `resolve()` copies them onto
+# `TrackingParams` unchanged.
+
+
+def test_resolve_takes_label_election_knobs_from_settings():
+    settings = dataclasses.replace(
+        SETTINGS,
+        track_label_vote_window=20,
+        track_label_switch_margin=2.0,
+        track_label_switch_streak=5,
+    )
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.label_vote_window == 20
+    assert resolved.label_switch_margin == 2.0
+    assert resolved.label_switch_streak == 5
+
+
+def test_label_election_knobs_default_to_the_plans_own_numbers():
+    # `docs/plans/active/TRACK-IDENTITY-PLAN.md`'s L1 section names these
+    # three numbers explicitly -- a fresh deployment must get exactly them.
+    settings = Settings()
+
+    assert settings.track_label_vote_window == 10
+    assert settings.track_label_switch_margin == 1.5
+    assert settings.track_label_switch_streak == 3
+
+
+def test_settings_read_the_label_election_env_vars(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_LABEL_VOTE_WINDOW", "20")
+    monkeypatch.setenv("CV_TRACK_LABEL_SWITCH_MARGIN", "2.0")
+    monkeypatch.setenv("CV_TRACK_LABEL_SWITCH_STREAK", "5")
+
+    settings = Settings.from_env()
+
+    assert settings.track_label_vote_window == 20
+    assert settings.track_label_switch_margin == 2.0
+    assert settings.track_label_switch_streak == 5
+
+
+def test_garbage_label_election_env_vars_fall_back_and_never_raise(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_LABEL_VOTE_WINDOW", "not-a-number")
+    monkeypatch.setenv("CV_TRACK_LABEL_SWITCH_MARGIN", "not-a-number")
+    monkeypatch.setenv("CV_TRACK_LABEL_SWITCH_STREAK", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert settings.track_label_vote_window == Settings().track_label_vote_window
+    assert settings.track_label_switch_margin == Settings().track_label_switch_margin
+    assert settings.track_label_switch_streak == Settings().track_label_switch_streak
+
+
+def test_non_positive_label_election_env_vars_fall_back_not_disable(monkeypatch):
+    # Unlike the ORU ceilings above, none of these three has a legitimate
+    # "0 means disabled" reading (`_parse_positive_int`/`_parse_positive_
+    # float`, the SAME "misconfiguration, not a disable value" contract
+    # `CV_TRACK_ROI_CROP_FACTOR` already uses) -- a window/margin/streak of
+    # zero or less is nonsensical, not an off switch, so it falls back to
+    # the shipped default with a logged warning instead.
+    monkeypatch.setenv("CV_TRACK_LABEL_VOTE_WINDOW", "0")
+    monkeypatch.setenv("CV_TRACK_LABEL_SWITCH_MARGIN", "-1.0")
+    monkeypatch.setenv("CV_TRACK_LABEL_SWITCH_STREAK", "-3")
+
+    settings = Settings.from_env()
+
+    assert settings.track_label_vote_window == Settings().track_label_vote_window
+    assert settings.track_label_switch_margin == Settings().track_label_switch_margin
+    assert settings.track_label_switch_streak == Settings().track_label_switch_streak

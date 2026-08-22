@@ -24,9 +24,6 @@ import java.time.Instant;
  * @param viewUrl   where a viewer can watch the stream over HLS, or absent if the active publisher has no viewing endpoint
  * @param whepUrl   where a viewer can watch the stream over WebRTC/WHEP (sub-second latency), or absent
  *                  if the active publisher has no WebRTC viewing endpoint
- * @param burnedIn  whether server-side overlay burn-in is actually active for this stream — see
- *                  {@link StartStreamResponse#burnedIn()}'s own javadoc for the full contract; same
- *                  "always serialized, never omitted" reasoning
  * @param state     whether this stream's <b>video</b> is actually flowing right now
  *                  (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5). Always serialized. Before this
  *                  existed a client could only infer liveness from this stream's presence in the
@@ -47,7 +44,7 @@ import java.time.Instant;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ActiveStreamResponse(String streamId, String deviceId, Instant startedAt, String viewUrl,
-                                    String whepUrl, boolean burnedIn, StreamState state, boolean detectionEnabled,
+                                    String whepUrl, StreamState state, boolean detectionEnabled,
                                     DetectionState detectionState) {
 
     /**
@@ -69,7 +66,7 @@ public record ActiveStreamResponse(String streamId, String deviceId, Instant sta
     public static ActiveStreamResponse from(ActiveStream stream, String viewUrl, String whepUrl,
                                              DetectionState detectionState) {
         return new ActiveStreamResponse(stream.streamId().value().toString(), stream.deviceId().value().toString(),
-                stream.startedAt(), viewUrl, whepUrl, stream.burnedIn(), stream.state(), stream.detectionEnabled(),
+                stream.startedAt(), viewUrl, whepUrl, stream.state(), stream.detectionEnabled(),
                 detectionState);
     }
 }

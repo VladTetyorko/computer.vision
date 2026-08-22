@@ -108,11 +108,6 @@ public final class LiveFrameFallbackStreamService implements StreamService {
     }
 
     @Override
-    public boolean burnedIn(StreamId streamId) {
-        return delegate.burnedIn(streamId);
-    }
-
-    @Override
     public List<Detection> latestDetections(StreamId streamId) {
         return delegate.latestDetections(streamId);
     }

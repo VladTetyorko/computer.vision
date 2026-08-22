@@ -21,7 +21,6 @@ import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
-import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
@@ -452,7 +451,6 @@ public class ApplicationServiceWiring {
                                         DetectionRepositoryPort detectionRepositoryPort,
                                         EventPublisherPort eventPublisherPort,
                                         UsageTracker usageTracker,
-                                        OverlayPort overlayPort,
                                         DetectionEventRepositoryPort detectionEventRepositoryPort,
                                         DetectionLiveUpdatePort detectionLiveUpdatePort,
                                         VisionApplicationProperties applicationProperties,
@@ -467,7 +465,7 @@ public class ApplicationServiceWiring {
                 : null;
         StreamService defaultStreamService = new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry,
                 detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker,
-                overlayPort, detectionEventRepositoryPort, detectionLiveUpdatePort,
+                detectionEventRepositoryPort, detectionLiveUpdatePort,
                 streamPipelineSettings(applicationProperties, trackingProperties, cvProperties), pullDetectionSettings,
                 detectionDemandPort.getIfAvailable());
         if (publishProperties.sourceProxy().enabled()) {

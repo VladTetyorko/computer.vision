@@ -72,33 +72,17 @@
             <section class="card">
               <header>
                 <h2>Detections</h2>
-                <div class="row segmented" role="group" aria-label="Detection boxes">
-                  <button
-                    type="button"
-                    class="btn secondary small"
-                    [class.active]="facade.boxesMode() === 'overlay'"
-                    (click)="facade.setBoxesMode('overlay')"
-                  >
-                    Overlay
-                  </button>
-                  @if (facade.showBurnedInOption()) {
+                <div class="row segmented" role="group" aria-label="Detection boxes declutter level">
+                  @for (level of declutterLevels; track level) {
                     <button
                       type="button"
                       class="btn secondary small"
-                      [class.active]="facade.boxesMode() === 'burned'"
-                      (click)="facade.setBoxesMode('burned')"
+                      [class.active]="facade.boxesMode() === level"
+                      (click)="facade.setBoxesMode(level)"
                     >
-                      Burned
+                      {{ boxesModeLabel(level) }}
                     </button>
                   }
-                  <button
-                    type="button"
-                    class="btn secondary small"
-                    [class.active]="facade.boxesMode() === 'off'"
-                    (click)="facade.setBoxesMode('off')"
-                  >
-                    Off
-                  </button>
                 </div>
               </header>
               <vision-detections-strip />

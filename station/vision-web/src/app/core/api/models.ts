@@ -89,13 +89,10 @@ export interface RegisterDeviceRequest {
  * reverse-proxies HLS byte fetches), WHEP is a POST/SDP + ICE exchange a stateless proxy cannot
  * forward, so this is never app-relative and must never be proxied — POST straight to it.
  *
- * `burnedIn` (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§8 wave M8) says whether this stream's video
- * itself actually carries burned-in detection boxes (`PipelineConfig.overlayBurnIn` at start time,
- * wave M5's own addition to the wire — this field does not exist on the wire yet as of M8). **An
- * absent field means `true`** — that is today's behaviour (`overlayBurnIn` defaults `true`
- * server-side, and a pre-M5 backend never sends this key at all), so every reader of this field goes
- * through `detection-overlay-logic.ts#resolveBurnedIn` rather than a bare truthiness check, per
- * MEDIA-SOT-PLAN.md D1's "defaults reproduce today's behaviour exactly" rule.
+ * **`burnedIn` is gone** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3) — server-side burn-in
+ * itself is deleted, not defaulted off, so there is no longer a wire field to mirror; the video is
+ * always clean pixels and the client canvas overlay (`shared/player/detection-overlay-logic.ts`) is
+ * simply the product now.
  */
 export interface ActiveStream {
   readonly streamId: string;
@@ -103,7 +100,6 @@ export interface ActiveStream {
   readonly startedAt: string;
   readonly viewUrl?: string;
   readonly whepUrl?: string;
-  readonly burnedIn?: boolean;
   readonly state?: StreamState;
   readonly detectionEnabled?: boolean;
   readonly detectionState?: DetectionState;
@@ -146,12 +142,21 @@ export type StreamState = 'STARTING' | 'LIVE' | 'STALLED' | 'RECONNECTING' | 'UN
  * request, so it is always sent explicitly — the SPA's own default (also flipped to `false`, same
  * wave, §D3) is what actually governs a stream this app started, not this field's absence. Both are
  * also PATCH-able live afterward — see `UpdateStreamConfigRequest`.
+ *
+ * `labelDenyFilter` (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5) mirrors `dto.StartStreamRequest
+ * #labelDenyFilter` one for one: an explicit empty array is a real value meaning "deny nothing",
+ * absent leaves the server default (also "deny nothing") alone. Enforced server-side in
+ * `StreamPipeline`'s single drop site, *after* `labelFilter` — a label that fails the allowlist or
+ * matches the deny list is dropped identically before all fan-out (screen, alerts, recording). See
+ * `UpdateStreamConfigRequest#labelDenyFilter` below for the everyday one-click "hide this class" act
+ * this field backs; `labelFilter` stays the rarer model-intent allowlist.
  */
 export interface StartStreamRequest {
   readonly confidenceThreshold?: number;
   readonly inferenceFps?: number;
   readonly model?: string;
   readonly labelFilter?: readonly string[];
+  readonly labelDenyFilter?: readonly string[];
   readonly detectionEnabled?: boolean;
 }
 
@@ -182,11 +187,22 @@ export interface StartStreamRequest {
  * `buildTrackingCadencePatch`/`buildFollowLockPatch`/`buildReleaseLockPatch` each build a
  * `tracking`-only patch). See {@link TrackingConfigRequest}'s own doc comment for the one-of-three
  * `lock` rule.
+ *
+ * `labelDenyFilter` (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5) mirrors `dto.
+ * UpdateStreamConfigRequest#labelDenyFilter` — the one field added since the §2 contract froze,
+ * present/absent following the exact same "only present fields change" partial-patch rule as
+ * `labelFilter`; an explicit `[]` means "deny nothing" (a real value, not "leave unchanged"). Hot,
+ * never re-arms: sent on the same debounced hot-knob PATCH as `labelFilter`
+ * (`cv-control-panel-logic.ts#buildHotKnobPatch`). This is the field an operator's one-click "hide
+ * this class" act (the strip, the panel's class-chip checklist) actually writes — `labelFilter`
+ * itself is left alone by that flow, reserved for the rarer model-intent allowlist (preset fill,
+ * seeding on a model switch).
  */
 export interface UpdateStreamConfigRequest {
   readonly confidenceThreshold?: number;
   readonly inferenceFps?: number;
   readonly labelFilter?: readonly string[];
+  readonly labelDenyFilter?: readonly string[];
   readonly detectionEnabled?: boolean;
   readonly model?: string;
   readonly tracking?: TrackingConfigRequest;
@@ -586,13 +602,12 @@ export interface CvTrackersResponse {
 }
 
 /** Mirrors `dto.StartStreamResponse`. `whepUrl` follows the same absolute-origin rule as
- *  `ActiveStream#whepUrl`; `burnedIn` follows the same "absent means true" rule as
- *  `ActiveStream#burnedIn` — see that field's own doc comment. */
+ *  `ActiveStream#whepUrl`; `burnedIn` is gone for the same reason — see that field's own doc
+ *  comment (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3). */
 export interface StartStreamResult {
   readonly streamId: string;
   readonly viewUrl?: string;
   readonly whepUrl?: string;
-  readonly burnedIn?: boolean;
 }
 
 /**

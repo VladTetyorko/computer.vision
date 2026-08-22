@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  *
  * <p>{@code vision.publish.enabled=false} only — deliberately the same {@code @SpringBootTest}
  * configuration shape {@link com.drones.vision.app.PersistenceWiringTest}/{@link
- * com.drones.vision.app.OverlayWiringTest}/over a dozen other classes already use, so this class
+ * com.drones.vision.app.CvWiringTest}/over a dozen other classes already use, so this class
  * reuses their cached context instead of forcing a new one ({@code
  * com.drones.vision.app.testsupport.PostgresContextCustomizerFactory}'s own javadoc: each distinct
  * {@code @SpringBootTest} properties combination parks its own pooled connections against the

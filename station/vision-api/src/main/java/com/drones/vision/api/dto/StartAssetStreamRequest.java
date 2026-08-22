@@ -21,19 +21,20 @@ import java.util.List;
  * @param deviceId            the device to stream from, as a canonical UUID string; {@code null} means "the asset's single video-capable device"
  * @param confidenceThreshold overrides {@link PipelineConfig#confidenceThreshold()} if present
  * @param inferenceFps        overrides {@link PipelineConfig#inferenceFps()} if present
- * @param overlayBurnIn       overrides {@link PipelineConfig#overlayBurnIn()} if present (docs/plans/done/MVP2-PLAN.md §V, V-e)
  * @param model               overrides {@link PipelineConfig#model()}'s {@code id} if present/non-blank — see
  *                             {@link StartStreamRequest#model()}'s own javadoc for the full contract (raw,
  *                             never split; version comes from the default)
  * @param labelFilter         overrides {@link PipelineConfig#labelFilter()} if present — see {@link
  *                             StartStreamRequest#labelFilter()}'s own javadoc (docs/plans/done/CV-CONTROL-PLAN.md §2)
+ * @param labelDenyFilter      overrides {@link PipelineConfig#labelDenyFilter()} if present — see {@link
+ *                             StartStreamRequest#labelDenyFilter()}'s own javadoc (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2)
  * @param detectionEnabled    overrides {@link PipelineConfig#detectionEnabled()} if present (docs/plans/done/CV-CONTROL-PLAN.md §2)
  * @param tracking            overrides the deployment's tracking seed if present — see {@link
  *                             StartStreamRequest#tracking()}'s own javadoc for the full contract
  *                             (same shape as {@code PATCH .../config}'s, minus {@code lock})
  */
 public record StartAssetStreamRequest(String deviceId, Double confidenceThreshold, Integer inferenceFps,
-                                       Boolean overlayBurnIn, String model, List<String> labelFilter,
+                                       String model, List<String> labelFilter, List<String> labelDenyFilter,
                                        Boolean detectionEnabled, TrackingConfigRequest tracking) {
 
     /** No body: no explicit device, use every default from {@link PipelineConfig#defaults()}. */
@@ -41,21 +42,21 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
             new StartAssetStreamRequest(null, null, null, null, null, null, null, null);
 
     /**
-     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
-     * a convenience constructor defaulting it to {@code null} ("use the seed as-is").
+     * Convenience constructor defaulting {@code labelDenyFilter} to {@code null} ("deny nothing beyond
+     * the default").
      *
      * @param deviceId            the device to stream from, or {@code null}
      * @param confidenceThreshold overrides the default confidence threshold if present
      * @param inferenceFps        overrides the default inference sample rate if present
-     * @param overlayBurnIn       overrides the default burn-in flag if present
      * @param model               overrides the default model id if present/non-blank
      * @param labelFilter         overrides the default label set if present
      * @param detectionEnabled    overrides the default detection on/off flag if present
+     * @param tracking            overrides the deployment's tracking seed if present
      */
     public StartAssetStreamRequest(String deviceId, Double confidenceThreshold, Integer inferenceFps,
-                                    Boolean overlayBurnIn, String model, List<String> labelFilter,
-                                    Boolean detectionEnabled) {
-        this(deviceId, confidenceThreshold, inferenceFps, overlayBurnIn, model, labelFilter, detectionEnabled, null);
+                                    String model, List<String> labelFilter, Boolean detectionEnabled,
+                                    TrackingConfigRequest tracking) {
+        this(deviceId, confidenceThreshold, inferenceFps, model, labelFilter, null, detectionEnabled, tracking);
     }
 
     /**
@@ -69,10 +70,10 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
     }
 
     /**
-     * Merges {@link #confidenceThreshold()}/{@link #inferenceFps()}/{@link #overlayBurnIn()}/{@link
-     * #model()}/{@link #labelFilter()}/{@link #detectionEnabled()} onto {@code defaults}, delegating
-     * to {@link StartStreamRequest#mergeOnto(PipelineConfig)} so the two start-stream shapes keep
-     * sharing exactly one merge implementation. Tracking travels separately as {@link
+     * Merges {@link #confidenceThreshold()}/{@link #inferenceFps()}/{@link #model()}/{@link
+     * #labelFilter()}/{@link #labelDenyFilter()}/{@link #detectionEnabled()} onto {@code defaults},
+     * delegating to {@link StartStreamRequest#mergeOnto(PipelineConfig)} so the two start-stream
+     * shapes keep sharing exactly one merge implementation. Tracking travels separately as {@link
      * #trackingPatch()} — see that method and its device-level twin.
      *
      * @param defaults the deployment's default pipeline configuration to merge this request onto
@@ -96,7 +97,7 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
     }
 
     private StartStreamRequest asDeviceLevelRequest() {
-        return new StartStreamRequest(confidenceThreshold, inferenceFps, overlayBurnIn, model, labelFilter,
+        return new StartStreamRequest(confidenceThreshold, inferenceFps, model, labelFilter, labelDenyFilter,
                 detectionEnabled, tracking);
     }
 }

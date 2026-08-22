@@ -1,6 +1,5 @@
 package com.drones.vision.perception.application.stream;
 
-import com.drones.vision.perception.domain.model.AnnotatedFrame;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.perception.domain.model.Detection;
@@ -30,7 +29,6 @@ import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
-import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.perception.domain.port.VideoSourcePort;
 import org.junit.jupiter.api.BeforeEach;
@@ -99,8 +97,8 @@ class DefaultStreamServiceTest {
     private static PipelineConfig detectingDefaults() {
         PipelineConfig base = PipelineConfig.defaults();
         return new PipelineConfig(base.model(), base.confidenceThreshold(), base.inferenceFps(),
-                base.maxInFlightInferences(), base.overlayTelemetry(), base.labelFilter(), base.eventRule(),
-                base.overlayBurnIn(), true, base.tracking());
+                base.maxInFlightInferences(), base.labelFilter(), base.eventRule(), true, base.tracking(),
+                base.labelDenyFilter());
     }
 
     private static Flow.Publisher<VideoFrame> noOpPublisher() {
@@ -269,7 +267,7 @@ class DefaultStreamServiceTest {
         // immediately -- a tiny backoff window (20ms) plus a generous wait afterwards proves no
         // further open() call ever arrives, without waiting out the real 1s-30s production backoff.
         StreamService fastRetryService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
                 TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
         ErroringThenSilentPublisher publisher = new ErroringThenSilentPublisher();
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
@@ -476,7 +474,7 @@ class DefaultStreamServiceTest {
         when(usageTracker.resolveAsset(device.id())).thenReturn(Optional.of(assetId));
         DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
         StreamService withLiveUpdates = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker, null, null,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker, null,
                 liveUpdatePublisherPort);
         VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
@@ -492,9 +490,9 @@ class DefaultStreamServiceTest {
     @Test
     void neverResolvesOrAnnouncesLiveUpdatesWhenNoLiveUpdatePublisherIsConfigured() {
         // Documents/protects the nullable-collaborator contract: usageTracker.resolveAsset must
-        // never even be called when there's neither a DetectionLiveUpdatePort to hand the result to
-        // nor an OverlayPort that could ever read a telemetry supplier built from it (see the
-        // telemetry-supplier tests below).
+        // never even be called when there's no DetectionLiveUpdatePort to hand the result to and no
+        // camera field of view configured that could ever read a telemetry supplier built from it
+        // (see the telemetry-supplier tests below).
         UsageTracker usageTracker = mock(UsageTracker.class);
         StreamService withTracker = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker);
@@ -505,13 +503,14 @@ class DefaultStreamServiceTest {
     }
 
     @Test
-    void threadsATelemetrySupplierWhenAFieldOfViewIsConfiguredEvenWithNoOverlayPort() {
-        // REGRESSION (docs/conclusions/CV-RATE-BUDGET.md gap 3). The telemetry supplier was built
-        // only when an OverlayPort was present, because the OSD was its only consumer. Camera
-        // attitude is a second, unrelated consumer, so a deployment with a configured field of view
-        // and no overlay silently sent NO CameraPose -- and no test could see it, because every
-        // existing test injects the supplier into StreamPipeline directly rather than exercising
-        // the construction here. Caught by watching the wire, pinned here.
+    void threadsATelemetrySupplierWhenAFieldOfViewIsConfigured() {
+        // INVARIANT (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1): the telemetry supplier that feeds
+        // CameraAttitude/ego-motion is built from usageTracker + a configured field of view alone --
+        // it once shipped dead because its construction was gated on an OverlayPort being present
+        // (docs/conclusions/CV-RATE-BUDGET.md gap 3), which silently meant a deployment with a
+        // configured field of view but no overlay sent no CameraPose at all. Now that overlay does
+        // not exist anywhere in this constructor chain, this test pins that camera attitude still
+        // flows with nothing overlay-shaped anywhere in the call.
         UsageTracker usageTracker = mock(UsageTracker.class);
         AssetId assetId = AssetId.random();
         when(usageTracker.resolveAsset(device.id())).thenReturn(Optional.of(assetId));
@@ -519,8 +518,7 @@ class DefaultStreamServiceTest {
                 new Telemetry(device.id(), Instant.now(), 50.0, 30.0, 120.0, 137.5, 80.0, Map.of())));
         StreamPipelineSettings withFov = settingsWithCameraHfov(62.0);
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker,
-                null /* no overlay */, null, null, withFov);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker, null, null, withFov);
         VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
@@ -536,7 +534,7 @@ class DefaultStreamServiceTest {
     }
 
     @Test
-    void buildsNoTelemetrySupplierWithNeitherAnOverlayPortNorAFieldOfView() {
+    void buildsNoTelemetrySupplierWithNoFieldOfViewConfigured() {
         // The cost gate the fix had to preserve: nothing reads telemetry, so nothing resolves it.
         UsageTracker usageTracker = mock(UsageTracker.class);
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
@@ -556,44 +554,6 @@ class DefaultStreamServiceTest {
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
                 base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
                 base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees);
-    }
-
-    // --- Telemetry-OSD input (closes adapter-overlay/MODULE.md's "OSD gate not reachable" gap) ---
-
-    @Test
-    void resolvesTheOwningAssetAndThreadsATelemetrySupplierIntoThePipelineWhenOverlayIsConfigured() {
-        UsageTracker usageTracker = mock(UsageTracker.class);
-        AssetId assetId = AssetId.random();
-        when(usageTracker.resolveAsset(device.id())).thenReturn(Optional.of(assetId));
-        Telemetry sample = new Telemetry(device.id(), Instant.now(), 50.45, 30.52, 100.0, 90.0, 77.0, Map.of());
-        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(sample));
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
-                ByteBuffer.wrap(new byte[]{1, 2, 3}));
-        when(overlayPort.render(any())).thenReturn(frame);
-        StreamService withOverlay = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker, overlayPort);
-        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
-        // Never completes: with PipelineConfig.defaults()'s overlayTelemetry=true, the telemetry
-        // sample alone (no detections at all) is what must trigger overlay rendering.
-        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>());
-
-        withOverlay.start(device.id(), PipelineConfig.defaults());
-
-        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
-        verify(overlayPort).render(captor.capture());
-        assertEquals(sample, captor.getValue().telemetry());
-    }
-
-    @Test
-    void neverBuildsATelemetrySupplierWhenNoUsageTrackerIsConfiguredEvenWithAnOverlayPort() {
-        // Documents/protects the nullable-collaborator contract the other direction: an OverlayPort
-        // with no UsageTracker at all must never throw building/using a telemetry supplier.
-        OverlayPort overlayPort = mock(OverlayPort.class);
-        StreamService withOverlayOnly = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, overlayPort);
-
-        assertDoesNotThrow(() -> withOverlayOnly.start(device.id(), PipelineConfig.defaults()));
     }
 
     /** A {@link Flow.Publisher} that delivers exactly one frame on its first {@code request()} call. */
@@ -657,7 +617,7 @@ class DefaultStreamServiceTest {
         // opposite (configured) direction.
         DetectionEventRepositoryPort detectionEventRepositoryPort = mock(DetectionEventRepositoryPort.class);
         StreamService withEvents = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, null,
                 detectionEventRepositoryPort);
 
         StreamId streamId = withEvents.start(device.id(), PipelineConfig.defaults());
@@ -745,8 +705,8 @@ class DefaultStreamServiceTest {
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
         // detectionEnabled explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
         // this test's whole point is that detection keeps running across the hot-knob swap.
-        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true);
         StreamId streamId = service.start(device.id(), started);
 
         UpdateOutcome outcome = service.updateConfig(streamId, new PipelineConfigPatch(0.75, null, null, null, null));
@@ -777,8 +737,8 @@ class DefaultStreamServiceTest {
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
         // detectionEnabled explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
         // this test's whole point is that the next sampled frame still detects, on the new model.
-        PipelineConfig started = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true);
         StreamId streamId = service.start(device.id(), started);
 
         UpdateOutcome outcome =
@@ -801,8 +761,8 @@ class DefaultStreamServiceTest {
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
         // detectionEnabled explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
         // this test's whole point is that detection keeps running with the merged config.
-        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "v1"), 0.4, 1000, 3, true, Set.of("person"),
-                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "v1"), 0.4, 1000, 3, Set.of("person"),
+                EventRuleConfig.defaults(), true);
         StreamId streamId = service.start(device.id(), started);
 
         service.updateConfig(streamId, new PipelineConfigPatch(null, null, Set.of("car"), null, null));
@@ -815,7 +775,7 @@ class DefaultStreamServiceTest {
         assertEquals(0.4, merged.confidenceThreshold());
         assertEquals(1000, merged.inferenceFps());
         assertEquals(3, merged.maxInFlightInferences());
-        assertTrue(merged.overlayTelemetry());
+        assertTrue(merged.labelDenyFilter().isEmpty(), "labelDenyFilter is untouched by this patch");
         assertEquals("yolo", merged.model().id());
         assertEquals("v1", merged.model().version());
         assertTrue(merged.detectionEnabled());
@@ -856,8 +816,8 @@ class DefaultStreamServiceTest {
     }
 
     private static PipelineConfig startedWith(TrackingConfig tracking) {
-        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
-                EventRuleConfig.defaults(), true, true, tracking);
+        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true, tracking);
     }
 
     /**
@@ -1108,7 +1068,7 @@ class DefaultStreamServiceTest {
     private StreamService serviceSeededWith(TrackingConfigPatch seed) {
         StreamPipelineSettings base = StreamPipelineSettings.defaults();
         return new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, null,
+                detectionRepositoryPort, eventPublisher, null, null, null,
                 new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(), base.warmupFrames(),
                         base.minMeasuredFps(), base.maxMeasuredFps(), base.detectionBackoffInitialNanos(),
                         base.detectionBackoffMaxNanos(), base.sourceReopenBackoffInitialNanos(),
@@ -1158,14 +1118,14 @@ class DefaultStreamServiceTest {
         // evaluateDetectionDemand's package-private Instant seam, never by waiting out a real cadence.
         StreamPipelineSettings settings = settingsWithDetectionDemand(Duration.ofMinutes(1), grace);
         DefaultStreamService demandService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
                 settings, null, demandPort);
         // inferenceFps=100 (10ms sample interval) plus the 15ms real sleeps below reliably clear the
         // pipeline's own real-nanoTime sample deadline between pushes -- unrelated to (and much
         // shorter than) the synthetic Instants driving the grace computation itself below, which
         // never waits on real time at all.
-        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 100, 5, true, Set.of(),
-                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 100, 5, Set.of(),
+                EventRuleConfig.defaults(), true);
         StreamId streamId = demandService.start(device.id(), started);
         Instant t0 = Instant.now();
 
@@ -1203,7 +1163,7 @@ class DefaultStreamServiceTest {
         StreamPipelineSettings settings = settingsWithDetectionDemand(Duration.ofMillis(20),
                 StreamPipelineSettings.defaults().detectionDemandGrace());
         DefaultStreamService demandService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
                 settings, null, throwingPort);
 
         demandService.start(device.id(), PipelineConfig.defaults());
@@ -1225,7 +1185,7 @@ class DefaultStreamServiceTest {
         // this test drives evaluateDetectionDemand explicitly, through its package-private Instant seam.
         StreamPipelineSettings settings = settingsWithDetectionDemand(Duration.ofMinutes(1), Duration.ofSeconds(30));
         DefaultStreamService demandService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
                 settings, null, demandPort);
         StreamId streamId = demandService.start(device.id(), detectingDefaults());
 

@@ -95,25 +95,25 @@ class StreamPipelinePullModeTest {
      * ("this stream's detection gate is open") must be on the page rather than inherited silently.
      */
     private static PipelineConfig config() {
-        return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true, Set.of(),
-                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, true);
+        return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, Set.of(),
+                EventRuleConfig.defaults(), true);
     }
 
     private static PipelineConfig configWithDetectionEnabled(boolean detectionEnabled) {
-        return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true, Set.of(),
-                EventRuleConfig.defaults(), PipelineConfig.DEFAULT_OVERLAY_BURN_IN, detectionEnabled);
+        return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, Set.of(),
+                EventRuleConfig.defaults(), detectionEnabled);
     }
 
     private StreamPipeline pullPipeline(PipelineConfig config, PullDetectionBinding binding) {
         return new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, null, null, System::nanoTime,
+                detectionRepositoryPort, eventPublisher, null, null, null, null, System::nanoTime,
                 StreamPipelineSettings.defaults(), binding);
     }
 
     private StreamPipeline pullPipeline(PipelineConfig config, PullDetectionBinding binding, AssetId assetId,
                                          DetectionLiveUpdatePort liveUpdatePublisherPort) {
         return new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, assetId, liveUpdatePublisherPort, null,
+                detectionRepositoryPort, eventPublisher, null, assetId, liveUpdatePublisherPort, null,
                 System::nanoTime, StreamPipelineSettings.defaults(), binding);
     }
 
@@ -225,7 +225,7 @@ class StreamPipelinePullModeTest {
         StreamPipeline pipeline = pullPipeline(config(), binding);
         pipeline.start();
 
-        PipelineConfig next = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.6, 15, 2, true, Set.of());
+        PipelineConfig next = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.6, 15, 2, Set.of());
         pipeline.updateConfig(next);
 
         assertEquals(1, pulledDetectionPort.reconfigureCalls.size());
@@ -241,7 +241,7 @@ class StreamPipelinePullModeTest {
                 streamPublisherPort, detectionRepositoryPort, eventPublisher);
 
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> pipeline.updateConfig(
-                new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.6, 15, 2, true, Set.of())));
+                new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.6, 15, 2, Set.of())));
     }
 
     // --- the detection gate reaches pull mode too (docs/plans/active/CV-DEMAND-PLAN.md &sect;5, the ---

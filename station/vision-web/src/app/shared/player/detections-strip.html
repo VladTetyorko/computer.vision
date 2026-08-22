@@ -1,0 +1,43 @@
+<div class="strip">
+  <span
+    class="cv-dot"
+    [class.on]="store.status() === 'on'"
+    [attr.aria-label]="'CV ' + store.status()"
+    [title]="'CV ' + store.status()"
+  ></span>
+  @if (chips().length > 0) {
+    <div class="chip-row" role="group" aria-label="Detected classes">
+      @for (chip of chips(); track chip.label) {
+        @if (interactive()) {
+          <button
+            type="button"
+            class="chip strip-chip"
+            [class.warn]="chip.hidden"
+            [attr.aria-pressed]="chip.hidden"
+            [title]="chip.hidden ? 'Hidden — click to show ' + chip.label + ' again' : 'Click to hide ' + chip.label"
+            (mouseenter)="onChipEnter(chip.label)"
+            (mouseleave)="onChipLeave()"
+            (focus)="onChipEnter(chip.label)"
+            (blur)="onChipLeave()"
+            (click)="onChipClick(chip)"
+          >
+            @if (chip.hidden) {
+              <span class="strip-chip-label strip-chip-hidden">{{ chip.label }} — hidden</span>
+            } @else {
+              <span class="strip-chip-label">{{ chip.label }} <span class="mono">×{{ chip.count }}</span></span>
+            }
+          </button>
+        } @else {
+          <span class="chip strip-chip">
+            {{ chip.label }} <span class="mono">×{{ chip.count }}</span>
+          </span>
+        }
+      }
+    </div>
+    @if (interactive()) {
+      <p class="muted hint strip-hint">{{ hiddenClassTruth }}</p>
+    }
+  } @else {
+    <span class="muted hint">No detections yet.</span>
+  }
+</div>

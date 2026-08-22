@@ -58,6 +58,12 @@ the one case this file's own guard exists to allow. Reverting is `CV_TRACK_REUPD
 RATIO=0`, and finding O5 (`TRACKING-V3-PLAN.md` §6b) tracks resolving the FOLLOW-side cost once
 aerial footage makes FOLLOW measurable on real video at all.
 
+**2026-08-20 -- TRACK-IDENTITY-PLAN wave L2, association hardening, measured. Table below
+UNCHANGED -- all 30 rows.** `cv_service/config.py`'s cost weight/gate defaults were raised per
+the plan, tuned against this exact table, and one of the three knobs was reverted on measured
+evidence rather than shipped on the plan's own starting guess. Full trial account, the reverted
+knob's root cause, and the re-measured L1 label-flip counter: §6 below.
+
 Reproduce with (see `cv/cv-service/MODULE.md` for the full `PYTHONPATH` explanation):
 
 ```bash
@@ -76,13 +82,13 @@ server's own defaults: `cost` for ASSOCIATE, `lk` for FOLLOW (`CV_TRACK_ASSOCIAT
 scenario         | mode                    | engine | frames | gt | IDSW | FM | MT | PT | ML | gaps | recov | recov% | life_mean | life_med | det/s | trk_ms_avg | trk_ms_p95 | coast_n | cADE  | cFDE  | cADE_px | cFDE_px | implaus_n
 -----------------+-------------------------+--------+--------+----+------+----+----+----+----+------+-------+--------+-----------+----------+-------+------------+------------+---------+-------+-------+---------+---------+----------
 clutter          | TRACKING_MODE_ASSOCIATE | cost   | 60     | 10 | 0    | 0  | 10 | 0  | 0  | 0    | 0     | n/a    | 55.8      | 60.0     | 10.00 | ~4         | ~5         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-clutter          | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 60.0      | 60.0     | 0.83  | ~1         | ~1         | 55      | 0.218 | 0.324 | 69.9    | 103.8   | 0        
+clutter          | TRACKING_MODE_FOLLOW    | lk     | 60     | 1  | 3    | 3  | 0  | 1  | 0  | 3    | 0     | 0%     | 24.0      | 20.0     | 0.83  | ~1         | ~3         | 55      | 0.069 | 0.096 | 22.1    | 30.6    | 0        
 crossing         | TRACKING_MODE_ASSOCIATE | cost   | 50     | 2  | 0    | 0  | 2  | 0  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-crossing         | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 0.80  | ~0.4       | ~1         | 48      | 0.194 | 0.228 | 62.1    | 72.9    | 0        
+crossing         | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 49.0      | 49.0     | 0.80  | ~1         | ~2         | 48      | 0.194 | 0.228 | 62.1    | 72.9    | 0        
 crossing_similar | TRACKING_MODE_ASSOCIATE | cost   | 50     | 2  | 0    | 2  | 2  | 0  | 0  | 2    | 2     | 100%   | 44.0      | 44.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-crossing_similar | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 50.0      | 50.0     | 0.80  | ~0.4       | ~1         | 48      | 0.357 | 0.752 | 95.9    | 196.8   | 0        
+crossing_similar | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 36.0      | 36.0     | 0.80  | ~1         | ~1         | 48      | 0.357 | 0.752 | 95.9    | 196.8   | 0        
 crowd_recall     | TRACKING_MODE_ASSOCIATE | cost   | 150    | 6  | 0    | 6  | 6  | 0  | 0  | 6    | 6     | 100%   | 60.0      | 60.0     | 10.00 | ~0.8       | ~2         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-crowd_recall     | TRACKING_MODE_FOLLOW    | lk     | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 101.0     | 101.0    | 1.47  | ~0.4       | ~1         | 98      | 0.016 | 0.022 | 4.9     | 6.8     | 0        
+crowd_recall     | TRACKING_MODE_FOLLOW    | lk     | 150    | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 53.3      | 40.0     | 1.47  | ~0.5       | ~2         | 98      | 0.016 | 0.022 | 4.9     | 6.8     | 0        
 dropout          | TRACKING_MODE_ASSOCIATE | cost   | 50     | 1  | 0    | 4  | 1  | 0  | 0  | 4    | 4     | 100%   | 41.0      | 41.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
 dropout          | TRACKING_MODE_FOLLOW    | lk     | 50     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 35.0      | 35.0     | 1.40  | ~0.7       | ~1         | 33      | 0.002 | 0.003 | 0.6     | 0.8     | 0        
 latency          | TRACKING_MODE_ASSOCIATE | cost   | 60     | 1  | 0    | 4  | 0  | 1  | 0  | 4    | 4     | 100%   | 52.0      | 52.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
@@ -100,7 +106,7 @@ pan              | TRACKING_MODE_FOLLOW    | lk     | 70     | 1  | 0    | 0  | 
 pan_occlusion    | TRACKING_MODE_ASSOCIATE | cost   | 90     | 1  | 0    | 1  | 1  | 0  | 0  | 1    | 1     | 100%   | 65.0      | 65.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
 pan_occlusion    | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 0  | 0  | 1  | 0  | 0    | 0     | n/a    | 87.0      | 87.0     | 0.78  | ~0.3       | ~1         | 84      | 0.260 | 0.328 | 83.3    | 104.8   | 0        
 pan_step         | TRACKING_MODE_ASSOCIATE | cost   | 90     | 2  | 0    | 2  | 2  | 0  | 0  | 2    | 2     | 100%   | 60.0      | 60.0     | 10.00 | ~0.1       | ~1         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
-pan_step         | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 3  | 1  | 0  | 0  | 3    | 3     | 100%   | 90.0      | 90.0     | 0.56  | ~1         | ~1         | 87      | 0.013 | 0.016 | 3.8     | 4.9     | 0        
+pan_step         | TRACKING_MODE_FOLLOW    | lk     | 90     | 1  | 0    | 3  | 1  | 0  | 0  | 3    | 3     | 100%   | 46.3      | 30.0     | 0.56  | ~1         | ~1         | 87      | 0.013 | 0.016 | 3.8     | 4.9     | 0        
 small_target     | TRACKING_MODE_ASSOCIATE | cost   | 80     | 1  | 0    | 2  | 1  | 0  | 0  | 2    | 2     | 100%   | 78.0      | 78.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
 small_target     | TRACKING_MODE_FOLLOW    | lk     | 80     | 1  | 0    | 0  | 1  | 0  | 0  | 0    | 0     | n/a    | 80.0      | 80.0     | 0.50  | ~1         | ~1         | 78      | 0.001 | 0.001 | 0.3     | 0.3     | 0        
 tiny_fast        | TRACKING_MODE_ASSOCIATE | cost   | 70     | 3  | 2    | 0  | 3  | 0  | 0  | 0    | 0     | n/a    | 19.0      | 19.0     | 10.00 | ~0         | ~0         | 0       | n/a   | n/a   | n/a     | n/a     | 0        
@@ -355,3 +361,217 @@ gallery); `pan` showed `mostly_tracked=0` across all four objects (REVIEW findin
 A1/A2, closed by wave C2's ego-motion compensation). `TRACKING-V2-PLAN.md` §5b has the
 full C1-C5 delivery table; this section exists only so the numbers above have their
 original context, not as a target any wave is judged against anymore.
+
+---
+
+## 6. TRACK-IDENTITY-PLAN wave L2 (2026-08-20) -- association hardening, measured
+
+`docs/plans/active/TRACK-IDENTITY-PLAN.md`'s L2, after L1's track-level label election
+landed (commit `899fb838`, "Track-level label election" above). L1 gave `assign.py`'s
+`Candidate.label` a stable, hysteresis-gated operand instead of the raw, noisy per-frame
+one; L2's own job is to actually SPEND that stability -- raise the cost weights/gates that
+were left at their permissive "nothing is ever forbidden" C3 defaults
+(`docs/plans/active/TRACK-IDENTITY-RESEARCH.md` §1 item 3) now that a label disagreement or
+a near-zero-overlap pairing means something more than frame-to-frame classifier noise.
+
+**Method.** Every trial below runs the full unmodified `tools/trackeval --all` (all 15
+scenarios x 2 modes, `sequences.DEFAULT_SEED`) and diffs the 22 non-timing columns against
+§1's own table -- the same comparison `tests/trackeval/test_baseline_consistency.py` makes
+automatically against whatever is currently in this file. Each of the three knobs was first
+tested ALONE (the other two held at their PRE-L2 default via an env-var override, so
+`CV_TRACK_COST_WEIGHT_LABEL`/`_GATE_MIN_IOU`/`_GATE_MAX_COST` isolate one variable's effect
+at a time), then the surviving knobs were re-measured together as the final combination.
+
+**Trial 1 -- `DEFAULT_TRACK_COST_WEIGHT_LABEL` 0.0 -> 0.3, isolated.** Command:
+`CV_TRACK_COST_GATE_MIN_IOU=0.0 CV_TRACK_COST_GATE_MAX_COST=inf PYTHONPATH="$PWD"
+.venv/bin/python -m tools.trackeval --all`. **Result: all 30 rows byte-identical to §1.**
+The harness has no scenario where two live candidates compete for one detection under
+disagreeing ELECTED labels (every scenario runs with `label_noise_probability=0.0` by
+default, per `metrics.py`'s own module docstring on why `label_flip_count` reads `0`
+everywhere in §1's table) -- so the penalty is provably inert on every pinned scenario
+while still tightening the real multi-object, conflicting-label case it targets. **Kept.**
+
+**Trial 2 -- `DEFAULT_TRACK_COST_GATE_MIN_IOU` 0.0 -> 0.05 (the plan's own proposed value),
+isolated.** Command: `CV_TRACK_COST_WEIGHT_LABEL=0.0 CV_TRACK_COST_GATE_MAX_COST=inf
+PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --all`. **Result: 4 of 15 scenarios'
+ASSOCIATE row regress:**
+
+```
+scenario   | column     | before (S1) | after (0.05)
+-----------+------------+-------------+--------------
+latency    | IDSW       | 0           | 16
+latency    | FM         | 4           | 16
+latency    | recov/gaps | 4/4 (100%)  | 0/16 (0%)
+latency    | life_mean  | 52.0        | 2.9
+nonlinear  | IDSW       | 0           | 1
+nonlinear  | recov/gaps | 1/1 (100%)  | 0/1 (0%)
+occlusion  | IDSW       | 0           | 1
+occlusion  | recov/gaps | 1/1 (100%)  | 0/1 (0%)
+tiny_fast  | IDSW       | 2           | 4
+```
+
+`latency`'s collapse is the sharpest: a track that used to survive its own 8-frame detection
+lag as one continuous identity (recovering all 4 of its own fragmentation gaps) instead
+fragments and re-spawns 16 times over 60 frames, never once recovering its own id.
+
+**Trial 2 continued -- tuning sweep.** Per the plan's own "tune the three values, document
+every trial" clause, the same 4-row check was re-run at `min_iou = 0.04, 0.03, 0.02, 0.01,
+0.005, 0.0001` (six more full-suite runs, `CV_TRACK_COST_GATE_MIN_IOU=<value>` with the other
+two knobs still held at their pre-L2 default). **Every value produced the IDENTICAL four
+regressed rows above, digit for digit, all the way down to `0.0001`.** That flatness is the
+finding: it means the TRUE geometric IoU between the predicted candidate and the
+reappearing/lagging/reversing target on the frame each row's `IDSW`/`recov` figure turns on
+is exactly `0.0`, not merely small -- so no strictly-positive gate, however gentle, can avoid
+excluding it. `nonlinear`'s own §2 write-up above already names the mechanism directly:
+"constant-velocity extrapolation ran the WRONG WAY the entire time: the object reverses
+heading the instant it goes behind the bar" -- a predicted box built from the wrong-direction
+extrapolation can land with zero overlap on the true box, and `occlusion`/`latency`/
+`tiny_fast` each have their own equivalent wide-displacement moment (a full occlusion gap, an
+8-frame systematic lag, and a ~19px/frame pan respectively). This is precisely the failure
+the PRE-L2 comment on this line already named as the reason `min_iou` defaulted to `0.0` in
+the first place ("a strict `min_iou` would forbid exactly the wide-displacement case
+ego-motion compensation exists to recover") -- Trial 2 turns that reasoning from an argument
+into a measurement. **Reverted to `0.0`** (`config.py`'s own comment on this default has the
+full account) -- a measured retreat per the plan's own escape hatch, not a partial win shipped
+on the strength of the plan's starting guess.
+
+**Trial 3 -- `DEFAULT_TRACK_COST_GATE_MAX_COST` `inf` -> 1.5, isolated.** Command:
+`CV_TRACK_COST_WEIGHT_LABEL=0.0 CV_TRACK_COST_GATE_MIN_IOU=0.0 PYTHONPATH="$PWD"
+.venv/bin/python -m tools.trackeval --all`. **Result: all 30 rows byte-identical to §1.**
+No pinned scenario's total cost (`1.0*(1-iou) + 0.5*appearance + 0.3*label`, capped at `1.8`
+under the full L2 weight set) ever climbs anywhere near `1.5` -- the gate is a forward guard
+against a worst-of-everything pairing, not a demonstrated fix for one on this suite. **Kept**
+(plan's own text: "1.5 starting point ... tune against trackeval" -- measurement found no
+reason to move it).
+
+**Final combination -- `weight_label=0.3`, `gate_min_iou=0.0` (reverted), `gate_max_cost=1.5`
+(`config.py`'s actual shipped defaults after this wave).** Command: bare `PYTHONPATH="$PWD"
+.venv/bin/python -m tools.trackeval --all`, no env overrides. **Result: all 30 rows
+byte-identical to §1 -- §1's own table needed no edit, which is why it still reads exactly as
+wave V0 left it.** `tests/trackeval/test_baseline_consistency.py` confirms this automatically
+on every `pytest` run (it diffs a fresh harness run against whatever this file currently
+documents), and passed unchanged through this whole wave.
+
+**L1's flip counter, re-measured under the final L2 config.** The acceptance bar requires the
+noisy-label case L1 measured at 7 flips to stay improved. Re-running
+`tests/trackeval/test_replay.py::test_label_election_suppresses_most_of_a_maximal_noisy_label_
+sequence`'s own scenario (`linear`, seed 0, detector seed 2, `label_noise_probability=1.0`
+over a 3-label pool) directly against the shipped L2 config: **`label_flip_count=7`,
+`idsw=0`, `fragmentations=0` -- identical to L1's own measurement, unchanged by L2.** Still a
+~16x reduction against the ~118 raw-label estimate, comfortably past the plan's "order of
+magnitude" bar (`test_replay.py`'s own `raw_flip_estimate // 8` threshold, `~14`).
+
+**Full cv-service pytest, before and after this wave.** `PYTHONPATH="$PWD" .venv/bin/python
+-m pytest -q`, foreground, both runs on the same machine: **1227 passed / 1 skipped before
+this wave's `config.py` edits, 1227 passed / 1 skipped after** -- a net delta of zero, as
+expected for a wave that changes three numeric defaults and comments only, no new code paths
+and no new tests (the acceptance bar here is trackeval non-regression, not new unit coverage;
+`tests/tracking/test_params.py`'s existing env-override/garbage-fallback tests for these three
+knobs pin behaviour around the DEFAULT value, not its literal number, so none needed editing).
+
+**Ride-along per the plan.** `config.py`'s `DEFAULT_TRACK_APPEARANCE_ENGINE` comment
+(previously ~114-120, TRACK-IDENTITY-RESEARCH.md §2 finding D-D) claimed `cost` is NOT the
+`CV_TRACK_ASSOCIATE_ENGINE` default; `DEFAULT_TRACK_ASSOCIATE_ENGINE = "cost"` (`config.py`
+line 73) and this file's own §1 reproduction note ("Both engines are the server's own
+defaults: `cost` for ASSOCIATE") already said otherwise -- fixed to state the correct
+direction, no behaviour change.
+
+## 7. TRACK-IDENTITY-PLAN wave L4 (2026-08-20) -- FOLLOW's memory path, measured
+
+`docs/plans/active/TRACK-IDENTITY-PLAN.md`'s L4, after L1 (track-level label election) and
+L2 (association hardening, §6 above). D-B's own diagnosis
+(`TRACK-IDENTITY-RESEARCH.md` §2): FOLLOW's re-acquire is geometry-only
+(`lock.py`'s `best_iou_match`/`select_by_point`), so once the lost track's prediction has
+drifted too far to clear `redetect_iou_threshold`, the lock is dead until the operator
+re-clicks -- `ObjectMemory` (the dormant re-ID gallery, wave C4) was consulted only from
+ASSOCIATE's unmatched-target path. This wave adds the missing half.
+
+**What shipped.** (1) `_settle_followed` (`session.py`) now remembers the followed track to
+`ObjectMemory` the instant it settles LOST, before unbinding -- not merely a nice-to-have:
+`TrackBook.apply()` is the only thing that ages a track towards the book's own automatic
+expiry-driven remember (`_retire`), and FOLLOW stops calling `apply()` for an unbound target
+entirely, so without this explicit call the automatic path is unreachable for a single-target
+FOLLOW session that never re-acquires. (2) A new `ObjectMemory.match_identity(track_id, ...)`
+(`memory.py`) scores ONE requested dormant identity through the same four gates `match()`
+already applies, rather than `match()`'s own whole-gallery best-match -- required because
+FOLLOW's re-acquire wants a specific id back, and letting a different, better-scoring dormant
+identity win would silently redirect the lock to an object nobody asked to follow. A new
+`_attempt_follow_recovery` (`session.py`) calls it from `_follow_verify`'s "nothing to
+re-anchor to" branch, gated to a TRACK-ID-ONLY lock target (the one shape with no geometric
+reference of its own left to retry -- a point/box lock keeps retrying its original click/box
+every pass and never reaches this code). The claim is deferred until `engine.init()` on the
+winning box has actually succeeded (mirroring `_attempt_recovery`'s own read-only match/claim
+split, one step further), so a rare tracker I/O failure never burns the one dormant identity
+for nothing. (3) `DEFAULT_TRACK_FOLLOW_TOP_K` 1 -> 2 -- see below.
+
+**The top_k measurement.** Two questions, both required before flipping a fleet-wide default
+this codebase's own "prove it, then flip" discipline (§6's L2 write-up is the precedent):
+does ONE extra tracked target fit FOLLOW's own frame budget, and does it touch the LOCKED
+target's own behaviour at all.
+
+*Cost.* A tracker-only FOLLOW frame at `top_k=2` costs exactly one more `SingleObjectTracker.
+update()` call than `top_k=1` -- this file's own "measured on this box" table (§1's own repo,
+`MODULE.md`) puts `lk.update()` at 0.525ms mean / 0.619ms p95. A direct `time.perf_counter()`
+probe (200 tracker-only frames, `clutter`'s own geometry, real `StreamTrackingSession`, not
+`tools.trackeval`'s own ms-quantized `trk_ms_*` columns -- this file's own §1 note on why
+those are display-only) measured `top_k=1` at 2.588ms mean / 3.058ms p95 and `top_k=2` at
+2.394ms mean / 3.047ms p95 on this box -- statistically indistinguishable, the marginal cost
+lost in run-to-run noise. Trivial either way against the default 2000ms verify cadence and a
+23ms `yolo26n.pt` detector pass, and the GB4005 deployment profile (Intel-only/OpenVINO CPU
+inference, no CUDA headroom to lose) has no scenario where a sub-millisecond extra tracker
+update is what breaks a frame budget a 23ms detector pass did not already threaten.
+
+*Safety.* Ran `tools.trackeval --scenario {clutter,crowd_recall,pan_step} --mode FOLLOW
+--engine lk` at `CV_TRACK_FOLLOW_TOP_K=1` and `=2`, then a direct script comparing
+`outcome.locked_track_id` and the locked box's own geometry, frame by frame, between the two
+runs (the same proof this file's "Multi-target FOLLOW" section in `MODULE.md` already made
+for `top_k=3`, re-run here specifically for `2`): **byte-identical on all three scenarios.**
+The locked target's own id and box never move; only the SECOND, extra tracked box is new.
+
+**`clutter`/FOLLOW's own §1 row moving is that same already-documented harness limitation,
+not a regression -- re-confirmed, not merely inferred from the `top_k=3` precedent.** At
+`top_k=2` the row now reads `IDSW=3, FM=3, gaps=3, recov%=0%, life_mean=24.0` (was `IDSW=0,
+FM=0, gaps=0, recov%=n/a, life_mean=60.0`) -- but the locked-only comparison above proves the
+LOCK's own outcome is unchanged; `metrics.py`'s greedy IoU matcher cannot tell a locked box
+from an extra one and lets the extra win a ground-truth match slot the locked box would have
+gotten, registering spurious churn against an object nobody's lock ever left. The same
+contamination was independently caught (and fixed) in `tests/trackeval/test_ego_motion_
+outcome.py`'s own `follow_counts()` helper below. Four other rows (`crossing`, `crossing_
+similar`, `crowd_recall`, `pan_step`) move on `life_mean`/`life_med` alone -- an extra
+surviving in the frame longer than `MOT`'s single-target-shaped `life_*` columns were ever
+designed to summarize when a second box is now also in play, not an IDSW/FM change. All ten
+other columns on those four rows, and all fifteen ASSOCIATE rows, are unchanged.
+
+**§1's table above is updated to this wave's fresh numbers** (the five FOLLOW rows named
+above) -- `tests/trackeval/test_baseline_consistency.py` passes against the new table.
+`recov%` (the column that would show wave L4's OWN new recovery mechanism working) is
+UNCHANGED on every row: none of the harness's fifteen scenarios ever construct a
+track-id-only lock (`tools/trackeval/replay.py`'s own `_lock_onto` always locks by point, "the
+same thing an operator's click does in production"), so `_attempt_follow_recovery`'s new code
+path is never exercised by `--all` at all -- it is proven instead by three new session-level
+tests (`tests/tracking/test_session.py`) built specifically to construct that lock shape: a
+followed track lost then reappearing too far away for geometry alone recovers under the same
+id with no new `lock_seq`; the same reappearance past the gallery's TTL stays honestly
+unrecovered; a label-incompatible impostor at the same plausible position and timing does not
+steal the lock. `memory.py`'s own `match_identity` gates (label/appearance/motion/TTL, and the
+no-descriptor neutral-0.5 reading FOLLOW always exercises, since it never resolves an
+appearance extractor) are pinned directly in `tests/tracking/test_memory.py`.
+
+**Test fixes required by the default change, not by a defect.** `follow_session()`
+(`tests/tracking/test_session.py`'s own single-target FOLLOW helper) now pins
+`Settings(track_follow_top_k=1)` explicitly rather than relying on the (previously accidental)
+production default -- its single shared `FakeFollower` corrupts multi-target state
+(`multi_follow_session`'s own docstring already warned of this), so every test built on it is
+implicitly single-target and should not depend on a global default that can change.
+`test_follow_top_k_defaults_to_one` (`test_params.py`) is now `..._to_two`, pinning the new
+line. `test_a_raising_engine_degrades_one_frame_and_the_stream_survives`
+(`tests/grpc/test_detect_stream_tracking.py`) fed two detections per frame from the start (its
+own `FakeDetector` docstring, "one steady detection plus a distractor") and asserted the
+id sequence produced by ONE id minted per acquisition; at `top_k=2` an acquisition now mints
+two (locked + extra), so the post-reset re-acquire is the third id handed out, not the second
+-- updated, comment included, not a behaviour regression.
+
+**Full cv-service pytest, before and after this wave.** `PYTHONPATH="$PWD" .venv/bin/python
+-m pytest -q`, foreground: **1227 passed / 1 skipped before this wave's edits (§6's own
+closing count), 1238 passed / 1 skipped after** -- eleven new tests (eight `memory.py`
+`match_identity` gate tests, three `session.py` memory-recovery scenarios), zero regressions.

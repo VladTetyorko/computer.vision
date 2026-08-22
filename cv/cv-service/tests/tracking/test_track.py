@@ -112,6 +112,15 @@ def params(**overrides) -> TrackingParams:
         # matters.
         reupdate_max_shape_log_ratio=0.0,
         reupdate_max_motion_center_distance=0.0,
+        # TRACK-IDENTITY-PLAN wave L1 -- the shipped `config.py` defaults,
+        # so every test in this file that never mentions election gets the
+        # SAME hysteresis a real deployment would (a stray single-vote
+        # challenger cannot flip `elected_label` mid-test by accident).
+        # This file's own label-election section overrides these
+        # explicitly where the exact window/margin/streak matters.
+        label_vote_window=10,
+        label_switch_margin=1.5,
+        label_switch_streak=3,
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -126,6 +135,16 @@ def seen(key, x=0.1, y=0.1, source=SOURCE_DETECTOR, **kwargs) -> Observation:
         source=source,
         **kwargs,
     )
+
+
+def voted(key, label, confidence=0.9, x=0.1, y=0.1) -> Observation:
+    """Same shape as `seen` above, but with a caller-chosen `label`/
+    `confidence` -- `seen` hardcodes both, which every label-election test
+    below needs to vary. `SOURCE_DETECTOR`, always: election only ever
+    reads detector-sourced observations (`TrackBook._observe`'s own
+    `SOURCE_DETECTOR` branch), so a vote built any other way would test
+    something this package never actually does."""
+    return Observation(key=key, box=Box(x, y, 0.1, 0.1), label=label, confidence=confidence, source=SOURCE_DETECTOR)
 
 
 def test_ids_start_at_one_and_are_allocated_per_book():
@@ -974,3 +993,203 @@ def test_reset_reupdate_stats_is_what_a_frame_with_no_apply_call_must_use():
 
     assert book.last_reupdate_millis == 0
     assert book.last_reupdated_tracks == 0
+
+
+# -- TRACK-IDENTITY-PLAN wave L1: track-level label election ----------------
+#
+# `docs/plans/active/TRACK-IDENTITY-PLAN.md`'s L1 section, diagnosed by
+# `TRACK-IDENTITY-RESEARCH.md` §1: an open-vocabulary model re-rolls its one
+# argmax label every detector pass, and `track.label` (raw) echoes whichever
+# roll arrived last -- `track.elected_label` is the second, hysteresis-gated
+# opinion these tests hold to plan item 5's own checklist ("incumbent holds
+# under alternating noise; legitimate change switches after streak; decay
+# forgets; coast echoes elected; adoption resumes"). "Coast echoes elected"
+# is asserted in `tests/tracking/test_session.py` instead (`_from_track` is a
+# `session.py` function, nothing here can call it without importing that
+# module) -- every other item is this file's own.
+
+
+def test_a_fresh_track_elects_its_birth_label():
+    # Plan item 2: "starts as the first confirmed observation's label" -- a
+    # birth is always `SOURCE_DETECTOR` in practice, so the very first frame
+    # already has a real, non-blank elected label, not an empty placeholder.
+    book = TrackBook(params(min_hits=1))
+
+    born = book.apply([voted("a", "car")], 0.0, detector_ran=True)[0]
+
+    assert born.elected_label == "car"
+    assert born.label == "car"
+
+
+def test_incumbent_holds_under_alternating_noise():
+    # Plan item 5, case 1. A challenger that never leads on two CONSECUTIVE
+    # passes can never accumulate a switch streak, no matter how many total
+    # votes it eventually racks up -- this is the exact per-frame flicker
+    # TRACK-IDENTITY-RESEARCH.md §1 diagnosed (`orion12l`-class re-rolling
+    # every pass), so it is the single most important case to hold.
+    book = TrackBook(params(min_hits=1))
+    book.apply([voted("a", "car")], 0.0, detector_ran=True)
+
+    track = None
+    for frame, label in enumerate(["dog", "car"] * 10, start=1):
+        track = book.apply([voted("a", label)], float(frame), detector_ran=True)[0]
+
+    assert track.elected_label == "car"
+
+
+def test_a_legitimate_change_switches_only_after_the_streak():
+    # Plan item 5, case 2. Default knobs (`label_switch_streak=3`): a
+    # sustained challenger switches the election, but not before the streak
+    # is actually complete -- and not on the very first pass that clears the
+    # margin either, since `_seed_label_election`'s own fixed, full-weight
+    # anchor (the birth vote counts as if maximally confident, regardless of
+    # its own real confidence) costs the challenger one extra pass before it
+    # can even start counting a streak. Verified against the real
+    # implementation (`track.py`'s `_update_label_election`), not derived by
+    # hand: a fourth consecutive `SOURCE_DETECTOR` "dog" vote is what
+    # actually clears both gates here, not the third.
+    book = TrackBook(params(min_hits=1))
+    book.apply([voted("a", "car", confidence=1.0)], 0.0, detector_ran=True)
+
+    for frame in (1, 2, 3):
+        track = book.apply([voted("a", "dog", confidence=0.9)], float(frame), detector_ran=True)[0]
+        assert track.elected_label == "car", f"frame {frame}: switched too early"
+
+    track = book.apply([voted("a", "dog", confidence=0.9)], 4.0, detector_ran=True)[0]
+    assert track.elected_label == "dog"
+
+
+def test_a_challenger_that_loses_the_lead_forfeits_its_streak():
+    # Plan item 2's "AND holds that lead for consecutive passes" -- a
+    # challenger that leads for two passes and then yields, even for one
+    # single pass, cannot resume from where it left off: the streak counts
+    # CONSECUTIVE qualifying passes by the SAME challenger, so an
+    # interruption forces it to rebuild from zero. The incumbent itself
+    # reasserting for one pass is what interrupts here (the cleanest way to
+    # make a single vote clearly retake the tally lead at these confidence
+    # levels -- a third, unrelated label's single vote is comfortably
+    # outweighed by "dog"'s own two already-accumulated votes and does NOT
+    # reliably interrupt it, which is itself a deliberate property: isolated
+    # jitter from a THIRD label should not by itself cost a challenger that
+    # is already ahead its progress).
+    book = TrackBook(params(min_hits=1))
+    book.apply([voted("a", "car", confidence=1.0)], 0.0, detector_ran=True)
+    for frame in (1, 2):
+        track = book.apply([voted("a", "dog", confidence=0.9)], float(frame), detector_ran=True)[0]
+        assert track.elected_label == "car"  # streak building (1, then 2) but not there yet
+
+    # "car" reasserts for one pass -- no OTHER label clears the margin this
+    # pass, so the challenger/streak resets to nothing.
+    track = book.apply([voted("a", "car", confidence=0.9)], 3.0, detector_ran=True)[0]
+    assert track.elected_label == "car"
+
+    # "dog" leads again afterward, but from a cold start: two more
+    # consecutive passes (the SAME count that was insufficient the first
+    # time, at frames 1-2) rebuilds only to streak 2, still short.
+    for frame in (4, 5):
+        track = book.apply([voted("a", "dog", confidence=0.9)], float(frame), detector_ran=True)[0]
+        assert track.elected_label == "car", "dog's streak should have restarted after the interruption"
+
+    # The third consecutive pass since the restart finally switches it.
+    track = book.apply([voted("a", "dog", confidence=0.9)], 6.0, detector_ran=True)[0]
+    assert track.elected_label == "dog"
+
+
+def test_decay_lets_a_recent_challenger_overturn_an_older_larger_majority():
+    # Plan item 5, case 3 ("decay forgets: an old identity fades rather than
+    # anchors forever"). A SMALLER number of recent "dog" votes overturns a
+    # LARGER number of older "car" votes -- proof this is decay/recency at
+    # work, not merely "whichever label has more raw votes wins": a plain
+    # majority count would still favor "car" (6 votes) over "dog" (5) here.
+    # `label_vote_window=6` also puts window EVICTION to work, on top of
+    # per-step decay -- both are how "an old identity fades" is implemented.
+    book = TrackBook(params(min_hits=1, label_vote_window=6))
+    book.apply([voted("a", "car", confidence=0.9)], 0.0, detector_ran=True)
+    for frame in range(1, 6):
+        track = book.apply([voted("a", "car", confidence=0.9)], float(frame), detector_ran=True)[0]
+    assert track.elected_label == "car"  # 6 confirmations in, firmly elected
+
+    for frame in range(6, 10):
+        track = book.apply([voted("a", "dog", confidence=0.9)], float(frame), detector_ran=True)[0]
+        assert track.elected_label == "car", f"frame {frame}: switched too early"
+
+    track = book.apply([voted("a", "dog", confidence=0.9)], 10.0, detector_ran=True)[0]
+    assert track.elected_label == "dog"  # the 5th "dog" vote overturns 6 "car" votes
+
+
+def test_bump_epoch_preserves_the_elected_label():
+    # TRACK-IDENTITY-PLAN wave L1's reset rule (plan item 4): "election
+    # state clears with the track book epoch" -- but `bump_epoch`'s own
+    # docstring is explicit that this is NOT a blank-slate reset: the
+    # CURRENT elected label survives the bump untouched (only the tally and
+    # any in-progress challenger streak start over), so an engine restart
+    # never causes a visible label flip on its own.
+    book = TrackBook(params(min_hits=1))
+    book.apply([voted("a", "car", confidence=1.0)], 0.0, detector_ran=True)
+    for frame in (1, 2):
+        book.apply([voted("a", "dog", confidence=0.9)], float(frame), detector_ran=True)
+    before = book.get(1)
+    assert before.elected_label == "car"  # not yet switched (streak still building)
+
+    book.bump_epoch()
+
+    after = book.get(1)
+    assert after is not None  # the track itself survives -- same id, not retired
+    assert after.elected_label == "car"
+    assert after.state != STATE_LOST
+
+
+def test_retire_remembers_the_elected_label_not_the_raw_one():
+    # TRACK-IDENTITY-PLAN wave L1 (plan item 3): `_retire` now hands
+    # `ObjectMemory` the ELECTED label, not whichever raw label happened to
+    # be attached the instant the track expired -- the whole point of the
+    # gallery is returning a recognizable identity, and a single late noisy
+    # vote (not enough to survive the switch margin/streak) must not be
+    # what a recovery resumes.
+    memory = ObjectMemory(MemoryParams())
+    book = TrackBook(params(min_hits=1, max_age_frames=1), memory=memory)
+    book.apply([voted("a", "car")], 0.0, detector_ran=True)
+    for frame in (1, 2, 3):
+        book.apply([voted("a", "car")], float(frame), detector_ran=True)
+    track = book.apply([voted("a", "dog")], 4.0, detector_ran=True)[0]
+    assert track.label == "dog"  # raw: unconditional overwrite, unchanged by this wave
+    assert track.elected_label == "car"  # one stray vote never earns a switch
+
+    for frame in range(5, 8):
+        book.apply([], float(frame), detector_ran=True)  # coast, then expire
+
+    assert memory.size() == 1
+    assert memory.identities()[0].label == "car"
+
+
+def test_adopt_resumes_the_gallerys_elected_label_not_this_frames_raw_observation():
+    # TRACK-IDENTITY-PLAN wave L1 (plan item 4): "the recovered track
+    # resumes its elected label and tally" -- `_adopt` seeds the reborn
+    # track's election around `RecoveredIdentity.elected_label` (what the
+    # gallery remembers), not around this frame's own raw recovering
+    # observation, which may be a completely different roll of the die.
+    book = TrackBook(params(min_hits=5))
+    recovery = RecoveredIdentity(
+        track_id=42, first_seen=-10.0, descriptor=RED, velocity=(0.1, 0.2), elected_label="truck"
+    )
+
+    recovered = book.apply([seen("x")], 3.0, detector_ran=True, recoveries={"x": recovery})[0]
+
+    assert recovered.label == "car"  # raw: this frame's own observation (`seen` hardcodes it)
+    assert recovered.elected_label == "truck"  # elected: resumed from the gallery, not guessed
+
+
+def test_adopt_falls_back_to_the_raw_observation_when_the_gallery_has_no_elected_label():
+    # `RecoveredIdentity.elected_label` defaults to `None` precisely so a
+    # caller built before this wave -- or a test constructing the value
+    # directly, exactly like `test_apply_books_a_recovery_under_the_
+    # remembered_id_and_skips_min_hits` above already does -- keeps working
+    # unchanged: `_adopt` falls back to the recovering observation's own raw
+    # label, the same value it would have used before `elected_label`
+    # existed at all.
+    book = TrackBook(params(min_hits=5))
+    recovery = RecoveredIdentity(track_id=42, first_seen=-10.0, descriptor=RED, velocity=(0.1, 0.2))
+
+    recovered = book.apply([seen("x")], 3.0, detector_ran=True, recoveries={"x": recovery})[0]
+
+    assert recovered.elected_label == "car"

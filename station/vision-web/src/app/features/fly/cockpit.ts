@@ -19,6 +19,7 @@ import { DiagnosticsCard } from './diagnostics-card';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { FlightCommandPanel } from './flight-command-panel';
 import { CvControlPanel } from './cv-control-panel';
+import { CvSetupModal } from './cv-setup-modal';
 import { RcMonitor } from './rc-monitor';
 import { DrawingToolbar } from '../../shared/map/map-controls/drawing-toolbar';
 import { LayerManager } from '../../shared/map/map-controls/layer-manager';
@@ -34,11 +35,15 @@ import { nextCollapseAction, showDetectionOffChip, type ToolRailPanelId } from '
  * the same `localStorage` shape, so an already-open drawer survives across a reload. */
 const ACTIVE_PANEL_KEY = 'vision.fly.activePanel';
 
-/** This page's one mutually-exclusive **confirm-dialog** group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) —
- * today just the Stop-stream confirm. Typed as a union (not a bare string), mirroring
- * `flight-command-panel.ts#CommandDialog`/`command.ts#CommandOverlay`'s identical precedent, even
- * with one member today. */
-type CockpitDialog = 'stop';
+/** This page's one mutually-exclusive **dialog** group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — the
+ * Stop-stream confirm and, as of docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1, the CV setup modal.
+ * Typed as a union (not a bare string), mirroring `flight-command-panel.ts#CommandDialog`/
+ * `command.ts#CommandOverlay`'s identical precedent. Both members share the one `UiStore` group
+ * (transient, no `storageKey`, same as `arm-confirm-dialog.ts`'s own group) so opening one always
+ * closes the other — never observed in practice today (nothing opens the setup modal while the Stop
+ * confirm is up, or vice versa), but "at most one dialog" is the invariant this group exists to
+ * hold regardless. */
+type CockpitDialog = 'stop' | 'cv-setup';
 
 /**
  * `/fly/:assetId` — the operator cockpit, addressable on its own now (docs/plans/done/NAV-IA-REDESIGN-PLAN.md
@@ -61,7 +66,8 @@ type CockpitDialog = 'stop';
  *   - the overlay state a `UiStore` group is explicitly meant to be **host-owned** (per that class's
  *     own doc comment "a host owns one instance directly", mirrored by `asset-detail.ts`'s
  *     `editors`/`panels` and `command.ts`'s `overlay`): `panels` (the six tool-rail drawers) and
- *     `dialog` (the Stop-stream confirm);
+ *     `dialog` (the Stop-stream confirm and, as of docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1,
+ *     the CV setup modal);
  *   - DOM-only concerns no facade could hold anyway: the fullscreen `viewChild`/`toggleFullscreen`,
  *     and the page-scoped `document` `keydown` listener (`handleKeydown`) that maps physical keys to
  *     facade commands / `UiStore` calls.
@@ -92,6 +98,7 @@ type CockpitDialog = 'stop';
     ReturnHomeButton,
     FlightCommandPanel,
     CvControlPanel,
+    CvSetupModal,
     RcMonitor,
     MarksPanel,
     DrawingToolbar,
@@ -147,8 +154,10 @@ export class CockpitPage {
 
   /**
    * The right-edge icon tool-rail's one-open-at-a-time drawer manager (docs/plans/done/UI-REDESIGN-PLAN.md
-   * Wave 2, D-D/F3). Frozen rail ids (`ToolRailPanelId`): `flight`, `rc`, `cv`, `detections`,
-   * `marks`, `help`.
+   * Wave 2, D-D/F3). Frozen rail ids (`ToolRailPanelId`): `flight`, `rc`, `cv`, `marks`, `map`,
+   * `help` — `cv` is the merged Vision drawer as of wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3),
+   * the former separate `detections` id having been folded into it — see `fly-logic.ts#ToolRailPanelId`'s
+   * own doc comment.
    */
   protected readonly panels = new UiStore(ACTIVE_PANEL_KEY);
 
@@ -203,6 +212,21 @@ export class CockpitPage {
     this.dialog.close('stop');
   }
 
+  // --- CV setup modal (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) ------------------------------
+  // `CvControlPanel#setupRequested` (the "Change…"/"Detection setup…" buttons) calls
+  // `requestCvSetup()`; the modal's own `(closed)` output (scrim click, the header "×", or `Esc` via
+  // `collapseOverlays()` below) calls `closeCvSetup()`. Opening this dialog does **not** touch
+  // `panels` — the `cv` drawer stays open underneath it, per the plan's "opening it must not close
+  // the tool-rail drawer".
+
+  protected requestCvSetup(): void {
+    this.dialog.open('cv-setup');
+  }
+
+  protected closeCvSetup(): void {
+    this.dialog.close('cv-setup');
+  }
+
   // --- Keyboard shortcuts (docs/plans/done/MVP3-PLAN.md §C-b) ------------------------------------------
   // Mirrors `LivePage`'s own `M`-only listener (page-scoped `document` `keydown`, ignored while a
   // form field has focus or a modifier is held, added/removed with the route), extended to the
@@ -246,16 +270,20 @@ export class CockpitPage {
     event.preventDefault();
   }
 
-  /** Closest-thing-open-first (docs/plans/done/UI-REDESIGN-PLAN.md D-D): any open tool-rail drawer, then the
-   * Stop-stream confirm, then the map inset; see `fly-logic.ts#nextCollapseAction`'s own doc comment
-   * for the cascade order this delegates to. */
+  /** Closest-thing-open-first (docs/plans/done/UI-REDESIGN-PLAN.md D-D): the CV setup modal, then any open
+   * tool-rail drawer, then the Stop-stream confirm, then the map inset; see
+   * `fly-logic.ts#nextCollapseAction`'s own doc comment for the cascade order this delegates to. */
   protected collapseOverlays(): void {
     const action = nextCollapseAction({
+      cvSetupOpen: this.dialog.isOpen('cv-setup'),
       panelOpen: this.panels.active() !== null,
       stopConfirmOpen: this.dialog.isOpen('stop'),
       mapVisible: this.facade.mapVisible(),
     });
     switch (action) {
+      case 'cv-setup':
+        this.closeCvSetup();
+        break;
       case 'panel':
         this.panels.close();
         break;

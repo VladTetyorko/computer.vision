@@ -136,6 +136,94 @@ def test_the_best_of_several_candidates_wins():
     assert recovery is not None and recovery.track_id == 9
 
 
+# -- match_identity: the SAME gates, scoped to ONE requested id (TRACK-
+# IDENTITY-PLAN wave L4) -----------------------------------------------------
+#
+# FOLLOW's re-acquire is a different question from ASSOCIATE's: the operator
+# asked for a SPECIFIC track id back, so `match`'s whole-gallery "best
+# candidate wins" answer is the wrong one -- a different, better-scoring
+# dormant identity winning would silently redirect the lock to an object
+# nobody asked to follow. `match_identity` answers "is THIS the one" instead.
+
+
+def test_match_identity_never_gets_redirected_to_a_better_scoring_identity():
+    store = memory()
+    remember(store, track_id=3, x=0.5, descriptor=RED)  # the requested one
+    remember(store, track_id=9, x=0.52, descriptor=RED)  # a closer, better match
+    recovery = store.match_identity(
+        3, box=Box(0.52, 0.5, 0.1, 0.1), label="car", descriptor=RED, now_millis=2000.0
+    )
+    # `match` would answer 9 here (closer centre, same descriptor) -- proven
+    # by the sibling test above using the same geometry. `match_identity`
+    # must answer only for id 3, or refuse.
+    assert recovery is not None
+    assert recovery.track_id == 3
+
+
+def test_match_identity_refuses_an_id_never_remembered():
+    store = memory()
+    remember(store, track_id=3)
+    assert store.match_identity(
+        999, box=Box(0.4, 0.5, 0.1, 0.1), label="car", descriptor=RED, now_millis=2000.0
+    ) is None
+
+
+def test_match_identity_applies_the_label_gate():
+    store = memory()
+    remember(store, track_id=3, label="car")
+    assert store.match_identity(
+        3, box=Box(0.4, 0.5, 0.1, 0.1), label="bus", descriptor=RED, now_millis=2000.0
+    ) is None
+
+
+def test_match_identity_applies_the_appearance_gate():
+    store = memory()
+    remember(store, track_id=3, descriptor=RED)
+    assert store.match_identity(
+        3, box=Box(0.41, 0.5, 0.1, 0.1), label="car", descriptor=BLUE, now_millis=2000.0
+    ) is None
+
+
+def test_match_identity_applies_the_motion_gate():
+    store = memory()
+    remember(store, track_id=3)
+    assert store.match_identity(
+        3, box=Box(0.95, 0.05, 0.1, 0.1), label="car", descriptor=RED, now_millis=1100.0
+    ) is None
+
+
+def test_match_identity_applies_the_ttl_gate():
+    store = memory(ttl_millis=5_000)
+    remember(store, track_id=3)
+    assert store.match_identity(
+        3, box=Box(0.4, 0.5, 0.1, 0.1), label="car", descriptor=RED, now_millis=20_000.0
+    ) is None
+
+
+def test_match_identity_with_no_descriptor_is_judged_on_motion_alone():
+    # FOLLOW never resolves an appearance extractor (`_resolve_appearance_
+    # extractor` is reached only from ASSOCIATE's `cost` associator), so
+    # `_attempt_follow_recovery` always calls this with `descriptor=None`.
+    # `memory.py`'s own neutral-appearance reading (0.5) applies -- never a
+    # rejection on that account alone.
+    store = memory()
+    remember(store, track_id=3)
+    recovery = store.match_identity(
+        3, box=Box(0.42, 0.5, 0.1, 0.1), label="car", descriptor=None, now_millis=2000.0
+    )
+    assert recovery is not None
+    assert recovery.confidence < 1.0
+
+
+def test_match_identity_does_not_consume_the_identity():
+    store = memory()
+    remember(store, track_id=3)
+    assert store.match_identity(
+        3, box=Box(0.41, 0.5, 0.1, 0.1), label="car", descriptor=RED, now_millis=2000.0
+    ) is not None
+    assert store.size() == 1  # still there -- only `claim` takes it
+
+
 # -- lifecycle -------------------------------------------------------------
 
 

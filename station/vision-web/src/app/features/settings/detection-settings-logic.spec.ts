@@ -10,6 +10,7 @@ describe('computeDeltaFromDefaults', () => {
     inferenceFps: defaults.inferenceFps,
     model: defaults.model,
     labelFilter: [],
+    labelDenyFilter: [],
     detectionEnabled: true,
   };
 

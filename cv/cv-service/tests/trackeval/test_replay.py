@@ -17,6 +17,7 @@ pytest.importorskip("numpy")
 
 from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW
 
+from tools.trackeval.metrics import compute
 from tools.trackeval.replay import DetectorNoiseConfig, run_replay
 from tools.trackeval.sequences import SCENARIOS
 
@@ -82,6 +83,84 @@ def _track_id_sequence(result) -> list[tuple[int, ...]]:  # type: ignore[no-unty
         for outcome in result.outcomes
         if outcome.boxes is not None
     ]
+
+
+# -- label noise (TRACK-IDENTITY-PLAN wave L1) --------------------------------
+
+
+def test_label_noise_is_a_no_op_at_the_default_probability() -> None:
+    """`label_noise_probability` defaults to 0.0 -- the "draw only when in
+    play" idiom `_miss_probability`'s own comment establishes: a disabled
+    noise dimension must never call `self._rng.*()`, so turning THIS one on
+    later can never perturb the deterministic draw sequence the OTHER noise
+    dimensions (dropout, false positives, jitter) already rely on for the
+    15 pinned `BASELINE.md` scenarios. Proven the same way `test_replay_is_
+    deterministic_for_a_fixed_seed` proves determinism generally: two runs,
+    one with a noise config carrying every OTHER knob active, must produce
+    byte-identical track-id sequences whether or not the label field ever
+    gets read this way."""
+    sequence = SCENARIOS["dropout"](seed=0)
+    config = DetectorNoiseConfig(seed=7, dropout_probability=0.3, false_positive_probability=0.2)
+    with_default_label_noise = run_replay(sequence, mode=MODE_ASSOCIATE, detector_config=config)
+    again = run_replay(sequence, mode=MODE_ASSOCIATE, detector_config=config)
+    assert _track_id_sequence(with_default_label_noise) == _track_id_sequence(again)
+
+
+def test_run_replay_captures_one_label_snapshot_per_outcome() -> None:
+    """`ReplayResult.track_labels` must stay frame-aligned with `outcomes`
+    -- `metrics._count_label_flips`'s own length-mismatch guard reads any
+    disagreement as "no label data" and silently reports zero, so a wiring
+    break here would show up as a metric that never fires, not a crash."""
+    sequence = SCENARIOS["linear"](seed=0)
+    result = run_replay(sequence, mode=MODE_ASSOCIATE)
+    assert len(result.track_labels) == len(result.outcomes)
+
+
+def test_a_clean_replay_never_flips_a_label() -> None:
+    """No label noise, one label per object for the whole clip -- the
+    elected label must never move, a deterministic (not statistical) floor
+    for the suppression proof below."""
+    sequence = SCENARIOS["linear"](seed=0)
+    result = run_replay(sequence, mode=MODE_ASSOCIATE, detector_config=DetectorNoiseConfig())
+    metrics = compute(result)
+    assert metrics.label_flip_count == 0
+
+
+def test_label_election_suppresses_most_of_a_maximal_noisy_label_sequence() -> None:
+    """TRACK-IDENTITY-PLAN wave L1 item 5's own acceptance bar: the elected
+    label's flip count "must drop by an order of magnitude on the synthetic
+    noisy-label sequence" relative to what the RAW per-frame detection
+    would have flipped.
+
+    `label_noise_probability=1.0` with a 3-entry pool means EVERY detector
+    observation this replay ever books is drawn uniformly from `{truck,
+    bus, bike}`, independently frame to frame (`SyntheticDetector._label_
+    for`) -- i.e. the worst case, not a realistic one. For iid uniform
+    draws over 3 labels, `P(differs from the previous draw) = 2/3`, so the
+    RAW label stream (this project's OLD, pre-L1 behavior -- `track.label
+    = observation.label` on every observation, TRACK-IDENTITY-RESEARCH.md
+    §1) would flip on roughly two of every three (track, frame)
+    transitions. `linear` has 3 objects x 60 frames = 180 (track, frame)
+    appearances, ~177 transitions once first-appearance seeds are
+    excluded, so raw flips land near 118 -- confirmed empirically via
+    `git stash` against this exact scenario/seed while building this wave
+    (110 raw vs 7 elected, ~16x). The elected count only needs to clear
+    "an order of magnitude" under that raw estimate; the bound below
+    (raw_estimate // 8) leaves generous room for a different machine's
+    RNG-consuming call order without begging the exact number."""
+    sequence = SCENARIOS["linear"](seed=0)
+    config = DetectorNoiseConfig(seed=2, label_noise_probability=1.0, label_noise_pool=("truck", "bus", "bike"))
+    result = run_replay(sequence, mode=MODE_ASSOCIATE, detector_config=config)
+    metrics = compute(result)
+
+    total_appearances = sum(len(frame_labels) for frame_labels in result.track_labels)
+    raw_flip_estimate = round((total_appearances - 3) * 2 / 3)  # -3: one seed frame per object, never a "flip"
+
+    assert metrics.label_flip_count > 0, "the noise pool never produced a single flip -- check the wiring"
+    assert metrics.label_flip_count < raw_flip_estimate // 8, (
+        f"elected flips ({metrics.label_flip_count}) did not drop an order of magnitude "
+        f"below the raw estimate ({raw_flip_estimate}) -- election hysteresis may have regressed"
+    )
 
 
 # -- TRACKING-V3-PLAN wave V0: latency ----------------------------------------

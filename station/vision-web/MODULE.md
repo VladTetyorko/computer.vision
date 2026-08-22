@@ -11,7 +11,8 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 ### `src/app/core/api/` — typed REST client (WEB-PLAN §0.5: mirrors Java DTOs exactly, no component calls `fetch` directly)
 
 - `models.ts` — wire types 1:1 with `com.drones.vision.api.dto`: `Device` (mirrors `DeviceResponse`: id, name, capabilities, protocol, uri, options, state), `RegisterDeviceRequest`, `ActiveStream`, `StartStreamRequest`, `StartStreamResult`, `DiscoveredDevice` (mirrors `DiscoveredDeviceResponse`; `suggestedCategory?: string` is a category slug), `ScanRequest`, `ScanResult`, `ApiErrorBody`. `Capability = 'VIDEO'|'TELEMETRY'|'PTZ'|'AUDIO'`. **No `DeviceType`/`type` field anywhere** — removed server-side; categories are asset-level data.
-  - **`ActiveStream`/`StartStreamResult` gain `burnedIn?: boolean`** (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§8 wave M8 — the backend field itself is wave M5's job and does not exist on the wire yet). **Absent means `true`** — every reader goes through `shared/player/detection-overlay-logic.ts#resolveBurnedIn` rather than a bare truthiness/`??` check, so a pre-M5 backend (every deployment today) behaves byte-identically to before this wave (D1's "defaults reproduce today's behaviour exactly"). See that section below and the M8 changelog entry at the end of this file.
+  - **`burnedIn` is gone from both `ActiveStream` and `StartStreamResult`** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3 — **superseding** the M8 entry below, which added the field speculatively ahead of a backend that never shipped it). Server-side burn-in is deleted outright, not defaulted off, so there is no longer a wire field to mirror: the video is always clean pixels and the client canvas overlay (`shared/player/detection-overlay-logic.ts`) is simply the product now. See that section below and the W3 changelog entry near the end of this file.
+  - **`labelDenyFilter?: readonly string[]` reaches the client wire, mirroring `labelFilter`'s own shape** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5) — added to both `StartStreamRequest` and `UpdateStreamConfigRequest`, matching `dto.StartStreamRequest#labelDenyFilter`/`dto.UpdateStreamConfigRequest#labelDenyFilter` exactly (the real Java DTO field name, confirmed against the W1 backend wave). An explicit `[]` means "deny nothing" (a real value, not "leave unchanged"), same partial-patch rule `labelFilter` already follows. This is the field an operator's one-click "hide this class" act (the detections strip, the CV panel's class-chip checklist) actually writes — `labelFilter` itself, the rarer model-intent allowlist, is never touched by that flow. See the W5 changelog entry near the end of this file for the full write-up.
   - **`ActiveStream` gains `state?: StreamState`, `detectionEnabled?: boolean`, `detectionState?: DetectionState`** (docs/plans/active/STREAM-STATE-PLAN.md §2.5, wave S3) — the three facts `GET /api/streams` never carried. `StreamState = 'STARTING'|'LIVE'|'STALLED'|'RECONNECTING'|'UNOBSERVED'` is **video flow only** and deliberately has no `'STOPPED'`: a stopped stream is simply not in the list (its record is an `AssetUsage`, a different axis). All three are optional so an older backend degrades to exactly today's behaviour — `features/fly/stream-state-logic.ts` is where that degradation is decided, once.
   - **Live per-stream CV control (docs/plans/done/CV-CONTROL-PLAN.md §2-4's frozen contract, superseding the old hardcoded model list — see the dedicated changelog section at the end of this file)**: `StartStreamRequest` gains optional `labelFilter?: readonly string[]`/`detectionEnabled?: boolean`; new `UpdateStreamConfigRequest` (every field optional — the body of `PATCH /api/streams/{id}/config`, a **partial** patch, not a replace), `PatchStreamConfigResponse {streamId, modelReArmed}`, `CvModel {id, displayName, kind, openVocab, defaultLabelFilter}` (one row of the model-picker roster — `displayName` now carries the old `DetectionModelOption.hint` inline, there is no separate hint field), `CvModelsResponse {models}` (the body of `GET /api/cv/models`, never errors server-side).
   - **Asset-side DTOs** (docs/main/CYCLES-PLAN.md §2 — landed the mirroring this file previously deferred): `AssetSummary` (mirrors `AssetSummaryResponse`), `AssetDetails` (extends `AssetSummary` with `devices`/`recentUsages`, mirrors `AssetDetailsResponse`), `AssetUsage` (mirrors `AssetUsageResponse`; `endedAt` absent = open usage), `TelemetrySample` (mirrors `TelemetrySampleResponse`; every field but `at` is optional), `GeoPosition` (mirrors `GeoPositionResponse`), `Category` (mirrors `CategoryResponse`), plus `AssetStatus` union. Same `@JsonInclude(NON_NULL)` convention as everything else here: absent, not `null`, typed `?:`.
@@ -98,14 +99,14 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 - **`../live/live-store.ts`/`live/live-fallback-logic.ts`** (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c — frontend half; full writeup in the dedicated R-c Status entry below) — `LiveStore` (`providedIn: 'root'`, one instance app-wide): owns the app's **one** `GET /api/live` `EventSource`, exposing `connectionState` (`'connecting'|'open'|'closed'`), an always-on `fleet` (`AssetSummary[]`), `liveEvents` (`LiveEvent[]`, **not** `DetectionEvent` — see Gotchas), `devices` (`DevicesSnapshot`), `detectionEvents` (`DetectionEvent[]`, chronological), and **`markEvents` (`MarkEvent[]`, chronological — docs/plans/done/TACTICAL-MARKS-PLAN.md §5, `core/marks/marks-store.ts`'s own projection source; always-on like the others but, unlike `detectionEvents`, carries no snapshot-on-connect backlog — see `MarkEvent`'s own doc comment in `models.ts`)** signal, plus ref-counted per-asset opt-in: `trackTelemetry`/`untrackTelemetry`/`trackDetections`/`untrackDetections`/**`trackGeo`/`untrackGeo`(assetId)** (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, wave H6 — the `geo:<assetId>` topic, an eighth projection alongside the pre-existing seven) (issuing `PATCH /api/live/{connectionId}/topics`, only on the first-subscriber-in/last-unsubscriber-out transition) and `telemetryFor`/`detectionsFor`/**`geoFor`**`(assetId)` returning that asset's own signal — `GeoStore` is `geoFor`'s one consumer, see `core/geo/**`'s own section below. Reconnects (native, on a transient drop, or its own manual retry every `SSE_RETRY_INTERVAL_MS`=60s after the browser gives up on a non-2xx/wrong-content-type response — e.g. `vision.live.enabled=false`, or a pre-R-c backend) always rebuild the `topics` query param from current ref-counts, so a consumer never needs to notice a reconnect itself. **Not unit-tested at the component level** — jsdom has no `EventSource` at all (confirmed by grepping the installed package); feature-detected (`typeof EventSource === 'undefined'`) and degrades straight to `'closed'`, which is also exactly what happens under jsdom, so this needs no test-side stubbing for it to stay inert. `live-fallback-logic.ts` is the pure, unit-tested logic behind it and the two projections below: `LiveConnectionState`/`isLiveAvailable`, `resolveAssetScopedTransport(connectionState, assetId?)` (live only with **both** an open connection **and** an asset id — the per-asset topics are asset-scoped only), `incrementTopicRef`/`decrementTopicRef` (ref-counting), `telemetryTopic`/`detectionsTopic`/**`geoTopic`** (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, wave H6)/`buildTopicsParam`, and `mergeTelemetrySamples` (dedupes a coalesced/resumed batch by `(deviceId, at)`, re-sorts chronologically, caps at `LIVE_TELEMETRY_MAX_SAMPLES`=500).
 - `../telemetry/telemetry-logic.ts` / `../telemetry/telemetry-store.ts` — live telemetry for `/live/:deviceId` and wall tile chips (docs/main/CYCLES-PLAN.md §2). `telemetry-logic.ts` is pure and unit-tested: `findOwningAsset`, `selectOpenUsage` (the `recentUsages` entry with no `endedAt`), `deriveTrail` (chronological lat/lon points, skipping samples with no position), `ageSeconds`/`isStale` (>5s), **`batterySeverity`/`telemetryAgeSeverity`** (docs/plans/done/MVP3-PLAN.md §C-b — `batterySeverity` lifted from a private `telemetry-osd.ts` computed once `features/fly/fly-osd.ts` needed the identical `'ok'|'low'|'critical'|'unknown'` tiers too, same behavior, unchanged thresholds; `telemetryAgeSeverity` is new, a third `'fresh'|'amber'|'red'` tier past the existing binary `isStale` — `amber` deliberately reuses `STALE_AFTER_SECONDS` rather than a second, redundant constant, so the OSD's medium tier lines up with what "stale" already means everywhere else in this app), **`groupTelemetryByDevice`/`telemetryDevices`** (docs/plans/done/MVP2-PLAN.md §R, R-b — moved here from `features/asset-detail/asset-detail-logic.ts` when the replay cockpit needed the identical per-device grouping; that page re-exports both so its own import site keeps working verbatim — see `features/replay/**` below), plus a re-export of `shouldPoll` from `poll-scheduler.ts` (see above) for backward-compat import paths. `TelemetryStore` (`@Injectable()`, **not** `providedIn: 'root'` — see Gotchas) orchestrates: **`track(deviceId, assetId?)`** (docs/plans/done/REALTIME-PLAN.md Phase R-a item 3, `assetId` new) resolves the device's owning asset and its open usage, then polls `GET /api/usages/{usageId}/telemetry?limit=200` every 2s (and ticks a 1s clock for `sampleAgeSeconds`) via `PollScheduler`; `reset()` stops and clears. Passing `assetId` (every caller that already has one should — `FlyPage`/`AssetDetailPage` do) resolves the open usage with **one `GET /api/assets/{assetId}`**; omitting it (`LivePage`/`WallTile`, which only ever have a bare `deviceId`) falls back to the original `listAssets()` + `getAsset()`-per-asset scan (a device belongs to ≤1 asset) — see Gotchas for the O(N) amplification this shortcut closes. Exposes `samples`, `hasTelemetry`, `latest`, `trail`, `sampleAgeSeconds`, `stale`. All lookups/polls silently degrade on error (no toast — telemetry is best-effort context, not a user-initiated action); callers render a "no telemetry" state instead. `map-store.ts` (docs/main/CYCLES-PLAN.md §6) reuses `selectOpenUsage` and `deriveTrail` (via its own `map-logic.ts`) directly rather than this class, since it starts from an already-known asset id, not a device id — see `features/map/**` below. **R-c (docs/plans/done/REALTIME-PLAN.md §4)**: `track()` now always does exactly **one** backfill `usageTelemetry` GET (never a repeating poll by itself) and, when `assetId` is given, subscribes to `LiveStore`'s `telemetry:<assetId>` topic for the whole session; `samples` reads live (merged with the backfill via `mergeTelemetrySamples`) or the 2s poll fallback, toggling purely with `LiveStore.connectionState()` — the live *subscription* itself is not torn down/recreated on a transient connection blip, only the *read* toggles (see the class's own doc comment's "Subscription lifecycle vs. transport, kept separate"). `assetId` omitted still always polls, unchanged.
 - **`../telemetry/flight-state-logic.ts` + `.spec.ts`** (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d, new — pure, unit-tested, no Angular): decodes `FlightState`/`TelemetrySample` into what the Fly cockpit and Command dashboard render. `gpsFixLabel(fixType)` → `'No GPS'|'No fix'|'2D'|'3D'|'DGPS'|'RTK float'|'RTK fixed'|'—'` (undefined/out-of-range → `'—'`, never a guess); `gpsSeverity(fixType)` → `'critical'` (undefined/0/1 — deliberately **not** `'unknown'`: a live flight instrument with no GPS reading at all is itself the dangerous state) `|'warn'` (2) `|'ok'` (≥3). `flightBanner(sample)` → `null | {kind:'failsafe'|'rth'|'landing', text}` — states what the *aircraft* is doing, never an instruction (poka-yoke): `failsafe===true` always wins regardless of mode (`'FAILSAFE — RETURNING TO HOME'` for an RTL-family mode — `RTL`/`SmartRTL`/`QRTL`/`AutoRTL` — else the plainer `'FAILSAFE ACTIVE'`); absent failsafe, an RTL-family mode → `'rth'`/`'Return to home active'`, a landing-family mode (`Land`/`QLand`/`AutoLand`) → `'landing'`/`'Landing'`; anything else (including no `flightState` at all) → `null`. `derivePreflight(sample, hasVideo, streaming, nowMs)` → exactly 5 `PreflightItem{label, state:'ok'|'fail'|'unknown', detail?}` rows, fixed order (Video feed, Telemetry link, GPS fix, Battery, Armable) — reuses `telemetry-logic.ts#STALE_AFTER_SECONDS`/`isStale`/`BATTERY_LOW_PERCENT` directly rather than duplicating those thresholds; every row is `'unknown'`, never a fabricated pass/fail, whenever its own underlying reading hasn't arrived. `nowMs` is a parameter (not a `Date.now()` read inside the function), mirroring `features/fly/fly-logic.ts#lastSeenLabel`'s identical determinism convention.
-- `../detections/detections-logic.ts` / `../detections/detections-store.ts` — the Live page's detections strip (docs/plans/done/MVP1-PLAN.md §C8 bullet 4), mirroring `core/telemetry/telemetry-logic.ts`/`core/telemetry/telemetry-store.ts`'s split exactly. `detections-logic.ts` is pure and unit-tested: `deriveChips(results, maxChips = 8)` — from `results` (newest first, as `VisionApi` returns them), one chip per **distinct** label capped at `maxChips`, each carrying the most recent confidence recorded for that label; `cvStatus(latestCapturedAt, nowMs)` → `'on'` (fresh, within `CV_STATUS_FRESH_SECONDS`=5) or `'off'` (stale or no result ever); `freshResults(results, nowMs, freshSeconds = CV_STATUS_FRESH_SECONDS)` — drops any result whose `capturedAt` has aged past the same window `cvStatus` uses for the dot. **A private shared `isFresh` helper backs both, so the two age rules cannot drift apart by construction, not merely by convention** — and the filter is per-result, not just on the latest, so the whole retained history agrees with what the dot claims is fresh. `DetectionsStore` (`@Injectable()`, **not** `providedIn: 'root'`, same reasoning as `TelemetryStore`) polls `GET /api/streams/{streamId}/detections?limit=50` every 2s while visible via `PollScheduler`; `track(streamId, assetId?)`/`reset()` mirror `TelemetryStore`'s API. Exposes `results` (a `computed` running `freshResults` over whichever transport is active, re-evaluated on every `nowSignal` tick — **the only place any client draws or reports detections from**, so a stream whose detections stopped arriving (switched off, no viewers, a CV outage, cv-service crashed) stops being drawn within one `CV_STATUS_FRESH_SECONDS` window regardless of transport and regardless of whether the server ever clears anything), `chips` (over `deriveChips(results())`), `status` (over `cvStatus`, ticking its own 1s clock so the dot can go `'off'` passively between polls, exactly like `TelemetryStore.stale()`). Silent-degrade on error — no toast: a *throwing* poll leaves `pollResultsSignal` at its last-known value, but `results()` never surfaces anything already stale regardless. **R-c (docs/plans/done/REALTIME-PLAN.md §4)**: `assetId` subscribes to `LiveStore`'s `detections:<assetId>` topic for the session (the live topic is asset-scoped, not stream-scoped — there is no way to subscribe to "this stream's" detections over SSE); since that topic is latest-frame-only (no backlog), this store accumulates each arrival onto its own running list (an `effect`, capped at `DETECTIONS_LIMIT`) — that accumulator (`liveResultsSignal`) only ever grows or is replaced wholesale by `track()`/`reset()` and **never** drops a stale entry itself; aging entries out is `results`' job via `freshResults`. `FlyPage`/`AssetDetailPage` pass `assetId`; `LivePage`/`WallTile` (bare `streamId`, no asset context) omit it and always poll, unchanged.
+- `../detections/detections-logic.ts` / `../detections/detections-store.ts` — the Live page's detections strip (docs/plans/done/MVP1-PLAN.md §C8 bullet 4), mirroring `core/telemetry/telemetry-logic.ts`/`core/telemetry/telemetry-store.ts`'s split exactly. `detections-logic.ts` is pure and unit-tested: `deriveChips(results, maxChips = 8)` — from `results` (newest first, as `VisionApi` returns them), one chip per **distinct** label capped at `maxChips`, each carrying the most recent confidence recorded for that label; `cvStatus(latestCapturedAt, nowMs)` → `'on'` (fresh, within `CV_STATUS_FRESH_SECONDS`=5) or `'off'` (stale or no result ever); `freshResults(results, nowMs, freshSeconds = CV_STATUS_FRESH_SECONDS)` — drops any result whose `capturedAt` has aged past the same window `cvStatus` uses for the dot. **A private shared `isFresh` helper backs both, so the two age rules cannot drift apart by construction, not merely by convention** — and the filter is per-result, not just on the latest, so the whole retained history agrees with what the dot claims is fresh. `DetectionsStore` (`@Injectable()`, **not** `providedIn: 'root'`, same reasoning as `TelemetryStore`) polls `GET /api/streams/{streamId}/detections?limit=50` every 2s while visible via `PollScheduler`; `track(streamId, assetId?)`/`reset()` mirror `TelemetryStore`'s API. Exposes `results` (a `computed` running `freshResults` over whichever transport is active, re-evaluated on every `nowSignal` tick — **the only place any client draws or reports detections from**, so a stream whose detections stopped arriving (switched off, no viewers, a CV outage, cv-service crashed) stops being drawn within one `CV_STATUS_FRESH_SECONDS` window regardless of transport and regardless of whether the server ever clears anything), `chips` (over `deriveChips(results())`), `status` (over `cvStatus`, ticking its own 1s clock so the dot can go `'off'` passively between polls, exactly like `TelemetryStore.stale()`). Silent-degrade on error — no toast: a *throwing* poll leaves `pollResultsSignal` at its last-known value, but `results()` never surfaces anything already stale regardless. **R-c (docs/plans/done/REALTIME-PLAN.md §4)**: `assetId` subscribes to `LiveStore`'s `detections:<assetId>` topic for the session (the live topic is asset-scoped, not stream-scoped — there is no way to subscribe to "this stream's" detections over SSE); since that topic is latest-frame-only (no backlog), this store accumulates each arrival onto its own running list (an `effect`, capped at `DETECTIONS_LIMIT`) — that accumulator (`liveResultsSignal`) only ever grows or is replaced wholesale by `track()`/`reset()` and **never** drops a stale entry itself; aging entries out is `results`' job via `freshResults`. `FlyPage`/`AssetDetailPage` pass `assetId`; `LivePage`/`WallTile` (bare `streamId`, no asset context) omit it and always poll, unchanged. **`pausedNotice`/`lastSeenAt` (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, wave W3, new)**: `lastSeenAt` (private) reads the whole transport's own **raw, unfiltered** `capturedAt` — `pollResultsSignal`/`liveResultsSignal`, never `results()` — since `results()`'s own `freshResults` filter has already dropped a batch older than `CV_STATUS_FRESH_SECONDS` out of the array entirely by the exact moment a "how long ago" notice needs to start reporting one; `pausedNotice` (public) feeds that through `shared/player/detection-overlay-logic.ts#detectionsPausedNotice` against `nowSignal()`. This is `core/` importing from `shared/` — an established precedent in this codebase (`core/map-data/drawings-logic.ts` already imports from `shared/map/tactical-map/tactical-map-logic.ts`), not a new layering exception. `CockpitFacade.detectionsPausedNotice` (new) gates this on `detectionOn()` before `cockpit.html` ever reads it — see the Fly section below.
 - `../fleet/device-logic.ts` — `findVideoDevice(devices): Device | undefined`, the watch-target resolution (first `VIDEO`-capable device on an asset). Started in `features/devices/simulate-logic.ts` (docs/main/CYCLES-PLAN.md §4); lifted here when docs/main/CYCLES-PLAN.md §6's `/map` tab needed the identical resolution for its own marker-popup Watch action and this codebase has no precedent for one page importing another page's module — every cross-page dependency runs through `core/` instead. `features/devices/devices.ts`, `core/map/map-store.ts`/`features/map/map.ts`, and (docs/main/CYCLES-PLAN.md §11) `features/asset-detail/asset-detail.ts` all import it from here now. **`videoDevices(devices): readonly Device[]`** (docs/plans/done/MVP3-PLAN.md §C-b, new) — every `VIDEO`-capable device, not just the first; backs `FlyPage`'s secondary-tile strip, mirrors `telemetryDevices`'s identical capability-filter shape.
 - `../fleet/warehouse-logic.ts` (docs/main/CYCLES-PLAN.md §11, CD-b) — the **generic** device/asset lifecycle logic, lifted out of `features/devices/devices-page-logic.ts` for the same cross-page reason as `device-logic.ts` above: the new asset detail page's own header (asset rename/lifecycle) and Hardware section (device rename/lifecycle) need the identical state machine `features/devices/devices.ts`'s warehouse table already had. `RESTORE_TARGET_STATE`, `DeviceLifecycleAction`/`AssetLifecycleAction`, `availableDeviceActions`/`availableAssetActions` (the per-lifecycle-state action-menu matrix), `buildDeviceRenameEdit`, `AssetEditForm`/`buildAssetEdit` — unchanged behavior, just relocated; `features/devices/devices-page-logic.ts` re-exports all of them so its own existing import sites keep working verbatim, and keeps only the Devices-page-specific view-model builders (`WarehouseRow`/`AssetRow`/`AssetListRow`, their `build*`/`filter*ByArchived` pairs, `mapDeviceOwners`) that only that page's rendering needs.
 - **`../fleet/asset-stats-logic.ts` + `.spec.ts`** (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B items 3–4, new — pure, unit-tested, no Angular) — the asset manager page's KPI tile row and "Recent flights" chart, split out mirroring `asset-detail-logic.ts`'s own precedent. `usageDurationSeconds(usage, nowMs)` — one usage's duration, open (counts to `nowMs`) or closed; shared by `flightBars` below and `AssetDetailPage#usageDuration` (the Usage history table), one definition of "how long was this flight." `formatFlightTime(totalSeconds: number | null)` → `"12h 34m"`/`"34m"`/`"—"` for `null` — minutes-only (no seconds; these are lifetime/average aggregates, not `stream-info-logic.ts#formatDuration`'s live-ticking single session). `KpiTile {label, value, sub?, live?}` + `kpiTiles(stats: AssetStats | undefined, nowMs)` → the row's five tiles in "biggest number first" order (Total flight time, Flights, Last flown, Avg flight, Battery) — `stats` `undefined` (the `/stats` fetch failed/404'd) degrades **every** tile to `'—'`, Flights included (a plain `0` there would dishonestly claim "known never flown" vs. the truth "unknown"); `flightCount === 0` similarly nulls out the Total flight time tile rather than rendering a `0m` reserved for the honest case of flights that summed to zero seconds; `flightInProgress` sets that one tile's `live: true` + a `'Flying now'` sub. `Last flown` reuses `core/events/events-logic.ts#relativeTimeLabel` verbatim (no local reimplementation). `FlightBar {usageId, startedAt, durationSeconds, open, heightPercent}` + `flightBars(recentUsages, nowMs)` — `AssetDetails#recentUsages` (newest-first, capped) reversed to oldest-first (a chronological left-to-right read) with each bar's `heightPercent` (0–100, floored at `MIN_BAR_HEIGHT_PERCENT`=6 so a near-zero-duration flight stays visible/hoverable) pre-scaled against the set's own max duration — the component reads `heightPercent` straight into a CSS `height`, no scale math in the template.
 - `../stream-info-logic.ts` (docs/plans/done/MVP2-PLAN.md §U-info, folded into CD-b) — pure derivations behind `shared/player/stream-info-panel.ts`: `describeSource(device)` → `{protocolLabel, description}`, a human-readable "MJPEG · 192.168.0.107:8080" / "File · flight.mp4 (looped)" / "Simulated · Pattern generator, no camera" line instead of a bare URI (credentials in an `rtsp://user:pass@…` URI are never surfaced in this primary description — `hostOf` parses `new URL(uri)` and reads only `hostname[:port]`; the raw URI, credentials included, stays reachable in the panel's "Technical details" disclosure). `sessionDurationSeconds`/`formatDuration` turn a raw `startedAt` timestamp into a live-ticking "12s" / "4m 07s" / "1h 03m" duration. `formatLatency(seconds)` renders `shared/player/player.ts`'s own measured `behindLive` (piped up via its `latencyChanged` output, never re-measured) as "~2.3s behind live" / "measuring…".
 - `../toast.service.ts` — `ToastService.ok/info/error/notify(text)`, auto-dismissing signal-backed toast list; rendered by `shared/ui/toast-host.ts`. `ok(text, action?)`/**`notify(text, action?)`** (docs/plans/done/UX-REWORK-PLAN.md §U-c, new — `shared/ui/notification-bell.ts`'s own newly-arrived-detection-event toasts) both accept an optional `ToastAction { label, onClick }` (docs/main/CYCLES-PLAN.md §4's original "Watch" action precedent); `toast-host.ts` renders it as an inline button that runs `onClick` and dismisses the toast. `info`/`error` don't take one — only a toast the user's own action caused (or that invites a specific follow-up click) earns one. **`ToastKind` gained `'notification'`** (own `.toast.notification` style in `toast-host.ts` — the app's one accent color, `var(--accent-soft)`/`var(--accent)`, docs/plans/done/UX-REWORK-PLAN.md §U-b item 2's "one saturated accent" rule, no new hue). **`DISMISS_AFTER_MS` is a flat 5s for every kind** (user decision, 2026-08-04) — it used to be a severity ladder (ok 4s → info 5s → notification 6s → warning 7s → error 9s), so kind now drives only *appearance* and whether an `action` is offered, never how long the toast stays. Consequence worth knowing before adding a toast: nothing an operator must not miss can rely on lingering longer than its siblings — that belongs in durable chrome (the bell dropdown, an inline error on the control that failed). Unit-tested: `core/toast.service.spec.ts`, fake-timers-based, covers the uniform 5s dismiss (plus per-toast clocks starting at push time), action wiring, and `dismiss(id)`. **Deliberately left out of the CU-b poll-scheduler consolidation** (see Status below) — its `setTimeout` per toast is a one-shot auto-dismiss, not a recurring poll. **Superseded, for the archive/deactivate Undo case specifically, by `shared/ui/undo-toast.service.ts` (docs/plans/done/OPS-CORE-PLAN.md §Q2, new — see that file's own bullet below)** — this service and `shared/ui/toast-host.ts` are otherwise completely unchanged and still carry every other toast in this app (`ok`/`info`/`error`/`notify`, including plain lifecycle confirmations like "X is now active").
 - **`shared/ui/undo-toast.service.ts`/`undo-toast.ts`** (docs/plans/done/OPS-CORE-PLAN.md §Q2, new) — a *separate* one-at-a-time "Undo" toast primitive, not a mode of `ToastService` above: `UndoToastService.showUndo(message, undo, {timeoutMs? = 10_000, onCommit?})` shows a single toast (`toast: Signal<UndoToastState | null>`) with a 10s default window (the plan's own pinned duration — closes U-a2 item 3b's own documented gap of reusing `ToastService.ok`'s fixed dismiss timer, then 4s and now a flat 5s, with no Undo-specific timing; this service's 10s is functional, an undo grace period, and is deliberately *not* affected by that flattening). **One toast at a time, commit-on-replace, undo-only-cancels**: a second `showUndo()` call while one is still open immediately *commits* the first (runs its own `onCommit` if given, then drops it — its mutation already happened optimistically before `showUndo` was ever called, so "commit" is normally a no-op) before showing the new one; the only way an action is ever reversed is clicking **that toast's own** `Undo` before it's replaced, dismissed, or times out. `undo()` (the toast's Undo button) cancels the timer and runs the stored `undo` callback, never `onCommit`; `dismiss()` (the `×` button, or `Escape` — keyboard-dismissable) resolves exactly like a natural timeout: commits, never undoes. `shared/ui/undo-toast.ts` (`<vision-undo-toast>`) renders it — mounted once at the app root (`app.html`, next to `<vision-toast-host>`) **bottom-left** (`ToastHost` already owns bottom-right; bottom-center is the Fly cockpit's own primary Start/Stop control, `features/fly/fly.css#.hud-controls`, at every viewport this app supports) — a shrinking progress bar (pure CSS animation timed off `timeoutMs`, no interval/rAF ticking) gives the countdown a visual; `@for (… track toast.id)` over a computed single-element array (mirrors `toast-host.ts`'s own `track`-by-id precedent) is what makes the bar actually restart on replace rather than reusing a stale, already-part-way-shrunk element. Wired into the two existing archive flows (`features/devices/devices.ts`/`features/asset-detail/asset-detail.ts`'s `archiveAssetNow`/`archiveDeviceNow`, previously `ToastService.ok(text, {label:'Undo', onClick})`) **and** into device `deactivate` (previously silent-immediacy — a plain `FleetStore.setDeviceState` confirmation toast with no way back short of re-opening the row's kebab; both pages now bypass `FleetStore` for `deactivate` too, same reasoning as `archive`'s own existing bypass, via new `deactivateDeviceNow` methods). `activate`/the explicit `restore` kebab entry are unchanged — re-activating isn't the "silent immediacy" this item is about. Unit-tested: `undo-toast.service.spec.ts` (11 cases — default/custom timeout, undo cancels the timer and never commits (plus a no-op-when-idle case), natural timeout commits and never undoes, dismiss commits (plus a no-op-when-idle case), both callbacks optional, replace commits the outgoing toast and only the new one's Undo applies afterward, a stale replaced-toast's timer never double-commits, increasing ids).
-- `../settings/settings-store.ts` — `SettingsStore`: built-in + custom `PipelineProfile`s, `effective()` (draft-over-profile). **`model` is now a plain `string`, not the old closed `DetectionModelId` union** (docs/plans/done/CV-CONTROL-PLAN.md Wave E — `DETECTION_MODEL_OPTIONS`/`DetectionModelId` are gone; the roster is data-driven from `FleetStore.models`, see above). `PipelineProfile`/`PipelineSettings` both gained `labelFilter: readonly string[]` (empty = "all labels") and `detectionEnabled: boolean` (**default `false`** as of docs/plans/active/CV-DEMAND-PLAN.md wave D3 — was `true` through CV-CONTROL-PLAN Wave E; see the dedicated D3 changelog section at the end of this file for the flip and its migration-backfill reasoning), same profile/draft/custom-save/revert semantics confidence/fps/model already had; migration-safe restore backfills all three independently (`withValidPipelineFields`, superseding the old `withValidModel`) — a persisted `model` string the current roster doesn't recognize is **accepted as-is** now (only a missing/non-string value falls back to `DEFAULT_DETECTION_MODEL`, now `'yolo26n.pt'` — mirrors `PipelineConfig.defaults()`'s own Wave-B bug-fix off the dead `"yolo"` id). See the dedicated CV-CONTROL-PLAN Wave E changelog section at the end of this file for the full write-up. Also: `mapLayer: WritableSignal<MapLayerId>` (docs/main/CYCLES-PLAN.md §9, CU-b item 6 — `'standard'|'night'|'relief'|'satellite'`, default `'night'`; set directly, e.g. `settings.mapLayer.set('satellite')`, same convention as `wallDensity`) — all persisted to `localStorage['vision.settings.v1']`; a corrupt/unknown persisted `mapLayer` is ignored (falls back to the default) rather than adopted. **`eventNotifications: WritableSignal<boolean>`** (docs/plans/done/MVP2-PLAN.md §E, E-b, new, default `false`) — the user's own opt-in for browser detection-event notifications; `features/settings/settings.ts#toggleEventNotifications` is the only call site that ever sets it `true` (and the only place `Notification.requestPermission()` is called, from the direct user gesture most browsers require), a corrupt/non-boolean persisted value is ignored like every other field here. **`flyAssetId: WritableSignal<string | null>`** (docs/plans/done/MVP3-PLAN.md §C-b, new, default `null`) — the operator's remembered drone for `/fly`; `null` means "show the picker", any other value is an asset id `FlyPage` still validates against the live fleet before trusting it (a stale id for an archived/deleted asset falls back to the picker, this store never checks). Both the picker's first pick and the cockpit's own header switcher write here — "switching drones" and "picking one for the first time" are the same write. A non-string persisted value is ignored like every other field here.
+- `../settings/settings-store.ts` — `SettingsStore`: built-in + custom `PipelineProfile`s, `effective()` (draft-over-profile). **`model` is now a plain `string`, not the old closed `DetectionModelId` union** (docs/plans/done/CV-CONTROL-PLAN.md Wave E — `DETECTION_MODEL_OPTIONS`/`DetectionModelId` are gone; the roster is data-driven from `FleetStore.models`, see above). `PipelineProfile`/`PipelineSettings` both gained `labelFilter: readonly string[]` (empty = "all labels") and `detectionEnabled: boolean` (**default `false`** as of docs/plans/active/CV-DEMAND-PLAN.md wave D3 — was `true` through CV-CONTROL-PLAN Wave E; see the dedicated D3 changelog section at the end of this file for the flip and its migration-backfill reasoning), same profile/draft/custom-save/revert semantics confidence/fps/model already had; migration-safe restore backfills all three independently (`withValidPipelineFields`, superseding the old `withValidModel`) — a persisted `model` string the current roster doesn't recognize is **accepted as-is** now (only a missing/non-string value falls back to `DEFAULT_DETECTION_MODEL`, now `'yolo26n.pt'` — mirrors `PipelineConfig.defaults()`'s own Wave-B bug-fix off the dead `"yolo"` id). See the dedicated CV-CONTROL-PLAN Wave E changelog section at the end of this file for the full write-up. **`PipelineProfile`/`PipelineSettings` both also gained `labelDenyFilter: readonly string[]`** (empty = "deny nothing", wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) — `withValidPipelineFields` backfills a missing one the same way it already backfills a missing `labelFilter`; see the W5 changelog section for the full write-up including why this is a *separate* field from `labelFilter`, not a repurposing of it. Also: `mapLayer: WritableSignal<MapLayerId>` (docs/main/CYCLES-PLAN.md §9, CU-b item 6 — `'standard'|'night'|'relief'|'satellite'`, default `'night'`; set directly, e.g. `settings.mapLayer.set('satellite')`, same convention as `wallDensity`) — all persisted to `localStorage['vision.settings.v1']`; a corrupt/unknown persisted `mapLayer` is ignored (falls back to the default) rather than adopted. **`eventNotifications: WritableSignal<boolean>`** (docs/plans/done/MVP2-PLAN.md §E, E-b, new, default `false`) — the user's own opt-in for browser detection-event notifications; `features/settings/settings.ts#toggleEventNotifications` is the only call site that ever sets it `true` (and the only place `Notification.requestPermission()` is called, from the direct user gesture most browsers require), a corrupt/non-boolean persisted value is ignored like every other field here. **`flyAssetId: WritableSignal<string | null>`** (docs/plans/done/MVP3-PLAN.md §C-b, new, default `null`) — the operator's remembered drone for `/fly`; `null` means "show the picker", any other value is an asset id `FlyPage` still validates against the live fleet before trusting it (a stale id for an archived/deleted asset falls back to the picker, this store never checks). Both the picker's first pick and the cockpit's own header switcher write here — "switching drones" and "picking one for the first time" are the same write. A non-string persisted value is ignored like every other field here.
 - **`../training/training-store.ts` + `.spec.ts`** (docs/plans/done/CV-TRAINING-PLAN.md Wave T5, new) — `TrainingStore` (`@Injectable providedIn: 'root'`, lazy like `OrgStore` — no self-initializing fetch): the dataset list's source of truth (`datasets`, `loading`, `loaded`, **`disabled`**) plus `refresh()`/`createDataset()`/`deleteDataset()`. `disabled` is the honest "not enabled here" signal — set the moment `GET /api/datasets` (the one call that can only mean "the whole controller is absent" on a `404`, never "unknown id") 404s; every other failure stays a toast. One dataset's own samples/annotations are page-local, single-consumer state handled directly by `features/labeling/**`'s own facades (`VisionApi` injected there, not this store) — see the dedicated CV-TRAINING-PLAN Wave T5 section at the end of this file for the full write-up.
 - `../idle-preload.ts` — `IdlePreload` (`PreloadingStrategy`): preloads lazy route chunks on browser idle; opt out via route `data: { preload: false }`. As of docs/main/CYCLES-PLAN.md §9, CU-b item 2, **no route opts out any more** — every tab chunk (including `/map` and `/debug`, previously excluded) is idle-preloaded; see Status below for why that's safe against the initial-bundle budget.
 - **`shared/player/webrtc-certificate.ts`/`webrtc-certificate-logic.ts`/`webrtc-certificate-db.ts`** (docs/plans/done/REALTIME-PLAN.md Phase R-b item 3, new; moved out of `core/` into `shared/player/` per station/vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §3, D2 — Player-only WebRTC internals, not a store) — `WebrtcCertificateService` (`providedIn: 'root'`, one instance app-wide): `certificates(): Promise<readonly RTCCertificate[]>` lazily creates (`RTCPeerConnection.generateCertificate({name:'ECDSA', namedCurve:'P-256'})`), persists in IndexedDB, and hands back the browser's *one* stable ECDSA certificate — `shared/player/player.ts` passes it to every `RTCPeerConnection` via the `certificates` option, so every `<vision-player>` tile and every reconnect presents the identical DTLS fingerprint (server-side viewer correlation, no application-level session/cookie needed) and skips ECDSA keygen latency after the first attach. Memoized and **re-validated on every call**, not just once at startup — `isCertificateUsable`/`CERTIFICATE_EXPIRY_SAFETY_MARGIN_MS` (`webrtc-certificate-logic.ts`, pure, unit-tested, 9 cases) is the one place "is this cert still safe to hand out" is decided, so a certificate that expires mid-session (Safari caps a generated cert's own lifetime at roughly a week regardless of what's requested) regenerates transparently on the *next* call rather than silently going stale. `webrtc-certificate-db.ts` is the minimal IndexedDB glue (one object store, one record — mirrors `shared/map/tile-cache-db.ts`'s identical "thin, undocumented-by-spec, no dedicated test" precedent; jsdom has neither IndexedDB nor `generateCertificate` to test against regardless); both `getStoredCertificate`/`putStoredCertificate` degrade to `undefined`/a no-op rather than throwing, which is what makes the private-mode/IndexedDB-unavailable fallback "just generate a fresh in-memory certificate, per tab" fall out for free rather than needing its own special-cased branch. Logs the fingerprint (`getFingerprints()`, formatted by `formatFingerprints`) at `info` once per session — memoization means this only fires once regardless of how many `<vision-player>` tiles call `certificates()`.
@@ -128,14 +129,14 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 
 **Folder-structure migration note (station/vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md, executed):** the flat `pages/`/`core/`/`ui/` layout described in earlier cycle writeups below has since been reorganized into `core/` (singleton services + stores, now grouped per concern in subfolders: `core/fleet/`, `core/telemetry/`, `core/detections/`, `core/events/`, `core/map/`, `core/settings/`, `core/live/`), `shared/` (reusable code grouped by subsystem: `shared/player/` — the video surface + WebRTC/HLS plumbing, `shared/map/` — the Leaflet surface, `shared/ui/` — genuinely dumb shared components), and `features/` (one folder per routed page, `pages/<name>/` renamed `features/<name>/`, each with its own `<name>.routes.ts`). Every path below reflects the **current** location; where a cycle writeup describes a file moving from one flat bucket to another (e.g. "moved to `core/`"), read that as accurate for the cycle it describes — the file's *current* subfolder is whatever this doc's other sections/backtick paths say now.
 
-`features/fly/` (docs/plans/done/MVP3-PLAN.md §C-b — the operator cockpit and the app's default landing page; split into two routed pages, the picker and the cockpit itself, docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12 — see its own section immediately below) · `features/command/` (docs/plans/done/UX-REWORK-PLAN.md §U-c, superseding docs/plans/done/MVP3-PLAN.md §C-c's stacked-cards layout — the manager's map-first dashboard: full-bleed fleet map, a collapsible attention-sorted entity rail, and a collapsible right-hand asset detail panel — see its own section below; `/map` folds in here too, see `features/map/**`'s own note) · `features/wall/` (grid of live tiles, density control, `IntersectionObserver`-suspended off-screen players, plus a detection-events rail — docs/plans/done/MVP2-PLAN.md §E, E-b, see the "Detection events" section below; each `wall-tile.ts`/`.html`/`.css` — **three-file-split in docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8**, was inline `template`/`styles` before — also carries a `TelemetryStore`/`DetectionsStore` for its own battery/altitude chip and per-tile detection-boxes toggle, now a burnedIn-aware `linkedSignal` default + `cycleBoxesMode(current, stream()#burnedIn)` cycle (`shared/player/detection-overlay-logic.ts`) instead of its own hand-rolled three-mode cycle — see below) · `features/map/` (docs/plans/done/UX-REWORK-PLAN.md §U-c: now just a `redirectTo: 'command'` route — `MapPage` itself is deleted, its job absorbed by `features/command/**`, see that section's own note) · `features/devices/` (asset-first inventory + the single "+ Add source" progressive flow — see below) · `features/asset-detail/` (docs/main/CYCLES-PLAN.md §11, CD-b — one asset's full picture: video, map, per-source telemetry, usage history, Hardware, and (docs/plans/done/MVP2-PLAN.md §E, E-b) an Events section — see below) · `features/replay/` (docs/plans/done/MVP2-PLAN.md §R, R-b — the flight-replay cockpit: scrub bar, trail-to-scrub map, telemetry/detections at the scrub time — see below) · `features/live/` (single-device cockpit, video-first with a collapsible rail — see below) · `features/settings/` — **split in two, docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 Wave 4 (F7)**: `/settings` (`account-settings.ts`/`.html`/`.css`, `account-settings-facade.ts` — Interface's Advanced-mode toggle, Notifications, and the read-only System status card; reached only from the avatar menu's "Account settings") and `/settings/detection` (`detection-settings.ts`/`.html`/`.css`, `detection-settings-facade.ts`, `detection-settings-logic.ts` — Detection profile/model/advanced knobs, reached only from the sidebar's Operate group's "Detection defaults"); see the dedicated Wave 4 Status entry at the end of this file for the full split writeup · `features/debug/` (raw API console + health + last-scan — see below) · `shared/player/player.ts` (`<vision-player>`, hls.js-backed, self-recovering — reused as-is by `wall-tile.ts`, `live.html`, `features/asset-detail/asset-detail.html`, `features/command/asset-panel.ts`, and now `features/fly/cockpit.html` — see below) · `shared/player/player-recovery.ts` (the pure state machine behind it) · `shared/player/detection-overlay-logic.ts` (the client-side detection-boxes sync matcher) · `shared/player/stream-info-panel.ts` (`<vision-stream-info>`, docs/plans/done/MVP2-PLAN.md §U-info — see below) · `shared/map/live-map.ts` (`<vision-live-map>`, moved here from `features/live/` in CD-b so the asset detail page could reuse it, now also Fly's map inset — see below) · `shared/player/detections-strip.ts` (`<vision-detections-strip>`, moved here from `features/live/` in docs/plans/done/MVP3-PLAN.md §C-b for the identical reason — see below) · `features/fly/fly-osd.ts` (`<vision-fly-osd>`, docs/plans/done/MVP3-PLAN.md §C-b — the cockpit's overlaid OSD chip bar, new — see its own doc comment for why it isn't a `TelemetryOsd` reuse) · `shared/map/fleet-map.ts` (docs/main/CYCLES-PLAN.md §6/§9, moved here from `features/map/` in docs/plans/done/MVP3-PLAN.md §C-c so Command could reuse it too — see below; its sibling `live-dock.ts` was deleted 2026-07-24, zero remaining consumers) · `shared/ui/events-rail.ts` (docs/plans/done/MVP2-PLAN.md §E, E-b, moved here from `features/wall/` in docs/plans/done/MVP3-PLAN.md §C-c for the identical reason — see below) · `shared/ui/toast-host.ts` · `shared/map/leaflet-loader.ts` (shared Leaflet bootstrap + the switchable map-layer catalogue + the IndexedDB tile cache, docs/plans/done/MVP3-PLAN.md — see Gotchas, `features/map/**` below, and the tile-cache section below).
+`features/fly/` (docs/plans/done/MVP3-PLAN.md §C-b — the operator cockpit and the app's default landing page; split into two routed pages, the picker and the cockpit itself, docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12 — see its own section immediately below) · `features/command/` (docs/plans/done/UX-REWORK-PLAN.md §U-c, superseding docs/plans/done/MVP3-PLAN.md §C-c's stacked-cards layout — the manager's map-first dashboard: full-bleed fleet map, a collapsible attention-sorted entity rail, and a collapsible right-hand asset detail panel — see its own section below; `/map` folds in here too, see `features/map/**`'s own note) · `features/wall/` (grid of live tiles, density control, `IntersectionObserver`-suspended off-screen players, plus a detection-events rail — docs/plans/done/MVP2-PLAN.md §E, E-b, see the "Detection events" section below; each `wall-tile.ts`/`.html`/`.css` — **three-file-split in docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8**, was inline `template`/`styles` before — also carries a `TelemetryStore`/`DetectionsStore` for its own battery/altitude chip and per-tile detection-boxes toggle, a plain `signal<BoxesMode>('overlay')` + two-state `cycleBoxesMode(current)` cycle (`shared/player/detection-overlay-logic.ts`) — see below) · `features/map/` (docs/plans/done/UX-REWORK-PLAN.md §U-c: now just a `redirectTo: 'command'` route — `MapPage` itself is deleted, its job absorbed by `features/command/**`, see that section's own note) · `features/devices/` (asset-first inventory + the single "+ Add source" progressive flow — see below) · `features/asset-detail/` (docs/main/CYCLES-PLAN.md §11, CD-b — one asset's full picture: video, map, per-source telemetry, usage history, Hardware, and (docs/plans/done/MVP2-PLAN.md §E, E-b) an Events section — see below) · `features/replay/` (docs/plans/done/MVP2-PLAN.md §R, R-b — the flight-replay cockpit: scrub bar, trail-to-scrub map, telemetry/detections at the scrub time — see below) · `features/live/` (single-device cockpit, video-first with a collapsible rail — see below) · `features/settings/` — **split in two, docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 Wave 4 (F7)**: `/settings` (`account-settings.ts`/`.html`/`.css`, `account-settings-facade.ts` — Interface's Advanced-mode toggle, Notifications, and the read-only System status card; reached only from the avatar menu's "Account settings") and `/settings/detection` (`detection-settings.ts`/`.html`/`.css`, `detection-settings-facade.ts`, `detection-settings-logic.ts` — Detection profile/model/advanced knobs, reached only from the sidebar's Operate group's "Detection defaults"); see the dedicated Wave 4 Status entry at the end of this file for the full split writeup · `features/debug/` (raw API console + health + last-scan — see below) · `shared/player/player.ts` (`<vision-player>`, hls.js-backed, self-recovering — reused as-is by `wall-tile.ts`, `live.html`, `features/asset-detail/asset-detail.html`, `features/command/asset-panel.ts`, and now `features/fly/cockpit.html` — see below) · `shared/player/player-recovery.ts` (the pure state machine behind it) · `shared/player/detection-overlay-logic.ts` (the client-side detection-boxes sync matcher) · `shared/player/stream-info-panel.ts` (`<vision-stream-info>`, docs/plans/done/MVP2-PLAN.md §U-info — see below) · `shared/map/live-map.ts` (`<vision-live-map>`, moved here from `features/live/` in CD-b so the asset detail page could reuse it, now also Fly's map inset — see below) · `shared/player/detections-strip.ts` (`<vision-detections-strip>`, moved here from `features/live/` in docs/plans/done/MVP3-PLAN.md §C-b for the identical reason — see below) · `features/fly/fly-osd.ts` (`<vision-fly-osd>`, docs/plans/done/MVP3-PLAN.md §C-b — the cockpit's overlaid OSD chip bar, new — see its own doc comment for why it isn't a `TelemetryOsd` reuse) · `shared/map/fleet-map.ts` (docs/main/CYCLES-PLAN.md §6/§9, moved here from `features/map/` in docs/plans/done/MVP3-PLAN.md §C-c so Command could reuse it too — see below; its sibling `live-dock.ts` was deleted 2026-07-24, zero remaining consumers) · `shared/ui/events-rail.ts` (docs/plans/done/MVP2-PLAN.md §E, E-b, moved here from `features/wall/` in docs/plans/done/MVP3-PLAN.md §C-c for the identical reason — see below) · `shared/ui/toast-host.ts` · `shared/map/leaflet-loader.ts` (shared Leaflet bootstrap + the switchable map-layer catalogue + the IndexedDB tile cache, docs/plans/done/MVP3-PLAN.md — see Gotchas, `features/map/**` below, and the tile-cache section below).
 
 ### `src/app/features/fly/**` — `/fly` (picker) + `/fly/:assetId` (cockpit) (docs/plans/done/MVP3-PLAN.md §C-b; split into two routed pages docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12 — full writeup in this cycle's own dated Status entry near the end of this file)
 
 The app's default landing page and the operator persona's one job: *flies ONE drone at a time; everything else is noise* — video dominant, safety numbers glanceable without leaving the picture, position/events/controls all on the one page, nothing behind a second click. The only genuinely new component in this feature (unrelated to the split below) is `<vision-fly-osd>` (see its own doc comment in `features/fly/fly-osd.ts`).
 
 **Split into two routed pages, each with its own facade (F12 — "the cockpit is not addressable")**: one component (`FlyPage`) used to switch between picker and cockpit *internally*, with no URL change at all — the cockpit could never be bookmarked, refreshed into, or shared, and Back never left it.
-- **`fly-logic.ts`** (+`.spec.ts`) — pure, unit-tested, shared by both facades below: `sortAssetsForPicker`, `rememberedStreamingAssetId(assets, rememberedAssetId)` (F12 — **stricter** than the pre-split `resolveActiveAssetId`'s "still exists in the fleet" bar: the remembered `SettingsStore.flyAssetId` only counts as "nothing to ask" while it is still actually **streaming**, not merely present — a landed remembered drone still shows the picker), `latestFinishedUsage`, `isWatchMode`, `cycleBoxesMode` (re-export — **moved to `shared/player/detection-overlay-logic.ts`** in docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8, since `WallTile` needed the identical burnedIn-aware cycle; re-exported here for this file's own existing import site/tests, mirrors the `trackingIdChanged` re-export just below), `TICKER_MAX_EVENTS`, `trackingIdChanged` (re-export), `nextCollapseAction`, `isSwitcherOptionSelected`, `streamStateLabel`/`lastSeenLabel`/`positionLabel` (picker card facts), `ALL_DRONES_OPTION_VALUE`/`isAllDronesOption`.
+- **`fly-logic.ts`** (+`.spec.ts`) — pure, unit-tested, shared by both facades below: `sortAssetsForPicker`, `rememberedStreamingAssetId(assets, rememberedAssetId)` (F12 — **stricter** than the pre-split `resolveActiveAssetId`'s "still exists in the fleet" bar: the remembered `SettingsStore.flyAssetId` only counts as "nothing to ask" while it is still actually **streaming**, not merely present — a landed remembered drone still shows the picker), `latestFinishedUsage`, `isWatchMode`, `TICKER_MAX_EVENTS`, `trackingIdChanged` (re-export), `nextCollapseAction`, `isSwitcherOptionSelected`, `streamStateLabel`/`lastSeenLabel`/`positionLabel` (picker card facts), `ALL_DRONES_OPTION_VALUE`/`isAllDronesOption`. **The `cycleBoxesMode` re-export is gone** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3) — `CockpitFacade` already imported the real thing straight from `shared/player/detection-overlay-logic.ts` (its canonical home since M8), so once burn-in's removal simplified that function this file's own re-export/duplicate test block had no remaining reader and was deleted outright rather than kept as a stale pass-through.
 - **`fly-redirect-guard.ts` — `flyRedirectGuard`**, `/fly`'s own `canActivate` (`fly.routes.ts`): decides *before* `DronePickerPage` ever mounts whether to skip the picker. Redirects — always `router.navigate(..., {replaceUrl:true})` then returns `false`, never a `UrlTree` (unlike `auth-guard.ts`/`org-guard.ts` — this route's own redirect needs unambiguous replacing-navigation semantics, see the guard's own doc comment) — when either **`?asset=<id>`** is present (Command's/Alerts' own drill-down links, unconditional, streaming or not) or **the remembered drone is still streaming** (`rememberedStreamingAssetId`). **Never redirects on a `popstate` navigation** (`router.getCurrentNavigation()?.trigger === 'popstate'`, checked first) — a bare `/fly` only ever becomes a real, Back-reachable history entry at the moment this guard renders the picker (every redirect is `replaceUrl`), so re-deciding on the way *back* to it would redirect straight into the cockpit Back is trying to leave; found and fixed via this cycle's own live verification, not merely reasoned about.
 - **`drone-picker.ts`/`.html`/`.css` + `drone-picker-facade.ts` — `DronePickerPage`** at `/fly`. Deliberately thin now that the redirect guard owns "is there anything to ask": `listAssets()`, a 5s `PollScheduler` refresh (`retryPicker()` for the error-card retry), the asset-card grid. A card is a plain `[routerLink]="['/fly', a.assetId]"` `<a>` (not a `<button>` + facade command — entering a cockpit is a real navigation now, no HTTP call needed to "select" it). No `EventsStore` activation on this page (it renders no ticker — only the cockpit does). **Truthful empty state (docs/plans/active/OPS-UX-PLAN.md §2 A2, Wave A, 2026-08-16)**: the `orderedPickerAssets().length === 0` branch no longer shows one hardcoded "No drones registered yet" — `facade.emptyState()` (`DronePickerFacade`, injects `AuthStore`) resolves the whole title/message/CTA view model via `fly-logic.ts#pickerEmptyStateCopy(topRole, memberships)`, pure/unit-tested. No new HTTP call: `GET /api/assets` is already visibility-scoped (a PILOT's `VisibilityScope` is `ASSIGNED_ASSETS`), so an empty response for a PILOT already means "nothing assigned to *you*", not "the fleet is empty" — the two cases this collapses were conflated only in the copy, never in the data. PILOT sees "No aircraft assigned to you yet" + their group name(s) from `memberships` (comma-joined, de-duplicated; an honest "could not determine your group" if none resolve — never a fabricated name), no CTA at all. ADMIN/MANAGER keep the unchanged "No drones registered yet" title/message, but the CTA now points at **`/add-source`** (not `/devices?addSource=1`) and is gated on `topRole === 'ADMIN' || 'MANAGER'` (mirrors A4's `POST /api/assets` gate — never dangles a door the API would now refuse, including for an unresolved/pre-boot role).
 - **Picker header — `page-head` → `vision-page-bar`** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 Wave 2): `title="Fly" icon="cockpit" [count]="… ?? null" countNoun="drone"`, the old "Pick a drone…" paragraph moved to `hint`.
@@ -157,7 +158,8 @@ The app's default landing page and the operator persona's one job: *flies ONE dr
   - **Geofence zones, read-only (docs/plans/done/OPS-CORE-PLAN.md §G-c, new)** — `[zones]="geofence.zones()"` passed straight to the cockpit's own `<vision-live-map>` (`GeofenceStore` injected root-wide, no page-local fetch); same styles as Command's own zones layer, no click affordance — see `core/geofence/**`'s own section above.
   - **Weather go/no-go chip (docs/plans/done/OPS-CORE-PLAN.md §W, new)** — `<vision-weather-chip>` inside `<vision-fly-osd>`'s own chip bar (that component injects `WeatherStore` from `CockpitPage`'s `providers` directly, same DI-sharing idiom as `TelemetryStore`), centered on the flown asset's own live-telemetry fix (falling back to `AssetDetails.lastKnownPosition` before one arrives) with `windLimitMps` read from `AssetDetails.attributes['windLimitMps']` — see `core/weather/**`'s own section above.
   - **Geo divergence chip (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6, new)** — `<vision-geo-chip>` inside `<vision-fly-osd>`'s Link cluster, always rendered, DI-sharing the `GeoStore` instance `CockpitPage`'s own `providers` now also carries; `CockpitFacade` gained a `geo` field + a constructor `effect()` that calls `geo.track(assetId)`/`geo.reset()` alongside the existing detections-tracking effect, and a `mapCorrections` computed (`facade.mapCorrections()`, `[latest]` or `[]`) feeding `<vision-tactical-map [corrections]>`. See `core/geo/**`'s own section above for the chip/store/detail-popover writeup in full.
-  - **CV control panel (docs/plans/done/CV-CONTROL-PLAN.md Wave E, new; boxes-mode + Classes rework and `layers` merge, per direct user request)** — `<vision-cv-control-panel>` (`features/fly/cv-control-panel.ts`/`.html`/`.css`, pure logic in `cv-control-panel-logic.ts`+`.spec.ts`), a HUD toggle button + drawer in `.hud-header` (right of the flight-command cluster, hidden with the rest of the controls in watch mode) — model picker, confidence/inference-rate sliders, a class-filter chip checklist, a **Boxes rendering** section (the Overlay/Burned in/Off segmented control, shortcut `B` — formerly the standalone `layers` drawer's only content; the component gained a plain `boxesMode` input + `boxesModeChange` output for it, not routed through `SettingsStore` since it's a client-side rendering preference, not part of the `PipelineSettings` wire contract), and detection on/off. **"Burned in" is omitted from the segmented control once `[burnedIn]="facade.stream()?.burnedIn"` (a new input, `cockpit.html`) resolves `false`** (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8 — `showBurnedInOption`, `resolveBurnedIn`) — a control that would draw nothing if clicked reads as a choice, not an absence, so it isn't offered at all; `CockpitFacade.boxesMode` itself is now a `linkedSignal` defaulting off the same field (`defaultBoxesMode`, re-derived whenever `stream()#burnedIn` — projected to a primitive, `streamBurnedIn`, so a same-value poll refresh doesn't fight the operator's own pick) rather than the old plain `signal<BoxesMode>('burned')`; `cycleBoxes()` (the `B` shortcut) now calls `cycleBoxesMode(current, streamBurnedIn())`, so `'burned'` drops out of the cycle the moment a stream is confirmed burn-in-free. Drawer subtitle is now "Model · classes · confidence · boxes". **Classes flow** (top to bottom): status line → quick-actions row (the "+ People, vehicles & buildings" preset, now primary `.btn`, plus a "Clear all" button once the filter is non-empty) → a search box that filters the chip checklist live and doubles as the free-text "add" input once nothing matches → the chip checklist itself, each chip a `<span class="class-chip">` shell around a `.chip-label` (click toggles) and, only while checked, a trailing `.chip-remove` "×" (same toggle, explicit affordance); checked chips sort first (`sortSelectedFirst`, a no-op while the filter is `[]`/"all"). New pure helpers `filterLabelsByQuery`/`hasExactLabelMatch`/`sortSelectedFirst` in `cv-control-panel-logic.ts`; the old `removeLabel`/`removeClass` (superseded by `toggleChip`, which — unlike `removeLabel` — handles the `labelFilter === []` "all" edge case) were deleted as dead code. See this file's own dedicated CV-CONTROL-PLAN Wave E changelog section at the end for the full write-up (predates the boxes/Classes rework above).
+  - **CV control panel (docs/plans/done/CV-CONTROL-PLAN.md Wave E, new; boxes-mode + Classes rework and `layers` merge, per direct user request)** — `<vision-cv-control-panel>` (`features/fly/cv-control-panel.ts`/`.html`/`.css`, pure logic in `cv-control-panel-logic.ts`+`.spec.ts`), a HUD toggle button + drawer in `.hud-header` (right of the flight-command cluster, hidden with the rest of the controls in watch mode) — model picker, confidence/inference-rate sliders, a class-filter chip checklist, a **Boxes rendering** section (the Overlay/Off segmented control, shortcut `B` — formerly the standalone `layers` drawer's only content; the component gained a plain `boxesMode` input + `boxesModeChange` output for it, not routed through `SettingsStore` since it's a client-side rendering preference, not part of the `PipelineSettings` wire contract), and detection on/off. **"Burned in" is gone from the segmented control entirely** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3 — **superseding** the M8 entry below, which only ever conditionally hid it): server-side burn-in no longer exists at all, so there is nothing left for a third mode to name — the `burnedIn` input, `showBurnedInOption`, and the "Burned in" tab were all deleted rather than kept dark. `CockpitFacade.boxesMode` is a plain `signal<BoxesMode>('overlay')` (no more `linkedSignal`/`streamBurnedIn` — nothing left to re-derive against); `cycleBoxes()` (the `B` shortcut) now calls the two-state `cycleBoxesMode(current)`. Drawer subtitle is now "Model · classes · confidence · boxes". **Classes flow** (top to bottom): status line → quick-actions row (the "+ People, vehicles & buildings" preset, now primary `.btn`, plus a "Clear all" button once the filter is non-empty) → a search box that filters the chip checklist live and doubles as the free-text "add" input once nothing matches → the chip checklist itself, each chip a `<span class="class-chip">` shell around a `.chip-label` (click toggles) and, only while checked, a trailing `.chip-remove` "×" (same toggle, explicit affordance); checked chips sort first (`sortSelectedFirst`, a no-op while the filter is `[]`/"all"). New pure helpers `filterLabelsByQuery`/`hasExactLabelMatch`/`sortSelectedFirst` in `cv-control-panel-logic.ts`; the old `removeLabel`/`removeClass` (superseded by `toggleChip`, which — unlike `removeLabel` — handles the `labelFilter === []` "all" edge case) were deleted as dead code. See this file's own dedicated CV-CONTROL-PLAN Wave E changelog section at the end for the full write-up (predates the boxes/Classes rework above). **As of wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3), `<vision-cv-control-panel>` is body-only — it no longer self-wraps its own `<vision-side-panel>` or owns an `open`/`close` input/output**: `cockpit.html` mounts it (and the detections strip) as siblings inside one merged "Vision" drawer, so mounting the component *is* opening it. A class-chip click now writes `labelDenyFilter`, immediately, never the staged `labelFilter` allowlist — see the W5 changelog section for the full write-up, including why the two lists stay separate axes. **As of docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 (2026-08-20), `<vision-cv-control-panel>` is slimmed to exactly seven fly-time items** — Detect hero, a "Looking for" name+cost-word summary row, Boxes, the "Following #N" lock chip, the two conditional honesty notices, and a "Detection setup…" door — every set-once/expert control (model intent cards, confidence, the full class checklist including "Seen now", tracking mode, the Expert tier) moved verbatim into a new sibling, `<vision-cv-setup-modal>` (`features/fly/cv-setup-modal.ts`/`.html`/`.css`, same shared `cv-control-panel-logic.ts`), a centered dialog opened by the panel's own "Change…"/"Detection setup…" buttons. See the CV-PANEL-SPLIT-PLAN P1 changelog section at the end of this file for the full write-up, including the dialog-group wiring and the panel/modal content inventory.
+  - **`<vision-cv-setup-modal>` (`features/fly/cv-setup-modal.ts`/`.html`/`.css`, new, docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1)** — a true `position: fixed` centered dialog (`--scrim-strong` backdrop, video dimmed-not-blanked behind it), backdrop-click/`Esc`-dismissible (mirrors `flight-plan-dialog.ts`/`geofence-zone-dialog.ts`'s convention, not `arm-confirm-dialog.ts`'s no-dismiss one — this dialog holds no destructive action). Opened/closed via `cockpit.ts`'s own transient `dialog` `UiStore` group, id `'cv-setup'` (joins `'stop'` in `CockpitDialog`). Injects `FleetStore`/`SettingsStore`/`ToastService`/`DetectionsStore` directly, same shape `CvControlPanel` already used pre-split (non-routed presentational child, out of `architecture.spec.ts`'s facade-injection rule) — **reads `DetectionsStore.tracks()`/`.results()` only, never calls `trackTracks`/`untrackTracks`**: that poll's lifecycle stays owned by `CvControlPanel`, which stays mounted for the whole time the Vision drawer is open, a strictly longer window than this modal's own nested open/close cycle. The "Expert" `<details>` disclosure's open state is **facade-owned** (`CockpitFacade.cvExpertOpen`, a plain `signal(false)`, round-tripped via `[expertOpen]`/`(expertOpenChange)`) rather than a component-local boolean — mirrors `lockedTrackId`/`hoveredDetectionClass`'s own "plain facade signal through an input/output pair" shape, needed here because this component (unlike the always-mounted panel) is destroyed/recreated every close/reopen.
   - **Map COP — marks, layers, drawings (docs/plans/done/MAP-REWORK-PLAN.md §5.2, Wave E; reworked from docs/plans/done/TACTICAL-MARKS-PLAN.md M5)** — the cockpit map inset binds `[marks]="facade.marks.displayMarks()"`/`[drawings]="facade.drawings.displayDrawings()"`/`[layers]="facade.layers.layers()"`/`[interactionMode]="facade.interactionMode()"`/`[selectedMarkId]` plus `(markSelected)`/`(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)`, all to `CockpitFacade`'s three public root stores (`marks`/`layers`/`drawings`, mirroring `geofence`). Two tool-rail drawers: **`marks`** (`<vision-marks-panel>`, `target` icon) — the one-tap **Mark target** geolocate (now carrying the palette's kind/affiliation/layer, still an honest estimate the notice states plainly), the shared `<vision-mark-palette>` for new marks and for editing one inline, an **UNVERIFIED filter chip** with a live count, a per-row **Confirm** shortcut for managers, `<vision-verify-controls>` on the selected mark, and the bearing/distance readout from the drone (`CockpitFacade.dronePosition`; `—`, never a fabricated distance, when either end is missing) — and the **new `map` drawer** (`layers` icon) holding `<vision-drawing-toolbar layout="stacked">` + `<vision-layer-manager>`. **One drawer for both map tools, not two rail buttons**: the cockpit's map is a 220 px inset, so Command's floating-toolbar shape would eat the picture it is meant to annotate. `ToolRailPanelId` is therefore seven ids now (`flight`/`rc`/`cv`/`detections`/`marks`/`map`/`help`). See `core/map-data/**` and `shared/map/map-controls/**` above for the stores and controls.
   - **Tool-rail grouped by job (docs/conclusions/UX-SIMPLIFY-REVIEW.md F4)** — the right-edge `.grid-rail` had grown to 7 glyph-only drawers (flight · rc · cv · detections · marks · layers · help), past the "glance and know" limit the finding names, and was regrouped into four `.rail-group`s (each `role="group" aria-label="…"` for assistive tech) separated by a thin `.rail-divider` (`--hairline`, the same token `.secondary-tile`'s own border already uses): **Control** (flight, rc), **Vision** (cv, detections), **Situational** (marks), and **Help** pinned to the rail's bottom via `.rail-group-help{margin-top:auto}` — reference material, deliberately separated from the flying tools above it. No group gets a text label: at the rail's ~2.25rem button width a word like "Situational" doesn't read clean (the finding's own fallback: "if it crowds, use just the divider"). No "more"/overflow affordance either — the finding explicitly rules that out on a safety-of-flight screen; every remaining button stays always-visible, gated exactly as before (`canShowCommands()`/`!watchMode()`/`live()`/always). **`layers` removed (per direct user request, later than F4 itself)** — the rail is down to 6 drawers (flight · rc · cv · detections · marks · help); the detection-boxes rendering-mode control that used to be the `layers` drawer's only content now lives inside the `cv` (Detection) drawer instead (see the CV control panel bullet above). `ToolRailPanelId` (`fly-logic.ts`) is `'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'help'`; its own doc comment notes the union's declaration order no longer matches the rail's visual order.
 
@@ -565,7 +567,7 @@ The single flow for bringing any source into the app — a forward-only, back-na
 - **Map inset toggle + keyboard shortcut** (`LivePage.mapInsetVisible`, independent of `railOpen` — the map can be hidden even while the rail stays open). The Map card's header carries a Hide/Show button; `M` (case-insensitive, ignored while a form field has focus, and only wired while `hasTelemetry()`) toggles it too — a `document`-level `keydown` listener added in the constructor and removed via `DestroyRef.onDestroy`, the same manual-listener idiom `FleetMap` already uses for its own delegated click handler, not a `@HostListener` (this codebase has no precedent for that decorator).
 - `telemetry-osd.ts` — `TelemetryOsd`, now the rail's "Telemetry" card content (previously a strip above the player). Purely presentational: injects the same `TelemetryStore` instance from `LivePage`'s DI (no inputs), every value a `computed` over it. Coordinates, altitude, a CSS-rotated compass needle (`transform: rotate(headingDeg)`), a color-thresholded battery bar (ok/low/critical), and sample age (highlighted via `store.stale()`, >5s). Rendered only when `telemetry.hasTelemetry()`; otherwise the card shows a plain "no telemetry yet" line — the silent-degrade state, never an error.
 - **The Map card** now renders `<vision-live-map>` from `shared/map/live-map.ts` — the component itself moved there in docs/main/CYCLES-PLAN.md §11 (CD-b) so the asset detail page could reuse it unmodified; see that file's own entry below for its (unchanged) behavior. `live.ts`'s import path is the only thing that changed here.
-- `shared/player/detections-strip.ts` (moved from `features/live/` in docs/plans/done/MVP3-PLAN.md §C-b when the Fly cockpit needed the identical strip — same "no page imports another page's module" precedent as `shared/map/live-map.ts`'s own earlier move; `live.ts`'s import path is the only thing that changed, behavior is byte-for-byte the same) — `DetectionsStrip` (docs/plans/done/MVP1-PLAN.md §C8 bullet 4), the rail's "Detections" card content (previously a strip below the player) whenever `live()` is true. Purely presentational, DI-shares `LivePage`'s `DetectionsStore` (no inputs), mirroring `TelemetryOsd`'s shape exactly: a subtle "CV" status dot (`store.status()`, green/`on` or grey/`off`, `title`/`aria-label` spell out which) plus up to 8 `.chip`s (`store.chips()`, e.g. "person · 0.87") — the strip itself only *lists* what is currently being seen; the boxes themselves now render two ways (docs/main/CYCLES-PLAN.md §11 item 6): the server's burned-in pixels (`Java2DOverlayRenderer`, adapter-overlay, unchanged) and/or `shared/player/player.ts`'s own client-side vector overlay (below), toggled by the card header's **Overlay/Burned/Off** button group (`LiveFacade.boxesMode`, defaults to `'burned'` — changed from `'overlay'` per direct user request, matching `player.ts`'s own input default and `WallTile`/`CockpitFacade`'s identical signals — passed straight into `<vision-player [boxesMode]>`). "No detections yet." shown in place of chips when the list is empty, never an error state. **The "Burned" button is omitted once `LiveFacade.showBurnedInOption()` resolves `false`** (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8, `resolveBurnedIn(stream()?.burnedIn)`) — same reasoning as `CvControlPanel`'s identical gate; `LiveFacade.boxesMode` is now a `linkedSignal` defaulting off the same field (`defaultBoxesMode`, re-derived off a primitive `streamBurnedIn` projection so a same-value poll refresh never fights the operator's own pick), not the old plain `signal<BoxesMode>('burned')`.
+- `shared/player/detections-strip.ts` (moved from `features/live/` in docs/plans/done/MVP3-PLAN.md §C-b when the Fly cockpit needed the identical strip — same "no page imports another page's module" precedent as `shared/map/live-map.ts`'s own earlier move; `live.ts`'s import path is the only thing that changed, behavior is byte-for-byte the same) — `DetectionsStrip` (docs/plans/done/MVP1-PLAN.md §C8 bullet 4), the rail's "Detections" card content (previously a strip below the player) whenever `live()` is true. Purely presentational, DI-shares `LivePage`'s `DetectionsStore` (no inputs), mirroring `TelemetryOsd`'s shape exactly: a subtle "CV" status dot (`store.status()`, green/`on` or grey/`off`, `title`/`aria-label` spell out which) plus up to 8 `.chip`s (`store.chips()`, e.g. "person · 0.87") — the strip itself only *lists* what is currently being seen; the boxes themselves render via `shared/player/player.ts`'s own client-side vector overlay only (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3 — **superseding** the M8 entry below: server-side burn-in is deleted outright, not merely defaulted off, so there is no second rendering path left to toggle between), via the card header's **Overlay/Off** button group (`LiveFacade.boxesMode`, a plain `signal<BoxesMode>('overlay')` — no more `linkedSignal`/`streamBurnedIn`/`showBurnedInOption`, all deleted along with the "Burned" button — passed straight into `<vision-player [boxesMode]>`). "No detections yet." shown in place of chips when the list is empty, never an error state. **As of wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3), this component is dual-mode via one new optional `streamId` input, split into a proper 3-file component (`.ts`/`.html`/`.css`, was inline) with its chip derivation moved to its own `detections-strip-logic.ts`**: unbound — `live.html`'s exact usage above, byte-for-byte unchanged — stays plain read-only chips; bound (`features/fly/cockpit.html`'s merged Vision drawer) becomes the class-level remote control — hover emits `hoveredClassChange`, click toggles `labelDenyFilter` and PATCHes immediately. See the W5 changelog section for the full write-up. **Sliding-window aggregation + sticky labels (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 2, new)**: `stripChips` now aggregates the last `STRIP_WINDOW_SECONDS`=5 of `results` (max-concurrent count per label, not a per-batch sum) instead of the single newest batch, and groups by `detection-overlay-logic.ts#electStickyLabels`' election rather than each detection's raw per-batch label — a track whose raw label flips batch-to-batch now produces one stable chip instead of two blinking ones. `chip.label` is therefore the *displayed* (sticky) label throughout, including the one `onChipClick` PATCHes as a deny — see the dedicated L3 Status entry below for the full deny/display rationale and its named gap until L1 ships server-side.
 - **The old "Source" card is now `<vision-stream-info>`** (docs/plans/done/MVP2-PLAN.md §U-info, folded into CD-b) — see `shared/player/stream-info-panel.ts`'s own entry below. `LivePage.latencySeconds` receives `<vision-player>`'s `(latencyChanged)` output and feeds it straight through as an input; the advanced-mode raw stream-options block (unchanged) now sits below the panel inside the same "Stream" card rather than "Source".
 - **`stopped` wiring** (docs/plans/done/MVP2-PLAN.md §S, S-b, new): `LivePage.stopped = computed(() => explicitlyStopped() || (hasBeenLive() && !live()))`, piped into `<vision-player [stopped]>`. `stop()` sets `explicitlyStopped` true (after `fleet.stop()` resolves); `start()` sets it false again (a fresh attach). `hasBeenLive` latches once `live()` is ever observed true for this page instance (an `effect()` in the constructor) so a stream that later disappears from the streams list — this page's own Stop, or someone else's — reads as stopped too, without needing a fictional "was this ever live in some past session" signal. See `shared/player/player.ts`'s `stopped` input and the S-b Status entry below for the full incident this closes.
 
@@ -583,13 +585,13 @@ The single flow for bringing any source into the app — a forward-only, back-na
   - **Snap-to-live** (docs/plans/done/MVP2-PLAN.md §V, V-b — `shared/player/live-edge-logic.ts#shouldSnapToLive`/`SnapToLiveReason`): after a recovery reattach reaches `playing` again (`'recovered'` — read directly off `player-recovery.ts`'s own state, `transportState().recovery.phase === 'reconnecting'`, checked *before* the `firstSegment` event is applied — not a parallel flag) or the tab regains visibility while still `playing` (`'visibilityRestored'`, detected by diffing `document.hidden` on the existing 1s latency-sampling timer rather than a dedicated `visibilitychange` listener — mirrors `core/poll-scheduler.ts`'s own "check `document.hidden` from an existing heartbeat" precedent), the player forward-seeks the `<video>` to `hls.liveSyncPosition` (falling back to the end of the native `seekable` range for Safari's native-HLS path, same fallback shape as `measureBehindLive`) instead of leaving playback wherever its buffer already sits. `'recovered'` always snaps (a reattach's buffer is freshly built from nothing — see the function's own doc comment for why trusting the still-`null` `behindLive` measurement at that exact moment would be pointless); `'visibilityRestored'` only snaps once the current measurement clears `SNAP_TO_LIVE_THRESHOLD_SECONDS` (3s) — hysteresis against reseeking a tab glanced away from for under a second. Never called for a `webrtc` transport (WHEP has no seekable buffer to fall behind — `behindLive` is pinned to `0`).
   - **Behind-live chip, honestly, with hysteresis** (docs/plans/done/MVP2-PLAN.md §V, V-b — `shared/player/live-edge-logic.ts#shouldShowBehindLive`/`behindLiveChipLabel`): the HLS badge only quantifies "…s behind" once `behindLive` clears `BEHIND_LIVE_SHOW_THRESHOLD_SECONDS` (4s), and only stops once it drops back below the *lower* `BEHIND_LIVE_HIDE_THRESHOLD_SECONDS` (2s) — the two-threshold dead band is what stops the chip flickering between `'live · HLS'` and `'live · HLS · 4.1s behind'` as the per-second measurement jitters across one single cutoff. The hysteresis flag (`showBehindLive`, a signal) updates once per latency sample, not on every render, and resets to hidden on every fresh attach (`teardownMedia`) — a new attach starts the judgment over, it doesn't inherit the previous one's verdict.
   - **Deliberately-stopped state** (docs/plans/done/MVP2-PLAN.md §S, S-b, new): `stopped: input(false)`, checked first in `reattach()` ahead of `src`/`whepUrl` — once `true`, nothing attaches, ever, regardless of what `src`/`whepUrl` say (even a stray/late/flapping value from a host still catching up with the backend). Drives the new absorbing `'stopped'` `PlayerPhase`/`RecoveryEvent` in `player-recovery.ts` (see its own entry below) and a calm "Stream stopped" status line — no spinner, no reconnect hint, no Retry-now button. `LivePage`/`AssetDetailPage` are the two callers that wire it (their own Stop action plus "this page watched it go live, then it disappeared from the streams list" — see each page's own `stopped` computed for the exact rule); `WallTile`/`LiveDock` deliberately don't (see the S-b Status entry below for why both are already safe without it).
-  - **Client-side detection overlay** (item 6): optional `detections: input<DetectionResult[]>([])` / `boxesMode: input<BoxesMode>('burned')` (default changed from `'overlay'` per direct user request — matters only for a caller that never binds `[boxesMode]` at all; every page with its own boxes-mode control seeds its own signal to `'burned'` too, see the Fly section's CV control panel bullet). **`Player` itself still defaults `boxesMode` to `'burned'` unconditionally — it is not `burnedIn`-aware and takes no `burnedIn` input** (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8): the burnedIn-aware default/cycle lives one layer up, in whichever facade owns the `BoxesMode` signal it feeds in (`CockpitFacade`/`LiveFacade`/`WallTile`, see their own bullets below and in the Fly/Live/Wall sections) — see `detection-overlay-logic.ts#resolveBurnedIn`/`defaultBoxesMode`/`boxesModeCycle`/`cycleBoxesMode`. Draws a `<canvas>` positioned over the `<video>` (`shouldDrawOverlay`/`selectDetectionResult`, `detection-overlay-logic.ts`) — boxes stay pixel-perfect at any video bitrate (unlike the server's burned-in pixels) and are hoverable (a small label+confidence tooltip, hit-tested against the last-drawn box rects on `mousemove`). **Sync**: `selectDetectionResult(results, nowMs, latencySeconds, slackBatches=1)` matches by `capturedAt` against `overlaySyncLatency` (`Player`'s own `computed`, wave M8 — `behindLive` for HLS, `whepLatencySeconds` for WHEP, see below) — the newest result whose `capturedAt` isn't *ahead* of the estimated on-screen instant (`nowMs - latencySeconds*1000`), plus one observed batch-interval of slack for scheduling jitter, falling back to the oldest available result if every one looks "future" (e.g. right after attach, before latency has settled). `'burned'`/`'off'` both suppress the canvas — there is no server-side toggle to disable burn-in itself (out of scope this cycle, "no server change" per the plan), so the two states differ only in what they claim about intent, not in rendering; see the module's own doc comment. Callers that never pass `detections` simply see the canvas draw nothing — fully additive. **Per-model box hues (docs/plans/done/OPS-CORE-PLAN.md §Q3b, new)**: `drawBox` colors both the stroke and the label background via `modelHue(detectionModelKey(detection), alphaPercent?)` instead of the old hardcoded `'#4f8cff'`/`'rgb(79 140 255 / 85%)'` literals — see `detection-overlay-logic.ts`'s own bullet below for the color rule. A small **model legend** (`overlayModelKeys`/`showModelLegend`, top-right pill stack, `modelSwatch(key)`) renders only once the batch currently on screen (`overlayResult`, the same `selectDetectionResult` pick mirrored as a `computed`) actually mixes ≥2 distinct model keys — a single-model stream never shows it. **Track-aware rendering (docs/plans/done/TRACKING-PLAN.md §10/§4, wave T7)** — everything gates on `detection.track` alone, one null check: `drawBox` labels a tracked box `formatDetectionLabel(detection)` (`"#7 car 82%"`, unchanged `"car 82%"` otherwise — also the hover tooltip's own text, `hoveredLabel()`, so the two never disagree) and colors it via `trackHue(track.id)` instead of `modelHue` (stable per-track, survives a composite-mode label flip); a `COASTING` track draws **dashed** (`ctx.setLineDash([6,4])`, reset immediately after so it never leaks into the label fill or a trail stroke). **Trails**: `drawTrails` strokes a fading polyline per track (`trackTrails(results, nowMs, TRAIL_WINDOW_MS=2000)`, `detection-overlay-logic.ts` — a pure recomputation from `this.detections()` on every redraw tick, so a stream switch clears trails for free with no bookkeeping in this component; segments fade `0.15`→`0.80` alpha oldest→newest), drawn before boxes so every box sits on top of its own tail. **Click-to-follow**: `onOverlayClick` reuses the exact `drawnBoxes` hit-test `onOverlayMouseMove` already does; a hit on a **tracked** box emits `trackFollowed`, an untracked box or empty canvas is a no-op (the wire's point/box lock forms are out of this wave's scope). **Four gaps closed in docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8** (the overlay mechanism itself is unchanged — this wave only fixes how it picks a batch and how it rasterizes): (1) **WHEP sync** — `overlaySyncLatencySeconds(transport, behindLiveSeconds, whepLatencySeconds)` (`detection-overlay-logic.ts`) replaces the raw `behindLive()` `selectDetectionResult` used to receive for a WHEP transport (hard-pinned `0`, ignoring the real ~0.2–0.5s glass-to-glass delay, so boxes led the picture); HLS still passes `behindLive` through untouched. `whepLatencySeconds` was already computed (`player-recovery.ts#estimateWhepLatencySeconds`, half the `getStats()` round-trip time plus jitter — the exact figure the latency badge already showed) but was previously display-only; a `null` (unmeasured yet) degrades to `0`, same as before. (2) **HiDPI backing store** — `canvasBackingSize(cssWidth, cssHeight, devicePixelRatio)` sizes the canvas's *backing store* only; the CSS box (and therefore `letterboxRect`/hit-testing, both still CSS-pixel-space) is unchanged, `ctx.setTransform(devicePixelRatio, ...)` maps every draw call back so nothing else needed touching. (3) **`requestVideoFrameCallback`** drives the redraw loop where the browser supports it (`Player#startOverlayLoop`/`scheduleVideoFrameRedraw`, self-rescheduling from inside the callback — redraws once per actually-composited frame instead of a fixed `OVERLAY_REDRAW_MS`=200ms interval), falling back to that same interval where it doesn't (older Safari, pre-~132 Firefox); every call site that used to check `overlayTimer === null` now just calls the now-idempotent `startOverlayLoop()`. (4) **`ResizeObserver`** on the `<video>` element (`afterNextRender`-started once, disconnected on destroy) triggers a redraw the instant the container's box actually changes, instead of waiting up to `OVERLAY_REDRAW_MS`/the next frame/never (paused, off-screen).
+  - **Client-side detection overlay** (item 6): optional `detections: input<DetectionResult[]>([])` / `boxesMode: input<BoxesMode>('overlay')`. **`burned` is gone as a mode entirely, and so is the default's own history of chasing it** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3 — **superseding** the M8 entry below, which had `Player` default to `'burned'` unconditionally and left the burnedIn-aware default/cycle to whichever facade owned the signal): server-side burn-in is deleted outright, not merely defaulted off, so `'overlay'` is simply the only mode left that draws anything, and every facade (`CockpitFacade`/`LiveFacade`/`WallTile`) now seeds a plain `signal<BoxesMode>('overlay')` with no re-derivation to guard. Draws a `<canvas>` positioned over the `<video>` (`shouldDrawOverlay`/`selectDetectionResult`, `detection-overlay-logic.ts`) — boxes stay pixel-perfect at any video bitrate and are hoverable (a small label+confidence tooltip, hit-tested against the last-drawn box rects on `mousemove`). **Sync**: `selectDetectionResult(results, nowMs, latencySeconds, slackBatches=1)` matches by `capturedAt` against `overlaySyncLatency` (`Player`'s own `computed`, wave M8 — `behindLive` for HLS, `whepLatencySeconds` for WHEP, see below) — the newest result whose `capturedAt` isn't *ahead* of the estimated on-screen instant (`nowMs - latencySeconds*1000`), plus one observed batch-interval of slack for scheduling jitter, falling back to the oldest available result if every one looks "future" (e.g. right after attach, before latency has settled) — **unless that fallback candidate is itself stale in absolute wall-clock terms** (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, wave W3: `isDetectionStale`, bounded at `DETECTION_STALE_CUTOFF_SECONDS` = `CV_STATUS_FRESH_SECONDS`), in which case it returns `undefined` rather than drawing a genuinely old batch as if it were fresh. `'off'` suppresses the canvas entirely. Callers that never pass `detections` simply see the canvas draw nothing — fully additive. **Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, wave W3)**: `redrawOverlay` computes `detectionAlphaPercent(ageMs, averageBatchIntervalMs(results))` once per redraw and applies it via `ctx.globalAlpha` around the box-drawing loop only (never the trails, which manage their own per-segment alpha and already reset to `1` before this runs) — a batch older than `STALE_FADE_BATCH_MULTIPLIER` (2) observed batch-intervals draws at `STALE_FADE_ALPHA_PERCENT` (40%) instead of full alpha; anything crossing `DETECTION_STALE_CUTOFF_SECONDS` never reaches this code at all, since `selectDetectionResult`'s own bound above already excludes it. `CockpitFacade.detectionsPausedNotice` (a new combinator, gated on `detectionOn()`) surfaces the "Detections paused — last seen Ns ago" text itself, via `DetectionsStore.pausedNotice`/`detection-overlay-logic.ts#detectionsPausedNotice` — see the `core/detections/**` and Fly sections below, and the W3 changelog entry near the end of this file. **Per-model box hues (docs/plans/done/OPS-CORE-PLAN.md §Q3b, new)**: `drawBox` colors both the stroke and the label background via `modelHue(detectionModelKey(detection), alphaPercent?)` instead of the old hardcoded `'#4f8cff'`/`'rgb(79 140 255 / 85%)'` literals — see `detection-overlay-logic.ts`'s own bullet below for the color rule. A small **model legend** (`overlayModelKeys`/`showModelLegend`, top-right pill stack, `modelSwatch(key)`) renders only once the batch currently on screen (`overlayResult`, the same `selectDetectionResult` pick mirrored as a `computed`) actually mixes ≥2 distinct model keys — a single-model stream never shows it. **Track-aware rendering (docs/plans/done/TRACKING-PLAN.md §10/§4, wave T7)** — everything gates on `detection.track` alone, one null check: `drawBox` labels a tracked box `formatDetectionLabel(detection)` (`"#7 car 82%"`, unchanged `"car 82%"` otherwise — also the hover tooltip's own text, `hoveredLabel()`, so the two never disagree) and colors it via `trackHue(track.id)` instead of `modelHue` (stable per-track, survives a composite-mode label flip); a `COASTING` track draws **dashed** (`ctx.setLineDash([6,4])`, reset immediately after so it never leaks into the label fill or a trail stroke). **Trails**: `drawTrails` strokes a fading polyline per track (`trackTrails(results, nowMs, TRAIL_WINDOW_MS=2000)`, `detection-overlay-logic.ts` — a pure recomputation from `this.detections()` on every redraw tick, so a stream switch clears trails for free with no bookkeeping in this component; segments fade `0.15`→`0.80` alpha oldest→newest), drawn before boxes so every box sits on top of its own tail. **Click-to-follow**: `onOverlayClick` reuses the exact `drawnBoxes` hit-test `onOverlayMouseMove` already does; a hit on a **tracked** box emits `trackFollowed`, an untracked box or empty canvas is a no-op (the wire's point/box lock forms are out of this wave's scope). **Four gaps closed in docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8** (the overlay mechanism itself is unchanged — this wave only fixes how it picks a batch and how it rasterizes): (1) **WHEP sync** — `overlaySyncLatencySeconds(transport, behindLiveSeconds, whepLatencySeconds)` (`detection-overlay-logic.ts`) replaces the raw `behindLive()` `selectDetectionResult` used to receive for a WHEP transport (hard-pinned `0`, ignoring the real ~0.2–0.5s glass-to-glass delay, so boxes led the picture); HLS still passes `behindLive` through untouched. `whepLatencySeconds` was already computed (`player-recovery.ts#estimateWhepLatencySeconds`, half the `getStats()` round-trip time plus jitter — the exact figure the latency badge already showed) but was previously display-only; a `null` (unmeasured yet) degrades to `0`, same as before. (2) **HiDPI backing store** — `canvasBackingSize(cssWidth, cssHeight, devicePixelRatio)` sizes the canvas's *backing store* only; the CSS box (and therefore `letterboxRect`/hit-testing, both still CSS-pixel-space) is unchanged, `ctx.setTransform(devicePixelRatio, ...)` maps every draw call back so nothing else needed touching. (3) **`requestVideoFrameCallback`** drives the redraw loop where the browser supports it (`Player#startOverlayLoop`/`scheduleVideoFrameRedraw`, self-rescheduling from inside the callback — redraws once per actually-composited frame instead of a fixed `OVERLAY_REDRAW_MS`=200ms interval), falling back to that same interval where it doesn't (older Safari, pre-~132 Firefox); every call site that used to check `overlayTimer === null` now just calls the now-idempotent `startOverlayLoop()`. (4) **`ResizeObserver`** on the `<video>` element (`afterNextRender`-started once, disconnected on destroy) triggers a redraw the instant the container's box actually changes, instead of waiting up to `OVERLAY_REDRAW_MS`/the next frame/never (paused, off-screen).
   - `latencyChanged = output<number | null>()` — emits `behindLive` on every sample so a host's info panel (below) can echo the same number rather than re-measuring. `transportChanged = output<Transport>()` — likewise for the live transport.
   - **Real WHEP stall detection via `getStats()`** (docs/plans/done/REALTIME-PLAN.md Phase R-a item 1 — see §0 there for the measured ~10-11s false-stall churn this closes): before this, `lastFrameAt` was only ever set at attach and in the one-shot `ontrack` handler, so `STALL_WATCHDOG_MS` declared a perfectly healthy WHEP stream stalled ~8-10s after connecting, every time — WHEP tore down and reattached (a fresh `OPTIONS`+`POST`) roughly every 10-11s forever, on every `<vision-player>` instance, primary and secondary tiles alike. Fixed: the existing 2s WHEP watchdog tick (`startWhepWatchdog`/`tickWhepWatchdog`) now also calls `refreshWhepStatsProgress`, which awaits `RTCPeerConnection.getStats()` and refreshes `lastFrameAt` whenever the inbound video track's `framesDecoded`/`bytesReceived` (`player-recovery.ts#extractWhepStatsSnapshot`/`didWhepStatsAdvance`) moved since the previous tick — real evidence of ongoing decode. A genuinely dead feed's counters stop moving, so the watchdog still fires for it exactly as before. Logs (`console.debug`) only on an advancing/stalled *transition* (`Player#whepStatsAdvancing`), never every 2s tick, to avoid console spam on a healthy stream.
 - `player-recovery.ts` — the pure state machine above. `PlayerPhase`, `RecoveryState`, `reduceRecovery`, `reconnectDelayMs`, `isStalled`, `COLD_START_RETRY_DELAY_MS`/`STALL_WATCHDOG_MS` are **unchanged** from before U3 — every existing caller/spec keeps working verbatim. **New (docs/plans/done/MVP2-PLAN.md §L/§U3):** `Transport = 'webrtc'|'hls'`, `TransportRecoveryState {transport, recovery: RecoveryState}`, `initialTransportState(hasWhepUrl)` (starts `webrtc` when a WHEP URL exists, `hls` otherwise), `reduceTransportRecovery(state, event)` — a thin wrapper, not a parallel machine: every event still funnels through `reduceRecovery` for phase/attempt bookkeeping; the one added rule is that a `webrtc` transport failing (`fatalError`/`stalled`/`unsupported`) *before it has ever reached `playing`* falls over to `hls` permanently for this attach lifetime (restarting `hls`'s own recovery at a clean `connecting`), while a `webrtc` transport that fails *after* `playing` at least once instead retries `webrtc` itself with the identical capped backoff — see the function's own doc comment for the exact "never played yet" vs. "played before" check (mirrors `reduceRecovery`'s own `playlistNotReady` precedent). Unit-tested without hls.js/`RTCPeerConnection`/timers/a `<video>` element. **Untouched by V-b** (docs/plans/done/MVP2-PLAN.md §V) — no new `RecoveryEvent`s were needed; the snap-to-live/behind-live-chip logic V-b adds only *reads* this module's existing state (`TransportRecoveryState.recovery.phase`), it never feeds new events back into the reducer, so this file and its own spec file are exactly as they were after U3, and V-b's own logic + specs live entirely in the new `live-edge-logic.ts`/`live-edge-logic.spec.ts` sibling instead. **New in S-b (docs/plans/done/MVP2-PLAN.md §S)**: `PlayerPhase`/`RecoveryEvent` gain `'stopped'` — always wins from any phase (`reduceRecovery`'s first check), landing on `{phase: 'stopped', attempt: 0}`, and is then **absorbing**: every other event (`stalled`/`fatalError`/`firstSegment`/`playlistNotReady`/`unsupported`) is a no-op (returns the exact same `state` reference) while `phase === 'stopped'`, except `'attachStarted'`/`'reset'` — "a fresh attach is actually wanted now" — which still escape it. This is the fix for the diagnosed stop-freeze mechanism; see the S-b Status entry below for the full incident writeup and the regression test encoding it. **New in S-c (docs/plans/done/MVP2-PLAN.md §S) — `PacingState`/`advancePacing`/`cyclePacingDelayMs`/`shouldAttemptWhep`, a further, independent pure state machine bolted on top, closing S-b's own flagged-open gap.** `RecoveryState`/`reduceRecovery`/`TransportRecoveryState`/`reduceTransportRecovery` (including their own `attempt` field/`firstSegment`-resets-it-immediately behavior) are **completely unchanged** by S-c too — every one of the pre-existing specs above still passes verbatim, `attempt` still drives the chip's *local* per-cycle bookkeeping. `PacingState {cycleAttempt, playingSinceMs, lastWhepAttemptAtMs}` is the separate, saga-wide counter `shared/player/player.ts` actually uses for delay/WHEP-retry decisions now — see the dedicated S-c Status entry below for the full three-rule contract and the request-rate math. **New in R-a (docs/plans/done/REALTIME-PLAN.md Phase R-a):** `WhepStatsSnapshot {framesDecoded, bytesReceived}`, `WhepInboundRtpStatLike` (a small structural type matching the bits of a `getStats()` report entry this module reads — deliberately not the full DOM `RTCStats` union, so it's testable with plain object literals, no jsdom WebRTC shim), `extractWhepStatsSnapshot(stats)` (finds the inbound video RTP entry), `didWhepStatsAdvance(previous, current)` (item 1's stall-detection comparison — see the Player entry above); `attachKey(src, whepUrl, suspended, stopped)` (item 4 — the reattach effect's identity-key builder, extracted from `shared/player/player.ts` so the "same primitive values → same key, regardless of the enclosing object's identity" guarantee secondary tiles lean on is directly unit-tested). **New in R-b (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1) — `WhepIcePhase`/`WhepIceState`/`INITIAL_WHEP_ICE_STATE`/`WhepIceEvent`/`reduceWhepIce`/`ICE_RESTART_GRACE_MS`, a further, independent pure state machine, sibling to `PacingState` for the identical reason: kept separate from `RecoveryState`/`TransportRecoveryState` rather than bolted on as ad-hoc flags, since an in-place ICE restart must never flip the visible chip out of `'playing'` the way every other failure this file models does.** `'stable'|'grace'|'restarting'` — `'disconnected'` starts the grace phase (a no-op unless `'stable'`), `'graceExpired'` (a no-op unless `'grace'`) or `'failed'` (always, from any phase) moves to `'restarting'` and bumps `restartAttempt`, `'reconnected'` self-heals `'grace'` back to `'stable'` before ever restarting, `'restartSucceeded'` closes `'restarting'` back to `'stable'`. `RecoveryState`/`reduceRecovery`/`TransportRecoveryState`/`reduceTransportRecovery`/`PacingState`/`advancePacing` are **completely unchanged** by this — every existing spec still passes verbatim; `shared/player/player.ts` only ever reaches into that pre-existing machinery as R-b's own explicitly-named "last resort" (a rejected ICE-restart PATCH), unchanged from before this cycle.
 - **`webrtc-ice-restart.ts`** (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1, new) — the pure SDP-fragment logic behind the ICE-restart PATCH, split out the same way `live-edge-logic.ts` was (a sibling to `player-recovery.ts`, aware of it, not grown inside it): `parseSdp(sdp)` (extracts `iceUfrag`/`icePwd` plus per-media `mid`/gathered `a=candidate:` lines — reads `a=mid:` directly rather than assuming array position, since a transceiver's mid is fixed at first negotiation and never changes across a later ICE restart on the same PC), `buildIceRestartFragment(localSdp)` (the `application/trickle-ice-sdpfrag` PATCH body — mirrors mediamtx's own bundled `reader.js#generateSdpFragment`, generalized from one trickled candidate to every candidate already sitting in a completed non-trickle-gathered offer), `applyIceRestartAnswer(currentRemoteSdp, answerFragment)` (splices the server's new answer-side ICE credentials into the current remote SDP for `setRemoteDescription` — mirrors mediamtx's own server-side `replaceICECredentials`, client side; throws on a fragment with no usable credentials, never a silent no-op), `candidatesFromFragment(fragment)` (any candidates mediamtx's own answer fragment carries, ready for `addIceCandidate`), `isPatchFallbackStatus(status)` (200/204 succeed, everything else — 404/412 named explicitly — falls back). **Verified byte-for-byte against mediamtx `v1.19.2`'s own source** (`internal/servers/webrtc/session.go`/`http_server.go`, fetched and read directly, not guessed at from the WHIP/WHEP drafts) — see the module's own top doc comment for the full mapping. mediamtx's own bundled reference WHEP client (`reader.js`) does **not** exercise this path at all (it only ever trickles candidates under the original ufrag and falls back to a full teardown+re-POST on any failure, no grace period) — this player is deliberately more capable, which is exactly why there was no reference client code to copy this flow from; every function here had to be derived from the server's own request-handling logic instead. Unit-tested (19 cases) entirely with plain strings — no `RTCPeerConnection`/jsdom WebRTC shim needed at all.
 - **`live-edge-logic.ts`** (docs/plans/done/MVP2-PLAN.md §V, V-b, new) — the pure logic behind the two behaviors above, unit-tested (16 cases), split out the same way `detection-overlay-logic.ts` was: `SnapToLiveReason`, `SNAP_TO_LIVE_THRESHOLD_SECONDS`, `shouldSnapToLive(reason, behindLiveSeconds, thresholdSeconds?)`; `BEHIND_LIVE_SHOW_THRESHOLD_SECONDS`/`BEHIND_LIVE_HIDE_THRESHOLD_SECONDS`, `shouldShowBehindLive(behindLiveSeconds, currentlyShowing, showThresholdSeconds?, hideThresholdSeconds?)`; `behindLiveChipLabel(transport, behindLiveSeconds, showBehindLive)`. Deliberately *aware* of `player-recovery.ts`'s `Transport` type (imported, not redefined) and of the reducer's phase concept (`'recovered'` as a reason) without becoming a second reducer itself — see the module's own top doc comment for why it stays a sibling rather than growing inside `player-recovery.ts`.
-- `detection-overlay-logic.ts` — the pure sync matcher above (`BoxesMode`, `selectDetectionResult`, `shouldDrawOverlay`, `DEFAULT_SLACK_BATCHES`), unit-tested. Untouched by U3 — `latencySeconds=0` (WHEP) was already handled correctly by the existing `latencySeconds !== null && latencySeconds >= 0` check. **Composite-model box hues (docs/plans/done/OPS-CORE-PLAN.md §Q3b, new)**: `detectionModelKey(detection)` resolves a `Detection`'s color key from its own `label` prefix (`"orion12l:tank"` → `"orion12l"` — cv-service's own composite-mode tagging, `registry.py#detect_composite`), never from `Detection.modelId` (every detection in one composite batch shares the *same* `modelId`, the request's whole comma-joined composite id — proto's `Detection` message has no per-detection model-tag field, so `modelId` can't distinguish members within a batch even though it's on the wire); an unprefixed label (any single-model stream, whichever model) resolves to `DEFAULT_MODEL_KEY`. `modelHue(modelKey, alphaPercent = 100)` is the pure hash→color function: `DEFAULT_MODEL_KEY` always returns the exact original box color (`DEFAULT_BOX_COLOR = '#4f8cff'`, or the byte-identical `'rgb(79 140 255 / 85%)'` at `alphaPercent=85` — a single-model stream sees zero visual change); any other key hashes deterministically (a plain djb2-ish string hash → hue `[0,360)`) into `hsl(hue 90% 65%)` (fixed saturation/lightness, same vivid band as `--accent`), stable across calls/reconnects/reloads with no stateful registry. `distinctModelKeys(detections)` — every distinct key in a batch, first-seen order; `shared/player/player.ts`'s legend gate shows a chip only once this reaches ≥2 (the frame *currently* on screen actually mixes models, not merely "composite mode is configured" — a frame where only one member model detected anything still reads as single-model, matching `DEFAULT_MODEL_KEY`'s own zero-change guarantee). Tests: stability (same key → same color), pairwise distinctness across a sample of keys, the exact default-color/default-fill literals, and `distinctModelKeys`' dedupe/order/single-vs-multi cases. **Track-aware helpers (docs/plans/done/TRACKING-PLAN.md §10, wave T7, new)**: `formatDetectionLabel(detection)` — `"#id label conf%"` once `detection.track` is present, byte-identical otherwise; `trackHue(trackId, alphaPercent?)` — the identical hash→hue mechanism as `modelHue`, keyed on `track-${trackId}` instead of a model key, so one object keeps one color across a composite-mode label flip; `trackTrails(results, nowMs, windowMs=TRAIL_WINDOW_MS)` — per-track normalized box-center points within the last `TRAIL_WINDOW_MS` (2s) of `results`, oldest-first, `Map<trackId, TrailPoint[]>`; not a mutable accumulator — a pure recomputation from `DetectionsStore.results()`'s own retained history each call, so it "clears on stream change" for free the instant that array resets to `[]`. Tests: `formatDetectionLabel`'s tracked/untracked cases, `trackHue`'s stability/distinctness/no-collision-with-`DEFAULT_BOX_COLOR`, `trackTrails`' empty/untracked-ignored/oldest-first-ordering/per-track-keying/window-cutoff/stream-switch-clears cases. **Burn-in awareness + WHEP sync + HiDPI sizing (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§6/§8 wave M8, new)**: `resolveBurnedIn(burnedIn?: boolean)` — `undefined`/`true` → `true`, only an explicit `false` → `false` (D1's dev-parity rule, the single funnel every reader of `ActiveStream#burnedIn` goes through); `boxesModeCycle(burnedIn?)` — `['overlay','burned','off']` unless `burnedIn === false`, then `['overlay','off']`; `defaultBoxesMode(burnedIn?)` — `'burned'` unless `burnedIn === false`, then `'overlay'`; `cycleBoxesMode(current, burnedIn?)` — **moved here from `features/fly/fly-logic.ts`** (re-exported from there for its existing import site/tests — `WallTile`'s own per-tile cycle button needed the identical burnedIn-aware cycle, so the function stopped being Fly-specific), a stale `current` no longer in the cycle restarts from the front rather than throwing. `overlaySyncLatencySeconds(transport, behindLiveSeconds, whepLatencySeconds)` — HLS passes `behindLiveSeconds` through unchanged, WHEP substitutes `whepLatencySeconds ?? 0` (see the Player entry above). `canvasBackingSize(cssWidth, cssHeight, devicePixelRatio)` — `{width, height}` in device pixels, `Math.round`ed, treats a zero/negative ratio as `1`. Tests: dev-parity defaulting (`undefined` behaves exactly like `true`, byte-identical to pre-M8), the two-vs-three-mode cycle, HLS-unchanged/WHEP-substituted/null-degrades-to-0 for the sync latency, and the 1×/2×/fractional-ratio/zero-ratio backing-size cases.
+- `detection-overlay-logic.ts` — the pure sync matcher above (`BoxesMode`, `selectDetectionResult`, `shouldDrawOverlay`, `DEFAULT_SLACK_BATCHES`), unit-tested. Untouched by U3 — `latencySeconds=0` (WHEP) was already handled correctly by the existing `latencySeconds !== null && latencySeconds >= 0` check. **Composite-model box hues (docs/plans/done/OPS-CORE-PLAN.md §Q3b, new)**: `detectionModelKey(detection)` resolves a `Detection`'s color key from its own `label` prefix (`"orion12l:tank"` → `"orion12l"` — cv-service's own composite-mode tagging, `registry.py#detect_composite`), never from `Detection.modelId` (every detection in one composite batch shares the *same* `modelId`, the request's whole comma-joined composite id — proto's `Detection` message has no per-detection model-tag field, so `modelId` can't distinguish members within a batch even though it's on the wire); an unprefixed label (any single-model stream, whichever model) resolves to `DEFAULT_MODEL_KEY`. `modelHue(modelKey, alphaPercent = 100)` is the pure hash→color function: `DEFAULT_MODEL_KEY` always returns the exact original box color (`DEFAULT_BOX_COLOR = '#4f8cff'`, or the byte-identical `'rgb(79 140 255 / 85%)'` at `alphaPercent=85` — a single-model stream sees zero visual change); any other key hashes deterministically (a plain djb2-ish string hash → hue `[0,360)`) into `hsl(hue 90% 65%)` (fixed saturation/lightness, same vivid band as `--accent`), stable across calls/reconnects/reloads with no stateful registry. `distinctModelKeys(detections)` — every distinct key in a batch, first-seen order; `shared/player/player.ts`'s legend gate shows a chip only once this reaches ≥2 (the frame *currently* on screen actually mixes models, not merely "composite mode is configured" — a frame where only one member model detected anything still reads as single-model, matching `DEFAULT_MODEL_KEY`'s own zero-change guarantee). Tests: stability (same key → same color), pairwise distinctness across a sample of keys, the exact default-color/default-fill literals, and `distinctModelKeys`' dedupe/order/single-vs-multi cases. **Track-aware helpers (docs/plans/done/TRACKING-PLAN.md §10, wave T7, new)**: `formatDetectionLabel(detection)` — `"#id label conf%"` once `detection.track` is present, byte-identical otherwise; `trackHue(trackId, alphaPercent?)` — the identical hash→hue mechanism as `modelHue`, keyed on `track-${trackId}` instead of a model key, so one object keeps one color across a composite-mode label flip; `trackTrails(results, nowMs, windowMs=TRAIL_WINDOW_MS)` — per-track normalized box-center points within the last `TRAIL_WINDOW_MS` (2s) of `results`, oldest-first, `Map<trackId, TrailPoint[]>`; not a mutable accumulator — a pure recomputation from `DetectionsStore.results()`'s own retained history each call, so it "clears on stream change" for free the instant that array resets to `[]`. Tests: `formatDetectionLabel`'s tracked/untracked cases, `trackHue`'s stability/distinctness/no-collision-with-`DEFAULT_BOX_COLOR`, `trackTrails`' empty/untracked-ignored/oldest-first-ordering/per-track-keying/window-cutoff/stream-switch-clears cases. **`BoxesMode` simplified to two states, staleness honesty added (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1/§3.4, wave W3, superseding the "Burn-in awareness" paragraph below)**: `BoxesMode = 'overlay' | 'off'` — `'burned'` is gone as a type member, not merely as a runtime branch, since server-side burn-in no longer exists to name. `resolveBurnedIn`/`boxesModeCycle`/`defaultBoxesMode` are all **deleted** (every call site now uses the literal `'overlay'` directly, matching `Player`'s own existing literal-default idiom); `cycleBoxesMode(current: BoxesMode): BoxesMode` drops its `burnedIn?` parameter and cycles the fixed two-entry `['overlay','off']` array — a stale `current` no longer in the cycle (e.g. `'burned'` surviving in a persisted signal from before this wave) restarts from the front rather than throwing. **Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7, new)**: `STALE_FADE_BATCH_MULTIPLIER` (2) / `STALE_FADE_ALPHA_PERCENT` (40) / `DETECTION_STALE_CUTOFF_SECONDS` (imported from `core/detections/detections-logic.ts#CV_STATUS_FRESH_SECONDS` rather than redeclared, so the canvas, the CV status dot, and the paused notice can never quietly disagree about "too old to call live"); `detectionAlphaPercent(ageMs, batchIntervalMs)` — 100% while fresh, `STALE_FADE_ALPHA_PERCENT` once older than `STALE_FADE_BATCH_MULTIPLIER` observed batch-intervals, never fades with a `batchIntervalMs` of `0` (a single-batch history has no baseline to call a batch old *relative to*); `isDetectionStale(ageMs)`; `detectionsPausedNotice(latestCapturedAt, nowMs)` — `"Detections paused — last seen Ns ago"` once stale, `null` otherwise (mirrors `stream-state-logic.ts#videoNotice`'s own shape/honesty rule for the sibling video axis), **must be fed the unfiltered last-seen timestamp**, not `DetectionsStore.results()`'s own freshness-pruned array — see that store's own `pausedNotice`/`lastSeenAt` bullet below. `selectDetectionResult`'s own fallback branch (every result "in the future" relative to the on-screen estimate) is now bounded by `isDetectionStale` too — a fallback exists for attach jitter, not as an unbounded policy that draws a genuinely old batch as fresh forever. `averageBatchIntervalMs` (the observed cadence `detectionAlphaPercent` scales its fade threshold off) is now exported, not module-private, so `Player#redrawOverlay` and this file's own spec can both call it. **WHEP sync + HiDPI sizing (docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8, unaffected by W3)**: `overlaySyncLatencySeconds(transport, behindLiveSeconds, whepLatencySeconds)` — HLS passes `behindLiveSeconds` through unchanged, WHEP substitutes `whepLatencySeconds ?? 0` (see the Player entry above). `canvasBackingSize(cssWidth, cssHeight, devicePixelRatio)` — `{width, height}` in device pixels, `Math.round`ed, treats a zero/negative ratio as `1`. Tests: the two-state cycle (including the stale-`'burned'`-restarts-from-front case), `detectionAlphaPercent`'s fresh/faded/no-cadence-to-compare-against cases, `isDetectionStale`'s at-cutoff/past-cutoff cases, `detectionsPausedNotice`'s nothing-ever-arrived/still-fresh/stale/future-clamped-to-zero cases, `selectDetectionResult`'s new stale-fallback-bound/fresh-fallback-still-wins cases, HLS-unchanged/WHEP-substituted/null-degrades-to-0 for the sync latency, and the 1×/2×/fractional-ratio/zero-ratio backing-size cases. **Sticky label election (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1, new)**: `electStickyLabels(results)` — confidence-weighted-tally + switch-margin (`STICKY_LABEL_SWITCH_MARGIN`=1.5) + switch-streak (`STICKY_LABEL_SWITCH_STREAK`=3) hysteresis over the last `STICKY_LABEL_VOTE_WINDOW`=10 observations per track id, a pure function replayed from `DetectionsStore`'s own retained batch history each redraw (no persisted accumulator, same shape as `trackTrails`), deliberately mirroring cv-service's own planned L1 server-side election knobs by name/default. `applyStickyLabels(detections, stickyLabels)` swaps `detection.label` for the elected one, returning the *same object reference* for an untracked detection or one whose sticky label already equals its raw label (the mechanism behind "converges to a no-op once L1 ships" — see the dedicated L3 Status entry below) — `player.ts#redrawOverlay` feeds the result into `detectionTiers`/`formatDetectionLabel`/`classBucketHue` in place of the raw detections, so painted text, box hue, and the hover tooltip all repaint off the sticky label with zero changes to any of those three functions. Untracked detections and W7's own extrapolation/track-id matching are unaffected — sticky labels only ever rewrite a display string, never identity or geometry.
 - `stream-info-panel.ts` — `StreamInfoPanel` (`<vision-stream-info>`, docs/plans/done/MVP2-PLAN.md §U-info): user-meaning-first replacement for a bare "Source URI / Device id / Stream id / Started" plumbing block, used by `features/live/live.html`'s "Stream" card and `features/asset-detail/asset-detail.html`'s "Stream" card. DI-shares the host's `FleetStore` (root) and `DetectionsStore` (page-provided — every host must list it in its own `providers`, exactly like `TelemetryOsd`/`DetectionsStrip`); takes `deviceId`/`latencySeconds`/**`transport: input<Transport>('hls')`** (docs/plans/done/MVP2-PLAN.md §L/§U3, new) as inputs, the latter two piped from `<vision-player>`'s `latencyChanged`/`transportChanged` outputs, never re-measured. Renders: a protocol chip + human source description (`core/stream-info-logic.ts#describeSource` — "MJPEG · 192.168.0.107:8080" / "File · flight.mp4 (looped)" / "Simulated · Pattern generator, no camera", never a bare URI, credentials never surfaced here even when the raw `uri` carries them), a live-ticking "Streaming for" duration (`formatDuration`/`sessionDurationSeconds`), **`Transport: WebRTC (WHEP)` / `HLS`** (`core/stream-info-logic.ts#transportLabel`, now honest about which is actually live — no longer a hardcoded `"HLS"`), a latency line (`formatLatency`), a CV status line (`DetectionsStore.status()` on/off + last-detection age — the same two-state derivation `detections-logic.ts#cvStatus` already uses, never a fabricated third "degraded" state, per the explicit "surface honestly, don't invent" directive), a **Copy view link** button (`navigator.clipboard.writeText`, toasts on success/failure), and a collapsed **`<details>` "Technical details"** disclosure holding every raw identifier (device id, URI, stream id, raw `startedAt`) — reachable, never deleted, just not the front door. **Gap, not invented**: resolution/FPS are not shown — no current API DTO (`ActiveStreamResponse`, `DetectionResultResponse`) exposes frame dimensions or a video FPS figure (verified against `vision-api`'s DTOs before writing this), so per docs/plans/done/MVP2-PLAN.md §U-info's own scoping ("implements what current APIs already serve"), that field is omitted rather than guessed; a future cycle that adds it server-side is where this panel would grow that line. The now-deleted `shared/map/live-dock.ts`'s compact preview never rendered this panel at all (docs/main/CYCLES-PLAN.md §11's own deviation) but did bind `<vision-player>`'s `whepUrl` input, so that docked preview got WHEP-first playback even without the info panel — its successor, `features/command/asset-panel.ts`'s Video tab, inherits the same omission.
 - **`sample-box-editor.ts`/`.html`/`.css` + `sample-box-editor-logic.ts` + `.spec.ts`** (docs/plans/done/CV-TRAINING-PLAN.md §4, Wave T5, new) — `SampleBoxEditor` (`<vision-sample-box-editor>`), the editable annotation canvas `features/labeling/sample-editor.ts` hosts: a captured frame `<img>` with its `Annotation[]` drawn as draggable/resizable boxes (drag-create, drag-move, corner-resize, an "Add box" fallback for no-drag-skill-needed precision), plus a side list for label (a `<select>` constrained to the dataset's own `classes`) and delete. **A deliberate fork of `player.ts`'s own `letterboxRect`/`DrawnBox`/`drawBox` idiom, not a shared import** — `player.ts` is read-only (detections are drawn, never dragged) and this wave's own task brief explicitly calls for forking rather than complicating the live player's hot render path; `sample-box-editor-logic.ts` duplicates just the small letterbox-math formula and adds the write-side half player.ts never needs: `boxToPx`/`pxToBox` (normalized↔px round-trip), `clampBox`, `normalizeDragRect`, `hitTest`/`HandleId` (four corner handles — `nw`/`ne`/`sw`/`se`; edge-midpoint handles are a deliberate scope cut, a box's four corners cover every practical correction), `moveBox`/`resizeBox` (bounds- and min-size-clamped). Colors are the same fixed, categorical, two-value encoding the rest of this app already uses: `MODEL` (still-unreviewed suggestion) stays the exact `#4f8cff` every detection box has always drawn; `OPERATOR` (drawn/corrected by hand) is `#37c977` (green, "confirmed truth") — no invented hue. Controlled input, uncontrolled edit session: `annotations` seeds the working copy once per sample; every edit after that is owned locally and reported via `annotationsChange` only on a *committed* change (drag end, a label pick, add, remove), never on every pointermove. Pointer events (not mouse-only) drive every gesture, with a generously oversized hit radius around each handle — touch-friendly per CLAUDE.md's own "large touch targets" rule.
 - `live-map.ts`/`.html`/`.css` — `LiveMap` (`<vision-live-map>`) — **deleted 2026-08-05** (docs/plans/done/MAP-REWORK-PLAN.md §5.1, Wave D). Everything it did — the heading-rotated drone divIcon, the breadcrumb trail, the start-point flag, auto-follow, expand-to-full-pane, the switchable base layer, the offline-tile badge — is now `shared/map/tactical-map/`'s **follow mode** (`[followAssetId]` non-null); see that section below. Its three host pages (`/fly` cockpit inset, `/live/:deviceId`, asset detail's Position card) build the single `[assets]` entry from their own `TelemetryStore` via `tactical-map-logic.ts#followMarkers` instead of the component injecting that store itself.
@@ -1139,6 +1141,168 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
 - **A plain `localStorage` read inside a `computed()`/`effect()` is invisible to Angular's reactivity graph — even though the *write* that changed it happened through a perfectly ordinary signal `.set()` elsewhere in the same tick.** `shared/map/tile-cache/leaflet-loader.ts#isMapLayerExplicit()`/`markMapLayerExplicit()` used to be exactly this: `isMapLayerExplicit()` called `readPersistedFlag(MAP_LAYER_EXPLICIT_KEY, false)` (`core/panel-state.ts`, a bare `localStorage.getItem` wrapper) fresh on every call, with no signal anywhere in the chain — so `TacticalMap#activeBasemapId`'s `computed(() => effectiveMapLayerId(theme.theme(), settings.mapLayer(), isMapLayerExplicit()))` never re-derived off a `markMapLayerExplicit()` call, because `computed()`'s dependency tracking only sees **signal reads**, and a `localStorage.getItem()` call is not one, no matter how deterministic-looking the surrounding code is. Two real, user-visible symptoms fell out of this: (1) clicking a basemap button that happened to already match the theme's implied default was a complete no-op — `settings.mapLayer.set(id)` compared equal via `Object.is` to its own current value, and nothing else in the computed's dependency list had changed, so the computed's cached value never even re-checked; (2) once a basemap *did* become "explicit" (a genuine pick, on a mismatched button), `effectiveMapLayerId` permanently stopped depending on `theme` at all for that session — `TacticalMap`'s theme-driven `refreshMapColors()` (trail/drawing/zone paint colors) then only ever re-ran as an indirect side effect of `applyBasemap()`'s own effect, which by then had nothing left to react to either, so a later light/dark toggle left every painted overlay stuck in the old theme's colors until a full remount. **Fixed**: `isMapLayerExplicit()`/`markMapLayerExplicit()` now wrap a module-level `signal(readPersistedFlag(...))` — `localStorage` is read once at module load to seed it (persistence), the signal itself is the only thing ever read reactively (source of truth) after that, and `markMapLayerExplicit()` writes both (`explicitMapLayer.set(true)` first, so every reactive consumer sees the flip in the same synchronous pass, then `writePersistedFlag` for next-load durability). **The general rule this bites hardest for**: any small `localStorage`-backed helper that looks like a pure function (no class, no DI, just two exported functions) is exactly the shape that quietly forgets to be reactive, because there is no `Injectable`/component boundary prompting "should this be a signal?" the way there would be on a store field. If a future helper in this shape needs to be read from inside a `computed()`/`effect()`, it needs a signal at its core from the start, not a `localStorage` read wearing a function's clothes. `TacticalMap` also gained a **second, separate** `effect()` tracking `theme.theme()` directly (alongside the existing `effect(() => applyBasemap())`) specifically so a theme flip always re-triggers `refreshMapColors()` regardless of whether a basemap is explicit — folding `theme` back into `applyBasemap()`'s own dependency list was rejected because that would force an unnecessary tile-layer teardown+re-add (visible flicker) on every theme flip even when only paint colors, not tiles, need to change.
 - **A `linkedSignal` that re-seeds off a whole polled/live-updated *object* discards in-progress edits every time that object's owning store refreshes — even when the specific thing being edited hasn't actually changed.** `shared/map/map-controls/mark-palette.ts`'s `editPalette`/`editLabel`/`editNote` and `drawing-toolbar.ts`'s `editLabel` used to be single-arg `linkedSignal(() => this.mark()?.label ?? '')`-shaped: they re-seed from `this.mark()` (a bound `input()`) / `this.drawings.selected()` (a `computed()` doing `.find()` over the store's list) on **every** change to that source — and `MarksStore`/`DrawingsStore` (`core/map-data/**`) both replace their entire list with a **brand-new array of brand-new objects** on every fold of the `map` SSE topic and on their 30s safety-net poll (`marksSignal.set(await this.api.listMapMarks())`), even when nothing about the mark/drawing an operator is actively editing actually changed server-side. The result: an operator mid-typing a label had their keystrokes silently wiped the instant the next poll tick (or literally any other user's unrelated map edit riding the same SSE topic) landed — up to every 30 seconds guaranteed, more often in practice. **Fixed** by switching to `linkedSignal`'s `{source, computation}` form, keyed on a **derived primitive identity** (`markId`/`drawingId`), not the enclosing object: `computation: (id, previous) => previous && previous.source === id ? previous.value : computeFresh()` — re-seed only when the id itself changes, otherwise keep whatever the operator has typed so far. This is the same "guard on a derived primitive, never the enclosing object" rule the **Signals compare with `Object.is`** Gotcha above already documents for `effect()`s calling store methods; this is that same rule's `linkedSignal` shape, worth calling out separately because a `linkedSignal`'s re-seed silently *destroys user input* rather than merely re-running an idempotent-looking store call — a much sharper failure mode. Both the `source` and the `computation` closures of a `linkedSignal`'s `{source, computation}` form are tracked reactively (confirmed by reading Angular's actual runtime — `producerUpdateValueVersion`/`consumerBeforeComputation` in `@angular/core`'s `_effect-chunk.mjs`, not assumed from the public typings' doc comment alone), so `computation`'s own `this.mark()`/`this.drawings.selected()` read is exactly as live as the old single-arg form's — the fix is entirely in the re-seed *decision* (`previous.source === id`), not in giving up on tracking the live object. **If `DrawingsStore`/`MarksStore` (or any future store shaped like them) already exposes the selection's id as its own primitive signal — `DrawingsStore.selectedDrawingId` does — use that directly as `source` rather than deriving a fresh `computed()` wrapper**; `mark-palette.ts`'s `mark` is a bound `input()` with no such sibling, so it needed one (`editingMarkId = computed(() => this.mark()?.markId)`). Regression coverage: `mark-palette.spec.ts`/`drawing-toolbar.spec.ts` (new — the first component-level `TestBed` specs for either file, justified specifically because this is a reactivity-wiring bug a pure-logic spec can't exercise) both assert an in-progress DOM edit survives a same-identity refresh and still re-seeds on a genuine identity change.
 
+## Status — TRACK-IDENTITY-PLAN wave L3: SPA label stability (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3) — 2026-08-20
+
+Scope: `station/vision-web/**` only — a concurrent agent was landing wave L1 (cv-service's own
+server-side election, `CV_TRACK_LABEL_VOTE_WINDOW`/`_SWITCH_MARGIN`/`_SWITCH_STREAK`) **in the same
+working tree, in `cv/cv-service/**`, at the same time**; nothing outside `shared/player/**` and this
+file was touched, and every build/test verification below re-confirmed via `git status --porcelain`
+that the concurrent module's uncommitted files were never staged, stashed, or disturbed. docs/plans/
+active/TRACK-IDENTITY-RESEARCH.md §1's six-layer label-flip chain names this SPA as the last two
+links (5–6): the canvas overlay repaints a box's text/hue the instant cv-service's raw per-frame
+label flips, and the detections strip blinks a whole new chip in and out for the same physical
+object — both cosmetic *symptoms* of the same upstream identity churn L1 fixes at the source. This
+wave is the client-side mirror of L1: a defensive stopgap that converges to a no-op the moment L1
+ships (see below), not a competing fix.
+
+### What shipped
+
+- **`shared/player/detection-overlay-logic.ts` — sticky label election (§L3 item 1).**
+  `electStickyLabels(results)` replays a `DetectionsStore`-held batch history (already retained,
+  `DETECTIONS_LIMIT=50`) newest-to-oldest per track id and returns a `ReadonlyMap<trackId, label>`; a
+  pure function recomputed once per redraw from the store's own list, **not a stateful class** —
+  the same "full rescan every call, no persisted accumulator" shape `trackTrails` already uses one
+  section above it in this file. Election is confidence-weighted-tally + switch-margin +
+  switch-streak hysteresis, deliberately mirroring L1's own server-side knobs by name and default:
+  `STICKY_LABEL_VOTE_WINDOW=10` (only the most recent 10 observations count), `STICKY_LABEL_SWITCH_MARGIN=1.5`
+  (a challenger must out-score the incumbent by 1.5×, not just edge ahead), `STICKY_LABEL_SWITCH_STREAK=3`
+  (the margin must hold for 3 consecutive observations before the incumbent actually changes) — cited
+  in the code's own doc comment to `CV_TRACK_LABEL_VOTE_WINDOW`/`_SWITCH_MARGIN`/`_SWITCH_STREAK`,
+  L1's planned config names (grepped for in `cv/cv-service` before writing this — not present on this
+  branch as of this wave, so the plan's own stated names/defaults were cited directly rather than a
+  live symbol). `applyStickyLabels(detections, stickyLabels)` swaps `detection.label` for its track's
+  elected label — an untracked detection (`detection.track?.id === undefined`) is returned by the
+  **same object reference**, unchanged, matching `extrapolateDetections`' own reference-equality
+  convention one section above (load-bearing: `hoveredDetection === detection` checks and
+  `detectionTiers`' hover-promotion both depend on reference identity surviving a no-op transform). A
+  tracked detection whose elected label already equals its raw label (the steady-state / "L1 has
+  shipped and cv-service's own label no longer flips" case) also keeps its original reference — this
+  is the concrete mechanism behind "converges to a no-op once L1 ships": once cv-service never emits
+  a flip, `elected === raw` on every call, and this function does nothing every single time.
+- **`shared/player/player.ts` — wired into the redraw pipeline.** `redrawOverlay()` now computes
+  `const stickyLabels = electStickyLabels(results); const displayed = applyStickyLabels(projected, stickyLabels);`
+  immediately after W7's `extrapolateDetections` call, and every downstream consumer that used to read
+  `projected` now reads `displayed` instead: `trackTrails`' per-result substitution, the hover
+  re-anchor `.find()`, `detectionTiers(displayed, …)` (so `formatDetectionLabel`/`formatTierLabel`'s
+  painted text, `classBucket`/`classBucketHue`'s box hue, and the hover tooltip all consume the sticky
+  label for free — zero changes needed in any of those three functions), the composite-model gate
+  (`distinctModelKeys(displayed).length >= 2`), the T0 track-id accumulation, and the draw order.
+  `projected` itself is now only ever the direct output of `extrapolateDetections` and the sole input
+  to `applyStickyLabels` — W7's forward-projection and hover-promotion/track-id matching are
+  completely unaffected, since sticky labels only ever rewrite a display string, never a track id
+  or a box's geometry.
+- **`shared/player/detections-strip-logic.ts` — sliding-window chip aggregation (§L3 item 2).**
+  `stripChips` used to scan only `results[0]`, the single newest batch — chips blinked in and out at
+  raw CV batch cadence. It now aggregates `windowedResults(results, STRIP_WINDOW_SECONDS=5)` (a plain
+  `capturedAt`-based cutoff off the newest batch's own timestamp, not wall-clock `Date.now()` — keeps
+  this pure/deterministic in tests), with `count` becoming the **max concurrent** count for a label
+  within the window (not a sum — the same object re-detected every batch must not multiply its own
+  count) — same constant name (`STRIP_WINDOW_SECONDS`) and default the plan's own item 2 specifies.
+  Grouping now runs on `electStickyLabels`' own election (imported from `detection-overlay-logic.ts`,
+  not reimplemented — see the deny/display decision below for why sharing one election matters) rather
+  than each detection's raw per-batch label, so a track whose raw label alternates batch-to-batch
+  produces one stable chip instead of two chips flickering in and out of existence.
+- **`shared/player/detections-strip.ts`** — no functional change; `onChipClick` already sent
+  `chip.label` verbatim, and `stripChips` now populates that field with the sticky/displayed label
+  automatically. A doc-comment addendum to the class doc's "Click" bullet records the deny/display
+  decision (below) so a future reader doesn't have to re-derive it from the diff.
+
+### The deny/display decision, concretely
+
+The plan flagged this as potentially murky and offered two resolutions: send the chip's *displayed*
+label in the deny PATCH, or keep chips raw for deny while sticky only for display. **Chosen: the
+displayed label, unconditionally** — `stripChips` groups and labels chips entirely off
+`electStickyLabels`, so `chip.label` *is* the sticky label throughout, and the existing `onChipClick`
+handler (unmodified) sends exactly what the operator clicked on screen. Rationale: "hide by chip must
+hide what the chip shows" is a stronger, more intuitive invariant than "hide by chip hides whatever
+cv-service happens to be calling this object on its very next frame" — an operator has no visibility
+into the raw per-frame label at all once this wave ships, only the sticky one, so a deny PATCH keyed
+on a label they never saw would be surprising if it ever silently failed to suppress what they just
+clicked. **Named cost, not hidden**: until cv-service's own L1 election ships server-side, this can
+transiently under-suppress a still-flipping track — a raw label the operator never saw as a chip can
+still slip through the server-side deny filter (keyed on cv-service's raw label, not this SPA's
+election) for a beat before the two converge. Accepted as an honest, bounded gap of a client-side-only
+stopgap, not silently patched over; closed for free the moment L1 lands, since at that point
+cv-service's own raw label **is** the stable one this SPA's election would have elected anyway.
+
+### Degrade / role-gate / dev-parity notes
+
+- **Untracked detections are untouched** — `detection.track?.id === undefined` short-circuits both
+  `electStickyLabels` (nothing to key an election on) and `applyStickyLabels` (same-reference
+  pass-through), so anything without a track id keeps its raw label exactly as before this wave.
+- **A track with no election entry yet** (e.g. `DetectionsStore` has fewer than one batch of history
+  for it) degrades to the raw label via `stickyLabels.get(trackId) ?? detection.label` — never a
+  fabricated guess, matching this app's existing "show the real thing or admit you don't have it"
+  posture everywhere else (`stream-info-panel.ts`'s own doc comment states the identical rule for its
+  own gaps).
+- **No role-gating** — this is a pure rendering/labeling refinement inside the already-shipped canvas
+  overlay and detections strip; it introduces no new surface, endpoint, or affordance, so nothing here
+  reads `MeResponse.topRole` and nothing needed to.
+- **Dev-parity** — nothing in this wave reads `vision.auth.enabled`; behavior is identical whether
+  auth is on or off, since it's entirely a client-side transform over data the SPA already receives.
+- **No new colors/themes** — `classBucketHue` itself is untouched; sticky labels only change *which*
+  label string reaches it, not the hue function, so both light/dark themes are unaffected by
+  construction.
+
+### Tests
+
+**2414/2414 pass, 132 spec files** (net +14 over this wave's own pre-edit baseline of 2400 — no new
+spec files, both extended in place). `detection-overlay-logic.spec.ts`: +12 — `electStickyLabels`
+(8 cases: incumbent holds under alternating noise, genuine switch after streak, does not switch one
+pass short of the required streak, only the most recent `STICKY_LABEL_VOTE_WINDOW` observations count
+— a window-boundary-discriminating case built so a buggy unbounded implementation would fail it,
+untracked detections produce no election entry, empty/no-track-history inputs, multi-track
+independence, first-observation-is-elected-by-default) and `applyStickyLabels` (4 cases: untracked
+detection returns the same reference, a differing sticky label produces a new object with only
+`label` swapped and every other field/`.track`/`.box` preserved by reference, a sticky label equal to
+the raw label keeps the same reference — the "L1-deployed no-op" case, no election entry yet keeps
+the same reference). `detections-strip-logic.spec.ts`: net +2 — the old single-batch "already counted
+from a newer batch" case (invalidated by the new max-concurrent-window semantics) was replaced by
+three: max-concurrent-not-summed aggregation across two in-window batches, a batch older than
+`STRIP_WINDOW_SECONDS` off the newest one contributing nothing, and a track whose raw label flips
+batch-to-batch producing one stable sticky chip instead of two churning ones. Every pre-existing case
+in both files (cap, deny-filter, single-batch scenarios) verified unaffected and left as-is. `npx tsc
+--noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` — run and measured **earlier in this same task**, via a
+**path-scoped** `git stash push -- <this wave's own 6 files>` before/after comparison (not a bare
+`git stash` — the concurrent L1 agent's own uncommitted `cv/cv-service/**` changes live in the same
+working tree; `git status --porcelain` confirmed those files were never touched by the stash, before
+*and* after). Initial eager bundle unchanged: 409.08 kB / 115.11 kB (this wave touches no eagerly-
+loaded code path). The `shared/player/**` code is pulled into its own **unnamed shared chunk**
+(reused by more than one lazy route — `cockpit`, `live`, `wall`, `asset-detail` all import
+`shared/player/**` — so the bundler splits it out rather than duplicating it into each named route
+chunk; this is why every *named* lazy chunk showed byte-identical raw sizes before/after while the
+shared chunk absorbed the actual delta): **+0.80 kB raw / +0.27 kB estimated transfer**. Both
+pre-existing budget warnings (unchanged from before this wave) are not regressions introduced here.
+**Re-verification note**: `npm run test:ci` (2414/2414) and both `tsc --noEmit` runs were re-run
+fresh, successfully, immediately before writing this entry; a fresh `ng build` re-run for a final
+sanity check hit this shared, multi-agent machine's disk filling to single-digit MB free in real time
+(confirmed via `df -h` — falling even between consecutive checks, consistent with the concurrent L1
+agent's own disk-consuming work in `cv/cv-service/**`, not this wave's own code) and panicked before
+completing; the figures above are the ones actually measured against this wave's real diff earlier in
+this task, not extrapolated.
+
+### Files touched
+
+Modified: `shared/player/detection-overlay-logic.ts`+`.spec.ts`,
+`shared/player/detections-strip-logic.ts`+`.spec.ts`, `shared/player/detections-strip.ts`,
+`shared/player/player.ts`, this file (`station/vision-web/MODULE.md`). No new files — both `*-logic.ts`
+modules were extended in place, matching this wave's own instruction to keep the change footprint
+inside the existing pure-logic files rather than adding new ones.
+
+### Left incomplete / deferred, named honestly
+
+- **This wave's own convergence depends on L1 actually shipping** — until cv-service's server-side
+  election lands, the deny/display gap named above (a transient under-suppression window on a
+  still-flipping track) remains open; nothing to fix in this module, just a fact worth re-checking
+  once L1 merges.
+- **No component-level spec for `player.ts`'s new wiring** — matches this codebase's own established
+  precedent (pure-logic vitest over component specs, this file's Conventions section) exactly as the
+  T7/W7 waves before it; `electStickyLabels`/`applyStickyLabels` themselves carry the real coverage.
+
 ## Status — marks are no longer draggable — 2026-08-19
 
 **What changed.** Dragging a placed mark to a new position is removed. `TacticalMap.applyMarks` no
@@ -1163,6 +1327,17 @@ spec (only `tactical-map-logic.spec.ts`, for its pure helpers), so the deleted L
 never directly covered — stated rather than implied.
 
 ## Status — MEDIA-SOT-PLAN wave M8: stop lying about burn-in, stop leading the picture (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§6/§8) — 2026-08-12
+
+**Superseded, for everything burn-in-related, by docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3
+(2026-08-20 — see the dedicated W3 Status entry near the end of this file)**: the `burnedIn` field this
+wave speculatively wired against never shipped server-side (M5 was never built), and the plan that would
+have built it was superseded by a decision to delete server-side burn-in outright instead of merely
+defaulting it off. Every symbol this entry names below — `resolveBurnedIn`, `boxesModeCycle`,
+`defaultBoxesMode`, the three-mode `BoxesMode` union, `ActiveStream#burnedIn`/`StartStreamResult#burnedIn`
+— is now **gone**, not merely defaulted to the safe branch. Left below as a historical record of the
+wave that *did* ship (the WHEP-sync/HiDPI/`requestVideoFrameCallback`/`ResizeObserver` fixes this entry
+also describes are untouched by W3 and remain accurate). The dated test/build/bundle figures elsewhere
+in this entry are this wave's own measurements and are left as written, per this file's own convention.
 
 Scope: `station/vision-web/**` only, per the plan's own wave boundary — no Java, no proto. The client-side
 detection overlay (canvas rendering, letterbox-correct scaling, track hues, trails, click-to-follow,
@@ -11991,3 +12166,1134 @@ warning carried over from wave H6 (`tactical-map.css` 9.86 kB against an 8 kB bu
 or worsened here. The "130 files / 2292 tests" figure in the H6 section above is that wave's own
 measurement and is left as written; this is the current number.
 
+## Status — CV-CLEAN-FEED-PLAN wave W3: burned mode out, overlay is the only mode, staleness honesty — 2026-08-20
+
+### What shipped
+
+Server-side burn-in is gone (wave W1, backend, same release — a parallel agent deleted
+`video-output/overlay/`, `PublishWiring#overlayRenderer`, and the `burnedIn` DTO fields in the same
+working tree). This wave is the client half: nothing left to name a third boxes mode after, so
+`BoxesMode` drops from three states to two, and detection staleness — previously invisible, since a
+burned-in frame always "looked" current even when the underlying batch was stale — now says so.
+
+- **`shared/player/detection-overlay-logic.ts`**: `BoxesMode = 'overlay' | 'off'`. `resolveBurnedIn`,
+  `boxesModeCycle`'s burn-aware branching, and `defaultBoxesMode` are **deleted outright**, not
+  reduced to a stub — there is no backend field left to resolve. `cycleBoxesMode(current)` drops its
+  `burnedIn?` parameter and cycles the fixed `['overlay', 'off']` pair; a stale `current` no longer
+  in the cycle (e.g. `'burned'` surviving in a pre-wave persisted signal) restarts from the front
+  instead of throwing — a degrade choice, not an oversight, since a signal seeded before this wave
+  shipped is exactly the kind of stale client state this app can't assume away.
+- **`core/api/models.ts`**: `burnedIn?: boolean` removed from `ActiveStream` and `StartStreamResult`.
+  Doc comments on both rewritten to state the field is gone and cite this wave, so a future reader
+  hitting a git-blame on the old field lands on the reason, not a dead end.
+- **Every consumer updated to the two-state world**: `CockpitFacade`, `LiveFacade`, `WallTile` all
+  had a `linkedSignal(() => defaultBoxesMode(streamBurnedIn()))` re-deriving `boxesMode` off the
+  stream's `burnedIn` field — with that field gone, there is nothing left to re-derive against, so
+  all three simplified to a plain `signal<BoxesMode>('overlay')`. `cv-control-panel.ts`/`.html` lost
+  the `burnedIn` input, `showBurnedInOption`, and the "Burned in" tab entirely (not hidden — deleted,
+  since there is no longer a code path where it could ever apply). `live.html` lost the "Burned"
+  segmented-control button the same way. `player.ts`'s `boxesMode` input default changed to
+  `'overlay'` (was `'burned'`). The `B`-key shortcut (`cockpit.ts#handleKeydown`) needed no change —
+  it already just calls `cycleBoxes()`, which now cycles two states instead of three.
+- **Staleness honesty** (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4/D7), new pure functions
+  in `detection-overlay-logic.ts`: `detectionAlphaPercent(ageMs, batchIntervalMs)` fades a batch to
+  `STALE_FADE_ALPHA_PERCENT` (40%) once it's older than `STALE_FADE_BATCH_MULTIPLIER` (2) observed
+  batch-intervals (`averageBatchIntervalMs`, now exported so both `Player` and this file's own spec
+  can call it); `isDetectionStale(ageMs)` and `detectionsPausedNotice(latestCapturedAt, nowMs)` gate
+  at `DETECTION_STALE_CUTOFF_SECONDS`, **imported from `core/detections/detections-logic.ts`'s
+  `CV_STATUS_FRESH_SECONDS` rather than redeclared**, so the canvas fade, the CV status dot, and the
+  paused notice can never quietly disagree about "too old to call live". `Player#redrawOverlay` sets
+  `ctx.globalAlpha` around the box-drawing loop only (never trails, which already manage their own
+  per-segment alpha and reset to `1` first) each redraw tick. `selectDetectionResult`'s existing
+  "every result looks future, fall back to the oldest" branch is now bounded by `isDetectionStale`
+  too — that fallback exists for attach-time latency jitter, not as license to draw a genuinely old
+  batch as if it were live forever; past the cutoff it returns `undefined` and the canvas draws
+  nothing, matching the plan's "older than ~5s draw nothing" line exactly (`DETECTION_STALE_CUTOFF_SECONDS`
+  resolves to the same 5s `CV_STATUS_FRESH_SECONDS` the CV status dot already uses).
+- **The stage notice**: `DetectionsStore` gained `pausedNotice` (`core/detections/detections-store.ts`),
+  computed off a new `lastSeenAt` that reads the transport-appropriate list's **raw, unfiltered**
+  head `capturedAt` — deliberately not `results()`, which is already freshness-pruned and would have
+  nothing left to report by the time staleness is worth announcing. `CockpitFacade.detectionsPausedNotice`
+  gates that on `detectionOn()` (silent when detection is off — that's a different, already-handled
+  state, not staleness) and `cockpit.html` renders it through the existing `.stage-notice`/`.notice`
+  pattern already used for the video-flow notice, as a new `@else if` branch between the video notice
+  and the "detection off" chip — reusing the established stage-notice chain rather than inventing a
+  second notice framework, per the task's own instruction.
+
+### Design choices
+
+- **`core/detections/detections-store.ts` importing from `shared/player/detection-overlay-logic.ts`**
+  follows this codebase's own established precedent for `core/` depending on `shared/` pure logic
+  (`core/map-data/drawings-logic.ts` → `shared/map/tactical-map/tactical-map-logic.ts`) rather than
+  either duplicating the staleness math or inverting the dependency by moving `DetectionsStore` under
+  `shared/`.
+- **Reusing the existing stage-notice pattern rather than inventing a new one**: `detectionsPausedNotice`'s
+  copy is stable text pulled straight from `detection-overlay-logic.ts`; no new color/iconography needed —
+  it is the same "amber-toned stage notice" the video-flow notice already established, extended to a
+  second failure axis on the same stage.
+- **Two-state cycle over a hidden third state**: `cycleBoxesMode` could have kept a dead `'burned'`
+  branch for wire compatibility with an old persisted signal; deleting it instead (restart-from-front
+  degrade, see above) matches the plan's explicit instruction that burn-in is *removed*, not
+  *defaulted off* — a hidden dead mode would misrepresent that as a runtime choice rather than a
+  deleted capability.
+
+### Degrade / role-gate / dev-parity
+
+- **No new failure surface.** The staleness fade and paused notice are themselves the "degrade
+  honestly" behavior for an axis (detection freshness) that was previously undetectable at the UI
+  layer — a burned-in frame gave no visual cue that its boxes were minutes old. Nothing here is
+  role-gated: boxes-mode and staleness are visible to every viewer who could already see a stream,
+  unchanged from before this wave.
+- **Dev parity preserved trivially**: none of the deleted symbols (`resolveBurnedIn`,
+  `showBurnedInOption`, etc.) ever branched on `topRole` or `vision.auth.enabled`, so there is nothing
+  for `vision.auth.enabled=false`'s unbounded dev admin to lose access to — every viewer, dev or real,
+  sees the identical two-state toggle and the identical staleness fade/notice.
+
+### Tests
+
+`npm run test:ci`: **131 test files, 2304 tests, all passing** (131/2304, up from 131/2301 at the
+close of Wave H8 immediately above — net +3 after this wave's own additions and one deletion:
+`fly-logic.spec.ts` lost its `cycleBoxesMode` re-export describe block, `detection-overlay-logic.spec.ts`
+gained cases for the two-state cycle's restart-from-front behavior, `averageBatchIntervalMs`,
+`detectionAlphaPercent`, `isDetectionStale`, `detectionsPausedNotice`, and two new `selectDetectionResult`
+stale-fallback-bound cases; `detections-store.spec.ts` gained a `pausedNotice` assertion inside its
+existing stale-poll-result test). `npx tsc --noEmit` clean on both `tsconfig.app.json` and
+`tsconfig.spec.json` (verified independently, not just via the root passthrough).
+
+### Build
+
+`ng build --configuration production` — green. Same two pre-existing budget warnings as Wave H8
+above (initial bundle over its 390 kB warning threshold, `tactical-map.css` over its 8 kB budget),
+neither introduced nor worsened by this wave. **Bundle delta**, measured via `git worktree add
+--detach` at the pre-wave commit rather than `git stash` (a parallel agent was editing Java files
+in the same working tree at measurement time — see this file's own concurrency-caution note
+elsewhere in this plan's waves) — `node_modules` symlinked into the worktree after confirming
+`package.json`/`package-lock.json` were byte-identical, avoiding a reinstall:
+
+- **Initial total: 410.75 kB → 408.85 kB raw (-1.90 kB) / 115.96 kB → 115.08 kB transfer (-0.88 kB)**.
+- **`cockpit` lazy chunk: 130.10 kB → 129.64 kB raw (-0.46 kB) / 28.24 kB → 28.08 kB transfer (-0.16 kB)**.
+- **`live` lazy chunk: 22.08 kB → 21.57 kB raw (-0.51 kB) / 5.97 kB → 5.88 kB transfer (-0.09 kB)**.
+- Every other chunk byte-identical — the deleted burn-in branching was small (a few conditionals and
+  one dead component input each), and the new staleness math is comparably sized, so this wave nets
+  a small shrink rather than the wash a pure rename would produce.
+
+### Files touched
+
+`src/app/shared/player/detection-overlay-logic.ts` (+`.spec.ts`), `src/app/core/api/models.ts`,
+`src/app/features/fly/cockpit-facade.ts`, `src/app/features/fly/fly-logic.ts` (+`.spec.ts`),
+`src/app/features/fly/stream-state-logic.ts`, `src/app/features/live/live-facade.ts`,
+`src/app/features/live/live.html`, `src/app/features/live/live.css`,
+`src/app/features/wall/wall-tile.ts`/`.html`, `src/app/features/fly/cv-control-panel.ts`/`.html`,
+`src/app/features/fly/cockpit.html`, `src/app/shared/player/player.ts`,
+`src/app/shared/player/detections-strip.ts`, `src/styles.css`,
+`src/app/shared/map/map-controls/drawing-toolbar.ts`, `src/app/shared/map/map-controls/mark-palette.ts`
+(both only a dangling doc-comment citation of the now-deleted `CockpitFacade#streamBurnedIn` fixed to
+cite each other instead — no behavior change), `src/app/features/replay/replay.html` (stale
+burn-in-era training-capture warning rewritten), `src/app/core/detections/detections-store.ts`
+(+`.spec.ts`).
+
+### Left incomplete / deferred, named honestly
+
+- **`PipelineConfig.overlayBurnIn`/`overlayTelemetry` (client-side type) are untouched.** The plan's
+  §2 wire contract lists them alongside `burnedIn`, but this wave's own file list (§ W3 in
+  CV-CLEAN-FEED-PLAN.md) names exactly `models.ts`'s `burnedIn` field plus 7 named consumer files —
+  it does not include `PipelineConfig`. Removing `overlayBurnIn`/`overlayTelemetry` from the TS type
+  is server-side W1's DTO change to mirror, not named as this wave's job; left for whichever wave
+  reconciles the client `PipelineConfig` shape against the post-W1 backend DTO.
+- **`labelDenyFilter` is not added anywhere on the client.** Per the plan, that field's frontend wiring
+  ("click hides via `labelDenyFilter`") is explicitly wave W5's job, not W3's — the strip is still
+  read-only this wave.
+- **`UpdateStreamConfigRequest`'s doc comment still explains `overlayBurnIn` as a "not PATCH-able in
+  v1" non-goal** (`models.ts` line ~170) — accurate history of why it was never a patchable field, but
+  once W1's backend deletion lands fleet-wide there will be nothing left for that sentence to explain.
+  Not touched here: it doesn't contain the words "burned"/"burnedIn" this wave's grep sweep was
+  scoped to, and rewriting it means editing a doc comment on a type this wave's file list doesn't
+  name — flagged here rather than improvised.
+- **W4's tiered rendering / declutter levels and W5's Vision-drawer merge are unstarted** — this wave
+  is scoped to the two-state mode switch and staleness honesty only, per the plan's own wave
+  boundaries.
+
+## Status — CV-CLEAN-FEED-PLAN wave W4: priority tiers, label collision-yield, four-state declutter — 2026-08-20
+
+### What shipped
+
+W3 left the overlay a flat, undifferentiated draw: every detection got the same box, the same
+always-on label, the same per-track hash hue, and every tracked object grew a trail — noise at any
+real object count (research §3.2's own "12 parked cars" example). This wave is the priority-tier
+render model docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/§3.3/§3.6 designed for it.
+
+- **`shared/player/detection-overlay-logic.ts`** gained, as pure functions with full specs:
+  - **Priority tiers** (`DetectionTier = 'T0'|'T1'|'T2'|'T3'`, `detectionTiers`) — T0 (hover or the
+    FOLLOW-locked track, unconditional, checked first) → T3 (sub-scale, under `SUB_SCALE_PX` (12) on
+    *both* axes, checked before the top-K budget is spent) → T1 (tracked-and-moving, displacement ≥
+    `MOVING_DISPLACEMENT_THRESHOLD` (0.02, normalized) across the trail window — uncapped, always
+    promoted — **or** in the top `NOTABLE_TOP_K` (5) of the size-eligible remainder by box-area ×
+    confidence; the two routes share one budget, a mover just spends its slot without going through
+    the ranking) → T2 (everything left). Alert-rule promotion (the research table's third T1
+    criterion) is deliberately omitted — no `alerting` field exists on the wire yet (§8.3), and
+    nothing here fabricates one client-side.
+  - **Tiered rendering weights** — `tierAlphaPercent(tier, lockActive)`: T2 draws at its own
+    `T2_ALPHA_PERCENT` (55%) base; once a FOLLOW lock is active, every non-T0 tier additionally dims
+    to `LOCK_DIM_ALPHA_PERCENT` (40%) of its own base (T0 is exempt — it usually *is* the lock).
+    Combined *multiplicatively*, never additively, with the pre-existing staleness fade at the
+    `Player#redrawOverlay` call site. Stroke widths named (`T0_STROKE_WIDTH_PX`=3,
+    `T1_STROKE_WIDTH_PX`=2, `T2_STROKE_WIDTH_PX`=1); T3 draws a filled dot,
+    `SUB_SCALE_DOT_RADIUS_PX`=3, no box, no label.
+  - **Class-bucket box colors** — `trackHue` (per-track hash hue) is **deleted outright**: at real
+    object counts it read as confetti and encoded nothing a viewer could actually use (identity was
+    already the `#id` text and box constancy, never the color). `classBucketHue`/`classBucket`/
+    `tierBoxColor` replace it — three fixed, non-hashed hues (`person`=340°/`--rose-500`,
+    `vehicle`=146°/`--green-500`, `other`=275°, each ≥56° from the reserved T0-blue/hover-amber/
+    danger-red hues), a keyword-substring heuristic over the (composite-prefix-stripped) label text.
+    `tierBoxColor(detection, composite)` picks `modelHue` instead when the batch actually mixes ≥2
+    models this frame (`distinctModelKeys(...).length >= 2`) — the multi-model legend case, kept
+    unchanged per the research disposition table. T0 reserves the original accent
+    (`modelHue(DEFAULT_MODEL_KEY)`, byte-identical `#4f8cff`) regardless of class or composite mode;
+    hover keeps its own amber override on every tier that draws a box.
+  - **Label collision-yield** (`placeLabels`) — a pure greedy placer: for each candidate, in
+    caller-supplied priority order (T0 first), try its previous-frame slot first if collision-free
+    (hysteresis, via a caller-owned `Map<string, LabelSlot>`), else `above → below → inside-top`; a
+    candidate that collides in all three paints no label at all (the box still draws — identity stays
+    recoverable by hover). Capped at `MAX_PAINTED_LABELS` (10) painted labels per frame, across every
+    tier combined. `formatTierLabel` drops the confidence percent for T1 (research §3.2/D4) — T0's
+    label and the hover tooltip both keep the full `formatDetectionLabel` text, confidence included.
+  - **Declutter levels** — `BoxesMode` widens from W3's two-state `'overlay'|'off'` to
+    `'all'|'priority'|'locked'|'off'` (identifier kept — every consumer already names its own
+    signal/input `boxesMode`, only the *values* changed shape). `tiersForDeclutterLevel` is the one
+    place the mapping lives: `'all'` → every tier, `'priority'` (new `DEFAULT_DECLUTTER_LEVEL`) → T0+
+    T1+T3 (ambient T2 hidden), `'locked'` → T0 only, `'off'` → nothing (`shouldDrawOverlay` still
+    short-circuits the whole canvas before tiers are even consulted). `cycleBoxesMode`/
+    `DECLUTTER_LEVELS` (newly exported, the segmented controls' own `@for` source) cycle
+    All → Priority → Locked-only → Off → All; a stale/unrecognized value (e.g. `'overlay'` surviving
+    in a pre-wave persisted signal) restarts from the front, the same degrade W3 already established.
+    `declutterLevelLabel` is the one place the four display names live.
+- **`shared/player/player.ts`** — `redrawOverlay` rewritten around the tier pipeline: computes
+  `trails` once (reused by both the trail layer and `detectionTiers`, one scan per redraw, not two),
+  builds a `DetectionTierContext` from the new `lockedTrackId` input + `hoveredDetection` + `trails` +
+  the letterboxed content size, filters/sorts the draw list by `tiersForDeclutterLevel` and tier rank
+  (ambient → notable → committed, so a higher tier's box always paints on top), applies the combined
+  staleness × tier × lock-dim alpha per detection, then a separate `paintLabels` pass over the T0/T1
+  candidates collected during the box pass. `drawBox` → `drawTierBox` (returns whether the caller
+  should queue a label candidate; draws a dot for T3, a stroke for everything else, `COASTING` still
+  dashed on every tier that draws a box at all). `drawTrails` now takes the precomputed `trails` map
+  plus a `t0TrackIds` filter — trails are **T0-only** as of this wave (research §3.2/D8: a
+  twelve-parked-cars trail was pure noise); `trackTrails` itself is unchanged, this is a filter at the
+  call site. `drawnBoxes` (and therefore hover/click hit-testing) now only ever contains
+  declutter-visible detections — an operator on `'locked'` can't hover a T2 box that isn't drawn.
+- **The FOLLOW-locked track id reaches the renderer via a new plumbing chain**, since `player.ts` had
+  no tracking poll of its own: `CvControlPanel` (which already owns the honest tracks-poll-derived
+  `lockedTrackId` computed, feeding its "Following #N" chip) gained a `lockedTrackIdChange` output,
+  emitted by a constructor `effect` on every change. `CockpitFacade` gained a plain `lockedTrackId`
+  signal (seeded `0`, the wire's own "no lock" sentinel), and `cockpit.html` wires
+  `(lockedTrackIdChange)="facade.lockedTrackId.set($event)"` on the panel and
+  `[lockedTrackId]="facade.lockedTrackId()"` on the primary `<vision-player>`. This keeps tracks-poll
+  ownership exactly where it already was (no relocation, preserving W5's future "one feed owner"
+  boundary) while still getting the value where the research spec wants it read from — the wire's own
+  echo, never a local optimistic guess (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule,
+  the same doctrine the dashed `COASTING` stroke already expresses at the pixel level). `Player`'s own
+  `lockedTrackId` input defaults to `0` and is simply never bound by Live or the wall tile — neither
+  page has a Follow/lock control at all, so T0 there stays hover-only: an honest degrade, not a broken
+  one, since there is genuinely no lock to report from those surfaces.
+- **Every consumer migrated to the four-state model**: `cv-control-panel.html`'s "Boxes rendering"
+  section and `live.html`'s segmented control both now `@for` over the shared `DECLUTTER_LEVELS`
+  constant, naming each button via `declutterLevelLabel`/a thin `boxesModeLabel` wrapper (matching the
+  file's existing `capabilityLevelName` precedent) rather than restating four literals per template.
+  `wall-tile.html`'s tiny toggle button keeps a one-glyph-per-state design (no room for a labeled
+  control at wall scale, per that component's own doc comment) — `▦`/`▢`/`◉`/`▢×` for
+  all/priority/locked/off, with `priority`/`off` keeping the *exact* glyphs the old two-state toggle
+  always drew, so an untouched wall looks byte-identical. `cockpit.html`'s help drawer B-key text
+  updated to name all four states. `CockpitFacade`/`LiveFacade`/`WallTile` all reseed their
+  `boxesMode` signal default from `DEFAULT_DECLUTTER_LEVEL` instead of the now-invalid literal
+  `'overlay'`.
+
+### Design choices
+
+- **`BoxesMode` keeps its name despite the semantic shift** (a rendering toggle → a density level) —
+  every consumer already names its own signal/input `boxesMode`, and the control still answers the
+  same question ("how are boxes drawn"); renaming the type would have forced a mechanical rename
+  across 9 files for no behavioral gain. Flagged here as a deliberate call, not a missed rename.
+  `DECLUTTER_LEVELS`/`DEFAULT_DECLUTTER_LEVEL`/`declutterLevelLabel`/`tiersForDeclutterLevel` all use
+  the "declutter" vocabulary the research doc itself uses for the *concept*, while the *type* stays
+  `BoxesMode` for exactly that consumer-continuity reason.
+- **A moving track and the top-K ranking share one `NOTABLE_TOP_K` budget, not two independent ones**
+  — the research doc's own "doesn't consume a second slot" phrasing. A batch of movers alone can
+  still exceed 5 T1 detections (movement is never itself capped), but each mover claims one of the 5
+  nominal slots before the ranking loop runs, so a scene with many genuine movers *and* many strong
+  static detections will show more than 5 T1 boxes in the mover-heavy case and fewer than 5
+  ranking-based promotions in that same case — an intentional shared-budget design, not a bug,
+  verified directly by `detectionTiers.spec.ts`'s own "shared budget" and "movement is never capped"
+  cases.
+- **Sub-scale (T3) is checked before the top-K ranking, not after** — a tiny, high-confidence box
+  would otherwise trivially win a top-K slot and then render as a box too small to read; checking size
+  first means the budget is never spent on something that's going to be a dot regardless.
+- **Class-bucket hues over a richer taxonomy**: three buckets (person/vehicle/other) rather than
+  per-class hues — the research table asks for "one stable hue each" at the *tier* system's color
+  budget, and an open-vocab model's ~4585-class real vocabulary (docs/plans/done/CV-CONTROL-PLAN.md
+  Wave E's own measurement) makes a hue-per-class scheme both infeasible (colorblind-safe hue budgets
+  are small) and not what the research doc asked for.
+- **Draw order is ambient → notable → committed** (not detection-array order) so a T0 box's stroke is
+  never visually buried under a T2 outline that happens to overlap it on screen — matters most exactly
+  when the operator has committed to a target, the one moment layering should least be left to chance.
+
+### Degrade / role-gate / dev-parity
+
+- **Honest lock-id sourcing, not a client guess**: `Player#lockedTrackId` only ever reflects
+  `CvControlPanel`'s own wire-confirmed poll read, mirroring the "Following #N" chip's own rule
+  (docs/extracts/TRACKING-ORCHESTRATION.md §3.3) — a click-to-follow never paints T0 optimistically
+  ahead of the server actually confirming the lock.
+- **Watch mode has no lock plumbing at all**: `cockpit.html` only mounts `<vision-cv-control-panel>`
+  `@if (!facade.watchMode())`, so in watch mode `facade.lockedTrackId` never receives a poll-derived
+  value and stays its seeded `0` — the overlay's T0 tier there is hover-only, same honest "nothing to
+  report" degrade as Live/Wall, not a silently-broken lock indicator.
+- **Detection controls remain ungated by role**, unchanged from every prior wave — nothing in this
+  wave introduces a new role-sensitive surface, so there is nothing for `vision.auth.enabled=false`'s
+  unbounded dev admin to lose; every viewer, dev or real, sees the identical four-state control and
+  identical tier rendering.
+- **A failed/absent tracks poll degrades honestly**: `tracksResponse` (and therefore `lockedTrackId`)
+  already falls back to `null`/`0` on any transport failure (`CvControlPanel#pollTracks`'s existing
+  catch block, unchanged this wave) — the overlay simply never promotes a lock-based T0 in that case,
+  never fabricating one.
+
+### Tests
+
+`npm run test:ci`: **131 test files, 2341 tests, all passing** (up from 131/2304 at the close of Wave
+W3 — net +37, entirely in `detection-overlay-logic.spec.ts`, whose own `it(` count went 56 → 93: the
+`trackHue` describe block removed (4 cases, the function is gone), `shouldDrawOverlay`/`cycleBoxesMode`
+rewritten for the four-state values, and new describe blocks added for `detectionTiers` (11 cases,
+including the shared-budget/movement-uncapped/sub-scale-before-top-K edge cases named above),
+`tierAlphaPercent`, `classBucket`, `classBucketHue`, `tierBoxColor`, `formatTierLabel`, `placeLabels`
+(7 cases, including all-three-slots-collide and stale-hysteresis-slot fallback), `tiersForDeclutterLevel`,
+and `declutterLevelLabel`. `npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json`
+(verified independently). No new component specs — this module tests pure logic, not templates/wiring
+(the codebase's own stated precedent), and every consumer edit here is thin wiring already exercised
+end-to-end by the full suite passing.
+
+### Build
+
+`ng build --configuration production` — green. Same two pre-existing budget warnings as Waves H8/W3
+(initial bundle over its 390 kB warning threshold, `tactical-map.css` over its 8 kB budget), neither
+introduced nor worsened by this wave. **Bundle delta**, measured via `git worktree add --detach` at
+the pre-wave commit (adc66bc1, Wave W3) with `node_modules` symlinked in (no dependency changes this
+wave, so no reinstall needed) — a parallel agent was mid-edit on Java files in the primary working
+tree at measurement time, so a worktree was used instead of `git stash`, matching W3's own
+methodology:
+
+- **Initial (eager) bundle: unchanged — 408.85 kB raw / 115.08 kB transfer, byte-identical.** Every
+  file this wave touched lives in a lazy-loaded feature chunk; nothing reaches the eager bundle.
+- **`cockpit` lazy chunk: 129.64 kB → 130.05 kB raw (+0.41 kB) / 28.13 kB → 28.19 kB transfer
+  (+0.06 kB).**
+- **`live` lazy chunk: 21.57 kB → 21.68 kB raw (+0.11 kB) / 5.90 kB → 5.97 kB transfer (+0.07 kB).**
+- **`wall` lazy chunk: 9.55 kB → 9.74 kB raw (+0.19 kB) / 3.22 kB → 3.31 kB transfer (+0.09 kB).**
+- **Every lazy chunk summed: 1591.39 kB → 1596.07 kB raw (+4.68 kB, +0.29%) / 419.10 kB → 420.68 kB
+  transfer (+1.58 kB, +0.38%).** The tier/label/color logic and its extra rendering branches are the
+  entire cost — no new dependency was added or upgraded.
+
+### Files touched
+
+`src/app/shared/player/detection-overlay-logic.ts` (+`.spec.ts`), `src/app/shared/player/player.ts`,
+`src/app/features/fly/cv-control-panel.ts`/`.html`, `src/app/features/fly/cockpit-facade.ts`,
+`src/app/features/fly/cockpit.html`, `src/app/features/live/live-facade.ts`,
+`src/app/features/live/live.ts`/`.html`, `src/app/features/wall/wall-tile.ts`/`.html`.
+
+### Left incomplete / deferred, named honestly
+
+- **Alert-rule T1 promotion (research §3.2's third T1 criterion) is not implemented.** There is no
+  `alerting`/similar field on the detection wire contract yet (research §8.3 lists it as an open
+  backend candidate) — `detectionTiers` only ever promotes on lock/hover, sub-scale, movement, and
+  top-K ranking. Left for whichever wave lands the backend field.
+- **`fly-logic.ts` needed no change** — grep-confirmed before and after this wave to carry no
+  `BoxesMode`/`boxesMode` reference at all; `ToolRailPanelId` never named a boxes-specific rail entry.
+- **No new component-level spec** for `player.ts`'s rewritten `redrawOverlay`/`drawTierBox`/
+  `drawTrails`/`paintLabels` — this module has never unit-tested `<canvas>` drawing directly (matching
+  W3's own stated precedent); every piece of decision logic those methods call is itself covered by
+  `detection-overlay-logic.spec.ts`'s 93 cases.
+- **W5's Vision-drawer merge and the honest label-filter-driven declutter interaction are unstarted**
+  — this wave is scoped to priority tiers, label collision-yield, and the four-state declutter control
+  only, per the plan's own wave boundaries.
+
+## Status — CV-CLEAN-FEED-PLAN wave W5: one Vision drawer, an honest one-click hide, one feed owner (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2/D-3) — 2026-08-20
+
+### What shipped
+
+W4 left two separate cockpit drawers (`cv`, `detections`) and a class-filter checklist whose only
+"hide a class" mechanism was narrowing the allowlist — honest about *what* it hid, dishonest about
+*how much*: the first hide on an unfiltered stream silently switched the model from "see everything"
+to "see only this," a trap D-3's own research called out. This wave fixes both: one merged drawer, and
+a real deny-list the operator can toggle per class without ever touching model intent.
+
+- **`labelDenyFilter` reaches the client wire** — `core/api/models.ts`'s `StartStreamRequest` and
+  `UpdateStreamConfigRequest` both gain `labelDenyFilter?: readonly string[]`, matching
+  `dto.StartStreamRequest#labelDenyFilter`/`dto.UpdateStreamConfigRequest#labelDenyFilter` **exactly**
+  (the real Java DTO field name, confirmed against the W1 backend wave that already enforces it
+  server-side, pre-fan-out, alongside `labelFilter`). `PipelineProfile`/`PipelineSettings`
+  (`core/settings/settings-store.ts`) gain the identical field, empty = "deny nothing";
+  `withValidPipelineFields` backfills a profile/draft saved before this wave the same honest way it
+  already backfills a missing `labelFilter`. `cv-control-panel-logic.ts#buildHotKnobPatch` now sends
+  it on the same debounced hot-knob PATCH as `labelFilter`/`confidenceThreshold`/`inferenceFps`.
+- **`core/detections/detections-logic.ts`** gains three exports, neutral (importable by both a
+  `shared/` component and a `features/fly/` one — the reason they live here, not in
+  `cv-control-panel-logic.ts`, which `shared/player/detections-strip.ts` must not import per the
+  standing `shared` → `features` import-direction rule): `isLabelDenied(labelDenyFilter, label)`,
+  `toggleLabelDeny(labelDenyFilter, label)` (add-if-absent/remove-if-present, no staging — an empty
+  deny-list has an unambiguous "deny nothing" meaning, unlike `labelFilter`'s "empty means all"), and
+  `HIDDEN_CLASS_TRUTH`, the one honest sentence both hide surfaces show verbatim: *"Hidden classes are
+  dropped everywhere — screen, alerts, recording. The model still scans for everything."*
+- **One Vision drawer, not two** — `fly-logic.ts#ToolRailPanelId` narrows from seven ids to six,
+  dropping `'detections'` entirely; `'cv'` survives as the merged drawer's id (least-disruptive choice
+  — a returning operator's `localStorage`-persisted open-panel id still opens the same drawer, no
+  migration needed). `cockpit.html` now owns **one** `<vision-side-panel title="Vision" icon="eye">`
+  directly, with `<vision-detections-strip>` and `<vision-cv-control-panel>` mounted as **siblings**
+  inside it (not nested) — each independently `@if`-gated: the strip on `facade.live()` (unchanged
+  from its pre-merge gate, so it stays reachable in watch mode — a viewer keeps "what's on screen" even
+  though the mutating controls below it are hidden from them), the control panel on
+  `!facade.watchMode()`. The drawer itself mounts on the wider `isPanelOpen('cv') && (facade.live() ||
+  !facade.watchMode())` union, so it's reachable whenever either sibling has something to show. The
+  rail loses one button — one "Vision" icon-button now toggles the merged drawer, still carrying the
+  off-dot (`!facade.watchMode() && !facade.detectionOn()`).
+  - **`CvControlPanel` is now body-only** — it no longer self-wraps its own `<vision-side-panel>` or
+    owns an `open`/`close` input/output at all; `cockpit.html` mounting it *is* opening it, the same
+    contract `<vision-side-panel>` itself documents. This was a nested-composition trap avoided
+    mid-design: nesting the strip *inside* `CvControlPanel`'s own panel would have broken watch-mode
+    strip visibility, since the control panel is entirely unmounted there — sibling composition, with
+    `cockpit.html` owning the one shell, was the fix.
+- **The strip becomes the class-level remote control** (research §3.5) — `shared/player/
+  detections-strip.ts` is now **dual-mode via one new optional `streamId` input**, split into a proper
+  3-file component (`.ts`/`.html`/`.css`, was inline) with its own chip derivation extracted to
+  `shared/player/detections-strip-logic.ts` (`stripChips`, `StripChip {label, count, hidden}`,
+  `STRIP_CHIP_CAP = 8`). Unbound (`live.html`'s existing usage, unchanged) stays exactly the old
+  read-only chip list. Bound (`cockpit.html`'s Vision drawer, `[streamId]="facade.stream()?.streamId"`)
+  turns interactive:
+  - **Hover** a chip emits `hoveredClassChange` — relayed by a new `CockpitFacade.hoveredDetectionClass`
+    signal (`signal<string | null>(null)`, mirroring wave W4's `lockedTrackId` plumbing shape exactly,
+    just with no poll behind it: hover is instantaneous DOM state, nothing to reconcile against)
+    straight into `<vision-player [hoveredClass]>`. Reset to `null` in the facade's existing
+    stream-change effect, alongside `detections.track()`/`reset()` — a hover carried over from the
+    previous stream's strip would otherwise promote a box on a feed it was never hovered on.
+  - **Click** a chip toggles it in `SettingsStore.labelDenyFilter` and immediately PATCHes
+    `FleetStore.patchStreamConfig` — no staging, `HIDDEN_CLASS_TRUTH` shown once, at rest. **Never**
+    touches `labelFilter`.
+  - `shared/player/detection-overlay-logic.ts#DetectionTierContext` gains `hoveredClass: string |
+    null`; `detectionTiers`' T1 promotion loop now also matches `detection.label === context
+    .hoveredClass` (unconditional, budget-exempt, same as `isMovingTrack` — a hover cannot be crowded
+    out by `NOTABLE_TOP_K` already being spent elsewhere), but deliberately does **not** reach T3
+    (sub-scale dots stay dots) or override T0 (the FOLLOW lock and the actively-hovered *box* still
+    win). `Player` gains a matching `hoveredClass` input, fed into every `redrawOverlay` tier
+    computation.
+- **`cv-control-panel-logic.ts#toggleLabelChip` is deleted outright** — the old function built the
+  allowlist complement on first hide (the D-3-flagged dishonest trap) and its `FIRST_HIDE_HINT` copy
+  went with it. `CvControlPanel#toggleChip` now calls `toggleLabelDeny` and writes straight through the
+  existing debounced `applyHotKnob` path, same as every other hot knob. `isChecked` is reworked to the
+  honest **combined** predicate — `isLabelChecked(labelFilterSeed, label) && !isLabelDenied
+  (labelDenyFilter, label)` — so a class the (separately, rarely-edited) allowlist already excludes
+  correctly stays unchecked even though a click can only ever restore the deny-list half.
+  `chipCandidates` gains a third parameter (`labelDenyFilter`), unioned into the candidate set
+  alongside the allowlist and observed labels, so an already-hidden class stays visible in the
+  checklist as "hidden" instead of disappearing the moment the server stops emitting it.
+- **One feed owner** — `DetectionsStore` (not a new `vision-feed-store.ts`) is extended with
+  `trackTracks(streamId)`/`untrackTracks()`/`tracks` (a readonly signal), a **completely independent**
+  lifecycle from the pre-existing `track()`/`reset()` detections-feed pair (separate poll-stop
+  function, separate signal, separate `DestroyRef` teardown line) — see "Design choices" below for why
+  extending the existing store, not a new one, was the smaller honest change. `CvControlPanel`'s own
+  private `GET .../tracks` poller is deleted entirely; the component now injects `DetectionsStore` and
+  reads `detections.tracks()`/`detections.results()`. Its constructor calls
+  `trackTracks(streamId)`/`untrackTracks()` on every stream-id change — since the component is now
+  body-only and only ever mounted while the drawer is open (see above), "poll only while the drawer is
+  open" falls out for free from the component's own lifetime, with no separate visibility flag needed.
+
+### Design choices
+
+- **`DetectionsStore` extended, not a new store — the smaller honest change.** The task's own brief
+  offered both options. A new `vision-feed-store.ts` would have meant either the strip and the panel
+  reading from two different stores for what is conceptually one stream's one feed (a split the
+  honesty doctrine actively warns against — two sources of truth *can* disagree), or `DetectionsStore`
+  itself becoming a thin re-export shim, adding a layer with no behavioral reason to exist. Extending
+  it keeps exactly one place that owns "what is this stream detecting right now" in both its senses
+  (the results feed and the tracks/lock feed), with the two lifecycles kept deliberately independent
+  (verified by a dedicated "tracks poll starts/stops without touching the detections feed" test) so a
+  future caller of one is never surprised into starting the other.
+- **`stripChips` is a separate function from `deriveChips`, not a signature extension of it.**
+  `deriveChips` is read by every non-interactive `DetectionsStore.chips` consumer and only ever scans
+  `results` — which, because the deny-list drop site runs pre-fan-out server-side, can **never**
+  contain a denied label at all. The strip's own candidate set has to union the operator's
+  `labelDenyFilter` in from `SettingsStore`, a source `deriveChips`'s other callers have no reason to
+  touch and no business reading. Forcing one shared signature would have made every existing
+  `deriveChips` caller carry an unused parameter for a concern only the strip has.
+  `cv-control-panel-logic.ts#chipCandidates` already applies the identical "union the deny-list in from
+  outside `results`" reasoning to its own checklist — `stripChips` is a second, purpose-built instance
+  of the same principle, not a duplicate of the mechanism.
+- **`ToolRailPanelId` keeps the surviving id `'cv'`, not renamed to `'vision'`.** The drawer's own
+  title/icon changed to "Vision"/`eye`, but the persisted `localStorage` key an operator's browser
+  already carries names the panel `'cv'` — renaming the id would silently reopen no drawer at all for
+  every returning operator until they re-discovered the new rail button. `fly-logic.ts`'s own doc
+  comment on the type carries this reasoning so a future reader isn't tempted to "clean up" the name
+  mismatch.
+- **Sibling composition, not nested** — see "What shipped" above for the watch-mode-visibility trap
+  this avoided. Recorded here because it was a real design revision made mid-task, not a mechanical
+  choice: the first plan nested the strip inside `CvControlPanel`'s own panel, which would have
+  silently regressed the strip's watch-mode reachability.
+- **`chipCandidates`'s existing signature-extension approach was kept** for the CV panel's own
+  checklist (a third parameter, `labelDenyFilter`) rather than also being rewritten as a from-scratch
+  function — its existing shape (union allowlist + deny-list + observed) already matched what wave W5
+  needed; only `stripChips` needed genuinely new logic (counts, an 8-item cap, recency order).
+
+### Degrade / role-gate / dev-parity
+
+- **A denied label can never reappear in `DetectionsStore.results()` at all** — enforced Java-side,
+  pre-fan-out (W1) — so both `stripChips` and `chipCandidates` must (and do) union the operator's own
+  `labelDenyFilter` in from `SettingsStore` externally; reading `results` alone would make an
+  already-hidden chip vanish from the checklist entirely instead of rendering as "hidden," which would
+  be a lie by omission about what the operator has already done.
+- **Hover promotion is pure client state, never a PATCH** — `hoveredDetectionClass` never touches the
+  network; a failed/slow backend has zero effect on whether hovering a chip highlights its boxes.
+- **Click-to-hide degrades exactly like every other hot knob**: `patchStreamConfig` failing leaves
+  `SettingsStore`'s draft already updated (so the next Start carries the operator's intent) but the
+  running stream's actual deny-list unconfirmed — no different from a failed confidence/fps PATCH
+  today; nothing here fabricates a "hidden" state the wire never confirmed. (Unlike the FOLLOW-lock
+  chip, this is not wire-gated — a deny-list write has no server "did it land" readback field the way
+  `StreamTracksResponse#lockedTrackId` does, so it follows the app's existing hot-knob honesty
+  contract, not the stricter wire-confirmed-only one `lockedTrackId`/`hoveredDetectionClass` need
+  because those *do* have a distinguishable "not yet true" state to misrepresent.)
+- **Watch mode**: the strip stays reachable (unchanged gate), the mutating `CvControlPanel` — and
+  therefore every deny-list write, model change, and tracking control — stays hidden, same "viewer,
+  not controller" rule Start/Stop and the flight panel already enforce. Nothing new introduced.
+- **No new role-gated surface** — this wave adds no capability role-gating didn't already cover;
+  `vision.auth.enabled=false`'s unbounded dev admin sees the identical merged drawer, identical
+  deny-list affordance, as every other role that could already reach the pre-merge `cv`/`detections`
+  drawers.
+- **Tracks poll honesty is unchanged, only relocated** — `DetectionsStore.trackTracks` is the same
+  poll `CvControlPanel` used to run privately, at the same cadence (`TRACKS_POLL_INTERVAL_MS = 2_000`),
+  gated the same way (now for free, via component mount lifetime instead of an explicit open flag); the
+  "Following #N" chip still only ever reads the wire's own echoed `lockedTrackId`, never an optimistic
+  local guess.
+
+### Tests
+
+`npm run test:ci`: **132 test files, 2371 tests, all passing** (up from 131/2341 at the close of Wave
+W4 — net +1 file, +30 tests). New: `shared/player/detections-strip-logic.spec.ts` (10 cases, new file).
+Extended: `core/detections/detections-logic.spec.ts` (+8, three new describe blocks —
+`isLabelDenied`/`toggleLabelDeny`/`HIDDEN_CLASS_TRUTH`), `core/detections/detections-store.spec.ts`
+(+7, a new "Tracks poll" section including a case verifying the tracks lifecycle is independent of the
+detections-feed lifecycle), `core/settings/settings-store.spec.ts` (+4, the deny-list draft/save/
+migration-backfill/corrupt-value cases), `shared/player/detection-overlay-logic.spec.ts` (+5, a "Class
+hover promotion" section), `features/fly/cv-control-panel-logic.spec.ts` (net churn, not growth —
+`toggleLabelChip`'s own describe block deleted, `chipCandidates`'s tests widened to the new 3-arg
+signature plus 2 new cases), `features/settings/detection-settings-logic.spec.ts` (`labelDenyFilter: []`
+added to the `atDefaults` fixture). One authoring bug caught and fixed during this wave's own
+verification, not left in: a new hover-promotion test asserted a solo low-confidence detection lands in
+T2, but with nothing else in the batch to fill `NOTABLE_TOP_K`'s ranking budget it would win a top-K
+slot by default regardless of hover — fixed by padding the test with `NOTABLE_TOP_K` stronger
+detections, mirroring the pre-existing "everything left after T0/T3/T1 is T2" test's own pattern; the
+implementation itself needed no change. `npx tsc --noEmit` clean on both `tsconfig.json` (default) and
+`tsconfig.app.json`. `architecture.spec.ts` green (part of the 132/2371 total).
+
+### Build
+
+`ng build --configuration production` — green. Same two pre-existing budget warnings as Waves H8/W3/W4
+(initial bundle over its 390 kB warning threshold, `tactical-map.css` over its 8 kB budget), neither
+introduced nor worsened by this wave. **Bundle delta**, measured via `git worktree add` at the pre-wave
+commit (2148c773, this branch's own tip going into W5) with `node_modules` symlinked in (no dependency
+changes this wave, so no reinstall needed) — a worktree was used rather than `git stash` per this
+codebase's own standing methodology (W3/W4):
+
+- **Initial (eager) bundle: 408.85 kB → 409.05 kB raw (+0.20 kB, +0.05%) / 115.11 kB transfer both
+  (unchanged at this precision).** Negligible — every file this wave touched lives in a lazy-loaded
+  feature chunk.
+- **`cockpit` lazy chunk: 130.05 kB → 128.18 kB raw (−1.87 kB) / 28.21 kB → 27.98 kB transfer
+  (−0.23 kB) — a decrease**, despite this wave adding a new drawer merge, a hover-plumbing chain, and a
+  deny-list rework: removing `CvControlPanel`'s own self-wrapped `<vision-side-panel>` (now one shell
+  owned by `cockpit.html` instead of two) and deleting `toggleLabelChip`/`FIRST_HIDE_HINT` outweighed
+  what the strip's 3-file split and the new hover/deny-list wiring added.
+- **`live` lazy chunk: 21.68 kB raw both (unchanged) / 5.93 kB → 5.95 kB transfer (+0.02 kB,
+  rounding-level noise)** — `DetectionsStrip`'s unbound read-only path is byte-for-byte the same
+  behavior as before; the new interactive-mode code is present but does not change what Live's own
+  unbound usage executes.
+- **`wall` lazy chunk: unchanged (9.74 kB / 3.29 kB both)** — confirms the wall tile was never a
+  consumer of any file this wave touched.
+
+### Files touched
+
+`src/app/core/api/models.ts`, `src/app/core/detections/detections-logic.ts` (+`.spec.ts`),
+`src/app/core/detections/detections-store.ts` (+`.spec.ts`), `src/app/core/settings/settings-store.ts`
+(+`.spec.ts`), `src/app/features/fly/cockpit-facade.ts`, `src/app/features/fly/cockpit.ts`/`.html`/
+`.css`, `src/app/features/fly/cv-control-panel.ts`/`.html`/`.css` (+`cv-control-panel-logic.ts`/
+`.spec.ts`), `src/app/features/fly/fly-logic.ts`, `src/app/features/settings/
+detection-settings-logic.spec.ts`, `src/app/shared/player/detection-overlay-logic.ts` (+`.spec.ts`),
+`src/app/shared/player/player.ts`, `src/app/shared/player/detections-strip.ts`/`.html`/`.css` (rewritten
+as a 3-file component, was inline) + new `detections-strip-logic.ts`/`.spec.ts`.
+
+### Left incomplete / deferred, named honestly
+
+- **`cv-control-panel.html`'s own internal restructure (tier layout, control grouping) is explicitly
+  out of this wave's scope** — the task named it CV-UX-RESEARCH's job, not W5's; the panel's *content*
+  is unchanged, only its outer shell (no more self-wrapped drawer) and its class-chip write path (deny-
+  list, not allowlist-complement) changed.
+- **No copy change was needed in the cockpit's Help drawer** — checked directly: its shortcuts `<dl>`
+  names only generic keys (`M`/`B`/`F`/`Esc`/`?`) and the switcher/exit shortcuts, never `cv`/
+  `detections`/"Vision" by name, so the merge required no textual update there.
+  `cockpit.ts`/`cockpit.html`/`cockpit.css` doc comments that *did* still name the old seven-drawer/
+  `detections` id split were caught by a repo-wide grep sweep and corrected as part of this wave (not
+  left stale) — `cockpit.ts`'s own `panels` field doc comment and a `cockpit.css` comment describing
+  which drawer components self-wrap `<vision-side-panel>` internally.
+- **No separate `fly.ts`/`fly.html` exists** — resolved during this wave: the cockpit page is
+  `cockpit.ts`/`cockpit.html` only; `fly-logic.ts`/`fly-osd.ts`/`fly-redirect-guard.ts`/`fly.routes.ts`
+  are pure-logic/routing/a different overlay component, not a second page needing its own review.
+
+
+## Status — CV-PANEL-SPLIT-PLAN wave P1: the Vision drawer splits into a fly-time panel and a calm-hands setup modal (docs/plans/active/CV-PANEL-SPLIT-PLAN.md §1) — 2026-08-20
+
+### What shipped
+
+W5 left `<vision-cv-control-panel>` as a single 474-line, 12-section scroll inside the merged Vision
+drawer — every fly-time glance (Detect on/off, the follow-lock chip, the two honesty notices) sharing
+one surface with every set-once decision (model choice, confidence, the full class checklist, tracking
+mode, the Expert rate/ceiling/engine tier). P1 splits that one surface into two, with **no content
+redesign** — every control not explicitly named for the fly-time panel moved verbatim into the new
+modal, none deleted.
+
+- **`<vision-cv-control-panel>` slimmed to exactly seven items**, top to bottom: (1) the Detect hero
+  toggle + its existing honest status line (a measured-rate line is deferred to P2, per the plan); (2)
+  a new **"Looking for" summary row** — the selected model's `displayName` + `costWord` (`'fast'`/
+  `'slower'`) plus a "Change…" button, a *door* into the modal's own intent cards, never a second copy
+  of them; (3) nothing — the W5 detections-strip sibling already covers "what's on screen right now"
+  and is not duplicated here; (4) the Boxes declutter segmented control, unchanged; (5) the "Following
+  #N — Release" lock chip, unchanged, still wire-confirmed-only; (6) the capability-downgrade
+  warn/lag-over-budget danger notices, unchanged, still only-when-firing; (7) a "Detection setup…"
+  button, the second door into the modal.
+- **New `<vision-cv-setup-modal>` (`features/fly/cv-setup-modal.ts`/`.html`/`.css`)** — a centered
+  `position: fixed` dialog over the cockpit stage, video visible-but-dimmed behind a `--scrim-strong`
+  backdrop (never blanked, no `backdrop-filter` blur). Contains, moved verbatim from the old panel's
+  Tune/Expert disclosures: the "Looking for" intent cards + open-vocab preset button, the "Seen now"
+  staged-allowlist mini-checklist, confidence, the full "All classes" search/toggle/add/clear
+  checklist, the tracking-mode segmented control, and a collapsed "Expert" `<details>` (fps floor,
+  capability ceiling + hint, engine picker, re-verify cadence, follow sampling, the flow strip, the
+  Serving/detection-lag readout). Backdrop-click and the header "×" both emit `(closed)`; `Esc` is
+  **not** handled locally — `cockpit.ts`'s existing page-level `keydown` listener closes it via
+  `collapseOverlays()`, extended this wave (see below). Opening the modal does not touch the `panels`
+  `UiStore` group at all, so the Vision drawer stays open underneath it.
+- **Dialog wiring** — `cockpit.ts`'s `CockpitDialog` union widens from `'stop'` to `'stop' |
+  'cv-setup'`, both sharing the page's existing transient `dialog` `UiStore` (no `storageKey`,
+  mirrors `arm-confirm-dialog.ts`'s group shape). New `requestCvSetup()`/`closeCvSetup()` methods
+  mirror `requestStop()`/`cancelStop()`. `cockpit.html` wires `<vision-cv-control-panel
+  (setupRequested)="requestCvSetup()">` and mounts `<vision-cv-setup-modal>` in a new
+  `@if (isDialogOpen('cv-setup') && !facade.watchMode())` block (not additionally gated on
+  `isPanelOpen('cv')` — nothing can call `requestCvSetup()` without the drawer already open, since the
+  only two triggers live inside the panel, which itself only renders while the drawer is open).
+- **`Esc`'s cascade gains a new first-priority step** — `fly-logic.ts#nextCollapseAction` takes a new
+  `cvSetupOpen` field, checked *before* `panelOpen`/`stopConfirmOpen`/`mapVisible`: the setup modal is
+  the topmost overlay in the stack (it opens *over* the still-open Vision drawer), so one `Esc` closes
+  it alone, leaving the drawer open for a second `Esc` to then close.
+- **`CockpitFacade.cvExpertOpen`** — a new plain `signal(false)`, round-tripped through the modal's
+  `[expertOpen]`/`(expertOpenChange)` input/output pair, mirroring `lockedTrackId`/
+  `hoveredDetectionClass`'s existing "facade-owned overlay-adjacent state" shape. Facade-owned rather
+  than a component-local boolean (the shape the pre-split panel's own `tuneTier`/`expertTier` used) so
+  an operator's "I always want Expert open" preference survives the modal being destroyed and
+  recreated on every close/reopen — a component-local field would forget it every time.
+- **`cv-control-panel-logic.ts` gains two exports**, shared by both components so they can never
+  disagree: `modelCostWord(openVocab)` (`'slower'`/`'fast'`, replaces the inline ternary both the old
+  panel's intent cards and the new summary row used to write separately) and `HOT_KNOB_DEBOUNCE_MS`
+  (`400`, hoisted out of a local `const` in the panel so the modal's own `hotKnobPatch` debounce can't
+  silently drift from it).
+
+### Design choices
+
+- **The "Seen now" staged-allowlist checklist moved to the modal, not deleted, not left in the
+  panel** — a plan-vs-code mismatch worth flagging explicitly. The plan's own item (3) assumed the
+  panel's tier-0 "Seen now" section *was* the W5 detections-strip sibling and could simply be dropped
+  as a duplicate. Reading the actual source showed these are two different mechanisms: the W5 strip
+  (`<vision-detections-strip>`) toggles `labelDenyFilter` immediately, no staging; the panel's own
+  "Seen now" section is a staged **allowlist** mini-checklist sharing `pendingLabels`/
+  `submitLabelFilter`/`discardStagedLabels` with the full "All classes" checklist. Since it is a
+  set-once decision control, not a fly-time glance, it moved into the modal (alongside "All classes",
+  which it already shares state with) rather than being deleted — "nothing is deleted in P1" per the
+  plan's own instruction for anything not explicitly named.
+- **Expert disclosure state: facade signal, not a component `UiStore`, even though that departs from
+  the very file being split.** The pre-split panel's `tuneTier`/`expertTier` were component-owned
+  `UiStore` fields — a working, already-shipped precedent. The task's explicit instruction ("facade-
+  owned, not a component boolean") is more specific than that precedent, so it was followed literally:
+  `CockpitFacade.cvExpertOpen` plus an input/output pair, mirroring wave W4/W5's `lockedTrackId`/
+  `hoveredDetectionClass` shape rather than the pre-split panel's own tier-`UiStore` shape.
+- **The modal is not additionally gated on `isPanelOpen('cv')`.** Considered gating the modal's `@if`
+  on the drawer also being open, so that manually closing the drawer (the rail icon, or `?` toggling
+  `help` — mutually exclusive with `cv` inside the `panels` `UiStore` group) would also force-close the
+  modal. Rejected: the two `UiStore` groups (`panels`, `dialog`) are intentionally independent, and
+  gating one on the other would mean a drawer close silently discarding dialog-open state the operator
+  never asked to lose, with no way back except re-triggering `requestCvSetup()`. If the drawer does
+  close while the modal is open (an edge case — closing it requires going out of the way, since the
+  only buttons that open the modal live inside the panel), the modal stays open but now reads cleared
+  tracks/lock data — honest (nothing fabricated, `untrackTracks()` clears stale reads on unmount, see
+  `CvControlPanel`'s own doc comment) even if visually orphaned; not a violation of any named
+  invariant, but worth a future wave's attention if it proves confusing in practice.
+- **`servedCapability` (the downgrade notice's `reason` text) is a small duplicate computed in both
+  components, not threaded through an output.** Both `CvControlPanel` and `CvSetupModal` read
+  `DetectionsStore.results()` directly and derive `frameTracking`/`servedCapability`/
+  `capabilityDowngraded`/`detectionLagOverBudget` independently — there is nothing to keep in sync by
+  wiring one from the other, since both read the identical shared signal. The panel only needs the two
+  booleans (for its conditional notices); the modal additionally needs the numeric readouts (Serving
+  chip, lag text) for its own quiet Expert-tier reading.
+
+### Degrade / role-gate / dev-parity
+
+- **Every existing honesty invariant carries over unchanged, only relocated**: the Detect switch still
+  renders `detectionEnabled()` (server truth via `CockpitFacade.detectionOn()`), never an optimistic
+  local flip; the "Following #N" chip still only ever reads `DetectionsStore.tracks()?.lockedTrackId`,
+  never a click's own guess; the capability-downgrade notice still reads `servedCapability()?.reason`
+  straight from the server's own field, never a local comparison (invariant B5); the tracks poll
+  (`trackTracks`/`untrackTracks`) is still keyed on `CvControlPanel`'s own mount lifetime — i.e. the
+  Vision drawer being open — unchanged by the split; `CvSetupModal` never calls either.
+- **No new role-gated surface.** Both components are reached exactly where the old single panel was —
+  gated on `!facade.watchMode()` — so a viewer (watch mode) sees neither the panel's mutating controls
+  nor the setup modal's door into them, same "viewer, not controller" rule as before. Nothing here
+  reads `MeResponse.topRole` directly; role-gating is unchanged from the pre-split panel.
+- **`vision.auth.enabled=false` dev parity**: unaffected — the split touches only client-side UI
+  composition, no auth/role logic. The unbounded dev admin sees the identical two-surface split as
+  every other ADMIN.
+- **Failed enrichment/PATCH reads degrade exactly as before**: a failed `GET /api/cv/models` still
+  renders the summary row's fallback (the raw model id, `mono`, no fabricated display name); a failed
+  hot-knob PATCH still leaves the draft updated but the running stream's actual state unconfirmed,
+  same as every other hot knob pre-split.
+
+### Tests
+
+`npm run test:ci`: **132 test files, 2374 tests, all passing** (up from 132/2371 at the close of W5 —
+net +3 tests, 0 new files: `cv-control-panel-logic.spec.ts` gains a `modelCostWord` describe block (+2
+cases); `fly-logic.spec.ts`'s existing `nextCollapseAction` describe block gains the new `cvSetupOpen`
+field on every case plus one new case for its first-priority behavior (+1, net over widening the
+existing 4). No new component spec for `cv-control-panel.ts`/`cv-setup-modal.ts` — this repo's own
+established precedent (pure-logic vitest over component specs) holds; every behavior the split could
+regress (the seven-item content, the modal's verbatim sections, dialog open/close) is either pure logic
+already covered by `cv-control-panel-logic.spec.ts`/`fly-logic.spec.ts` or template wiring inherently
+outside that precedent's scope. `npx tsc --noEmit` clean on both `tsconfig.app.json` and
+`tsconfig.spec.json` (and the default `tsconfig.json`). `architecture.spec.ts` green — `fly/cockpit.ts`
+itself (the only file this suite scans) injects no new store directly and declares no new bare-signal
+overlay flag; `cv-control-panel.ts`/`cv-setup-modal.ts` are non-routed presentational children, already
+out of that suite's scope by its own documented carve-out (same as `flight-command-panel.ts`).
+
+### Build
+
+`ng build --configuration production` — green. Same two pre-existing budget warnings as every prior
+wave back through H8 (initial bundle over its 390 kB warning threshold by ~19 kB, `tactical-map.css`
+over its 8 kB budget by ~1.86 kB), neither introduced nor worsened by this wave (both present,
+near-identical magnitude, in the pre-P1 baseline build below too). **Bundle delta**, measured via
+`git stash -u` back to the pre-P1 working tree (this branch's own tip going into P1) and rebuilding,
+then `git stash pop` to restore:
+
+- **Initial (eager) bundle: 409.05 kB → 409.08 kB raw (+0.03 kB) / 115.11 kB → 115.12 kB transfer
+  (+0.01 kB) — noise-level, effectively unchanged.** Expected: every file this wave touched lives in
+  the lazy-loaded `cockpit` chunk.
+- **`cockpit` lazy chunk: 128.18 kB → 132.49 kB raw (+4.31 kB, +3.4%) / 27.98 kB → 28.50 kB transfer
+  (+0.52 kB, +1.9%)** — the cost of one new component (`cv-setup-modal.ts`/`.html`/`.css`) plus the new
+  facade signal/dialog-id/collapse-cascade wiring, partly offset by the slimmed panel shedding roughly
+  half its own template/component code to the modal. A modest, expected increase for a structural
+  split that adds one new standalone component with its own selector/metadata overhead — no dead code
+  or duplication left behind (verified via a repo-wide grep for `tuneTier`/`expertTier`/
+  `onTierToggle`, all gone).
+
+### Files touched
+
+Modified: `src/app/features/fly/cockpit-facade.ts`, `src/app/features/fly/cockpit.ts`/`.html`,
+`src/app/features/fly/cv-control-panel.ts`/`.html`/`.css` (slimmed), `src/app/features/fly/
+cv-control-panel-logic.ts` (+`.spec.ts`, two new exports), `src/app/features/fly/fly-logic.ts`
+(+`.spec.ts`). New: `src/app/features/fly/cv-setup-modal.ts`/`.html`/`.css`.
+
+### Left incomplete / deferred, named honestly
+
+- **The measured-rate line for the Detect hero's status text is explicitly P2 scope**, per the plan —
+  the hero's status line is otherwise unchanged from pre-split.
+- **The modal is not gated on the Vision drawer's own open state** — see "Design choices" above for
+  the reasoning and the one honest-but-orphaned edge case this leaves (drawer closed via the rail/help
+  toggle while the modal is still open, which then shows cleared tracks data until manually dismissed).
+  Not a regression against any named invariant; flagged for a future wave's judgment call, not silently
+  left undocumented.
+- **No Help-drawer copy change was needed** — checked directly: the Help drawer's shortcuts `<dl>`
+  names only generic keys (`M`/`B`/`F`/`Esc`/`?`), never `cv`/"Vision"/"Detection setup" by name (the
+  same finding W5's own changelog recorded), and the new "Change…"/"Detection setup…" buttons are
+  text-labeled, not icon-only, matching this app's existing precedent that only icon-only controls earn
+  a Help-drawer entry.
+
+## Status — CV-PANEL-SPLIT-PLAN wave P2: measured-rate hero, intent cards, symptom-framed confidence, honest expert copy, one merged Classes section (docs/plans/active/CV-PANEL-SPLIT-PLAN.md §1.1/§1.2/§2/§3 P2, docs/plans/active/CV-UX-RESEARCH.md §1/§5) — 2026-08-20
+
+### What shipped
+
+- **Measured-rate hero line** (`detectionStatus`/`formatMeasuredRate`, `cv-control-panel-logic.ts`) —
+  now takes the whole `DetectionRate | undefined` object (was a bare `submittedFps` number), so it can
+  tell apart three distinct wire states instead of collapsing them: **`rate === undefined`** ("never
+  sampled yet", per `StreamTracksResponse`'s own javadoc) → `"On — rate not yet measured."`, never a
+  fabricated number; **`rate` present but `submittedFps <= 0`** (a genuine stall in the trailing
+  window, `DetectionRate.empty()`'s own all-zero shape) → new `'stalled'` status kind, `"On — no
+  detector passes in the last {rate.windowSeconds}s."` (the window itself, not a hardcoded figure);
+  **`rate.submittedFps > 0`** → `formatMeasuredRate(rate.submittedFps)` + a classes-on-screen clause,
+  e.g. `"9.9/s measured · 3 classes on screen"` (singular `"1 class on screen"`, clause omitted
+  entirely at zero). The operator's own off choice still wins first, now with the plan's exact wording
+  `"Off — zero CPU. Video unaffected."`. `cv-control-panel.ts`'s `detectionStatusInfo` computed now
+  passes `this.detections.tracks()?.rate` (the object) through unchanged.
+- **Intent cards** (`cv-setup-modal.html`) — each of the three radio cards (general/specialized/
+  open-vocab, `CvWiring#cvModelRoster`'s three hardcoded roster entries) now shows a new
+  `intentCardSentence(kind)` one-liner under its name (`"Finds people, cars, trucks and other everyday
+  vehicles."` / `"Finds military vehicle types — tanks, APCs and similar."` / `"Finds anything
+  nameable, including buildings — a much wider net."`) — hand-written, since the wire roster
+  (`CvModelResponse.java`) carries no description field, only `id, displayName, kind, openVocab,
+  defaultLabelFilter`, and the three `kind` values are fixed. The open-vocab card's CPU line
+  (`perfHintText()`, shrunk — see below) and the people/vehicles/buildings preset button both moved
+  inside that card's own `@if (m.openVocab && m.id === settings.effective().model)` block — no
+  section-level paragraph competing with the grid anymore. No `kind` taxonomy chip was found still
+  rendering (already gone by P1). Selecting a card is still today's `onModelChange` + seed-path
+  behavior, unchanged; the re-arm honesty toast is untouched.
+- **Confidence reframed as a symptom** (`cv-setup-modal.html`) — the slider's `<label>` now reads
+  `"Fewer false boxes ←→ Find more"` with the numeric value in `.mono` beside it
+  (`settings.effective().confidenceThreshold.toFixed(2)`); identical `[value]`/`(input)` wiring, only
+  the copy changed.
+- **Expert honesty** — the fps slider's label is now `"Detector floor — adaptive rate raises above
+  this, never below"` (folding the old separate hint paragraph into the label itself, so the claim
+  isn't stated twice); `perfHint(openVocabSelected)` shrank to exactly one sentence per branch and no
+  longer folds in `HIDDEN_CLASS_TRUTH` verbatim (confirmed by a new spec assertion) — the class-filter-
+  steers-model/saves-CPU claim now appears at most once per surface, in its own dedicated place (the
+  merged Classes section's own foot line, see below), never duplicated into the fps hint too. **The
+  capability-ceiling `<select>` was checked against CV-UX-RESEARCH §1's render-bug report (rendering
+  outside the `trackingMode() !== 'OFF'` guard) and found already correctly inside that guard in the
+  current modal — no fix was needed; this is a verified-fine finding, not a silent no-op.**
+- **Classes apparatus merged into one section** — P1 had moved both the old panel's staged-allowlist
+  "Seen now" mini-checklist *and* the full "All classes" search/toggle/add/clear checklist into the
+  modal side by side, sharing `pendingLabels` but rendering as two separate lists (flagged in P1's own
+  "Design choices" as a decision worth revisiting, and independently reported as a duplicate-apparatus
+  mismatch in this task's brief). P2 deletes the "Seen now" section's markup entirely and repurposes
+  its one distinguishing signal — which labels were recently observed — as a **sort priority** inside
+  the single remaining checklist instead of a second rendered list: new `sortRecentFirst(candidates,
+  recentLabels)` (replaces `sortSelectedFirst`) promotes recently-observed labels to the front, in
+  their own recency order, leaving everything else in place; a candidate no longer in scope (filtered
+  out by search) is silently dropped rather than kept as an orphan. The modal's `filteredChips`
+  computed now reads `sortRecentFirst(filterLabelsByQuery(...), this.recentLabels())` where
+  `recentLabels = computed(() => recentObservedLabels(this.detections.results()))`. **Hidden-classes
+  (deny-list) management, added by wave W5, now lives inside this same merged checklist** rather than
+  a separate concept: a new `isHidden(label)` method (wraps `isLabelDenied`) drives `.class-chip.hidden`
+  styling — soft-amber `--color-warn-*` tokens, a "label — hidden" strikethrough treatment, and a
+  `title` of `'Hidden — click to show {label} again'` — mirroring `detections-strip.css`'s identical
+  `.strip-chip-hidden` precedent exactly, so the two surfaces read "hidden, click to un-hide" the same
+  way. Section order is now Looking for → Confidence → Classes → Tracking → Expert, matching the plan.
+- **Pure logic**: `cv-control-panel-logic.ts` gains `intentCardSentence(kind)` and `sortRecentFirst`
+  (replacing `sortSelectedFirst`), and rewrites `formatMeasuredRate`/`detectionStatus`/`perfHint` per
+  above; `DetectionStatusKind` widens with a new `'stalled'` member. All new/changed behavior is pure
+  functions with vitest coverage in `cv-control-panel-logic.spec.ts` — no new component spec, matching
+  this repo's established precedent.
+
+### Design choices
+
+- **A plan-vs-code mismatch in P1's own MODULE.md entry, found and corrected here, reported not
+  silently fixed.** P1's "Left incomplete / deferred" section states: *"The measured-rate line for the
+  Detect hero's status text is explicitly P2 scope... the hero's status line is otherwise unchanged
+  from pre-split."* This is false. `git show dd3274b6^:.../cv-control-panel-logic.ts` and `git show
+  dd3274b6^:.../core/api/models.ts` both confirm `formatMeasuredRate`, `detectionStatus`, and the full
+  `DetectionRate`/`PipelineLatency`/`DetectionState`/`StreamTracksResponse.rate` TS typing **already
+  existed, working, before the P1 commit** — they predate the split entirely (their own doc comments
+  cite `docs/plans/active/CV-DEMAND-PLAN.md §3.6` and wave U3+U5 of `CV-UX-RESEARCH.md`, both older
+  than CV-PANEL-SPLIT-PLAN). What P2 actually did was **rework** an already-shipped measured-rate line
+  to add the `'stalled'` vs `'never sampled'` distinction and switch its text to the plan's exact
+  wording — not build one from scratch. Left as history in P1's own entry above (not rewritten) per
+  this task's "report, don't improvise" instruction; this entry is the correction.
+- **`intentCardSentence` sentences are hand-written prose keyed on `kind`, not a wire field** — the
+  roster has no description field and the wire is frozen for this task (`station/vision-api` is out of
+  scope). Keying on `kind` rather than `id` means a future fourth roster entry with a `kind` already
+  covered here gets a sentence automatically; an entirely new `kind` value falls through to `null` (no
+  sentence rendered) rather than a stale/wrong guess — checked directly in the spec.
+- **Recency becomes a sort key, not a second list, to actually delete the duplicate apparatus** — the
+  brief's own instruction was "merge into ONE classes section... drop duplicate apparatus" while "keep
+  the recency signal". A capped 5-item mini-list and a full search/toggle/add/clear checklist cannot
+  be merged into literally one `@for` without picking one shape; sorting was chosen over, e.g., a
+  recency badge/section-divider inside the full list, because it needed no new markup at all — the
+  existing chip template already handles arbitrary list order, so "recent first" falls out of changing
+  only the array passed into the same `@for`.
+- **Old `formatMeasuredRate`/`detectionStatus` spec cases asserting the *previous* text (`'Running at
+  9.9 fps · 3 classes on screen'`, `'Off — video only, zero detection cost.'`) were replaced, not kept
+  alongside the new ones** — they exercised text this task explicitly rewrote, so keeping them would
+  either fail (asserting stale copy) or require the old copy to still be produced by some code path,
+  which would reintroduce exactly the duplication P2 is asked to remove. A new `rate()` test-factory
+  (mirrors the file's existing `model()`/`settings()`/`capability()` pattern) builds `DetectionRate`
+  fixtures for the new signature.
+
+### Degrade / role-gate / dev-parity
+
+- **Never a fabricated number, in either direction.** `rate === undefined` and `rate.submittedFps <= 0`
+  are now visibly different sentences (`"rate not yet measured"` vs. `"no detector passes in the last
+  Ns"`) instead of collapsing to the same `null`-swallowing branch pre-P2 did — a genuine stall now
+  reads as a stall, not silently as "still warming up". A negative `submittedFps` (should never occur
+  on the wire, defensive only) still reads as `'stalled'`, never a fabricated negative rate — covered
+  by a spec case.
+- **Hidden classes still degrade honestly**: `chipCandidates()` (unchanged, W5) unions `labelFilter` +
+  `labelDenyFilter` + observed labels, so a hidden/denied label never silently disappears from the one
+  merged checklist — it renders struck through with an explicit un-hide affordance, same invariant the
+  detections-strip precedent already established.
+- **No role-gating touched.** Both components are reached exactly where P1 left them — gated on
+  `!facade.watchMode()` — unaffected by this wave; nothing here reads `MeResponse.topRole`.
+  `vision.auth.enabled=false` dev parity is unaffected — every change in this wave is client-side
+  copy/logic/layout only, no auth/role code touched; the unbounded dev admin sees the identical rework
+  every other ADMIN does.
+- **Failed enrichment reads unchanged**: a failed `GET /api/cv/models` still degrades the "Looking for"
+  summary row to the raw model id (`mono`, no fabricated display name) exactly as before — untouched
+  by this wave's intent-card work, which only changes what renders once the roster *does* resolve.
+
+### Tests
+
+`npm run test:ci`: **132 test files, 2381 tests, all passing** (up from 132/2374 at the close of P1 —
+net +7, 0 new spec files): `sortRecentFirst` replaces the `sortSelectedFirst` describe block (3 cases,
+rewritten for recency semantics); `perfHint`'s describe block drops the old "folds in
+`HIDDEN_CLASS_TRUTH` verbatim" case and gains a "does not fold it in" + a one-line-length case; a new
+`intentCardSentence` describe block (4 cases: general/specialized/open-vocab/unknown-kind→`null`); the
+`formatMeasuredRate`/`detectionStatus` describe blocks are rewritten in place for the new
+`DetectionRate`-object signature (a new local `rate()` fixture factory; new cases for the `'stalled'`
+kind, the exact window-seconds text, and the negative-`submittedFps` defensive case). `npx tsc --noEmit`
+clean on `tsconfig.app.json`, `tsconfig.spec.json`, and the default `tsconfig.json`.
+`architecture.spec.ts` green — no new store injected, no new bare-signal overlay flag;
+`cv-control-panel.ts`/`cv-setup-modal.ts` stay non-routed presentational children, unaffected.
+
+### Build
+
+`ng build --configuration production` — green. Same two pre-existing budget warnings as every prior
+wave (initial bundle over its 390 kB threshold by ~19 kB, `tactical-map.css` over its 8 kB budget by
+~1.86 kB), neither introduced nor worsened. **Bundle delta**, measured the same way P1's own entry did
+— `git stash -u` back to this branch's P1 tip (`dd3274b6`), rebuild, `git stash pop` to restore:
+
+- **Initial (eager) bundle: 409.08 kB → 409.08 kB raw (unchanged) / 115.12 kB → 115.09 kB transfer
+  (−0.03 kB) — noise-level, effectively unchanged.** Expected: every file this wave touched lives in
+  the lazy-loaded `cockpit` chunk.
+- **`cockpit` lazy chunk: 132.49 kB → 132.09 kB raw (−0.40 kB, −0.3%) / 28.50 kB → 28.64 kB transfer
+  (+0.14 kB, +0.5%)** — essentially a wash: deleting the "Seen now" section's markup roughly offsets the
+  new intent-card sentences, `isHidden`/`.class-chip.hidden` styling, and the `rate`-object plumbing.
+  No net growth from this wave despite adding new copy/behavior, because it net-deletes more markup
+  (one whole checklist section) than it adds.
+
+### Files touched
+
+Modified only (no new files): `src/app/features/fly/cv-control-panel-logic.ts` (+`.spec.ts`),
+`src/app/features/fly/cv-control-panel.ts`, `src/app/features/fly/cv-control-panel.html` (comment
+only, no behavioral change), `src/app/features/fly/cv-setup-modal.ts`, `src/app/features/fly/
+cv-setup-modal.html` (major restructure), `src/app/features/fly/cv-setup-modal.css`.
+
+### Left incomplete / deferred, named honestly
+
+- **Nothing from this task's 8 numbered items was found incomplete or skipped.** The one item expected
+  to require a fix (the capability-ceiling render-bug from CV-UX-RESEARCH §1) was checked directly and
+  found already correct in the modal — reported as verified-fine rather than assumed.
+
+
+## Status — CV-CLEAN-FEED-PLAN wave W7: client-side box extrapolation closes the burn-in gap W1 opened (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7) — 2026-08-20
+
+### What shipped
+
+W6's own live smoke test (owner-observed) found boxes visibly trailing moving objects — "the flow
+of detections is much slower than video". Root cause: the burn-in path W1 deleted used to call
+`DetectionExtrapolator.at(frame.capturedAt())` server-side per published frame, velocity-projecting
+every box onto the exact frame being encoded; the client overlay only *selects* a batch by video
+latency (`selectDetectionResult`), it never projected one — so whenever video latency is shorter
+than detection arrival lag (WHEP especially; the 2 s poll fallback worst of all) the newest batch on
+hand is inherently behind the picture on screen. This wave ports the deleted server logic into the
+client, unchanged in semantics, so the wire stays frozen.
+
+- **`shared/player/detection-overlay-logic.ts` gains a new "Forward-projection" section** (between
+  `overlaySyncLatencySeconds` and `shouldDrawOverlay`): `EXTRAPOLATION_MAX_MS = 800` and
+  `EXTRAPOLATION_MATCH_GATE = 0.15`, each doc-commented with the exact server default they mirror
+  (`StreamPipelineSettings#defaults().extrapolationMaxMillis()`/`.extrapolationMatchGate()`,
+  `application.yaml`'s `vision.application.pipeline.extrapolation.max-millis`/`.match-gate`,
+  `DetectionExtrapolator.MAX_EXTRAPOLATION_MILLIS`/`.MATCH_GATE_DISTANCE`) — hand-mirrored, not
+  server-fetched, with the doc comment naming that risk explicitly (a future tuning change on one
+  side without the other quietly reintroduces this wave's own defect, in reverse). The exported
+  `extrapolateDetections(selected, previous, targetMs, maxExtrapolationMs?, matchGate?)` ports
+  `DetectionExtrapolator#match`/`#extrapolate` two-pass-for-two-pass:
+  1. **Track id, exact, ungated** (`matchDetections`'s pass 1) — equal non-`undefined` track ids on
+     both sides are the same object per the tracker's own decision, no distance heuristic involved
+     (this is what keeps velocity correct through an occlusion or a same-label crossing pair a
+     distance gate would confidently swap).
+  2. **Same-label nearest normalized-center, gated at `matchGate`**, over whatever pass 1 left
+     unmatched — closest pairs assigned first, each side used at most once, **except** a pair whose
+     two sides *both* carry a track id (the tracker already declared those different objects; gate-
+     matching them on proximity would reintroduce the exact swap pass 1 prevents).
+  - `extrapolateOne` (private) projects a matched box's center by its per-pair velocity
+    (`(selectedCenter − previousCenter) / deltaMs`), `extrapolateMs` further ahead — already capped
+    by the caller — leaving width/height and every other field (label, confidence, model, track)
+    untouched; each resulting coordinate is clamped back into `[0,1]` (the box's *origin* after
+    subtracting half-width/height back off the center, mirroring the server's exact clamp point, not
+    the center itself).
+  - `extrapolateDetections` returns `selected.detections` **raw, unchanged, same references** when
+    `previous` is `undefined`, when `previous.capturedAt` is not strictly before `selected.capturedAt`
+    (degenerate/duplicate dt — mirrors the server's `deltaSeconds <= 0` guard), or when `targetMs` is
+    at or before `selected`'s own capture time. Otherwise the horizon is capped at
+    `maxExtrapolationMs` past `selected.capturedAt` — a `targetMs` further out **freezes** at exactly
+    the capped projection rather than running boxes off into the distance forever, byte-identical to
+    the server's own freeze rule. Unmatched detections in `selected` (including every detection when
+    there is nothing to match against) pass through completely unchanged, same object reference.
+  - New `findPredecessorResult(results, selected)` — the newest batch in `results` (newest-first, per
+    `selectDetectionResult`'s own contract) strictly older than `selected`, found from `selected`'s
+    own position (by reference) onward; `selected` being absent from `results` altogether is itself
+    "no predecessor," not license to match some unrelated entry by timestamp alone; a duplicate-
+    timestamp neighbor is skipped rather than matched, since `extrapolateDetections` would immediately
+    fall back to raw on it anyway — better to look one batch further back for an actual velocity.
+- **`selectDetectionResult`'s inline latency-to-on-screen-instant math is extracted**, not
+  duplicated: new exported `estimatedOnScreenAtMs(nowMs, latencySeconds)` (the same
+  `null`-degrades-to-`0`-latency rule `selectDetectionResult` already had), placed right before
+  `averageBatchIntervalMs`; `selectDetectionResult`'s own body now calls it instead of inlining the
+  computation — a behavior-preserving refactor, not a new rule.
+- **`player.ts#redrawOverlay`** now computes `onScreenAtMs = estimatedOnScreenAtMs(Date.now(),
+  this.overlaySyncLatency())` (the identical latency figure `selectDetectionResult` already used to
+  pick `result`, reused rather than re-derived), finds `predecessor = findPredecessorResult(results,
+  result)`, and produces `projected = extrapolateDetections(result, predecessor, onScreenAtMs)`.
+  Every downstream consumer of the frame's detections was switched from `result.detections` to
+  `projected`: the tier computation (`detectionTiers(projected, ...)`), `composite`'s multi-model
+  check (`distinctModelKeys(projected)`), the `t0TrackIds` trail-eligibility scan, the box draw-order
+  array (`drawOrder = [...projected]`), and the trail layer — `trails` is now computed from a copy of
+  `results` with the newest entry's `detections` swapped for `projected` (`trailResults`), so a T0
+  trail's last point always lands exactly where the box drawn below actually is, never one raw
+  capture behind it.
+- **Hover identity re-anchored, not left on stale references** — a matched detection gets a brand-new
+  object every redraw (its box center advances with `onScreenAtMs`), so the pre-existing
+  `this.hoveredDetection() === detection` comparisons `drawTierBox` (box stroke highlight) and
+  `paintLabels` (label highlight) both independently did would have silently stopped matching for
+  exactly the moving objects this wave exists to track. `redrawOverlay` now resolves `hovered` once —
+  `rawHovered.track && detection.track ? track.id match : rawHovered === detection` against
+  `projected` — and passes it into both methods as a new explicit parameter (`drawTierBox`'s 6th,
+  `paintLabels`'s 4th), replacing their internal `this.hoveredDetection()` reads. An untracked hover
+  has no stable anchor and simply clears on the next redraw — an honest degrade (no fabricated
+  match), not a regression; this was found by grepping every `this.hoveredDetection()` call site
+  after the initial edit, not assumed complete from the brief alone.
+
+### Design choices
+
+- **Extraction (`estimatedOnScreenAtMs`), not duplication.** `redrawOverlay` needs the identical
+  on-screen instant `selectDetectionResult` already computed to pick `result` in the first place — a
+  second, differently-written computation of the same value would have been a silent way for the two
+  to drift (e.g. one handling `latencySeconds === null` differently than the other). Extracting it
+  keeps exactly one place that answers "what instant is actually on screen right now."
+- **`extrapolateDetections` takes `DetectionResult`, not a bare `Detection[]`, for both `selected` and
+  `previous`.** The function needs each batch's own `capturedAt` to compute `deltaMs` and to apply the
+  cap/freeze/degenerate-dt rules — passing detections and captured-at timestamps as separate
+  parameters would let a caller mismatch them (e.g. `previous`'s detections against `selected`'s
+  timestamp) in a way the type system can't catch. Taking the whole `DetectionResult` for each side
+  makes that pairing structurally impossible to get wrong.
+- **Trail substitution via a mapped copy (`trailResults`), not a `trackTrails` signature change.**
+  `trackTrails` already has its own well-tested contract (scan `results`, build per-track point
+  history over `TRAIL_WINDOW_MS`) untouched by every prior wave; teaching it about projection would
+  couple a general trail-history function to this wave's specific concern. Building a
+  `results`-shaped array with only the newest entry's detections swapped keeps `trackTrails` itself
+  unaware anything changed, while still giving trails the same projected geometry the boxes use.
+- **Hover re-anchoring lives in `redrawOverlay`, resolved once, not re-derived separately inside
+  `drawTierBox`/`paintLabels`.** Both methods used to read `this.hoveredDetection()` directly and
+  compare by reference; once boxes are regenerated every redraw that comparison silently breaks for
+  a moving hovered object. Resolving `hovered` once per redraw (against `projected`, by track id when
+  possible) and threading it in as a parameter keeps both draw methods pure functions of what they're
+  given, and keeps the identity-reconciliation logic in exactly one place instead of two copies that
+  could drift.
+- **No component-level test harness for `player.ts`.** `redrawOverlay`'s wiring (canvas context,
+  `requestAnimationFrame`/`setInterval` loop, DOM measurement) stays untested territory, consistent
+  with every prior wave touching this file — the pure `extrapolateDetections`/`findPredecessorResult`/
+  `estimatedOnScreenAtMs` functions are the contract, verified directly.
+
+### Degrade / role-gate / dev-parity
+
+- **No predecessor, no velocity to project — draws raw, not a fabricated guess.** A fresh stream
+  (only one batch ever received), a paused/resumed detector, or a batch whose predecessor has a
+  degenerate/equal/later `capturedAt` all fall back to `selected.detections` completely unchanged,
+  same object references — never an invented position.
+- **The freeze, not a drop, at the 800 ms cap — this is the wave's explicit answer to the 2 s poll-
+  fallback staleness bound named in the plan.** With SSE/WHEP the predecessor is typically well within
+  the 800 ms window and projection tracks the picture closely. With the 2 s poll fallback (no SSE),
+  consecutive batches can be up to ~2 s apart, so `targetMs` (the current on-screen instant) can land
+  well past `selected.capturedAt + 800ms`; `extrapolateDetections` computes `cappedTargetMs =
+  min(targetMs, selectedCapturedAtMs + maxExtrapolationMs)` unconditionally, so the projected box
+  simply **stops advancing at the 800 ms mark and holds there** — it does not keep extrapolating
+  motion for a stale detector, and it never disappears or snaps backward either. This matches the
+  server's original freeze behavior exactly; the plan itself names §6.2 (tracks/detections folded into
+  the SSE topic) as the real fix for poll staleness, not a client-side tuning knob.
+- **An untracked hover clears honestly rather than staying wrongly pinned** — see "What shipped"'s
+  hover re-anchoring: a hover with no `track.id` to survive projection by simply degrades to `null`
+  the next redraw a matched box moves, rather than keeping a highlight glued to a stale, no-longer-
+  correct screen position.
+- **The projection target degrades the same way `selectDetectionResult`'s own batch-selection already
+  does** — `onScreenAtMs` resolves the identical instant `selectDetectionResult` already used, so the
+  two never disagree even when `overlaySyncLatency()` itself degrades (e.g. `null` on a stream with no
+  latency figure yet); `estimatedOnScreenAtMs`'s own `null`-degrades-to-`0`-latency rule is shared, not
+  reimplemented.
+- **No role-gating change** — this wave touches only how already-visible detection boxes are
+  positioned on screen; it adds no new capability or surface for role-gating to cover, and no wire
+  field. `vision.auth.enabled=false`'s unbounded dev admin sees byte-identical projection behavior to
+  every other role, since the projection runs entirely client-side against data every role already
+  receives.
+- **Wire frozen, dev parity untouched** — no DTO, no REST call, no `core/api/vision-api.ts` change;
+  the server's own detection payload shape is exactly what W1 left it as.
+
+### Tests
+
+`npm run test:ci`: **132 test files, 2400 tests, all passing** (up from 132/2371 at the close of P2 —
+net +29 tests, no new files: all additions landed in the existing
+`shared/player/detection-overlay-logic.spec.ts`). New coverage: a 3-case `estimatedOnScreenAtMs`
+describe block (subtracts latency; `null` degrades to 0; negative degrades to 0); a 13-case
+`extrapolateDetections` describe block — track-id match projects center by velocity; track-id match
+still applies even when centers are implausibly far apart (proving pass 1 is exact and ungated, not
+gated by distance); same-label gate match works when one side is untracked; outside-gate same-label
+pair draws raw; two detections that both carry a (different) track id never gate-match even when
+close; the cap freezes at exactly `maxExtrapolationMs` past `capturedAt` and a target far beyond the
+cap produces the identical frozen value; no predecessor draws raw (exact reference equality); a
+degenerate/duplicate dt (two sub-cases: equal timestamps, predecessor after selected) draws raw; a
+target at or before the capture instant draws raw (two sub-cases: exactly at, 10 ms before); a
+projected center clamps back into `[0,1]`; an unmatched detection newly present in `selected` passes
+through raw (same reference) alongside a matched one that does not (`not.toBe`); custom
+`matchGate`/`maxExtrapolationMs` override the exported defaults. A 4-case `findPredecessorResult`
+describe block: a strictly-older predecessor is found; `undefined` when `selected` is the oldest
+entry; `undefined` when `selected` is absent from `results` altogether (this case caught a real bug —
+see below); a duplicate-timestamp neighbor is skipped. Two authoring bugs caught and fixed during this
+wave's own verification, not left in: (1) the same-label gate-match test's expected value was
+copy-pasted from the track-id test above it and implied the wrong velocity — recomputed correctly
+(0.225, not 0.3) once vitest's own assertion failure surfaced the mismatch; (2) `findPredecessorResult`
+originally still scanned from array index 0 when `selected` was absent from `results` (index `-1`),
+silently returning an unrelated result as a false "predecessor" instead of the documented `undefined`
+— fixed by returning `undefined` immediately on `index === -1`, before any scanning. `npx tsc --noEmit`
+clean on both `tsconfig.app.json` and `tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` — green (confirmed twice in direct succession). **Note on this
+environment specifically**: an earlier attempt in this same sandbox crashed instantly with `panic:
+aborting due to terminal initialize failure` (SIGABRT) — traced toward a Rust-native `rolldown`
+binding `@angular/build`'s `chunk-optimizer.js` can invoke, but confirmed **not actually the cause**:
+that path is gated by `environment_options.js#shouldOptimizeChunks`, which only turns on when
+`NG_BUILD_OPTIMIZE_CHUNKS` is set in the environment (`parseTristate` — unset means `false`), and it
+was unset throughout. Re-running the identical command minutes later succeeded cleanly (exit 0) and
+did so again on a second, independent run — the crash did not reproduce a third time and its root
+cause was not conclusively isolated beyond "not this wave's code, not the rolldown chunk-optimizer
+path." Same two pre-existing budget warnings as every prior wave (initial bundle over its 390 kB
+threshold by ~19 kB, `tactical-map.css` over its 8 kB budget by ~1.86 kB), neither introduced nor
+worsened. **Bundle delta**, measured via `git stash -u` back to this branch's pre-W7 tip (`a8f12b6a`),
+rebuild, `git stash pop` to restore:
+
+- **Initial (eager) bundle: 409.08 kB raw both (unchanged) / 115.09 kB → 115.11 kB transfer
+  (+0.02 kB) — noise-level.** Expected: every file this wave touched is reachable only from
+  lazy-loaded routes.
+- **The unnamed shared chunk carrying `player.ts`/`detection-overlay-logic.ts`** (confirmed by
+  grepping the built output for a marker string unique to `player.ts`, since this chunk is not one of
+  the named feature chunks — `player.ts` is `<vision-player>`, embedded by several lazy routes, so it
+  splits into its own shared chunk rather than living inside any single named one; hashes differ per
+  build so the file is identified by content, not name — `chunk-CZLXCLQV.js` before this wave,
+  `chunk-H6S32OSP.js` after): **43.11 kB → 44.74 kB raw (+1.63 kB, +3.8%) / 12.65 kB → 13.23 kB
+  transfer (+0.58 kB, +4.6%)** — the new matching/extrapolation logic and its doc comments account for
+  the growth; no other chunk in the build (named or unnamed) changed size at all between the two
+  builds, confirming this is the only chunk this wave's code landed in.
+- **`cockpit`/`live`/`command`/`asset-detail` lazy chunks: unchanged** — `player.ts` is embedded by
+  each of these, not duplicated into them; the shared chunk above is where its added weight actually
+  lives.
+
+### Files touched
+
+Modified only (no new files): `src/app/shared/player/detection-overlay-logic.ts` (+`.spec.ts`),
+`src/app/shared/player/player.ts`.
+
+### Left incomplete / deferred, named honestly
+
+- **Nothing from the W7 spec was found incomplete.** The hover-identity re-anchoring for
+  `drawTierBox`'s box-stroke highlight (as distinct from `paintLabels`'s label highlight) was not
+  spelled out item-by-item in the brief but was a necessary elaboration to satisfy its own "everything
+  downstream must consume the projected geometry" requirement — found by grepping every
+  `this.hoveredDetection()` call site after the first edit, not left as a latent reference-equality
+  bug.
+- **The 2 s poll-fallback staleness bound is handled by design (freeze at the cap), not eliminated** —
+  the plan itself defers the actual fix (folding tracks/detections into the SSE topic, so `/fly` never
+  needs the poll fallback at all) to §6.2, out of this wave's scope by name.
+- **The production-build crash observed once in this session was not conclusively root-caused** — see
+  "Build" above. It did not reproduce on either of two subsequent identical runs, is not gated behind
+  any code this wave touched, and left no indication it depends on wave-specific state; reported here
+  in the interest of completeness rather than as a known defect requiring a fix.

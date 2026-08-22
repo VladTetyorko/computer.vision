@@ -82,8 +82,8 @@ export class MarkPalette {
    * event and on its 30s safety-net poll (`marks-store.ts`) — if these `linkedSignal`s tracked `mark()`
    * directly (as they used to), an operator's in-progress edit was silently discarded every time that
    * poll landed mid-edit, even though the mark itself hadn't changed. See `vision-web/MODULE.md`
-   * Gotchas ("`linkedSignal` over an object input") and `CockpitFacade#streamBurnedIn`'s identical
-   * "guard a `linkedSignal`'s re-seed on a derived primitive, never the enclosing object" precedent.
+   * Gotchas ("`linkedSignal` over an object input") — "guard a `linkedSignal`'s re-seed on a derived
+   * primitive, never the enclosing object", the same fix `DrawingToolbar#editLabel` mirrors.
    */
   private readonly editingMarkId = computed(() => this.mark()?.markId);
 

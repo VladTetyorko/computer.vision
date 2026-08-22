@@ -111,12 +111,16 @@ DEFAULT_TRACK_MOTION_ENGINE = "flow"
 # TRACKING-V2-PLAN wave C3: which `AppearanceExtractor` a stream gets when
 # its `TrackingConfig.appearance_engine_id` is blank (proto field 9, frozen
 # at C0). Measured (see MODULE.md "Wave C3" for the harness table): `cost`
-# is NOT the `CV_TRACK_ASSOCIATE_ENGINE` default -- `bytetrack` never
-# resolves an appearance extractor at all (it has no descriptor input to
-# feed, see `session.py`'s `_run_cost_associate`) -- so this default only
-# matters to an operator who has already opted into `CV_TRACK_ASSOCIATE_
-# ENGINE=cost`. `"off"` disables appearance evidence outright, same shape as
-# `DEFAULT_TRACK_MOTION_ENGINE`'s "off".
+# IS the `CV_TRACK_ASSOCIATE_ENGINE` default (`DEFAULT_TRACK_ASSOCIATE_
+# ENGINE` above) -- this default therefore matters on every stream out of
+# the box, not only one that has opted in. `bytetrack` never resolves an
+# appearance extractor at all (it has no descriptor input to feed, see
+# `session.py`'s `_run_cost_associate`), so this knob is inert for a stream
+# that has opted OUT of `cost` back to `bytetrack`. `"off"` disables
+# appearance evidence outright, same shape as `DEFAULT_TRACK_MOTION_ENGINE`'s
+# "off". (TRACK-IDENTITY-PLAN wave L2, docs/plans/active/TRACK-IDENTITY-
+# RESEARCH.md §2 D-D: this comment previously claimed the opposite -- fixed
+# as a stale-doc ride-along, no behaviour change.)
 DEFAULT_TRACK_APPEARANCE_ENGINE = "histogram"
 
 # TRACKING-V2-PLAN wave C3: `assign.CostAssociator`'s cost weights and gates
@@ -137,12 +141,46 @@ DEFAULT_TRACK_APPEARANCE_ENGINE = "histogram"
 # `test_appearance_is_ignored_entirely_when_it_is_not_weighted`).
 DEFAULT_TRACK_COST_WEIGHT_IOU = 1.0
 DEFAULT_TRACK_COST_WEIGHT_APPEARANCE = 0.5
-DEFAULT_TRACK_COST_WEIGHT_LABEL = 0.0
-# `min_iou=0.0`: no geometric gate by default -- `max_cost` and, once an
-# appearance engine is active, `max_appearance` are what bound a match; a
-# strict `min_iou` would forbid exactly the wide-displacement case ego-motion
-# compensation exists to recover (a warped candidate whose IoU with the true
-# box is still imperfect right after a stall).
+# TRACK-IDENTITY-PLAN wave L2 (`docs/plans/active/TRACK-IDENTITY-PLAN.md`):
+# 0.0 -> 0.3. A SOFT penalty, never a hard gate -- a label gate would split
+# a track on every residual flip, the exact failure TRACKING-PLAN R9 set 0
+# to avoid, and wave L1's election already gives `Candidate.label` a stable
+# operand (`session.py`'s `_run_cost_associate` passes `track.elected_label`,
+# not the raw per-frame one) so the penalty compares a hysteresis-gated
+# opinion against the fresh detection's raw label, not noise against noise.
+# `_labels_compatible` (`assign.py`) still passes an unknown/composite-prefix
+# label pair through for free, so this only ever fires on a genuine,
+# elected-label disagreement. Measured, not merely reasoned (`BASELINE.md`'s
+# 2026-08-20 L2 section has the full trial table): isolated via
+# `CV_TRACK_COST_GATE_MIN_IOU=0 CV_TRACK_COST_GATE_MAX_COST=inf` against the
+# other two L2 knobs, this alone reproduces all 30 `tools/trackeval` rows
+# byte-identical to the pre-L2 baseline -- the harness has no scenario where
+# two live candidates compete for one detection under conflicting elected
+# labels, so the penalty is provably inert on every pinned scenario while
+# still tightening the real multi-object case it targets.
+DEFAULT_TRACK_COST_WEIGHT_LABEL = 0.3
+# TRACK-IDENTITY-PLAN wave L2: measured and REVERTED, stays `0.0`. The plan
+# proposed 0.05 ("a track may no longer absorb a detection it doesn't even
+# touch"), reasoning ego-motion warping would keep a genuine match's IoU
+# comfortably clear of it. Measured instead: isolating this knob alone (every
+# other L2 knob held at its OLD default) against the full `tools/trackeval`
+# suite regresses 4 of 15 scenarios' ASSOCIATE row -- `latency` (`IDSW`
+# 0->16, `recov%` 100->0, `life_mean` 52.0->2.9), `occlusion` and `nonlinear`
+# (each `recov%` 100->0, an `IDSW` appears where there was none), `tiny_fast`
+# (`IDSW` 2->4) -- at EVERY tested value from `0.05` down to `0.0001`, with
+# identical numbers at every step: the true IoU between the predicted
+# candidate and the reappearing/lagging/reversing target in each of these
+# four rows is exactly `0.0`, not merely small, so no strictly-positive gate
+# survives them (`nonlinear`'s own `BASELINE.md` writeup already named the
+# mechanism: constant-velocity extrapolation runs the WRONG WAY across an
+# occlusion/reversal, landing the prediction with zero overlap on the true
+# box). This IS the exact "wide-displacement case ego-motion compensation
+# exists to recover" the pre-L2 comment on this line named -- confirmed by
+# measurement to be a real, currently load-bearing behaviour, not a
+# hypothetical worry, so the knob reverts per the plan's own "a measured
+# retreat beats an unmeasured win" clause rather than shipping a harder gate
+# on an unmeasured guess. `max_cost` below is this wave's answer to the same
+# goal (bounding a worst-of-everything match) without a hard per-axis floor.
 DEFAULT_TRACK_COST_GATE_MIN_IOU = 0.0
 # Above this Hellinger distance ([0, 1], 1 = no match) an appearance-weighted
 # pair is forbidden outright rather than merely penalised -- tuned so two
@@ -150,9 +188,23 @@ DEFAULT_TRACK_COST_GATE_MIN_IOU = 0.0
 # even at moderate geometric ambiguity, while a colour shift from motion blur
 # or exposure does not.
 DEFAULT_TRACK_COST_GATE_MAX_APPEARANCE = 0.6
-# No cap beyond the two gates above -- `AssignGates`' own default (`assign.
-# FORBIDDEN`, i.e. "never accept purely on cost, gates decide").
-DEFAULT_TRACK_COST_GATE_MAX_COST = float("inf")
+# TRACK-IDENTITY-PLAN wave L2: inf -> 1.5, a starting point per the plan,
+# kept as-is (no further tuning needed -- see below). The full cost range
+# under the defaults above is `1.0*(1-iou) + 0.5*appearance + 0.3*label <=
+# 1.8`; 1.5 forbids only a pairing that is bad on EVERY axis at once
+# (near-zero overlap, near-maximum appearance distance, AND a label
+# disagreement) -- the "worst of everything" pairing a pure cost matrix with
+# no ceiling would otherwise still accept as merely expensive. Measured, not
+# merely reasoned (`BASELINE.md`'s 2026-08-20 L2 section has the full trial
+# table): isolated via `CV_TRACK_COST_WEIGHT_LABEL=0
+# CV_TRACK_COST_GATE_MIN_IOU=0` against the other two L2 knobs, and again
+# combined with `DEFAULT_TRACK_COST_WEIGHT_LABEL=0.3` at `min_iou=0.0` (this
+# file's own final L2 configuration), both produce the identical 30-row
+# `tools/trackeval` table as the pre-L2 baseline -- no pinned scenario's cost
+# ever approaches 1.5, so the ceiling is inert on every scenario measured
+# today and stands as a forward guard against the failure it targets, not
+# (yet) a demonstrated fix for one.
+DEFAULT_TRACK_COST_GATE_MAX_COST = 1.5
 # The high/low confidence split for `CostAssociator`'s two-stage match
 # (`assign.py`'s own docstring: "high-confidence targets first, then low").
 # Matches `engines/bytetrack.py`'s own `_TRACK_HIGH_THRESH` so `cost` and
@@ -234,19 +286,33 @@ DEFAULT_TRACK_SESSION_CAPACITY = 64
 # deployment-only knob, same "resolved straight from Settings" shape as
 # `track_max_age_millis` before it).
 #
-# `1` -- today's exact single-target behaviour -- is the shipped default,
-# same "ship the less-proven behaviour opt-in" posture `DEFAULT_TRACK_
-# ASSOCIATE_ENGINE`'s own comment documents for `cost`: multi-target FOLLOW
-# is new code, and while its OWN risk is low (P2 still holds -- K tracker
-# updates is K x ~0.3ms, never a YOLO pass -- and a wrong "extra" box is
-# cosmetic, not a mis-identified lock), it is still an operator-visible
-# behaviour change (more boxes on screen, more per-target engine instances)
-# that deserves the same "prove it, then flip the fleet default" discipline
-# rather than changing what every existing deployment sees for free. An
-# operator sets `CV_TRACK_FOLLOW_TOP_K=3` (or higher) to opt a fleet into
-# situational awareness between verify passes -- review finding C6's own
-# complaint ("the operator's display holds one target and NOTHING ELSE").
-DEFAULT_TRACK_FOLLOW_TOP_K = 1
+# TRACK-IDENTITY-PLAN wave L4 raised the default from `1` to `2` -- ONE
+# extra target alongside the locked one, not the "opt a fleet into full
+# situational awareness" `3+` the comment above used to gate behind. Two
+# measurements on the dev box justify the move (both via `tools.trackeval`
+# and a direct `time.perf_counter()` probe against a real `StreamTracking
+# Session`, `clutter`/`crowd_recall`/`pan_step` scenarios, `lk` engine):
+#   - Cost: a tracker-only FOLLOW frame at K=2 costs one MORE `lk` `update()`
+#     call than K=1 -- MODULE.md's own benchmark puts that at 0.525ms mean /
+#     0.619ms p95 on this box. Measured end-to-end (200-frame direct probe,
+#     `perf_counter`, not the harness's own ms-quantized column) K=1 vs K=2
+#     were statistically indistinguishable (~2.4-2.6ms mean, ~3.0ms p95
+#     either way) -- the marginal cost is noise against total per-frame
+#     overhead, and trivial against the default 2000ms verify cadence and a
+#     23ms YOLO pass (GB4005 is CPU-only/OpenVINO -- no budget headroom to
+#     lose, but this does not touch it).
+#   - Safety: the LOCKED target's own `locked_track_id` and box geometry are
+#     byte-identical between K=1 and K=2 runs of the full `tools.trackeval`
+#     harness on every scenario checked (`clutter`, `crowd_recall`,
+#     `pan_step`) -- an extra fails independently of the lock (P2, unchanged
+#     by L4). `clutter`'s IDSW/FM columns DO move at K=2; that is the same
+#     greedy-IoU-matcher harness limitation already proven for K=3 (this
+#     file's "Multi-target FOLLOW" section) re-confirmed here, not a real
+#     regression -- the locked box itself never moves.
+# `3+` still needs its own opt-in per the reasoning below (more engine
+# instances, more on-screen boxes) -- L4 only asked whether ONE extra fits
+# the budget, and it measurably does.
+DEFAULT_TRACK_FOLLOW_TOP_K = 2
 
 # TRACKING-V2-PLAN wave C5c (review §4.6, "detection recall -- the other
 # half of the complaint"): whether a CONFIRMED track the full-frame pass
@@ -540,6 +606,47 @@ DEFAULT_TRACK_REUPDATE_MAX_SHAPE_LOG_RATIO = 0.40
 # velocity is most trustworthy. Re-sweep it on aerial footage before
 # concluding anything general.
 DEFAULT_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE = 0.0
+
+# TRACK-IDENTITY-PLAN wave L1: backs `track.py`'s per-track label election
+# (`_seed_label_election`/`_update_label_election`) -- the fix for
+# TRACK-IDENTITY-RESEARCH.md's six-layer causal chain, where an open-
+# vocabulary model's one-argmax-per-pass label re-rolls every observation
+# and every downstream layer repeats the newest roll verbatim. No wire
+# field exists for any of the three -- deployment-only, same "resolved
+# straight from Settings" shape as `track_follow_top_k`/`track_roi_enabled`
+# above -- because election is a *deployment* posture (how patient the
+# fleet is with a challenger label), not a per-request tuning the operator
+# UI exposes.
+#
+# How many of a track's most recent SOURCE_DETECTOR observations feed the
+# label tally (older votes fall off the ring AND are exponentially
+# decayed -- see `track.py`'s `_LABEL_VOTE_DECAY` -- so this bounds memory,
+# not just history depth). `10` mirrors the shipped
+# `CV_TRACK_VERIFY_MILLIS`-adjacent cadence: at the detector's own pass
+# rate this is roughly a second of evidence, long enough to outvote a
+# single-pass mis-class, short enough that a genuine identity change (the
+# tracked object itself changes) is not held hostage for many seconds.
+DEFAULT_TRACK_LABEL_VOTE_WINDOW = 10
+# A challenger label must out-score the incumbent elected label by this
+# multiple before it is even eligible to start a switch streak (see
+# `DEFAULT_TRACK_LABEL_SWITCH_STREAK` below) -- a >1.0 margin so a
+# challenger barely ahead of decayed noise cannot immediately contest the
+# incumbent every single pass. `1.5` -- not a bare majority (`1.0`, which a
+# single strong-confidence outlier could clear) and not a landslide
+# (`3.0`+, which would make legitimate identity changes sluggish) -- the
+# same "clearly ahead, not merely ahead" posture `DEFAULT_TRACK_COST_GATE_
+# HIGH_CONFIDENCE` takes for its own threshold.
+DEFAULT_TRACK_LABEL_SWITCH_MARGIN = 1.5
+# The challenger must hold the margin above for this many CONSECUTIVE
+# SOURCE_DETECTOR passes before the election actually switches -- a single
+# lucky pass (even a decisive one) never flips the emitted label; the
+# streak resets to zero the moment any other label leads. `3` consecutive
+# passes is the same order of magnitude as `DEFAULT_TRACK_MIN_HITS` (the
+# gate a brand-new track's own existence must clear before CONFIRMED) --
+# long enough that transient noise cannot win, short enough that a real
+# identity change is visible in under a second at the detector's own pass
+# rate.
+DEFAULT_TRACK_LABEL_SWITCH_STREAK = 3
 
 # --- pull (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
 #
@@ -1017,6 +1124,9 @@ class Settings:
     track_reupdate_max_motion_center_distance: float = (
         DEFAULT_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE
     )
+    track_label_vote_window: int = DEFAULT_TRACK_LABEL_VOTE_WINDOW
+    track_label_switch_margin: float = DEFAULT_TRACK_LABEL_SWITCH_MARGIN
+    track_label_switch_streak: int = DEFAULT_TRACK_LABEL_SWITCH_STREAK
     pull_decoder: str = DEFAULT_PULL_DECODER
     pull_rtsp_transport: str = DEFAULT_PULL_RTSP_TRANSPORT
     pull_target_fps: float = DEFAULT_PULL_TARGET_FPS
@@ -1262,6 +1372,21 @@ class Settings:
                 os.environ.get("CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE"),
                 DEFAULT_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE,
                 "CV_TRACK_REUPDATE_MAX_MOTION_CENTER_DISTANCE",
+            ),
+            track_label_vote_window=_parse_positive_int(
+                os.environ.get("CV_TRACK_LABEL_VOTE_WINDOW"),
+                DEFAULT_TRACK_LABEL_VOTE_WINDOW,
+                "CV_TRACK_LABEL_VOTE_WINDOW",
+            ),
+            track_label_switch_margin=_parse_positive_float(
+                os.environ.get("CV_TRACK_LABEL_SWITCH_MARGIN"),
+                DEFAULT_TRACK_LABEL_SWITCH_MARGIN,
+                "CV_TRACK_LABEL_SWITCH_MARGIN",
+            ),
+            track_label_switch_streak=_parse_positive_int(
+                os.environ.get("CV_TRACK_LABEL_SWITCH_STREAK"),
+                DEFAULT_TRACK_LABEL_SWITCH_STREAK,
+                "CV_TRACK_LABEL_SWITCH_STREAK",
             ),
             pull_decoder=_parse_string(os.environ.get("CV_PULL_DECODER"), DEFAULT_PULL_DECODER),
             pull_rtsp_transport=_parse_string(

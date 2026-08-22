@@ -131,7 +131,7 @@ from cv_service.tracking.engines.base import (
     Transform,
 )
 from cv_service.tracking.lock import LockArbiter
-from cv_service.tracking.memory import ObjectMemory, Recovery
+from cv_service.tracking.memory import DormantIdentity, ObjectMemory, Recovery
 from cv_service.tracking.params import (
     MODE_ASSOCIATE,
     MODE_FOLLOW,
@@ -841,7 +841,14 @@ class StreamTrackingSession:
             Candidate(
                 key=track.key,
                 box=predict(track, now).box,
-                label=track.label,
+                # TRACK-IDENTITY-PLAN wave L1: the ELECTED label, not the
+                # raw one -- `assign.py`'s `_labels_compatible`/label
+                # penalty (L2) both get a stable operand instead of
+                # re-rolling every pass, the same "recovery gates and the
+                # L2 label penalty both get a stable operand" plan item 3
+                # names. `track.label` (raw) keeps its own unconditional-
+                # overwrite semantics for every OTHER reader.
+                label=track.elected_label,
                 descriptor=track.descriptor,
                 confirmed=track.state != STATE_TENTATIVE,
             )
@@ -1163,13 +1170,59 @@ class StreamTrackingSession:
         identity = memory.claim(recovery.track_id)
         if identity is None:
             return None
-        recovered = RecoveredIdentity(
-            track_id=recovery.track_id,
-            first_seen=identity.first_seen_millis / 1000.0,
-            descriptor=identity.descriptor,
-            velocity=identity.velocity,
-        )
-        return recovered, recovery
+        return _recovered_identity(identity, recovery), recovery
+
+    def _attempt_follow_recovery(
+        self, boxes: Sequence[Box], detections: Sequence[Any], now: float
+    ) -> "Optional[tuple[int, Recovery]]":
+        """Best-scoring detection this pass for the operator's SPECIFIC lost
+        track id, or `None` (TRACK-IDENTITY-PLAN wave L4).
+
+        Read-only -- mirrors `_attempt_recovery`'s own match/claim split
+        (its docstring), just with the claim deferred one step further: the
+        caller here only takes the recovery (`ObjectMemory.claim`) once
+        `engine.init()` on the winning box has actually succeeded, so a
+        rare tracker I/O failure never burns the operator's one dormant
+        identity for nothing -- unlike ASSOCIATE's unmatched-target loop,
+        FOLLOW has no second candidate this same frame to fall back to if
+        the claim is wasted.
+
+        Gated to a TRACK-ID-ONLY lock target -- the same branch `lock.py`'s
+        `select_target` reaches only via its own `box_of_track` fallback
+        (`target.box is None and target.point is None`). A box- or point-
+        locked target still has its ORIGINAL geometric reference to retry
+        every pass (`select_target`'s primary tests, `_select_target`'s own
+        OCR/history fallback); only a bare track id has nothing left once
+        the live book can no longer resolve it -- memory is the only
+        resort left. FOLLOW never resolves an appearance extractor
+        (`_resolve_appearance_extractor` is reached only from `_run_cost_
+        associate`), so every candidate here is scored on label and motion
+        alone -- `descriptor=None`, `memory.py`'s own neutral-appearance
+        (0.5) reading, never a rejection on that account.
+        """
+        memory = self._memory
+        if memory is None:
+            return None
+        target = self._lock.target
+        if target is None or target.box is not None or target.point is not None:
+            return None
+        if target.track_id <= 0:
+            return None
+        now_millis = now * 1000.0
+        best: "Optional[tuple[int, Recovery]]" = None
+        for det_index, (box, detection) in enumerate(zip(boxes, detections)):
+            recovery = memory.match_identity(
+                target.track_id,
+                box=box,
+                label=detection.label,
+                descriptor=None,
+                now_millis=now_millis,
+            )
+            if recovery is None:
+                continue
+            if best is None or recovery.confidence > best[1].confidence:
+                best = (det_index, recovery)
+        return best
 
     def _describe(
         self, extractor: Any, frame: FrameFn, boxes: Sequence[Box]
@@ -1306,9 +1359,68 @@ class StreamTrackingSession:
                 ]
 
         if self._followed is None:
-            # Nothing held and nothing to acquire. The operator's target
-            # request (if any) stands, so the next frame tries again --
-            # scheduler trigger (c).
+            # TRACK-IDENTITY-PLAN wave L4: geometry (above) found nothing to
+            # re-anchor to -- for a track-id-only lock, the dormant gallery
+            # is the last resort before the honest coast-to-`-1`. A no-op
+            # for every other lock shape (`_attempt_follow_recovery`'s own
+            # gate) and for a stream with memory disabled.
+            recovery_hit = self._attempt_follow_recovery(boxes, detections, now)
+            if recovery_hit is not None:
+                det_index, recovery = recovery_hit
+                try:
+                    anchored = engine.init(frame(), boxes[det_index])
+                except Exception as exc:  # noqa: BLE001
+                    self._reset_engine(exc)
+                    return [_box_for(detection) for detection in detections]
+                if anchored:
+                    # Only NOW taken out of the gallery (this method's own
+                    # docstring) -- `engine.init()` just proved the
+                    # recovery is actually usable, so the claim can no
+                    # longer be wasted.
+                    identity = self._memory.claim(recovery.track_id)
+                    if identity is not None:
+                        recovered_observation = observation_for(
+                            detections[det_index],
+                            self._follow_key(),
+                            det_index=det_index,
+                            # A memory-confirmed re-acquire is CONFIRMED
+                            # outright, exactly like a geometric re-anchor
+                            # above -- the gallery's own four gates already
+                            # did the vetting `min_hits` exists to replace.
+                            authoritative=True,
+                        )
+                        tracks = self._book.apply(
+                            [recovered_observation],
+                            now,
+                            detector_ran=True,
+                            recoveries={
+                                recovered_observation.key: _recovered_identity(identity, recovery)
+                            },
+                        )
+                        locked_track = tracks[0]
+                        self._followed = locked_track
+                        self._lock.bind(locked_track.track_id)
+                        self._tracker_stalled = False
+                        return [
+                            _box_for(
+                                detection,
+                                locked_track if position == det_index else None,
+                                identity_confidence=(recovery.confidence if position == det_index else 0.0),
+                                dormant_millis=(recovery.dormant_millis if position == det_index else 0),
+                                box=(locked_track.box if position == det_index else None),
+                            )
+                            for position, detection in enumerate(detections)
+                        ]
+                    # `claim()` lost a same-frame race -- another caller took
+                    # this identity between `_attempt_follow_recovery`'s
+                    # read-only match and here. Vanishingly unlikely for a
+                    # single track-id-targeted recovery, but handled the
+                    # same way `_attempt_recovery`'s own race case is: fall
+                    # through to the honest "nothing acquired" outcome
+                    # below, never an error.
+            # Nothing held and nothing to acquire (nor recovered from
+            # memory). The operator's target request (if any) stands, so
+            # the next frame tries again -- scheduler trigger (c).
             self._lock.unbind()
             return [_box_for(detection) for detection in detections]
 
@@ -1454,7 +1566,7 @@ class StreamTrackingSession:
         extra_observations, surviving_extras = self._extras_observations(frame)
 
         tracks = self._book.apply([locked_observation, *extra_observations], now, detector_ran=False)
-        boxes = [self._settle_followed(tracks[0])]
+        boxes = [self._settle_followed(tracks[0], now)]
         self._extras = []
         for extra, track in zip(surviving_extras, tracks[1:]):
             # `track` is the SAME object `TrackBook` will keep handing back
@@ -1528,7 +1640,7 @@ class StreamTrackingSession:
         if observation is None:
             return None
         track = self._book.apply([observation], now, detector_ran=detector_ran)[0]
-        return self._settle_followed(track)
+        return self._settle_followed(track, now)
 
     def _build_coast_observation(
         self, engine: Any, held: Track, frame: FrameFn, now: float, *, detector_ran: bool
@@ -1622,16 +1734,43 @@ class StreamTrackingSession:
             predicted=predicted,
         )
 
-    def _settle_followed(self, track: Track) -> TrackedBox:
+    def _settle_followed(self, track: Track, now: float) -> TrackedBox:
         """Post-`apply()` bookkeeping for the LOCKED target's own track,
         shared by `_coast` and `_follow_predict`'s own batched apply call."""
         self._followed = track
         if track.state == STATE_LOST:
+            # TRACK-IDENTITY-PLAN wave L4: `track.py`'s own `_retire` -- the
+            # AUTOMATIC remember-on-expiry path `TrackBook._expire` drives --
+            # never runs for a single-target FOLLOW lock that goes LOST here.
+            # `TrackBook.apply()` is the only thing that ages a track towards
+            # that expiry, and the instant `self._followed` goes `None`
+            # below, FOLLOW stops calling `apply()` for this key entirely
+            # until a NEW acquisition re-anchors it -- so the track would
+            # otherwise sit in the book unaged, indefinitely, and NEVER reach
+            # the gallery. Without this explicit remember, the memory-based
+            # re-acquire below (`_attempt_follow_recovery`) would have
+            # nothing to find. Mirrors `track.py`'s `_retire` exactly (same
+            # kwargs, the ELECTED label, the same descriptor) -- just
+            # triggered by the session's own settle instead of the book's
+            # expiry sweep. Re-remembering an id already dormant is a no-op
+            # refresh (`ObjectMemory.remember`'s own docstring), so a track
+            # that recovers and is lost again costs nothing extra here.
+            if self._memory is not None:
+                self._memory.remember(
+                    track_id=track.track_id,
+                    label=track.elected_label,
+                    box=track.box,
+                    velocity=(track.velocity_x, track.velocity_y),
+                    descriptor=track.descriptor,
+                    now_millis=now * 1000.0,
+                    first_seen_millis=track.first_seen * 1000.0,
+                )
             # `max_age_frames` consecutive unconfirmed verify passes: the
             # lock is dropped and the next pass re-acquires per policy
             # (TRACKING-PLAN §3.1 trigger (e)). The track itself stays in the
-            # book until it expires, so a re-acquisition of the same target
-            # recovers the same id.
+            # book, unaged, until a future acquisition attempt starts
+            # touching `apply()` again -- harmless, since it is also now
+            # remembered above.
             self._followed = None
             self._lock.unbind()
         return _from_track(track)
@@ -2144,6 +2283,25 @@ class StreamTrackingSession:
         self._capability_resolved = False
 
 
+def _recovered_identity(identity: DormantIdentity, recovery: Recovery) -> RecoveredIdentity:
+    """`ObjectMemory.claim()`'s own dormant record, reshaped into what
+    `TrackBook._adopt` reads -- shared by `_attempt_recovery` (ASSOCIATE)
+    and `_attempt_follow_recovery` (TRACK-IDENTITY-PLAN wave L4, FOLLOW).
+    """
+    return RecoveredIdentity(
+        track_id=recovery.track_id,
+        first_seen=identity.first_seen_millis / 1000.0,
+        descriptor=identity.descriptor,
+        velocity=identity.velocity,
+        # TRACK-IDENTITY-PLAN wave L1: `identity.label` is the ELECTED
+        # label `_retire`/`_settle_followed` remembered -- `_adopt`
+        # re-seeds the recovered track's election around it, so the
+        # operator sees the same stable name they lost, not a fresh guess
+        # from this one recovering detection.
+        elected_label=identity.label,
+    )
+
+
 def _box_for(
     detection: Any,
     track: Optional[Track] = None,
@@ -2166,9 +2324,18 @@ def _box_for(
     `Observation.box` is ITS post-Kalman estimate, deliberately never shown
     here even absent this wave -- passing `track.box` there would be a
     genuine, unrelated behaviour change this wave does not intend to make.
+
+    TRACK-IDENTITY-PLAN wave L1 (plan item 3): `label` is `track.elected_
+    label` whenever a `track` is given (a TRACKED detection -- this frame's
+    box has an identity behind it whose stable, hysteresis-gated name is
+    what the operator should read), and the raw `detection.label` only for
+    an UNTRACKED one (`track=None` -- ASSOCIATE below `min_hits`, or any
+    detection this frame never bound to a track at all): there is no
+    identity yet to elect a label over, so the newest roll is the only
+    opinion that exists.
     """
     return TrackedBox(
-        label=detection.label,
+        label=track.elected_label if track is not None else detection.label,
         confidence=detection.confidence,
         box=box if box is not None else Box(detection.x, detection.y, detection.width, detection.height),
         track=track,
@@ -2178,7 +2345,11 @@ def _box_for(
 
 
 def _from_track(track: Track) -> TrackedBox:
-    return TrackedBox(label=track.label, confidence=track.confidence, box=track.box, track=track)
+    # TRACK-IDENTITY-PLAN wave L1 (plan item 3): a coast frame already has
+    # nothing BUT the track to read from, so the elected label was always
+    # the more honest choice available here -- this call site simply picks
+    # it explicitly now instead of echoing `track.label`'s raw newest roll.
+    return TrackedBox(label=track.elected_label, confidence=track.confidence, box=track.box, track=track)
 
 
 def _clamp01(value: float) -> float:

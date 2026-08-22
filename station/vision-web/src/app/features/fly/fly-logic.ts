@@ -10,15 +10,6 @@ import { formatDuration } from '../../core/stream-info-logic';
 export { trackingIdChanged } from '../../core/telemetry/telemetry-logic';
 
 /**
- * Re-exported from `shared/player/detection-overlay-logic.ts`, its canonical home since
- * docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8 — `WallTile`'s own per-tile cycle button needed the
- * identical burnedIn-aware cycle, so the function (plus its `BOXES_CYCLE` constant) moved there
- * rather than staying duplicated. Kept here too so `CockpitFacade`'s existing import site, and this
- * file's own `cycleBoxesMode` tests, keep working verbatim.
- */
-export { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
-
-/**
  * Pure, Angular-free logic behind `FlyPage` (docs/plans/done/MVP3-PLAN.md §C-b) — split out so picker
  * ordering, remembered/requested-asset resolution, the "Replay last flight" link, watch-mode
  * parsing, and the keyboard boxes-cycle are unit-testable without HTTP, the router, or `document`,
@@ -120,29 +111,46 @@ export const TICKER_MAX_EVENTS = 4;
  * Phase 0 — the read-only RC transmitter monitor; `marks` added by docs/plans/done/TACTICAL-MARKS-PLAN.md M5
  * — the shared tactical-marks operational picture). This union's own declaration order is no longer
  * the rail's visual order: docs/conclusions/UX-SIMPLIFY-REVIEW.md F4 groups the rail by job — Control (flight,
- * rc), Vision (cv, detections), Situational (marks), Help (pinned last, separated) — see fly.html's
+ * rc), Vision (cv), Situational (marks), Help (pinned last, separated) — see fly.html's
  * own comment above `.grid-rail` for the full grouping. Every id/gate/behavior below is unchanged;
  * only where each button sits in the rail moved. **`layers` was removed** (per direct user request)
  * — the detection-boxes rendering-mode control it used to hold its own drawer for now lives inside
- * the `cv` (Detection) drawer instead (`cv-control-panel.html`'s own "Boxes rendering" section). */
-export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'map' | 'help';
+ * the `cv` drawer instead (`cv-control-panel.html`'s own "Boxes rendering" section).
+ *
+ * **`detections` was merged into `cv` in wave W5** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3): the
+ * standalone strip-only drawer and the CV control drawer are now one "Vision" drawer, id kept as
+ * `cv` — the least-disruptive choice (an operator's own persisted `localStorage` open-panel id still
+ * opens the same drawer; there is no `detections` id left to migrate away from). See `cockpit.html`'s
+ * own comment above the merged drawer block for the full reasoning, including why the drawer stays
+ * reachable in watch mode (the strip) even though the control body (`<vision-cv-control-panel>`)
+ * does not. */
+export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'marks' | 'map' | 'help';
 
 /**
  * `Esc`'s own "closest thing open, first" priority (docs/plans/done/UI-REDESIGN-PLAN.md D-D: "Esc calls
- * `panels.close()`") — extracted from `fly.ts#collapseOverlays()` so the cascade order itself (any
- * open tool-rail drawer, then the Stop-stream confirm, then the map inset) is unit-testable without
- * a real `PanelState`/DOM. Mirrors the pre-Wave-2 cascade's own order (shortcuts/CV/detections were
- * already the drawers-in-training even then, just modeled as separate flags) with one change: the
- * map inset moves to *last* rather than sharing the old detections-strip slot, since it's the one
- * overlay this wave deliberately keeps outside `PanelState` (D-D: "the map inset stays a separate
- * persisted toggle … since it is glanceable, not a modal drawer") and is the least "in the way" of
- * the three.
+ * `panels.close()`") — extracted from `fly.ts#collapseOverlays()` so the cascade order itself (the
+ * CV setup modal, then any open tool-rail drawer, then the Stop-stream confirm, then the map inset)
+ * is unit-testable without a real `PanelState`/DOM. Mirrors the pre-Wave-2 cascade's own order
+ * (shortcuts/CV/detections were already the drawers-in-training even then, just modeled as separate
+ * flags) with one change: the map inset moves to *last* rather than sharing the old detections-strip
+ * slot, since it's the one overlay this wave deliberately keeps outside `PanelState` (D-D: "the map
+ * inset stays a separate persisted toggle … since it is glanceable, not a modal drawer") and is the
+ * least "in the way" of the three.
+ *
+ * **`cvSetupOpen` is checked first** (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) — the setup
+ * modal is the topmost overlay in the stack (it opens *over* the still-open Vision drawer, per the
+ * plan's "opening it must not close the tool-rail drawer"), so `Esc` must close it alone on the
+ * first press, leaving the drawer beneath it open for a second `Esc` to then close via `'panel'`.
  */
 export function nextCollapseAction(state: {
+  readonly cvSetupOpen: boolean;
   readonly panelOpen: boolean;
   readonly stopConfirmOpen: boolean;
   readonly mapVisible: boolean;
-}): 'panel' | 'stop-confirm' | 'map' | null {
+}): 'cv-setup' | 'panel' | 'stop-confirm' | 'map' | null {
+  if (state.cvSetupOpen) {
+    return 'cv-setup';
+  }
   if (state.panelOpen) {
     return 'panel';
   }

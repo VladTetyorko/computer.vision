@@ -160,11 +160,6 @@
             </dependency>
             <dependency>
                 <groupId>com.drones</groupId>
-                <artifactId>adapter-overlay</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.drones</groupId>
                 <artifactId>adapter-tiles</artifactId>
                 <version>${project.version}</version>
             </dependency>

@@ -45,12 +45,10 @@ import com.drones.vision.api.controller.StreamController;
  *
  * <h2>Supported formats</h2>
  * Only the two {@link PixelFormat}s any adapter in this codebase actually produces today: {@code
- * BGR24} (adapter-rtsp, and adapter-overlay's renderer when its input was {@code BGR24}) and {@code
- * JPEG} (adapter-simulation, adapter-mjpeg, and adapter-overlay's renderer when its input was
- * already {@code JPEG}). Anything else throws {@link IllegalStateException} — unreachable with
- * today's adapters, so deliberately left to fall through to Spring's default 500 rather than a
- * bespoke 4xx mapping in {@link ApiExceptionHandler}: an unexpected pixel format here is a genuine
- * server-side surprise, not a client mistake.
+ * BGR24} (adapter-rtsp) and {@code JPEG} (adapter-simulation, adapter-mjpeg). Anything else throws
+ * {@link IllegalStateException} — unreachable with today's adapters, so deliberately left to fall
+ * through to Spring's default 500 rather than a bespoke 4xx mapping in {@link ApiExceptionHandler}:
+ * an unexpected pixel format here is a genuine server-side surprise, not a client mistake.
  */
 public final class SnapshotJpegEncoder {
 
@@ -118,7 +116,7 @@ public final class SnapshotJpegEncoder {
      * Copies raw {@code BGR24} bytes into a fresh {@link BufferedImage#TYPE_3BYTE_BGR}'s backing
      * array — the same packed-BGR-no-padding layout that format already carries, so this is a
      * straight bulk copy, no per-pixel reordering. Same idiom as {@code adapter-cv-grpc}'s {@code
-     * GrpcDetectionPort#wrapBgr24}/{@code adapter-overlay}'s {@code Java2DOverlayRenderer.renderBgr24}.
+     * GrpcDetectionPort#wrapBgr24}.
      */
     private static BufferedImage wrapBgr24(int width, int height, ByteBuffer data) {
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_3BYTE_BGR);

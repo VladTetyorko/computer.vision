@@ -164,6 +164,22 @@ class Metrics:
     # zero occurrences, which is also the correct answer for "how many did
     # this bound catch".
     implausible_velocity_count: int = 0
+    # TRACK-IDENTITY-PLAN wave L1 item 5 -- how many times any track's own
+    # emitted label changed between two consecutive appearances of that
+    # track id, and that count normalized to "flips per track per minute"
+    # (`label_flip_count / total track-minutes`, `total track-minutes`
+    # being the sum of every track's own appearance-frame count divided by
+    # fps and 60 -- the same `_track_lifetimes` "appearance count" this
+    # module already computes for the lifetime fields above, not a
+    # first-to-last span). Deliberately NOT rendered in `render_table`'s
+    # column set or pinned in `BASELINE.md`: the plan requires the counter
+    # to exist and be measured on a noisy-label sequence, not to join the
+    # scoreboard -- see `cv-service/MODULE.md`'s L1 entry for the
+    # before/after numbers this produced. Always a plain count/rate, never
+    # `None`, same "nothing to report reads as zero" convention
+    # `implausible_velocity_count` uses.
+    label_flip_count: int = 0
+    label_flips_per_track_per_minute: float = 0.0
 
 
 def compute(result: ReplayResult) -> Metrics:
@@ -235,6 +251,11 @@ def compute(result: ReplayResult) -> Metrics:
 
     coast_all, coast_finals = _coast_samples(result, matches_by_frame, windows)
     implausible_velocity_count = _count_implausible_velocities(result)
+    label_flip_count = _count_label_flips(result)
+    total_track_minutes = (sum(lifetimes) / result.fps / 60.0) if lifetimes and result.fps > 0 else 0.0
+    label_flips_per_track_per_minute = (
+        label_flip_count / total_track_minutes if total_track_minutes > 0 else 0.0
+    )
 
     return Metrics(
         scenario=result.scenario,
@@ -262,6 +283,8 @@ def compute(result: ReplayResult) -> Metrics:
         coast_ade_px=mean(sample.px for sample in coast_all) if coast_all else None,
         coast_fde_px=mean(sample.px for sample in coast_finals) if coast_finals else None,
         implausible_velocity_count=implausible_velocity_count,
+        label_flip_count=label_flip_count,
+        label_flips_per_track_per_minute=label_flips_per_track_per_minute,
     )
 
 
@@ -475,6 +498,42 @@ def _count_implausible_velocities(result: ReplayResult) -> int:
         for velocity_x, velocity_y in frame_velocities.values()
         if abs(velocity_x) > bound or abs(velocity_y) > bound
     )
+
+
+def _count_label_flips(result: ReplayResult) -> int:
+    """How many times any track's own emitted label changed between two
+    consecutive appearances of that track id -- walking each track's OWN
+    timeline in appearance order, the same "appearance count" idiom
+    `_track_lifetimes` below uses for lifetime, not adjacent video frames: a
+    track that coasts through a gap and reappears is still one timeline, so
+    the label it re-emits on return is compared against the label it last
+    emitted, not against whatever any OTHER track said on the frames
+    between.
+
+    Reads `result.track_labels`, captured immediately after each
+    `session.process()` call by `replay.run_replay` (mirroring
+    `track_velocities`), **never** `outcome.boxes[i].label` after the fact
+    -- see `_count_implausible_velocities`'s own docstring for why reading
+    a mutable `Track`'s state back out post-replay is unsafe; `TrackedBox`
+    itself is frozen, but `run_replay` still captures per-frame so this
+    function stays symmetric with its sibling and needs no separate replay
+    pass.
+
+    `()` (no label data -- an older/hand-built `ReplayResult`) reads as
+    zero, the same "nothing to report" convention `_count_implausible_
+    velocities` uses for `track_velocities`.
+    """
+    if len(result.track_labels) != len(result.outcomes):
+        return 0
+    last_label_by_track: dict[int, str] = {}
+    flips = 0
+    for frame_labels in result.track_labels:
+        for track_id, label in frame_labels.items():
+            previous = last_label_by_track.get(track_id)
+            if previous is not None and previous != label:
+                flips += 1
+            last_label_by_track[track_id] = label
+    return flips
 
 
 # -- per-object timelines -----------------------------------------------------

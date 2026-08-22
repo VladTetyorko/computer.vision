@@ -18,6 +18,7 @@ describe('SettingsStore', () => {
       inferenceFps: 5,
       model: DEFAULT_DETECTION_MODEL,
       labelFilter: [],
+      labelDenyFilter: [],
       // docs/plans/active/CV-DEMAND-PLAN.md wave D3: detection is opt-in now, off until the operator turns
       // it on, both server-side (PipelineConfig.DEFAULT_DETECTION_ENABLED) and here.
       detectionEnabled: false,
@@ -41,6 +42,7 @@ describe('SettingsStore', () => {
       inferenceFps: 3,
       model: DEFAULT_DETECTION_MODEL,
       labelFilter: [],
+      labelDenyFilter: [],
       detectionEnabled: false,
     });
     // The preset it is based on is still identifiable, which is what the badge shows.
@@ -73,6 +75,7 @@ describe('SettingsStore', () => {
       inferenceFps: 12,
       model: DEFAULT_DETECTION_MODEL,
       labelFilter: [],
+      labelDenyFilter: [],
       detectionEnabled: false,
     });
   });
@@ -155,8 +158,77 @@ describe('SettingsStore', () => {
     for (const profile of BUILT_IN_PROFILES) {
       expect(profile.model).toBe(DEFAULT_DETECTION_MODEL);
       expect(profile.labelFilter).toEqual([]);
+      // docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5: every built-in also denies nothing.
+      expect(profile.labelDenyFilter).toEqual([]);
       expect(profile.detectionEnabled).toBe(false);
     }
+  });
+
+  // ---- Label deny-list (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5) -------------------------
+
+  it('adjusting labelDenyFilter turns the active profile into a revertible custom draft, independent of labelFilter', () => {
+    store.adjust({ labelDenyFilter: ['tree', 'bush'] });
+
+    expect(store.isCustom()).toBe(true);
+    expect(store.effective().labelDenyFilter).toEqual(['tree', 'bush']);
+    // The allowlist stays untouched by a deny-list edit — the two axes are independent.
+    expect(store.effective().labelFilter).toEqual([]);
+
+    store.revertDraft();
+    expect(store.effective().labelDenyFilter).toEqual([]);
+  });
+
+  it('saves a draft labelDenyFilter choice as a reusable profile', () => {
+    store.adjust({ labelDenyFilter: ['tree'] });
+    store.saveDraftAs('No trees');
+
+    const saved = store.customProfiles();
+    expect(saved).toHaveLength(1);
+    expect(saved[0].labelDenyFilter).toEqual(['tree']);
+    expect(store.effective().labelDenyFilter).toEqual(['tree']);
+  });
+
+  it('backfills a missing labelDenyFilter on a profile/draft saved before this wave to "deny nothing"', () => {
+    localStorage.setItem(
+      'vision.settings.v1',
+      JSON.stringify({
+        activeProfileId: 'custom-pre-w5',
+        customProfiles: [
+          {
+            id: 'custom-pre-w5',
+            name: 'Pre-W5',
+            description: 'Based on Balanced.',
+            builtIn: false,
+            confidenceThreshold: 0.4,
+            inferenceFps: 5,
+            model: DEFAULT_DETECTION_MODEL,
+            labelFilter: [],
+            detectionEnabled: false,
+            // no `labelDenyFilter` field at all — every profile saved before wave W5.
+          },
+        ],
+        draft: { confidenceThreshold: 0.6, inferenceFps: 8 },
+      }),
+    );
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.customProfiles()[0].labelDenyFilter).toEqual([]);
+    expect(reloaded.effective().labelDenyFilter).toEqual([]);
+  });
+
+  it('ignores a corrupt persisted draft labelDenyFilter rather than adopting it', () => {
+    localStorage.setItem(
+      'vision.settings.v1',
+      JSON.stringify({ draft: { confidenceThreshold: 0.6, inferenceFps: 8, labelDenyFilter: 'tree' } }),
+    );
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.effective().labelDenyFilter).toEqual([]);
+    expect(reloaded.effective().confidenceThreshold).toBe(0.6);
   });
 
   it('adjusting the model turns the active profile into a revertible custom draft', () => {
@@ -169,6 +241,7 @@ describe('SettingsStore', () => {
       inferenceFps: 3,
       model: 'orion12l.pt',
       labelFilter: [],
+      labelDenyFilter: [],
       detectionEnabled: false,
     });
     // Confidence/fps stay exactly what the base preset had — only model moved.

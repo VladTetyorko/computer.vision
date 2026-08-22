@@ -41,9 +41,9 @@
         type="button"
         class="boxes-btn"
         (click)="cycleBoxesMode()"
-        [title]="'Detection boxes: ' + boxesMode() + ' (click to cycle)'"
+        [title]="'Detection boxes: ' + boxesModeLabel(boxesMode()) + ' (click to cycle)'"
       >
-        ▢{{ boxesMode() === 'overlay' ? '' : boxesMode() === 'burned' ? '·' : '×' }}
+        {{ boxesModeGlyph(boxesMode()) }}
       </button>
     </div>
   </footer>

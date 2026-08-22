@@ -30,6 +30,8 @@
           [compact]="true"
           [detections]="facade.detections.results()"
           [boxesMode]="facade.boxesMode()"
+          [lockedTrackId]="facade.lockedTrackId()"
+          [hoveredClass]="facade.hoveredDetectionClass()"
           (latencyChanged)="facade.onLatency($event)"
           (transportChanged)="facade.onTransport($event)"
           (trackFollowed)="facade.followTrack($event)"
@@ -52,6 +54,17 @@
               <span class="dot" aria-hidden="true"></span>
             }
             <span>{{ videoState.text }}</span>
+          </div>
+        } @else if (facade.detectionsPausedNotice(); as pausedText) {
+          <!-- ---- Detections-staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4) ------
+               Detection is meant to be on ({@link detectionsPausedNotice} is `null` whenever it isn't —
+               see `CockpitFacade`'s own doc comment), but nothing has arrived recently — the same amber
+               `.notice` chrome as a stalled video feed above, since a batch that stopped arriving is an
+               equally genuine fault. Mutually exclusive with the video-notice branch above (a stalled
+               *video* feed already explains why detections stopped too) and with the "Detection off"
+               chip below (that one only ever shows once this is `null`). -->
+          <div class="stage-notice notice">
+            <span>{{ pausedText }}</span>
           </div>
         } @else if (detectionOffChipVisible()) {
           <!-- ---- Detection-off affordance (docs/plans/active/CV-DEMAND-PLAN.md wave D3) --------------------
@@ -217,25 +230,44 @@
         (close)="panels.close()"
       />
 
-      <!-- Detection (CV) console — migrated into the shared drawer shell (D-E); hidden entirely in
-           watch mode, same "viewer, not controller" gate as Start/Stop below. Also carries (per
-           direct user request) the former standalone `layers` drawer's own content — the
-           detection-boxes rendering-mode control (`cv-control-panel.html`'s own "Boxes rendering"
-           section) — since both drawers govern how detection results are surfaced; there is no
-           longer a separate `layers` drawer or rail button (`ToolRailPanelId`, `fly-logic.ts`). -->
-      @if (!facade.watchMode()) {
-        <vision-cv-control-panel
-          [streamId]="facade.stream()?.streamId"
-          [detectionResults]="facade.detections.results()"
-          [boxesMode]="facade.boxesMode()"
-          (boxesModeChange)="facade.boxesMode.set($event)"
-          [burnedIn]="facade.stream()?.burnedIn"
-          [detectionEnabled]="facade.detectionOn()"
-          [detectionPending]="facade.detectionPending()"
-          (detectionEnabledChange)="facade.setDetection($event)"
-          [open]="isPanelOpen('cv')"
-          (close)="panels.close()"
-        />
+      <!-- ---- Vision drawer — merged from the former separate `cv` (CV control) and `detections`
+           (strip) drawers into one (wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3), id kept as
+           `cv` (`fly-logic.ts#ToolRailPanelId`'s own doc comment — least-disruptive: a returning
+           operator's persisted open-panel id still opens this same drawer). Top: the detections
+           strip, now the class-level remote control (hover-highlights a class on the stage, click
+           hides it via `labelDenyFilter` — docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.5).
+           Below: `<vision-cv-control-panel>`'s own body — as of docs/plans/active/CV-PANEL-SPLIT-
+           PLAN.md P1, the slimmed seven-item fly-time surface; its own "Change…"/"Detection setup…"
+           buttons open `<vision-cv-setup-modal>` (mounted separately, near the Stop confirm below,
+           since it is a stage-level overlay, not drawer content) via `(setupRequested)="requestCvSetup()"`.
+           **Mounted whenever there is something to show, not only `!facade.watchMode()`**: the strip
+           has always been reachable in watch mode (`facade.live()` was its only gate, before this
+           merge) — a viewer keeps the "what's on screen" strip even though the mutating CV controls
+           stay hidden from them, same "viewer, not controller" rule Start/Stop and the flight panel
+           already enforce. `<vision-cv-control-panel>` itself no longer owns an `open`/`close`
+           input/output or a `<vision-side-panel>` of its own (body-only as of this wave, see its own
+           class doc) — this is the one drawer shell for both. -->
+      @if (isPanelOpen('cv') && (facade.live() || !facade.watchMode())) {
+        <vision-side-panel title="Vision" icon="eye" subtitle="What the aircraft sees" (close)="panels.close()">
+          @if (facade.live()) {
+            <vision-detections-strip
+              [streamId]="facade.stream()?.streamId"
+              (hoveredClassChange)="facade.hoveredDetectionClass.set($event)"
+            />
+          }
+          @if (!facade.watchMode()) {
+            <vision-cv-control-panel
+              [streamId]="facade.stream()?.streamId"
+              [boxesMode]="facade.boxesMode()"
+              (boxesModeChange)="facade.boxesMode.set($event)"
+              (lockedTrackIdChange)="facade.lockedTrackId.set($event)"
+              [detectionEnabled]="facade.detectionOn()"
+              [detectionPending]="facade.detectionPending()"
+              (detectionEnabledChange)="facade.setDetection($event)"
+              (setupRequested)="requestCvSetup()"
+            />
+          }
+        </vision-side-panel>
       }
 
       <!-- Controller (RC transmitter monitor + Take control) — docs/plans/active/RC-CONTROL-PLAN.md Phase 0
@@ -250,14 +282,6 @@
           [canCommand]="facade.canShowCommands()"
           (close)="panels.close()"
         />
-      }
-
-      <!-- Detections strip — previously an always-visible bottom-right toggle+strip, now the
-           `detections` drawer (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2 item 5); same `live()` gate as before. -->
-      @if (facade.live() && isPanelOpen('detections')) {
-        <vision-side-panel title="Detections" icon="eye" (close)="panels.close()">
-          <vision-detections-strip />
-        </vision-side-panel>
       }
 
       <!-- Map — layers + drawing (docs/plans/done/MAP-REWORK-PLAN.md §5.2). One drawer for both rather than
@@ -305,7 +329,7 @@
             <dt>M</dt>
             <dd>Toggle the map inset</dd>
             <dt>B</dt>
-            <dd>Cycle detection boxes — overlay / burned / off</dd>
+            <dd>Cycle detection boxes — All / Priority / Locked only / Off</dd>
             <dt>F</dt>
             <dd>Fullscreen</dd>
             <dt>Esc</dt>
@@ -337,18 +361,20 @@
     <!-- ---- Tool-rail (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D; grouped by job per
          docs/conclusions/UX-SIMPLIFY-REVIEW.md F4 — "7 glyph-only drawers is past the glance-and-know limit";
          `layers` folded into `cv` per direct user request — the detection-boxes rendering mode is
-         now a control inside the `cv` (Detection) drawer, not its own drawer/button) — frozen ids
-         (fly-logic.ts's own `ToolRailPanelId`, matching cockpit.ts's own comment): flight · rc · cv ·
-         detections · marks · map · help, seven drawers; unchanged gates/behavior, only visual
-         grouping + order. Every button stays always-visible (no "more" overflow — F4 explicitly
-         rules that out on a safety-of-flight screen); a thin `--hairline` divider between
-         `.rail-group`s stands in for a text label, which does not read clean at this rail's ~2.25rem
-         button width (F4: "if it crowds, use just the divider"). Every button already carries its
-         own `title`/`aria-label` via `vision-icon-button`'s required `label` input
-         (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1 — see that component's own doc comment). Groups, top to bottom:
+         now a control inside the `cv` drawer, not its own drawer/button; `detections` folded into
+         `cv` in wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3 — one "Vision" button/drawer now
+         covers what used to be two) — frozen ids (fly-logic.ts's own `ToolRailPanelId`, matching
+         cockpit.ts's own comment): flight · rc · cv · marks · map · help, six drawers now (was seven
+         before the merge); unchanged gates/behavior otherwise, only visual grouping + order. Every
+         button stays always-visible (no "more" overflow — F4 explicitly rules that out on a
+         safety-of-flight screen); a thin `--hairline` divider between `.rail-group`s stands in for a
+         text label, which does not read clean at this rail's ~2.25rem button width (F4: "if it
+         crowds, use just the divider"). Every button already carries its own `title`/`aria-label`
+         via `vision-icon-button`'s required `label` input (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1 —
+         see that component's own doc comment). Groups, top to bottom:
            Control      — flight, rc (what an operator commands the aircraft with)
-           Vision       — cv, detections (what the aircraft sees / how it's rendered, including the
-                           boxes rendering-mode control merged into the `cv` drawer)
+           Vision       — cv alone now (what the aircraft sees / how it's rendered, including the
+                           boxes rendering-mode control and, since wave W5, the detections strip)
            Situational  — marks, map (the shared tactical picture: markers, plus map layers/drawing,
                            docs/plans/done/MAP-REWORK-PLAN.md §5.2)
            Help         — pinned to the rail's bottom via `.rail-group-help`'s `margin-top: auto`,
@@ -376,28 +402,24 @@
 
       <div class="rail-group" role="group" aria-label="Vision">
         <span class="rail-divider" aria-hidden="true"></span>
-        @if (!facade.watchMode()) {
+        <!-- One button for the merged drawer (wave W5) — visible whenever there is something to show
+             it for: a running stream (the strip, even in watch mode) or control mode (the CV body,
+             even before Start) — same union `cockpit.html`'s own drawer `@if` above uses. The
+             off-dot only ever means "detection is off" and only ever applies to the control body, so
+             it stays gated on `!facade.watchMode()` same as before the merge. -->
+        @if (facade.live() || !facade.watchMode()) {
           <span class="rail-item">
             <vision-icon-button
-              icon="scan"
-              label="Detection controls"
+              icon="eye"
+              label="Vision"
               variant="hud"
               [active]="isPanelOpen('cv')"
               (activated)="togglePanel('cv')"
             />
-            @if (!facade.detectionOn()) {
+            @if (!facade.watchMode() && !facade.detectionOn()) {
               <span class="rail-dot" title="Detection is off"></span>
             }
           </span>
-        }
-        @if (facade.live()) {
-          <vision-icon-button
-            icon="eye"
-            label="Detections"
-            variant="hud"
-            [active]="isPanelOpen('detections')"
-            (activated)="togglePanel('detections')"
-          />
         }
       </div>
 
@@ -472,6 +494,24 @@
           </div>
         </div>
       </div>
+    }
+
+    <!-- ---- CV setup modal (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) — a centered dialog over
+         this whole `.cockpit` stage, video visible-but-dimmed behind it. Only ever opened by
+         `<vision-cv-control-panel>`'s own "Change…"/"Detection setup…" buttons above, which are
+         themselves only rendered while the Vision drawer is open and `!facade.watchMode()` — so this
+         `@if` does not additionally gate on `isPanelOpen('cv')`: nothing can reach `requestCvSetup()`
+         without the drawer already open. `expertOpen`/`expertOpenChange` round-trip
+         `facade.cvExpertOpen` (facade-owned, not a component boolean — see that signal's own doc
+         comment) so the Expert disclosure's open state survives this component being destroyed and
+         recreated on every close/reopen. -->
+    @if (isDialogOpen('cv-setup') && !facade.watchMode()) {
+      <vision-cv-setup-modal
+        [streamId]="facade.stream()?.streamId"
+        [expertOpen]="facade.cvExpertOpen()"
+        (expertOpenChange)="facade.cvExpertOpen.set($event)"
+        (closed)="closeCvSetup()"
+      />
     }
   </div>
 } @else if (facade.loadError()) {

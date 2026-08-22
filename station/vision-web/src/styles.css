@@ -685,7 +685,7 @@ input[type="radio"] {
 
 /* ---- Segmented controls --------------------------------------------------- */
 /* Mutually-exclusive mode buttons (docs/plans/done/UX-REWORK-PLAN.md U-b item 5 — the Live/asset-detail
-   "boxes: Overlay/Burned/Off" toggle, the fleet/live map's layer picker) rendered as one joined
+   "boxes: Overlay/Off" toggle, the fleet/live map's layer picker) rendered as one joined
    strip with a strong active state, not parallel separate buttons floating next to each other.
    Add this class alongside a group's own layout/`role="group"` wrapper; children stay plain
    `.btn.secondary.small` buttons carrying `[class.active]="…"` exactly as before — this only

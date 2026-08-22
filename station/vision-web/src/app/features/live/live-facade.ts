@@ -1,7 +1,7 @@
-import { DestroyRef, Injectable, computed, effect, inject, linkedSignal, signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import type { BoxesMode, Transport } from '../../shared/player/player';
-import { defaultBoxesMode, resolveBurnedIn } from '../../shared/player/detection-overlay-logic';
+import { DEFAULT_DECLUTTER_LEVEL } from '../../shared/player/detection-overlay-logic';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
@@ -86,23 +86,16 @@ export class LiveFacade {
   });
   readonly live = computed(() => this.stream() !== undefined);
 
-  /** `stream()#burnedIn` projected to a primitive (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) —
-   * see `CockpitFacade#streamBurnedIn`'s identical doc comment for why a primitive, not the whole
-   * `stream()` object, gates `boxesMode`'s `linkedSignal` below. */
-  private readonly streamBurnedIn = computed(() => this.stream()?.burnedIn);
-
-  /** Per-tile "boxes: overlay/burned/off" toggle (docs/main/CYCLES-PLAN.md §11 item 6) — defaults to
-   * `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s own
-   * `boxesMode` input default matches for the same reason) **unless this stream is confirmed
-   * burn-in-free**, in which case `'overlay'` is the only mode that shows anything
-   * (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) — see `CockpitFacade#boxesMode`'s identical
-   * `linkedSignal` doc comment for the full reasoning. */
-  readonly boxesMode = linkedSignal<BoxesMode>(() => defaultBoxesMode(this.streamBurnedIn()));
-
-  /** `live.html`'s own "Burned" button — hidden once {@link streamBurnedIn} is confirmed `false`
-   * (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8), same reasoning as
-   * `CvControlPanel#showBurnedInOption`. */
-  readonly showBurnedInOption = computed(() => resolveBurnedIn(this.streamBurnedIn()));
+  /** Per-tile declutter-level toggle (docs/main/CYCLES-PLAN.md §11 item 6) — defaults to
+   * {@link DEFAULT_DECLUTTER_LEVEL} ('priority'); burn-in no longer exists at all
+   * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1), so there is nothing left to re-derive against a
+   * stream's own state. A plain `signal`, not the old `linkedSignal` over a derived `streamBurnedIn`
+   * primitive — see `CockpitFacade#boxesMode`'s identical simplification. Widened from a two-state
+   * toggle to four named declutter levels as of wave W4
+   * (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.6). This page has no FOLLOW-lock plumbing at
+   * all, so `<vision-player>`'s `lockedTrackId` input is simply never bound here — it stays its own
+   * default `0`, an honest "no lock known" rather than a fabricated one. */
+  readonly boxesMode = signal<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
 
   // --- Deliberately-stopped state (docs/plans/done/MVP2-PLAN.md §S, S-b) ---------------------------------
   // `explicitlyStopped` is this page's own Stop action; `hasBeenLive` tracks whether *this page

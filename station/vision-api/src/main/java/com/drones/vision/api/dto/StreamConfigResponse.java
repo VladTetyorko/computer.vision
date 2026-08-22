@@ -31,20 +31,18 @@ import java.util.List;
  *                            the measured truth, and this field must never be rendered as one
  * @param labelFilter         the running class filter; <b>empty means "every class"</b>, matching
  *                            {@code PipelineConfig}'s own convention, not "no classes"
+ * @param labelDenyFilter     the running class deny list (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2);
+ *                            <b>empty means "deny nothing"</b>. Applied alongside {@code labelFilter}
+ *                            at the single drop site in {@code StreamPipeline}, never a separate stage
  * @param detectionEnabled    the operator's own per-stream detect-on/off intent — one of the two
  *                            independent gates (docs/plans/active/CV-DEMAND-PLAN.md &sect;1). This
  *                            says what was <i>asked for</i>, never whether inference is running;
  *                            {@code GET .../tracks}'s {@code detectionState} answers that
- * @param overlayBurnIn       whether this stream asks for server-side box burn-in. Note this is the
- *                            <i>request</i>: {@code ActiveStreamResponse#burnedIn()} reports whether
- *                            burn-in is actually active, which also depends on a wired overlay and a
- *                            non-proxied source
- * @param overlayTelemetry    whether the OSD renders telemetry over the video
  * @param tracking            the running tracking configuration
  */
 public record StreamConfigResponse(String model, double confidenceThreshold, int inferenceFps,
-                                    List<String> labelFilter, boolean detectionEnabled, boolean overlayBurnIn,
-                                    boolean overlayTelemetry, StreamTrackingConfigResponse tracking) {
+                                    List<String> labelFilter, List<String> labelDenyFilter, boolean detectionEnabled,
+                                    StreamTrackingConfigResponse tracking) {
 
     /**
      * Maps the running configuration to the wire, field for field.
@@ -54,8 +52,8 @@ public record StreamConfigResponse(String model, double confidenceThreshold, int
      */
     public static StreamConfigResponse from(PipelineConfig config) {
         return new StreamConfigResponse(config.model().id(), config.confidenceThreshold(), config.inferenceFps(),
-                List.copyOf(config.labelFilter()), config.detectionEnabled(), config.overlayBurnIn(),
-                config.overlayTelemetry(), StreamTrackingConfigResponse.from(config.tracking()));
+                List.copyOf(config.labelFilter()), List.copyOf(config.labelDenyFilter()), config.detectionEnabled(),
+                StreamTrackingConfigResponse.from(config.tracking()));
     }
 
     /**

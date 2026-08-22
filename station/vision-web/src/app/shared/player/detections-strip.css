@@ -1,0 +1,79 @@
+/* `:host { display: contents }` — this strip is a content fragment, not a layout box of its own;
+   mirrors `cv-control-panel.css`'s identical convention for a component slotted into a host page's
+   own grid/flow. */
+:host {
+  display: contents;
+}
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-16);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.cv-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: none;
+}
+
+.cv-dot.on {
+  background: var(--color-success);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/* Read-only mode's chips stay the plain `.chip` this component has always rendered (global
+   `styles.css`) — only the interactive `<button>` variant below adds its own touch/hover/focus
+   treatment on top. */
+.strip-chip {
+  font-size: 0.76rem;
+}
+
+button.strip-chip {
+  border: 1px solid var(--border);
+  cursor: pointer;
+  /* A comfortable tap target (docs/main — "large touch targets" convention this app applies
+     everywhere a chip becomes clickable, e.g. `cv-control-panel.css`'s `.class-chip`), not just the
+     thin read-only pill the same class renders as a `<span>`. */
+  min-height: 2.25rem;
+  padding: var(--space-4) var(--space-8);
+}
+
+button.strip-chip:hover {
+  border-color: var(--color-info);
+}
+
+button.strip-chip:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: 1px;
+}
+
+/* Hidden state reuses `.chip.warn`'s own soft-amber tokens (global `styles.css`) — a deliberate
+   operator choice worth flagging at a glance, not an error (`.chip.danger`) and not the ambient
+   "currently visible" default (plain `.chip`). */
+button.strip-chip.warn:hover {
+  border-color: var(--color-warn);
+}
+
+.strip-chip-hidden {
+  text-decoration: line-through;
+  text-decoration-color: var(--color-warn-text);
+}
+
+.strip-hint {
+  flex-basis: 100%;
+  margin: 0;
+}

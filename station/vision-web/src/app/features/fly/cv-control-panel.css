@@ -1,12 +1,18 @@
-/* This is now drawer *content* only — `<vision-side-panel>` (cv-control-panel.html) owns the head/
-   close chrome, the drawer surface, and the bottom-sheet collapse below `--bp-sm` (docs/UI-REDESIGN-
-   PLAN.md Wave 2, D-E: migration deleted the old hand-rolled `.cv-toggle`/`.cv-drawer`/
-   `.cv-drawer-head` chrome entirely). `:host { display: contents }` keeps this component from
-   introducing its own box in `fly.html`'s `.grid-main` layout — mirrors `shared/ui/confirm-dialog.ts`/
-   `arm-confirm-dialog.css`'s identical convention for a component that is only ever a conditional
-   overlay, never a layout participant itself. Only the truly global, unscoped rules in
-   `src/styles.css` (`.btn`, `.chip`, `.label`, `.muted`, `.mono`, `.row`/`.spread`, native control
-   styling) are relied on below — see that file for anything referenced but not defined here. */
+/* This is now drawer *content* only — `<vision-side-panel>` (`cockpit.html`) owns the head/close
+   chrome, the drawer surface, and the bottom-sheet collapse below `--bp-sm`. `:host { display:
+   contents }` keeps this component from introducing its own box in `cockpit.html`'s `.grid-main`
+   layout — mirrors `shared/ui/confirm-dialog.ts`/`arm-confirm-dialog.css`'s identical convention for
+   a component that is only ever a conditional overlay/panel, never a layout participant itself. Only
+   the truly global, unscoped rules in `src/styles.css` (`.btn`, `.chip`, `.label`, `.muted`, `.mono`,
+   `.row`/`.spread`, native control styling) are relied on below — see that file for anything
+   referenced but not defined here.
+
+   Slimmed by docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1: every rule for a control that moved to
+   `CvSetupModal` (intent cards, the class checklist, the Tune/Expert `<details>` shells, the flow
+   strip, the capability readout) moved with it into `cv-setup-modal.css` — this file only keeps
+   what the seven-item fly-time panel still renders. `.cv-section.emphasized`/
+   `.capability-downgrade-reason` were already dead (unreferenced by any template) before this split
+   and are dropped here rather than carried forward. */
 
 :host {
   display: contents;
@@ -24,25 +30,14 @@
   margin-bottom: 0;
 }
 
-/* Prominence for the open-vocab model's own primary control (docs/plans/done/CV-CONTROL-PLAN.md §E) — a soft
-   accent card-within-the-drawer, reusing the existing `--accent`/`--accent-soft` tokens rather than
-   inventing a new color for "this is the important one right now". */
-.cv-section.emphasized {
-  background: var(--color-info-soft);
-  border: 1px solid var(--color-info);
-  border-radius: var(--radius-sm);
-  padding: var(--space-8);
-}
-
 .hint {
   font-size: 0.74rem;
   margin: var(--space-2) 0 var(--space-8);
   color: var(--text-muted);
 }
 
-/* ---- Detect hero (docs/plans/active/CV-UX-RESEARCH.md §3, wave U1) — the primary act, promoted to
-   the top of the panel; a quiet card (not `.emphasized`'s accent treatment — that's reserved for
-   "this is the one control that matters for the current model", a different signal). */
+/* ---- Detect hero (docs/plans/active/CV-UX-RESEARCH.md §3, wave U1) — the primary act, at the top
+   of the panel; a quiet card. ---- */
 
 .cv-hero {
   background: var(--panel-raised);
@@ -52,316 +47,43 @@
 }
 
 /* The one honest status sentence (`detectionStatus`, `cv-control-panel-logic.ts`) — telemetry-
-   shaped text, so `.mono` like every other quiet reading in this app (the flow strip, the
-   capability readout); no status colour (frontend-style skill §3: this app has no dedicated "good"
-   hue, and "detecting normally" is not itself a warning/danger state to flag). */
+   shaped text, so `.mono` like every other quiet reading in this app; no status colour
+   (frontend-style skill §3: this app has no dedicated "good" hue, and "detecting normally" is not
+   itself a warning/danger state to flag). */
 .cv-status-line {
   margin: var(--space-8) 0 0;
   padding-left: calc(1rem + var(--space-8) + var(--space-8));
 }
 
-/* ---- "Looking for" intent cards (docs/plans/active/CV-UX-RESEARCH.md §5, wave U2) ------------ */
-
-.intent-cards {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-}
-
-.intent-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: var(--space-8);
-}
-
-.intent-card.selected {
-  border-color: var(--color-info);
-  background: var(--color-info-soft);
-}
-
-.intent-card-choice {
+/* ---- "Looking for" summary row (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 §1.1 item 2) — a
+   door into the setup modal's own intent cards, not a second copy of them. */
+.cv-summary-row {
   display: flex;
   align-items: center;
   gap: var(--space-8);
-  cursor: pointer;
-  /* Comfortable tap target on touch, not just a thin text row. */
-  min-height: 2.5rem;
+  flex-wrap: wrap;
 }
 
-.intent-card-name {
+.cv-summary-name {
   flex: 1;
   min-width: 0;
   font-size: 0.82rem;
   color: var(--text);
 }
 
-.intent-card-preset {
-  align-self: flex-start;
-}
-
-/* ---- Class-filter chip checklist ------------------------------------------------------------ */
-
-.chip-checklist {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  margin-bottom: var(--space-8);
-}
-
-/* A chip is a `<span>` shell around two buttons — a `.chip-label` (toggles checked/hidden, the whole
-   chip's main job) and, only while checked, a trailing `.chip-remove` "×" (the same toggle, under a
-   more explicit affordance — nested `<button>`s aren't valid HTML, hence the shell). */
-.class-chip {
-  display: inline-flex;
-  align-items: center;
-  border-radius: var(--radius-pill);
-  background: var(--panel-raised);
-  border: 1px solid var(--border-strong);
-  color: var(--text-muted);
-  font-size: 0.76rem;
-  min-height: 1.9rem;
-}
-
-.class-chip.checked {
-  background: var(--color-info-soft);
-  border-color: var(--color-info);
-  color: var(--color-info-text);
-}
-
-.chip-check {
-  width: 0.85em;
-  display: inline-block;
-  text-align: center;
-}
-
-.chip-label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-8);
-  background: none;
-  border: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  border-radius: var(--radius-pill);
-}
-
-.chip-label:hover {
-  text-decoration: underline;
-}
-
-.chip-label:focus-visible {
-  outline: 2px solid var(--color-info);
-  outline-offset: -2px;
-}
-
-.chip-remove {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 1.2rem;
-  height: 1.2rem;
-  margin: 0 var(--space-4) 0 0;
-  border-radius: 50%;
-  border: none;
-  background: none;
-  color: inherit;
-  font-size: 0.85rem;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0.65;
-}
-
-.chip-remove:hover {
-  opacity: 1;
-  background: var(--color-info);
-  color: var(--panel-raised);
-}
-
-.chip-remove:focus-visible {
-  outline: 2px solid var(--color-info);
-  outline-offset: 1px;
-}
-
-.chip-search-row,
-.chip-action-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-8);
-}
-
-.chip-search-row input {
-  flex: 1;
-  width: 100%;
-}
-
-.chip-add-button {
-  margin-bottom: var(--space-8);
-}
-
-/* The tier-0 "Seen now" one-time first-hide hint (docs/plans/active/CV-UX-RESEARCH.md §4.4) — reuses
-   the shared `.notice` shell (no `.warn`/`.danger` intent: this is a plain fact, not bad news). */
-.cv-first-hide-hint {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-8);
-}
-
-/* The staged class-filter edit's own "count + Submit + Discard" row (direct user request: "Seen
-   now" becomes staged selection + Submit) — same shell/layout as `.cv-first-hide-hint` above (a
-   plain `.notice`, no `.warn`/`.danger` intent: unapplied work in progress is not bad news, just a
-   fact that must stay visible per the frontend-style skill's "unapplied state must be visible"
-   rule). Rendered identically in both the tier-0 "Seen now" section and Tune's full checklist
-   (`cv-control-panel.html`) — the two surfaces share one `pendingLabels` signal, so their own
-   pending rows must read the same too. */
-.cv-pending-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-8);
-}
-
-/* ---- Tune / Expert disclosures (docs/plans/active/CV-UX-RESEARCH.md §3/§7, wave U1) — the same
-   native `<details>` idiom `app-sidebar.css`'s own `.disclosure` already established for "Advanced"/
-   "Upcoming"; a feature-local rule set rather than reusing that class directly, since Angular's view
-   encapsulation scopes `app-sidebar.css` to `AppSidebar`'s own template. */
-
-.cv-disclosure {
-  margin-bottom: var(--space-8);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.cv-disclosure:last-child {
-  margin-bottom: 0;
-}
-
-.cv-disclosure summary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-4) var(--space-8);
-  padding: var(--space-8);
-  cursor: pointer;
-  list-style: none;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--text);
-  /* Comfortable tap target on touch, not just a thin text row. */
-  min-height: 2.5rem;
-}
-
-.cv-disclosure summary::-webkit-details-marker {
-  display: none;
-}
-
-.cv-disclosure-chevron {
-  display: inline-block;
-  flex: none;
-  color: var(--text-muted);
-  transition: transform 0.15s ease;
-}
-
-.cv-disclosure[open] .cv-disclosure-chevron {
-  transform: rotate(90deg);
-}
-
-.cv-disclosure-hint {
-  margin-left: auto;
-  font-weight: 400;
-  font-size: 0.74rem;
-  text-align: right;
-}
-
-.cv-disclosure-body {
-  padding: 0 var(--space-8) var(--space-8);
-  border-top: 1px solid var(--border);
-}
-
-.cv-disclosure-body .cv-section:first-child {
-  margin-top: var(--space-8);
-}
-
-/* ---- Tracking (docs/plans/done/TRACKING-PLAN.md, wave T7) --------------------------------------------------- */
+/* ---- Tracking (docs/plans/done/TRACKING-PLAN.md, wave T7) ---------------------------------- */
 
 /* The "Following #N — release" chip row — `.chip.accent` is the shared confirmed/selected chip
-   style everywhere else in the app (docs/plans/done/STYLE-TOKENS-PLAN.md); this only owns the row layout. */
+   style everywhere else in the app (docs/plans/done/STYLE-TOKENS-PLAN.md); this only owns the row
+   layout. */
 .tracking-lock-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-8);
-    margin-top: var(--space-8);
-}
-
-/* The flow strip (docs/extracts/TRACKING-ORCHESTRATION.md §7) — telemetry-shaped text, so `.mono` +
-   tabular-nums like every other ticking number in this app (frontend-style skill §8); a hairline
-   card rather than plain text so it reads as one instrument reading, not a stray caption. */
-.tracking-flow-strip {
-    margin-top: var(--space-8);
-    padding: var(--space-4) var(--space-8);
-    background: var(--panel-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-variant-numeric: tabular-nums;
-}
-
-/* ---- Served capability + detection-lag readout (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md
-   §4, wave J4) — a quiet hairline card by default, matching `.tracking-flow-strip` above; a
-   downgrade (`.downgraded`) borrows the shared `--color-warn-*` intent tokens rather than inventing
-   a new color, the same way `.notice.warn`/`.chip.warn` already do everywhere else in this app —
-   this is what makes a downgrade read as a *distinct state*, not the same grey text as a normal
-   reading (this wave's own brief). */
-.capability-readout {
-  margin-top: var(--space-8);
-  padding: var(--space-8);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.capability-readout.downgraded {
-  border-color: var(--color-warn-line);
-  background: var(--color-warn-soft);
-}
-
-.capability-readout-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-8);
+  margin-top: var(--space-8);
 }
 
-.capability-readout-label {
-  font-size: 0.74rem;
-  color: var(--text-muted);
-}
-
-.capability-readout-value {
-  font-variant-numeric: tabular-nums;
-}
-
-.capability-readout-value.lag-over-budget {
-  color: var(--color-danger-text);
-  font-weight: 600;
-}
-
-.capability-downgrade-reason {
-  margin: 0;
-  font-size: 0.74rem;
-}
-
-/* ---- Detection on/off toggle ------------------------------------------------------------------ */
+/* ---- Detect on/off toggle -------------------------------------------------------------------- */
 
 .toggle {
   display: flex;
@@ -379,4 +101,11 @@
 
 .toggle input {
   margin-top: var(--space-4);
+}
+
+/* ---- 7. Door into `CvSetupModal` — a full-width, large touch-target button, distinct from the
+   inline "Change…" affordance in the summary row above (same destination, two doors: this one is
+   the deliberate "I want to go tune everything" act, always visible at the panel's foot). */
+.cv-setup-button {
+  width: 100%;
 }

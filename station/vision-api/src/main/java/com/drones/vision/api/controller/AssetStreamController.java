@@ -41,12 +41,12 @@ import com.drones.vision.api.security.CurrentUser;
  * <h2>docs/plans/active/CV-DEMAND-PLAN.md §3.8 — one more collaborator, no more slots</h2>
  * {@link #startStream} needed a deployment-default {@link PipelineConfig} to merge request
  * overrides onto (the same change {@link StreamController#start} got), but this constructor was
- * already at this codebase's five-parameter ceiling. {@link StreamPublisherPort}/{@link
- * StreamService} — here only to resolve {@code viewUrl}/{@code whepUrl}/{@code burnedIn} for the
- * response — are replaced by {@link StreamViewerLinks}, which wraps exactly those three reads
- * behind one collaborator; that frees the slot {@code defaultConfig} needed. {@link StreamService}
- * itself stays a direct dependency of {@link StreamController} (it does far more there than these
- * three reads), so this narrowing is specific to this controller's own, smaller surface.
+ * already at this codebase's five-parameter ceiling. {@link StreamPublisherPort} — here only to
+ * resolve {@code viewUrl}/{@code whepUrl} for the response — is replaced by {@link
+ * StreamViewerLinks}, which wraps exactly those two reads behind one collaborator; that frees the
+ * slot {@code defaultConfig} needed. {@link StreamService} itself stays a direct dependency of
+ * {@link StreamController} (it does far more there than these two reads), so this narrowing is
+ * specific to this controller's own, smaller surface.
  *
  * <h2>Who the change is attributed to</h2>
  * The acting user comes from {@link CurrentUser}, matching {@link AssetController}'s own
@@ -121,7 +121,7 @@ public class AssetStreamController {
 
         StreamId streamId = assetStreamService.startStream(assetId, device, config, tracking);
         return new StartStreamResponse(streamId.value().toString(), streamViewerLinks.viewUrl(streamId),
-                streamViewerLinks.whepUrl(streamId), streamViewerLinks.burnedIn(streamId));
+                streamViewerLinks.whepUrl(streamId));
     }
 
     /**
