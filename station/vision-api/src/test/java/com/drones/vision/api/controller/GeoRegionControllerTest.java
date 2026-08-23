@@ -38,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc tests for {@link GeoRegionController} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3, H5)
+ * MockMvc tests for {@link GeoRegionController} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3, H5)
  * — the D9 flag-off {@code 409} on all four routes, {@code POST}/{@code DELETE}'s {@code
  * canAdminister} gate, and the plain read-through shape of {@code GET}.
  */

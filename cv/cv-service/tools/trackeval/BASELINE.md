@@ -366,12 +366,12 @@ original context, not as a target any wave is judged against anymore.
 
 ## 6. TRACK-IDENTITY-PLAN wave L2 (2026-08-20) -- association hardening, measured
 
-`docs/plans/active/TRACK-IDENTITY-PLAN.md`'s L2, after L1's track-level label election
+`docs/plans/done/TRACK-IDENTITY-PLAN.md`'s L2, after L1's track-level label election
 landed (commit `899fb838`, "Track-level label election" above). L1 gave `assign.py`'s
 `Candidate.label` a stable, hysteresis-gated operand instead of the raw, noisy per-frame
 one; L2's own job is to actually SPEND that stability -- raise the cost weights/gates that
 were left at their permissive "nothing is ever forbidden" C3 defaults
-(`docs/plans/active/TRACK-IDENTITY-RESEARCH.md` §1 item 3) now that a label disagreement or
+(`docs/plans/done/TRACK-IDENTITY-RESEARCH.md` §1 item 3) now that a label disagreement or
 a near-zero-overlap pairing means something more than frame-to-frame classifier noise.
 
 **Method.** Every trial below runs the full unmodified `tools/trackeval --all` (all 15
@@ -478,7 +478,7 @@ direction, no behaviour change.
 
 ## 7. TRACK-IDENTITY-PLAN wave L4 (2026-08-20) -- FOLLOW's memory path, measured
 
-`docs/plans/active/TRACK-IDENTITY-PLAN.md`'s L4, after L1 (track-level label election) and
+`docs/plans/done/TRACK-IDENTITY-PLAN.md`'s L4, after L1 (track-level label election) and
 L2 (association hardening, §6 above). D-B's own diagnosis
 (`TRACK-IDENTITY-RESEARCH.md` §2): FOLLOW's re-acquire is geometry-only
 (`lock.py`'s `best_iou_match`/`select_by_point`), so once the lost track's prediction has

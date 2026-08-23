@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, effect, inject, signal } from '@angular/core';
-import { RcInputService } from './rc-input.service';
-import type { ManualControlChannelBinding } from '../api/models';
+import { RcSource } from './rc-source.service';
+import type { ManualControlChannelBinding, VehicleKind } from '../api/models';
 import {
   DEFAULT_LATENCY_WINDOW,
   buildChannelsFrame,
@@ -27,22 +27,34 @@ const MANUAL_CONTROL_WS_URL = '/ws/manual-control';
 export type ManualControlEngageState = 'idle' | 'engaging' | 'engaged' | 'denied' | 'released';
 
 /**
- * `ManualControlClient` — the browser half of the SITL RC relay (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4,
- * R5). Opens one `WebSocket` per {@link engage} call, streams `RcInputService`'s live axes/buttons
- * back at the server-confirmed rate once `engaged`, and tracks glass-to-stick latency from each
- * `ack`. Frame encode/decode/latency math is pure (`manual-control-logic.ts`); this class is the
- * thin, browser-touching wiring around it — mirrors `rc-input.service.ts`'s own split.
+ * `ManualControlClient` — the browser half of the RC relay (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4,
+ * R5). Opens one `WebSocket` per {@link engage} call, streams the selected input source's live
+ * axes/buttons back at the server-confirmed rate once `engaged`, and tracks glass-to-stick latency
+ * from each `ack`. Frame encode/decode/latency math is pure (`manual-control-logic.ts`); this class
+ * is the thin, browser-touching wiring around it — mirrors `rc-input.service.ts`'s own split.
  *
- * **Provided per host**, exactly like `RcInputService` (`features/fly/rc-monitor.ts`'s own
- * `providers` array carries both) — this class injects `RcInputService` directly, DI-sharing
- * whichever instance the host provided, the same "one page-scoped service injects another"
- * idiom `FlyFacade` uses for `TelemetryStore`/`DetectionsStore`/`WeatherStore`.
+ * **Provided per host** (`features/fly/rc-monitor.ts`'s own `providers` array carries the whole
+ * set) — this class injects `RcSource`, DI-sharing whichever instance the host provided, the same
+ * "one page-scoped service injects another" idiom `FlyFacade` uses for `TelemetryStore`/
+ * `DetectionsStore`/`WeatherStore`.
+ *
+ * <h2>Input-source agnostic</h2>
+ * It reads `RcSource`, not the Gamepad API, so a session behaves identically whether the sticks are
+ * a plugged-in transmitter or the on-screen control surface
+ * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P10). Everything below — the watchdog
+ * keepalive, latency, every deadman — was already independent of where the numbers came from.
+ *
+ * <h2>The engaged frame describes the vehicle</h2>
+ * `vehicleKind`/`profileCode`/`profileName`/`channelMap` are what the server resolved from the
+ * heartbeat it was hearing at engage time. A host renders its control surface from them rather than
+ * assuming a multirotor's stick layout.
  *
  * <h2>Sending is driven by the input, not by a clock of its own</h2>
- * `RcInputService` writes `axes`/`buttons` from its `requestAnimationFrame` loop; this class sends
+ * The selected `RcSource` writes `axes`/`buttons` as they change — the gamepad from its
+ * `requestAnimationFrame` loop, the on-screen surface from its pointer handlers; this class sends
  * from an `effect()` over those signals, so a stick that moves reaches the socket in the same frame
  * it was sampled instead of waiting out a `setInterval` that had no relationship to when the input
- * arrived (docs/plans/active/RC-LATENCY-PLAN.md §2 B — that free-running timer cost a mean 15ms of
+ * arrived (docs/plans/done/RC-LATENCY-PLAN.md §2 B — that free-running timer cost a mean 15ms of
  * the old ~39ms glass-to-stick budget).
  *
  * A backstop timer still ticks, but its job is now the *keepalive*: both paths funnel through the
@@ -62,7 +74,9 @@ export type ManualControlEngageState = 'idle' | 'engaging' | 'engaged' | 'denied
  *   own destruction *is* the "panel closed" signal.
  * - **The tab hiding** — a `visibilitychange` listener, wired/torn down alongside this class's own
  *   lifecycle.
- * - **The gamepad disconnecting** — a constructor `effect()` over `RcInputService.connected()`.
+ * - **The input source going away** — a constructor `effect()` over `RcSource.live()`. That is the
+ *   gamepad unplugging; the on-screen surface cannot be unplugged, so for it this trigger never
+ *   fires and the other four carry the deadman.
  * - **The socket dropping** (any cause — network, a server-side abrupt close) — the raw
  *   `WebSocket`'s own `onclose`/`onerror`.
  * - **The server's own `watchdog`/`released` frames** — the session is already released
@@ -87,13 +101,16 @@ export type ManualControlEngageState = 'idle' | 'engaging' | 'engaged' | 'denied
  */
 @Injectable()
 export class ManualControlClient {
-  private readonly rc = inject(RcInputService);
+  private readonly source = inject(RcSource);
 
   private readonly _state = signal<ManualControlEngageState>('idle');
   private readonly _deniedReason = signal<string | undefined>(undefined);
   private readonly _latencyMs = signal<number | undefined>(undefined);
   private readonly _channelMap = signal<readonly ManualControlChannelBinding[] | undefined>(undefined);
   private readonly _rateHz = signal<number | undefined>(undefined);
+  private readonly _vehicleKind = signal<VehicleKind | undefined>(undefined);
+  private readonly _profileCode = signal<string | undefined>(undefined);
+  private readonly _profileName = signal<string | undefined>(undefined);
   private readonly _watchdogTripped = signal(false);
 
   readonly state = this._state.asReadonly();
@@ -101,6 +118,10 @@ export class ManualControlClient {
   readonly latencyMs = this._latencyMs.asReadonly();
   readonly channelMap = this._channelMap.asReadonly();
   readonly rateHz = this._rateHz.asReadonly();
+  /** What the vehicle reported itself to be, as the server resolved it at engage time. */
+  readonly vehicleKind = this._vehicleKind.asReadonly();
+  readonly profileCode = this._profileCode.asReadonly();
+  readonly profileName = this._profileName.asReadonly();
   readonly watchdogTripped = this._watchdogTripped.asReadonly();
 
   private ws: WebSocket | null = null;
@@ -121,18 +142,20 @@ export class ManualControlClient {
       this.release();
     });
 
-    // Gamepad-disconnect deadman — see this class's own doc comment.
+    // Input-source deadman — see this class's own doc comment. For the gamepad source this is the
+    // unplug case it always was; the on-screen surface is never "not live", and relies on the other
+    // four triggers instead.
     effect(() => {
-      if (!this.rc.connected() && this.isSessionLive()) {
+      if (!this.source.live() && this.isSessionLive()) {
         this.release();
       }
     });
 
-    // The send path — every new rAF sample is offered to the one send rule. See this class's own
+    // The send path — every new sample is offered to the one send rule. See this class's own
     // "Sending is driven by the input" doc section.
     effect(() => {
-      const axes = this.rc.axes();
-      const buttons = this.rc.buttons();
+      const axes = this.source.axes();
+      const buttons = this.source.buttons();
       this.offerChannels(axes, buttons);
     });
   }
@@ -162,6 +185,9 @@ export class ManualControlClient {
     this._watchdogTripped.set(false);
     this._channelMap.set(undefined);
     this._rateHz.set(undefined);
+    this._vehicleKind.set(undefined);
+    this._profileCode.set(undefined);
+    this._profileName.set(undefined);
     this._latencyMs.set(undefined);
     this.latencyWindow = [];
     this.seq = 0;
@@ -205,6 +231,9 @@ export class ManualControlClient {
       case 'engaged':
         this._channelMap.set(msg.channelMap);
         this._rateHz.set(msg.rateHz);
+        this._vehicleKind.set(msg.vehicleKind);
+        this._profileCode.set(msg.profileCode);
+        this._profileName.set(msg.profileName);
         this._state.set('engaged');
         this.startSendLoop(msg.rateHz);
         break;
@@ -252,7 +281,7 @@ export class ManualControlClient {
     this.stopSendLoop();
     this.keepaliveMs = keepaliveIntervalMs(rateHz);
     this.sendTimer = setInterval(
-      () => this.offerChannels(this.rc.axes(), this.rc.buttons()),
+      () => this.offerChannels(this.source.axes(), this.source.buttons()),
       SEND_CHECK_INTERVAL_MS,
     );
   }

@@ -6,14 +6,14 @@
   }
 </p>
 
-<!-- ---- 1. Detect hero — the primary act (docs/plans/active/CV-UX-RESEARCH.md §3). The status line
+<!-- ---- 1. Detect hero — the primary act (docs/plans/done/CV-UX-RESEARCH.md §3). The status line
      is the plan's own P2 §1 item 1 wording: a measured rate + classes-on-screen while running, a
      plain "no detector passes" sentence while stalled, "Off — zero CPU. Video unaffected." while
      off — see `detectionStatus` (`cv-control-panel-logic.ts`) for the full state table. -->
 <section class="cv-section cv-hero">
   <label class="toggle">
     <!-- Bound to the stream's own server-side intent while one is running, the draft otherwise
-         (docs/plans/active/STREAM-STATE-PLAN.md §3.1, resolved once in `CockpitFacade#detectionOn`).
+         (docs/plans/done/STREAM-STATE-PLAN.md §3.1, resolved once in `CockpitFacade#detectionOn`).
          Disabled, not optimistically flipped, while the request is in flight — this switch shows
          where detection actually is, never where a click asked it to go. -->
     <input
@@ -39,7 +39,7 @@
   </p>
 </section>
 
-<!-- ---- 2. "Looking for" summary row (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 §1.1 item 2) —
+<!-- ---- 2. "Looking for" summary row (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1 §1.1 item 2) —
      name + cost word only, a door into `CvSetupModal`'s own full intent-card picker; never a second
      copy of the picker itself. `costWord`/the underlying model roster are the exact same source the
      modal's cards read, via `cv-control-panel-logic.ts#modelCostWord` — the two surfaces can never
@@ -79,7 +79,7 @@
 
 <!-- ---- 5. Click-to-follow + lock chip — the real Follow interaction is clicking a box in the
      video (`buildFollowLockPatch`), not a control in either surface; stays in this panel regardless
-     of the setup modal's own tracking-mode picker (docs/plans/active/CV-UX-RESEARCH.md §6). Wire-
+     of the setup modal's own tracking-mode picker (docs/plans/done/CV-UX-RESEARCH.md §6). Wire-
      confirmed only (docs/extracts/TRACKING-ORCHESTRATION.md §3.3) — unchanged by the P1 split. -->
 @if (streamId()) {
   <section class="cv-section">

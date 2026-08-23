@@ -1,7 +1,7 @@
 """Replay driver: feeds a synthetic `Sequence` through the REAL
 `cv_service.tracking.session.StreamTrackingSession` -- not a reimplementation.
 
-`docs/plans/active/TRACKING-V2-PLAN.md` §4 (wave C0). This is the one place
+`docs/plans/done/TRACKING-V2-PLAN.md` §4 (wave C0). This is the one place
 the harness talks to production tracking code: everything upstream
 (`sequences.py`) and downstream (`metrics.py`) is plain data, so a session
 bug shows up here and nowhere else has to reimplement

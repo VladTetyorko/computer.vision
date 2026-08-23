@@ -14,7 +14,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code detection_events} — mirrors {@link com.drones.vision.perception.domain.model.DetectionEvent}
- * field-for-field (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3); {@code DetectionEventMapper} owns the mapping
+ * field-for-field (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W3); {@code DetectionEventMapper} owns the mapping
  * in both directions.
  *
  * <p>{@code id} is the domain's own {@code DetectionEventId} (not synthetic — unlike {@link

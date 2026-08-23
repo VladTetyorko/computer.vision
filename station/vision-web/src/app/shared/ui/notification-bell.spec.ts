@@ -163,7 +163,7 @@ describe('NotificationBell — dropdown state (docs/plans/done/UI-STATE-PLAN.md)
   });
 });
 
-describe('NotificationBell — system events (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2-§3.3)', () => {
+describe('NotificationBell — system events (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.2-§3.3)', () => {
   it('renders a durable system-events card, one row per non-DETECTION LiveEvent, with the empty state hidden', () => {
     const fixture = render([], [liveEvent({ id: 'le-1', type: 'DEVICE_OFFLINE', message: 'Camera went quiet' })]);
     trigger(fixture).click();

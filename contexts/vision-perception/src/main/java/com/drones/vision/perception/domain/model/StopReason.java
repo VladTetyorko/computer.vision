@@ -1,7 +1,7 @@
 package com.drones.vision.perception.domain.model;
 
 /**
- * Why a stream stopped (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2) &mdash; carried on the
+ * Why a stream stopped (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2) &mdash; carried on the
  * {@code STREAM_STOPPED} event so a stop that <b>the system chose</b> can be told apart from one an
  * operator asked for.
  *

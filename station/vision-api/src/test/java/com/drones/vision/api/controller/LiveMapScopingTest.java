@@ -186,7 +186,7 @@ class LiveMapScopingTest {
     }
 
     /**
-     * The G4 scoping proof (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D11): a {@code track}
+     * The G4 scoping proof (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5/D11): a {@code track}
      * event rides the same {@code map} topic and the same per-connection {@code canView(layerId)}
      * filter a {@code mark} event already does -- no new scoping mechanism exists for it, so this
      * mirrors {@link #aMarkOnOneTeamsLayerReachesThatTeamsConnectionOnly()} exactly, substituting a

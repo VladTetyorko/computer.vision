@@ -106,7 +106,7 @@ public final class DefaultStreamService implements StreamService {
     private final StreamPipelineSettings settings;
 
     /**
-     * Deployment-wide pull-mode wiring (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, switch B) — {@code null}
+     * Deployment-wide pull-mode wiring (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, switch B) — {@code null}
      * (every constructor but the 12-argument one) means every stream this service starts uses push
      * detection, exactly as before this capability existed. Non-null switches every stream this
      * service starts to the pull-mode detection driver (D12's own note: B is one deployment-wide
@@ -116,7 +116,7 @@ public final class DefaultStreamService implements StreamService {
     private final PullDetectionSettings pullDetectionSettings;
 
     /**
-     * Detection-demand evaluator (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3) — {@code null} means this
+     * Detection-demand evaluator (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3) — {@code null} means this
      * service never schedules the demand-poll task at all, so no stream it starts is ever gated on
      * anything but {@link PipelineConfig#detectionEnabled()}; {@link StreamPipeline}'s own {@code
      * detectionDemand} field simply stays at its fail-open {@code true} default forever. Non-null
@@ -268,7 +268,7 @@ public final class DefaultStreamService implements StreamService {
     }
 
     /**
-     * Same as the 10-argument constructor, plus deployment-wide pull-mode wiring (docs/plans/active/MEDIA-SOT-PLAN.md
+     * Same as the 10-argument constructor, plus deployment-wide pull-mode wiring (docs/plans/done/MEDIA-SOT-PLAN.md
      * wave M5, switch B) threaded into every {@link StreamPipeline} this service starts.
      *
      * @param pullDetectionSettings nullable, following the same convention as {@code
@@ -290,7 +290,7 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Same as the 11-argument constructor, plus a {@link DetectionDemandPort} collaborator
-     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3): when present, this constructor schedules {@link
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3): when present, this constructor schedules {@link
      * #pollDetectionDemand} on {@link #retryScheduler} at {@link
      * StreamPipelineSettings#detectionDemandPollInterval()}, re-evaluating every running stream's
      * demand on each tick.
@@ -376,7 +376,7 @@ public final class DefaultStreamService implements StreamService {
                         lockSeq::incrementAndGet), lockSeq::incrementAndGet));
 
         try {
-            // docs/plans/active/MEDIA-SOT-PLAN.md D4: when the active publisher itself dials this device's
+            // docs/plans/done/MEDIA-SOT-PLAN.md D4: when the active publisher itself dials this device's
             // source (a proxied RTSP path), this service opens no VideoSourcePort at all -- NO_VIDEO_SOURCE
             // stands in so StreamPipeline's video-path half (onNext, latestFrame) simply never runs, while
             // streamStarted/streamEnded still fire (that is what lets the proxying publisher create/delete
@@ -401,7 +401,7 @@ public final class DefaultStreamService implements StreamService {
                 videoPublisher = supervisedSource;
             }
 
-            // docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5: switch B (vision.cv.frame-transport) is one
+            // docs/plans/done/MEDIA-SOT-PLAN.md wave M5, D5: switch B (vision.cv.frame-transport) is one
             // deployment-wide choice, not a per-device one -- every stream this service starts either
             // pulls or pushes, decided once by whether pullDetectionSettings was ever wired in.
             PulledDetectionPort pulledDetectionPort = null;
@@ -435,7 +435,7 @@ public final class DefaultStreamService implements StreamService {
             // every completed result), or a configured field of view (CameraAttitude needs it for
             // ego-motion compensation) -- so a lookup nobody will ever read is never even attempted.
             //
-            // INVARIANT (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1): this supplier must be built
+            // INVARIANT (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1): this supplier must be built
             // unconditionally with respect to overlay -- it once shipped dead because its construction
             // was gated on an OverlayPort being present, which silently meant a deployment with a
             // configured field of view but no overlay sent no CameraPose at all (a defect invisible to
@@ -455,7 +455,7 @@ public final class DefaultStreamService implements StreamService {
                     streamPublisherPort, detectionRepositoryPort, eventPublisher, eventEngine,
                     ownerAssetId, liveUpdatePublisherPort, telemetrySupplier, System::nanoTime, settings,
                     pullDetection);
-            // docs/plans/active/CV-DEMAND-PLAN.md §1: seeded to Instant.EPOCH, not Instant.now() -- demand must
+            // docs/plans/done/CV-DEMAND-PLAN.md §1: seeded to Instant.EPOCH, not Instant.now() -- demand must
             // be observed, never assumed. StreamPipeline#detectionDemand's own fail-open true default
             // already covers a just-started stream until the first poll tick (at most
             // detectionDemandPollInterval, not a full detectionDemandGrace); seeding this to "now" would
@@ -549,7 +549,7 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * The {@code STREAM_STOPPED} event, worded and tagged by {@code reason}
-     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2). The reason also travels as a structured attribute,
+     * (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2). The reason also travels as a structured attribute,
      * not only inside the prose: the message is for a human reading the ticker, the attribute is what
      * a client can branch on without parsing English.
      */
@@ -594,7 +594,7 @@ public final class DefaultStreamService implements StreamService {
      * pipeline's).
      *
      * <p><b>A null {@code supervisedSource} is exactly the proxied case</b>
-     * (docs/plans/active/MEDIA-SOT-PLAN.md D4) — {@code start} wires one if and only if the active
+     * (docs/plans/done/MEDIA-SOT-PLAN.md D4) — {@code start} wires one if and only if the active
      * publisher does not dial the device itself — so it is the honest test for observability rather
      * than a defensive null check. Such a stream can only ever be {@link StreamState#UNOBSERVED},
      * and must never be reported as {@code STARTING}: its frame count stays {@code 0} for as long as
@@ -675,7 +675,7 @@ public final class DefaultStreamService implements StreamService {
     }
 
     /**
-     * The demand-poll task (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3), scheduled on {@link #retryScheduler}
+     * The demand-poll task (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3), scheduled on {@link #retryScheduler}
      * at {@link StreamPipelineSettings#detectionDemandPollInterval()} only when {@link
      * #detectionDemandPort} is non-null — see the constructor. Re-evaluates every currently running
      * stream once per tick.
@@ -702,7 +702,7 @@ public final class DefaultStreamService implements StreamService {
     }
 
     /**
-     * Evaluates and applies one stream's detection demand (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3):
+     * Evaluates and applies one stream's detection demand (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3):
      * resolves the stream's owning asset (mirroring {@link #start}'s own {@code ownerAssetId}
      * resolution — {@code null} when {@link #usageTracker} is absent or the device has no owning
      * asset), asks {@link #detectionDemandPort}, stamps {@code lastDemandAt} when wanted, and
@@ -777,7 +777,7 @@ public final class DefaultStreamService implements StreamService {
      * client that could choose the number could replay an abandoned target back into existence.
      *
      * <p>{@code labelFilter}/{@code labelDenyFilter} each replace their running set wholesale when
-     * present (docs/plans/active/CV-CLEAN-FEED-PLAN.md &sect;2, D-2) — same "absent = unchanged,
+     * present (docs/plans/done/CV-CLEAN-FEED-PLAN.md &sect;2, D-2) — same "absent = unchanged,
      * present = replace" semantics, independent of one another.
      */
     private static PipelineConfig mergeConfig(PipelineConfig current, PipelineConfigPatch patch,
@@ -818,7 +818,7 @@ public final class DefaultStreamService implements StreamService {
      *                                 mirrors this nullability
      * @param pulledDetectionPort     the pull-mode port this stream opened a pull against, or {@code
      *                                 null} for a push-mode stream; {@code supervisedPulledResults}
-     *                                 mirrors this nullability (docs/plans/active/MEDIA-SOT-PLAN.md wave M5)
+     *                                 mirrors this nullability (docs/plans/done/MEDIA-SOT-PLAN.md wave M5)
      * @param lockSeq                 this stream's monotonic target-lock sequence (docs/plans/done/TRACKING-PLAN.md
      *                                 &sect;4.D). Per-stream, not global: two streams' locks are unrelated, and
      *                                 a shared counter would make one operator's click advance
@@ -829,7 +829,7 @@ public final class DefaultStreamService implements StreamService {
      *                                 since a start request could in principle carry a lock and would
      *                                 then need the first number
      * @param lastDemandAt            the instant {@link #evaluateDetectionDemand} last observed real
-     *                                 demand for this stream (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3);
+     *                                 demand for this stream (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3);
      *                                 seeded to {@link Instant#EPOCH} by {@link #start}, deliberately
      *                                 <b>not</b> {@link Instant#now()} &mdash; demand must be
      *                                 <i>observed</i>, never assumed, so a just-started stream with no

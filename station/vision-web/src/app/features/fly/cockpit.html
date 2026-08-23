@@ -42,7 +42,7 @@
         } @else if (facade.live() && !facade.stream()?.viewUrl) {
           <div class="notice stage-notice">The stream is running but has no view URL yet.</div>
         } @else if (facade.videoNotice(); as videoState) {
-          <!-- ---- Video-flow state (docs/plans/active/STREAM-STATE-PLAN.md §2.3) ------------------------
+          <!-- ---- Video-flow state (docs/plans/done/STREAM-STATE-PLAN.md §2.3) ------------------------
                Server-measured, not inferred here from "the player has not errored yet". Ahead of the
                detection chip below because a stalled feed is the more urgent fact and makes
                "video only" untrue. Silent for `LIVE` (the video is the message) and for `UNOBSERVED`
@@ -56,7 +56,7 @@
             <span>{{ videoState.text }}</span>
           </div>
         } @else if (facade.detectionsPausedNotice(); as pausedText) {
-          <!-- ---- Detections-staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4) ------
+          <!-- ---- Detections-staleness honesty (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4) ------
                Detection is meant to be on ({@link detectionsPausedNotice} is `null` whenever it isn't —
                see `CockpitFacade`'s own doc comment), but nothing has arrived recently — the same amber
                `.notice` chrome as a stalled video feed above, since a batch that stopped arriving is an
@@ -67,7 +67,7 @@
             <span>{{ pausedText }}</span>
           </div>
         } @else if (detectionOffChipVisible()) {
-          <!-- ---- Detection-off affordance (docs/plans/active/CV-DEMAND-PLAN.md wave D3) --------------------
+          <!-- ---- Detection-off affordance (docs/plans/done/CV-DEMAND-PLAN.md wave D3) --------------------
                Detection now defaults off, both here and server-side, so a stream with no boxes is the
                normal case, not a fault — an operator would otherwise have no idea why nothing is being
                drawn, with the only control buried at the bottom of the `cv` drawer (`cv-control-panel.html`).
@@ -231,11 +231,11 @@
       />
 
       <!-- ---- Vision drawer — merged from the former separate `cv` (CV control) and `detections`
-           (strip) drawers into one (wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3), id kept as
+           (strip) drawers into one (wave W5, docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3), id kept as
            `cv` (`fly-logic.ts#ToolRailPanelId`'s own doc comment — least-disruptive: a returning
            operator's persisted open-panel id still opens this same drawer). Top: the detections
            strip, now the class-level remote control (hover-highlights a class on the stage, click
-           hides it via `labelDenyFilter` — docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.5).
+           hides it via `labelDenyFilter` — docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.5).
            Below: `<vision-cv-control-panel>`'s own body — as of docs/plans/active/CV-PANEL-SPLIT-
            PLAN.md P1, the slimmed seven-item fly-time surface; its own "Change…"/"Detection setup…"
            buttons open `<vision-cv-setup-modal>` (mounted separately, near the Stop confirm below,
@@ -362,7 +362,7 @@
          docs/conclusions/UX-SIMPLIFY-REVIEW.md F4 — "7 glyph-only drawers is past the glance-and-know limit";
          `layers` folded into `cv` per direct user request — the detection-boxes rendering mode is
          now a control inside the `cv` drawer, not its own drawer/button; `detections` folded into
-         `cv` in wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3 — one "Vision" button/drawer now
+         `cv` in wave W5, docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3 — one "Vision" button/drawer now
          covers what used to be two) — frozen ids (fly-logic.ts's own `ToolRailPanelId`, matching
          cockpit.ts's own comment): flight · rc · cv · marks · map · help, six drawers now (was seven
          before the merge); unchanged gates/behavior otherwise, only visual grouping + order. Every
@@ -496,7 +496,7 @@
       </div>
     }
 
-    <!-- ---- CV setup modal (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) — a centered dialog over
+    <!-- ---- CV setup modal (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1) — a centered dialog over
          this whole `.cockpit` stage, video visible-but-dimmed behind it. Only ever opened by
          `<vision-cv-control-panel>`'s own "Change…"/"Detection setup…" buttons above, which are
          themselves only rendered while the Vision drawer is open and `!facade.watchMode()` — so this

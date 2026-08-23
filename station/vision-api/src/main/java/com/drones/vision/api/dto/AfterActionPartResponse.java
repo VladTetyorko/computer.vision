@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.api.support.afteraction.AfterActionPart;
 
 /**
- * Wire representation of one {@code parts[]} row (docs/plans/active/AFTER-ACTION-PLAN.md
+ * Wire representation of one {@code parts[]} row (docs/plans/done/AFTER-ACTION-PLAN.md
  * &sect;3.1's frozen wire contract). No {@code @JsonInclude(NON_NULL)} — {@code note: null} is
  * meaningful (a {@code PRESENT} part with nothing to qualify) and must appear on the wire, not be
  * omitted.

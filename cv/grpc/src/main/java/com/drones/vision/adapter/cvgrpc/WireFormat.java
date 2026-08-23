@@ -3,7 +3,7 @@ package com.drones.vision.adapter.cvgrpc;
 import java.util.Locale;
 
 /**
- * How a downscaled frame reaches cv-service (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R3).
+ * How a downscaled frame reaches cv-service (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R3).
  *
  * <h2>What this actually buys</h2>
  * Measured on loopback (docs/conclusions/CV-RATE-BUDGET.md &sect;3), a 53.8 ms round trip contained

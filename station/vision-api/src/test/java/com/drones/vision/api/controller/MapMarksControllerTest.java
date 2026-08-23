@@ -268,7 +268,7 @@ class MapMarksControllerTest {
         org.junit.jupiter.api.Assertions.assertNull(spec.getValue().depressionDegrees(),
                 "an absent depressionDegrees must stay null, not silently become the 45deg default -- "
                         + "otherwise every real gimbal measurement would be discarded as a false override "
-                        + "(docs/plans/active/GEO-POSE-PLAN.md V3)");
+                        + "(docs/plans/done/GEO-POSE-PLAN.md V3)");
         org.junit.jupiter.api.Assertions.assertNull(spec.getValue().layerId());
     }
 

@@ -54,7 +54,7 @@ export class AssetPanel {
   /**
    * `marker()?.gpsFixType` feeds the same `gps-degraded` reason the rail's own row rank uses — see
    * `command-logic.ts#gpsDegradedReason`'s doc comment. `geofenceBreaches`/`pipelineErrorDetail`
-   * (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4) are **not** threaded here, matching this component's
+   * (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4) are **not** threaded here, matching this component's
    * pre-existing gap for `geofenceBreaches` (both need a `LiveStore` read this deliberately-dumb,
    * store-free panel doesn't have — see class doc's "issues no HTTP itself and holds no store" line);
    * `buildEntityRows`' own rail-row computation (`command-facade.ts#entityRows`) is still the

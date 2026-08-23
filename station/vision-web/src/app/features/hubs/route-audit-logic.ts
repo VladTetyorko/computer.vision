@@ -12,7 +12,7 @@ import type { Routes } from '@angular/router';
  * Three questions matter for that check: does a path terminate in an actual component
  * (`loadComponent`/`component`), a static redirect (`redirectTo`), or a guard-only leaf
  * (`canActivate` with no `children` of its own — `app.routes.ts`'s `landingGuard` route,
- * docs/plans/active/OPS-UX-PLAN.md §2 A1, which resolves its destination by role at navigation time
+ * docs/plans/done/OPS-UX-PLAN.md §2 A1, which resolves its destination by role at navigation time
  * rather than naming one statically) — any of the three means "no dead link"; none of them means the
  * path was never registered at all (would 404 via the `**` catch-all).
  */

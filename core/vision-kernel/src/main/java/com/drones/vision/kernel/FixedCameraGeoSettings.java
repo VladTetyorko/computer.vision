@@ -2,7 +2,7 @@ package com.drones.vision.kernel;
 
 /**
  * The operator-tunable limits {@link FixedCameraGeo} uses to decide whether a projected ground fix
- * is honest enough to publish (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D6). CLAUDE.md
+ * is honest enough to publish (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D6). CLAUDE.md
  * rule 1 forbids these as code constants — every caller supplies them, sourced from
  * {@code application.yaml}'s {@code vision.geo.fixed-camera.*} in the running app (§6); the kernel
  * itself stores no default.

@@ -2,7 +2,7 @@ package com.drones.vision.flight.domain.model;
 
 /**
  * How much a {@link TrackCorrection} is believed, after both halves of D5's two-owner gate
- * (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§4.3) — Python's "is this frame confidently matched"
+ * (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.5/§4.3) — Python's "is this frame confidently matched"
  * and Java's "do I believe the aircraft is there". Frozen wire spelling: the enum name is the wire
  * string (§3.4/§3.5).
  */

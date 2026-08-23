@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * CRUD over one asset's {@link CameraPose} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4),
+ * CRUD over one asset's {@link CameraPose} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D4),
  * audited through {@code AuditTrailPort} — this context's first audit write (D10).
  *
  * <p>One interface, one implementation ({@link DefaultCameraPoseService}).

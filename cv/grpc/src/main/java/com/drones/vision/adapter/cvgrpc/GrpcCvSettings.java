@@ -31,12 +31,12 @@ import java.util.Objects;
  *   <li>{@link #detectWidth()}/{@link #jpegQuality()} &rarr; {@code vision.cv.detect-width}/{@code
  *   .jpeg-quality} — {@link GrpcDetectionPort}'s wide-{@code BGR24} downscale threshold/target width
  *   and JPEG re-encode quality (see {@link DetectionFrameCodec}). {@link #detectWidth()} doubles as
- *   {@link GrpcPulledDetectionPort}'s {@code PullControl.detect_width} (docs/plans/active/MEDIA-SOT-PLAN.md
+ *   {@link GrpcPulledDetectionPort}'s {@code PullControl.detect_width} (docs/plans/done/MEDIA-SOT-PLAN.md
  *   &sect;5.1, wave M4) — the same "how wide should the CV side work with" knob, whether the JVM
  *   downscales before sending (push) or tells the worker to downscale locally (pull).</li>
  *   <li>{@link #pullRtspBase()}/{@link #pullReconnectInitialBackoff()}/{@link
  *   #pullReconnectMaxBackoff()} &rarr; {@code vision.cv.pull.rtsp-base}/{@code
- *   .pull.reconnect-backoff.*} (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.5, wave M4) — see their own
+ *   .pull.reconnect-backoff.*} (docs/plans/done/MEDIA-SOT-PLAN.md &sect;5.5, wave M4) — see their own
  *   javadoc below for why these are config-surface only in this module today, not consumed by any
  *   class here.</li>
  * </ul>
@@ -64,7 +64,7 @@ import java.util.Objects;
  * @param wireFormat             how a downscaled frame reaches cv-service; must not be {@code null},
  *                                defaults to {@link WireFormat#AUTO} which picks raw {@code BGR24}
  *                                for a loopback endpoint and JPEG for anything else
- * @param pullRtspBase            base RTSP URL the worker dials for a pulled stream (docs/plans/active/MEDIA-SOT-PLAN.md
+ * @param pullRtspBase            base RTSP URL the worker dials for a pulled stream (docs/plans/done/MEDIA-SOT-PLAN.md
  *                                &sect;5.5), e.g. {@code rtsp://localhost:8554} — <b>deliberately
  *                                separate</b> from {@code vision.publish.mediamtx.rtsp-base}: a remote
  *                                worker (the GB4005 box) must dial the host's LAN address, not {@code
@@ -77,7 +77,7 @@ import java.util.Objects;
  *                                of that wiring. Must not be {@code null}
  * @param pullReconnectInitialBackoff how long a pulled stream's reopen waits before its first retry
  *                                after a failure; mirrors {@code vision.publish.resilience.initial-backoff}'s
- *                                shape. <b>Not applied by this module</b> — docs/plans/active/MEDIA-SOT-PLAN.md
+ *                                shape. <b>Not applied by this module</b> — docs/plans/done/MEDIA-SOT-PLAN.md
  *                                decision D5 is explicit that {@link GrpcPulledDetectionPort} must not
  *                                build reconnect/backoff itself; the existing generic {@code
  *                                SupervisedPublisher<DetectionResult>} (vision-application) applies it

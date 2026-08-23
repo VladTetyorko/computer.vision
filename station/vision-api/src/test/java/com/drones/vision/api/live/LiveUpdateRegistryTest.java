@@ -191,7 +191,7 @@ class LiveUpdateRegistryTest {
     }
 
     /**
-     * docs/plans/active/SCALE-100-PLAN.md §5 S5 — {@link LiveUpdateRegistry#publishFleetChanged()} used to
+     * docs/plans/done/SCALE-100-PLAN.md §5 S5 — {@link LiveUpdateRegistry#publishFleetChanged()} used to
      * recompute the entire fleet+devices snapshot on every single call; it now coalesces leading+
      * trailing, the same treatment {@link LiveUpdateRegistry#flushPending()} already gives telemetry/
      * detections. These three tests exercise the coalescing itself, independently of the class's
@@ -437,7 +437,7 @@ class LiveUpdateRegistryTest {
     }
 
     /**
-     * docs/plans/active/SCALE-100-PLAN.md §5 S7: {@code telemetryBuffer} is no longer the private
+     * docs/plans/done/SCALE-100-PLAN.md §5 S7: {@code telemetryBuffer} is no longer the private
      * {@code static final TELEMETRY_BUFFER_CAPACITY} constant it used to be — it comes from the
      * {@link VisionApiProperties.Live} passed to the full constructor. This proves the value is
      * actually enforced, not just stored: with a capacity of 2, a third coalesced flush must evict
@@ -544,7 +544,7 @@ class LiveUpdateRegistryTest {
 
     @Test
     void watchingDetectionsIsTrueOnceAConnectionSubscribesToThatAssetsDetectionsTopic() {
-        // docs/plans/active/CV-DEMAND-PLAN.md §3.5's SSE half: a cockpit open on this asset
+        // docs/plans/done/CV-DEMAND-PLAN.md §3.5's SSE half: a cockpit open on this asset
         // subscribes to `detections:<assetId>` at connect time, and that alone is "someone is
         // watching" -- no envelope needs to actually flow.
         AssetId assetId = AssetId.random();
@@ -559,7 +559,7 @@ class LiveUpdateRegistryTest {
     }
 
     /**
-     * S2 (docs/plans/active/SCALE-100-PLAN.md §5) — {@link #register} plugs a test-double {@link SseEmitter}
+     * S2 (docs/plans/done/SCALE-100-PLAN.md §5) — {@link #register} plugs a test-double {@link SseEmitter}
      * straight into the registry, so these tests can observe exactly what {@link
      * LiveUpdateRegistry#broadcast}/{@link LiveUpdateRegistry#heartbeatAll} actually write, and with
      * what timing, on {@link LiveUpdateRegistry#connectionWriteExecutor}'s real virtual threads —
@@ -646,7 +646,7 @@ class LiveUpdateRegistryTest {
 
         try {
             // The blocked connection's write for "first" is now queued on connectionWriteExecutor
-            // and will never complete -- exactly the risk docs/plans/active/SCALE-100-PLAN.md §9 calls out
+            // and will never complete -- exactly the risk docs/plans/done/SCALE-100-PLAN.md §9 calls out
             // ("multi-threaded dispatch reorders envelopes within a topic"). Two more envelopes are
             // published while that write is stuck in flight.
             registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STOPPED, "second"));

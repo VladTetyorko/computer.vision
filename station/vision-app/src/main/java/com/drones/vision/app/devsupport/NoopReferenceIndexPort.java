@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * {@link ReferenceIndexPort} that never talks to cv-service — the flag-off fallback for {@code
- * vision.geo.visual.enabled=false} (docs/plans/active/VISUAL-GEO-V2-PLAN.md D9, "off means
+ * vision.geo.visual.enabled=false} (docs/plans/done/VISUAL-GEO-V2-PLAN.md D9, "off means
  * invisible"). Needed so {@code GeoRegionController} (component-scanned, unconditional per {@code
  * CameraPoseController}'s precedent — see {@code VisualGeoWiringConfiguration}) can always get a
  * {@code ReferenceRegionService} bean built on top of <em>some</em> {@link ReferenceIndexPort}, even

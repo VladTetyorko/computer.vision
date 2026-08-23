@@ -57,9 +57,9 @@ export function seedLabelFilterForModel(model: CvModel | undefined): readonly st
 }
 
 /**
- * The "Looking for" card/summary's own cost word (docs/plans/active/CV-UX-RESEARCH.md §5) —
+ * The "Looking for" card/summary's own cost word (docs/plans/done/CV-UX-RESEARCH.md §5) —
  * `'slower'` for an open-vocabulary model, `'fast'` otherwise. Named so the Vision drawer's
- * tier-0 summary row (`cv-control-panel.ts`, docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 §1.1
+ * tier-0 summary row (`cv-control-panel.ts`, docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1 §1.1
  * item 2) and the setup modal's intent cards (`cv-setup-modal.ts`) can never disagree about the
  * word for the same model — both call this instead of restating the ternary twice.
  */
@@ -69,7 +69,7 @@ export function modelCostWord(openVocab: boolean): 'fast' | 'slower' {
 
 /**
  * One plain sentence of *what* a roster entry finds — the intent card's own "what it finds" line
- * (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §1 item 2, CV-UX-RESEARCH.md §5: "one sentence of
+ * (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §1 item 2, CV-UX-RESEARCH.md §5: "one sentence of
  * what it finds plus the honest cost word"). `GET /api/cv/models` (wire-frozen, `dto.CvModelResponse`)
  * carries no description field of its own — `displayName` is a UI label, not a sentence, and the
  * wire's `kind` (`'general'`/`'specialized'`/`'open-vocab'`, the exact three values
@@ -115,7 +115,7 @@ export function observedLabels(results: readonly DetectionResult[]): readonly st
 
 /** How many of the most-recently-observed labels {@link recentObservedLabels} names, in recency
  *  order — originally the pre-P2 "Seen now" mini-checklist's own display cap
- *  (docs/plans/active/CV-UX-RESEARCH.md §4.1/§7 wave U4). docs/plans/active/CV-PANEL-SPLIT-PLAN.md
+ *  (docs/plans/done/CV-UX-RESEARCH.md §4.1/§7 wave U4). docs/plans/done/CV-PANEL-SPLIT-PLAN.md
  *  P2 §5 folded that mini-checklist into the one full Classes checklist, so this constant now bounds
  *  how many labels {@link sortRecentFirst} promotes to the front, not a separately-rendered list. */
 export const SEEN_NOW_CHIP_CAP = 8;
@@ -158,7 +158,7 @@ export function recentObservedLabels(
  *
  * The `labelDenyFilter` half matters for the same reason the strip's own candidate set needs it
  * (`shared/player/detections-strip-logic.ts#stripChips`): a denied label is dropped server-side
- * pre-fan-out (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2), so it can never reappear in `observed`
+ * pre-fan-out (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2), so it can never reappear in `observed`
  * once hidden — without unioning `labelDenyFilter` in directly, a hidden chip would vanish from this
  * checklist the moment its last visible detection aged out, with no way back to un-hide it.
  */
@@ -180,7 +180,7 @@ export function isLabelChecked(labelFilter: readonly string[], label: string): b
 
 /**
  * How many distinct classes are actually visible right now, after the class filter — the honest
- * number the tier-0 status line names (docs/plans/active/CV-UX-RESEARCH.md §3's mockup, "3 classes
+ * number the tier-0 status line names (docs/plans/done/CV-UX-RESEARCH.md §3's mockup, "3 classes
  * on screen"). Reads only the single most recent detection result (`results[0]`, the same
  * newest-first assumption {@link latestFrameTracking} documents) — what's actually on screen right
  * now, not {@link observedLabels}' running history. `0` for no results yet.
@@ -201,7 +201,7 @@ export function classesOnScreenCount(
 // --- Staged class-filter selection (bulk-edit paths only, wave W5) ------------------------------
 // `labelFilter` (the allowlist) is edited only through the bulk paths below — the preset fill
 // ({@link applyPreset}), free-text add ({@link addLabel}), and Clear-all — never by a per-chip
-// click anymore (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3: "allowlist stays only as a model-intent
+// click anymore (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3: "allowlist stays only as a model-intent
 // seed, preset/seeding paths unchanged"). The panel stages these edits in its own `pendingLabels`
 // signal (`cv-control-panel.ts`) — `null` mirrors the applied filter (no edit in progress), a
 // concrete array (possibly `[]`) is unapplied work waiting on an explicit Submit — and only
@@ -281,7 +281,7 @@ export function hasExactLabelMatch(candidates: readonly string[], query: string)
  * Reorders `candidates` so the most-recently-observed labels sort first, in their own recency
  * order, followed by the rest in whatever order `candidates` already had (`chipCandidates`'
  * alphabetical order, ordinarily) — the single merged Classes checklist's own sort
- * (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5: "the full checklist … with observed-recently
+ * (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §5: "the full checklist … with observed-recently
  * labels sorted first"). `recentLabels` is meant to be {@link recentObservedLabels}'s own output —
  * this is what survives of the pre-P2 "Seen now" mini-checklist once it's folded into the one full
  * list instead of existing as a second, duplicate apparatus: recency was that section's one real
@@ -405,13 +405,13 @@ export function perfHint(openVocabSelected: boolean): string {
     : 'Inference rate and detection on/off are the CPU-budget controls — the model still computes every class every frame regardless of the filter.';
 }
 
-// --- Honest, repeated-verbatim copy (docs/plans/active/CV-UX-RESEARCH.md §4.3, CV-CLEAN-FEED-PLAN.md
+// --- Honest, repeated-verbatim copy (docs/plans/done/CV-UX-RESEARCH.md §4.3, CV-CLEAN-FEED-PLAN.md
 // D-3 wave W5) -------------------------------------------------------------------------------------
 // HIDDEN_CLASS_TRUTH lives in `core/detections/detections-logic.ts`, not here — both the setup
 // modal's own Classes section and the detections strip's one-click hide (`shared/player/
 // detections-strip.ts`, in `shared/`, which cannot import from `features/fly/`) need the identical
 // sentence, so it lives in the one neutral home both can reach. `perfHint` above deliberately does
-// NOT import or fold it in (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §2/§4) — the modal's Classes
+// NOT import or fold it in (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §2/§4) — the modal's Classes
 // section is the sentence's one home per surface; a second copy under the fps slider would be the
 // exact duplication that instruction forbids.
 //
@@ -636,21 +636,21 @@ export function formatDetectionLag(detectionLagMillis: number): string {
   return `${Math.round(detectionLagMillis)} ms`;
 }
 
-// --- Detection status line (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §1, CV-UX-RESEARCH.md
+// --- Detection status line (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §1, CV-UX-RESEARCH.md
 // §1.2/§3/§9.2) -------------------------------------------------------------------------------
 // Replaces the bare on/off toggle with one honest sentence naming the actual outcome. Detection
 // only ever runs when BOTH the operator's own `detectionEnabled` choice AND the backend's own
-// viewer-demand gate are open (docs/plans/active/CV-DEMAND-PLAN.md §2's two-gate model,
+// viewer-demand gate are open (docs/plans/done/CV-DEMAND-PLAN.md §2's two-gate model,
 // `StreamPipeline#maybeDetect`) — a toggle reading "on" while nothing is watching is not lying
 // about the operator's own intent, but showing only the toggle *would* lie about the outcome; this
 // section is what turns "on" into "on, but idle" using `detectionState`, already served on
 // `GET .../tracks` (`dto.DetectionState`) and mirrored in `core/api/models.ts`.
 
 /**
- * The measured detection rate as shown to the operator (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2
+ * The measured detection rate as shown to the operator (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2
  * §1 item 1's exact mockup wording, `"9.9/s measured"`) — replacing the inference-fps slider's now-
  * false "this is the rate" label (the adaptive rate controller only ever raises above the slider's
- * own floor, never holds it exactly — docs/plans/active/CV-RATE-CONTROL-PLAN.md §2). Takes a
+ * own floor, never holds it exactly — docs/plans/done/CV-RATE-CONTROL-PLAN.md §2). Takes a
  * **known-positive, already-measured** `submittedFps` (`DetectionRateResponse#submittedFps` off
  * `GET .../tracks`) — {@link detectionStatus} is the one caller, and it only reaches this function
  * once it has already told "never measured" and "measured zero" apart (see that function's own doc
@@ -682,7 +682,7 @@ export interface DetectionStatus {
 }
 
 /**
- * The one honest status line for the Detect hero (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §1
+ * The one honest status line for the Detect hero (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §1
  * item 1). Order of checks matters — each is the more specific truth than the next:
  *
  * 1. `!detectionEnabled` — the operator's own choice, always wins; nothing else matters once
@@ -703,7 +703,7 @@ export interface DetectionStatus {
  *         `rate.windowSeconds`-second window submitted nothing to the detector at all (`due()` is a
  *         real deadline count in `DetectionRate.java`, so this is not "not measured yet", it is
  *         "measured zero") — named plainly: `"On — no detector passes in the last Ns."` This is the
- *         honest field to read for a stalled detector per docs/plans/active/CV-PANEL-SPLIT-PLAN.md
+ *         honest field to read for a stalled detector per docs/plans/done/CV-PANEL-SPLIT-PLAN.md
  *         P2 §1 item 1, distinct from case (a) precisely because `rate` is present.
  *      c. Otherwise — the plan's own mockup line: {@link formatMeasuredRate} plus how many classes
  *         are on screen right now ({@link classesOnScreenCount}), joined with `" · "`; the classes
@@ -815,7 +815,7 @@ function formatDetectorReason(reason: DetectorReason): string {
 /** How long a hot-knob edit (confidence/fps/labelFilter/labelDenyFilter) waits for further edits
  *  before actually sending the PATCH — coalesces a fast slider drag or a burst of chip clicks into
  *  one request instead of one per input event. Lives here (not a local `const` in `cv-setup-
- *  modal.ts`, its one caller as of docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) purely so it can't
+ *  modal.ts`, its one caller as of docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1) purely so it can't
  *  drift from `debounce`'s own doc comment below, which names the exact behavior this constant
  *  tunes. */
 export const HOT_KNOB_DEBOUNCE_MS = 400;

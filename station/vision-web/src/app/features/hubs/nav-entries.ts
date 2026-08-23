@@ -62,12 +62,12 @@ import type { IconName } from '../../shared/ui/icon-registry';
  *   is true, the exact same gate `shared/ui/identity-chip.ts`'s Organization link and
  *   `core/org/org-guard.ts`'s route guard already use — reused here, not a new role system. Every
  *   `group`-carrying entry is `managerOnly`, with **one deliberate exception**: `System status`
- *   (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1) sits in the `diagnostics` group but is not
+ *   (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1) sits in the `diagnostics` group but is not
  *   `managerOnly` — an operator whose CV pipeline just died needs to see why, the same "don't gate
  *   the explanation behind the role that isn't looking at the failure" reasoning `/command` already
  *   applies more broadly. `Pilots / roster` is `managerOnly` too (its own route is already
  *   `orgGuard`-gated, so hiding the tile for a pilot matches where a click would land anyway, not a
- *   new restriction). **`Add source` is `managerOnly` too (docs/plans/active/OPS-UX-PLAN.md §2 A4)** — the
+ *   new restriction). **`Add source` is `managerOnly` too (docs/plans/done/OPS-UX-PLAN.md §2 A4)** — the
  *   concurrent backend wave gates `POST /api/assets` itself on `canManageOrg()`, so the nav must not
  *   dangle a door the API will now refuse. `Assets` stays ungated — reading the fleet is not a
  *   management action — as does `System status`, for the separate reason given above. Net effect: a
@@ -209,7 +209,7 @@ export const NAV_MODES: readonly NavMode[] = [
         name: 'Audit trail',
         description: 'Who changed what, fleet-wide — actor, action, target, and result.',
         to: '/monitor/audit',
-        // docs/plans/active/OPS-UX-PLAN.md §3 B1: mirrors `AuditController#list`'s own
+        // docs/plans/done/OPS-UX-PLAN.md §3 B1: mirrors `AuditController#list`'s own
         // `canManageOrg()` gate — the manager's accountability surface, not a pilot's.
         managerOnly: true,
       },
@@ -252,7 +252,7 @@ export const NAV_MODES: readonly NavMode[] = [
         name: 'Add source',
         description: 'Enter an address, scan the network, listen for a drone, or simulate one — four steps.',
         to: '/add-source',
-        // docs/plans/active/OPS-UX-PLAN.md §2 A4: the concurrent backend wave gates `POST /api/assets` on
+        // docs/plans/done/OPS-UX-PLAN.md §2 A4: the concurrent backend wave gates `POST /api/assets` on
         // `canManageOrg()` — the nav must not offer a door the API will now refuse. `Assets`, its
         // sibling above, stays ungated (reading the fleet is not a management action).
         managerOnly: true,
@@ -332,7 +332,7 @@ export const NAV_MODES: readonly NavMode[] = [
         group: 'diagnostics',
         managerOnly: true,
       },
-      // Deliberately NOT managerOnly (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1) — the one exception to
+      // Deliberately NOT managerOnly (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1) — the one exception to
       // "every grouped entry is managerOnly" this file's own class doc otherwise states as a rule.
       // An operator whose CV pipeline just died needs to see why the system is degraded; gating that
       // behind ADMIN/MANAGER would hide the one page that explains a problem they're already looking

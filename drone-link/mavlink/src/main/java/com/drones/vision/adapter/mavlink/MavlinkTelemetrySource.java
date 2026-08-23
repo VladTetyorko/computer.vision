@@ -196,7 +196,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     /**
      * {@link LinkHealth.Health} for every vehicle currently claimed across every open gateway
      * (every bind address, not just one) — {@code mavlink-link}'s {@code SubsystemStatusPort}
-     * plumbing (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2). Public — unlike this class's other
+     * plumbing (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2). Public — unlike this class's other
      * {@code MavlinkGateway}-plumbing accessors — because {@code vision-app}'s wiring passes {@code
      * this::claimedVehicleHealth} as the {@code Supplier<List<LinkHealth.Health>>}
      * {@link MavlinkLinkStatusProvider} takes; that wiring class lives in a different package and

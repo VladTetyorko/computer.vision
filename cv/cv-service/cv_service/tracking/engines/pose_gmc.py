@@ -1,6 +1,6 @@
 """`pose` -- ego-motion compensation from camera attitude, with no pixels at all.
 
-`docs/plans/active/TRACKING-V2-PLAN.md` §3.1, `docs/conclusions/TRACKING-REVIEW.md` §4.5.
+`docs/plans/done/TRACKING-V2-PLAN.md` §3.1, `docs/conclusions/TRACKING-REVIEW.md` §4.5.
 
 **The defect this closes.** Association is IoU-based, and IoU is computed in
 image space. When the *camera* yaws, every box in the frame moves; nothing

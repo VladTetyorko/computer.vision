@@ -7,7 +7,7 @@ import java.time.Instant;
 
 /**
  * The live, ephemeral read model for one tracked object a fixed camera has projected onto the
- * ground (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3) — one object per
+ * ground (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D3) — one object per
  * {@code (assetId, trackId)}, updated in place as new fixes arrive, never one row per point (that is
  * {@link TrackPoint}'s job, the durable trail). This is the payload {@link MapEvent}'s {@link
  * MapEvent.EntityType#TRACK} entity carries.

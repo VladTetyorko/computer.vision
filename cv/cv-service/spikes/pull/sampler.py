@@ -1,7 +1,7 @@
 """Python port of the deadline sampler from `StreamPipeline.sampleDue`/`armScheduleAt`
 (feat/cv-rate-control, vision-application/src/main/java/com/drones/vision/application/
 pipeline/StreamPipeline.java, ~L908-943), for M0's rate-discipline measurement
-(docs/plans/active/MEDIA-SOT-PLAN.md §8 M0, §7 "deadline sampler ... ported to Python").
+(docs/plans/done/MEDIA-SOT-PLAN.md §8 M0, §7 "deadline sampler ... ported to Python").
 
 Two properties are load-bearing and are exactly what a careless port loses -- both are
 preserved here on purpose, not incidentally:

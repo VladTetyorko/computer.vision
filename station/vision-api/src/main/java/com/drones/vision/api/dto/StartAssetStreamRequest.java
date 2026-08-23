@@ -27,7 +27,7 @@ import java.util.List;
  * @param labelFilter         overrides {@link PipelineConfig#labelFilter()} if present — see {@link
  *                             StartStreamRequest#labelFilter()}'s own javadoc (docs/plans/done/CV-CONTROL-PLAN.md §2)
  * @param labelDenyFilter      overrides {@link PipelineConfig#labelDenyFilter()} if present — see {@link
- *                             StartStreamRequest#labelDenyFilter()}'s own javadoc (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2)
+ *                             StartStreamRequest#labelDenyFilter()}'s own javadoc (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2)
  * @param detectionEnabled    overrides {@link PipelineConfig#detectionEnabled()} if present (docs/plans/done/CV-CONTROL-PLAN.md §2)
  * @param tracking            overrides the deployment's tracking seed if present — see {@link
  *                             StartStreamRequest#tracking()}'s own javadoc for the full contract
@@ -77,7 +77,7 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
      * #trackingPatch()} — see that method and its device-level twin.
      *
      * @param defaults the deployment's default pipeline configuration to merge this request onto
-     *                 (docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8)
+     *                 (docs/plans/done/CV-DEMAND-PLAN.md §3.7/§3.8)
      * @return the effective pipeline configuration for the new stream
      */
     public PipelineConfig mergeOnto(PipelineConfig defaults) {

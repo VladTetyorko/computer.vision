@@ -18,7 +18,7 @@ const POLL_INTERVAL_MS = 2_000;
  * live, slow enough to stay a background read.
  *
  * **"Only while the drawer is open" is now free**, not a flag this store tracks itself (wave W5,
- * docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3): `CvControlPanel` is only ever mounted while the merged
+ * docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3): `CvControlPanel` is only ever mounted while the merged
  * Vision drawer is open (`cockpit.html` owns the mount, `<vision-side-panel>`'s own doc comment —
  * "mounting is the host's job… mounting IS opening"), so calling {@link trackTracks} from that
  * component's constructor and {@link untrackTracks} from its `DestroyRef` bounds this poll to exactly
@@ -78,7 +78,7 @@ const DETECTIONS_LIMIT = 50;
  * window regardless of which transport was feeding it or whether the server ever clears anything.
  *
  * **Also owns the `GET /api/streams/{id}/tracks` poll** ({@link trackTracks}/{@link untrackTracks}/
- * {@link tracks}, wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3) — previously a private poller
+ * {@link tracks}, wave W5, docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3) — previously a private poller
  * inside `CvControlPanel`. Folded in here because that panel is this store's own consumer already
  * (it injects `DetectionsStore` for {@link results} too) and because "one store owns the whole Fly
  * cockpit CV feed" is more honest than two independently-timed pollers reading overlapping server
@@ -157,7 +157,7 @@ export class DetectionsStore {
    * The most recently arrived result's `capturedAt`, regardless of freshness — unlike {@link results}
    * (which drops anything that has aged out), this keeps tracking "when did we last actually see
    * something" so a stalled feed can report *how long* it's been silent instead of merely going
-   * blank (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7). Reads the same raw
+   * blank (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7). Reads the same raw
    * poll/live accumulator {@link results} itself reads before filtering.
    */
   private readonly lastSeenAt = computed(() =>

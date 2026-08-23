@@ -18,7 +18,7 @@ import type { RegionProgressResponse, RegionResponse } from '../../core/api/mode
 const PROGRESS_POLL_INTERVAL_MS = 3_000;
 
 /**
- * `RegionManagerPage`'s facade (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — `/manage/geo/regions`,
+ * `RegionManagerPage`'s facade (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — `/manage/geo/regions`,
  * the reference-imagery region list + ingest form + live indexing progress. A single-consumer,
  * page-local read/write model, so this calls `VisionApi` directly rather than growing `GeoStore`
  * (per-asset correction tracking, unrelated) with region state — the same "a routed page's facade

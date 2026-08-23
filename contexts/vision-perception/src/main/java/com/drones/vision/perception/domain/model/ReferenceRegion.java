@@ -1,7 +1,7 @@
 package com.drones.vision.perception.domain.model;
 
 /**
- * {@code GET /api/geo/regions}' actual read model (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3) —
+ * {@code GET /api/geo/regions}' actual read model (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3) —
  * the merge {@link com.drones.vision.perception.application.geo.ReferenceRegionService#list} performs
  * between cv-service's built regions ({@link
  * com.drones.vision.perception.domain.port.ReferenceIndexPort#list}) and Java's own in-memory

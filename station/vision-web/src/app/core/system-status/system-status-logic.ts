@@ -4,7 +4,7 @@ import type { OverallHealth, SubsystemHealth } from '../api/models';
 /**
  * Pure, Angular-free logic behind `core/system-status/system-status-store.ts`,
  * `shared/ui/app-sidebar/**`'s shell rollup dot, and `features/system-status/**`'s own facade
- * (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1-§5.2, wave S3).
+ * (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1-§5.2, wave S3).
  *
  * **Why a shared severity vocabulary, not a `SubsystemHealth`-shaped one**: `<vision-notice>`'s own
  * `variant` input (`shared/ui/notice.ts`) is exactly `'neutral' | 'warn' | 'danger' | 'ok'` — this
@@ -92,7 +92,7 @@ export function worstSeverity(values: readonly ShellSeverity[]): ShellSeverity {
 }
 
 /**
- * The shell rollup dot's own severity (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2) — the direct fix for §1.2's
+ * The shell rollup dot's own severity (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2) — the direct fix for §1.2's
  * finding that the sidebar dot answered only "did the last device poll succeed" and stayed green
  * through a live-transport failure or a degraded backend subsystem. Worst-of three independent axes:
  * backend REST reachability, the SSE live-transport connection, and the platform's own self-reported

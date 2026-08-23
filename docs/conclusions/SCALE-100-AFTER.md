@@ -144,4 +144,4 @@ serialized path, which is the right shape for what is left.
 4. **The browser idle-tab polling spot-check is still not done** (baseline §3.4). It remains the
    weakest claim in the plan's §2.1.
 5. **`spring.threads.virtual.enabled` was off on both sides**, per the reversal in
-   [`SCALE-100-CONTEXT.md`](../plans/active/SCALE-100-CONTEXT.md) §7. This sweep says nothing about it.
+   [`SCALE-100-CONTEXT.md`](../plans/done/SCALE-100-CONTEXT.md) §7. This sweep says nothing about it.

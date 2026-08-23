@@ -147,7 +147,7 @@ export class AssetDetailFacade {
   /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/plans/done/MAP-REWORK-PLAN.md §5.2). */
   readonly layers = inject(LayersStore);
   readonly drawings = inject(DrawingsStore);
-  /** Projected fixed-camera tracks (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G5) — the same
+  /** Projected fixed-camera tracks (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md wave G5) — the same
    *  org-wide, already-scoped picture `marks`/`drawings`/`geofence` show on this card's map, not
    *  filtered to this one asset (this card's map has never been per-asset-scoped for its overlays). */
   readonly tracks = inject(TracksStore);

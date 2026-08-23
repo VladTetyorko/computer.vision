@@ -1,8 +1,8 @@
 # LIVE-SCOPE — give the live-operations surface an authority model
 
 **Branch** `feat/live-scope` (off master) · closes theme **T1** and the client half **T2** of
-[PLATFORM-AUDIT-FINDINGS.md](PLATFORM-AUDIT-FINDINGS.md) · lane evidence in
-[PLATFORM-AUDIT-SCOPE.md](PLATFORM-AUDIT-SCOPE.md) and [PLATFORM-AUDIT-UI.md](PLATFORM-AUDIT-UI.md).
+[PLATFORM-AUDIT-FINDINGS.md](../active/PLATFORM-AUDIT-FINDINGS.md) · lane evidence in
+[PLATFORM-AUDIT-SCOPE.md](../active/PLATFORM-AUDIT-SCOPE.md) and [PLATFORM-AUDIT-UI.md](../active/PLATFORM-AUDIT-UI.md).
 
 ## 1. The problem in one paragraph
 

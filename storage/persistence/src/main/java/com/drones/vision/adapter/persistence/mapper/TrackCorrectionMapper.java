@@ -10,7 +10,7 @@ import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.VisualFixEvidence;
 
 /**
- * {@link TrackCorrection} ⟷ {@link TrackCorrectionEntity} (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * {@link TrackCorrection} ⟷ {@link TrackCorrectionEntity} (docs/plans/done/VISUAL-GEO-V2-PLAN.md
  * §3.5/§3.7).
  *
  * <p>{@code toEntity} never carries an {@code id} — {@link TrackCorrection} has none of its own,
@@ -30,7 +30,7 @@ import com.drones.vision.kernel.VisualFixEvidence;
  *
  * <p>{@code cellCalibrated}/{@code sequenceConverged} left this placeholder list in H8 — they are
  * the two booleans that decide PROBABLE vs CONFIRMED, so substituting {@code false} on read-back
- * was not inert at all (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 4). They now round-trip
+ * was not inert at all (docs/plans/done/VISUAL-GEO-V2-PLAN.md §9.11 defect 4). They now round-trip
  * through real columns.
  */
 public final class TrackCorrectionMapper {

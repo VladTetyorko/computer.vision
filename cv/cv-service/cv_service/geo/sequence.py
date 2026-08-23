@@ -1,4 +1,4 @@
-"""Sequence localizer + false-convergence gate evidence (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+"""Sequence localizer + false-convergence gate evidence (docs/plans/done/VISUAL-GEO-V2-PLAN.md
 §4.4, frozen). Production port of `spikes/geo/harvested/sequence.py#SequenceLocalizer` -- the
 core particle-filter math (measurement update = softmax over the similarity field at
 `temperature`; motion update = odometry delta rotated/scaled by per-particle process noise +

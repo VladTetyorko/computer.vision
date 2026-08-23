@@ -13,7 +13,14 @@ import java.util.List;
  * @param frame             the grabbed frame; {@link VideoFrame#width()}/{@link
  *                          VideoFrame#height()} are the resolution to report — never downscaled,
  *                          that only happens to the preview thumbnail the API layer derives from
- *                          this frame
+ *                          this frame. <b>{@code null} only on a telemetry-only probe</b>
+ *                          (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §3): a link that
+ *                          carries MAVLink and no video has no frame to grab and never will, so
+ *                          demanding one would make every telemetry-only device unaddable. The
+ *                          compact constructor still refuses a frameless result that detected no
+ *                          telemetry either — a successful probe must prove <em>something</em>
+ *                          arrived, which is the invariant the original non-null check was
+ *                          protecting
  * @param codec             a best-effort codec label derived from {@link
  *                          com.drones.vision.perception.domain.model.PixelFormat}, or {@code null} when it
  *                          isn't knowable from that alone. A raw, already-decoded pixel format
@@ -36,9 +43,20 @@ public record ProbeResult(VideoFrame frame, String codec, Integer fps, boolean t
                            List<String> warnings) {
 
     public ProbeResult {
-        if (frame == null) {
-            throw new IllegalArgumentException("ProbeResult frame must not be null");
+        if (frame == null && !telemetryDetected) {
+            throw new IllegalArgumentException(
+                    "ProbeResult must carry a frame unless telemetry was detected");
         }
         warnings = warnings == null ? List.of() : List.copyOf(warnings);
+    }
+
+    /**
+     * Whether this probe proved the link by telemetry alone, with no video behind it.
+     *
+     * @return {@code true} when there is no frame — which, by the compact constructor's invariant,
+     *         can only happen once telemetry was detected
+     */
+    public boolean telemetryOnly() {
+        return frame == null;
     }
 }

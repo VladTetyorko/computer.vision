@@ -9,7 +9,7 @@ import java.util.concurrent.Flow;
 import java.util.function.Supplier;
 
 /**
- * Per-stream pull-mode detection collaborators (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5/D6) — bundled
+ * Per-stream pull-mode detection collaborators (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, D5/D6) — bundled
  * because they are only ever supplied together (a running stream is either push or pull, never both)
  * and only ever consumed by {@link StreamPipeline}'s pull-mode detection driver: bundling here is what
  * keeps that class's already-wide constructor from growing three more individually-nullable
@@ -26,7 +26,7 @@ import java.util.function.Supplier;
  *                  reopen-with-backoff, mirroring how a video source's publisher is wrapped before
  *                  reaching this class; opened lazily on {@link StreamPipeline#start()}, never here
  * @param wallClock wall-clock "now" at result receipt, for the pull-mode {@link PipelineLatency}
- *                  redefinition (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7: {@code receivedAt - capturedAt});
+ *                  redefinition (docs/plans/done/MEDIA-SOT-PLAN.md &sect;7: {@code receivedAt - capturedAt});
  *                  injectable so a test can drive it deterministically instead of {@link Instant#now()}
  */
 public record PullDetectionBinding(PulledDetectionPort port, Flow.Publisher<DetectionResult> results,

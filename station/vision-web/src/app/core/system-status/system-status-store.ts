@@ -4,7 +4,7 @@ import { PollScheduler } from '../poll-scheduler';
 import type { OverallHealth, SystemStatus } from '../api/models';
 
 /** How often `GET /api/system/status` is re-read while the tab is visible — slower than
- *  `FleetStore`'s 5s device/stream poll (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1's page is a
+ *  `FleetStore`'s 5s device/stream poll (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1's page is a
  *  diagnostics surface an operator opens deliberately, not a live cockpit readout), and a multiple
  *  of `PollScheduler`'s 1s heartbeat as every registered cadence must be. */
 const POLL_INTERVAL_MS = 15_000;
@@ -13,7 +13,7 @@ const LOG_PREFIX = '[system-status]';
 
 /**
  * Single source of truth for the platform's own self-reported health
- * (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.3's frozen `GET /api/system/status` contract, wave S3).
+ * (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.3's frozen `GET /api/system/status` contract, wave S3).
  *
  * `providedIn: 'root'` and polling unconditionally from construction — **not** gated behind the
  * `/manage/system` route being active — because `shared/ui/app-sidebar/app-sidebar.ts`'s shell rollup

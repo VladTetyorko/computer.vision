@@ -7,7 +7,7 @@ scenarios existed, and worse, a `crossing_similar` row that once recorded
 `IDSW=2, FM=0` when the code has always produced `IDSW=0, FM=2` -- a wrong
 number that made a real wave's own acceptance criterion ("keeps both ids
 where V0 shows a swap") unmeetable, caught only because a human happened to
-re-run the harness by hand. `docs/plans/active/TRACKING-V2-PLAN.md` §5b
+re-run the harness by hand. `docs/plans/done/TRACKING-V2-PLAN.md` §5b
 already records five earlier defects in this harness's OWN measurement
 apparatus (never the tracker) before that sixth one; this file exists so a
 SEVENTH cannot ship into a wave unnoticed.

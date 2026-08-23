@@ -14,6 +14,7 @@ const COMMANDABLE: FlightCapability = {
   armSupported: true,
   modeSelectSupported: true,
   selectableModes: ['Stabilize', 'Loiter', 'RTL'],
+  vehicleKind: 'COPTER',
 };
 
 describe('canShowCommandPanel', () => {

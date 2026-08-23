@@ -11,7 +11,7 @@ package com.drones.vision.adapter.publishhls;
  * streamStarted}/{@code streamEnded}" posture (a continuous push that must tolerate a flaky
  * mediamtx mid-stream), {@link MediamtxProxyPublisher#streamStarted} lets this propagate
  * deliberately: a proxied path that never became ready must fail the start call, not hand a viewer
- * a URL that plays nothing (docs/plans/active/MEDIA-SOT-PLAN.md &sect;12's own named risk, and the
+ * a URL that plays nothing (docs/plans/done/MEDIA-SOT-PLAN.md &sect;12's own named risk, and the
  * concrete reason this type exists rather than being swallowed and logged). {@link
  * MediamtxProxyPublisher#streamEnded}, by contrast, still catches and logs this at {@code WARNING} —
  * teardown must not block a caller just because mediamtx could not be reached to clean up after

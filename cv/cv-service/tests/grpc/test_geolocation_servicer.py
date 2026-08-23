@@ -400,7 +400,7 @@ def test_delete_region_unsafe_id_returns_ok_false(tmp_path: Path):
 def test_geo_evidence_reaches_the_wire_field_for_field_including_the_promotion_booleans():
     """`cell_calibrated` and `sequence_converged` are the two booleans the Java gate reads to
     choose PROBABLE over CONFIRMED. They were set here from H4 onward but nothing downstream
-    could see them (docs/plans/active/VISUAL-GEO-V2-PLAN.md 9.11 defect 4, fixed end-to-end in
+    could see them (docs/plans/done/VISUAL-GEO-V2-PLAN.md 9.11 defect 4, fixed end-to-end in
     H8), so this pins the servicer's own half of that chain rather than trusting it by reading."""
     from cv_service.geo.localize import FrameEvidence
     from cv_service.grpc.servicers import _geo_evidence_to_wire

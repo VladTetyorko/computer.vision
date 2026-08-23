@@ -18,9 +18,9 @@ const FROZEN_NAMES: readonly IconName[] = [
   'gamepad',
   // docs/plans/done/TACTICAL-MARKS-PLAN.md M5 — TARGET's crosshair and FRIENDLY's flag.
   'target', 'flag',
-  // docs/plans/active/OPS-UX-PLAN.md §3 B1 — the "Audit trail" nav entry's glyph.
+  // docs/plans/done/OPS-UX-PLAN.md §3 B1 — the "Audit trail" nav entry's glyph.
   'shield',
-  // docs/plans/active/OPS-UX-PLAN.md §3 B2 — the setup checklist's own "done" tick.
+  // docs/plans/done/OPS-UX-PLAN.md §3 B2 — the setup checklist's own "done" tick.
   'check',
 ];
 

@@ -280,7 +280,7 @@
        can't read `var()` — the same convention every other breakpoint token here already follows). */
     --sidebar-bp: 1024px;
 
-    /* Shell banner strip (docs/plans/active/OPS-UX-PLAN.md §2 A6 rev.2) — the height of the one
+    /* Shell banner strip (docs/plans/done/OPS-UX-PLAN.md §2 A6 rev.2) — the height of the one
        stacked banner region `app.html` renders above everything (unsecured station, backend
        unreachable, …). **Measured at runtime, not declared**: `App` observes the strip and writes the
        real pixel height here (see its own doc for why a token can't be hardcoded — the copy wraps to

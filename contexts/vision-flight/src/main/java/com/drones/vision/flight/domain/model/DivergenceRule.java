@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The per-asset divergence alarm state machine (docs/plans/active/VISUAL-GEO-V2-PLAN.md §4.5) — the
+ * The per-asset divergence alarm state machine (docs/plans/done/VISUAL-GEO-V2-PLAN.md §4.5) — the
  * {@code FlightPhaseRule}/{@code GeofenceMonitor} shape: a pure, hand-fake-testable rule holding only
  * its own configured thresholds plus per-asset in-heap state, safe to share across every asset and
  * thread.

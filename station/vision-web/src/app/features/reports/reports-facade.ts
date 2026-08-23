@@ -28,7 +28,7 @@ export class ReportsFacade {
   private readonly summarySignal = signal<FleetSummary | undefined>(undefined);
 
   /**
-   * `streamId → active PIPELINE_ERROR message` (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4) — unlike
+   * `streamId → active PIPELINE_ERROR message` (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4) — unlike
    * `CommandFacade`'s own version of this computed, there is no periodic poll here to piggyback a
    * clock tick on (this page is a one-shot `load()`, not a poller — see this class's own doc
    * comment), so this simply reads `Date.now()` at evaluation time. That means the 15-minute decay

@@ -5,7 +5,7 @@ package com.drones.vision.kernel;
  * sees. {@link FixedCameraGeo} turns a pixel inside this camera's frame into a ground point using
  * exactly these five numbers; nothing else about the camera (its owning asset, who last aimed it,
  * whether the pose was measured or solved) belongs at this layer. That bookkeeping is
- * {@code contexts/vision-map}'s {@code CameraPose} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md
+ * {@code contexts/vision-map}'s {@code CameraPose} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
  * D4), which carries a value shaped like this one plus audit metadata — this record is the pure
  * geometric core it wraps, not a competing concept.
  *

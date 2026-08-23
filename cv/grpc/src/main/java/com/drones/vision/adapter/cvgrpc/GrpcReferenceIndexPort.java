@@ -39,7 +39,7 @@ import java.util.zip.ZipOutputStream;
 /**
  * {@link ReferenceIndexPort} over the generated {@code Geolocation/BuildReferenceIndex} (bidi
  * streaming), {@code Geolocation/ListRegions} and {@code Geolocation/DeleteRegion} gRPC RPCs
- * (docs/plans/active/VISUAL-GEO-V2-PLAN.md &sect;3.1, D10, H3) — the region-ingest half of this
+ * (docs/plans/done/VISUAL-GEO-V2-PLAN.md &sect;3.1, D10, H3) — the region-ingest half of this
  * module's geolocation client. Sibling of {@link GrpcPulledGeolocationPort} (the {@code
  * LocalizeStream} half); the two never share state.
  *

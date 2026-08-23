@@ -11,7 +11,7 @@ import { Icon } from './icon';
  * host's local state, mirroring `features/command/asset-panel.ts`'s own "deliberately dumb"
  * convention. That is what makes it safe to share across two unrelated routed features.
  *
- * **Moved here from `features/fly/` (docs/plans/active/IA-TRUTH-PLAN.md §3, U2)** — `features/preflight/**`
+ * **Moved here from `features/fly/` (docs/plans/done/IA-TRUTH-PLAN.md §3, U2)** — `features/preflight/**`
  * (`/operate/preflight`) has reused this component, unmodified, since docs/plans/done/UI-REDESIGN-PLAN.md
  * Wave 4; it living under a different feature's folder while itself being cross-feature-consumed
  * broke this codebase's own "no page imports another page's module" precedent (`shared/map/live-map.ts`'s

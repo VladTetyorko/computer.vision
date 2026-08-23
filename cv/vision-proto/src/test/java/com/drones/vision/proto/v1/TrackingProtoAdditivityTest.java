@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * Wave T0 acceptance test (docs/plans/done/TRACKING-PLAN.md §4.A, §7 "T0"), extended by
- * VISUAL-GEO-V2 wave H1 (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1/§5 H1).
+ * VISUAL-GEO-V2 wave H1 (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1/§5 H1).
  *
  * <p>Proto3 additive rules require that an old client against a new server (no {@code tracking}
  * sent) and a new client that simply leaves tracking off both produce the exact wire bytes the

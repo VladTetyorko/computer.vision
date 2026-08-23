@@ -14,7 +14,7 @@ import { attentionReasons, type AttentionReason } from '../../core/fleet/attenti
  * never supplied: this dashboard has no live map marker or geofence feed to draw either from, so
  * those two reason kinds simply never fire here — an honest "not evaluated", identical to how
  * Command itself treats an asset with no marker. `pipelineErrorMessagesByStreamId`
- * (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4) *is* threaded through, optionally — `ReportsFacade` has a
+ * (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4) *is* threaded through, optionally — `ReportsFacade` has a
  * `LiveStore` to read (unlike a map marker or geofence feed, `LiveEvent`s cost this page nothing
  * extra to read), so `pipeline-error` is the one live-derived reason this static dashboard can still
  * show honestly.

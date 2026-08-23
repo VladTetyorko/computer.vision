@@ -150,7 +150,7 @@
       @if (liveCount() > 0) {
         <span class="chip"><span class="dot live"></span>{{ liveCount() }} live</span>
       }
-      <!-- Live-transport state (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1) — a quiet dot + plain text, not a
+      <!-- Live-transport state (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.1) — a quiet dot + plain text, not a
            second chip (frontend-style §5). Distinct from the backend-reachable dot below: this one is
            about the SSE `/api/live` connection specifically, see `app-sidebar.ts`'s own doc comment. -->
       <span class="live-transport" role="status" [attr.aria-label]="liveTransportLabel() + ' updates'">
@@ -162,7 +162,7 @@
         ></span>
         <span class="live-transport-text">{{ liveTransportLabel() }}</span>
       </span>
-      <!-- Shell rollup dot (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2) — worst of backend reachability,
+      <!-- Shell rollup dot (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2) — worst of backend reachability,
            live-transport state and the platform's own `overall` health (`app-sidebar.ts#shellSeverity`).
            A real `routerLink`, not a click handler on a bare `<span>`, so it navigates on click *and*
            gets native keyboard/focus support for free — clicking it takes you to `/manage/system`. -->

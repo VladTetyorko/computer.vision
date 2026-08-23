@@ -36,7 +36,7 @@ import com.drones.vision.api.security.CurrentUser;
  * <h2>Who the change is attributed to</h2>
  * The acting user comes from {@link CurrentUser}, mirroring {@link AssetController}.
  *
- * <h2>Authority (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2)</h2>
+ * <h2>Authority (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2)</h2>
  * {@link #simulate} registers a brand-new asset exactly like {@link AssetController#create} does —
  * it gates on the same {@link com.drones.vision.platform.VisibilityScope#canManageOrg()
  * scope().canManageOrg()}, closing an asymmetry the LIVE-SCOPE audit found: this sibling endpoint
@@ -70,7 +70,7 @@ public class SimulationController {
     private final SimulationService simulationService;
     private final CurrentUser currentUser;
     private final StreamPublisherPort streamPublisherPort;
-    /** Used only for {@link #stop}'s scoped read (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2) — the
+    /** Used only for {@link #stop}'s scoped read (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2) — the
      * same "re-read through scope before mutating" idiom {@link AssetStreamController} uses. */
     private final AssetService assetService;
 
@@ -90,7 +90,7 @@ public class SimulationController {
      * @param request the video file and home point to simulate
      * @return the created asset's id, and — if streaming — its stream id and viewer URLs
      * @throws AccessDeniedException if the caller's scope may not {@code canManageOrg()}
-     *                                (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2 — closes the
+     *                                (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2 — closes the
      *                                asymmetry with {@link AssetController#create}'s own gate)
      */
     @PostMapping("/api/simulations")
@@ -120,7 +120,7 @@ public class SimulationController {
      * Stops a simulated asset's stream and, for a wired-transport ({@code rtsp}/{@code mjpeg})
      * simulation, its transmitted feed too (docs/main/CYCLES-PLAN.md §3, §5) — idempotent for an
      * asset the caller's scope may reach: an already-stopped asset is still a 204. An out-of-scope
-     * or unknown asset now 404s instead (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2) — scoped to
+     * or unknown asset now 404s instead (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2) — scoped to
      * "may this caller touch this asset at all", deliberately not an exclusive-claim check; see
      * this class's own "Authority" section for the CREW-CONTROL boundary.
      *

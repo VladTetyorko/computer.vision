@@ -1,4 +1,4 @@
-"""The live per-keyframe geolocation pipeline (docs/plans/active/VISUAL-GEO-V2-PLAN.md §4.1,
+"""The live per-keyframe geolocation pipeline (docs/plans/done/VISUAL-GEO-V2-PLAN.md §4.1,
 frozen order): given one drone keyframe, answer "where is this?" -- H4 production rewrite of
 `spikes/geo/harvested/localize.py`'s retrieval-only Wave-3a path, extended to the full frozen
 five-stage pipeline `GeolocationServicer.LocalizeStream` drives:

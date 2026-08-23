@@ -9,7 +9,7 @@ import type { SystemEventRow as SystemEventRowModel } from '../../core/system-ev
 import { SystemStatusFacade } from './system-status-facade';
 
 /**
- * `/manage/system` (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1, wave S3) — makes the running system
+ * `/manage/system` (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1, wave S3) — makes the running system
  * legible to its operator: an overall verdict, the per-subsystem breakdown `GET /api/system/status`
  * reports, which live transport is actually carrying updates right now, and a durable log of the
  * generic system events (S1's own store/row component, reused wholesale here).

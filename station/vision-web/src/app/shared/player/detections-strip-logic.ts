@@ -2,18 +2,18 @@ import type { Detection, DetectionResult } from '../../core/api/models';
 import { electStickyLabels } from './detection-overlay-logic';
 
 /**
- * Pure derivation behind `DetectionsStrip` (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3, wave W5) —
+ * Pure derivation behind `DetectionsStrip` (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3, wave W5) —
  * split out so the strip's own "class-level remote control" candidate set (research §3.5) is
  * unit-testable without Angular. Deliberately a **separate** derivation from
  * `core/detections/detections-logic.ts#deriveChips`, not a same-signature extension of it: that
  * function is used by every non-interactive reader of `DetectionsStore.chips` (Live page included)
  * and only ever scans `results`, which — being server-filtered — can *never* contain a denied label
- * (`StreamPipeline`'s single drop site runs pre-fan-out, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2).
+ * (`StreamPipeline`'s single drop site runs pre-fan-out, docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2).
  * A "hidden, click to un-hide" chip therefore has to be reconstructed by unioning in the operator's
  * own `labelDenyFilter` from outside `results` entirely — a concern `deriveChips`'s existing callers
  * neither need nor expect.
  *
- * **Sliding-window aggregation + sticky labels (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 2)**:
+ * **Sliding-window aggregation + sticky labels (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 2)**:
  * `stripChips` used to scan only the single newest batch — the strip's own "person ×3" chips blinked in
  * and out at whatever cadence the CV pipeline batches at, and (before item 1) churned between multiple
  * distinct chips for the same physical object every time its raw label flipped. Both are fixed the same
@@ -69,7 +69,7 @@ function displayLabel(detection: Detection, stickyLabels: ReadonlyMap<number, st
  * The strip's candidate set, recency-ordered and capped at `cap`: every distinct display label seen
  * within the last `windowSeconds` of `results` (paired with the *max concurrent* count for that label
  * across the window — research §3.5's "person ×3", now stable across a multi-batch window instead of
- * one instant, docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 2), unioned with every currently-
+ * one instant, docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 2), unioned with every currently-
  * denied label that can no longer appear in `results` at all (dropped server-side) so an operator can
  * still find and un-hide it. Observed labels fill the cap first (newest-first, matching `results`' own
  * documented order — the order its label was *first* encountered scanning the window newest-to-oldest);

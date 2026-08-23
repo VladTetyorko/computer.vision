@@ -242,7 +242,7 @@ com.drones.vision.learning.application     — every service, command/read-model
     roster. Marks every ref whose `equals` matches `port.active()` (`Optional.empty()` active → every
     row `false`, e.g. an empty/unreachable registry).
   - `void promote(ModelRef, UserId actor, VisibilityScope scope)` — gated on `scope.canAdminister()`
-    (docs/plans/active/OPS-UX-PLAN.md §1/C4 — was `canManageOrg()`; promoting the live model is
+    (docs/plans/done/OPS-UX-PLAN.md §1/C4 — was `canManageOrg()`; promoting the live model is
     deployment-global, not team-scoped, so a MANAGER's own-subtree `GROUPS` authority is no longer
     enough, only `UNBOUNDED`/ADMIN may). `AccessDeniedException` + audited `DENIED:out of scope`
     otherwise, no per-model ownership to restrict against. A cv-service refusal
@@ -263,7 +263,7 @@ com.drones.vision.learning.application     — every service, command/read-model
     (5-arg: explicit `ExecutorService`+`Supplier<Instant> clock`; 6-arg: same plus `maxFinishedJobs`
     too) both delegate to the one 6-arg canonical constructor.
   - `String start(TrainingJobSpec, UserId actor, VisibilityScope scope)` — gated on
-    `scope.canAdminister()` (docs/plans/active/OPS-UX-PLAN.md §1/C4 — was `canManageOrg()`; claiming
+    `scope.canAdminister()` (docs/plans/done/OPS-UX-PLAN.md §1/C4 — was `canManageOrg()`; claiming
     the shared training host is deployment-global, same reasoning as `promote` above — only
     `UNBOUNDED`/ADMIN may). Right after the gate: parses `DatasetId.of(spec.datasetId())` and runs one
     cheap, bounded synchronous pre-check — `labelingService.samples(datasetId, LABELED, 1, actor, scope)`
@@ -402,7 +402,7 @@ citing it once here: it is the wave that gave `DefaultLabelingService`/`Training
 now folded into the constructor signatures documented above), and moved this context's classes from a
 flat `com.drones.vision.application.training` package into `com.drones.vision.learning.application`.
 
-**docs/plans/active/OPS-UX-PLAN.md Wave C (C4) done**: `DefaultModelRegistryService#promote` and
+**docs/plans/done/OPS-UX-PLAN.md Wave C (C4) done**: `DefaultModelRegistryService#promote` and
 `DefaultTrainingJobService#start` moved their gate from `scope.canManageOrg()` to
 `scope.canAdminister()` — both are deployment-global actions (swap the model every stream uses; claim
 the one shared training host), so a MANAGER's team-scoped authority is no longer enough, matching

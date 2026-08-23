@@ -91,7 +91,7 @@ const MAX_LIVE_MAP_EVENTS = 300;
  *   as incremental deltas on top, and keeps a slow safety-net poll. It is also the only
  *   **per-connection-filtered** topic: the server drops events for layers this viewer may not see
  *   (§4.3), so nothing here is a client-side visibility filter.
- * - `geo:<assetId>` ↔ `core/geo/geo-store.ts#GeoStore` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, wave H6) —
+ * - `geo:<assetId>` ↔ `core/geo/geo-store.ts#GeoStore` (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4, wave H6) —
  *   the 8th, opt-in per-asset topic, same shape/scoping as `telemetry:<assetId>` (D11 — deliberately
  *   *not* viewer-filtered like `map`, since its raw twin `telemetry:<assetId>` isn't either).
  *   Coalescing latest-wins with ring capacity 1 server-side, so `geoSignalFor` below only ever holds
@@ -230,7 +230,7 @@ export class LiveStore {
     return this.detectionsSignalFor(assetId);
   }
 
-  /** The latest live visual-geolocation correction for `assetId` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4) — `undefined` until one arrives. */
+  /** The latest live visual-geolocation correction for `assetId` (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4) — `undefined` until one arrives. */
   geoFor(assetId: string): Signal<CorrectionResponse | undefined> {
     return this.geoSignalFor(assetId);
   }

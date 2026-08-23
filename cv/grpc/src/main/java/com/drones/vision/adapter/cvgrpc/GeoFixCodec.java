@@ -16,7 +16,7 @@ import java.time.Instant;
 
 /**
  * Pure mapping between the kernel/perception geolocation model and cv-service's {@code
- * Geolocation.LocalizeStream} wire types (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1) — the geo
+ * Geolocation.LocalizeStream} wire types (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1) — the geo
  * sibling of {@link DetectionFrameCodec}, static methods only, no state.
  *
  * <h2>D6 — the one and only pitch-sign conversion</h2>
@@ -34,7 +34,7 @@ import java.time.Instant;
  * H7 measured the consequence: MAVLink {@code ATTITUDE} (#30) never populates the gimbal trio, so
  * every gimbal-less aircraft was silently modelled as nadir, {@code camera_pitch_deg} never crossed
  * the wire, and rectification never ran — {@code rectified} false 323/323 with #30 only, true 41/41
- * once #285 appeared, with a 36% higher mean inlier ratio (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * once #285 appeared, with a 36% higher mean inlier ratio (docs/plans/done/VISUAL-GEO-V2-PLAN.md
  * §9.11, defect 2).
  *
  * <p>When no gimbal pitch is reported, this codec now falls back to the <b>airframe's</b> own

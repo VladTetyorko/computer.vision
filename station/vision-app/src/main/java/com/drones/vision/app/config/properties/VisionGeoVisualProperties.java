@@ -12,7 +12,7 @@ import java.net.URI;
 import java.time.Duration;
 
 /**
- * Configuration for visual geolocation ({@code vision.geo.visual.*}), docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * Configuration for visual geolocation ({@code vision.geo.visual.*}), docs/plans/done/VISUAL-GEO-V2-PLAN.md
  * §3.6 — every value there, frozen verbatim, none as a code constant (CLAUDE.md rule 1). Bound by
  * {@link com.drones.vision.app.config.wiring.VisualGeoWiringConfiguration}.
  *

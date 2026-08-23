@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * Wire representation of a {@link ProjectedTrack} — one row of {@code GET /api/map/tracks}, and the
  * {@code track} field of a live {@code TRACK} {@link MapEventPayload} on the {@code map} SSE topic
- * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5's frozen wire contract). One record serves three
+ * (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5's frozen wire contract). One record serves three
  * shapes, distinguished by which factory built it:
  * <ul>
  *   <li>{@link #from(ProjectedTrackView)} — {@code GET /api/map/tracks}: every field populated,

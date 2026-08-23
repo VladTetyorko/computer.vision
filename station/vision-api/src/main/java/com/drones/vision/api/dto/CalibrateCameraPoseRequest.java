@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * Request body for {@code POST /api/assets/{assetId}/camera-pose/calibration}
- * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D5) — solves but <b>never persists</b>; the
+ * (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5/D5) — solves but <b>never persists</b>; the
  * operator reviews the result and confirms with a separate {@code PUT}.
  *
  * <p>2–8 {@code points} (→ 400 outside that range) and a {@code u}/{@code v} outside {@code [0,1]}

@@ -61,7 +61,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * The security-critical half of docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3, end to end over real
+ * The security-critical half of docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3, end to end over real
  * SSE frames — the per-asset twin of {@link LiveMapScopingTest}. Two pilots, two assets, each
  * scoped ({@link VisibilityScope#assignedAssets(Set)}) to only their own: alpha may see {@code
  * alphaAsset}, bravo may see {@code bravoAsset}, and this class proves neither can reach the
@@ -258,7 +258,7 @@ class LiveAssetScopingTest {
     }
 
     /**
-     * The core proof of docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3 defect 3: authorization must
+     * The core proof of docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3 defect 3: authorization must
      * hold per delivery, not only at the moment a topic was subscribed. Alpha's connection keeps its
      * {@code telemetry:<alphaAsset>} subscription throughout -- there is no {@code PATCH}, no
      * reconnect, nothing that would give {@code LiveController} another chance to re-run {@link

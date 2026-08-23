@@ -33,7 +33,7 @@ import { NotificationBell } from '../notification-bell';
  *   popover that can run out of viewport height; the body scrolls (`overflow-y: auto`) instead of
  *   silently cutting off Manage's ten entries the way a 961px-tall dropdown used to.
  * - **F10** ("role filtering is applied in one of the two navigation copies") — `managerOnly` (and,
- *   since docs/plans/active/OPS-UX-PLAN.md §2 A5, `badge: 'soon'`) is filtered exactly once, in `modes()`
+ *   since docs/plans/done/OPS-UX-PLAN.md §2 A5, `badge: 'soon'`) is filtered exactly once, in `modes()`
  *   below. The old split — `ManageHub` honoured it, the header dropdown didn't — cannot recur
  *   because there is only one place left that reads `NAV_MODES`.
  *
@@ -138,7 +138,7 @@ export class AppSidebar {
   protected readonly theme = inject(ThemeStore);
   private readonly auth = inject(AuthStore);
   private readonly liveStore = inject(LiveStore);
-  /** Backs the shell rollup dot below (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2) — the same "shared
+  /** Backs the shell rollup dot below (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2) — the same "shared
    *  shell component, not a routed page" carve-out `theme`'s own doc comment above explains; the
    *  singleton store is already warm app-wide (see that store's own class doc), this just reads it. */
   private readonly systemStatus = inject(SystemStatusStore);
@@ -155,7 +155,7 @@ export class AppSidebar {
 
   /**
    * `NAV_MODES` with every `managerOnly` entry dropped for anyone who isn't ADMIN/MANAGER, **and**
-   * (docs/plans/active/OPS-UX-PLAN.md §2 A5) every `badge: 'soon'` scaffold entry dropped for the same
+   * (docs/plans/done/OPS-UX-PLAN.md §2 A5) every `badge: 'soon'` scaffold entry dropped for the same
    * audience. A `badge: 'soon'` row is a roadmap preview, not a working page (`nav-entries.ts`'s own
    * class doc: "every remaining pure-SCAFFOLD entry") — genuinely useful context for ADMIN/MANAGER
    * sizing up what's coming, but a dead end for a PILOT, who has no manage-facing reason to browse
@@ -182,7 +182,7 @@ export class AppSidebar {
   protected readonly liveCount = computed(() => this.fleet.streams().length);
 
   /**
-   * The shell rollup dot (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2) — the direct fix for §1.2's
+   * The shell rollup dot (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2) — the direct fix for §1.2's
    * finding that this dot answered only "did the last device poll succeed" (`FleetStore.reachable()`
    * alone) and stayed green through a closed live-transport connection or a degraded platform
    * subsystem. Now the worst of three independent axes — backend REST reachability, the SSE
@@ -199,7 +199,7 @@ export class AppSidebar {
   protected readonly shellLabel = computed(() => shellStatusLabel(this.shellSeverity()));
 
   /**
-   * The foot's live-transport dot+text (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1) — a **different axis**
+   * The foot's live-transport dot+text (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.1) — a **different axis**
    * than `offline`/`fleet.reachable()` above: that dot answers "can we reach the backend's REST API
    * at all"; this one answers "is the SSE `/api/live` connection actually open right now", which is
    * exactly the gap `SYSTEM-STATUS-PLAN.md §1` names — a closed SSE connection on a perfectly reachable

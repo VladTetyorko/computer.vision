@@ -33,7 +33,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
  * <p>The application services ({@link AuthService}/{@link UserService}/{@link GroupService}) and the
  * one {@link PasswordHasherPort} (BCrypt) are wired unconditionally — they exist and behave the
  * same whether or not auth is enabled (the login endpoint uses them either way). Dev-account
- * seeding is no longer part of this wiring at all: docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 deleted the
+ * seeding is no longer part of this wiring at all: docs/plans/done/POSTGRES-ONLY-CONTEXT.md W1 deleted the
  * code-based {@code AuthSeedRunner} (which used to mint a random root group id here — the root cause
  * of an empty-fleet bug once a MANAGER's scope no longer matched it) in favor of a Flyway migration
  * (`db/seed/dev`, `storage/persistence`) that seeds the fixed-id root group and three DEV-ONLY
@@ -52,7 +52,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
  *
  * <p>The repository ports themselves ({@link UserRepositoryPort}/{@link GroupRepositoryPort}) are
  * wired unconditionally in {@link PersistenceWiringConfiguration} alongside every other port
- * (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b removed the {@code vision.persistence.enabled} flag
+ * (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b removed the {@code vision.persistence.enabled} flag
  * that used to gate them) — orthogonal to {@code vision.auth.enabled}.
  */
 @Configuration

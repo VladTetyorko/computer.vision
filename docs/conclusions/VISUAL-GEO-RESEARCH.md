@@ -1,7 +1,6 @@
 # VISUAL-GEO-RESEARCH — camera ↔ satellite/aerial geolocation: approaches, evidence, and the two sub-ways
 
-Date: 2026-08-19. Author role: architecture synthesis (no code). Context file:
-`docs/plans/active/VISUAL-GEO-RESEARCH-CONTEXT.md`.
+Date: 2026-08-19. Author role: architecture synthesis (no code).
 
 This is the index and synthesis over six research reports in `docs/conclusions/visual-geo-research/`.
 Read this file first; open a report only for the references behind a claim.
@@ -184,7 +183,7 @@ along-road aliasing), `WaybackTileSource`, the region-ingestion pipeline.
 
 ## 5. Suggested next step (architecture only)
 
-Author `docs/plans/active/VISUAL-GEO-V2-PLAN.md` with a frozen contract for (a) the corrected-track
+Author `docs/plans/done/VISUAL-GEO-V2-PLAN.md` with a frozen contract for (a) the corrected-track
 stream + divergence alarm in `vision-flight`, (b) the corridor-pack artefact attached to MISSIONS, and
 (c) an evaluation protocol in metres/false-fix-rate; waves: H1 eval harness + rectify-first re-rank on
 the branch's real video, H2 heavy-A on OpenVINO, H3 corrected-track publication, L1 pack builder,

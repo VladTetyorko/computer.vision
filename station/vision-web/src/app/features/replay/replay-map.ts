@@ -61,7 +61,7 @@ const DEFAULT_ZOOM = 17;
  * default over that same raw signal. Fixed so this is one shared basemap contract, not five slightly
  * different ones.
  *
- * **Corrected track (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6)** — `[correctedTrail]`
+ * **Corrected track (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6)** — `[correctedTrail]`
  * draws a second, dashed polyline over the raw one whenever `GET /api/geo/corrections?usageId=` has
  * anything to show; empty (the default) simply draws nothing, the honest "absent, not empty" degrade
  * §3.8's own Off-state row requires. Colored from the live theme (`resolveMapColors`, reused from
@@ -84,7 +84,7 @@ export class ReplayMap {
   readonly markerHeadingDegrees = input<number | undefined>(undefined);
 
   /**
-   * The visual-geolocation corrected track, up to the scrub position (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+   * The visual-geolocation corrected track, up to the scrub position (docs/plans/done/VISUAL-GEO-V2-PLAN.md
    * §3.8, wave H6) — `ReplayFacade#correctedTrail`, itself `core/geo/geo-logic.ts#correctedTrailPoints`
    * over `GET /api/geo/corrections?usageId=`. Empty on a flight with no corrections (disabled flag,
    * or none computed) — `applyScrub` below then simply clears the second polyline to nothing, the

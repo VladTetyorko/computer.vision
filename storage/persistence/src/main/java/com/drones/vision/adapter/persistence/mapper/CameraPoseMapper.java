@@ -8,7 +8,7 @@ import com.drones.vision.map.domain.model.CameraPose;
 import com.drones.vision.map.domain.model.LayerId;
 
 /**
- * {@link CameraPose} ⟷ {@link CameraPoseEntity} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4).
+ * {@link CameraPose} ⟷ {@link CameraPoseEntity} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D4).
  *
  * <p>{@code position} is flattened rather than nested, matching the columns {@code
  * V22__fixed_camera_geo.sql} defines — same "flatten a small value type" choice {@code MarkMapper}

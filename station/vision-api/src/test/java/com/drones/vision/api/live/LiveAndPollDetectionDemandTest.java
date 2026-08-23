@@ -114,7 +114,7 @@ class LiveAndPollDetectionDemandTest {
         // returning false here would gate detection off for every stream at once AND report
         // DetectionState.IDLE_NO_VIEWERS to an operator who is demonstrably watching. Matches every
         // other failure decision in this feature (an absent port gates nothing; the pipeline's own
-        // demand flag initialises true) -- docs/plans/active/CV-DEMAND-PLAN.md §3.2/§3.3.
+        // demand flag initialises true) -- docs/plans/done/CV-DEMAND-PLAN.md §3.2/§3.3.
         LiveAndPollDetectionDemand demand = new LiveAndPollDetectionDemand(assetId -> {
             throw new IllegalStateException("registry blew up");
         }, POLL_TTL);
@@ -123,7 +123,7 @@ class LiveAndPollDetectionDemandTest {
                 "an undeterminable lookup must fail open, not claim nobody is watching");
     }
 
-    // ---- D9 third OR-term: a calibrated fixed camera (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md) ----
+    // ---- D9 third OR-term: a calibrated fixed camera (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md) ----
 
     @Test
     void detectionWantedIsTrueWhenTheAssetHasACameraPoseEvenWithNoSseWatcherOrPoll() {

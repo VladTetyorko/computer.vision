@@ -12,7 +12,7 @@ settings — are overwhelming too."*
 
 Grounding: every claim below cites the file and line actually read. Prior art this builds on rather
 than repeats: `docs/conclusions/UX-SIMPLIFY-REVIEW.md` (F4 already named the Fly tool-rail as
-creeping; this document finds it crept back), `docs/plans/active/CV-UX-RESEARCH.md` (this
+creeping; this document finds it crept back), `docs/plans/done/CV-UX-RESEARCH.md` (this
 document's structure and rigour), `.claude/skills/frontend-style/SKILL.md` +
 `docs/plans/done/STYLE-TOKENS-PLAN.md` + `docs/plans/done/VISUAL-REFRESH-PLAN.md` (the colour rules
 judged against in §4). No wire contract is touched by anything proposed; §9 states plainly that

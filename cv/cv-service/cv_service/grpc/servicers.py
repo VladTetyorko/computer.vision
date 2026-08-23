@@ -54,7 +54,7 @@ living in ``cv_service/training/`` and ``cv_service/grpc/server.py``.
   this method only reads the wire stream and translates the result.
   ``trainer.py`` is untouched by it: the landed directory is byte-identical
   to what a manual rsync would have produced.
-* ``Geolocation.LocalizeStream`` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1,
+* ``Geolocation.LocalizeStream`` (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1,
   frozen wire; H4 production wiring) is ``DetectPulled``'s sibling: pull-only
   (D2 -- the worker dials ``GeoControl.source_url`` itself, same
   ``cv_service.pull`` machinery, no frame bytes cross the wire), a
@@ -1702,7 +1702,7 @@ _JOB_STATE_BY_EVENT_KIND = {
 
 # --- Geolocation --------------------------------------------------------------------------------
 #
-# docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1 (frozen wire), H4. `GeolocationServicer` below is
+# docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1 (frozen wire), H4. `GeolocationServicer` below is
 # the sole translation point between the wire (`cv_pb2.GeoControl`/`GeoFix`/`GeoEvidence`/
 # `ReferencePackChunk`/`ReferenceIndexProgress`/`RegionInfo`) and the plain, wire-agnostic
 # `cv_service.geo.*` package -- every function/class here mirrors an established pattern already
@@ -2030,7 +2030,7 @@ def _build_default_geo_matcher(settings: Settings):
 
 
 class GeolocationServicer(cv_pb2_grpc.GeolocationServicer):
-    """Wire <-> domain translation for `Geolocation` (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+    """Wire <-> domain translation for `Geolocation` (docs/plans/done/VISUAL-GEO-V2-PLAN.md
     §3.1). See the module docstring's `Geolocation.*` bullets for each RPC's shape; this class
     only owns session/wire plumbing -- the actual pipeline is `cv_service.geo.localize.
     localize_frame`, the actual index build is `cv_service.geo.orchestrator.run_build_job`.

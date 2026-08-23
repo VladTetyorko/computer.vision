@@ -1,5 +1,6 @@
 import type { ManualControlChannelBinding } from '../../core/api/models';
 import type { ManualControlEngageState } from '../../core/rc/manual-control-client';
+import type { RcSourceKind } from '../../core/rc/rc-source.service';
 
 /**
  * Pure, component-adjacent logic behind `rc-monitor.ts`'s "Take control" section
@@ -11,7 +12,7 @@ import type { ManualControlEngageState } from '../../core/rc/manual-control-clie
 export interface EngageGateInput {
   readonly hasAsset: boolean;
   readonly canCommand: boolean;
-  readonly gamepadSupported: boolean;
+  readonly sourceKind: RcSourceKind;
   readonly gamepadConnected: boolean;
   readonly engageState: ManualControlEngageState;
 }
@@ -20,10 +21,16 @@ export interface EngageGateInput {
  * The Take-control button's poka-yoke reason (docs/plans/done/UX-REWORK-PLAN.md §U-a2 rule 1 — "disabled with
  * the reason inline, never enabled-then-error", applied to R5's engage gesture; mirrors
  * `flight-command-panel-logic.ts#canShowCommandPanel`'s own "reuse the same gate the flight panel
- * uses" instruction, extended with the two things unique to RC: the Gamepad API's own support/
- * connection state). `undefined` = enabled. Checked in priority order — the most fundamental
- * blocker first, so a caller with several problems at once sees the one to fix, not a vague
- * catch-all.
+ * uses" instruction, extended with the one thing unique to RC: whether the *selected input source*
+ * can actually produce a stick value). `undefined` = enabled. Checked in priority order — the most
+ * fundamental blocker first, so a caller with several problems at once sees the one to fix, not a
+ * vague catch-all.
+ *
+ * A missing gamepad no longer blocks control outright
+ * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P10): it blocks only while the gamepad
+ * source is the selected one, and the message says so, because the on-screen surface is right
+ * there. Neither does a browser without the Gamepad API — that fact belongs to the monitor above,
+ * which is what actually needs it.
  */
 export function engageDisabledReason(input: EngageGateInput): string | undefined {
   if (input.engageState === 'engaging') {
@@ -35,11 +42,8 @@ export function engageDisabledReason(input: EngageGateInput): string | undefined
   if (!input.canCommand) {
     return "This drone isn't commandable right now.";
   }
-  if (!input.gamepadSupported) {
-    return "This browser doesn't expose gamepad input.";
-  }
-  if (!input.gamepadConnected) {
-    return 'Plug your transmitter in first.';
+  if (input.sourceKind === 'gamepad' && !input.gamepadConnected) {
+    return 'Plug your transmitter in, or switch to the on-screen controls.';
   }
   return undefined;
 }

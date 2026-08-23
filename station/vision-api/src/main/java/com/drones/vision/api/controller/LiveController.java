@@ -40,7 +40,7 @@ import java.util.Objects;
  * <h2>Who the connection is</h2>
  * Two things beyond HTTP shape happen here, and only here: the {@code map} topic's delivery is
  * scoped per viewer (docs/plans/done/MAP-REWORK-PLAN.md §4.3), and every per-asset topic
- * (telemetry/detections/geo) is scoped per caller (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3) —
+ * (telemetry/detections/geo) is scoped per caller (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3) —
  * identity is resolved at the API edge in both cases, never inside the registry. So {@link #connect}
  * reads {@link CurrentUser#userId()}/{@link CurrentUser#viewer()} once, at connect time: {@code
  * userId} both filters the requested {@code topics} down to ones the caller may see ({@link
@@ -115,7 +115,7 @@ public class LiveController {
      *                      failing the whole request
      * @return the connection's full topic set afterward
      * @throws java.util.NoSuchElementException if {@code connectionId} is unknown, <em>or belongs to
-     *                                            a different caller</em> (docs/plans/active/LIVE-SCOPE-PLAN.md
+     *                                            a different caller</em> (docs/plans/done/LIVE-SCOPE-PLAN.md
      *                                            §2, W3) — both collapse to the same 404 via {@link
      *                                            ApiExceptionHandler} so a caller cannot distinguish
      *                                            "no such connection" from "not yours"

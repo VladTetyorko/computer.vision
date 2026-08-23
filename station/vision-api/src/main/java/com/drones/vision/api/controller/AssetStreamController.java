@@ -38,7 +38,7 @@ import com.drones.vision.api.security.CurrentUser;
  * (stopping) moves here too, purely so the two halves of one sub-resource's lifecycle stay on one
  * controller — {@link AssetService#stopStream} itself did not move and is unaffected.
  *
- * <h2>docs/plans/active/CV-DEMAND-PLAN.md §3.8 — one more collaborator, no more slots</h2>
+ * <h2>docs/plans/done/CV-DEMAND-PLAN.md §3.8 — one more collaborator, no more slots</h2>
  * {@link #startStream} needed a deployment-default {@link PipelineConfig} to merge request
  * overrides onto (the same change {@link StreamController#start} got), but this constructor was
  * already at this codebase's five-parameter ceiling. {@link StreamPublisherPort} — here only to
@@ -55,7 +55,7 @@ import com.drones.vision.api.security.CurrentUser;
  * <h2>Visibility scoping</h2>
  * {@link #startStream} re-reads the asset through {@link CurrentUser#scope()} before mutating —
  * the same "read-scope guards the write" posture {@link AssetController} documents at length.
- * {@link #stopStream} now does too (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2) — before this
+ * {@link #stopStream} now does too (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2) — before this
  * wave it was deliberately unscoped, mirroring {@link AssetService#stopStream}'s own no-op-for-
  * unknown-asset contract; the audit that produced LIVE-SCOPE-PLAN.md found that posture let any
  * caller stop any asset's stream regardless of scope. It is scoped narrowly, on purpose: "may this
@@ -80,7 +80,7 @@ public class AssetStreamController {
     private final AssetStreamService assetStreamService;
     private final CurrentUser currentUser;
     private final StreamViewerLinks streamViewerLinks;
-    /** The deployment's default {@link PipelineConfig} for a newly started stream (docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8). */
+    /** The deployment's default {@link PipelineConfig} for a newly started stream (docs/plans/done/CV-DEMAND-PLAN.md §3.7/§3.8). */
     private final PipelineConfig defaultConfig;
 
     public AssetStreamController(AssetService assetService, AssetStreamService assetStreamService,
@@ -127,7 +127,7 @@ public class AssetStreamController {
     /**
      * Stops the asset's active stream(s), if any. Idempotent for an asset the caller can see — a
      * visible asset with no active stream is a no-op — but 404s for an out-of-scope or unknown asset
-     * (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2), which {@link AssetService#stopStream(AssetId)}'s
+     * (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2), which {@link AssetService#stopStream(AssetId)}'s
      * own no-op contract does not by itself provide; see this class's own "Visibility scoping"
      * section for the scoped-not-exclusive distinction and the deliberate CREW-CONTROL boundary.
      *

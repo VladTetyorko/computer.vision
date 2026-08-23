@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Unit tests for {@link MapEventPayload#from(MapEvent)}'s {@code TRACK} case
- * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D11) — {@code track} rides the same {@code map}
+ * (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5/D11) — {@code track} rides the same {@code map}
  * topic as {@code mark}/{@code drawing}/{@code layer}, so this pins the new entity/action strings and
  * the {@code created}/{@code updated} vs {@code cleared} shape split without needing a live SSE
  * connection ({@link com.drones.vision.api.controller.LiveMapScopingTest} covers the transport/scoping

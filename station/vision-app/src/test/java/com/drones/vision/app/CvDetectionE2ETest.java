@@ -87,7 +87,7 @@ class CvDetectionE2ETest {
     static void cvProperties(DynamicPropertyRegistry registry) {
         registry.add("vision.cv.enabled", () -> "true");
         registry.add("vision.cv.endpoint", () -> "localhost:" + server.getPort());
-        // docs/plans/active/CV-DEMAND-PLAN.md §3.7: this test proves frames reach the gRPC pipe at
+        // docs/plans/done/CV-DEMAND-PLAN.md §3.7: this test proves frames reach the gRPC pipe at
         // all, not that a viewer/poller kept demand alive for the whole run -- nothing here ever
         // opens the SSE detections:<assetId> topic or polls GET .../detections, so the real
         // demand-poll task would otherwise flip detection off ~2s in (StreamPipelineSettings'
@@ -98,7 +98,7 @@ class CvDetectionE2ETest {
 
     /**
      * {@link PipelineConfig#defaults()} with {@code detectionEnabled} true} instead of its own
-     * default {@code false} (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1) -- this test exists to
+     * default {@code false} (docs/plans/done/CV-DEMAND-PLAN.md §1, wave D1) -- this test exists to
      * prove the gRPC pipe carries sampled frames, which needs detection actually switched on for the
      * stream it starts directly through {@link AssetStreamService}, bypassing the controller-level
      * {@code vision.cv.detection-default-enabled} deployment default entirely.

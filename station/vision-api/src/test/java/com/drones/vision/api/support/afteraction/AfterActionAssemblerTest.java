@@ -69,7 +69,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Plain-JUnit coverage of {@link AfterActionAssembler} (docs/plans/active/AFTER-ACTION-PLAN.md,
+ * Plain-JUnit coverage of {@link AfterActionAssembler} (docs/plans/done/AFTER-ACTION-PLAN.md,
  * Wave W1) against hand-written fakes of its four collaborators — no Spring, no Mockito, matching
  * the class's own "framework-free, constructor-injected collaborators only" design (this module's
  * java-clean-code skill, and {@link AfterActionAssembler}'s own javadoc).

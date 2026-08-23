@@ -76,7 +76,7 @@ class DefaultAssignmentServiceTest {
 
     @Test
     void aPilotScopeMayNotGrantEvenWhenTheAssetIsAlreadyAssignedToThem() {
-        // Authority is not visibility (docs/plans/active/OPS-UX-PLAN.md §1): a pilot assigned to
+        // Authority is not visibility (docs/plans/done/OPS-UX-PLAN.md §1): a pilot assigned to
         // this very asset can see it, but seeing it is not authority to re-pilot it.
         VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of(asset.id()));
 

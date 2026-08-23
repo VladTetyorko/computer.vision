@@ -437,7 +437,7 @@ class AssetWiringTest {
      * docs/plans/done/MAP-REWORK-PLAN.md §3: the COP layer is ensured at startup. {@code
      * V12__map_layers.sql} seeds it at a fixed id, so the first call below finds that row rather
      * than creating one — the {@code mapLayerBootstrapRunner} {@code ApplicationRunner} that used
-     * to do the creating (for the in-memory profile, before docs/plans/active/POSTGRES-ONLY-CONTEXT.md
+     * to do the creating (for the in-memory profile, before docs/plans/done/POSTGRES-ONLY-CONTEXT.md
      * W2b) is gone, since the migration is now the only source of this row. Because {@code
      * LayerResolver#copLayerId()} is a synchronized find-or-create regardless, asking again must
      * still return the same id rather than mint a second COP layer.

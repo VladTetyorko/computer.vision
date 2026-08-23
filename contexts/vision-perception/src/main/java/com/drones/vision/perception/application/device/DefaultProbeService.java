@@ -22,6 +22,7 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import com.drones.vision.perception.application.pipeline.VideoSourceRegistry;
+import com.drones.vision.perception.application.stream.UnsupportedProtocolException;
 
 /**
  * {@link ProbeService} backed by the same {@link VideoSourcePort} adapters {@link
@@ -53,6 +54,15 @@ import com.drones.vision.perception.application.pipeline.VideoSourceRegistry;
  * every simulated asset this codebase actually builds always bundles a video and a telemetry
  * device together, so "a sim probe implies telemetry will be available" is a fair read, not a lie).
  *
+ * <h2>Telemetry-only links</h2>
+ * When no {@link VideoSourcePort} claims the protocol, the probe does <em>not</em> immediately 400:
+ * it asks the telemetry sources the same question first (see {@link #probeTelemetryOnly}). A link
+ * that carries MAVLink and no video is a normal, supported device — the ESP32/ELRS/companion
+ * recipes in {@code infra/edge/} are all telemetry-only — and demanding a frame from one made every
+ * such device unaddable through the wizard, which is what
+ * docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §2 B1 documents. Only a protocol neither
+ * kind of adapter claims is still the 400 it always was.
+ *
  * <h2>Failure messages</h2>
  * {@link #friendlyMessage} pattern-matches the failing {@link Throwable}'s own message text for a
  * handful of well-known substrings (401/unauthorized, connection refused, 404, timeout, HEVC/H.265)
@@ -69,39 +79,89 @@ public final class DefaultProbeService implements ProbeService {
     /** How long the telemetry side-check waits for one sample before concluding "not detected". */
     static final Duration DEFAULT_TELEMETRY_TIMEOUT = Duration.ofSeconds(2);
 
+    /**
+     * How long a <em>telemetry-only</em> probe waits — the whole verdict, not a side-check, so it
+     * gets the same budget as {@link #DEFAULT_FRAME_TIMEOUT} rather than the side-check's 2s.
+     */
+    static final Duration DEFAULT_TELEMETRY_PROBE_TIMEOUT = DEFAULT_FRAME_TIMEOUT;
+
     private static final String TELEMETRY_WARNING = "No telemetry detected — OSD unavailable";
+
+    /** Not a fault — it is what a MAVLink link *is*, said out loud so the Test step can stop asking for a frame. */
+    private static final String TELEMETRY_ONLY_NOTICE = "No video on this link — telemetry only";
 
     private final VideoSourceRegistry videoSourceRegistry;
     private final List<TelemetrySourcePort> telemetrySources;
     private final Duration frameTimeout;
     private final Duration telemetryTimeout;
+    private final Duration telemetryProbeTimeout;
 
     public DefaultProbeService(VideoSourceRegistry videoSourceRegistry, List<TelemetrySourcePort> telemetrySources) {
-        this(videoSourceRegistry, telemetrySources, DEFAULT_FRAME_TIMEOUT, DEFAULT_TELEMETRY_TIMEOUT);
+        this(videoSourceRegistry, telemetrySources, DEFAULT_FRAME_TIMEOUT, DEFAULT_TELEMETRY_TIMEOUT,
+                DEFAULT_TELEMETRY_PROBE_TIMEOUT);
     }
 
     /** Test seam: explicit, short timeouts so tests never wait out the production defaults. */
     DefaultProbeService(VideoSourceRegistry videoSourceRegistry, List<TelemetrySourcePort> telemetrySources,
                          Duration frameTimeout, Duration telemetryTimeout) {
+        this(videoSourceRegistry, telemetrySources, frameTimeout, telemetryTimeout, telemetryTimeout);
+    }
+
+    /** Test seam: as above, plus the telemetry-only verdict's own (normally much longer) budget. */
+    DefaultProbeService(VideoSourceRegistry videoSourceRegistry, List<TelemetrySourcePort> telemetrySources,
+                         Duration frameTimeout, Duration telemetryTimeout, Duration telemetryProbeTimeout) {
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
         this.telemetrySources =
                 List.copyOf(Objects.requireNonNull(telemetrySources, "telemetrySources must not be null"));
         this.frameTimeout = Objects.requireNonNull(frameTimeout, "frameTimeout must not be null");
         this.telemetryTimeout = Objects.requireNonNull(telemetryTimeout, "telemetryTimeout must not be null");
+        this.telemetryProbeTimeout =
+                Objects.requireNonNull(telemetryProbeTimeout, "telemetryProbeTimeout must not be null");
     }
 
     @Override
     public ProbeResult probe(StreamDescriptor descriptor) {
         Objects.requireNonNull(descriptor, "descriptor must not be null");
-        VideoSourcePort videoSource = videoSourceRegistry.sourceFor(descriptor); // 400 if unrecognized
+        VideoSourcePort videoSource;
+        try {
+            videoSource = videoSourceRegistry.sourceFor(descriptor);
+        } catch (UnsupportedProtocolException noVideoSource) {
+            return probeTelemetryOnly(descriptor, noVideoSource);
+        }
         VideoFrame frame = grabOneFrame(videoSource, descriptor);
 
-        boolean telemetryDetected = detectTelemetry(descriptor);
+        boolean telemetryDetected = detectTelemetry(descriptor, telemetryTimeout);
         List<String> warnings = new ArrayList<>();
         if (!telemetryDetected) {
             warnings.add(TELEMETRY_WARNING);
         }
         return new ProbeResult(frame, codecFor(frame), fpsHint(descriptor), telemetryDetected, warnings);
+    }
+
+    /**
+     * The fallback for a protocol no {@link VideoSourcePort} claims: prove the link by telemetry
+     * instead of by a frame, or rethrow (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §2 B1).
+     *
+     * <p>Before this existed, {@code mavlink} — the one protocol in this codebase that is telemetry
+     * and nothing else — 400'd here, which made the wizard's test-before-save step an unpassable
+     * gate and every telemetry-only device unaddable through the UI at all.
+     *
+     * <p>Waits {@link #telemetryProbeTimeout} rather than the far shorter {@link #telemetryTimeout}:
+     * that one is a <em>side-check</em> on a link a frame has already proven, where answering "no"
+     * costs only a warning. Here the same answer is the whole verdict, and a 1 Hz heartbeat has to
+     * clear a bind plus a full beacon interval before it can be heard at all.
+     */
+    private ProbeResult probeTelemetryOnly(StreamDescriptor descriptor,
+                                            UnsupportedProtocolException noVideoSource) {
+        if (telemetrySourceFor(descriptor) == null) {
+            throw noVideoSource; // neither kind of adapter claims it — genuinely unrecognized, 400
+        }
+        if (!detectTelemetry(descriptor, telemetryProbeTimeout)) {
+            throw new ProbeFailedException("No telemetry received within " + telemetryProbeTimeout.toSeconds()
+                    + "s on " + descriptor.uri() + " — this platform listens on that port, so check that the"
+                    + " vehicle is powered, transmitting, and pointed at this host");
+        }
+        return new ProbeResult(null, null, fpsHint(descriptor), true, List.of(TELEMETRY_ONLY_NOTICE));
     }
 
     /**
@@ -164,14 +224,29 @@ public final class DefaultProbeService implements ProbeService {
         }
     }
 
-    /** See class javadoc's "Telemetry detection" section for the honesty argument behind this. */
-    private boolean detectTelemetry(StreamDescriptor descriptor) {
-        Device probeDevice = new Device(DeviceId.random(), "probe",
+    /**
+     * The synthetic, never-persisted device a telemetry source is asked to claim — both
+     * capabilities, since a probe request carries none of its own (see the class javadoc's
+     * "Telemetry detection" section).
+     */
+    private static Device probeDevice(StreamDescriptor descriptor) {
+        return new Device(DeviceId.random(), "probe",
                 Set.of(Capability.VIDEO, Capability.TELEMETRY), descriptor);
-        TelemetrySourcePort telemetrySource = telemetrySources.stream()
-                .filter(candidate -> candidate.supports(probeDevice))
+    }
+
+    /** Which registered source claims this connection, or {@code null} when none does. */
+    private TelemetrySourcePort telemetrySourceFor(StreamDescriptor descriptor) {
+        Device probe = probeDevice(descriptor);
+        return telemetrySources.stream()
+                .filter(candidate -> candidate.supports(probe))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /** See class javadoc's "Telemetry detection" section for the honesty argument behind this. */
+    private boolean detectTelemetry(StreamDescriptor descriptor, Duration timeout) {
+        Device probeDevice = probeDevice(descriptor);
+        TelemetrySourcePort telemetrySource = telemetrySourceFor(descriptor);
         if (telemetrySource == null) {
             return false;
         }
@@ -203,7 +278,7 @@ public final class DefaultProbeService implements ProbeService {
             }
         });
         try {
-            return detected.get(telemetryTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            return detected.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             return false;
         } catch (ExecutionException e) {

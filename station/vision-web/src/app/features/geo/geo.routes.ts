@@ -2,7 +2,7 @@ import type { Routes } from '@angular/router';
 import { orgGuard } from '../../core/org/org-guard';
 
 /**
- * `/manage/geo/regions` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — own lazy chunk, split per
+ * `/manage/geo/regions` (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — own lazy chunk, split per
  * vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3. Spread inside `app.routes.ts`'s
  * `authGuard`-wrapped children group like every other feature; `orgGuard` (`core/org/org-guard.ts`,
  * the same guard `/manage/roster` uses) gates the **whole page**, not just create/delete — unlike

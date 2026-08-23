@@ -10,7 +10,7 @@ import java.util.Objects;
 
 /**
  * Solves a fixed camera's yaw/pitch/hfov from 2–8 clicked landmark correspondences
- * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D5, exactly). Deterministic, no third-party
+ * (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D5, exactly). Deterministic, no third-party
  * dependencies, pure — mirrors kernel's {@link GeoProjection}/{@code FixedCameraGeo} idiom (private
  * constructor, static methods only; java-clean-code SKILL.md §1: one implementation, no substitution
  * point, no interface earned) even though it lives in this context's application layer rather than

@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Golden values below were computed independently with the standard OSM slippy-map formulas
  * (python's {@code math.floor}/{@code math.log}/{@code math.tan}) — see
- * docs/plans/active/VISUAL-GEO-V2-PLAN.md §5 H2b's own tile-grid pin.
+ * docs/plans/done/VISUAL-GEO-V2-PLAN.md §5 H2b's own tile-grid pin.
  */
 class TileGridTest {
 

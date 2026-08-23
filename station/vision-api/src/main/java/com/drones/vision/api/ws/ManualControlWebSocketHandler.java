@@ -12,8 +12,7 @@ import com.drones.vision.flight.application.ManualControlSession;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.flight.application.WatchdogListener;
 import com.drones.vision.kernel.AssetId;
-import com.drones.vision.flight.domain.model.ChannelMap;
-import com.drones.vision.flight.domain.model.ControlBinding;
+import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.kernel.UserId;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -65,11 +64,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link #sendFrame}, which synchronizes on {@link ConnectionState#sendLock} — exactly the guard
  * {@code LiveConnection} uses around {@code SseEmitter#send}.
  *
+ * <h2>The stick layout comes from the vehicle, and its labels come with it</h2>
+ * The {@code engaged} frame carries the session's {@link ControlProfile} — the vehicle kind the
+ * adapter is currently hearing, plus the bindings chosen for it, each with its own function and
+ * travel. This handler no longer invents labels from channel numbers: the {@code source+rcChannel ->
+ * label} switch it used to own hardcoded {@code case 1 -> "Roll"}, which is simply false on a ground
+ * vehicle whose channel 1 is steering (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P5).
+ *
  * <h2>{@code rateHz} is read live, through the port</h2>
  * This module still may not depend on adapter-mavlink, so the number does not come from there
  * directly — it rides the seam the port already owns: the adapter stamps its clamped keepalive rate
  * on the {@code ManualControlLink} it returns from {@code engage}, {@link ManualControlSession}
- * exposes it, and this handler echoes it (docs/plans/active/RC-LATENCY-PLAN.md §2 C). The
+ * exposes it, and this handler echoes it (docs/plans/done/RC-LATENCY-PLAN.md §2 C). The
  * hand-mirrored constant this class used to send is gone.
  */
 @Component
@@ -190,8 +196,10 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
         try {
             ManualControlSession mcSession = manualControlService.engage(assetId, actor, scope, onWatchdog);
             state.session = mcSession;
-            sendFrame(session, state, new ManualControlEngagedFrame(assetId.value().toString(),
-                    mcSession.rateHz(), toChannelMapResponse(mcSession.channelMap())));
+            ControlProfile profile = mcSession.controlProfile();
+            sendFrame(session, state, new ManualControlEngagedFrame(assetId.value().toString(), mcSession.rateHz(),
+                    profile.kind().name(), profile.code(), profile.displayName(),
+                    toChannelMapResponse(profile)));
         } catch (AccessDeniedException e) {
             sendFrame(session, state, new ManualControlDeniedFrame(CODE_OUT_OF_SCOPE, e.getMessage()));
         } catch (IllegalStateException e) {
@@ -244,35 +252,8 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
         return CODE_NOT_COMMANDABLE;
     }
 
-    private static List<ManualControlChannelBindingResponse> toChannelMapResponse(ChannelMap channelMap) {
-        return channelMap.bindings().stream()
-                .map(binding -> new ManualControlChannelBindingResponse(binding.source().name(), binding.sourceIndex(),
-                        binding.rcChannel(), labelFor(binding.source(), binding.rcChannel())))
-                .toList();
-    }
-
-    /**
-     * This handler's own {@code source+rcChannel -> label} mapping (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md
-     * §5) — {@link ControlBinding} carries no label field, so the frozen default map's function
-     * names are hardcoded here rather than derived.
-     */
-    private static String labelFor(ControlBinding.Source source, int rcChannel) {
-        if (source == ControlBinding.Source.AXIS) {
-            return switch (rcChannel) {
-                case 1 -> "Roll";
-                case 2 -> "Pitch";
-                case 3 -> "Throttle";
-                case 4 -> "Yaw";
-                default -> "Axis RC" + rcChannel;
-            };
-        }
-        return switch (rcChannel) {
-            case 5 -> "Aux 1";
-            case 6 -> "Aux 2";
-            case 7 -> "Aux 3";
-            case 8 -> "Aux 4";
-            default -> "Button RC" + rcChannel;
-        };
+    private static List<ManualControlChannelBindingResponse> toChannelMapResponse(ControlProfile profile) {
+        return profile.channelMap().bindings().stream().map(ManualControlChannelBindingResponse::from).toList();
     }
 
     private static List<Double> readDoubleList(JsonNode arrayNode) {

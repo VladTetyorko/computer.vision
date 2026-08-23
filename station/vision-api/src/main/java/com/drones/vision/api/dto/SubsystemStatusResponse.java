@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 
 /**
- * One subsystem's entry in {@code GET /api/system/status} (docs/plans/active/SYSTEM-STATUS-PLAN.md
+ * One subsystem's entry in {@code GET /api/system/status} (docs/plans/done/SYSTEM-STATUS-PLAN.md
  * §4.3's frozen wire contract) — mirrors {@link SubsystemStatus} field-for-field, plus {@code
  * @JsonInclude(NON_NULL)} for {@code since}/{@code hint}, which are genuinely absent (not merely
  * blank) when unknown/not applicable.

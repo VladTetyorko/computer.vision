@@ -348,7 +348,7 @@ class UsageTimelineControllerTest {
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }
 
-    // ---- byStream (docs/plans/active/STREAM-STATE-PLAN.md S5 -- what happened to stream X) ----
+    // ---- byStream (docs/plans/done/STREAM-STATE-PLAN.md S5 -- what happened to stream X) ----
 
     @Test
     void byStreamReturns200WithTheSameRowShapeTheListUses() throws Exception {

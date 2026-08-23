@@ -1,5 +1,6 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.vision.flight.domain.model.VehicleKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -153,5 +154,34 @@ class FlightModesTest {
         assertEquals(List.of(), FlightModes.selectableModes(AUTOPILOT_PX4, MAV_TYPE_QUADROTOR));
         assertEquals(List.of(), FlightModes.selectableModes(99, MAV_TYPE_QUADROTOR));
         assertEquals(List.of(), FlightModes.selectableModes(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GCS));
+    }
+
+    // --- vehicleKind (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §1.4) --------------
+
+    @Test
+    void vehicleKindSortsEveryFamilyThisClassAlreadyKnows() {
+        assertEquals(VehicleKind.COPTER, FlightModes.vehicleKind(2));   // MAV_TYPE_QUADROTOR
+        assertEquals(VehicleKind.COPTER, FlightModes.vehicleKind(4));   // MAV_TYPE_HELICOPTER
+        assertEquals(VehicleKind.COPTER, FlightModes.vehicleKind(13));  // MAV_TYPE_HEXAROTOR
+        assertEquals(VehicleKind.PLANE, FlightModes.vehicleKind(1));    // MAV_TYPE_FIXED_WING
+        assertEquals(VehicleKind.PLANE, FlightModes.vehicleKind(21));   // MAV_TYPE_VTOL_TILTROTOR
+        assertEquals(VehicleKind.ROVER, FlightModes.vehicleKind(10));   // MAV_TYPE_GROUND_ROVER
+        assertEquals(VehicleKind.ROVER, FlightModes.vehicleKind(11));   // MAV_TYPE_SURFACE_BOAT
+    }
+
+    @Test
+    void anUnrecognizedMavTypeIsUnknownNotAGuess() {
+        assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(6));   // MAV_TYPE_GCS
+        assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(0));   // MAV_TYPE_GENERIC
+        assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(255));
+    }
+
+    @Test
+    void vehicleKindIsTheSameWhicheverFirmwareIsFlyingIt() {
+        // Unlike the mode tables, the classification never consults `autopilot`: a quadrotor is a
+        // quadrotor whether ArduPilot, PX4 or Betaflight is flying it. Asserted by construction --
+        // the method takes no autopilot argument at all -- and pinned here so a later "helpful"
+        // overload that adds one has to justify itself.
+        assertEquals(VehicleKind.COPTER, FlightModes.vehicleKind(2));
     }
 }

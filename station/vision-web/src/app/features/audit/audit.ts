@@ -5,7 +5,7 @@ import { EmptyState } from '../../shared/ui/empty-state';
 import { AuditFacade } from './audit-facade';
 
 /**
- * `/monitor/audit` — the manager's fleet-wide accountability surface (docs/plans/active/OPS-UX-PLAN.md §3 B1,
+ * `/monitor/audit` — the manager's fleet-wide accountability surface (docs/plans/done/OPS-UX-PLAN.md §3 B1,
  * docs/conclusions/OPS-UX-REVIEW.md §U3: "the cheapest high-value item in the whole review: the
  * backend is done"). Reads `GET /api/audit` — built, audited across every context, and, before this
  * task, called from no page in this SPA at all.

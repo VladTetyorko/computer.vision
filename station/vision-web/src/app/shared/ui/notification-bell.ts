@@ -78,7 +78,7 @@ import type { DetectionEvent } from '../../core/api/models';
  * events read), so it can't be a bare `overlays.toggle()` call in the template the way
  * `identity-chip.ts`'s trigger is.
  *
- * **System events (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2-§3.3)** get a *second*, independent card in
+ * **System events (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.2-§3.3)** get a *second*, independent card in
  * this same dropdown, `<vision-system-event-row>` per row — a **sibling** of `vision-event-row`
  * (`EventsRail`'s own row component), not a widened version of it, since `EventRow.event` is typed
  * to `DetectionEvent` and every one of its existing call sites stays untouched by this wave; see

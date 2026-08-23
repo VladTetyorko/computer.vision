@@ -1,5 +1,7 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.vision.flight.domain.model.VehicleKind;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -168,6 +170,36 @@ final class FlightModes {
             return List.of();
         }
         return table.values().stream().distinct().sorted().toList();
+    }
+
+    /**
+     * The vehicle family behind a raw {@code HEARTBEAT.type}, as the control-shape taxonomy
+     * {@code vision-flight} reasons in (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §1.4).
+     *
+     * <p>Reuses the very same {@code MAV_TYPE} sets this class already maintains to pick a mode
+     * table — a vehicle whose modes come from the rover table is, by construction, a rover. Before
+     * this method that classification reached {@code selectableModes} and stopped; the stick layout,
+     * which needs it just as badly, was left guessing.
+     *
+     * <p>Deliberately <b>autopilot-independent</b>, unlike {@link #tableFor}: a quadrotor is a
+     * quadrotor whether ArduPilot, PX4 or Betaflight is flying it. Only the <em>mode names</em> are
+     * firmware-specific, not the physics. An unrecognized {@code mavType} yields {@link
+     * VehicleKind#UNKNOWN} — never a guess, per that document's §2 P8.
+     *
+     * @param mavType {@code HEARTBEAT.type} raw value
+     * @return the control-shape family, or {@link VehicleKind#UNKNOWN} if this class knows no family for it
+     */
+    static VehicleKind vehicleKind(int mavType) {
+        if (COPTER_MAV_TYPES.contains(mavType)) {
+            return VehicleKind.COPTER;
+        }
+        if (PLANE_MAV_TYPES.contains(mavType)) {
+            return VehicleKind.PLANE;
+        }
+        if (ROVER_MAV_TYPES.contains(mavType)) {
+            return VehicleKind.ROVER;
+        }
+        return VehicleKind.UNKNOWN;
     }
 
     private static Map<Integer, String> tableFor(int autopilot, int mavType) {

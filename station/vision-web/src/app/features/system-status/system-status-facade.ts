@@ -20,7 +20,7 @@ import { SystemStatusStore } from '../../core/system-status/system-status-store'
 const CLOCK_TICK_MS = 1_000;
 
 /**
- * `/manage/system`'s facade (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1, wave S3), the one seam this
+ * `/manage/system`'s facade (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1, wave S3), the one seam this
  * routed page injects (`core/ui/architecture.spec.ts`'s layering guard). Reads three existing
  * `providedIn: 'root'` singletons rather than owning any polling/SSE of its own:
  *

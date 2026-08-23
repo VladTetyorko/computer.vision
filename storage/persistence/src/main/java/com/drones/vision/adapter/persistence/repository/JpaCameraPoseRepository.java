@@ -14,7 +14,7 @@ import java.util.Optional;
 
 /**
  * {@link CameraPoseRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4.
+ * docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D4.
  *
  * <p>{@link #save} is an upsert (merge-by-{@code assetId}), matching the port's own "one row per
  * asset" contract exactly — same shape as {@link JpaAssetImageRepository}, whose owning id also

@@ -1,7 +1,7 @@
 # GEO-POSE-PLAN — give the projection the measurements it never had
 
 **Status:** authoritative spec, not yet implemented. Branch `feat/geo-pose` off master.
-**Reads with:** [MAVLINK-CORE-PLAN.md](MAVLINK-CORE-PLAN.md) (§2.2 message set, merged W0–W4),
+**Reads with:** [MAVLINK-CORE-PLAN.md](../active/MAVLINK-CORE-PLAN.md) (§2.2 message set, merged W0–W4),
 `vision-kernel/src/main/java/com/drones/vision/kernel/GeoProjection.java` (the math being fixed).
 **Scope:** the **shipped** `GeoProjection` "Mark target" feature. **Not** the parked `feat/visual-geo`
 VPR branch — see §6.

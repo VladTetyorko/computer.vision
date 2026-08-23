@@ -23,7 +23,7 @@ import java.util.Objects;
  *
  * <p><b>Wiring status</b>: {@link SnapshotJpegEncoder}, {@code HlsProxyController} and {@code
  * LiveUpdateRegistry} each take an instance of the relevant nested record today — the last two as
- * of docs/plans/active/SCALE-100-PLAN.md §5 S7, which finished the extraction
+ * of docs/plans/done/SCALE-100-PLAN.md §5 S7, which finished the extraction
  * docs/plans/active/LAYERING-REFACTOR-PLAN.md §7 row B deferred. Both take the nested record alone
  * (not the whole top-level {@code VisionApiProperties}), matching {@code
  * PublishWiring#snapshotJpegEncoder}'s established bridge shape: {@code vision-app}'s
@@ -84,7 +84,7 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
 
     /**
      * {@code HlsProxyController}'s upstream {@code HttpClient} timeouts and its two bounded-buffer
-     * sizing knobs (docs/plans/active/SCALE-100-PLAN.md §5 S7).
+     * sizing knobs (docs/plans/done/SCALE-100-PLAN.md §5 S7).
      *
      * @param connectTimeout           bound on establishing the upstream TCP connection
      * @param requestTimeout           bound on the whole upstream request/response round trip
@@ -114,7 +114,7 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
      * The SSE data plane's coalescing/heartbeat cadence, per-topic ring-buffer capacities, and
      * {@code LiveUpdateRegistry}'s two per-connection dispatch bounds
      * (docs/plans/done/REALTIME-PLAN.md §4; {@code sendTimeout}/{@code bufferEviction} added
-     * docs/plans/active/SCALE-100-PLAN.md §5 S2/S7).
+     * docs/plans/done/SCALE-100-PLAN.md §5 S2/S7).
      *
      * @param coalesce        how often pending telemetry/detections/fleet-recompute are flushed
      *                        into one envelope per topic

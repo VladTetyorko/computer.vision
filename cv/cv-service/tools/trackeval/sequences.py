@@ -1,6 +1,6 @@
 """Synthetic ground-truth sequences for the tracking evaluation harness.
 
-`docs/plans/active/TRACKING-V2-PLAN.md` §4 (wave C0). This repo has no
+`docs/plans/done/TRACKING-V2-PLAN.md` §4 (wave C0). This repo has no
 camera -- hardware tier H1 is unbought (`docs/main/TWO-TARGETS-PLAN.md`) --
 so ground truth has to be known BY CONSTRUCTION rather than hand-labelled:
 every object's box on every frame is computed from a closed-form trajectory,

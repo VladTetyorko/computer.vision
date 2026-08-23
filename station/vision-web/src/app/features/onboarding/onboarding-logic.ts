@@ -23,7 +23,7 @@ import { withRegistrationNumber } from '../../core/fleet/asset-attributes';
 
 /**
  * The wizard's six steps, always in this order — `nextStep`/`prevStep` are the only way to move
- * through the first five. **`assign`** (docs/plans/active/OPS-UX-PLAN.md §2 A3, "Who flies this?") is the
+ * through the first five. **`assign`** (docs/plans/done/OPS-UX-PLAN.md §2 A3, "Who flies this?") is the
  * exception: the wizard never reaches it via `next()` (the `create` step's own action button is
  * what gets there, only after `POST /api/assets` actually succeeds — see `OnboardingStore#finishCreate`)
  * and it is never back-navigable into `create` (the asset already exists by the time it renders;
@@ -161,12 +161,36 @@ export function canAdvanceFromConnect(draft: ConnectDraft): boolean {
 }
 
 /**
+ * Protocols that carry telemetry and no video, so the Test step must stop asking them for a frame
+ * (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §2 B3).
+ *
+ * A list rather than a single string because the *concept* is "telemetry-only link", not "mavlink":
+ * every `infra/edge/` recipe (ELRS backpack, ESP32/WiFi bridge, companion computer) is one, they
+ * simply all speak `mavlink` today. A second entry belongs here, not in a widened conditional.
+ *
+ * This only picks the wording. The backend decides what a probe actually does — it asks the
+ * telemetry sources whichever protocol arrives — so a protocol missing from this list still probes
+ * correctly, it is just described in video terms while it does.
+ */
+export const TELEMETRY_ONLY_PROTOCOLS: readonly string[] = ['mavlink'];
+
+/** See {@link TELEMETRY_ONLY_PROTOCOLS}. Case/whitespace-tolerant, like the backend's own default. */
+export function isTelemetryOnlyProtocol(protocol: string | null | undefined): boolean {
+  return protocol !== null && protocol !== undefined
+    && TELEMETRY_ONLY_PROTOCOLS.includes(protocol.trim().toLowerCase());
+}
+
+/**
  * Test step (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1, poka-yoke): "cannot advance to save while the last
  * probe failed" — for `register`/`discover` paths only. `simulate` never reaches this step at all
  * (see {@link nextStep}), so it trivially always may advance; kept as a real branch (not assumed
  * true by the caller) so a future caller that *does* invoke this for `simulate` gets the right
  * answer rather than undefined behavior. `lastProbeOk` is `undefined` before any probe has run —
  * exactly the "not yet allowed" state a fresh Test step starts in.
+ *
+ * Deliberately unchanged by the telemetry-only work: a frameless probe still returns `ok: true`
+ * (that is the whole point of the second 200 shape), so "the last probe succeeded" remains the one
+ * question this gate asks. Only the wording around it had to learn the difference.
  */
 export function canAdvanceFromTest(method: ConnectMethod | null, lastProbeOk: boolean | undefined): boolean {
   return method === 'simulate' || lastProbeOk === true;
@@ -271,7 +295,7 @@ export function buildPostSimulationAssetEdit(
   };
 }
 
-// --- Step 5: "Who flies this?" (docs/plans/active/OPS-UX-PLAN.md §2 A3) -------------------------------
+// --- Step 5: "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) -------------------------------
 
 /** Least→most privileged, mirroring the domain's own `Role` ordinal — used only to find the *highest* of a set of memberships below. */
 const ROLE_RANK: Readonly<Record<Role, number>> = { PILOT: 0, MANAGER: 1, ADMIN: 2 };
@@ -289,7 +313,7 @@ const ROLE_RANK: Readonly<Record<Role, number>> = { PILOT: 0, MANAGER: 1, ADMIN:
  * `MeResponse.memberships` carries a synthetic group id that does not match the real seeded
  * admin/manager/pilot users' own "Root" group id (two different, unrelated ids that merely share a
  * display name) — so this function resolves *a* group correctly, but `pilotsInGroup` below will
- * never find a match against it in that mode. This is a frontend-only wave (docs/plans/active/OPS-UX-PLAN.md
+ * never find a match against it in that mode. This is a frontend-only wave (docs/plans/done/OPS-UX-PLAN.md
  * §2) with no backend change available to fix the mismatch; the picker's own honest empty state
  * ("nobody in *that* group is a pilot yet") is still a true statement about the data this app can
  * see, never a fabrication — see `onboarding-store.ts#enterAssignStep`'s own note.
@@ -308,7 +332,7 @@ export function creatorOwnershipGroup(memberships: readonly Membership[]): Membe
  * same `enabled`-only filter `features/asset-detail/pilots-card.ts#assignable` already applies (a
  * disabled account can't sign in to fly anything). `undefined`/unresolved `groupId` yields no
  * candidates at all, never every pilot app-wide — offering the wrong team's roster would be worse
- * than offering none (docs/plans/active/OPS-UX-PLAN.md §2 A3: "offer the group's pilots").
+ * than offering none (docs/plans/done/OPS-UX-PLAN.md §2 A3: "offer the group's pilots").
  */
 export function pilotsInGroup(users: readonly UserSummary[], groupId: string | undefined): readonly UserSummary[] {
   if (!groupId) {
@@ -320,7 +344,7 @@ export function pilotsInGroup(users: readonly UserSummary[], groupId: string | u
 }
 
 /**
- * The picker's default selection (docs/plans/active/OPS-UX-PLAN.md §2 A3 — "Default selection: the creator
+ * The picker's default selection (docs/plans/done/OPS-UX-PLAN.md §2 A3 — "Default selection: the creator
  * when they are a pilot in that group, else none"). Deliberately checks the creator's *own* role
  * within the resolved ownership group, not their global `topRole`: a MANAGER/ADMIN's ownership
  * group is by construction the group of their own highest-role membership (see

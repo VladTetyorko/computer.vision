@@ -16,8 +16,8 @@ ArchUnit-enforced one-way (`domain` never imports `application`).
 
 **Depends on:**
 - `vision-kernel` — every typed id, `GeoPosition`, `Ownership`, `GeoProjection` (mark geolocation math;
-  since docs/plans/active/GEO-POSE-PLAN.md wave V3, via `GeoProjection.aimFrom`/`CameraAim` rather than the
-  raw 4-arg `project`); since docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G2, also `FixedCameraGeo`/
+  since docs/plans/done/GEO-POSE-PLAN.md wave V3, via `GeoProjection.aimFrom`/`CameraAim` rather than the
+  raw 4-arg `project`); since docs/plans/done/FIXED-CAMERA-GEO-PLAN.md wave G2, also `FixedCameraGeo`/
   `FixedCameraPose`/`FixedCameraGeoSettings`/`GroundFix`/`BoundingBox` (fixed-camera pixel→ground
   projection) and `BearingDistance` (the calibration solver's own bearing/range math)
 - `vision-platform` — `AccessDeniedException` (every authorization refusal in this context throws it);
@@ -48,7 +48,7 @@ com.drones.vision.map.application.mark  — mark service (kept as its own subpac
                                            the root because "mark" is not the context's name and this
                                            context has more than one feature, unlike e.g. `flight`)
 com.drones.vision.map.application.track — camera pose CRUD, calibration solver, and track projection
-                                           (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G2); same
+                                           (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md wave G2); same
                                            "own subpackage, not the root" reasoning as `.mark`
 ```
 
@@ -253,7 +253,7 @@ com.drones.vision.map.application.track — camera pose CRUD, calibration solver
     publish `CREATED`. `geolocate` reads `UsageTracker#latestTelemetry(AssetId)` and requires
     latitude, longitude, heading present plus altitude present and `>0` — any of the four missing/
     invalid is the same `IllegalArgumentException("cannot geolocate: telemetry incomplete")`; this
-    guard is unchanged since before docs/plans/active/GEO-POSE-PLAN.md wave V3 and, by construction, is what
+    guard is unchanged since before docs/plans/done/GEO-POSE-PLAN.md wave V3 and, by construction, is what
     guarantees `GeoProjection.aimFrom` (see below) never itself throws here.
     - **Since wave V3**, the projected ground point comes from `GeoProjection.aimFrom(telemetry,
       GeoProjection.DEFAULT_DEPRESSION_DEGREES)` + `GeoProjection.project(GeoPosition, CameraAim)`
@@ -293,7 +293,7 @@ com.drones.vision.map.application.track — camera pose CRUD, calibration solver
 - **`GeolocateSpec(assetId, layerId, kind, affiliation, label, note, depressionDegrees)`** —
   `MarkService#geolocate`'s command, a `DETECTION` mark projected from an asset's freshest telemetry;
   carries no position of its own. **`depressionDegrees` is `Double`, genuinely nullable** (changed in
-  docs/plans/active/GEO-POSE-PLAN.md wave V3 from a primitive `double` that the wire DTO pre-defaulted to
+  docs/plans/done/GEO-POSE-PLAN.md wave V3 from a primitive `double` that the wire DTO pre-defaulted to
   `GeoProjection.DEFAULT_DEPRESSION_DEGREES`): `null` means "let the resolved pose decide" (a real
   gimbal reading if the telemetry has one, else the 45° default); non-null is an operator override
   that always wins, even over a real gimbal reading. Range-validated by `GeoProjection.CameraAim`'s
@@ -310,7 +310,7 @@ com.drones.vision.map.application.track — camera pose CRUD, calibration solver
   unambiguously means "leave unchanged" without colliding with `note`, which can itself legitimately
   be absent); `MarkPatch.NOTHING` the identity patch.
 
-### `com.drones.vision.map.application.track` (wave G2, docs/plans/active/FIXED-CAMERA-GEO-PLAN.md)
+### `com.drones.vision.map.application.track` (wave G2, docs/plans/done/FIXED-CAMERA-GEO-PLAN.md)
 - **`CameraPoseService`** (interface) → **`DefaultCameraPoseService`** — CRUD over one asset's
   `CameraPose`, audited through `AuditTrailPort` (**this context's first audit write**, D10).
   - `DefaultCameraPoseService(CameraPoseRepositoryPort, AuditTrailPort)` — 2-arg.
@@ -455,7 +455,7 @@ com.drones.vision.map.application.track — camera pose CRUD, calibration solver
   field, so a later `list()`/`patch()` of the same mark carries no measured-vs-assumed signal at all
   (`MarkResponse.from(Mark)`, used by every endpoint but geolocate, always sends `measured` absent).
   Persisting it durably would require widening the `Mark` domain record and `adapter-persistence`'s
-  `MarkEntity`/`MarkMapper` — deliberately deferred past docs/plans/active/GEO-POSE-PLAN.md wave V3; flag it if a
+  `MarkEntity`/`MarkMapper` — deliberately deferred past docs/plans/done/GEO-POSE-PLAN.md wave V3; flag it if a
   later wave wants the cockpit to show "measured" after a refresh, not just at creation time.
 - **`MapLiveUpdatePort#publishMapEvent` scopes delivery per-connection by layer visibility** — every
   other context's live-update port (`FleetLiveUpdatePort`, `TelemetryLiveUpdatePort`,
@@ -507,10 +507,10 @@ own mark. This is the design history `MAP-REWORK-PLAN.md`'s Wave B/`MapAccessPol
 (see Gotchas) — kept here for context, not as the current shape. 560/560 green after the revision (up
 from 535, same test count across both rounds — the revision replaced tests, not added to them).
 
-docs/plans/active/GEO-POSE-PLAN.md **wave V3 done** (`DefaultMarkService#geolocate` now uses the pose the
+docs/plans/done/GEO-POSE-PLAN.md **wave V3 done** (`DefaultMarkService#geolocate` now uses the pose the
 device actually measured, not just a hand-picked heading/altitude pair): `geolocate` resolves a
 `GeoProjection.CameraAim` via `GeoProjection.aimFrom` instead of calling the 4-arg `GeoProjection#project`
-directly, fixing the bug docs/plans/active/GEO-POSE-PLAN.md §1 describes (AMSL altitude silently standing in for
+directly, fixing the bug docs/plans/done/GEO-POSE-PLAN.md §1 describes (AMSL altitude silently standing in for
 AGL, offsetting every mark downrange by the site's height above sea level). `GeolocateSpec.depressionDegrees`
 changed from primitive `double` to genuinely-nullable `Double` — `GeolocateMarkRequest` no longer
 pre-defaults it at the wire boundary, since doing so made an explicit 45° override and an omitted value
@@ -526,7 +526,7 @@ assertion on the no-pose path is unchanged and green, proving no behavior change
 none of the new `Telemetry` fields. **227/227 green** (see Build/test above). `vision-web` is not yet
 updated to read `measured` off the geolocate response — a follow-up, not part of this wave.
 
-docs/plans/active/FIXED-CAMERA-GEO-PLAN.md **wave G2 done** (fixed-camera geolocation, application half —
+docs/plans/done/FIXED-CAMERA-GEO-PLAN.md **wave G2 done** (fixed-camera geolocation, application half —
 `contexts/vision-map/**` scope only; kernel's pixel→ground projection math, `FixedCameraGeo`/
 `FixedCameraPose`/`FixedCameraGeoSettings`/`GroundFix`, was wave G1's, read-only here): three new domain
 types (`CameraPoseSource`, `CameraPose`, `TrackPoint`, `ProjectedTrack`), `MapEvent`'s new `TRACK` entity

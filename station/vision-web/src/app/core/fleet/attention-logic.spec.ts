@@ -174,7 +174,7 @@ describe('geofence-breach (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
   });
 });
 
-describe('pipeline-error (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4)', () => {
+describe('pipeline-error (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4)', () => {
   it('never fires with no detail given at all', () => {
     expect(attentionReasons(asset())).toEqual([]);
     expect(attentionReasons(asset(), undefined, undefined, undefined)).toEqual([]);

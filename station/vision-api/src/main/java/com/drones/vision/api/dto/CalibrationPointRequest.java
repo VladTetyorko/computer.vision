@@ -5,7 +5,7 @@ import com.drones.vision.map.application.track.CalibrationLandmark;
 
 /**
  * One clicked correspondence inside a {@link CalibrateCameraPoseRequest} body
- * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D5) — a normalized frame pixel {@code (u,v)}
+ * (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5/D5) — a normalized frame pixel {@code (u,v)}
  * paired with the map position clicked for the same real-world point.
  *
  * @param u         normalized horizontal pixel coordinate, top-left origin; within {@code [0,1]}

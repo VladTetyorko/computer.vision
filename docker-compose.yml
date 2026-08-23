@@ -12,7 +12,7 @@
 #                 docs/plans/done/MVP2-PLAN.md P-a/P-b): vision-app below wires
 #                 VISION_PERSISTENCE_JDBC_URL/USERNAME/PASSWORD against it,
 #                 Flyway-migrated on first use. Unconditional since
-#                 docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b -- there is no
+#                 docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b -- there is no
 #                 in-memory fallback left to opt out into.
 #   mediamtx    - RTSP ingest / HLS egress sidecar (see ARCHITECTURE.md §6)
 #   cv-service  - Python gRPC YOLO inference service (docs/plans/done/MVP1-PLAN.md §C7)
@@ -129,7 +129,7 @@ services:
       # mediamtx default (HLS/WHEP viewing has the same shape), not something this correction
       # introduced or is scoped to fix.
       - "19996:9996" # Playback API (recording clip export)
-      # Control API (docs/plans/active/MEDIA-SOT-PLAN.md §5.3): container default is 9997 (mediamtx's
+      # Control API (docs/plans/done/MEDIA-SOT-PLAN.md §5.3): container default is 9997 (mediamtx's
       # own apiAddress default, ":9997"), set explicitly below via MTX_API/MTX_APIADDRESS for the
       # same "pin, don't silently inherit" reason as the MTX_HLS*/MTX_PLAYBACKADDRESS blocks. Serves
       # the create/patch/get/delete-path calls MediamtxProxyPublisher makes when
@@ -292,7 +292,7 @@ services:
       MTX_PATHDEFAULTS_RECORDDELETEAFTER: "1h"
       MTX_PLAYBACK: "yes"
       MTX_PLAYBACKADDRESS: ":9996"
-      # Control API (docs/plans/active/MEDIA-SOT-PLAN.md §5.3, wave M7): MTX_API=yes alone is NOT
+      # Control API (docs/plans/done/MEDIA-SOT-PLAN.md §5.3, wave M7): MTX_API=yes alone is NOT
       # sufficient for MediamtxProxyPublisher's calls to succeed -- mediamtx's own baked-in
       # authInternalUsers grants unauthenticated `api` action access only to a caller at
       # 127.0.0.1/::1, which a sibling container (vision-app, calling over this compose network)
@@ -369,7 +369,7 @@ services:
       # for a host-run vision-app talking to mediamtx over localhost.
       VISION_PUBLISH_MEDIAMTX_RTSP_BASE: rtsp://mediamtx:8554
       VISION_PUBLISH_MEDIAMTX_HLS_BASE: http://mediamtx:8888
-      # docs/plans/active/MEDIA-SOT-PLAN.md §5.3, wave M7 (gap closed in M9): MediamtxProxyPublisher's
+      # docs/plans/done/MEDIA-SOT-PLAN.md §5.3, wave M7 (gap closed in M9): MediamtxProxyPublisher's
       # Control API base, read by vision-app ITSELF (server-side, like rtsp-base/hls-base above), so
       # the compose-internal "mediamtx" hostname is correct here too -- unlike whep-base below, no
       # browser ever touches this URL. Only matters once vision.publish.source-proxy.enabled=true is
@@ -381,7 +381,7 @@ services:
       # loopback-only (127.0.0.1:19997:9997, see the mediamtx service's own Control API port comment),
       # so it wouldn't be reachable from this container even by address, only by container port.
       VISION_PUBLISH_MEDIAMTX_API_BASE: http://mediamtx:9997
-      # docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M7: the address the WORKER (cv-service) dials
+      # docs/plans/done/MEDIA-SOT-PLAN.md §5.5, wave M7: the address the WORKER (cv-service) dials
       # for a pulled stream -- only read when vision.cv.frame-transport=pull (off by default, D1;
       # this var is inert against the default push transport). Defaults to the same
       # compose-internal "mediamtx" hostname as VISION_PUBLISH_MEDIAMTX_RTSP_BASE above, which is
@@ -409,12 +409,12 @@ services:
       # hostname/port, not the host-mapped ${POSTGRES_PORT} below (same
       # container-vs-host addressing split as mediamtx's ports). Credentials
       # come straight from .env (see .env.example) via compose interpolation.
-      # Unconditional wiring since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b -- there
+      # Unconditional wiring since docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b -- there
       # is no longer a flag to set here.
       VISION_PERSISTENCE_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       VISION_PERSISTENCE_USERNAME: ${POSTGRES_USER}
       VISION_PERSISTENCE_PASSWORD: ${POSTGRES_PASSWORD}
-      # docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1: replaces the deleted code-based
+      # docs/plans/done/POSTGRES-ONLY-CONTEXT.md W1: replaces the deleted code-based
       # AuthSeedRunner, which used to seed these same three accounts unconditionally
       # at boot (and, before W1, minted a *random* root group id every restart --
       # the empty-fleet bug this plan fixes). Seeding now lives in a Flyway
@@ -458,7 +458,7 @@ services:
     # is not the default. Video ingest needs NO inbound port either way: RTSP/MJPEG
     # sources are dialled OUT to (the ESP32-CAM case included).
     healthcheck:
-      # docs/plans/active/SYSTEM-STATUS-PLAN.md §4.4: liveness probe against the actuator health
+      # docs/plans/done/SYSTEM-STATUS-PLAN.md §4.4: liveness probe against the actuator health
       # endpoint added there (management.endpoints.web.exposure.include: health, application.yaml) --
       # only `health` is ever exposed, permitted in SecurityConfig regardless of
       # VISION_AUTH_ENABLED. No curl/wget in this image (eclipse-temurin:21-jre, unlike cv-service's

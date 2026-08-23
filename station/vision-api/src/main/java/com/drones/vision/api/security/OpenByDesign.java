@@ -11,7 +11,7 @@ import java.lang.annotation.Target;
  *
  * <p>Every handler in this module must either consult {@code CurrentUser} (directly or through an
  * {@code *Access} collaborator) or carry this annotation — {@code EndpointAuthorizationTest} in
- * vision-app fails the build otherwise (docs/plans/active/LIVE-SCOPE-PLAN.md §2). The point is that
+ * vision-app fails the build otherwise (docs/plans/done/LIVE-SCOPE-PLAN.md §2). The point is that
  * an unauthorized endpoint must be an explicit, reviewable claim rather than an omission nobody
  * noticed: the audit that motivated this rule found 29 such omissions, none of them decisions.
  *

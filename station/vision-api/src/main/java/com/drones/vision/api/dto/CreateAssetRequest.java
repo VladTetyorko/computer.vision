@@ -85,18 +85,20 @@ public record CreateAssetRequest(String displayName, String category, Map<String
      * <p>{@code options} is optional; a missing/{@code null} value is treated
      * as an empty map — same shape and validation as {@link RegisterDeviceRequest}
      * (minus {@code type}, which no longer exists). {@code capabilities} is
-     * optional; a missing/empty value defaults to {@code Set.of(Capability.VIDEO)}.
-     * When present, each entry must match a {@link Capability} name
-     * case-insensitively (see {@link CapabilityParsing}) — this is what lets an
-     * asset device be registered with {@link Capability#TELEMETRY} so {@code
-     * UsageTracker} records positions for it.
+     * optional; a missing/empty value defaults <b>from {@code protocol}</b> —
+     * {@code mavlink} to {@link Capability#TELEMETRY}, everything else to
+     * {@link Capability#VIDEO} (see {@link CapabilityParsing}'s own "why the
+     * default depends on the protocol"). When present, each entry must match a
+     * {@link Capability} name case-insensitively, and an explicit list always
+     * wins over the protocol default.
      *
      * @param name         human-readable device name; must not be blank
      * @param protocol     lower-case protocol key selecting the ingest adapter (e.g. {@code "sim"}, {@code "rtsp"})
      * @param uri          the stream's resource locator
      * @param options      adapter-specific parameters; may be {@code null} (treated as empty)
      * @param capabilities capability names (see {@link Capability}); may be {@code null}/empty
-     *                     (defaults to {@code [VIDEO]})
+     *                     (then defaulted from {@code protocol}: {@code mavlink} → {@code
+     *                     [TELEMETRY]}, otherwise {@code [VIDEO]})
      */
     public record DeviceSpec(String name, String protocol, String uri, Map<String, String> options,
                               List<String> capabilities) {
@@ -128,7 +130,7 @@ public record CreateAssetRequest(String displayName, String category, Map<String
 
             StreamDescriptor descriptor =
                     new StreamDescriptor(protocol, parsedUri, options == null ? Map.of() : options);
-            return new DeviceRegistration(name, CapabilityParsing.parse(capabilities), descriptor);
+            return new DeviceRegistration(name, CapabilityParsing.parse(capabilities, protocol), descriptor);
         }
     }
 }

@@ -56,7 +56,7 @@ class DefaultTrainingJobServiceTest {
     private final UserId actor = UserId.random();
     private final DatasetId datasetId = DatasetId.random();
     private final TrainingJobSpec spec = new TrainingJobSpec("yolo26n.pt", datasetId.value().toString(), 10);
-    // docs/plans/active/OPS-UX-PLAN.md §1: starting a training job is deployment-global (it claims
+    // docs/plans/done/OPS-UX-PLAN.md §1: starting a training job is deployment-global (it claims
     // the single training host), so only an ADMIN/unbounded scope may -- adminScope is the scope
     // every happy-path test below now runs as; managerScope exists solely to prove it is refused.
     private final VisibilityScope adminScope = VisibilityScope.unbounded();
@@ -97,7 +97,7 @@ class DefaultTrainingJobServiceTest {
 
     @Test
     void startDeniedForAManagerScopeAuditsTheDenialAndNeverCallsThePort() {
-        // docs/plans/active/OPS-UX-PLAN.md §1: a MANAGER may administer every asset in their
+        // docs/plans/done/OPS-UX-PLAN.md §1: a MANAGER may administer every asset in their
         // subtree but training claims the one deployment-wide host, so canManageOrg() is not
         // enough here -- only an unbounded (ADMIN) scope may start a job.
         AccessDeniedException ex = assertThrows(AccessDeniedException.class,

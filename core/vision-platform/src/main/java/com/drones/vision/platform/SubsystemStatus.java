@@ -5,7 +5,7 @@ import java.time.Instant;
 /**
  * One subsystem's current status, as reported by a {@link SubsystemStatusPort} and served verbatim
  * (mapped 1:1 onto JSON) by {@code SystemStatusController}'s {@code GET /api/system/status}
- * (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.1/§4.3).
+ * (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.1/§4.3).
  *
  * @param id     stable machine identifier, e.g. {@code "cv-service"} — used as a UI/API key, never
  *               shown to an operator directly

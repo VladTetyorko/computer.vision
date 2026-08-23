@@ -2,7 +2,7 @@ package com.drones.vision.perception.domain.model;
 
 /**
  * One update in a region-ingest job's progress stream — mirrors proto's {@code
- * ReferenceIndexProgress} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1), carried unmodified from
+ * ReferenceIndexProgress} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1), carried unmodified from
  * {@link com.drones.vision.perception.domain.port.ReferenceIndexPort#build}'s {@code
  * Flow.Publisher} into {@code DefaultReferenceRegionService}'s in-memory job tracking (D10) and out
  * again as {@code GET /api/geo/regions/{regionId}/progress}.

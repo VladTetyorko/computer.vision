@@ -87,7 +87,7 @@ final class PipelineLatencyWindow {
     }
 
     /**
-     * Pull-mode counterpart to {@link #record} (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7): {@code
+     * Pull-mode counterpart to {@link #record} (docs/plans/done/MEDIA-SOT-PLAN.md &sect;7): {@code
      * roundTripMillis} is redefined as {@code receivedAt - capturedAt} — box age at arrival — since
      * there is no Java&rarr;Python frame submission to measure a round trip from. The caller computes
      * that elapsed duration (wall-clock, since {@code capturedAt} is the worker's wall-clock capture

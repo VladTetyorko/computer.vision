@@ -64,9 +64,9 @@ public class CvWiring {
      * <p>Present whenever any property enables a consumer: {@link VisionCvProperties#enabled()}
      * (live push-mode detection), {@code VisionTrainingProperties#enabled()} (the model registry
      * <em>and</em> training port), {@link VisionCvProperties#pullEnabled()}
-     * (docs/plans/active/MEDIA-SOT-PLAN.md wave M7, switch B — {@link #pulledDetectionPort} needs the
+     * (docs/plans/done/MEDIA-SOT-PLAN.md wave M7, switch B — {@link #pulledDetectionPort} needs the
      * same channel {@code DetectPulled} rides on), <strong>or</strong> {@code vision.geo.visual.enabled}
-     * (docs/plans/active/VISUAL-GEO-V2-PLAN.md D3 — visual geolocation's {@code GeoLocate}/{@code
+     * (docs/plans/done/VISUAL-GEO-V2-PLAN.md D3 — visual geolocation's {@code GeoLocate}/{@code
      * BuildReferenceIndex} calls reuse this same channel and {@link #cvChannelSupervisor} rather than
      * opening a second one; see {@code VisualGeoWiringConfiguration} in {@code station/vision-app}).
      * With every flag off (the default), no channel is built at all.
@@ -107,7 +107,7 @@ public class CvWiring {
 
     /**
      * Maps every {@code GrpcCvSettings} field off {@link VisionCvProperties} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
-     * wave F4, extended by docs/plans/active/MEDIA-SOT-PLAN.md wave M7 with the three {@code pull*}
+     * wave F4, extended by docs/plans/done/MEDIA-SOT-PLAN.md wave M7 with the three {@code pull*}
      * fields and docs/plans/active/CV-RECONNECT-PLAN.md wave R2 with the three push/channel {@code
      * reconnect*}/{@code outageLogInterval} fields) — shared by {@link #cvGrpcChannel}/{@link
      * #detectionPort}/{@link #cvChannelSupervisor}/{@link #pulledDetectionPort} here and {@code
@@ -194,7 +194,7 @@ public class CvWiring {
     }
 
     /**
-     * Present only when {@link VisionCvProperties#pullEnabled()} — switch B, docs/plans/active/MEDIA-SOT-PLAN.md
+     * Present only when {@link VisionCvProperties#pullEnabled()} — switch B, docs/plans/done/MEDIA-SOT-PLAN.md
      * §3/§5.5 — is {@code pull}: {@link ApplicationServiceWiring#streamService} then wraps this bean in
      * a {@code PullDetectionSettings} and every stream this deployment starts subscribes to {@code
      * DetectPulled} instead of pushing frames over {@link #detectionPort}. Absent (the default,
@@ -232,7 +232,7 @@ public class CvWiring {
     }
 
     /**
-     * The system-derived half of the two-gate detection demand model (docs/plans/active/CV-DEMAND-PLAN.md
+     * The system-derived half of the two-gate detection demand model (docs/plans/done/CV-DEMAND-PLAN.md
      * &sect;2-3.5) — present only when {@link VisionCvProperties.Demand#enabled()} is {@code true}
      * (the default). {@code false} means this bean is never created at all, so {@code
      * ApplicationServiceWiring#streamService}'s {@code ObjectProvider<DetectionDemandPort>} resolves
@@ -253,7 +253,7 @@ public class CvWiring {
      * conditionally absent), in which case this deployment's demand can only ever come from the
      * poll half.
      *
-     * <p>{@code hasCameraPose} is the D9 third OR-term (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md,
+     * <p>{@code hasCameraPose} is the D9 third OR-term (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md,
      * hazard 2) — resolved from {@link TrackProjectionRunner#hasCameraPose}, itself an {@link
      * ObjectProvider} because that bean is conditional on {@code vision.geo.fixed-camera.enabled}
      * (default {@code false}, see {@code FixedCameraGeoWiringConfiguration}). Absent means {@code
@@ -291,7 +291,7 @@ public class CvWiring {
 
     /**
      * The deployment's default {@link PipelineConfig} for a newly started stream
-     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.7/&sect;3.8) — {@link PipelineConfig#defaults()}
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.7/&sect;3.8) — {@link PipelineConfig#defaults()}
      * with {@code detectionEnabled} replaced by {@link VisionCvProperties#detectionDefaultEnabled()}
      * (default {@code false}). {@code StreamController}/{@code AssetStreamController}/{@code
      * DemoFleet} merge request overrides onto this instead of calling the static factory directly,
@@ -307,7 +307,7 @@ public class CvWiring {
 
     /**
      * Bundles {@link #streamDefaultConfig} and {@link #detectionDemandPort}'s poll-touch seam behind
-     * one bean for {@code StreamController} (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.8) — see
+     * one bean for {@code StreamController} (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.8) — see
      * {@link StreamDetectionSupport}'s own javadoc for why. {@code detectionDemandPort} resolves to
      * {@code null} exactly when {@link #detectionDemandPort} itself was not created (demand gate
      * disabled), which {@link StreamDetectionSupport} already treats as "nothing to touch."

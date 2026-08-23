@@ -6,7 +6,7 @@ import java.time.Instant;
 
 /**
  * One stored trail point inside {@link ProjectedTrackResponse}'s {@code trail} array
- * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5) — oldest to newest, already decimated
+ * (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5) — oldest to newest, already decimated
  * server-side (D7). Unlike the live {@link TrackPoint} domain record, this wire shape carries no
  * {@code errorRadiusMeters}/{@code label}/{@code layerId} — §5 freezes the trail entry as bare
  * {@code {latitude, longitude, at}}, the three fields a rendered polyline needs.

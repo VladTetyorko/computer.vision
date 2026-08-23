@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Context test for {@code vision.cv.demand.enabled=false} (docs/plans/active/CV-DEMAND-PLAN.md
+ * Context test for {@code vision.cv.demand.enabled=false} (docs/plans/done/CV-DEMAND-PLAN.md
  * §3.7/§5, wiring item 5): asserts the context still loads cleanly with {@link
  * LiveAndPollDetectionDemand} entirely absent — not merely inactive — and {@link
  * StreamDetectionSupport#demand()} therefore {@code null}, which its own {@code touched} makes a

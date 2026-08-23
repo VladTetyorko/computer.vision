@@ -2,7 +2,7 @@ package com.drones.vision.kernel;
 
 /**
  * Why a {@link VisualFix} believes (or refuses) what it claims — the wire-verbatim evidence bundle
- * cv-service reports alongside every fix (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1's {@code
+ * cv-service reports alongside every fix (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1's {@code
  * GeoEvidence}, §3.2). An operator must always be able to see <em>why</em>, not just <em>what</em>
  * (VISUAL-GEO-V2-PLAN.md D5) — this record is that "why", carried unmodified from the Python re-rank
  * and sequence-filter stages through to the wire.

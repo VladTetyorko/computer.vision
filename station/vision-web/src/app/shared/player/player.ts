@@ -107,7 +107,7 @@ const LOG_PREFIX = '[player]';
 
 const LATENCY_SAMPLE_MS = 1_000;
 /** Overlay redraw cadence for a browser with no `HTMLVideoElement#requestVideoFrameCallback` — see
- *  `startOverlayLoop`'s own doc comment (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8). Everywhere the API
+ *  `startOverlayLoop`'s own doc comment (docs/plans/done/MEDIA-SOT-PLAN.md §8 wave M8). Everywhere the API
  *  exists, the overlay redraws once per actually-displayed video frame instead, a tighter and less
  *  wasteful cadence than this fixed interval. */
 const OVERLAY_REDRAW_MS = 200;
@@ -236,7 +236,7 @@ interface TierLabelCandidate {
  *    live-edge distance and (via `maybeSnapToLive`) what decides whether a *seek* is worth doing,
  *    neither of which WHEP has (no seekable buffer to fall behind in). The detection-overlay sync
  *    matcher (`detection-overlay-logic.ts#selectDetectionResult`) reads **neither signal directly**:
- *    `overlaySyncLatencySeconds` (docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8) picks `behindLive` for
+ *    `overlaySyncLatencySeconds` (docs/plans/done/MEDIA-SOT-PLAN.md §6/§8 wave M8) picks `behindLive` for
  *    HLS and `whepLatencySeconds` for WHEP, so a WHEP box no longer leads the picture by the ~0.2–0.5s
  *    glass-to-glass delay a pinned `0` used to silently claim away.
  *  - The player never gives up. `shared/player/player-recovery.ts`'s pure state machine drives every
@@ -301,11 +301,11 @@ interface TierLabelCandidate {
  * fed via `overlaySyncLatencySeconds` — HLS's `behindLive`, WHEP's own `whepLatencySeconds`, see that
  * function's own doc comment) — crisp at any video bitrate (backing store scaled to
  * `devicePixelRatio`), and hoverable (label + confidence). Server-side burn-in no longer exists at
- * all (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1) — this overlay is the only way boxes ever reach
+ * all (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1) — this overlay is the only way boxes ever reach
  * the screen now. Callers that never pass `detections` simply never see the canvas draw anything.
  * Batches older than `STALE_FADE_BATCH_MULTIPLIER` observed intervals fade to reduced alpha, and
  * anything older than `DETECTION_STALE_CUTOFF_SECONDS` is not drawn at all (staleness honesty,
- * docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4 — a paused feed must never look like a live one).
+ * docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4 — a paused feed must never look like a live one).
  *
  * **Always a dark video surface, wherever it's mounted** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4): the
  * `.frame` host carries `.surface-dark` itself rather than depending on an ambient enclave, because
@@ -382,7 +382,7 @@ export class Player {
 
   /**
    * The label currently hovered on the detections strip's remote-control chips
-   * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3, wave W5, research §3.5) — `null` when nothing is
+   * (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3, wave W5, research §3.5) — `null` when nothing is
    * hovered. Passed straight through to {@link DetectionTierContext#hoveredClass}, which temporarily
    * promotes every box carrying this exact label into T1 for the redraw. Mirrors `lockedTrackId`'s own
    * "host holds the value, this component only draws it" plumbing: the strip lives outside this
@@ -501,7 +501,7 @@ export class Player {
    * is the only transport this actually measures a *buffer* distance for; `maybeSnapToLive`'s own
    * seek-to-edge logic is the one remaining consumer that cares about that HLS-specific meaning.
    * **No longer** what the detection-overlay sync matcher reads for WHEP — see
-   * `overlaySyncLatencySeconds`'s own doc comment and docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8.
+   * `overlaySyncLatencySeconds`'s own doc comment and docs/plans/done/MEDIA-SOT-PLAN.md §6/§8 wave M8.
    */
   private readonly behindLive = signal<number | null>(null);
 
@@ -510,7 +510,7 @@ export class Player {
    * `getStats()` tick that reports a round-trip time (`estimateWhepLatencySeconds`,
    * `player-recovery.ts`), refreshed on the same `WATCHDOG_TICK_MS` cadence as the stall watchdog's
    * own poll (`refreshWhepStatsProgress`). Originally a display-only concern; **also** the detection-
-   * overlay sync matcher's own WHEP-transport latency estimate as of docs/plans/active/MEDIA-SOT-PLAN.md §8
+   * overlay sync matcher's own WHEP-transport latency estimate as of docs/plans/done/MEDIA-SOT-PLAN.md §8
    * wave M8 (`overlaySyncLatencySeconds`) — the exact number the badge already showed the operator is
    * now the same number boxes sync against, closing the gap where WHEP boxes led the picture by the
    * real glass-to-glass delay a hard-pinned `0` used to claim didn't exist.
@@ -519,7 +519,7 @@ export class Player {
 
   /**
    * The latency the detection-overlay sync matcher (`selectDetectionResult`) actually syncs against
-   * — `behindLive` for HLS (unchanged), `whepLatencySeconds` for WHEP (docs/plans/active/MEDIA-SOT-PLAN.md
+   * — `behindLive` for HLS (unchanged), `whepLatencySeconds` for WHEP (docs/plans/done/MEDIA-SOT-PLAN.md
    * §6/§8 wave M8 — see `overlaySyncLatencySeconds`'s own doc comment for the full reasoning and the
    * `null`-degrades-to-`0` rule). Read by both {@link overlayResult} and `redrawOverlay`, so the
    * legend chip and the canvas draw always agree on which batch is "on screen right now".
@@ -541,7 +541,7 @@ export class Player {
   );
 
   /** Set from `drawnBoxes` (`onOverlayMouseMove`'s own hit-test) — already sticky-relabeled
-   *  (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1: `redrawOverlay`'s `displayed` array, not the
+   *  (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 1: `redrawOverlay`'s `displayed` array, not the
    *  raw `detections` input), so `hoveredLabel` below inherits the stable label with no further work. */
   protected readonly hoveredDetection = signal<Detection | null>(null);
   /** The hover tooltip's own text — `formatDetectionLabel` so the tooltip and the canvas-drawn box
@@ -555,7 +555,7 @@ export class Player {
   private drawnBoxes: readonly DrawnBox[] = [];
 
   /**
-   * Label placement hysteresis (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.3) — the previous
+   * Label placement hysteresis (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.3) — the previous
    * redraw's own {@link placeLabels} output, keyed by track id (`"#7"`) or an index fallback for an
    * untracked candidate; fed back in as `placeLabels`' own `previousSlots` argument so a label prefers
    * to stay in the same above/below/inside-top slot frame-to-frame instead of hopping on a marginal
@@ -605,7 +605,7 @@ export class Player {
   private videoFrameCallbackHandle: number | null = null;
   /** Whether the overlay redraw loop (either mechanism) is currently running — lets every call site
    *  that used to check `this.overlayTimer === null` ask one question regardless of which mechanism
-   *  this browser actually uses (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8). */
+   *  this browser actually uses (docs/plans/done/MEDIA-SOT-PLAN.md §8 wave M8). */
   private overlayLoopActive = false;
   /** Re-sizes the overlay canvas the moment its container's box actually changes (docs/plans/active/
    *  MEDIA-SOT-PLAN.md §8 wave M8) — before this, a resize was only ever caught on the next redraw
@@ -721,7 +721,7 @@ export class Player {
       this.redrawOverlay();
     });
 
-    // Container-driven canvas resize (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) — before this, a
+    // Container-driven canvas resize (docs/plans/done/MEDIA-SOT-PLAN.md §8 wave M8) — before this, a
     // resize (a rail collapsing, a Wall grid reflow, the window itself) was only ever caught on the
     // next redraw tick, which could be up to `OVERLAY_REDRAW_MS` away, or never while paused/off-
     // screen. `redrawOverlay` already re-measures `video.clientWidth`/`clientHeight` on every call, so
@@ -1190,7 +1190,7 @@ export class Player {
    * more than once per attach on renegotiation) can call this unconditionally rather than each
    * hand-rolling its own "already running?" check.
    *
-   * **`requestVideoFrameCallback` where the browser supports it** (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave
+   * **`requestVideoFrameCallback` where the browser supports it** (docs/plans/done/MEDIA-SOT-PLAN.md §8 wave
    * M8), instead of the fixed `OVERLAY_REDRAW_MS` interval every browser used before this wave: redraws
    * once per frame the browser actually composites, self-rescheduling from inside the callback
    * (`scheduleVideoFrameRedraw`) rather than a timer running regardless of whether a new frame ever
@@ -1875,7 +1875,7 @@ export class Player {
       return;
     }
 
-    // HiDPI backing store (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8): the canvas's CSS box stays
+    // HiDPI backing store (docs/plans/done/MEDIA-SOT-PLAN.md §8 wave M8): the canvas's CSS box stays
     // exactly `video.clientWidth`/`clientHeight` (unchanged — `letterboxRect`/hit-testing below both
     // still work in that same CSS-pixel space), only the *backing store* scales with
     // `devicePixelRatio` so boxes/labels/trails rasterize crisp on a HiDPI display instead of at 1
@@ -1911,7 +1911,7 @@ export class Player {
 
     const content = this.letterboxRect(width, height, video.videoWidth, video.videoHeight);
 
-    // Forward-projection (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave W7): `result`'s own boxes
+    // Forward-projection (docs/plans/done/CV-CLEAN-FEED-PLAN.md §7, wave W7): `result`'s own boxes
     // are up to one poll/arrival cycle stale relative to the instant actually on screen — mirrors the
     // server's deleted `DetectionExtrapolator` (see `detection-overlay-logic.ts`'s own "Forward-
     // projection" section header) so a moving object's box tracks the picture instead of trailing it.
@@ -1922,7 +1922,7 @@ export class Player {
     const predecessor = findPredecessorResult(results, result);
     const projected = extrapolateDetections(result, predecessor, onScreenAtMs);
 
-    // Sticky labels (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1): elected once per redraw
+    // Sticky labels (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 1): elected once per redraw
     // from the *full* batch history (`results`, not just `projected`'s single batch — a track's recent
     // votes span more than one batch), then swapped onto `projected`'s own tracked detections. Every
     // downstream reader of `detection.label` — the box color (`tierBoxColor`/`classBucketHue` below),
@@ -1933,7 +1933,7 @@ export class Player {
     const stickyLabels = electStickyLabels(results);
     const displayed = applyStickyLabels(projected, stickyLabels);
 
-    // Priority tiers (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2) — a pure function of what
+    // Priority tiers (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.2) — a pure function of what
     // this component already knows: the FOLLOW lock (fed in from the host, see `lockedTrackId`'s own
     // doc comment), the hovered box, and each track's recent trail (reused below for the trail layer
     // too, so the scan over `results` only runs once per redraw). Trails consume `displayed` too — the
@@ -1977,7 +1977,7 @@ export class Player {
     // a behavior change of its own.
     const composite = distinctModelKeys(displayed).length >= 2;
 
-    // Trails are T0-only now (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/D8 — twelve parked
+    // Trails are T0-only now (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.2/D8 — twelve parked
     // cars' trails were pure noise); `trackTrails` itself is unchanged, this is a filter at the call
     // site. Drawn first, so a box (drawn next) sits visually on top of its own tail, not under it.
     // `drawTrails` resets `ctx.globalAlpha` to `1` at its own end, so the staleness fade below starts
@@ -1990,7 +1990,7 @@ export class Player {
     }
     this.drawTrails(ctx, content, trails, t0TrackIds);
 
-    // Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4) — the whole batch fades
+    // Staleness honesty (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4) — the whole batch fades
     // together once it's aged past `STALE_FADE_BATCH_MULTIPLIER` observed intervals; a batch old enough
     // to count as paused outright (`isDetectionStale`) never reaches here at all — `selectDetectionResult`'s
     // own bounded fallback already excludes it from `result`, so this only ever dims, never decides
@@ -2054,7 +2054,7 @@ export class Player {
   }
 
   /**
-   * Draws one detection's box for its assigned tier (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md
+   * Draws one detection's box for its assigned tier (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md
    * §3.2, wave W4) — the caller (`redrawOverlay`) has already set `ctx.globalAlpha` for this
    * detection (staleness × `tierAlphaPercent`) before calling. Returns whether the caller should also
    * queue a label candidate for it: `T0`/`T1` always (subject to the collision-yield pass actually
@@ -2106,7 +2106,7 @@ export class Player {
 
   /**
    * Fading per-track trails (docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #3), narrowed to
-   * `T0` tracks only as of wave W4 (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/D8 — twelve
+   * `T0` tracks only as of wave W4 (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.2/D8 — twelve
    * parked cars' trails were pure noise; `trackTrails` itself is unchanged, this is a filter at the
    * call site). `trails` is `redrawOverlay`'s own precomputed map (one scan over `results` per
    * redraw, not one per layer). A track with fewer than two points in the window has nothing to
@@ -2149,7 +2149,7 @@ export class Player {
   }
 
   /**
-   * Label collision-yield pass (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.3, wave W4) — runs
+   * Label collision-yield pass (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.3, wave W4) — runs
    * once per redraw, after every box in every tier has already been drawn (`redrawOverlay`'s own draw
    * order), so a placed label always sits on top of every box, never the other way round. `candidates`
    * arrives already draw-ordered (`redrawOverlay` pushes `T0` last, but that's box z-order, not label
@@ -2160,7 +2160,7 @@ export class Player {
    * opacity. `this.labelSlotByKey` is this component's own hysteresis map — `placeLabels` reads it to
    * prefer last frame's slot per track id and this method overwrites it with the fresh placement
    * right after, so the map only ever reflects the most recently painted frame. `hovered` is
-   * `redrawOverlay`'s own re-anchored hover reference (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave
+   * `redrawOverlay`'s own re-anchored hover reference (docs/plans/done/CV-CLEAN-FEED-PLAN.md §7, wave
    * W7), not `this.hoveredDetection()` read directly — the candidates here already carry this tick's
    * freshly projected objects, and only the re-anchored reference is guaranteed to compare equal
    * against them.

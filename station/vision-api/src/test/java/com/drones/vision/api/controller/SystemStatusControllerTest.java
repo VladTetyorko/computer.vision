@@ -17,7 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * docs/plans/active/SYSTEM-STATUS-PLAN.md §4.3's frozen wire contract: {@code GET
+ * docs/plans/done/SYSTEM-STATUS-PLAN.md §4.3's frozen wire contract: {@code GET
  * /api/system/status} rolls many {@link SubsystemStatusPort}s into one response, computing {@code
  * overall} and never failing the whole request because one provider misbehaves.
  */

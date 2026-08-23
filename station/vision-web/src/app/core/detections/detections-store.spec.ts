@@ -368,7 +368,7 @@ describe('DetectionsStore', () => {
   });
 
   // --- Tracks poll (docs/plans/done/TRACKING-PLAN.md §4.E, folded in from CvControlPanel — wave W5,
-  // docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3) ---------------------------------------------------
+  // docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3) ---------------------------------------------------
 
   function tracksResponse(partial: Partial<StreamTracksResponse> = {}): StreamTracksResponse {
     return { streamId: 't-1', lockedTrackId: 0, tracks: [], ...partial };

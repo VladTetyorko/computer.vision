@@ -66,7 +66,7 @@ import com.drones.vision.api.security.CurrentUser;
  * caller may see, and {@link #details} (and every post-mutation detail render) 404s an asset
  * outside the caller's scope exactly as it 404s an unknown id — existence is never revealed.
  *
- * <h2>Authority, not visibility, guards the writes (docs/plans/active/OPS-UX-PLAN.md §1)</h2>
+ * <h2>Authority, not visibility, guards the writes (docs/plans/done/OPS-UX-PLAN.md §1)</h2>
  * Seeing an asset and administering it are different questions — a PILOT's scope is built to let
  * them see (and fly) exactly the aircraft assigned to them, which is not authority to rename,
  * deactivate, delete, or reassign the devices of that same aircraft. Each mutation ({@link

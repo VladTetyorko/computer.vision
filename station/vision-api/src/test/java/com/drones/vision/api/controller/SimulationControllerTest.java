@@ -52,7 +52,7 @@ class SimulationControllerTest {
 
     private SimulationService simulationService;
     private StreamPublisherPort streamPublisherPort;
-    /** Backs {@link SimulationController#stop}'s scoped read (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2). */
+    /** Backs {@link SimulationController#stop}'s scoped read (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2). */
     private AssetService assetService;
     private MockMvc mockMvc;
 
@@ -73,7 +73,7 @@ class SimulationControllerTest {
 
     /**
      * A {@link CurrentUser} answering with {@link #ownership}/{@link #ownerId} but a caller-supplied
-     * {@link VisibilityScope}, for the docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2 authority tests
+     * {@link VisibilityScope}, for the docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2 authority tests
      * below -- same idiom {@code AssetControllerTest} uses. {@link PrincipalResolver#viewer()} is
      * never called by this controller, so it throws rather than fake a map viewer no test here needs.
      */
@@ -644,7 +644,7 @@ class SimulationControllerTest {
         verifyNoInteractions(simulationService);
     }
 
-    // ---- docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2: authority --------------------------------
+    // ---- docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2: authority --------------------------------
     //
     // Before this wave, #simulate had no gate at all (any authenticated caller, including a PILOT,
     // could register and auto-start a fleet asset) and #stop had no scope check either. These tests

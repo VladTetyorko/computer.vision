@@ -9,7 +9,7 @@ import java.util.Objects;
 /**
  * Pure occlusion-proxy scorer for a decoded raster tile: the fraction of dark pixels, in {@code
  * [0,1]}, cheap and fully automatic (harvested from {@code feat/visual-geo}'s {@code
- * adapter-tiles}, docs/plans/active/VISUAL-GEO-V2-PLAN.md §1.3). Decodes via {@link ImageIO}
+ * adapter-tiles}, docs/plans/done/VISUAL-GEO-V2-PLAN.md §1.3). Decodes via {@link ImageIO}
  * (JDK-native, {@code javax.imageio} — no new Maven dependency), converts to grayscale using the
  * standard ITU-R BT.601 luma weights (the same conversion {@code PIL.Image.convert("L")} performs),
  * and reports the fraction of pixels whose luma falls below {@link #DEFAULT_DARKNESS_THRESHOLD}.

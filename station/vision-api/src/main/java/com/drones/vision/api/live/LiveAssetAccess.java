@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 
 /**
  * The live-operations authority seam for per-asset SSE topics ({@code telemetry:<assetId>}/{@code
- * detections:<assetId>}/{@code geo:<assetId>}) — docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3. {@link
+ * detections:<assetId>}/{@code geo:<assetId>}) — docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3. {@link
  * StreamAccess} already answers "may this caller reach this asset?" for {@code StreamController}'s
  * REST handlers (W2); this class reuses that exact same policy ({@link
  * StreamAccess#visibleAsset(AssetId, com.drones.vision.platform.VisibilityScope)}) rather than
@@ -53,7 +53,7 @@ import java.util.stream.Collectors;
  *       any per-asset topic the caller may not currently see, called directly by {@link
  *       LiveController} before the (now-vetted) request ever reaches {@link LiveUpdateRegistry}. A
  *       caller therefore never even subscribes to an asset outside their scope — closing
- *       docs/plans/active/LIVE-SCOPE-PLAN.md §2's defects 1 and 2 (a foreign topic silently
+ *       docs/plans/done/LIVE-SCOPE-PLAN.md §2's defects 1 and 2 (a foreign topic silently
  *       filtered, exactly like an invisible entry {@link StreamAccess#filterVisible} drops from a
  *       list, not a 403 that would fail an otherwise-legitimate mixed request).</li>
  *   <li><b>At delivery time</b> — {@link #deliveryPredicate(UserId)} is what {@link LiveController}
@@ -89,7 +89,7 @@ public class LiveAssetAccess {
     private final ConcurrentHashMap<Key, Entry> cache = new ConcurrentHashMap<>();
 
     /**
-     * @param streamAccess       the reused asset/ownership policy (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2)
+     * @param streamAccess       the reused asset/ownership policy (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2)
      * @param scopeResolver      re-derives a user's current {@link com.drones.vision.platform.VisibilityScope}
      * @param userRepositoryPort resolves the {@link User} a cached check's {@link UserId} names
      * @param ttlMillis          how long a resolved answer is reused before being re-derived —
@@ -156,7 +156,7 @@ public class LiveAssetAccess {
 
     /**
      * Filters a {@code PATCH /api/live/{connectionId}/topics} request's {@code add} list the same
-     * way {@link #filterTopicsParam} filters a fresh connect (docs/plans/active/LIVE-SCOPE-PLAN.md
+     * way {@link #filterTopicsParam} filters a fresh connect (docs/plans/done/LIVE-SCOPE-PLAN.md
      * §2, W3 defect 2) — a caller who has learned another connection's id, or simply guessed at
      * another asset's id, may not use this endpoint to add a topic naming an asset outside their
      * scope. {@code remove} is returned unchanged: narrowing one's own subscription is never a
@@ -184,7 +184,7 @@ public class LiveAssetAccess {
 
     /**
      * Whether {@code userId}'s current scope may see {@code assetId}, served from the {@code
-     * (userId, assetId)} cache when fresh, otherwise re-derived (docs/plans/active/LIVE-SCOPE-PLAN.md
+     * (userId, assetId)} cache when fresh, otherwise re-derived (docs/plans/done/LIVE-SCOPE-PLAN.md
      * §2, W3's "re-resolve rather than trusting a snapshot").
      */
     boolean canView(UserId userId, AssetId assetId, VisibilityScope requestScope) {

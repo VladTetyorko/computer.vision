@@ -7,7 +7,7 @@ import type {
 
 /**
  * Pure view-model logic behind `features/replay/after-action-panel.ts`
- * (docs/plans/active/AFTER-ACTION-PLAN.md, wave W2) — no Angular imports, fully unit-tested. Turns
+ * (docs/plans/done/AFTER-ACTION-PLAN.md, wave W2) — no Angular imports, fully unit-tested. Turns
  * the frozen §3.1 manifest into exactly what the panel renders: the six parts in their canonical
  * order, each with a plain-language state/tone, and the caveat list recomputed locally rather than
  * trusted verbatim off the wire (see {@link deriveCaveats}'s own doc comment for why).

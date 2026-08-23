@@ -8,7 +8,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * {@code live-updates}'s {@link SubsystemStatusPort} (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2):
+ * {@code live-updates}'s {@link SubsystemStatusPort} (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2):
  * reports whether the SSE data plane ({@link LiveUpdateRegistry}) is dispatching. Active whenever
  * {@link LiveUpdateRegistry} itself is (same {@code vision.live.enabled} condition, repeated here
  * rather than read via {@code @ConditionalOnBean} — see {@code CvWiring} in vision-app,

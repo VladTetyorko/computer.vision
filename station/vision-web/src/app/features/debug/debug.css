@@ -92,7 +92,7 @@ details {
     margin-top: var(--space-8);
 }
 
-/* The secondary Actuator probe (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.3) — separated from the
+/* The secondary Actuator probe (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.3) — separated from the
    primary `GET /api/system/status` card content above it the same way `.response`/`.history` mark
    their own section boundary. */
 .actuator-probe {

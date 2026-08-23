@@ -22,7 +22,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Driving REST adapter for {@code /api/geo/corrections} (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * Driving REST adapter for {@code /api/geo/corrections} (docs/plans/done/VISUAL-GEO-V2-PLAN.md
  * §3.3, H5) — the corrected track {@link TrackCorrectionService} produces, read back for the live
  * cockpit chip ({@link #live()}) and for replay ({@link #forUsage}).
  *

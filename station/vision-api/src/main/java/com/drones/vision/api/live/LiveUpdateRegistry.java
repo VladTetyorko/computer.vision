@@ -73,7 +73,7 @@ import com.drones.vision.api.controller.StreamController;
  * EventLiveUpdatePort} — five ports the former god-port {@code LiveUpdatePublisherPort} split into,
  * docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b — plus a sixth, {@link
  * TrackCorrectionLiveUpdatePort}, added for visual geolocation's {@code geo:<assetId>} topic,
- * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4/D11), a per-process ({@code single-instance
+ * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11), a per-process ({@code single-instance
  * deployment}, per the plan) hub fanning application-layer announcements out to every subscribed
  * {@code SseEmitter}. An adapter is exactly the place that may depend on every context at once —
  * each context's application code still only ever holds the one port it actually calls.
@@ -156,7 +156,7 @@ import com.drones.vision.api.controller.StreamController;
  * onto the shared scheduler rather than run on the caller's thread, keeping every method here
  * equally fire-and-forget.
  *
- * <p><b>{@link #publishFleetChanged()} is coalesced leading+trailing</b> (docs/plans/active/SCALE-100-PLAN.md
+ * <p><b>{@link #publishFleetChanged()} is coalesced leading+trailing</b> (docs/plans/done/SCALE-100-PLAN.md
  * §5 S5): every asset/device/stream lifecycle write used to trigger its own full fleet+devices
  * recompute, so a bulk import of N assets recomputed the whole fleet N times. The first call after a
  * quiet period still dispatches immediately — a lone write is delivered with no added latency — but
@@ -188,7 +188,7 @@ import com.drones.vision.api.controller.StreamController;
  * Everything above — sequencing ({@link #sequencer}), coalescing, and deciding which connections a
  * topic reaches — still happens on {@link #scheduler}'s single thread, so envelope ordering within
  * a topic is exactly the order {@link #scheduler} ran the code that appended/broadcast them.
- * What's off that thread (docs/plans/active/SCALE-100-PLAN.md §5 S2) is the actual write: {@link #broadcast}
+ * What's off that thread (docs/plans/done/SCALE-100-PLAN.md §5 S2) is the actual write: {@link #broadcast}
  * serializes an envelope to JSON exactly once ({@link #serialize}) and hands that one {@code
  * String} to every subscribed {@link LiveConnection}, each of which queues its own write onto
  * {@link #connectionWriteExecutor} (one virtual thread per write) instead of blocking {@link
@@ -235,7 +235,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     private final ScheduledExecutorService scheduler;
 
     /**
-     * The cadence/sizing knobs {@code vision.api.live.*} controls (docs/plans/active/SCALE-100-PLAN.md
+     * The cadence/sizing knobs {@code vision.api.live.*} controls (docs/plans/done/SCALE-100-PLAN.md
      * §5 S7, finishing the extraction {@code VisionApiProperties.Live} already described but neither
      * this class nor {@code HlsProxyController} actually read). Millis/int rather than the {@link
      * VisionApiProperties.Live} record's own {@code Duration}s — every call site below predates this
@@ -260,7 +260,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * write, unconditionally instantiated (not constructor-injected: this class's production
      * constructor is already at the five-parameter ceiling before counting this, see {@code
      * .claude/skills/java-clean-code/SKILL.md} §3 — its one settings-bundle parameter added for
-     * docs/plans/active/SCALE-100-PLAN.md §5 S7 groups eight scalars rather than adding a sixth
+     * docs/plans/done/SCALE-100-PLAN.md §5 S7 groups eight scalars rather than adding a sixth
      * loose one, the same precedent {@code MediamtxStreamPublisher}'s {@code PublishSettings}
      * bundle sets — and unlike {@link #scheduler} nothing here needs deterministic single-step test
      * control, only real concurrency to exercise).
@@ -290,11 +290,11 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * Per-asset buffers for {@code telemetry:<assetId>}/{@code detections:<assetId>} — {@link
      * #bufferFor} only ever adds an entry here ({@code computeIfAbsent}); {@link
      * #evictUnusedAssetBuffers()} is what keeps these two maps from retaining one buffer per asset
-     * ever watched for the life of the process (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 4).
+     * ever watched for the life of the process (docs/plans/done/SCALE-100-PLAN.md §5 S2 item 4).
      */
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> telemetryBuffers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> detectionBuffers = new ConcurrentHashMap<>();
-    /** Per-asset {@code geo:<assetId>} buffer (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, D11) -- same eviction/capacity-1 treatment as {@link #detectionBuffers}. */
+    /** Per-asset {@code geo:<assetId>} buffer (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4, D11) -- same eviction/capacity-1 treatment as {@link #detectionBuffers}. */
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> geoBuffers = new ConcurrentHashMap<>();
 
     private final ConcurrentHashMap<AssetId, ConcurrentLinkedQueue<Telemetry>> pendingTelemetry =
@@ -306,7 +306,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * {@link #publishFleetChanged()}'s coalescing window, in nanoseconds ({@link System#nanoTime()}
      * is monotonic and immune to wall-clock adjustment, unlike {@link System#currentTimeMillis()}) —
      * derived from {@link #coalesceMillis} rather than a second, independently-tunable field
-     * (docs/plans/active/SCALE-100-PLAN.md §5 S5): a fleet/devices recompute is exactly as expensive
+     * (docs/plans/done/SCALE-100-PLAN.md §5 S5): a fleet/devices recompute is exactly as expensive
      * to run too often as a telemetry flush, so it shares that same window.
      */
     private final long fleetCoalesceWindowNanos;
@@ -326,7 +326,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * already-open window) instead of dispatching its own recompute; {@link #flushPending()} checks
      * this on every tick and performs exactly one trailing recompute if it is set, guaranteeing the
      * window's last write is never silently dropped even if nothing calls {@link
-     * #publishFleetChanged()} again (docs/plans/active/SCALE-100-PLAN.md §5 S5's "must not lose the last state").
+     * #publishFleetChanged()} again (docs/plans/done/SCALE-100-PLAN.md §5 S5's "must not lose the last state").
      */
     private final AtomicBoolean fleetChangedDuringWindow = new AtomicBoolean(false);
 
@@ -353,7 +353,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * vision-app/MODULE.md's own Gotcha for the full chain and the exact {@code
      * UnsatisfiedDependencyException} this pattern resolves.
      *
-     * <p>{@code live} is the one addition docs/plans/active/SCALE-100-PLAN.md §5 S7 makes to this
+     * <p>{@code live} is the one addition docs/plans/done/SCALE-100-PLAN.md §5 S7 makes to this
      * list — a settings bundle, not a collaborator, so it does not participate in any of the cycles
      * above and needs no {@link ObjectProvider} wrapper.
      */
@@ -372,7 +372,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * Legacy 5-collaborator overload, defaulted to {@link VisionApiProperties.Live#defaults()} —
      * kept because {@code LiveControllerTest}/{@code LiveMapScopingTest} (package {@code
      * com.drones.vision.api.controller}, so only a {@code public} constructor is reachable there)
-     * construct this class directly rather than through Spring, and predate docs/plans/active/SCALE-100-PLAN.md
+     * construct this class directly rather than through Spring, and predate docs/plans/done/SCALE-100-PLAN.md
      * §5 S7's properties wiring. Not {@code @Autowired}: Spring must have exactly one candidate
      * constructor to autowire, and the six-parameter overload above is the real production entry
      * point.
@@ -465,12 +465,12 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      *                        LiveTopic#EVENT}/{@link LiveTopic#DEVICES}/{@link
      *                        LiveTopic#DETECTION_EVENTS}/{@link LiveTopic#MAP} are added
      *                        automatically regardless. {@code LiveController} has already filtered
-     *                        this down to topics the caller may see (docs/plans/active/LIVE-SCOPE-PLAN.md
+     *                        this down to topics the caller may see (docs/plans/done/LIVE-SCOPE-PLAN.md
      *                        §2, W3, via {@code LiveAssetAccess#filterTopicsParam}) before calling
      *                        this method — this class trusts that filtering rather than repeating it.
      * @param lastEventId     the {@code Last-Event-ID} header value, parsed to a {@code seq}, or
      *                        {@code null} if absent (a fresh connection, not a resume)
-     * @param userId          who this connection belongs to (docs/plans/active/LIVE-SCOPE-PLAN.md
+     * @param userId          who this connection belongs to (docs/plans/done/LIVE-SCOPE-PLAN.md
      *                        §2, W3) — bound to the connection so a later {@link
      *                        #updateTopics(String, UpdateLiveTopicsRequest, UserId)} can refuse a
      *                        caller who does not own it. A plain identity value, not a live handle;
@@ -481,7 +481,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      *                        snapshot/resume burst below exactly as it is to every later broadcast
      * @param assetVisibility whether this connection's viewer may currently see a per-asset topic's
      *                        {@link AssetId} — supplied by the caller ({@code LiveController} via
-     *                        {@code LiveAssetAccess#deliveryPredicate}, docs/plans/active/LIVE-SCOPE-PLAN.md
+     *                        {@code LiveAssetAccess#deliveryPredicate}, docs/plans/done/LIVE-SCOPE-PLAN.md
      *                        §2, W3), same treatment as {@code mapVisibility}: applied to the
      *                        snapshot/resume burst below and to every later broadcast, so a scope
      *                        change mid-connection (an assignment revoked) is enforced within the
@@ -549,16 +549,16 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      *
      * @param connectionId the connection to update
      * @param request      topics to add/remove — {@code LiveController} has already filtered
-     *                     {@code add} down to topics the caller may see (docs/plans/active/LIVE-SCOPE-PLAN.md
+     *                     {@code add} down to topics the caller may see (docs/plans/done/LIVE-SCOPE-PLAN.md
      *                     §2, W3, via {@code LiveAssetAccess#filterAdditions}) before calling this
      *                     method
-     * @param callerUserId who is making this request (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3)
+     * @param callerUserId who is making this request (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3)
      * @return the connection's full topic set afterward
      * @throws NoSuchElementException if {@code connectionId} is unknown (already disconnected, or
      *                                 never existed), <b>or if it belongs to a different user</b> —
      *                                 collapsed into the same 404 so a caller who has merely learned
      *                                 another connection's id cannot distinguish "doesn't exist" from
-     *                                 "isn't yours" (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3
+     *                                 "isn't yours" (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3
      *                                 defect 2 — the same "existence hides itself" idiom W2 uses)
      */
     public LiveSubscriptionResponse updateTopics(String connectionId, UpdateLiveTopicsRequest request,
@@ -596,7 +596,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
 
     /**
      * Whether any open connection currently subscribes to {@code detections:<assetId>}
-     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.5) — the SSE half of {@code
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.5) — the SSE half of {@code
      * LiveAndPollDetectionDemand}'s two-protocol demand signal. A cockpit open on this asset is
      * exactly what this topic means (see this class's own javadoc), so one open connection with the
      * topic in its set is already "someone is watching."
@@ -611,11 +611,11 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
 
     /**
      * Whether any open connection is subscribed to <b>any</b> topic scoped to this asset — telemetry
-     * or detections (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2). Read by {@code
+     * or detections (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2). Read by {@code
      * LiveHlsAndReaderVideoDemand} as its "a cockpit is open on this asset" term.
      *
      * <p>Deliberately broader than {@link #watchingDetections(AssetId)}: that one asks whether
-     * anyone wants <i>boxes</i>, which since docs/plans/active/CV-DEMAND-PLAN.md is off by default and so
+     * anyone wants <i>boxes</i>, which since docs/plans/done/CV-DEMAND-PLAN.md is off by default and so
      * says nothing about whether the video is being watched. Video has no SSE topic of its own — it
      * travels over HLS/WHEP — so an asset-scoped subscription is the closest thing this registry can
      * honestly offer, and it is only ever one OR-term among several.
@@ -634,7 +634,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
 
     /**
      * How many SSE connections are currently open — {@code live-updates}'s {@code
-     * SubsystemStatusPort} plumbing (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2), read by {@code
+     * SubsystemStatusPort} plumbing (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2), read by {@code
      * LiveUpdateStatusProvider} (same package). This class has no external dependency to fail
      * against (it dispatches purely in-process), so its mere presence as a live bean already means
      * SSE dispatch is running; this count is reported as informational detail, not itself a
@@ -665,7 +665,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * devices} (device-list + active-stream-list) snapshots in one dispatch — see this class's own
      * javadoc for why {@code devices} extends this method rather than needing a second port call.
      *
-     * <p><b>Coalesced leading+trailing</b> (docs/plans/active/SCALE-100-PLAN.md §5 S5 — see the class javadoc's
+     * <p><b>Coalesced leading+trailing</b> (docs/plans/done/SCALE-100-PLAN.md §5 S5 — see the class javadoc's
      * "Coalescing" section for the full reasoning): a call past the current window's close wins a
      * compare-and-set on {@link #fleetRecomputeWindowUntilNanos}, opens the next window, and
      * dispatches {@link #recomputeFleetAndDevices()} immediately, exactly as this method always did.
@@ -718,7 +718,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * {@inheritDoc}
      *
      * <p>Latest-only, exactly {@link #publishDetections}'s treatment -- a corrected fix supersedes
-     * whatever this asset's previous fix said (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, D11).
+     * whatever this asset's previous fix said (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4, D11).
      */
     @Override
     public void publishCorrection(AssetId assetId, TrackCorrection correction) {
@@ -864,7 +864,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     }
 
     /**
-     * Serializes {@code envelope} to JSON exactly once (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 1) so
+     * Serializes {@code envelope} to JSON exactly once (docs/plans/done/SCALE-100-PLAN.md §5 S2 item 1) so
      * {@link #broadcast} can hand the same {@code String} to every subscribed connection instead of
      * each one re-encoding the same object — {@code broadcast}'s cost used to grow with both the
      * number of connections and the size of the envelope; now only with the number of connections.
@@ -884,7 +884,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     }
 
     /**
-     * Bounds one already-queued connection write (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 3): if it has
+     * Bounds one already-queued connection write (docs/plans/done/SCALE-100-PLAN.md §5 S2 item 3): if it has
      * not completed within {@link #connectionWriteTimeoutMillis} — whether because the write
      * itself stalled or because an earlier write still ahead of it in {@link LiveConnection}'s own
      * chain is stuck — this connection is unregistered so a slow/dead client can never hold up
@@ -908,7 +908,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
 
     /**
      * Removes any {@link #telemetryBuffers}/{@link #detectionBuffers} entry for an asset no
-     * currently-open connection subscribes to anymore (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 4) — see
+     * currently-open connection subscribes to anymore (docs/plans/done/SCALE-100-PLAN.md §5 S2 item 4) — see
      * those fields' own javadoc for why this sweep exists. Package-private so a test can trigger it
      * directly instead of waiting on the real {@link #bufferEvictionMillis}ms timer.
      */
@@ -992,7 +992,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * StreamService#streams()}, mapping each active stream's viewer URLs through {@link
      * #streamPublisherPort} exactly like {@code StreamController#list} already does — both now via
      * {@link ActiveStreamResponse#from}, so a field added to the REST poll can no longer go missing
-     * from the snapshot the SPA actually prefers (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5).
+     * from the snapshot the SPA actually prefers (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.5).
      */
     private LiveEnvelopeResponse freshDevicesEnvelope() {
         List<DeviceResponse> devices =

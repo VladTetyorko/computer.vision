@@ -14,18 +14,18 @@ import java.util.Optional;
 
 /**
  * {@link StreamPublisherPort} that makes <b>mediamtx itself</b> dial an RTSP camera, instead of the
- * JVM decoding it and pushing frames (docs/plans/active/MEDIA-SOT-PLAN.md D3) — the "who publishes
+ * JVM decoding it and pushing frames (docs/plans/done/MEDIA-SOT-PLAN.md D3) — the "who publishes
  * video into mediamtx" half of the plan's two orthogonal switches (&sect;3). {@link PublisherRouter}
  * is what decides, per device, whether a stream reaches this class or {@link
  * MediamtxStreamPublisher}; this class assumes every device it is handed is proxy-eligible.
  *
  * <h2>Lifecycle</h2>
- * {@link #streamStarted} creates (or idempotently re-points, docs/plans/active/MEDIA-SOT-PLAN.md
+ * {@link #streamStarted} creates (or idempotently re-points, docs/plans/done/MEDIA-SOT-PLAN.md
  * &sect;5.3) a mediamtx path whose {@code source} is the device's own {@link
  * StreamDescriptor#uri()}, then — unless {@link MediamtxProxySettings#sourceOnDemand()} — polls
  * readiness up to {@link MediamtxProxySettings#readyTimeout()} before returning. A path that never
  * becomes ready fails the start call with a {@link MediamtxControlApiException} rather than handing
- * a viewer a URL that plays nothing (docs/plans/active/MEDIA-SOT-PLAN.md &sect;12's own named risk).
+ * a viewer a URL that plays nothing (docs/plans/done/MEDIA-SOT-PLAN.md &sect;12's own named risk).
  * {@link #publish} is an intentional no-op: mediamtx, not this JVM, holds the frames. {@link
  * #streamEnded} deletes the path and — unlike {@link #streamStarted} — never lets a mediamtx failure
  * escape, mirroring {@link MediamtxStreamPublisher}'s "teardown must not block the caller" posture.
@@ -45,7 +45,7 @@ public final class MediamtxProxyPublisher implements StreamPublisherPort {
     private static final System.Logger LOG = System.getLogger(MediamtxProxyPublisher.class.getName());
 
     /**
-     * Interval between readiness polls. Not a configuration knob — docs/plans/active/MEDIA-SOT-PLAN.md
+     * Interval between readiness polls. Not a configuration knob — docs/plans/done/MEDIA-SOT-PLAN.md
      * &sect;5.5 only budgets the overall {@code ready-timeout} — 100ms keeps a typical camera dial
      * (well under a second in practice) responsive without hammering the Control API, and keeps this
      * class's own tests fast.

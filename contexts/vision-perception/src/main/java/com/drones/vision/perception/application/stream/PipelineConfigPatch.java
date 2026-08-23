@@ -26,7 +26,7 @@ import com.drones.vision.perception.domain.model.TrackingConfig;
  * wholesale — there is no per-label add/remove, only present-vs-absent for the set as a whole; an
  * empty (but non-{@code null}) set is a real value, meaning "keep all labels"/"deny nothing"
  * respectively, the same semantics an empty set already has on {@code PipelineConfig} itself.
- * {@code labelDenyFilter} (docs/plans/active/CV-CLEAN-FEED-PLAN.md &sect;2, D-2) is the honest
+ * {@code labelDenyFilter} (docs/plans/done/CV-CLEAN-FEED-PLAN.md &sect;2, D-2) is the honest
  * "hide this class" act: it never touches {@code labelFilter}, so classes not yet observed keep
  * appearing instead of being silently swept into an allowlist complement.
  *
@@ -60,7 +60,7 @@ public record PipelineConfigPatch(Double confidenceThreshold, Integer inferenceF
      * Convenience constructor for callers that don't care about {@link #labelDenyFilter()} —
      * defaults it to {@code null} ("leave unchanged"), the same "N-1-arg convenience ctor" idiom
      * used elsewhere. This was the canonical constructor before
-     * docs/plans/active/CV-CLEAN-FEED-PLAN.md &sect;2 added {@link #labelDenyFilter()}; every
+     * docs/plans/done/CV-CLEAN-FEED-PLAN.md &sect;2 added {@link #labelDenyFilter()}; every
      * pre-existing 6-arg call site compiles unchanged.
      */
     public PipelineConfigPatch(Double confidenceThreshold, Integer inferenceFps, Set<String> labelFilter,

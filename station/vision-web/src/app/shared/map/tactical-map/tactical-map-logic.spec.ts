@@ -133,7 +133,7 @@ describe('layer visibility (the eye toggles)', () => {
     expect(visibleMarks(marks, []).length).toBe(2);
   });
 
-  it('filters projected tracks by their own target layer too (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D10, wave G5)', () => {
+  it('filters projected tracks by their own target layer too (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md D10, wave G5)', () => {
     const tracks: TacticalTrack[] = [
       {
         assetId: 'a1',

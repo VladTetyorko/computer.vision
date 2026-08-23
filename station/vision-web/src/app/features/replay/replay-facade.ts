@@ -71,7 +71,7 @@ export interface ReplayRouteInputs {
  * `<video>` DOM sync already trusts — as the captured instant, so "the frame you're looking at" is
  * genuinely the frame the server extracts.
  *
- * **After-action evidence package (docs/plans/active/AFTER-ACTION-PLAN.md §3, wave W2)** — `afterAction`/
+ * **After-action evidence package (docs/plans/done/AFTER-ACTION-PLAN.md §3, wave W2)** — `afterAction`/
  * `afterActionLoading`/`afterActionErrorMessage`/`afterActionArchiveUrl` back `AfterActionPanel`, own
  * `effect()`, own try/catch, deliberately independent of `load()`/`loadRecording()` above (see those
  * fields' own doc comment for why this fires even while `usageOpen()` is true).
@@ -114,7 +114,7 @@ export class ReplayFacade {
     return start !== undefined ? Date.parse(start) : undefined;
   });
 
-  // --- After-action evidence package (docs/plans/active/AFTER-ACTION-PLAN.md §3, wave W2) ------------------
+  // --- After-action evidence package (docs/plans/done/AFTER-ACTION-PLAN.md §3, wave W2) ------------------
   // Fetched independently of `timeline`/`recording` (its own `effect()`, below) and gated only on
   // both ids being known — deliberately **not** gated on `!usageOpen()`: §5 hazard 4 says a
   // still-open usage is a valid input, so this panel renders in both the "Watch live" empty state
@@ -131,7 +131,7 @@ export class ReplayFacade {
     return assetId && usageId ? this.api.afterActionArchiveUrl(assetId, usageId) : undefined;
   });
 
-  // --- Visual-geolocation corrected track (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) ----------
+  // --- Visual-geolocation corrected track (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) ----------
   // Fetched independently of `timeline`/`recording`/`afterAction` above (own `effect()`, own
   // try/catch) via `GET /api/geo/corrections?usageId=` — "no new backend surface" per §3.8's own
   // Replay row. A failed/disabled read degrades to an empty corrected track and no divergence bands,
@@ -267,7 +267,7 @@ export class ReplayFacade {
       void this.loadAfterAction(this.effectiveAssetId(), this.effectiveUsageId());
     });
 
-    // Visual-geolocation corrected track (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — its own
+    // Visual-geolocation corrected track (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — its own
     // independent effect/try-catch, same posture as after-action above; only needs `usageId` (the
     // endpoint is usage-scoped, not asset-scoped, unlike after-action's).
     effect(() => {

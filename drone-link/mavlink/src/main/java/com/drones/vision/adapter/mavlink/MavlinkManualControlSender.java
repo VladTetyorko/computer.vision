@@ -10,6 +10,7 @@ import com.drones.mavlink.session.DefaultTxScheduler;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.flight.domain.model.RcChannels;
+import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.flight.domain.port.ManualControlLink;
 import com.drones.vision.flight.domain.port.ManualControlPort;
 
@@ -141,7 +142,10 @@ public final class MavlinkManualControlSender implements ManualControlPort {
 
         LOG.log(System.Logger.Level.INFO, () -> "Engaged MAVLink RC override link for device " + device.id()
                 + " (sysid " + target.sysid() + ") at " + coreRc.clampedOverrideHz() + "Hz");
-        return new AdapterLink(service, coreLink, device.id(), coreRc.clampedOverrideHz());
+        // Resolved here, from the heartbeat being heard right now -- the domain picks the stick
+        // layout from it (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §3.3).
+        return new AdapterLink(service, coreLink, device.id(), coreRc.clampedOverrideHz(),
+                FlightModes.vehicleKind(target.mavType()));
     }
 
     @Override
@@ -183,13 +187,15 @@ public final class MavlinkManualControlSender implements ManualControlPort {
         private final ManualControlService.ManualControlLink coreLink;
         private final DeviceId deviceId;
         private final int rateHz;
+        private final VehicleKind vehicleKind;
 
         AdapterLink(ManualControlService service, ManualControlService.ManualControlLink coreLink, DeviceId deviceId,
-                    int rateHz) {
+                    int rateHz, VehicleKind vehicleKind) {
             this.service = service;
             this.coreLink = coreLink;
             this.deviceId = deviceId;
             this.rateHz = rateHz;
+            this.vehicleKind = vehicleKind;
         }
 
         @Override
@@ -201,6 +207,12 @@ public final class MavlinkManualControlSender implements ManualControlPort {
         @Override
         public int rateHz() {
             return rateHz;
+        }
+
+        /** What the vehicle said it is on its last heartbeat -- {@code UNKNOWN} rather than a guess. */
+        @Override
+        public VehicleKind vehicleKind() {
+            return vehicleKind;
         }
     }
 }

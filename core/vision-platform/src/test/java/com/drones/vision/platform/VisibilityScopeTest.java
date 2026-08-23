@@ -110,7 +110,7 @@ class VisibilityScopeTest {
         assertFalse(VisibilityScope.assignedAssets(Set.of(AssetId.random())).includesGroup(inScope));
     }
 
-    // --- authority is not visibility (docs/plans/active/OPS-UX-PLAN.md §1) ---
+    // --- authority is not visibility (docs/plans/done/OPS-UX-PLAN.md §1) ---
 
     @Test
     void canAdministerIsTrueOnlyForUnbounded() {

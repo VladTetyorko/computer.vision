@@ -37,7 +37,7 @@ import org.springframework.context.annotation.Configuration;
  * every other repository port {@code adapter-persistence} covers — to their Postgres-backed JPA
  * implementations.
  *
- * <p>Straight-line wiring, no {@code @Conditional*}: docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b removed
+ * <p>Straight-line wiring, no {@code @Conditional*}: docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b removed
  * {@code vision.persistence.enabled} (it had exactly one legal value, {@code true}, since W4) along
  * with the devsupport in-memory fallbacks it used to select between. {@link
  * #persistenceEntityManagerFactory} is therefore an ordinary bean like any other here — every port
@@ -83,7 +83,7 @@ public class PersistenceWiringConfiguration {
     }
 
     /**
-     * The one repository here with a tunable write path (docs/plans/active/SCALE-100-PLAN.md S4):
+     * The one repository here with a tunable write path (docs/plans/done/SCALE-100-PLAN.md S4):
      * telemetry is the only table written once per incoming sample, so it is the only one where a
      * per-write flush is worth trading a bounded loss window for.
      */
@@ -197,7 +197,7 @@ public class PersistenceWiringConfiguration {
     }
 
     /**
-     * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §7, Wave G3 — one audited row per asset's stored
+     * docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §7, Wave G3 — one audited row per asset's stored
      * camera pose, same shape as the nineteen above. Wired unconditionally like every other port
      * here: {@code vision.geo.fixed-camera.enabled} only gates whether {@code
      * FixedCameraGeoWiringConfiguration} ever calls {@code CameraPoseService#put}/{@code #delete}
@@ -210,7 +210,7 @@ public class PersistenceWiringConfiguration {
     }
 
     /**
-     * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §7, Wave G3 — the excluded-from-audit, append-only
+     * docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §7, Wave G3 — the excluded-from-audit, append-only
      * projected-track trail, same shape as the twenty above.
      */
     @Bean
@@ -219,7 +219,7 @@ public class PersistenceWiringConfiguration {
     }
 
     /**
-     * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, H5 — the excluded-from-audit, append-only
+     * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, H5 — the excluded-from-audit, append-only
      * visual-geolocation corrected track, same shape as {@link #trackTrailRepositoryPort} above.
      * Wired unconditionally like every other port in this class: {@code vision.geo.visual.enabled}
      * gates the runner that produces rows, not the schema or this repository.

@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the point of the HLS-proxy feature: browsers are never handed mediamtx's
  * own address.
  *
- * <p>Extended for docs/plans/active/MEDIA-SOT-PLAN.md wave M7: the top-level bean is now a {@link
+ * <p>Extended for docs/plans/done/MEDIA-SOT-PLAN.md wave M7: the top-level bean is now a {@link
  * PublisherRouter} wrapping {@code MediamtxStreamPublisher} (D1 — {@code
  * vision.publish.source-proxy.enabled} defaults to {@code false}, so the router never routes anywhere
  * else). {@code defaultConfigurationSelectsPublisherRouterWrappingMediamtxPublisher} (renamed from
@@ -82,7 +82,7 @@ class PublishWiringTest {
 
     @Test
     void defaultConfigurationSelectsPublisherRouterWrappingMediamtxPublisher() {
-        // docs/plans/active/MEDIA-SOT-PLAN.md wave M7: the router is now always the top-level bean when
+        // docs/plans/done/MEDIA-SOT-PLAN.md wave M7: the router is now always the top-level bean when
         // publish is enabled; every URL-shape test below proves it behaves byte-identically to the
         // plain MediamtxStreamPublisher this method used to assert directly, since
         // vision.publish.source-proxy.enabled defaults to false (D1).

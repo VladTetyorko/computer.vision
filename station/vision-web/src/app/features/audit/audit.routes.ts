@@ -2,7 +2,7 @@ import type { Routes } from '@angular/router';
 import { orgGuard } from '../../core/org/org-guard';
 
 /**
- * `/monitor/audit` (docs/plans/active/OPS-UX-PLAN.md §3 B1) — own lazy chunk, split per
+ * `/monitor/audit` (docs/plans/done/OPS-UX-PLAN.md §3 B1) — own lazy chunk, split per
  * vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8). Spread inside `app.routes.ts`'s
  * `authGuard`-wrapped children group like every other feature; `orgGuard` (`core/org/org-guard.ts`,
  * the same guard `/org` and `/manage/roster` use) adds the ADMIN/MANAGER role check on top — a pilot

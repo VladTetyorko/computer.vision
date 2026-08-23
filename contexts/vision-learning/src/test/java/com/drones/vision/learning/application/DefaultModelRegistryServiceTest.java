@@ -81,7 +81,7 @@ class DefaultModelRegistryServiceTest {
 
     @Test
     void promoteDeniedForAManagerScopeAndAuditsTheDenialWithoutCallingThePort() {
-        // docs/plans/active/OPS-UX-PLAN.md §1: promoting the live model is deployment-global, so a
+        // docs/plans/done/OPS-UX-PLAN.md §1: promoting the live model is deployment-global, so a
         // MANAGER's own-subtree authority (canManageOrg()) is not enough -- only ADMIN may.
         VisibilityScope managerScope = VisibilityScope.groups(Set.of());
 

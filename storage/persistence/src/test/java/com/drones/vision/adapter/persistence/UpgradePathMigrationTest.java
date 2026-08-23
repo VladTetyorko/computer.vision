@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Proves the W1 <strong>upgrade path</strong> (docs/plans/active/POSTGRES-ONLY-CONTEXT.md, defects 1
+ * Proves the W1 <strong>upgrade path</strong> (docs/plans/done/POSTGRES-ONLY-CONTEXT.md, defects 1
  * and 2) against a real Postgres seeded to look exactly like a database that already ran the
  * now-deleted {@code AuthSeedRunner}: a "Root" group at a random id, and admin/manager/pilot at
  * random ids whose memberships point at that random root — the shape every pre-W1

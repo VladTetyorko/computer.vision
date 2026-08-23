@@ -7,7 +7,7 @@ import java.util.Objects;
 
 /**
  * Asks mediamtx whether anyone is currently reading a stream's path
- * (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2) &mdash; the one video-demand term that cannot be
+ * (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2) &mdash; the one video-demand term that cannot be
  * answered from inside this JVM.
  *
  * <p><b>Why this exists as its own class.</b> The idle policy needs a single yes/no about a path;

@@ -19,7 +19,7 @@ import com.drones.vision.map.domain.model.MarkKind;
  * {@code MarkKind.TARGET} carried implicitly, and the same one docs/plans/done/MAP-REWORK-PLAN.md §2.2's
  * migration table assigns to every pre-existing {@code TARGET} mark.
  *
- * <p><b>{@code depressionDegrees} does not default here (docs/plans/active/GEO-POSE-PLAN.md §4.3, wave V3).</b>
+ * <p><b>{@code depressionDegrees} does not default here (docs/plans/done/GEO-POSE-PLAN.md §4.3, wave V3).</b>
  * Before that wave it was substituted at this wire boundary with {@code
  * GeoProjection.DEFAULT_DEPRESSION_DEGREES} whenever absent, which made an explicit {@code 45.0} and
  * an omitted value indistinguishable by the time {@link GeolocateSpec} saw them. Now that the

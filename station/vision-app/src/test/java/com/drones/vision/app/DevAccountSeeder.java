@@ -12,12 +12,12 @@ import com.drones.vision.platform.VisibilityScope;
 import java.util.List;
 
 /**
- * Test-only stand-in for the deleted {@code AuthSeedRunner} (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1).
+ * Test-only stand-in for the deleted {@code AuthSeedRunner} (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W1).
  *
  * <p>Dev-account seeding moved out of Java entirely: it is now a Flyway migration
  * ({@code storage/persistence}'s {@code db/seed/dev}, {@code V90001__dev_accounts.sql}) that only
  * ever runs when {@code vision.persistence.seed-dev-users} is true — there is no in-memory
- * equivalent any more, and (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b) no other flag to pair it
+ * equivalent any more, and (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b) no other flag to pair it
  * with either.
  * The {@code *AuthEnabledTest} classes in this package run with {@code vision.auth.enabled=true}
  * but leave {@code seed-dev-users} at its default {@code false} (that flag stays reserved for
@@ -28,7 +28,7 @@ import java.util.List;
  * exists.
  *
  * <p><strong>Joins the existing root group; only creates one if none exists.</strong> Since
- * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4, these tests run against a real, Flyway-migrated
+ * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W4, these tests run against a real, Flyway-migrated
  * database whose {@code V13__identity_baseline.sql} has <em>already</em> seeded a "Root" group at a
  * fixed id before this method ever runs — exactly the row {@code V90001__dev_accounts.sql} joins in
  * production. Always calling {@link GroupService#create} here (this class's original shape, written

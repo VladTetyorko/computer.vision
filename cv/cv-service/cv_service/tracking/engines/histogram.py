@@ -1,6 +1,6 @@
 """`histogram` -- colour-histogram appearance descriptor, the first `AppearanceExtractor`.
 
-`docs/plans/active/TRACKING-V2-PLAN.md` §3.1/§3 wave C3 (D7), `docs/conclusions/TRACKING-REVIEW.md`
+`docs/plans/done/TRACKING-V2-PLAN.md` §3.1/§3 wave C3 (D7), `docs/conclusions/TRACKING-REVIEW.md`
 §3 group B (finding B1) / §4.4.
 
 **The defect this closes.** Association was IoU-only, so two objects whose

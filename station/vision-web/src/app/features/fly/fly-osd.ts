@@ -74,7 +74,7 @@ import type { Transport } from '../../shared/player/player';
  * own "Wind" chip two paragraphs up**, see `WeatherChip`'s own doc comment for the
  * telemetry-instrument-vs-ambient-forecast distinction.
  *
- * **Geo divergence chip (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6)** — `<vision-geo-chip>`,
+ * **Geo divergence chip (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6)** — `<vision-geo-chip>`,
  * in the always-rendered Link group (a vision-derived position, like the transport/latency chip
  * beside it, needs no flight-controller telemetry link at all). Same DI-sharing idiom as
  * `<vision-weather-chip>` above, injecting `GeoStore` from `CockpitPage`'s own `providers` — see

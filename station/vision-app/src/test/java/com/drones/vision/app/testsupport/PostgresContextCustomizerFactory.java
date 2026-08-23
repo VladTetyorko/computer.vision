@@ -13,7 +13,7 @@ import java.util.List;
 /**
  * Points every {@code @SpringBootTest} context in this module at {@link SharedPostgresContainer}
  * instead of {@code application.yaml}'s {@code localhost:5432} default — with zero per-class
- * annotation, per docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4. Registered through {@code
+ * annotation, per docs/plans/done/POSTGRES-ONLY-CONTEXT.md W4. Registered through {@code
  * META-INF/spring.factories} ({@code org.springframework.test.context.ContextCustomizerFactory}),
  * the idiomatic Spring TestContext seam for customizing every context a module builds, auto-detected
  * by {@code AbstractTestContextBootstrapper} via {@code SpringFactoriesLoader} — the same mechanism

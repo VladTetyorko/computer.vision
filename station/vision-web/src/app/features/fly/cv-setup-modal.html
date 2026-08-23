@@ -15,7 +15,7 @@
     </header>
 
     <!-- ---- "Looking for" — model choice reframed as intent, not a filename (docs/plans/active/
-         CV-UX-RESEARCH.md §5; docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §1 item 2). Roster-driven:
+         CV-UX-RESEARCH.md §5; docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §1 item 2). Roster-driven:
          every card's name, one-sentence "what it finds", and cost word come from `models()`/
          `intentSentence` — nothing hardcoded per model id, only per the roster's own `kind` enum.
          The removed `kind` taxonomy chip stays removed (never rendered here). The open-vocab CPU
@@ -86,7 +86,7 @@
       />
     </section>
 
-    <!-- ---- Classes — one merged section (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5). P1 had
+    <!-- ---- Classes — one merged section (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §5). P1 had
          moved the pre-split panel's staged "Seen now" mini-checklist AND its full "All classes"
          checklist into this modal *verbatim, as two separate sections* sharing one `pendingLabels`
          stage — two apparatuses for one decision, the exact overload this whole plan exists to cut.
@@ -242,8 +242,8 @@
     </section>
 
     <!-- ---- "Expert" — rates, ceiling, engine, cadences, flow strip, full readouts
-         (docs/plans/active/CV-UX-RESEARCH.md §3/§7 wave U1). Relocated verbatim from the panel's
-         former "Expert" disclosure (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) — only the open-
+         (docs/plans/done/CV-UX-RESEARCH.md §3/§7 wave U1). Relocated verbatim from the panel's
+         former "Expert" disclosure (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1) — only the open-
          state source changed, from a component-local `UiStore` to `CockpitFacade#cvExpertOpen`. -->
     <details class="cv-disclosure" [open]="expertOpen()" (toggle)="onExpertToggle($event)">
       <summary>

@@ -7,7 +7,7 @@ import java.time.Duration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * The pull-mode redefinition (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7, wave M5): {@code roundTripMillis}
+ * The pull-mode redefinition (docs/plans/done/MEDIA-SOT-PLAN.md &sect;7, wave M5): {@code roundTripMillis}
  * becomes {@code receivedAt - capturedAt} instead of {@code completed - submitted}, fed via {@link
  * PipelineLatencyWindow#recordPullRoundTrip}. {@link PipelineLatencyWindowTest} (push mode, via {@link
  * PipelineLatencyWindow#record}) stays untouched — both share the same underlying window/percentile

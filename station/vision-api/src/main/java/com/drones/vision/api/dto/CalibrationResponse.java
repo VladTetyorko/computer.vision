@@ -7,7 +7,7 @@ import java.time.Instant;
 
 /**
  * The 200 body of {@code POST /api/assets/{assetId}/camera-pose/calibration}
- * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D5) — mirrors {@link CalibrationResult} field for
+ * (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5/D5) — mirrors {@link CalibrationResult} field for
  * field. <b>Deliberately not {@code @JsonInclude(NON_NULL)}</b>: unlike {@link
  * ProjectedTrackResponse}, §5's two frozen examples both show every key present with an explicit
  * {@code null} where the shape does not apply ({@code "reason": null} when solved, {@code "pose":

@@ -25,7 +25,7 @@ import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-l
  *   ({@link hiddenClassTruth}) is shown once, at rest, whenever this mode is active. **Never** touches
  *   `labelFilter` (the allowlist) — see `toggleLabelDeny`'s own doc comment
  *   (`core/detections/detections-logic.ts`) for why a deny-list needs no staging the way the
- *   allowlist does. `chip.label` is now (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 2) the
+ *   allowlist does. `chip.label` is now (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 2) the
  *   sticky/elected label for a tracked class, not necessarily cv-service's raw per-frame label — the
  *   PATCH deliberately sends that **displayed** string, since it is what the operator is actually
  *   pointing at when they click. Until cv-service's own L1 election ships, this can transiently
@@ -35,7 +35,7 @@ import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-l
  *   label section header for why the two converge).
  *
  * A denied label can never reappear in `DetectionsStore.results()` at all — `StreamPipeline`'s single
- * drop site runs pre-fan-out (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) — so the candidate set
+ * drop site runs pre-fan-out (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2) — so the candidate set
  * ({@link chips}, `shared/player/detections-strip-logic.ts#stripChips`) unions the operator's own
  * deny-list in from `SettingsStore` on top of `results`, the same reasoning
  * `features/fly/cv-control-panel-logic.ts#chipCandidates` already applies to its own checklist.

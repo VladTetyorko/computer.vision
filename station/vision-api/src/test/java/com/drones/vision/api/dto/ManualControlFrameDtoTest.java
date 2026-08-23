@@ -1,5 +1,7 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.flight.domain.model.ControlBinding;
+import com.drones.vision.flight.domain.model.ControlFunction;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -57,13 +59,33 @@ class ManualControlFrameDtoTest {
     @Test
     void engagedFrameSerializesWithTheFixedTypeLiteralAndItsChannelMap() {
         ManualControlEngagedFrame frame = new ManualControlEngagedFrame("11111111-1111-1111-1111-111111111111",
-                33, List.of(new ManualControlChannelBindingResponse("AXIS", 0, 1, "Roll")));
+                33, "COPTER", "AETR", "Multirotor",
+                List.of(ManualControlChannelBindingResponse.from(
+                        ControlBinding.centeredAxis(ControlFunction.ROLL, 0, 1))));
 
         String json = JSON.writeValueAsString(frame);
 
         assertTrue(json.contains("\"type\":\"engaged\""));
         assertTrue(json.contains("\"rateHz\":33"));
         assertTrue(json.contains("\"label\":\"Roll\""));
+        assertTrue(json.contains("\"vehicleKind\":\"COPTER\""));
+        assertTrue(json.contains("\"profileCode\":\"AETR\""));
+    }
+
+    /** The one field a client cannot render an honest throttle without (VEHICLE-CONTROL-PROFILES §2 P3). */
+    @Test
+    void aChannelMapEntryCarriesItsFunctionAndItsTravel() {
+        String copterThrottle = JSON.writeValueAsString(ManualControlChannelBindingResponse.from(
+                ControlBinding.unidirectionalAxis(ControlFunction.THROTTLE, 2, 3)));
+        String roverThrottle = JSON.writeValueAsString(ManualControlChannelBindingResponse.from(
+                ControlBinding.centeredAxis(ControlFunction.THROTTLE, 2, 3)));
+
+        assertTrue(copterThrottle.contains("\"function\":\"THROTTLE\""));
+        assertTrue(copterThrottle.contains("\"travel\":\"UNIDIRECTIONAL\""));
+        assertTrue(copterThrottle.contains("\"centerMicros\":1000"));
+
+        assertTrue(roverThrottle.contains("\"travel\":\"CENTERED\""));
+        assertTrue(roverThrottle.contains("\"centerMicros\":1500"));
     }
 
     @Test

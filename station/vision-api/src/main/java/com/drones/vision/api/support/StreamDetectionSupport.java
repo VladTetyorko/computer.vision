@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /**
  * Bundles {@code StreamController}'s two new detection-demand concerns
- * (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.5/&sect;3.8) behind one constructor parameter,
+ * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.5/&sect;3.8) behind one constructor parameter,
  * deliberately: that controller already sits at four collaborators, and neither {@link
  * #defaultConfig()} (a single field read, once per {@code start}) nor {@link #touched(StreamId)} (a
  * single delegated call, once per {@code detections} read) is substantial enough on its own to
@@ -23,7 +23,7 @@ import java.util.Objects;
  * vision.cv.demand.enabled} wired a real {@link LiveAndPollDetectionDemand} bean at all).
  *
  * @param defaultConfig the deployment's default {@link PipelineConfig} for a newly started
- *                       device-level stream (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.8) — {@code
+ *                       device-level stream (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.8) — {@code
  *                       StartStreamRequest#mergeOnto} merges a request's overrides onto this instead
  *                       of the domain's static {@link PipelineConfig#defaults()}, so {@code
  *                       vision.cv.detection-default-enabled} actually reaches a started stream
@@ -40,7 +40,7 @@ public record StreamDetectionSupport(PipelineConfig defaultConfig, LiveAndPollDe
     }
 
     /**
-     * Stamps {@code streamId} as polled just now (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.5) — a
+     * Stamps {@code streamId} as polled just now (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.5) — a
      * no-op when {@link #demand()} is absent (the demand gate is not wired at all), the same
      * "nothing to do, quietly" posture every optional collaborator in this codebase takes.
      *

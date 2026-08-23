@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * One tick's worth of work for {@link TrackProjectionService#project} — a calibrated asset's pose
- * plus perception's own current track list for its stream (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md
+ * plus perception's own current track list for its stream (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
  * decision D2: "hands {@code (pose, List<TrackedObject>)} to map's {@code TrackProjectionService}" —
  * the composition {@code vision-app}'s {@code TrackProjectionRunner} performs each tick, resolving
  * the calibrated asset's active stream and calling perception's {@code StreamService#tracks}).

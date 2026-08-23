@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit;
  * connection's pre-insert view of the table and could evict a sample from the very write it should
  * be keeping.
  *
- * <h2>Batching (docs/plans/active/SCALE-100-PLAN.md S4)</h2>
+ * <h2>Batching (docs/plans/done/SCALE-100-PLAN.md S4)</h2>
  * {@link #save} either writes straight through (the one/two-argument constructors — {@link
  * TelemetryBatchSettings#immediate()}, every pre-S4 caller's exact behavior) or buffers per usage
  * and flushes on {@link TelemetryBatchSettings}'s size-or-time bound (the three-argument
@@ -168,7 +168,7 @@ public final class JpaTelemetryRepository implements TelemetryRepositoryPort {
      * <p>Exposed because it is the one number that makes the batching trade-off observable from
      * outside, and because it is the invariant most likely to rot: a batch that is drained but not
      * removed leaves this climbing forever, one entry per flight ever flown, which is precisely the
-     * unbounded-map defect (docs/plans/active/SCALE-100-PLAN.md fact 2f) this plan exists to remove.
+     * unbounded-map defect (docs/plans/done/SCALE-100-PLAN.md fact 2f) this plan exists to remove.
      */
     public int pendingBatchCount() {
         return pendingByUsage.size();
@@ -232,7 +232,7 @@ public final class JpaTelemetryRepository implements TelemetryRepositoryPort {
      * while it is being drained. Draining always returns {@code null} from that lambda, so an
      * emptied batch is *evicted* rather than left behind — this map is on the telemetry hot path and
      * keyed by usage, so keeping empty entries would grow it for the life of the JVM, one per flight
-     * ever flown (docs/plans/active/SCALE-100-PLAN.md fact 2f is the same defect in {@code
+     * ever flown (docs/plans/done/SCALE-100-PLAN.md fact 2f is the same defect in {@code
      * LiveUpdateRegistry}, which S2 had to fix). The next {@link #save} simply creates a fresh one.
      *
      * <p>The DB write itself deliberately happens <em>outside</em> the lambda: {@code compute} holds

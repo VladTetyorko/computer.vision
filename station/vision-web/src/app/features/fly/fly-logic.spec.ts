@@ -109,7 +109,7 @@ describe('isWatchMode', () => {
   });
 });
 
-describe('showDetectionOffChip (docs/plans/active/CV-DEMAND-PLAN.md wave D3 — the cockpit\'s video-surface "Detection is off" affordance)', () => {
+describe('showDetectionOffChip (docs/plans/done/CV-DEMAND-PLAN.md wave D3 — the cockpit\'s video-surface "Detection is off" affordance)', () => {
   it('shows once a stream is live and detection is off', () => {
     expect(showDetectionOffChip(true, false)).toBe(true);
   });
@@ -202,7 +202,7 @@ describe('isAllDronesOption (docs/plans/done/UX-REWORK-PLAN.md §U-a bullet 4 �
 });
 
 describe('nextCollapseAction (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2 D-D — Esc\'s "closest thing open, first")', () => {
-  it('closes the CV setup modal first, even if a drawer/stop-confirm/map are also open (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1)', () => {
+  it('closes the CV setup modal first, even if a drawer/stop-confirm/map are also open (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1)', () => {
     expect(nextCollapseAction({ cvSetupOpen: true, panelOpen: true, stopConfirmOpen: true, mapVisible: true })).toBe('cv-setup');
   });
 
@@ -227,7 +227,7 @@ function membership(groupName: string, role: Membership['role'] = 'PILOT'): Memb
   return { groupId: `g-${groupName}`, groupName, role };
 }
 
-describe('pickerEmptyStateCopy (docs/plans/active/OPS-UX-PLAN.md §2 A2 — truthful Fly-picker empty state)', () => {
+describe('pickerEmptyStateCopy (docs/plans/done/OPS-UX-PLAN.md §2 A2 — truthful Fly-picker empty state)', () => {
   it('a PILOT with one membership is told which group has nobody assigned to them', () => {
     const state = pickerEmptyStateCopy('PILOT', [membership('Alpha Squadron')]);
     expect(state.title).toBe('No aircraft assigned to you yet');

@@ -947,7 +947,7 @@ def test_resolve_takes_label_election_knobs_from_settings():
 
 
 def test_label_election_knobs_default_to_the_plans_own_numbers():
-    # `docs/plans/active/TRACK-IDENTITY-PLAN.md`'s L1 section names these
+    # `docs/plans/done/TRACK-IDENTITY-PLAN.md`'s L1 section names these
     # three numbers explicitly -- a fresh deployment must get exactly them.
     settings = Settings()
 

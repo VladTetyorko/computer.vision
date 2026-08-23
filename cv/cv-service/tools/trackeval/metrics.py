@@ -1,6 +1,6 @@
 """Accuracy metrics for the tracking evaluation harness.
 
-`docs/plans/active/TRACKING-V2-PLAN.md` §4 (wave C0), closing
+`docs/plans/done/TRACKING-V2-PLAN.md` §4 (wave C0), closing
 `docs/conclusions/TRACKING-REVIEW.md` finding E: every number
 `cv-service/MODULE.md`'s "Tracking engine" section reported before this
 package existed is a COST number (ms, CPU%, duty ratio); nothing measured

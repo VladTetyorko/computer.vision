@@ -23,6 +23,7 @@ import java.util.concurrent.Flow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -102,6 +103,18 @@ class DefaultProbeServiceTest {
         VideoSourcePort port = mock(VideoSourcePort.class);
         when(port.supports(any())).thenReturn(true);
         when(port.open(any(), any())).thenThrow(new RuntimeException(message));
+        return port;
+    }
+
+    private static TelemetrySourcePort telemetrySourceEmittingOneSample() {
+        TelemetrySourcePort port = mock(TelemetrySourcePort.class);
+        when(port.supports(any())).thenReturn(true);
+        when(port.open(any())).thenAnswer(invocation ->
+                (Flow.Publisher<Telemetry>) subscriber -> {
+                    subscriber.onSubscribe(NOOP_SUBSCRIPTION);
+                    subscriber.onNext(new Telemetry(DeviceId.random(), Instant.now(), 1.0, 2.0, null, null, 80.0,
+                            Map.of()));
+                });
         return port;
     }
 
@@ -301,6 +314,65 @@ class DefaultProbeServiceTest {
 
         assertFalse(result.telemetryDetected());
         verify(telemetrySource, times(1)).close(any());
+    }
+
+    // --- Telemetry-only links (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §3) ---------
+
+    @Test
+    void aProtocolOnlyATelemetrySourceClaimsIsProvenByASampleInsteadOfAFrame() {
+        VideoSourcePort videoSource = mock(VideoSourcePort.class);
+        when(videoSource.supports(any())).thenReturn(false);
+        TelemetrySourcePort telemetrySource = telemetrySourceEmittingOneSample();
+
+        ProbeResult result = service(videoSource, List.of(telemetrySource))
+                .probe(descriptor("mavlink", "udp://0.0.0.0:14550", Map.of()));
+
+        assertTrue(result.telemetryOnly());
+        assertNull(result.frame());
+        assertTrue(result.telemetryDetected());
+        assertEquals(List.of("No video on this link — telemetry only"), result.warnings());
+    }
+
+    @Test
+    void aClaimedTelemetryOnlyLinkThatStaysSilentIsAProbeFailureNotABadRequest() {
+        VideoSourcePort videoSource = mock(VideoSourcePort.class);
+        when(videoSource.supports(any())).thenReturn(false);
+        TelemetrySourcePort telemetrySource = mock(TelemetrySourcePort.class);
+        when(telemetrySource.supports(any())).thenReturn(true);
+        when(telemetrySource.open(any())).thenAnswer(invocation ->
+                (Flow.Publisher<Telemetry>) subscriber -> subscriber.onSubscribe(NOOP_SUBSCRIPTION));
+
+        ProbeFailedException e = assertThrows(ProbeFailedException.class,
+                () -> service(videoSource, List.of(telemetrySource))
+                        .probe(descriptor("mavlink", "udp://0.0.0.0:14550", Map.of())));
+
+        assertTrue(e.getMessage().contains("udp://0.0.0.0:14550"), e.getMessage());
+        verify(telemetrySource, times(1)).close(any());
+    }
+
+    @Test
+    void aProtocolNeitherKindOfAdapterClaimsIsStillABadRequest() {
+        VideoSourcePort videoSource = mock(VideoSourcePort.class);
+        when(videoSource.supports(any())).thenReturn(false);
+        TelemetrySourcePort telemetrySource = mock(TelemetrySourcePort.class);
+        when(telemetrySource.supports(any())).thenReturn(false);
+
+        UnsupportedProtocolException e = assertThrows(UnsupportedProtocolException.class,
+                () -> service(videoSource, List.of(telemetrySource))
+                        .probe(descriptor("bogus", "bogus://thing", Map.of())));
+        assertEquals("bogus", e.protocol());
+    }
+
+    @Test
+    void aVideoProbeIsUnaffectedByTheTelemetryOnlyFallback() {
+        VideoSourcePort videoSource = videoSourceEmitting(frame(PixelFormat.JPEG));
+
+        ProbeResult result = service(videoSource, List.of(telemetrySourceEmittingOneSample()))
+                .probe(descriptor("rtsp", "rtsp://cam/stream", Map.of()));
+
+        assertFalse(result.telemetryOnly());
+        assertNotNull(result.frame());
+        assertEquals(1280, result.frame().width());
     }
 
     // --- Constructor null-checks ------------------------------------------------

@@ -115,7 +115,7 @@ class TrackingAssociateE2ETest {
     static void cvProperties(DynamicPropertyRegistry registry) {
         registry.add("vision.cv.enabled", () -> "true");
         registry.add("vision.cv.endpoint", () -> "localhost:" + server.getPort());
-        // docs/plans/active/CV-DEMAND-PLAN.md §3.7: this test proves tracking identity survives the
+        // docs/plans/done/CV-DEMAND-PLAN.md §3.7: this test proves tracking identity survives the
         // whole chain, not that a viewer/poller kept demand alive throughout -- the 3-ASSOCIATE-frame
         // wait below never opens the SSE detections:<assetId> topic or polls GET .../detections (only
         // GET .../tracks, which is not a demand signal), so the real demand-poll task would otherwise
@@ -125,7 +125,7 @@ class TrackingAssociateE2ETest {
 
     /**
      * {@link PipelineConfig#defaults()} with {@code detectionEnabled} true} instead of its own
-     * default {@code false} (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1) -- this test starts its
+     * default {@code false} (docs/plans/done/CV-DEMAND-PLAN.md §1, wave D1) -- this test starts its
      * stream directly through {@link AssetStreamService}, bypassing the controller-level {@code
      * vision.cv.detection-default-enabled} deployment default entirely, so detection has to be
      * switched on explicitly here for the servicer to ever see a frame at all.

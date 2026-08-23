@@ -3,7 +3,7 @@ package com.drones.vision.perception.domain.model;
 import java.util.regex.Pattern;
 
 /**
- * A request to build a reference region's index (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3's
+ * A request to build a reference region's index (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3's
  * {@code POST /api/geo/regions} body). {@code regionId} doubles as cv-service's on-disk directory
  * name ({@code CV_GEO_DATA_DIR/<regionId>/}, D10), hence the lower-case-kebab requirement — the
  * same reasoning {@link com.drones.vision.kernel.CategoryId} already applies to its own slug.

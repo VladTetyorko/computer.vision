@@ -1,7 +1,7 @@
 package com.drones.vision.perception.domain.model;
 
 /**
- * Worker-reported pull-mode diagnostics (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.1 fields 16-21, decision
+ * Worker-reported pull-mode diagnostics (docs/plans/done/MEDIA-SOT-PLAN.md &sect;5.1 fields 16-21, decision
  * D12) — "the complete, honest accounting of a loop that now runs on another machine." Rides on {@link
  * DetectionResult} as a nullable component, {@code null} in push mode: every one of these six fields
  * is zero on a {@code DetectStream} response, mirroring {@link TrackingTelemetry}'s own "one nullable
@@ -24,7 +24,7 @@ package com.drones.vision.perception.domain.model;
  * @param captureSkewMillis the worker's own estimate of (local receipt &minus; capture); {@code 0} means
  *                          unknown. Unconstrained in sign — an estimate, not a measured duration, and a
  *                          worker clock running behind the camera's own is exactly the case this field
- *                          exists to surface, not to forbid. This wave only logs it (docs/plans/active/MEDIA-SOT-PLAN.md
+ *                          exists to surface, not to forbid. This wave only logs it (docs/plans/done/MEDIA-SOT-PLAN.md
  *                          &sect;5.4 stays frozen); it has no read-model home yet
  */
 public record PullTelemetry(long decodeMillis, float sourceFps, float achievedFps, long droppedFrames,

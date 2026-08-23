@@ -9,8 +9,8 @@ import java.util.List;
  * to the aircraft as a MAVLink {@code RC_CHANNELS_OVERRIDE} (#70) frame
  * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1/§5).
  *
- * <p>The record itself accepts 1..18 channels (MAVLink #70's own extent), but v1's {@link
- * ChannelMap#defaultMap()} only ever populates channels 1..8 — channels 9..18 use a different,
+ * <p>The record itself accepts 1..18 channels (MAVLink #70's own extent), but no {@link
+ * ControlProfile} populates past channel 8 — channels 9..18 use a different,
  * ambiguous extension release sentinel this platform does not resolve yet (see the plan's Open
  * Questions §4). Every entry is either a real microsecond pulse width in {@code [MIN_MICROS,
  * MAX_MICROS]}, or one of the two sentinels {@link #RELEASE} / {@link #IGNORE}.

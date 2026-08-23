@@ -160,7 +160,7 @@ describe('freshResults', () => {
   });
 });
 
-// --- Class deny-list (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2/D-3, wave W5) -------------------------------
+// --- Class deny-list (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2/D-3, wave W5) -------------------------------
 
 describe('isLabelDenied', () => {
   it('is false for an empty deny-list', () => {

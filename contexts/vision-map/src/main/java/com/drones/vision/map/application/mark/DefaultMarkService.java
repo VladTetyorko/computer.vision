@@ -42,7 +42,7 @@ import com.drones.vision.platform.AccessDeniedException;
  * GeoProjection} itself accepts no nullable telemetry (docs/plans/done/TACTICAL-MARKS-PLAN.md's M1 handoff
  * note), so this null-checking is this class's job, not the pure geo-math's.
  *
- * <p>Since docs/plans/active/GEO-POSE-PLAN.md wave V3, the aim comes from {@link
+ * <p>Since docs/plans/done/GEO-POSE-PLAN.md wave V3, the aim comes from {@link
  * GeoProjection#aimFrom(com.drones.vision.kernel.Telemetry, double)} rather than a hand-picked
  * {@code headingDegrees}/{@code altitudeMeters} pair — {@code aimFrom} is the single place the
  * gimbal-vs-airframe and AGL-vs-AMSL precedence rules live, so this method does not re-derive them.
@@ -52,7 +52,7 @@ import com.drones.vision.platform.AccessDeniedException;
  * rather than passed in as its {@code fallbackDepressionDegrees} argument.
  *
  * <p>The existing telemetry-completeness guard (latitude/longitude/heading present, altitude present
- * and positive) is deliberately unrelaxed and unchanged (docs/plans/active/GEO-POSE-PLAN.md G6): it already
+ * and positive) is deliberately unrelaxed and unchanged (docs/plans/done/GEO-POSE-PLAN.md G6): it already
  * guarantees {@code aimFrom} always has a bearing source ({@code headingDegrees}) and an altitude
  * source ({@code altitudeMeters}) to fall back to, so {@code aimFrom} can never actually throw here —
  * this class's own {@link #TELEMETRY_INCOMPLETE} message is what a caller sees for every incomplete
@@ -140,7 +140,7 @@ public final class DefaultMarkService implements MarkService {
     /**
      * Resolves the {@link GeoProjection.CameraAim} to project {@code telemetry} from: {@link
      * GeoProjection#aimFrom} decides the gimbal-vs-airframe bearing and AGL-vs-AMSL altitude
-     * precedence (docs/plans/active/GEO-POSE-PLAN.md §4.1), always falling back to {@link
+     * precedence (docs/plans/done/GEO-POSE-PLAN.md §4.1), always falling back to {@link
      * GeoProjection#DEFAULT_DEPRESSION_DEGREES} when no gimbal pitch reading is available. An
      * explicit {@code depressionOverride} then replaces the resolved depression outright — it wins
      * even over a real gimbal reading, which is why {@code measured} becomes {@code false} whenever

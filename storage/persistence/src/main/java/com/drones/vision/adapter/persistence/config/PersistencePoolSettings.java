@@ -3,7 +3,7 @@ package com.drones.vision.adapter.persistence.config;
 /**
  * HikariCP sizing for the single {@code DataSource} {@link PersistenceUnit#start} builds and
  * shares between Flyway's migration connection and every Hibernate-issued {@code EntityManager}
- * (docs/plans/active/SCALE-100-PLAN.md S3). Framework-free by design, matching {@link
+ * (docs/plans/done/SCALE-100-PLAN.md S3). Framework-free by design, matching {@link
  * PersistenceUnit}/{@link JpaOperations}'s own "plain class, no Spring dependency" convention:
  * {@code vision-app} binds the {@code vision.persistence.pool.*} properties and passes this
  * record in, rather than this module reading Spring configuration itself.
@@ -12,7 +12,7 @@ package com.drones.vision.adapter.persistence.config;
  *                                    holds open at once, across migration and every request.
  *                                    Default {@value #DEFAULT_MAXIMUM_POOL_SIZE}: this platform's
  *                                    target scale is ~100 concurrent users on one instance
- *                                    (docs/plans/active/SCALE-100-PLAN.md), and every repository call is a
+ *                                    (docs/plans/done/SCALE-100-PLAN.md), and every repository call is a
  *                                    short borrow-execute-return against the pool (see {@link
  *                                    JpaOperations} -- no connection is held for a whole request),
  *                                    so a cap well under Postgres's own default {@code

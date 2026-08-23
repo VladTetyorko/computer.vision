@@ -15,7 +15,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires the after-action evidence package (docs/plans/active/AFTER-ACTION-PLAN.md) — a separate
+ * Wires the after-action evidence package (docs/plans/done/AFTER-ACTION-PLAN.md) — a separate
  * {@code @Configuration} from {@code ApplicationServiceWiring}, same split-out-by-concern precedent
  * as {@link OnboardingWiringConfiguration}/{@link AuthWiringConfiguration}. Every collaborator
  * {@link AfterActionAssembler} needs already exists as a bean elsewhere in this module; this class

@@ -178,7 +178,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
             return FlightCapability.notCommandable();
         }
         List<String> modes = FlightModes.selectableModes(FlightModes.AUTOPILOT_ARDUPILOTMEGA, target.mavType());
-        return new FlightCapability(true, true, true, modes);
+        return new FlightCapability(true, true, true, modes, FlightModes.vehicleKind(target.mavType()));
     }
 
     /** @throws IllegalArgumentException if unsupported, or the vehicle has never been heard (no source address) */

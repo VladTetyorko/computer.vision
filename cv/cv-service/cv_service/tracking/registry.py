@@ -1,7 +1,7 @@
 """`TrackerRegistry`: four rosters of engine **factories**, probed at startup.
 
 `docs/plans/done/TRACKING-PLAN.md` §5.A, `docs/extracts/TRACKING-ORCHESTRATION.md` §2.1,
-`docs/plans/active/TRACKING-V2-PLAN.md` §3 (wave C2 adds the motion roster;
+`docs/plans/done/TRACKING-V2-PLAN.md` §3 (wave C2 adds the motion roster;
 wave C3 adds the appearance roster and `cost` to the associator one; wave C5b
 adds no roster but leans harder on the follower roster's existing "a new
 instance every call" contract -- see `follower()`'s own docstring).

@@ -28,7 +28,7 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 
 /**
- * Driving REST adapter for {@code /api/geo/regions} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3,
+ * Driving REST adapter for {@code /api/geo/regions} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3,
  * H5) — a thin proxy onto {@link ReferenceRegionService}, which owns the real merge between
  * cv-service's built regions and Java's own in-memory in-flight ingest jobs (D10).
  *

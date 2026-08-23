@@ -6,7 +6,8 @@ import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
-import com.drones.vision.flight.domain.model.ChannelMap;
+import com.drones.vision.flight.domain.model.ControlProfile;
+import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
@@ -110,7 +111,7 @@ class DefaultManualControlServiceTest {
         assertTrue(session.active());
         assertEquals(1, manualControlPort.engagedDevices.size());
         assertEquals(device, manualControlPort.engagedDevices.get(0));
-        assertEquals(ChannelMap.defaultMap(), session.channelMap());
+        assertEquals(ControlProfile.forKind(FakeManualControlPort.FakeLink.KIND), session.controlProfile());
 
         assertEquals(1, auditTrail.recorded.size());
         AuditEntry entry = auditTrail.recorded.get(0);
@@ -196,7 +197,8 @@ class DefaultManualControlServiceTest {
 
         List<Double> axes = List.of(0.0, -0.12, 1.0, 0.0);
         List<Double> buttons = List.of(0.0, 1.0);
-        RcChannels expected = ChannelMap.defaultMap().apply(axes, buttons);
+        RcChannels expected = ControlProfile.forKind(FakeManualControlPort.FakeLink.KIND)
+                .channelMap().apply(axes, buttons);
 
         clock.advance(Duration.ofMillis(50));
         session.onChannels(axes, buttons, 42L, 1_000L);
@@ -414,6 +416,14 @@ class DefaultManualControlServiceTest {
 
             /** Any positive value -- these tests assert plumbing, not a particular cadence. */
             static final int RATE_HZ = 33;
+
+            /** The kind these tests engage as. Not UNKNOWN, so a profile actually gets chosen from it. */
+            static final VehicleKind KIND = VehicleKind.ROVER;
+
+            @Override
+            public VehicleKind vehicleKind() {
+                return KIND;
+            }
 
             @Override
             public int rateHz() {

@@ -25,12 +25,17 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  * StreamController#snapshot} already uses) rather than a new one.
  *
  * <h2>Status codes</h2>
- * A malformed request (blank/missing {@code protocol}/{@code uri}, an unparseable {@code uri}, or
- * an unrecognized protocol — {@link com.drones.vision.perception.application.stream.UnsupportedProtocolException})
- * maps to {@code 400}; a recognized protocol whose connection attempt itself fails, times out, or
- * ends without a frame ({@link com.drones.vision.perception.application.device.ProbeFailedException}) maps to {@code
- * 422} — both via {@link ApiExceptionHandler}. Success is always {@code 200}, never {@code 201}:
- * nothing is created.
+ * A malformed request (blank/missing {@code protocol}/{@code uri}, or a protocol <em>neither</em> a
+ * video nor a telemetry adapter claims — {@link
+ * com.drones.vision.perception.application.stream.UnsupportedProtocolException}) maps to {@code 400}; a claimed
+ * protocol whose connection attempt itself fails, times out, or ends without a frame ({@link
+ * com.drones.vision.perception.application.device.ProbeFailedException}) maps to {@code 422} — both via {@link
+ * ApiExceptionHandler}. Success is always {@code 200}, never {@code 201}: nothing is created.
+ *
+ * <p>A {@code 200} carries one of {@link ProbeDeviceResponse}'s two shapes. A telemetry-only link
+ * ({@code mavlink}) proves itself with a sample instead of a frame, so there is nothing to JPEG-encode
+ * — the encoder is skipped rather than handed a {@code null}
+ * (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §3).
  */
 @RestController
 public class DeviceProbeController {
@@ -58,7 +63,8 @@ public class DeviceProbeController {
     @PostMapping("/api/devices/probe")
     public ProbeDeviceResponse probe(@RequestBody ProbeDeviceRequest request) {
         ProbeResult result = probeService.probe(request.toDescriptor());
-        byte[] jpeg = snapshotJpegEncoder.encode(result.frame());
+        // A telemetry-only link has no frame to encode -- see ProbeDeviceResponse's "two legal shapes".
+        byte[] jpeg = result.telemetryOnly() ? null : snapshotJpegEncoder.encode(result.frame());
         return ProbeDeviceResponse.from(result, jpeg);
     }
 }

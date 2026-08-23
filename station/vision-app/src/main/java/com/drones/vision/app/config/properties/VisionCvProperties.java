@@ -41,7 +41,7 @@ import java.time.Duration;
  *                               reaches cv-service; default {@value #DEFAULT_WIRE_FORMAT}, which
  *                               sends raw {@code BGR24} to a loopback endpoint (no encode here, no
  *                               decode there) and JPEG to anything further away
- * @param frameTransport         {@code push} | {@code pull} (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch
+ * @param frameTransport         {@code push} | {@code pull} (docs/plans/done/MEDIA-SOT-PLAN.md §3 switch
  *                               B, §5.5) — {@code push} (default, {@value #DEFAULT_FRAME_TRANSPORT}) is
  *                               today's behavior unchanged: the JVM samples frames and sends them to
  *                               cv-service over {@code DetectStream}. {@code pull} switches every stream
@@ -61,15 +61,15 @@ import java.time.Duration;
  *                               defaulted as a whole when absent
  * @param registry               {@code GrpcModelRegistryPort}'s per-call deadline; defaulted as a whole
  *                               when absent
- * @param pull                   worker-pull config surface (docs/plans/active/MEDIA-SOT-PLAN.md §5.5);
+ * @param pull                   worker-pull config surface (docs/plans/done/MEDIA-SOT-PLAN.md §5.5);
  *                               defaulted as a whole when absent; only read when {@link #frameTransport()}
  *                               is {@code pull}
  * @param detectionDefaultEnabled what a <b>new</b> stream's {@code PipelineConfig#detectionEnabled}
- *                               starts at (docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8) — a
+ *                               starts at (docs/plans/done/CV-DEMAND-PLAN.md §3.7/§3.8) — a
  *                               deployment default that beats {@code PipelineConfig.defaults()} but
  *                               loses to an explicit per-request override; default {@code false}
  * @param demand                 the system-derived detection-demand gate's own tunables
- *                               (docs/plans/active/CV-DEMAND-PLAN.md §2-3.7); defaulted as a whole
+ *                               (docs/plans/done/CV-DEMAND-PLAN.md §2-3.7); defaulted as a whole
  *                               when absent
  * @param reconnect              bounded reconnect-cadence config for the shared push/channel path
  *                               (docs/plans/active/CV-RECONNECT-PLAN.md §3.3) — {@code
@@ -145,7 +145,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
     }
 
     /**
-     * The canonical constructor before docs/plans/active/CV-DEMAND-PLAN.md wave D2 added {@code
+     * The canonical constructor before docs/plans/done/CV-DEMAND-PLAN.md wave D2 added {@code
      * detectionDefaultEnabled}/{@code demand} and docs/plans/active/CV-RECONNECT-PLAN.md added
      * {@code reconnect}, kept as a convenience constructor defaulting all three — the first to
      * {@code false} (that plan's own pinned default), the other two to their record defaults via the
@@ -165,7 +165,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
     /**
      * Convenience constructor covering just the four original {@code vision.cv.*} fields (docs/plans/done/MVP1-PLAN.md
      * §C7/docs/plans/done/REMOTE-CV-PLAN.md P1 item 5, predating wave F4's extension) — every field wave F4 (and
-     * docs/plans/active/MEDIA-SOT-PLAN.md wave M7) added defaults to {@code GrpcCvSettings}'s own literal, so
+     * docs/plans/done/MEDIA-SOT-PLAN.md wave M7) added defaults to {@code GrpcCvSettings}'s own literal, so
      * behavior constructing an instance this way is unchanged.
      */
     public VisionCvProperties(boolean enabled, String endpoint, int detectWidth, float jpegQuality) {
@@ -230,7 +230,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
     }
 
     /**
-     * Worker-pull config surface (docs/plans/active/MEDIA-SOT-PLAN.md §5.5) — mirrors {@code
+     * Worker-pull config surface (docs/plans/done/MEDIA-SOT-PLAN.md §5.5) — mirrors {@code
      * GrpcCvSettings}'s own {@code pullRtspBase}/{@code pullReconnectInitialBackoff}/{@code
      * pullReconnectMaxBackoff} fields one-to-one, the same "this record maps onto that adapter
      * settings object" shape {@link Upload}/{@link Registry} already have.
@@ -258,7 +258,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
     }
 
     /**
-     * The system-derived detection-demand gate's own tunables (docs/plans/active/CV-DEMAND-PLAN.md
+     * The system-derived detection-demand gate's own tunables (docs/plans/done/CV-DEMAND-PLAN.md
      * §2-3.7) — mapped by {@code CvWiring#detectionDemandPort} onto a {@code
      * LiveAndPollDetectionDemand} bean, and by {@code ApplicationServiceWiring#streamPipelineSettings}
      * onto {@code StreamPipelineSettings#detectionDemandPollInterval}/{@code #detectionDemandGrace}.

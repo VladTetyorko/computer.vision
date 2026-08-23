@@ -5,7 +5,7 @@ import com.drones.vision.map.domain.model.Mark;
 /**
  * The outcome of {@link MarkService#geolocate}: the created {@code DETECTION} {@link Mark}, plus
  * whether the pose used to project it was actually measured or fell back to an assumed constant
- * (docs/plans/active/GEO-POSE-PLAN.md G5/§4.3, wave V3).
+ * (docs/plans/done/GEO-POSE-PLAN.md G5/§4.3, wave V3).
  *
  * <p>A separate wrapper rather than a field on {@link Mark} itself: {@code measured} describes how
  * *this* fix was produced, not a durable property of the mark (an operator may drag-correct the pin

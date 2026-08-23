@@ -18,7 +18,7 @@ import java.util.Set;
  * picker), and {@code labelFilter}/{@code detectionEnabled}
  * (docs/plans/done/CV-CONTROL-PLAN.md §2) were added the same way, per-stream,
  * mirroring this pattern rather than a global toggle. {@code labelDenyFilter}
- * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) followed the same shape once server-side overlay
+ * (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2) followed the same shape once server-side overlay
  * burn-in — and {@code overlayBurnIn} with it — was removed entirely (D-1): with no rendered boxes
  * left to strip out, "don't even detect this label" needed a first-class deny list instead.
  *
@@ -72,7 +72,7 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
 
     /**
      * Merges this request onto {@code defaults} — the deployment's own default {@link
-     * PipelineConfig} (docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8), not necessarily {@link
+     * PipelineConfig} (docs/plans/done/CV-DEMAND-PLAN.md §3.7/§3.8), not necessarily {@link
      * PipelineConfig#defaults()} itself: {@code vision.cv.detection-default-enabled} lets a
      * deployment override {@code detectionEnabled}'s starting value, and that only reaches a started
      * stream if this merge starts from the supplied instance rather than always calling the static

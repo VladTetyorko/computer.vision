@@ -5,7 +5,7 @@ import com.drones.vision.perception.domain.model.ReferenceIndexSummary;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * Wire shape for {@link IngestProgress} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3) — the {@code
+ * Wire shape for {@link IngestProgress} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3) — the {@code
  * GET /api/geo/regions/{regionId}/progress} response body.
  *
  * @param regionId the region this progress update is about

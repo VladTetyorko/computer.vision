@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Proves the W1 dev-account-seed contract (docs/plans/active/POSTGRES-ONLY-CONTEXT.md §5) against a real
+ * Proves the W1 dev-account-seed contract (docs/plans/done/POSTGRES-ONLY-CONTEXT.md §5) against a real
  * Postgres, one scenario per test method rather than reasoning about Flyway's behavior:
  *
  * <ul>

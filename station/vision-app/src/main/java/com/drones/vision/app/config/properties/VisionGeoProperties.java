@@ -9,7 +9,7 @@ import java.time.Duration;
 
 /**
  * Configuration for the fixed-camera geolocation feature ({@code vision.geo.fixed-camera.*}),
- * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §6 — every value there, none as a code constant
+ * docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §6 — every value there, none as a code constant
  * (CLAUDE.md rule 1). Bound by {@link com.drones.vision.app.config.wiring.FixedCameraGeoWiringConfiguration}.
  *
  * @param enabled                  the master gate (D8); default {@code false} — with it off, {@code

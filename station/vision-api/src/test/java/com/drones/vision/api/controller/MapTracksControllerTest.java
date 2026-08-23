@@ -35,7 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc tests for {@link MapTracksController} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5's
+ * MockMvc tests for {@link MapTracksController} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5's
  * frozen wire contract, Wave G4) — {@code GET /api/map/tracks}'s flag-off {@code 409} and the
  * viewer-scoped read that {@link LiveMapScopingTest} proves end to end over the live SSE topic.
  */

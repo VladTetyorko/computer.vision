@@ -24,7 +24,7 @@ class FlightCapabilityTest {
 
     @Test
     void keepsAllFieldsAndModes() {
-        FlightCapability caps = new FlightCapability(true, true, true, List.of("Loiter", "RTL"));
+        FlightCapability caps = new FlightCapability(true, true, true, List.of("Loiter", "RTL"), VehicleKind.COPTER);
 
         assertTrue(caps.commandable());
         assertTrue(caps.armSupported());
@@ -35,7 +35,7 @@ class FlightCapabilityTest {
     @Test
     void defensivelyCopiesSelectableModes() {
         List<String> modes = new ArrayList<>(List.of("Loiter", "RTL"));
-        FlightCapability caps = new FlightCapability(true, true, true, modes);
+        FlightCapability caps = new FlightCapability(true, true, true, modes, VehicleKind.COPTER);
 
         modes.add("Guided");
 
@@ -45,6 +45,6 @@ class FlightCapabilityTest {
 
     @Test
     void rejectsNullSelectableModes() {
-        assertThrows(NullPointerException.class, () -> new FlightCapability(false, false, false, null));
+        assertThrows(NullPointerException.class, () -> new FlightCapability(false, false, false, null, VehicleKind.UNKNOWN));
     }
 }

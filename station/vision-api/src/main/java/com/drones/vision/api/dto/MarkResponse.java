@@ -37,7 +37,7 @@ import java.time.Instant;
  * @param verifiedAt       when it was reviewed, absent while {@code UNVERIFIED}
  * @param measured         whether a {@code DETECTION} mark's fix used a real gimbal depression
  *                          reading and a real AGL sample rather than the platform's 45°/AMSL
- *                          assumptions (docs/plans/active/GEO-POSE-PLAN.md G5) — absent for every mark this
+ *                          assumptions (docs/plans/done/GEO-POSE-PLAN.md G5) — absent for every mark this
  *                          isn't known for (a {@code MANUAL} mark, or any mark reached via {@link
  *                          #from(Mark)} rather than the direct geolocate response); not an accuracy
  *                          guarantee, and not persisted on the mark itself, so it does not survive a
@@ -63,7 +63,7 @@ public record MarkResponse(String markId, String layerId, double latitude, doubl
 
     /**
      * Maps a domain {@link Mark} to its wire representation, carrying the geolocate call's
-     * measured-vs-assumed signal (docs/plans/active/GEO-POSE-PLAN.md G5, wave V3).
+     * measured-vs-assumed signal (docs/plans/done/GEO-POSE-PLAN.md G5, wave V3).
      *
      * @param mark     the mark to map
      * @param measured whether the fix that produced {@code mark} was measured, or {@code null} if

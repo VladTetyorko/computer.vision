@@ -5,8 +5,7 @@ green at 102 tests; `adapter-mavlink` is rewired onto it at **135/135, 0 skipped
 docker-gated SITL suite running for real against ArduPilot firmware, per §6.1 rule 4. The adapter shrank
 19 files/3 513 lines → 16 files/3 109 lines and contains **zero** `MavlinkConnection` construction sites.
 W5 (operator-facing message-rate + link-health slice) and W6 (Parameter/Mission) are open.
-**Context:** [MAVLINK-CORE-CONTEXT.md](MAVLINK-CORE-CONTEXT.md) — where the knowledge came from, starting state.
-**Reads with:** [adapter-mavlink/MODULE.md](../../../adapters/adapter-mavlink/MODULE.md) (as-is surface),
+**Reads with:** [adapter-mavlink/MODULE.md](../../../drone-link/mavlink/MODULE.md) (as-is surface),
 [DOMAIN-SEPARATION-PLAN.md](DOMAIN-SEPARATION-PLAN.md) (§3 urgency classes, D7 asset lease),
 [LAYERING-REFACTOR-PLAN.md](LAYERING-REFACTOR-PLAN.md) (§1.3 constructor rules, §5.1 package ceremony).
 **Supersedes:** nothing. It *extends* the E2/F2 restructuring that already split the big classes; those waves

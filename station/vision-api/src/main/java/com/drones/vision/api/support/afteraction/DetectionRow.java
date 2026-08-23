@@ -10,7 +10,7 @@ import java.util.Objects;
  * <p>{@code com.drones.vision.perception.domain.model.DetectionResult} carries a whole frame's
  * detections as one object; a CSV needs one row per detected object, not one row per frame — {@link
  * AfterActionAssembler#flattenDetections} does that flattening once, so both the manifest's
- * {@code count} (docs/plans/active/AFTER-ACTION-PLAN.md &sect;3.1) and the archive's CSV row count
+ * {@code count} (docs/plans/done/AFTER-ACTION-PLAN.md &sect;3.1) and the archive's CSV row count
  * agree on what "a detection" counts as.
  *
  * @param capturedAt the source frame's capture timestamp

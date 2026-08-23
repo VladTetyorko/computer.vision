@@ -141,7 +141,7 @@ DEFAULT_TRACK_APPEARANCE_ENGINE = "histogram"
 # `test_appearance_is_ignored_entirely_when_it_is_not_weighted`).
 DEFAULT_TRACK_COST_WEIGHT_IOU = 1.0
 DEFAULT_TRACK_COST_WEIGHT_APPEARANCE = 0.5
-# TRACK-IDENTITY-PLAN wave L2 (`docs/plans/active/TRACK-IDENTITY-PLAN.md`):
+# TRACK-IDENTITY-PLAN wave L2 (`docs/plans/done/TRACK-IDENTITY-PLAN.md`):
 # 0.0 -> 0.3. A SOFT penalty, never a hard gate -- a label gate would split
 # a track on every residual flip, the exact failure TRACKING-PLAN R9 set 0
 # to avoid, and wave L1's election already gives `Candidate.label` a stable
@@ -648,7 +648,7 @@ DEFAULT_TRACK_LABEL_SWITCH_MARGIN = 1.5
 # rate.
 DEFAULT_TRACK_LABEL_SWITCH_STREAK = 3
 
-# --- pull (docs/plans/active/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
+# --- pull (docs/plans/done/MEDIA-SOT-PLAN.md §5.5, wave M3) --------------
 #
 # Back `cv_service.pull.{source,clock,loop}` -- the worker's own decode loop
 # for `Inference.DetectPulled`, none of which has a `PullControl` wire
@@ -677,7 +677,7 @@ _PULL_CLOCK_MODES = ("anchor", "arrival")
 # than hardcoded in `clock.py` per rule 1 (no un-configurable magic numbers).
 DEFAULT_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS = 100.0
 
-# --- geo (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.6/§9.9, wave H4) ------
+# --- geo (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.6/§9.9, wave H4) ------
 #
 # Backs `cv_service.geo.*` -- `LocalizeStream`/`BuildReferenceIndex`/`ListRegions`/
 # `DeleteRegion` (`cv_service/grpc/servicers.py#GeolocationServicer`). The geo pull session

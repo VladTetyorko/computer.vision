@@ -116,7 +116,7 @@ interface DrawingHandle {
   decoration: Leaflet.Marker | null;
 }
 
-/** One projected track's three Leaflet objects (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5 D6, wave G5) — the dot itself, its trail, and its error-radius circle, which is drawn **always** (D6), never conditionally. */
+/** One projected track's three Leaflet objects (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5 D6, wave G5) — the dot itself, its trail, and its error-radius circle, which is drawn **always** (D6), never conditionally. */
 interface TrackHandle {
   dot: Leaflet.CircleMarker;
   trail: Leaflet.Polyline;
@@ -124,7 +124,7 @@ interface TrackHandle {
 }
 
 /**
- * One visual-geolocation correction's two Leaflet objects (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * One visual-geolocation correction's two Leaflet objects (docs/plans/done/VISUAL-GEO-V2-PLAN.md
  * §3.8, wave H6) — a marker (hollow ring + tick, never a filled dot, so it never reads as a second
  * "real" aircraft) and its `radiusMeters` error circle, drawn **always**, the same D6 discipline
  * `TrackHandle`'s own doc comment describes ("An 18 m estimate must never render like a 2 m one").
@@ -233,7 +233,7 @@ export class TacticalMap {
   readonly events = input<readonly EventMarker[]>([]);
 
   /**
-   * Projected fixed-camera tracks (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5, wave G5) —
+   * Projected fixed-camera tracks (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5, wave G5) —
    * `core/map-data/tracks-store.ts#tracks`. Empty on every host that hasn't wired it yet (the
    * default), which is exactly D8's own "the feature is inert, not wrong" for an unflagged
    * deployment or a host that simply doesn't bind this input.
@@ -241,7 +241,7 @@ export class TacticalMap {
   readonly tracks = input<readonly TacticalTrack[]>([]);
 
   /**
-   * Visual-geolocation corrections (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) —
+   * Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) —
    * hosts pass whatever they have latest-per-asset (the Fly cockpit's `GeoStore.latest()` wrapped
    * in a single-element array; a fleet-wide host could pass one per asset). Empty on every host
    * that hasn't wired it, or whenever `vision.geo.visual.enabled` is off — the whole layer is then
@@ -1068,7 +1068,7 @@ export class TacticalMap {
     return `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${ICONS[markKindIcon(mark.kind)]}</svg>`;
   }
 
-  // --- Projected tracks (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5 D6/D7, wave G5) ----------------
+  // --- Projected tracks (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5 D6/D7, wave G5) ----------------
 
   /**
    * Draws each track as three coupled Leaflet objects: a small dot at its own current position, a
@@ -1139,7 +1139,7 @@ export class TacticalMap {
     }
   }
 
-  // --- Visual-geolocation corrections (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) --------
+  // --- Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) --------
 
   /**
    * Draws each correction that has an actual fix (`hasCorrectionFix` — a `NO_FIX` row carries no

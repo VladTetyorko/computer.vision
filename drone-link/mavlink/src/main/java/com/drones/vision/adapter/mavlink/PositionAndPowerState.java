@@ -10,7 +10,7 @@ import io.dronefleet.mavlink.common.GlobalPositionInt;
  * MavlinkTelemetryDecoder}'s original 35-field flat state). See {@code MavlinkTelemetryDecoder}'s
  * own javadoc for the full unit-conversion table.
  *
- * <p>docs/plans/active/GEO-POSE-PLAN.md wave V2 added {@code GLOBAL_POSITION_INT}'s own {@code
+ * <p>docs/plans/done/GEO-POSE-PLAN.md wave V2 added {@code GLOBAL_POSITION_INT}'s own {@code
  * relative_alt} (height above home, mm) → {@link com.drones.vision.kernel.Telemetry#aglMeters()}
  * (÷ 1000, no sentinel — always sent) and {@code time_boot_ms} → {@link
  * com.drones.vision.kernel.Telemetry#deviceBootMillis()} (already a non-negative {@code long} once

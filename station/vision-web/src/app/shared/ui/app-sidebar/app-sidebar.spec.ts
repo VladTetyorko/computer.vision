@@ -71,7 +71,7 @@ function render(options: {
       { provide: EventsStore, useValue: fakeEventsStore() },
       { provide: LiveStore, useValue: fakeLiveStore(options.connectionState) },
       // `overall` defaults to `'OK'` — not `undefined` — so every pre-existing test in this file
-      // (written before the shell rollup dot read this third axis, docs/plans/active/SYSTEM-STATUS-PLAN.md
+      // (written before the shell rollup dot read this third axis, docs/plans/done/SYSTEM-STATUS-PLAN.md
       // §5.2) keeps its original "everything is fine" baseline unless a test explicitly opts into
       // `overall: undefined` (the pre-first-fetch state) or a degraded/down value.
       { provide: SystemStatusStore, useValue: fakeSystemStatusStore('overall' in options ? options.overall : 'OK') },
@@ -142,7 +142,7 @@ describe('AppSidebar — tiering + role gate', () => {
   });
 
   it('folds badge:"soon" entries under a collapsed Upcoming disclosure, each dimmed and carrying no per-row chip (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1 — the disclosure title already says it)', () => {
-    // Explicit MANAGER — since docs/plans/active/OPS-UX-PLAN.md §2 A5 (below), `badge: 'soon'` entries only
+    // Explicit MANAGER — since docs/plans/done/OPS-UX-PLAN.md §2 A5 (below), `badge: 'soon'` entries only
     // reach anyone at all for ADMIN/MANAGER; see the dedicated PILOT test for the opposite case.
     const fixture = render({ topRole: 'MANAGER' });
     const root = fixture.nativeElement as HTMLElement;
@@ -195,7 +195,7 @@ describe('AppSidebar — tiering + role gate', () => {
   });
 
   /**
-   * docs/plans/active/OPS-UX-PLAN.md §2 A5: `badge: 'soon'` scaffold entries are a roadmap preview for
+   * docs/plans/done/OPS-UX-PLAN.md §2 A5: `badge: 'soon'` scaffold entries are a roadmap preview for
    * ADMIN/MANAGER, not a working page — a PILOT following one is a dead end with no `managerOnly`
    * gate to have hidden it. Same F10 "filtered exactly once, here" claim as the `managerOnly` test
    * above, extended to this second predicate.
@@ -415,7 +415,7 @@ describe('AppSidebar — Advanced/Upcoming disclosures persist via SidebarStore'
   });
 });
 
-describe('AppSidebar — live-transport indicator (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1)', () => {
+describe('AppSidebar — live-transport indicator (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.1)', () => {
   it('reads "Live" with an ok dot while the SSE connection is open', () => {
     const fixture = render({ connectionState: 'open' });
     const root = fixture.nativeElement as HTMLElement;
@@ -451,13 +451,13 @@ describe('AppSidebar — live-transport indicator (docs/plans/active/SYSTEM-STAT
 });
 
 /**
- * The shell rollup dot (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2) — the direct fix for §1.2's finding
+ * The shell rollup dot (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2) — the direct fix for §1.2's finding
  * that this dot answered only "did the last device poll succeed" and stayed green through a closed
  * live-transport connection or a degraded platform subsystem. These specs exercise the worst-of-three
  * combination through the real rendered shell, complementing `system-status-logic.spec.ts`'s own
  * unit coverage of `shellStatusSeverity` in isolation.
  */
-describe('AppSidebar — shell rollup dot (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.2)', () => {
+describe('AppSidebar — shell rollup dot (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2)', () => {
   function statusDot(root: HTMLElement): HTMLElement {
     return root.querySelector('.status-row .dot.status-dot')!;
   }

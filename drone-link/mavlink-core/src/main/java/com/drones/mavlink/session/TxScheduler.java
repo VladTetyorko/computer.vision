@@ -23,7 +23,7 @@ public interface TxScheduler {
     /**
      * Runs {@code task} once, as soon as a pool thread is free — the latency-sensitive counterpart
      * to {@link #repeat} for a TX path that must not wait for the next tick of a periodic task
-     * (docs/plans/active/RC-LATENCY-PLAN.md §2 A: a stick that moves 1 ms after a tick should not
+     * (docs/plans/done/RC-LATENCY-PLAN.md §2 A: a stick that moves 1 ms after a tick should not
      * pay a full period for a clock that had no reason to be where it was). Same catch-and-log
      * contract as {@link #repeat} — a task that throws is logged and never reaches the pool — and
      * the same "already shut down" tolerance: a submission racing scheduler shutdown is dropped,

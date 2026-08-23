@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Reference-region ingest lifecycle (docs/plans/active/VISUAL-GEO-V2-PLAN.md D10, §3.3) — one
+ * Reference-region ingest lifecycle (docs/plans/done/VISUAL-GEO-V2-PLAN.md D10, §3.3) — one
  * interface, one implementation: {@link DefaultReferenceRegionService}. Not a user command in the
  * authorization sense (that is {@code GeoController}'s {@code canAdminister} check, §3.3 O9) — this
  * service takes no {@code VisibilityScope}/actor, since a reference region is shared imagery, not

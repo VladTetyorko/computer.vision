@@ -3,7 +3,7 @@
 **Branch:** `feat/tracking-v3` (worktree, based on `master`).
 **Origin:** a literature sweep of the SORT-family state of the art (§8), read against what
 `feat/tracking-v2` actually shipped.
-**Predecessor:** `docs/plans/active/TRACKING-V2-PLAN.md` (waves C0–C5, delivered 2026-08-12,
+**Predecessor:** `docs/plans/done/TRACKING-V2-PLAN.md` (waves C0–C5, delivered 2026-08-12,
 704 tests). V3 does not replace it; it attacks what V2's own design left estimation-centric.
 **Companion measurement:** `docs/conclusions/CV-RATE-BUDGET.md` (why *Hold* needs < 50 ms and a
 prior, not a threshold) and `docs/conclusions/TRACKING-REVIEW.md` (why identity needed an owner).

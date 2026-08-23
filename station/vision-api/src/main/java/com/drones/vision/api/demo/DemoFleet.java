@@ -82,7 +82,7 @@ public class DemoFleet {
     private final AssetService assets;
     private final AssetStreamService assetStreams;
     private final DemoVideoLibrary videos;
-    /** The deployment's default {@link PipelineConfig} for a newly started stream (docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8). */
+    /** The deployment's default {@link PipelineConfig} for a newly started stream (docs/plans/done/CV-DEMAND-PLAN.md §3.7/§3.8). */
     private final PipelineConfig defaultConfig;
 
     public DemoFleet(SimulationService simulations, AssetService assets, AssetStreamService assetStreams,

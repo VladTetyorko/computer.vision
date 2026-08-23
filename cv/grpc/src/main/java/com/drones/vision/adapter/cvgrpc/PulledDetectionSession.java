@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * One open {@code DetectPulled} bidi call for a single {@link StreamId} — the pull-mode sibling of
- * {@link DetectionStreamSession}, docs/plans/active/MEDIA-SOT-PLAN.md wave M4.
+ * {@link DetectionStreamSession}, docs/plans/done/MEDIA-SOT-PLAN.md wave M4.
  *
  * <h2>The structural difference from {@link DetectionStreamSession}</h2>
  * {@code DetectPulled} responses are <b>unsolicited</b>: the worker mints {@code sequence} itself,
@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * DetectionStreamSession}'s machinery this class deliberately does not have.
  *
  * <h2>What replaces it: restated desired state</h2>
- * {@code PullControl} is declarative (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.1, mirroring {@code
+ * {@code PullControl} is declarative (docs/plans/done/MEDIA-SOT-PLAN.md &sect;5.1, mirroring {@code
  * TrackingConfig}'s own doctrine): a one-shot control message can be lost with no error and no retry
  * (cv-service's {@code LatestOnlyMailbox} silently drops a frame when the sender outruns the
  * consumer), so every message this class sends restates the <em>complete</em> current desired state,
@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li><b>Transport failure</b> ({@code onError} from the server, e.g. {@code UNAVAILABLE} because
  *   the pulled source is unopenable or stalled past the worker's own timeout): surfaced to the
  *   publisher's subscriber via {@link SubmissionPublisher#closeExceptionally}, and this session drops
- *   itself from the owning map. No retry happens here — docs/plans/active/MEDIA-SOT-PLAN.md decision D5 is
+ *   itself from the owning map. No retry happens here — docs/plans/done/MEDIA-SOT-PLAN.md decision D5 is
  *   explicit that reopen-with-backoff is the existing generic {@code
  *   SupervisedPublisher<DetectionResult>}'s job (vision-application), not this adapter's.</li>
  *   <li><b>Server ends the stream normally</b> ({@code onCompleted} with no error): if this session

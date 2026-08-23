@@ -52,8 +52,13 @@ function isChannelBinding(value: unknown): value is ManualControlChannelBinding 
   const b = value as Record<string, unknown>;
   return (
     (b['source'] === 'AXIS' || b['source'] === 'BUTTON') &&
+    (b['travel'] === 'CENTERED' || b['travel'] === 'UNIDIRECTIONAL') &&
+    typeof b['function'] === 'string' &&
     typeof b['sourceIndex'] === 'number' &&
     typeof b['rcChannel'] === 'number' &&
+    typeof b['minMicros'] === 'number' &&
+    typeof b['centerMicros'] === 'number' &&
+    typeof b['maxMicros'] === 'number' &&
     typeof b['label'] === 'string'
   );
 }
@@ -62,6 +67,9 @@ function isEngaged(msg: Record<string, unknown>): msg is Record<string, unknown>
   return (
     typeof msg['assetId'] === 'string' &&
     typeof msg['rateHz'] === 'number' &&
+    typeof msg['vehicleKind'] === 'string' &&
+    typeof msg['profileCode'] === 'string' &&
+    typeof msg['profileName'] === 'string' &&
     Array.isArray(msg['channelMap']) &&
     (msg['channelMap'] as unknown[]).every(isChannelBinding)
   );
@@ -181,7 +189,7 @@ export function channelsEqual(a: readonly number[], b: readonly number[]): boole
 
 /**
  * The one send rule, shared by the input-driven path and the backstop timer
- * (docs/plans/active/RC-LATENCY-PLAN.md §2 B). A stick that moved reaches the socket in the frame it
+ * (docs/plans/done/RC-LATENCY-PLAN.md §2 B). A stick that moved reaches the socket in the frame it
  * was sampled, subject only to the wire ceiling; a stick that did not still reports at the keepalive
  * floor so the server's watchdog keeps seeing input.
  *

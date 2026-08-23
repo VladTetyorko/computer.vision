@@ -2,7 +2,7 @@ package com.drones.vision.kernel;
 
 /**
  * A drone's own attitude (roll/pitch/yaw) and, independently, its camera gimbal's orientation
- * (docs/plans/active/GEO-POSE-PLAN.md §4.1) — decoded from MAVLink {@code ATTITUDE} (#30) for the
+ * (docs/plans/done/GEO-POSE-PLAN.md §4.1) — decoded from MAVLink {@code ATTITUDE} (#30) for the
  * airframe and {@code GIMBAL_DEVICE_ATTITUDE_STATUS} (#285, preferred) or {@code MOUNT_ORIENTATION}
  * (#265, deprecated fallback) for the gimbal.
  *

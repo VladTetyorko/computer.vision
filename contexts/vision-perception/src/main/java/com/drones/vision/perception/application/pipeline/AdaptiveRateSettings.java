@@ -1,7 +1,7 @@
 package com.drones.vision.perception.application.pipeline;
 
 /**
- * Tunables for {@link DetectionRateController} (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2) — one
+ * Tunables for {@link DetectionRateController} (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2) — one
  * nested record rather than three more components on {@link StreamPipelineSettings}, which already
  * carries fifteen.
  *

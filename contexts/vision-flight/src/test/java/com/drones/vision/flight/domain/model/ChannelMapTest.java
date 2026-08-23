@@ -11,6 +11,24 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ChannelMapTest {
 
+    /**
+     * The shape {@code ChannelMap.defaultMap()} used to hand these tests: axes 0..3 on channels 1..4,
+     * buttons 0..3 on channels 5..8. Built locally now that choosing a map is {@link ControlProfile}'s
+     * job — these tests are about {@link ChannelMap#apply}'s mapping pass, not about which bindings
+     * any particular vehicle should get.
+     */
+    private static ChannelMap fourAxesFourButtons() {
+        return new ChannelMap(List.of(
+                ControlBinding.centeredAxis(ControlFunction.ROLL, 0, 1),
+                ControlBinding.centeredAxis(ControlFunction.PITCH, 1, 2),
+                ControlBinding.centeredAxis(ControlFunction.THROTTLE, 2, 3),
+                ControlBinding.centeredAxis(ControlFunction.YAW, 3, 4),
+                ControlBinding.button(ControlFunction.AUX_1, 0, 5),
+                ControlBinding.button(ControlFunction.AUX_2, 1, 6),
+                ControlBinding.button(ControlFunction.AUX_3, 2, 7),
+                ControlBinding.button(ControlFunction.AUX_4, 3, 8)));
+    }
+
     @Test
     void rejectsNullBindings() {
         assertThrows(IllegalArgumentException.class, () -> new ChannelMap(null));
@@ -19,62 +37,22 @@ class ChannelMapTest {
     @Test
     void defensivelyCopiesBindings() {
         List<ControlBinding> bindings = new ArrayList<>(List.of(
-                new ControlBinding(ControlBinding.Source.AXIS, 0, 1, 1000, 1500, 2000, 0.0, false)));
+                new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, 0.0, false)));
         ChannelMap map = new ChannelMap(bindings);
 
-        bindings.add(new ControlBinding(ControlBinding.Source.AXIS, 1, 2, 1000, 1500, 2000, 0.0, false));
+        bindings.add(new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 1, 2, 1000, 1500, 2000, 0.0, false));
 
         assertEquals(1, map.bindings().size());
         assertThrows(UnsupportedOperationException.class,
                 () -> map.bindings().add(
-                        new ControlBinding(ControlBinding.Source.AXIS, 1, 2, 1000, 1500, 2000, 0.0, false)));
-    }
-
-    // --- defaultMap() shape ---
-
-    @Test
-    void defaultMapHasEightBindings() {
-        assertEquals(8, ChannelMap.defaultMap().bindings().size());
-    }
-
-    @Test
-    void defaultMapAxesZeroToThreeDriveChannelsOneToFour() {
-        List<ControlBinding> bindings = ChannelMap.defaultMap().bindings();
-
-        for (int i = 0; i < 4; i++) {
-            ControlBinding binding = bindings.get(i);
-            assertEquals(ControlBinding.Source.AXIS, binding.source());
-            assertEquals(i, binding.sourceIndex());
-            assertEquals(i + 1, binding.rcChannel());
-            assertEquals(1000, binding.minMicros());
-            assertEquals(1500, binding.centerMicros());
-            assertEquals(2000, binding.maxMicros());
-            assertEquals(0.0, binding.deadband());
-            assertEquals(false, binding.reversed());
-        }
-    }
-
-    @Test
-    void defaultMapButtonsZeroToThreeDriveChannelsFiveToEight() {
-        List<ControlBinding> bindings = ChannelMap.defaultMap().bindings();
-
-        for (int i = 0; i < 4; i++) {
-            ControlBinding binding = bindings.get(4 + i);
-            assertEquals(ControlBinding.Source.BUTTON, binding.source());
-            assertEquals(i, binding.sourceIndex());
-            assertEquals(5 + i, binding.rcChannel());
-            assertEquals(1000, binding.minMicros());
-            assertEquals(2000, binding.maxMicros());
-            assertEquals(0.0, binding.deadband());
-            assertEquals(false, binding.reversed());
-        }
+                        new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 1, 2, 1000, 1500, 2000, 0.0, false)));
     }
 
     // --- apply() ---
 
     @Test
     void applyMapsAKnownAxesAndButtonsVectorToExpectedMicros() {
-        ChannelMap map = ChannelMap.defaultMap();
+        ChannelMap map = fourAxesFourButtons();
 
         RcChannels channels = map.apply(List.of(0.0, -0.12, 1.0, 0.0), List.of(0.0, 1.0));
 
@@ -83,7 +61,7 @@ class ChannelMapTest {
 
     @Test
     void applyWithEmptyAxesAndButtonsFallsBackToRestForEveryChannel() {
-        ChannelMap map = ChannelMap.defaultMap();
+        ChannelMap map = fourAxesFourButtons();
 
         RcChannels channels = map.apply(List.of(), List.of());
 
@@ -92,7 +70,7 @@ class ChannelMapTest {
 
     @Test
     void applyWithNullAxesAndButtonsFallsBackToRestForEveryChannel() {
-        ChannelMap map = ChannelMap.defaultMap();
+        ChannelMap map = fourAxesFourButtons();
 
         RcChannels channels = map.apply(null, null);
 
@@ -101,7 +79,7 @@ class ChannelMapTest {
 
     @Test
     void applyWithShortListsFallsBackToRestForMissingIndicesOnly() {
-        ChannelMap map = ChannelMap.defaultMap();
+        ChannelMap map = fourAxesFourButtons();
 
         // Only axis 0 and button 0 are present; axes 1..3 and buttons 1..3 read as rest (0.0).
         RcChannels channels = map.apply(List.of(1.0), List.of(1.0));
@@ -112,8 +90,8 @@ class ChannelMapTest {
     @Test
     void applyLeavesUnboundChannelsAsIgnore() {
         ChannelMap map = new ChannelMap(List.of(
-                new ControlBinding(ControlBinding.Source.AXIS, 0, 2, 1000, 1500, 2000, 0.0, false),
-                new ControlBinding(ControlBinding.Source.BUTTON, 0, 4, 1000, 1000, 2000, 0.0, false)));
+                new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 2, 1000, 1500, 2000, 0.0, false),
+                new ControlBinding(ControlBinding.Source.BUTTON, ControlFunction.AUX_1, 0, 4, 1000, 1000, 2000, 0.0, false)));
 
         RcChannels channels = map.apply(List.of(0.7), List.of(1.0));
 

@@ -70,7 +70,7 @@ class CvWiringTest {
     }
 
     /**
-     * docs/plans/active/CV-DEMAND-PLAN.md §3.7/§3.8: {@code vision.cv.demand.enabled} defaults to
+     * docs/plans/done/CV-DEMAND-PLAN.md §3.7/§3.8: {@code vision.cv.demand.enabled} defaults to
      * {@code true}, so the default-config context builds a real demand-poll port and
      * {@link StreamDetectionSupport} carries it — see {@link DetectionDemandDisabledWiringTest} for
      * the {@code false} counterpart.

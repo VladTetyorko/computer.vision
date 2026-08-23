@@ -1,7 +1,7 @@
 package com.drones.vision.map.application.track;
 
 /**
- * How much to trust a successful {@link CalibrationResult} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md
+ * How much to trust a successful {@link CalibrationResult} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
  * decision D5, frozen wire spellings, §5). Only meaningful when {@link CalibrationResult#solved()}.
  */
 public enum CalibrationQuality {

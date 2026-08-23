@@ -29,7 +29,7 @@ import type { ActiveStream, CalibrationResult, CameraPoseResponse, Device, GeoPo
 const LOG_PREFIX = '[camera-geo]';
 
 /**
- * The calibration wizard (`docs/plans/active/FIXED-CAMERA-GEO-PLAN.md` D5, this wave's G5 row) — click a
+ * The calibration wizard (`docs/plans/done/FIXED-CAMERA-GEO-PLAN.md` D5, this wave's G5 row) — click a
  * landmark in a still frame, click the same point on the map, repeat for 2–8 pairs, run the solve,
  * and either save an honest `solved:true` pose or read the refusal reason verbatim with no save
  * offered. A non-routed, modal-in-a-modal child of `camera-pose-panel.ts` — mounted only while that

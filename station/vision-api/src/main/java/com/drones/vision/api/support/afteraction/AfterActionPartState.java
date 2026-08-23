@@ -10,7 +10,7 @@ package com.drones.vision.api.support.afteraction;
  *   <li>{@link #ABSENT} — resolved successfully, but there is genuinely nothing: no data exists
  *       for this flight. Not an error.</li>
  *   <li>{@link #TRUNCATED} — resolved, but the underlying source is known to hold more than what
- *       is included (docs/plans/active/AFTER-ACTION-PLAN.md D7) — a downstream lossiness, declared
+ *       is included (docs/plans/done/AFTER-ACTION-PLAN.md D7) — a downstream lossiness, declared
  *       rather than silently shipped.</li>
  *   <li>{@link #FORBIDDEN} — the caller's role may not read this part at all. Deliberately distinct
  *       from {@link #ABSENT}: "there is nothing" and "you may not look" are different facts, and a

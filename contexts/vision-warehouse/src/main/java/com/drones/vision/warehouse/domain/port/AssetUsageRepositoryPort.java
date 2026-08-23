@@ -95,7 +95,7 @@ public interface AssetUsageRepositoryPort {
 
     /**
      * Finds the usage a stream opened &mdash; the answer to "what happened to stream X"
-     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.6).
+     * (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.6).
      *
      * <p>This exists because a stopped stream is deliberately <b>not</b> a {@code StreamState}: it
      * is absent from the running-stream list and present here, with an {@code endedAt}. Without

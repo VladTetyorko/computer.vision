@@ -6,7 +6,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * One Postgres container for the whole JVM — the "singleton container" pattern, not one per
  * {@code @SpringBootTest} class. This module has 34 of those; one container each would be started
  * (and torn down) 34 times over, which is both slow and the exact thing
- * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4 rules out ("34 containers would be unusable").
+ * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W4 rules out ("34 containers would be unusable").
  *
  * <p>{@code postgres:16} to match {@code docker-compose.yml}'s pinned production image — this
  * suite's Flyway migrations and JPA entity mappings must be proven against the same engine version

@@ -14,7 +14,7 @@ plan did not anticipate — pull-mode's `DetectionRate.dropRatio()` is pinned at
 for a docs-only wave.
 **Decided:** `docs/plans/active/CV-SCALE-PLAN.md` §S5 ("DECISION REQUIRED") — the answer is **GO**, and this
 plan owned its execution. §S5 is superseded by this file (amendment text in §10, applied to that file).
-**Reads with:** [ARCHITECTURE.md](../../../ARCHITECTURE.md) · [CV-SCALE-PLAN.md](CV-SCALE-PLAN.md) (S1–S4,
+**Reads with:** [ARCHITECTURE.md](../../../ARCHITECTURE.md) · [CV-SCALE-PLAN.md](../active/CV-SCALE-PLAN.md) (S1–S4,
 which this composes with) · [CV-RATE-CONTROL-PLAN.md](CV-RATE-CONTROL-PLAN.md) and
 [CV-RATE-BUDGET.md](../../conclusions/CV-RATE-BUDGET.md) (whose §5 gap 9 — *"tracker runs across the
 network — open, architectural, separate programme"* — is this programme) · `DOMAIN-SEPARATION-PLAN.md`

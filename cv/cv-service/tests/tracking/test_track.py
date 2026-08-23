@@ -997,7 +997,7 @@ def test_reset_reupdate_stats_is_what_a_frame_with_no_apply_call_must_use():
 
 # -- TRACK-IDENTITY-PLAN wave L1: track-level label election ----------------
 #
-# `docs/plans/active/TRACK-IDENTITY-PLAN.md`'s L1 section, diagnosed by
+# `docs/plans/done/TRACK-IDENTITY-PLAN.md`'s L1 section, diagnosed by
 # `TRACK-IDENTITY-RESEARCH.md` §1: an open-vocabulary model re-rolls its one
 # argmax label every detector pass, and `track.label` (raw) echoes whichever
 # roll arrived last -- `track.elected_label` is the second, hysteresis-gated

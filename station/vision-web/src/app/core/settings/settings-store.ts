@@ -48,7 +48,7 @@ export const DEFAULT_DETECTION_MODEL: string = 'yolo26n.pt';
  * []` ("all classes") on every built-in mirrors `PipelineConfig`'s own defaults too — none of the
  * three built-ins target the open-vocabulary model, so none of them narrow the class set.
  *
- * **`detectionEnabled: false`** (docs/plans/active/CV-DEMAND-PLAN.md wave D3, flipped from `true`) — mirrors
+ * **`detectionEnabled: false`** (docs/plans/done/CV-DEMAND-PLAN.md wave D3, flipped from `true`) — mirrors
  * `PipelineConfig.DEFAULT_DETECTION_ENABLED`'s own flip (wave D1): detection is opt-in per stream
  * now, both server-side and here. Sending `detectionEnabled: true` explicitly on every stream start
  * (the old default) would silently override the new server default right back to "always on" for
@@ -111,7 +111,7 @@ export interface PipelineSettings {
   readonly labelFilter: readonly string[];
   /**
    * Which detection labels to drop, applied Java-side alongside {@link labelFilter} in the same
-   * pre-fan-out drop site (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) — **empty means "deny
+   * pre-fan-out drop site (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2) — **empty means "deny
    * nothing"**. The everyday one-click "hide this class" act (the Vision drawer's detections strip,
    * the class-chip checklist's own toggle) writes here, immediately, never to {@link labelFilter} —
    * that field stays the rarer model-intent allowlist (preset fill, seeding on a model switch). A
@@ -121,7 +121,7 @@ export interface PipelineSettings {
   readonly labelDenyFilter: readonly string[];
   /** Server-side detection on/off (docs/plans/done/CV-CONTROL-PLAN.md §1) — `false` means zero inference CPU
    * spent on this stream; video keeps flowing regardless either way. **Defaults `false`**
-   * (docs/plans/active/CV-DEMAND-PLAN.md wave D3, flipped from `true`), mirroring
+   * (docs/plans/done/CV-DEMAND-PLAN.md wave D3, flipped from `true`), mirroring
    * `PipelineConfig.DEFAULT_DETECTION_ENABLED`'s own flip — detection is opt-in per stream now, not
    * on-by-default. Distinct from `FlyPage`'s own `boxesMode` (a purely client-side render toggle for
    * detections already computed) — see `cv-control-panel.html`'s own copy for the exact wording that
@@ -369,7 +369,7 @@ function isStringArray(value: unknown): value is readonly string[] {
  * bare id display, it is never treated as corrupt data. Only a missing/non-string value falls back
  * to the default.
  *
- * **`detectionEnabled`'s own fallback flipped from `true` to `false`** (docs/plans/active/CV-DEMAND-PLAN.md
+ * **`detectionEnabled`'s own fallback flipped from `true` to `false`** (docs/plans/done/CV-DEMAND-PLAN.md
  * wave D3) — but only for a value that is genuinely *missing or corrupt*, never one that is present.
  * An explicit `true` or `false` already sitting in storage is a choice a person made (most profiles
  * a real user has saved since docs/plans/done/CV-CONTROL-PLAN.md Wave E carry the field explicitly, defaulted
@@ -392,7 +392,7 @@ function withValidPipelineFields<
     ...value,
     model: isNonEmptyString(value.model) ? value.model : DEFAULT_DETECTION_MODEL,
     labelFilter: isStringArray(value.labelFilter) ? value.labelFilter : [],
-    // A profile/draft saved before wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) has no such
+    // A profile/draft saved before wave W5 (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2) has no such
     // field at all — backfills to "deny nothing", the same honest default a fresh built-in carries,
     // not a reason to drop the rest of the profile (mirrors `labelFilter`'s own migration-safe rule
     // above).

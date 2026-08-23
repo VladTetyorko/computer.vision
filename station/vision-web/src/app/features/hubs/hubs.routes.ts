@@ -33,7 +33,7 @@ import type { Routes } from '@angular/router';
  * exactly the kind of route not worth pre-fetching ahead of a real navigation (mirrors `**`'s own
  * `data: {preload: false}` in `app.routes.ts`).
  *
- * **`/monitor/replay` is gone (docs/plans/active/IA-TRUTH-PLAN.md §2, U1.2)** — it used to redirect to
+ * **`/monitor/replay` is gone (docs/plans/done/IA-TRUTH-PLAN.md §2, U1.2)** — it used to redirect to
  * the flat `/replay` route, then (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F8) to this file's own `ComingSoon`
  * scaffold advertising "a library listing every finished flight" as **coming**. It shipped:
  * `/replay` (`features/replay/replay.routes.ts`'s bare `'replay'` route) has served `ReplayLibraryPage`

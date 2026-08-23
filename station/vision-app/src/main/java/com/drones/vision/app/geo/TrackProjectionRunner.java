@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
 
 /**
  * The vision-app composition {@code TrackProjectionService} needs but must not itself depend on
- * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D2/D7) — resolves each calibrated asset's active
+ * (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md D2/D7) — resolves each calibrated asset's active
  * stream, calls perception's {@code StreamService#tracks}, and hands {@code (pose,
  * List<TrackedObject>)} to map's {@link TrackProjectionService#project} on a fixed cadence, the
  * O12-recorder precedent (composition here, logic in the context). One instance, self-managed

@@ -84,7 +84,7 @@ export function isPilot(user: UserSummary): boolean {
 }
 
 /**
- * The roster's other gap indicator (docs/plans/active/OPS-UX-PLAN.md §3 B3) — the mirror of
+ * The roster's other gap indicator (docs/plans/done/OPS-UX-PLAN.md §3 B3) — the mirror of
  * `features/roster/roster-logic.ts#countAssetsWithoutPilot`: how many users who hold a `PILOT`
  * membership somewhere are assigned to zero assets. Counts against every row `buildPilotRows`
  * produced (which already includes every user, pilot or not — see that function's own doc comment),

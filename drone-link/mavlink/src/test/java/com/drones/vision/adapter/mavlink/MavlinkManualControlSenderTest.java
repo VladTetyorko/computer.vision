@@ -12,6 +12,7 @@ import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.flight.domain.model.RcChannels;
 import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.flight.domain.port.ManualControlLink;
 
 import io.dronefleet.mavlink.common.RcChannelsOverride;
@@ -320,6 +321,11 @@ class MavlinkManualControlSenderTest {
         @Override
         public int rateHz() {
             return 1;
+        }
+
+        @Override
+        public VehicleKind vehicleKind() {
+            return VehicleKind.UNKNOWN;
         }
     }
 

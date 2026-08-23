@@ -1,6 +1,6 @@
 """MEDIA-SOT-PLAN wave M3 -- the cv-service pull worker.
 
-Three seams (docs/plans/active/MEDIA-SOT-PLAN.md §8 M3, D7):
+Three seams (docs/plans/done/MEDIA-SOT-PLAN.md §8 M3, D7):
 
 * ``source.py`` -- the ``PullSource`` protocol + the M0-chosen ``opencv``
   backend (``cv2.VideoCapture(url, cv2.CAP_FFMPEG)``,

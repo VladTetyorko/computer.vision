@@ -25,7 +25,7 @@ import java.time.Instant;
  * @param whepUrl   where a viewer can watch the stream over WebRTC/WHEP (sub-second latency), or absent
  *                  if the active publisher has no WebRTC viewing endpoint
  * @param state     whether this stream's <b>video</b> is actually flowing right now
- *                  (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5). Always serialized. Before this
+ *                  (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.5). Always serialized. Before this
  *                  existed a client could only infer liveness from this stream's presence in the
  *                  list, so a stalled or reconnecting source was indistinguishable from a healthy
  *                  one. {@code UNOBSERVED} is <b>not a fault</b> — it means a proxied source this
@@ -37,7 +37,7 @@ import java.time.Instant;
  *                  browser-local draft that could disagree with the stream in front of the operator.
  *                  Says what was <i>asked for</i>, never whether inference is running
  * @param detectionState which of the two CV gates explains the stream's current boxes-or-no-boxes
- *                  state (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.6) — the same value {@code GET
+ *                  state (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.6) — the same value {@code GET
  *                  .../tracks} serves, carried here so the fleet-wide poll answers it too rather
  *                  than forcing a per-stream request. Absent (omitted) only for a stream that
  *                  vanished between listing and reading it. Reports gating, never detector health

@@ -5,7 +5,7 @@ import com.drones.vision.kernel.StreamId;
 
 /**
  * Driven port: whether anything is currently consuming a stream's detection output
- * (docs/plans/active/CV-DEMAND-PLAN.md &sect;2-3.1) &mdash; the system-derived half of the two
+ * (docs/plans/done/CV-DEMAND-PLAN.md &sect;2-3.1) &mdash; the system-derived half of the two
  * independent gates {@code StreamPipeline} ANDs together before it runs inference at all (the
  * other half, operator intent, is {@code PipelineConfig#detectionEnabled()}). Deliberately
  * protocol-agnostic: a live SSE subscription to a stream's detections and a recent poll of {@code

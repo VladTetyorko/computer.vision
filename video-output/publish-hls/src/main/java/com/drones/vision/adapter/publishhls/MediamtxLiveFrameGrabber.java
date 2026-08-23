@@ -17,7 +17,7 @@ import java.util.Optional;
 
 /**
  * Grabs one decoded frame on demand from a mediamtx path's <b>live</b> RTSP output — the gap {@link
- * MediamtxProxyPublisher} opens (docs/plans/active/MEDIA-SOT-PLAN.md M6): in proxy mode nothing in
+ * MediamtxProxyPublisher} opens (docs/plans/done/MEDIA-SOT-PLAN.md M6): in proxy mode nothing in
  * the JVM ever decodes a stream's video, so the pipeline's own cached {@code latestFrame}/{@code
  * latestRawFrame} (backing the snapshot endpoint and training capture, {@code StreamPipeline} in
  * {@code vision-application}) would sit permanently empty for a proxied stream without this class
@@ -99,7 +99,7 @@ public final class MediamtxLiveFrameGrabber {
      * @return a decoded, un-annotated {@link VideoFrame} (sequence {@code 0}; {@code capturedAt}
      *         stamped at grab time — a live RTSP presentation timestamp has no wallclock anchor
      *         without RTCP sender reports, which a plain grab does not expose either,
-     *         docs/plans/active/MEDIA-SOT-PLAN.md &sect;6 — "recent enough" is what a one-shot
+     *         docs/plans/done/MEDIA-SOT-PLAN.md &sect;6 — "recent enough" is what a one-shot
      *         snapshot needs, not frame-accurate capture time), or {@link Optional#empty()} if the
      *         path is unreachable, not currently publishing, or carries no decodable video — never
      *         throws

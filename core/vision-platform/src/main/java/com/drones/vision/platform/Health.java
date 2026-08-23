@@ -6,7 +6,7 @@ package com.drones.vision.platform;
  * <p>Ordered worst-to-best is deliberately NOT the declaration order — see {@code
  * SystemStatusController} (vision-api) for the severity used to roll many {@link SubsystemStatus}
  * values up into one overall verdict. {@link #DISABLED} is excluded from that rollup entirely: a
- * subsystem an operator has deliberately switched off (docs/plans/active/SYSTEM-STATUS-PLAN.md §7.2's
+ * subsystem an operator has deliberately switched off (docs/plans/done/SYSTEM-STATUS-PLAN.md §7.2's
  * "honest status over optimistic status") must never read as a fault.
  */
 public enum Health {

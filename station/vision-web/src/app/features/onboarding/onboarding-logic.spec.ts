@@ -11,6 +11,7 @@ import {
   canAdvanceFromVerify,
   creatorOwnershipGroup,
   defaultPilotSelection,
+  isTelemetryOnlyProtocol,
   nextStep,
   pilotsInGroup,
   prevStep,
@@ -306,7 +307,7 @@ describe('buildPostSimulationAssetEdit', () => {
   });
 });
 
-// --- Step 5: "Who flies this?" (docs/plans/active/OPS-UX-PLAN.md §2 A3) -------------------------------
+// --- Step 5: "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) -------------------------------
 
 function membership(partial: Partial<Membership> = {}): Membership {
   return { groupId: 'group-1', groupName: 'Alpha Squad', role: 'PILOT', ...partial };
@@ -381,5 +382,33 @@ describe('defaultPilotSelection', () => {
 
   it('selects nobody when no group could be resolved at all', () => {
     expect(defaultPilotSelection('user-1', undefined)).toEqual([]);
+  });
+});
+
+describe('isTelemetryOnlyProtocol', () => {
+  it('recognizes mavlink whatever case or padding the select hands over', () => {
+    expect(isTelemetryOnlyProtocol('mavlink')).toBe(true);
+    expect(isTelemetryOnlyProtocol('MAVLink')).toBe(true);
+    expect(isTelemetryOnlyProtocol('  mavlink  ')).toBe(true);
+  });
+
+  it('leaves every video protocol alone, so their Test step keeps asking for a frame', () => {
+    for (const protocol of ['rtsp', 'mjpeg', 'srt', 'udp', 'v4l2', 'file', 'sim']) {
+      expect(isTelemetryOnlyProtocol(protocol)).toBe(false);
+    }
+  });
+
+  it('is false for the not-yet-chosen protocol the step starts in', () => {
+    expect(isTelemetryOnlyProtocol('')).toBe(false);
+    expect(isTelemetryOnlyProtocol(null)).toBe(false);
+    expect(isTelemetryOnlyProtocol(undefined)).toBe(false);
+  });
+});
+
+describe('canAdvanceFromTest with a frameless probe', () => {
+  it('passes a telemetry-only probe, which returns ok:true with no frame at all', () => {
+    // The second legal 200 shape (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §3) — the gate
+    // asks "did the last probe succeed", never "was there a picture".
+    expect(canAdvanceFromTest('register', true)).toBe(true);
   });
 });

@@ -17,7 +17,7 @@ import java.util.UUID;
 
 /**
  * {@link DetectionEventRepositoryPort} backed by Postgres via plain JPA (see {@link
- * JpaOperations}) — docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3.
+ * JpaOperations}) — docs/plans/done/POSTGRES-ONLY-CONTEXT.md W3.
  *
  * <p>{@link #save} is a genuine upsert (merge-by-id), matching {@code
  * InMemoryDetectionEventRepository}'s remove-then-re-add-by-id semantics exactly: a {@link

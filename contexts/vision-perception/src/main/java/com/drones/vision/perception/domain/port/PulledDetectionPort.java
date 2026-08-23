@@ -10,7 +10,7 @@ import java.util.concurrent.Flow;
 
 /**
  * Driven port: subscribe to a worker that pulls frames from a stream's own source (typically an
- * RTSP path served by mediamtx, docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.2) and decodes/infers
+ * RTSP path served by mediamtx, docs/plans/done/MEDIA-SOT-PLAN.md &sect;5.2) and decodes/infers
  * on them itself, instead of the JVM pushing sampled frames to it.
  *
  * <h2>Why this is a sibling of {@link DetectionPort}, not an overload</h2>

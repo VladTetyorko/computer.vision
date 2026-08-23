@@ -79,7 +79,7 @@ export function isWatchMode(param: string | undefined): boolean {
 
 /**
  * Whether `cockpit.html`'s video-surface "Detection is off — video only" chip should show
- * (docs/plans/active/CV-DEMAND-PLAN.md wave D3 — the honest affordance that replaces "an operator sees no
+ * (docs/plans/done/CV-DEMAND-PLAN.md wave D3 — the honest affordance that replaces "an operator sees no
  * boxes and has no idea why"). Requires **both** that a stream is actually live and that detection
  * is off — not just the latter, unlike the tool-rail's own `rail-dot` tell (`cockpit.html`), which
  * fires off `detectionEnabled` alone because it previews what a not-yet-started stream *would* send.
@@ -88,7 +88,7 @@ export function isWatchMode(param: string | undefined): boolean {
  * operator is about to get.
  *
  * `detectionEnabled` is now `CockpitFacade#detectionOn` — the running stream's own server-side value,
- * falling back to the draft only when nothing is running (docs/plans/active/STREAM-STATE-PLAN.md §3.1).
+ * falling back to the draft only when nothing is running (docs/plans/done/STREAM-STATE-PLAN.md §3.1).
  * The rail dot reads the same signal, so the "previews what Start would send" reading above holds
  * exactly where it always did: before a stream exists, that resolved value *is* the draft.
  */
@@ -117,7 +117,7 @@ export const TICKER_MAX_EVENTS = 4;
  * — the detection-boxes rendering-mode control it used to hold its own drawer for now lives inside
  * the `cv` drawer instead (`cv-control-panel.html`'s own "Boxes rendering" section).
  *
- * **`detections` was merged into `cv` in wave W5** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3): the
+ * **`detections` was merged into `cv` in wave W5** (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3): the
  * standalone strip-only drawer and the CV control drawer are now one "Vision" drawer, id kept as
  * `cv` — the least-disruptive choice (an operator's own persisted `localStorage` open-panel id still
  * opens the same drawer; there is no `detections` id left to migrate away from). See `cockpit.html`'s
@@ -137,7 +137,7 @@ export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'marks' | 'map' | 'help';
  * inset stays a separate persisted toggle … since it is glanceable, not a modal drawer") and is the
  * least "in the way" of the three.
  *
- * **`cvSetupOpen` is checked first** (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) — the setup
+ * **`cvSetupOpen` is checked first** (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1) — the setup
  * modal is the topmost overlay in the stack (it opens *over* the still-open Vision drawer, per the
  * plan's "opening it must not close the tool-rail drawer"), so `Esc` must close it alone on the
  * first press, leaving the drawer beneath it open for a second `Esc` to then close via `'panel'`.
@@ -254,7 +254,7 @@ export function isAllDronesOption(value: string): boolean {
   return value === ALL_DRONES_OPTION_VALUE;
 }
 
-// --- Truthful empty state (docs/plans/active/OPS-UX-PLAN.md §2 A2, docs/conclusions/OPS-UX-REVIEW.md §U2) -------
+// --- Truthful empty state (docs/plans/done/OPS-UX-PLAN.md §2 A2, docs/conclusions/OPS-UX-REVIEW.md §U2) -------
 //
 // `GET /api/assets` is already visibility-scoped (OPS-UX-PLAN.md §1's own table: "Every read …
 // unchanged" — this predates Wave A, nothing new here): a PILOT's `VisibilityScope` is
@@ -267,7 +267,7 @@ export function isAllDronesOption(value: string): boolean {
 export interface PickerEmptyState {
   readonly title: string;
   readonly message: string;
-  /** Only ADMIN/MANAGER get the CTA (docs/plans/active/OPS-UX-PLAN.md §2 A4 — the API now refuses `POST
+  /** Only ADMIN/MANAGER get the CTA (docs/plans/done/OPS-UX-PLAN.md §2 A4 — the API now refuses `POST
    * /api/assets` from anyone else, so the door must not be dangled for a PILOT either). */
   readonly showAddSource: boolean;
 }
@@ -289,7 +289,7 @@ function membershipGroupNames(memberships: readonly Membership[]): string | unde
  * branch (error / loading / empty) collapses its "empty" leg down to a single view model, mirroring
  * `onboarding-logic.ts`'s "component reads a computed, never branches on `topRole` itself" convention.
  *
- * **PILOT** (docs/plans/active/OPS-UX-PLAN.md §2 A2, verbatim wording): *"No aircraft assigned to you
+ * **PILOT** (docs/plans/done/OPS-UX-PLAN.md §2 A2, verbatim wording): *"No aircraft assigned to you
  * yet"*, naming their group from `memberships` when one resolves — never a fabricated person's name.
  * A PILOT with genuinely no membership at all (an edge the plan doesn't name a copy for) gets an
  * honest "could not determine your group" rather than either blank text or an invented one — the

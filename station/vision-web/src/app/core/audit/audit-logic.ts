@@ -3,7 +3,7 @@ import { formatActivity } from '../org/org-logic';
 import { activityAccentTone, type ActivityAccentTone } from '../activity/activity-logic';
 
 /**
- * Pure, Angular-free logic behind `/monitor/audit` (docs/plans/active/OPS-UX-PLAN.md §3 B1) — the manager's
+ * Pure, Angular-free logic behind `/monitor/audit` (docs/plans/done/OPS-UX-PLAN.md §3 B1) — the manager's
  * fleet-wide accountability surface over `GET /api/audit`, a built-and-audited endpoint no page in
  * this app called before this task (docs/conclusions/OPS-UX-REVIEW.md §U3). Deliberately reuses
  * `core/org/org-logic.ts#formatActivity` and `core/activity/activity-logic.ts#activityAccentTone`
@@ -51,7 +51,7 @@ const DENIED_PREFIX = 'DENIED';
  * `DefaultManualControlService` all follow the identical `"DENIED:<reason>"` convention on refusal).
  * **Not every service writes this key** — `DefaultAssetService`/`DefaultDeviceService` (the majority
  * of real fleet activity: create/edit/deactivate/delete an asset or device) never do, because
- * `AssetController`'s own authority gate (docs/plans/active/OPS-UX-PLAN.md §1) throws before the service
+ * `AssetController`'s own authority gate (docs/plans/done/OPS-UX-PLAN.md §1) throws before the service
  * layer is ever reached on a denial, so no entry is recorded for those refusals at all — an absent
  * `result` key therefore always means "this entry is a completed change", never "denied, but we
  * forgot to say so"; a fabricated distinction is never invented for the entries that carry no signal
@@ -126,7 +126,7 @@ export function buildAuditRows(
   });
 }
 
-/** The page's own two filters (docs/plans/active/OPS-UX-PLAN.md §3 B1 — "filterable by actor and action"); the backend's `targetType`/`targetId` query params are never used here — this page filters client-side over one already-fetched page of recent entries, not a second round-trip per filter change. */
+/** The page's own two filters (docs/plans/done/OPS-UX-PLAN.md §3 B1 — "filterable by actor and action"); the backend's `targetType`/`targetId` query params are never used here — this page filters client-side over one already-fetched page of recent entries, not a second round-trip per filter change. */
 export interface AuditFilter {
   readonly actorId?: string;
   readonly action?: string;

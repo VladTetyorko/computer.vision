@@ -40,7 +40,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * D4 (proxied sources open no {@code VideoSourcePort}) and the pull-mode wiring
- * (docs/plans/active/MEDIA-SOT-PLAN.md wave M5). {@link DefaultStreamServiceTest}
+ * (docs/plans/done/MEDIA-SOT-PLAN.md wave M5). {@link DefaultStreamServiceTest}
  * stays untouched — every one of its call sites uses the pre-existing constructors, which all default
  * {@code pullDetectionSettings} to {@code null} and get {@code proxiesSource() == false} from a plain
  * Mockito mock, so this file is purely additive coverage for the new wiring.

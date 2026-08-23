@@ -19,14 +19,14 @@ import java.util.Set;
  * streak of qualifying results opens/closes an event; see {@link
  * EventRuleConfig}.
  *
- * <p>{@code labelDenyFilter} (docs/plans/active/CV-CLEAN-FEED-PLAN.md &sect;2, D-2) is the
+ * <p>{@code labelDenyFilter} (docs/plans/done/CV-CLEAN-FEED-PLAN.md &sect;2, D-2) is the
  * operator-facing "hide this class" act: a detection whose label matches this set is dropped
  * <b>even when</b> {@code labelFilter} would otherwise keep it. The two sets answer different
  * questions — {@code labelFilter}, when non-empty, is the model-intent allowlist seed ("only
  * these labels ever exist for this stream"); {@code labelDenyFilter} is the everyday "stop
  * showing me trees" act, and writing to it never touches the allowlist, so classes not yet
  * observed keep appearing instead of being silently swept into an enumerated complement (the
- * allowlist-only defect docs/plans/active/CV-UX-RESEARCH.md &sect;4.4 diagnosed). Defensively
+ * allowlist-only defect docs/plans/done/CV-UX-RESEARCH.md &sect;4.4 diagnosed). Defensively
  * copied to an immutable set; empty means "deny nothing".
  *
  * <p>{@code detectionEnabled} (docs/plans/done/CV-CONTROL-PLAN.md §1, Wave B) is the
@@ -35,7 +35,7 @@ import java.util.Set;
  * detection costs zero CPU — while video keeps flowing at full rate,
  * untouched. Re-enabling resumes detection on the next sampled frame. The
  * skip itself is enforced by the application layer's {@code StreamPipeline}
- * (Wave C); this record only carries the flag. Since docs/plans/active/CV-DEMAND-PLAN.md &sect;1
+ * (Wave C); this record only carries the flag. Since docs/plans/done/CV-DEMAND-PLAN.md &sect;1
  * (wave D1) this is one of <em>two</em> independent gates {@code StreamPipeline} ANDs together —
  * see {@code DetectionDemandPort} for the other, system-derived half — and {@link
  * #DEFAULT_DETECTION_ENABLED} flipped to {@code false}: a stream is opt-in, not opt-out.
@@ -69,7 +69,7 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
     /**
      * Default for {@link #detectionEnabled()} on every N-1-arg convenience constructor, and what
      * {@link #defaults()} itself starts a new stream at — {@code false}
-     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;1, wave D1, which flipped this constant from its
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;1, wave D1, which flipped this constant from its
      * original {@code true}). Detection is opt-in per stream now, not opt-out: a deployment running
      * many concurrent streams can leave every one of them video-only, at effectively zero CV cost,
      * until an operator turns detection on for the ones they actually want to look at. A deployment
@@ -112,7 +112,7 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
     /**
      * Convenience constructor for callers that don't care about {@link #labelDenyFilter()} —
      * defaults it to an empty set ("deny nothing"), the same "N-1-arg convenience ctor" idiom used
-     * elsewhere. This was the canonical constructor before docs/plans/active/CV-CLEAN-FEED-PLAN.md
+     * elsewhere. This was the canonical constructor before docs/plans/done/CV-CLEAN-FEED-PLAN.md
      * &sect;2 added {@link #labelDenyFilter()}; every pre-existing 8-arg call site compiles
      * <em>and behaves</em> unchanged.
      */
@@ -178,7 +178,7 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * {@link EventRuleConfig#defaults()}, detection <strong>disabled</strong>, and tracking
      * {@link TrackingConfig#defaults() ASSOCIATE}.
      *
-     * <p><strong>Detection defaults to {@code false}</strong> (docs/plans/active/CV-DEMAND-PLAN.md &sect;1,
+     * <p><strong>Detection defaults to {@code false}</strong> (docs/plans/done/CV-DEMAND-PLAN.md &sect;1,
      * wave D1 — the plan's own flip of {@link #DEFAULT_DETECTION_ENABLED}): a new stream is
      * video-only, at zero CV cost, until an operator deliberately turns detection on for it. This is
      * what makes running many concurrent streams affordable — a stream nobody has switched on never

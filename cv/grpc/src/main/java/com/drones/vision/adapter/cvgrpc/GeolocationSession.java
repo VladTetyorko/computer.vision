@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * One open {@code LocalizeStream} bidi call for a single {@link StreamId} — the geolocation sibling
- * of {@link PulledDetectionSession} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1, H3). Structurally
+ * of {@link PulledDetectionSession} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1, H3). Structurally
  * simpler than its detection cousin: {@link com.drones.vision.perception.domain.port.PulledGeolocationPort}
  * has no {@code reconfigure} method at all — {@link GeoSessionConfig} (region/target-fps/prior) is
  * fixed for a session's whole life, captured once at construction; only {@link

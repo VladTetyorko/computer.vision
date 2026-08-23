@@ -18,7 +18,7 @@ import {
 } from './cv-control-panel-logic';
 
 /**
- * The Fly cockpit's **fly-time Vision surface** (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1, §1
+ * The Fly cockpit's **fly-time Vision surface** (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1, §1
  * "Surface 1 — flying: seconds matter, one glance") — the seven controls an operator needs while
  * actually flying, top to bottom: the Detect hero switch with an honest status line, a "Looking
  * for" summary row (name + cost word, with a "Change…" door into the setup modal), the Boxes
@@ -30,14 +30,14 @@ import {
  * `dialog.open('cv-setup')`, its own transient dialog `UiStore` group).
  *
  * **Split history**: this component used to be the single 474-line, 12-section CV control panel
- * (docs/plans/done/CV-CONTROL-PLAN.md Wave E through docs/plans/active/CV-CLEAN-FEED-PLAN.md wave
- * W5's merge into the one "Vision" drawer). docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 split it
+ * (docs/plans/done/CV-CONTROL-PLAN.md Wave E through docs/plans/done/CV-CLEAN-FEED-PLAN.md wave
+ * W5's merge into the one "Vision" drawer). docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1 split it
  * into this fly-time panel and the calm-hands `CvSetupModal` — see that plan's §1 for the full
  * "what lives where" rationale (CV-UX-RESEARCH.md §2's task ranking is the underlying *why*). This
  * component keeps the shared pure logic in `cv-control-panel-logic.ts` alongside the modal (both
  * import from it) rather than forking a second copy.
  *
- * **Body-only, no drawer shell of its own** (wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3,
+ * **Body-only, no drawer shell of its own** (wave W5, docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3,
  * unchanged by the P1 split): `cockpit.html` owns the one `<vision-side-panel>` shell for the
  * merged Vision drawer, mounting this component and `<vision-detections-strip>` as siblings inside
  * it; mounting this component *is* opening it.
@@ -71,7 +71,7 @@ export class CvControlPanel {
   readonly streamId = input<string | undefined>(undefined);
 
   /** The running stream's own server-side detect intent (`CockpitFacade`'s `facade.detectionOn()`,
-   * docs/plans/active/STREAM-STATE-PLAN.md §3.1) — already resolved by the facade against the draft, so
+   * docs/plans/done/STREAM-STATE-PLAN.md §3.1) — already resolved by the facade against the draft, so
    * this component renders it rather than re-deciding the rule. See {@link onDetectionEnabledToggle}
    * for why the switch never renders local intent. */
   readonly detectionEnabled = input<boolean>(false);
@@ -105,7 +105,7 @@ export class CvControlPanel {
    *  `CockpitFacade` all share. See class doc's own "The tracks poll is still owned here" paragraph. */
   protected readonly detections = inject(DetectionsStore);
 
-  // --- "Looking for" summary row (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 §1.1 item 2) -------
+  // --- "Looking for" summary row (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1 §1.1 item 2) -------
 
   protected readonly models = computed(() => this.fleet.models());
   protected readonly selectedModel = computed(() => findModel(this.models(), this.settings.effective().model));
@@ -144,7 +144,7 @@ export class CvControlPanel {
    * input (wave W4) — the overlay's T0 tier needs the same honest, wire-confirmed-only lock id. */
   readonly lockedTrackIdChange = output<number>();
 
-  // --- Detection status line (docs/plans/active/CV-UX-RESEARCH.md §1.2/§3/§9.2, waves U3+U5) -----
+  // --- Detection status line (docs/plans/done/CV-UX-RESEARCH.md §1.2/§3/§9.2, waves U3+U5) -----
 
   protected readonly hasStream = computed(() => !!this.streamId());
   private readonly latestResult = computed(() => this.detections.results()[0]);
@@ -195,7 +195,7 @@ export class CvControlPanel {
   }
 
   /**
-   * **Not** a debounced edit (docs/plans/active/STREAM-STATE-PLAN.md §3.1) — a single explicit
+   * **Not** a debounced edit (docs/plans/done/STREAM-STATE-PLAN.md §3.1) — a single explicit
    * click is not a gesture that might still be mid-drag, and it does not write what the operator
    * clicked into the rendered value: {@link detectionEnabled} is server truth, so the switch moves
    * once the wire says it moved. Emitting rather than self-applying is what keeps that single rule

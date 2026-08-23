@@ -10,7 +10,7 @@ import java.util.Optional;
 import java.util.concurrent.Flow;
 
 /**
- * Perception's ownership of "the localization session" (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * Perception's ownership of "the localization session" (docs/plans/done/VISUAL-GEO-V2-PLAN.md
  * D7) — at most one open session per stream, gated the same way {@code DefaultStreamService#start}
  * gates at most one active stream per device. One interface, one implementation: {@link
  * DefaultGeolocationSessionService}.

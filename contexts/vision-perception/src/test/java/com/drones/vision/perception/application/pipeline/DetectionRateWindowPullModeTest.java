@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pull-mode accounting (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7, wave M5, D12) — the worker's own
+ * Pull-mode accounting (docs/plans/done/MEDIA-SOT-PLAN.md &sect;7, wave M5, D12) — the worker's own
  * self-reported figures, mirrored rather than re-derived. {@link DetectionRateWindowTest} (push mode)
  * stays untouched: this is a sibling, not a replacement.
  */

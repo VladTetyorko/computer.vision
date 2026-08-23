@@ -8,7 +8,7 @@ cites the file actually read. No product code changed by this task.
 Prior art this builds on rather than repeats: docs/main/UX-DESIGN.md (the product promise),
 docs/conclusions/UX-SIMPLIFY-REVIEW.md (nav overwhelm — F1/F2/F3 largely shipped via
 NAV-IA-REDESIGN), docs/conclusions/FEATURE-MATRIX.md (feature value/effort), and
-docs/plans/active/CV-UX-RESEARCH.md (the Detection panel).
+docs/plans/done/CV-UX-RESEARCH.md (the Detection panel).
 
 ---
 
@@ -162,7 +162,7 @@ operator's menu should contain only things that work.
 
 ### U5 — The cockpit's Detection panel  *(already diagnosed, not yet built)*
 
-docs/plans/active/CV-UX-RESEARCH.md is a finished design: 15 controls of which an operator can
+docs/plans/done/CV-UX-RESEARCH.md is a finished design: 15 controls of which an operator can
 answer 6, three honesty defects (the class filter silently drops detections from alerts and
 recording, not just from the screen; the fps slider's label predates the rate controller; the
 primary on/off act is last in the scroll). Waves U1–U5 are pure frontend. It remains the

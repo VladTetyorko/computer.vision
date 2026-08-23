@@ -34,7 +34,7 @@ function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open
 
 /** `authEnabled` defaults to `false` — this app's own real default (`vision.auth.enabled=false`),
  *  so every existing call site here keeps exercising dev parity unless a test opts into a "real"
- *  secured session (docs/plans/active/OPS-UX-PLAN.md §2 A6's own dedicated tests below). */
+ *  secured session (docs/plans/done/OPS-UX-PLAN.md §2 A6's own dedicated tests below). */
 function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT', authEnabled = false) {
   return {
     user: () => (topRole ? { topRole, displayName: 'Test User', username: 'test' } : null),
@@ -144,7 +144,7 @@ describe('App shell', () => {
   });
 
   /**
-   * docs/plans/active/OPS-UX-PLAN.md §2 A6, docs/conclusions/OPS-UX-REVIEW.md §O3 — the persistent,
+   * docs/plans/done/OPS-UX-PLAN.md §2 A6, docs/conclusions/OPS-UX-REVIEW.md §O3 — the persistent,
    * non-dismissable "this station has no login" strip.
    */
   describe('the unsecured-station banner', () => {
@@ -193,7 +193,7 @@ describe('App shell', () => {
   });
 
   /**
-   * The regression this stack exists for (docs/plans/active/OPS-UX-PLAN.md §2 A6 rev.2): the first
+   * The regression this stack exists for (docs/plans/done/OPS-UX-PLAN.md §2 A6 rev.2): the first
    * revision made the unsecured banner its own `position: fixed` strip at the viewport top, which
    * painted it over the sidebar's brand row, over an open drawer's title, and over the offline
    * banner — two independent fixed strips at `inset: 0 0 auto 0` occupy the *same* pixels. Both
@@ -230,7 +230,7 @@ describe('App shell', () => {
     });
   });
 
-  it('shows the live-degraded banner only for the specific silent-degradation case: SSE closed + backend reachable (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1)', () => {
+  it('shows the live-degraded banner only for the specific silent-degradation case: SSE closed + backend reachable (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.1)', () => {
     const degraded = bannerWith(render({ topRole: 'PILOT', reachable: true, connectionState: 'closed' }),
       'Live updates disconnected');
     expect(degraded).not.toBeNull();

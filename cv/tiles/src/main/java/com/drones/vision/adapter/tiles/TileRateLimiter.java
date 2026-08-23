@@ -6,7 +6,7 @@ import java.util.concurrent.TimeUnit;
  * A shared token-interval rate limiter: at most {@code requestsPerSecond} outbound requests per
  * second across every thread calling {@link #acquire()} on the same instance — ported from the
  * Wave 0 spike's {@code cv-service/spikes/geo/tiles.py}'s {@code _RateLimiter} (harvested from
- * {@code feat/visual-geo}'s {@code adapter-tiles}, docs/plans/active/VISUAL-GEO-V2-PLAN.md §1.3).
+ * {@code feat/visual-geo}'s {@code adapter-tiles}, docs/plans/done/VISUAL-GEO-V2-PLAN.md §1.3).
  * One instance is shared by every {@link HttpTileSource#fetch} call, so the limit holds regardless
  * of how many threads a caller uses to fetch a region's tiles concurrently ({@code
  * vision.geo.visual.tiles.requests-per-second}).

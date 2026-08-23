@@ -17,7 +17,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * The live-operations authority seam (docs/plans/active/LIVE-SCOPE-PLAN.md §2.1) — {@link
+ * The live-operations authority seam (docs/plans/done/LIVE-SCOPE-PLAN.md §2.1) — {@link
  * StreamController}'s handlers deal in {@link StreamId}/{@link DeviceId} and {@code
  * StreamService} knows nothing about assets or ownership, while the device&rarr;asset&rarr;owner
  * mapping lives in warehouse ({@link AssetRepositoryPort#findByDeviceId}). Composing the two to
@@ -116,7 +116,7 @@ public final class StreamAccess {
     /**
      * Filters {@code streams} down to the ones the caller's scope may reach — the read half of
      * {@link StreamController#list}, which must narrow the fleet-wide list rather than all-or-
-     * nothing 403 it (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2).
+     * nothing 403 it (docs/plans/done/LIVE-SCOPE-PLAN.md §2.2).
      *
      * @param streams the candidate streams, as reported by {@link StreamService#streams()}
      * @return {@code streams}, filtered to the ones visible to {@link CurrentUser#scope()}
@@ -129,7 +129,7 @@ public final class StreamAccess {
      * Filters {@code devices} down to the ones the caller's scope may reach — the read half of
      * {@link DeviceController#list} (LIVE-SCOPE W5), mirroring {@link #filterVisible(List)}'s
      * stream-list narrowing so a scoped device list is filtered rather than all-or-nothing 403'd
-     * (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2).
+     * (docs/plans/done/LIVE-SCOPE-PLAN.md §2.2).
      *
      * @param devices the candidate devices, as reported by {@code DeviceService#devices}
      * @return {@code devices}, filtered to the ones visible to {@link CurrentUser#scope()}
@@ -142,7 +142,7 @@ public final class StreamAccess {
      * Whether {@code scope} may see the asset identified by {@code assetId} directly — the same
      * ownership rule {@link #visible(DeviceId)} applies, resolved from the asset itself rather than
      * by first walking a device to its asset. Exposed for {@code LiveAssetAccess}
-     * (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3), which must judge visibility for a connection
+     * (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3), which must judge visibility for a connection
      * captured at SSE-connect time — possibly re-checked minutes later, from the shared dispatcher
      * thread rather than that connection's own request thread — so it cannot read {@link
      * CurrentUser#scope()} (request-bound) and instead re-derives a fresh {@link VisibilityScope} of

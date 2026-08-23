@@ -16,7 +16,7 @@ import { OnboardingFacade } from './onboarding-facade';
  * (name/registration/photo/category) → Connect (the pre-existing 3-choice register/discover/
  * simulate component, moved here verbatim) → Test (probe + decoded frame before save — UX-DESIGN
  * §5.1's "test-before-save", skipped for Simulate) → Create (summary, then the actual
- * `POST /api/assets`/`POST /api/simulations` call) → **Assign** (docs/plans/active/OPS-UX-PLAN.md §2 A3, "Who
+ * `POST /api/assets`/`POST /api/simulations` call) → **Assign** (docs/plans/done/OPS-UX-PLAN.md §2 A3, "Who
  * flies this?" — offered only once the asset already exists; see `onboarding-logic.ts#WizardStep`'s
  * own doc comment for why it's the one step that isn't back-navigable).
  *

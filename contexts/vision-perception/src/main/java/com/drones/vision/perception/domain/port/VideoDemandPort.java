@@ -5,12 +5,12 @@ import com.drones.vision.kernel.StreamId;
 
 /**
  * Driven port: whether anything is currently consuming a stream's <b>video</b>
- * (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2) &mdash; the signal the idle policy stops a stream on.
+ * (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2) &mdash; the signal the idle policy stops a stream on.
  *
  * <h2>Why this is not {@link DetectionDemandPort}</h2>
  * They answer different questions and reusing the older one here would be a bug, not a shortcut.
  * {@code DetectionDemandPort} answers "is anyone consuming this stream's <i>detections</i>", and
- * since docs/plans/active/CV-DEMAND-PLAN.md detection is <b>off by default</b> &mdash; a stream watched as
+ * since docs/plans/done/CV-DEMAND-PLAN.md detection is <b>off by default</b> &mdash; a stream watched as
  * plain video, with no boxes, is the ordinary case in this deployment. A reaper driven by detection
  * demand would therefore stop precisely the streams the product is built to serve, while an operator
  * watched them.

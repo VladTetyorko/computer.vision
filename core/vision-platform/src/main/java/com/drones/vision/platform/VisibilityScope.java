@@ -33,7 +33,7 @@ import java.util.Set;
  * <p><strong>Visibility is not authority.</strong> {@link #includes(AssetId, Ownership)}/{@link
  * #includesGroup(GroupId)} answer "what may this request see"; {@link #canAdminister()}/{@link
  * #canManage(Ownership)} answer "what may this request do" — a distinct question this type used to
- * be asked without a dedicated answer (docs/plans/active/OPS-UX-PLAN.md §1). See their own javadoc
+ * be asked without a dedicated answer (docs/plans/done/OPS-UX-PLAN.md §1). See their own javadoc
  * for why the two questions diverge for {@link Kind#ASSIGNED_ASSETS}.
  *
  * @param kind           which case this scope is
@@ -159,7 +159,7 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
      *
      * <p>Exists because {@link #includes(AssetId, Ownership)} and {@link #canManageOrg()} both
      * answer a <em>visibility</em> question ("what may this request see/reach"), and two real call
-     * sites (docs/plans/active/OPS-UX-PLAN.md §1, citing docs/conclusions/OPS-UX-REVIEW.md §A1) had
+     * sites (docs/plans/done/OPS-UX-PLAN.md §1, citing docs/conclusions/OPS-UX-REVIEW.md §A1) had
      * been asking {@link #canManageOrg()} an <em>authority</em> question instead — whether the
      * caller may swap the model every stream in the deployment uses, or claim the one training
      * host. {@link Kind#GROUPS} (a MANAGER) is exactly as visible/manageable as {@link
@@ -180,7 +180,7 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
      *
      * <p>Exists for the same reason as {@link #canAdminister()}: {@link
      * #includes(AssetId, Ownership)} is a visibility filter, and asset lifecycle writes
-     * (docs/plans/active/OPS-UX-PLAN.md §1) had been gated on it directly, which conflates "the
+     * (docs/plans/done/OPS-UX-PLAN.md §1) had been gated on it directly, which conflates "the
      * caller can see this asset" with "the caller may administer it." A PILOT's {@link
      * Kind#ASSIGNED_ASSETS} scope is built so they can see (and fly) exactly the aircraft assigned
      * to them — that is the whole of a pilot's authority, so this predicate is {@code false} for

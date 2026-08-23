@@ -9,7 +9,7 @@
 # apply as overrides on top of whatever this file sets, exactly as they already do against mediamtx's
 # un-mounted baked-in config today.
 #
-# docs/plans/active/MEDIA-SOT-PLAN.md §5.3, blocking correction: mediamtx's Control API is IP-gated by
+# docs/plans/done/MEDIA-SOT-PLAN.md §5.3, blocking correction: mediamtx's Control API is IP-gated by
 # its own baked-in `authInternalUsers` -- the "any" user's `ips` list grants unauthenticated `api`
 # access only to a caller at 127.0.0.1/::1. A docker-published port does not preserve that view (the
 # container sees the compose bridge's gateway IP, not loopback), so vision-app calling from a sibling
@@ -55,7 +55,7 @@ authInternalUsers:
       - action: pprof
 
 # Preserves mediamtx's own default per-path behaviour: any path name (a per-start random StreamId,
-# docs/plans/active/MEDIA-SOT-PLAN.md D2) is accepted with no explicit per-path configuration block --
+# docs/plans/done/MEDIA-SOT-PLAN.md D2) is accepted with no explicit per-path configuration block --
 # exactly what the plain RTSP push path already relies on today, and what MediamtxProxyPublisher's
 # dynamically created paths (POST /v3/config/paths/add/{streamId}) need too.
 paths:

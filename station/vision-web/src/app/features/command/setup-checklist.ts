@@ -4,7 +4,7 @@ import { Icon } from '../../shared/ui/icon';
 import type { SetupChecklistRow } from '../../core/command/setup-checklist-logic';
 
 /**
- * `/command`'s "Set up this station" checklist (docs/plans/active/OPS-UX-PLAN.md §3 B2) — a dumb,
+ * `/command`'s "Set up this station" checklist (docs/plans/done/OPS-UX-PLAN.md §3 B2) — a dumb,
  * `OnPush` presentational component: every row (which ones exist, which are done, where each one
  * links) is `CommandFacade.setupChecklist`'s job (`core/command/setup-checklist-logic.ts#buildSetupChecklist`);
  * this component only renders whatever it's handed. `CommandPage` mounts it once, gated on

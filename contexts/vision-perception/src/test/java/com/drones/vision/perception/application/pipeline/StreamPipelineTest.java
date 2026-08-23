@@ -88,7 +88,7 @@ class StreamPipelineTest {
         eventPublisher = mock(EventPublisherPort.class);
     }
 
-    // docs/plans/active/CV-DEMAND-PLAN.md §1 flipped PipelineConfig.DEFAULT_DETECTION_ENABLED to false; every
+    // docs/plans/done/CV-DEMAND-PLAN.md §1 flipped PipelineConfig.DEFAULT_DETECTION_ENABLED to false; every
     // test in this file exercises the detection machinery itself, so both helpers state
     // detectionEnabled=true explicitly rather than relying on a default this suite never meant to
     // depend on.
@@ -289,7 +289,7 @@ class StreamPipelineTest {
 
     @Test
     void aThrowingTelemetrySupplierIsSwallowedAndDetectionKeepsFlowingWithAnUnknownAttitude() {
-        // CRITICAL INVARIANT (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1): with the telemetry-OSD burn-in
+        // CRITICAL INVARIANT (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1): with the telemetry-OSD burn-in
         // gone, cameraAttitude()/readTelemetry() is telemetrySupplier's only remaining consumer --
         // this pins that a failing supplier still cannot break the pipeline (video/detection keep
         // flowing) with nothing overlay-shaped anywhere in the call. CameraAttitude.from(null, ...)
@@ -500,7 +500,7 @@ class StreamPipelineTest {
 
     @Test
     void latestRawFrameMirrorsLatestFrameNowThatThereIsNoOverlayStage() {
-        // docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1: published video is always clean pixels -- there is no
+        // docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1: published video is always clean pixels -- there is no
         // server-side render stage to distinguish a "pre-overlay" instance from a "post-overlay" one
         // anymore. latestRawFrame() is kept as its own named method only because training-sample
         // capture (docs/plans/done/CV-TRAINING-PLAN.md §2/§D) reaches this API by that name specifically; this
@@ -541,7 +541,7 @@ class StreamPipelineTest {
 
     @Test
     void achievesExactlyTheRequestedRateForASourceRateItIsNotAMultipleOf() {
-        // THE regression this sampler exists for (docs/plans/active/CV-RATE-CONTROL-PLAN.md §1, loss L1).
+        // THE regression this sampler exists for (docs/plans/done/CV-RATE-CONTROL-PLAN.md §1, loss L1).
         // A 24fps source asked for 10fps: the integer stride this replaced could only pick
         // round(24/10) = every 2nd frame -- 12fps, a 20% overshoot it had no way to correct, and
         // one frame rate off in the other direction (25fps) would have undershot to 8.3 instead.
@@ -986,7 +986,7 @@ class StreamPipelineTest {
         assertEquals(firstResult.detections(), pipeline.latestDetections());
 
         // Same model id ("yolo"): a hot-knob-only patch must never behave like a re-arm. detectionEnabled
-        // stated explicitly (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default) since
+        // stated explicitly (docs/plans/done/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default) since
         // this test's whole point is that detection keeps running across the swap.
         PipelineConfig hotter = new PipelineConfig(new ModelRef("yolo", "latest"), 0.75, 1000, 5, Set.of(),
                 EventRuleConfig.defaults(), true);
@@ -1043,7 +1043,7 @@ class StreamPipelineTest {
         verify(detectionPort, times(1)).detect(any(), any());
     }
 
-    // --- docs/plans/active/CV-DEMAND-PLAN.md §1, §3.2: detection demand -- the second, independent gate ---
+    // --- docs/plans/done/CV-DEMAND-PLAN.md §1, §3.2: detection demand -- the second, independent gate ---
 
     @Test
     void detectionDemandDefaultsToTrueAndReflectsUpdates() {
@@ -1123,7 +1123,7 @@ class StreamPipelineTest {
         verify(detectionPort, times(1)).detect(any(), any());
     }
 
-    // --- docs/plans/active/CV-DEMAND-PLAN.md §3.6: DetectionState -- the gate made legible ---
+    // --- docs/plans/done/CV-DEMAND-PLAN.md §3.6: DetectionState -- the gate made legible ---
 
     @Test
     void detectionStateIsRunningWhenBothDetectionEnabledAndDetectionDemandAreTrue() {
@@ -1155,7 +1155,7 @@ class StreamPipelineTest {
                         + "so disabling detection must never also read as 'nobody is watching'");
     }
 
-    // --- docs/plans/active/CV-DEMAND-PLAN.md §5/§7: closing the gate clears what it already served,
+    // --- docs/plans/done/CV-DEMAND-PLAN.md §5/§7: closing the gate clears what it already served,
     // not just what it would have served next -- reversing this task's own first-cut decision that
     // a frozen last result was harmless. It is not: DetectionsStore polls every 2s and only preserves
     // a stale value on an *empty or failed* poll, so an un-cleared frozen result keeps being served,
@@ -1328,7 +1328,7 @@ class StreamPipelineTest {
         pipeline.onNext(frame(0));
         assertFalse(pipeline.latestDetections().isEmpty());
 
-        // detectionEnabled stated explicitly (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor
+        // detectionEnabled stated explicitly (docs/plans/done/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor
         // default) since this test's whole point is that the next sampled frame still detects, on
         // the new model.
         PipelineConfig newModel = new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, Set.of(),
@@ -1349,7 +1349,7 @@ class StreamPipelineTest {
 
     // --- docs/plans/done/TRACKING-PLAN.md §5.D/§5.E, wave T3: track book, stats window, follow sampling ---
 
-    // --- docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2: the adaptive rate, end to end -------------
+    // --- docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2: the adaptive rate, end to end -------------
 
     private static StreamPipelineSettings settingsWithAdaptiveRate(AdaptiveRateSettings adaptiveRate) {
         StreamPipelineSettings base = StreamPipelineSettings.defaults();

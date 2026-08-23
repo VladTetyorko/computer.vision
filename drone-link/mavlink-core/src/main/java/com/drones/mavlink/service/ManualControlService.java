@@ -32,7 +32,7 @@ import java.util.function.LongSupplier;
  * <h2>Two rates, not one: a ceiling and a keepalive</h2>
  * A single fixed rate used to serve as both "how often we transmit" and "how long a new stick
  * position waits", which cost a frame up to a full period of dead time for no protocol reason
- * (docs/plans/active/RC-LATENCY-PLAN.md §1). The rate is now split:
+ * (docs/plans/done/RC-LATENCY-PLAN.md §1). The rate is now split:
  * <ul>
  *   <li><b>{@code coalescePeriod}</b> ({@code 1/maxOverrideHz}) — the wire <em>ceiling</em>. Never
  *       transmit faster than this, however fast the caller writes.</li>

@@ -60,7 +60,7 @@ public interface SimulationService {
      * <p>A feed's TX side (the transmit thread pushing a local file to mediamtx) is pure in-process
      * runtime state — nothing durable backs it, so it never survives a JVM restart on its own: the
      * asset/device rows come back exactly as they were (Postgres-backed, unconditionally — see
-     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b), but their {@code rtsp} URI points at a path
+     * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b), but their {@code rtsp} URI points at a path
      * mediamtx has no publisher for anymore, 404-ing forever. Intended to be called once, at boot,
      * after the fleet has been restored from storage but before real traffic (see {@code
      * vision-app}'s {@code ApplicationRunner}, gated on {@code vision.simulation.resume-on-boot}).

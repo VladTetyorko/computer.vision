@@ -1,5 +1,5 @@
 """Job-lifecycle state machine for `Geolocation.BuildReferenceIndex`
-(docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1/H4, production port of
+(docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1/H4, production port of
 `spikes/geo/harvested/orchestrator.py`). Mirrors `cv_service/training/orchestrator.py`'s queue +
 daemon-thread + cancel-event + `is_context_active()` poll shape almost verbatim -- see that
 module's docstring for the full "why a background thread" rationale (a multi-thousand-tile

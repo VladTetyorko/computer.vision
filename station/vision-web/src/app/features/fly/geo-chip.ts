@@ -4,7 +4,7 @@ import { geoChipLabel, geoChipTone, geoDetailRows } from '../../core/geo/geo-log
 import { Icon } from '../../shared/ui/icon';
 
 /**
- * The Fly cockpit's visual-geolocation divergence chip (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8,
+ * The Fly cockpit's visual-geolocation divergence chip (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8,
  * wave H6) — embedded in `fly-osd.ts`'s Nav cluster, DI-sharing whichever {@link GeoStore} instance
  * `CockpitPage` provided, the exact same "second consumer → a shared, dumb, DI-sharing component"
  * idiom `shared/ui/weather-chip.ts` already established for the Env cluster's own chip. Takes no

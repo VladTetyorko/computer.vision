@@ -51,7 +51,7 @@
   @if (facade.loading()) {
     <p class="muted">Loading…</p>
   } @else if (facade.error(); as error) {
-    <!-- Honest 403 handling (docs/plans/active/OPS-UX-PLAN.md §3 B1) — `AuditFacade.error` carries
+    <!-- Honest 403 handling (docs/plans/done/OPS-UX-PLAN.md §3 B1) — `AuditFacade.error` carries
          `ApiExceptionHandler`'s own `ErrorResponse.message` verbatim via `describeHttpError`, so a
          caller whose role changed mid-session (the route guard already keeps a plain PILOT out, but
          a stale session is still possible) sees the real reason, never a table that looks like

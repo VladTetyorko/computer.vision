@@ -15,7 +15,7 @@ import java.util.concurrent.Flow;
 
 /**
  * {@link PulledDetectionPort} over the generated {@code Inference/DetectPulled} bidi stub — the Java
- * client half of the pull-mode contract added by docs/plans/active/MEDIA-SOT-PLAN.md wave M1 (see
+ * client half of the pull-mode contract added by docs/plans/done/MEDIA-SOT-PLAN.md wave M1 (see
  * {@code proto/vision/v1/cv.proto}).
  *
  * <h2>Channel sharing</h2>
@@ -33,7 +33,7 @@ import java.util.concurrent.Flow;
  * this class needs is a {@link PulledDetectionSession}; see that class for the bidi call machinery.
  *
  * <h2>Reconnect/backoff is deliberately not built here</h2>
- * docs/plans/active/MEDIA-SOT-PLAN.md decision D5: a source-unopenable or stalled-past-timeout pull ends its
+ * docs/plans/done/MEDIA-SOT-PLAN.md decision D5: a source-unopenable or stalled-past-timeout pull ends its
  * call with {@code UNAVAILABLE}, which this class surfaces honestly via {@link Flow.Subscriber#onError}
  * and nothing more. Reopening with backoff is the existing generic {@code
  * SupervisedPublisher<DetectionResult>}'s job (vision-application, a later wiring wave), reusing the

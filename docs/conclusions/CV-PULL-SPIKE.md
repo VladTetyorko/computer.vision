@@ -1,7 +1,7 @@
 # CV-PULL-SPIKE — M0 measurements for MEDIA-SOT-PLAN
 
 **Status:** spike complete, 2026-08-12. Wave M0 of
-[MEDIA-SOT-PLAN.md](../plans/active/MEDIA-SOT-PLAN.md) §8. Gates M3/M5/M6. No product code
+[MEDIA-SOT-PLAN.md](../plans/done/MEDIA-SOT-PLAN.md) §8. Gates M3/M5/M6. No product code
 changed; every number below comes from `cv-service/spikes/pull/` run against a throwaway
 mediamtx container, this laptop, and the GB4005 box. Numbers not measured this session are
 marked **not measured** rather than estimated — CV-RATE-BUDGET.md §5's standing lesson.

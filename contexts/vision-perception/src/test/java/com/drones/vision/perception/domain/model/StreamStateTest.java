@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Pins {@link StreamState#resolve}'s decision table and, more importantly, its <b>precedence</b> —
- * the part a reader cannot infer from the enum constants alone (docs/plans/active/STREAM-STATE-PLAN.md
+ * the part a reader cannot infer from the enum constants alone (docs/plans/done/STREAM-STATE-PLAN.md
  * &sect;2.1).
  */
 class StreamStateTest {

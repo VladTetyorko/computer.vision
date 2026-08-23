@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Unit tests for the sampler's accounting (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R1) — the
+ * Unit tests for the sampler's accounting (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R1) — the
  * counters that turn "this stream is not running at its configured rate" into a diagnosis.
  */
 class DetectionRateWindowTest {

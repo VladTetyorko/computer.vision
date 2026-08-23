@@ -23,7 +23,7 @@ import java.util.Map;
  *
  * <p><b>{@code altitudeMeters} is AMSL</b> (above mean sea level, e.g. MAVLink {@code
  * GLOBAL_POSITION_INT.alt}) — {@link GeoPosition} and every other consumer in the codebase already
- * read it that way (docs/plans/active/GEO-POSE-PLAN.md G1), so this field keeps that meaning rather
+ * read it that way (docs/plans/done/GEO-POSE-PLAN.md G1), so this field keeps that meaning rather
  * than being silently redefined. {@code aglMeters} is the separate, new field for height above the
  * ground (MAVLink {@code GLOBAL_POSITION_INT.relative_alt}) — the figure a projection actually wants,
  * since a projection's "how far away does the camera's line of sight hit the ground" question is
@@ -34,7 +34,7 @@ import java.util.Map;
  * convenience constructor defaults it to {@code null} so every pre-existing call site compiles
  * unchanged (same "N-1-arg convenience ctor" idiom as {@code AssetUsage}'s 7-arg ctor).
  *
- * <p>{@code aglMeters}, {@code attitude} and {@code deviceBootMillis} (docs/plans/active/GEO-POSE-PLAN.md
+ * <p>{@code aglMeters}, {@code attitude} and {@code deviceBootMillis} (docs/plans/done/GEO-POSE-PLAN.md
  * §4.1, wave V1) are appended the same way: the 9-arg constructor (the previous full arity, itself a
  * convenience overload since W1.6c) defaults all three to {@code null}, so all 46 pre-existing
  * {@code new Telemetry(...)} call sites across both the 8-arg and 9-arg shapes keep compiling
@@ -95,7 +95,7 @@ public record Telemetry(DeviceId deviceId, Instant at, Double latitude, Double l
      * Convenience constructor for callers that don't have AGL, attitude or a device boot timestamp
      * to report — defaults {@link #aglMeters()}, {@link #attitude()} and {@link #deviceBootMillis()}
      * all to {@code null}, unchanged behavior for every pre-existing call site (this was the full
-     * arity before docs/plans/active/GEO-POSE-PLAN.md wave V1 appended the three new components).
+     * arity before docs/plans/done/GEO-POSE-PLAN.md wave V1 appended the three new components).
      */
     public Telemetry(DeviceId deviceId, Instant at, Double latitude, Double longitude, Double altitudeMeters,
                       Double headingDegrees, Double batteryPercent, Map<String, Double> extra,

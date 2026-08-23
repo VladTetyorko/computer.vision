@@ -15,7 +15,7 @@ import {
 const AUDIT_FETCH_LIMIT = 200;
 
 /**
- * `AuditPage`'s facade (docs/plans/active/OPS-UX-PLAN.md §3 B1, docs/plans/done/UI-ARCHITECTURE-PLAN.md layering) —
+ * `AuditPage`'s facade (docs/plans/done/OPS-UX-PLAN.md §3 B1, docs/plans/done/UI-ARCHITECTURE-PLAN.md layering) —
  * mirrors `features/activity/activity-facade.ts`'s one-shot-load shape almost exactly, fleet-wide
  * instead of "just me": `VisionApi.listAudit` is the primary call, whose failure (most notably a
  * `403` for anyone who isn't ADMIN/MANAGER, or a stale session whose role changed mid-session even

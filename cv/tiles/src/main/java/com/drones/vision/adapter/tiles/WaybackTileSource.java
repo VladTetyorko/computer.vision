@@ -14,7 +14,7 @@ import java.util.concurrent.CompletionException;
  * {@link ReferenceTileSourcePort} that fetches one tile from <em>every</em> configured Wayback
  * historical release in parallel, scores each successful candidate with {@link TileOcclusionScorer},
  * and returns the least-occluded one (harvested from {@code feat/visual-geo}'s {@code
- * adapter-tiles}, docs/plans/active/VISUAL-GEO-V2-PLAN.md §1.3/§3.6's {@code wayback-multi-date}
+ * adapter-tiles}, docs/plans/done/VISUAL-GEO-V2-PLAN.md §1.3/§3.6's {@code wayback-multi-date}
  * knob) — purely additive, zero changes to the existing single-date {@link HttpTileSource} or its
  * callers.
  *

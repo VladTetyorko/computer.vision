@@ -29,7 +29,7 @@ class ActiveStreamTest {
 
     @Test
     void threeArgConstructorDefaultsToUnobservedAndDetectionDisabled() {
-        // docs/plans/active/STREAM-STATE-PLAN.md §2.3: the "we were not told" answers, deliberately,
+        // docs/plans/done/STREAM-STATE-PLAN.md §2.3: the "we were not told" answers, deliberately,
         // not optimistic ones -- a caller that omits state has not established video is flowing.
         StreamId streamId = StreamId.random();
         DeviceId deviceId = DeviceId.random();

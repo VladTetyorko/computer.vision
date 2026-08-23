@@ -16,7 +16,7 @@ import java.util.Optional;
 
 /**
  * {@link TrackCorrectionRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations})
- * — docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, H5.
+ * — docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, H5.
  *
  * <p>{@link #save} always {@code persist}s a brand-new row (append-only — {@link TrackCorrection}
  * carries no id to merge by, see {@link TrackCorrectionEntity}'s own javadoc), the same

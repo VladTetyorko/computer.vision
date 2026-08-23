@@ -77,9 +77,9 @@ export type IconName =
   // tactical marks (docs/plans/done/TACTICAL-MARKS-PLAN.md M5)
   | 'target'
   | 'flag'
-  // audit trail (docs/plans/active/OPS-UX-PLAN.md §3 B1)
+  // audit trail (docs/plans/done/OPS-UX-PLAN.md §3 B1)
   | 'shield'
-  // setup checklist (docs/plans/active/OPS-UX-PLAN.md §3 B2) — a done row's own tick mark.
+  // setup checklist (docs/plans/done/OPS-UX-PLAN.md §3 B2) — a done row's own tick mark.
   | 'check';
 
 export const ICONS: Record<IconName, string> = {
@@ -184,10 +184,10 @@ export const ICONS: Record<IconName, string> = {
   // Tactical marks (docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — TARGET's crosshair and FRIENDLY's flag.
   target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><line x1="12" y1="1" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="1" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="23" y2="12"/>',
   flag: '<line x1="5" y1="21" x2="5" y2="3"/><path d="M5 4h13l-3.2 4.5L18 13H5"/>',
-  // Audit trail (docs/plans/active/OPS-UX-PLAN.md §3 B1) — a shield reads as "accountability record", distinct
+  // Audit trail (docs/plans/done/OPS-UX-PLAN.md §3 B1) — a shield reads as "accountability record", distinct
   // from `history` (already the personal-activity icon) so the two log surfaces stay visually distinct.
   shield: '<path d="M12 3l7 3.5v5c0 5-3.2 8-7 9.5-3.8-1.5-7-4.5-7-9.5v-5L12 3Z"/><polyline points="9 12 11 14 15 9.5"/>',
-  // Setup checklist (docs/plans/active/OPS-UX-PLAN.md §3 B2) — a bare tick, no ring/circle around it
+  // Setup checklist (docs/plans/done/OPS-UX-PLAN.md §3 B2) — a bare tick, no ring/circle around it
   // (unlike `shield`'s check-in-a-shield): the row's own layout supplies the "done" framing.
   check: '<polyline points="4 12 9.5 17.5 20 6"/>',
 };

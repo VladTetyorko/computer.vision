@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * {@code video-publish}'s {@link SubsystemStatusPort} (docs/plans/active/SYSTEM-STATUS-PLAN.md
+ * {@code video-publish}'s {@link SubsystemStatusPort} (docs/plans/done/SYSTEM-STATUS-PLAN.md
  * §4.2): reports whether streams currently being pushed to mediamtx are actually getting through,
  * using {@link MediamtxStreamPublisher#streamsInOutage()} — the same {@link PublishBackoff} state
  * that already throttles reconnects and drops frames during a real outage.

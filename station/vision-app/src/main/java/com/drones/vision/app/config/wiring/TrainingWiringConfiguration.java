@@ -68,7 +68,7 @@ import org.springframework.context.annotation.Configuration;
  * LiveController} takes for its own property, applied here to a whole small cluster of beans
  * instead of one controller. Every bean is therefore individually {@code
  * @ConditionalOnProperty}-gated — a shape {@link PersistenceWiringConfiguration} itself no longer
- * has any of, since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b made every one of its beans
+ * has any of, since docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b made every one of its beans
  * unconditional.
  *
  * <p>{@link DatasetRepositoryPort}/{@link TrainingSampleRepositoryPort}/{@link

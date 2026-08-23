@@ -9,7 +9,7 @@ import java.time.Instant;
 
 /**
  * A second, parallel opinion about where the aircraft is — the aircraft's <b>own</b> position, not a
- * ground object's (docs/plans/active/VISUAL-GEO-V2-PLAN.md D7, §3.5), built from one {@code
+ * ground object's (docs/plans/done/VISUAL-GEO-V2-PLAN.md D7, §3.5), built from one {@code
  * VisualFix} plus the aircraft's own reported telemetry at the same frame time. Persisted and
  * published unconditionally, {@link CorrectionStatus#NO_FIX} included — a refusal is a measurement,
  * not an error (the same posture {@link com.drones.vision.kernel.VisualFix} itself takes).

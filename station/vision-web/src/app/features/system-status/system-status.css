@@ -1,7 +1,7 @@
 /* Reuses `.page`/`.card`/`.grid12`/`.col-*`/`.chip`/`.dot`/`.mono`/`.muted`/`.truncate` from
    `src/styles.css` — no new colors, no bespoke elevation. `.subsystem-row`/`.subsystem-row-head`
    mirror `features/reports/reports.css`'s own `.attention-row`/`.attention-row-head` layout
-   (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1's own anatomy: one `.chip` per row max, `detail` in body
+   (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1's own anatomy: one `.chip` per row max, `detail` in body
    text, `hint` as the next-action line, `since` in `.mono` — style law §5/§6). **`.hint` is not a
    global primitive** (grep-confirmed — it only exists as a page-local class in `debug.css`), so the
    next-action line here is this file's own `.subsystem-hint`/`.transport-note`, not a borrowed name. */

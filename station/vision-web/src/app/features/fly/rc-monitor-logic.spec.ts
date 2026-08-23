@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { channelBindingLabel, engageDisabledReason, latencyLabel } from './rc-monitor-logic';
 
-const BASE = { hasAsset: true, canCommand: true, gamepadSupported: true, gamepadConnected: true, engageState: 'idle' as const };
+const BASE = {
+  hasAsset: true,
+  canCommand: true,
+  sourceKind: 'gamepad' as const,
+  gamepadConnected: true,
+  engageState: 'idle' as const,
+};
 
 describe('engageDisabledReason', () => {
   it('is undefined (enabled) when every condition is met', () => {
@@ -21,20 +27,20 @@ describe('engageDisabledReason', () => {
     expect(engageDisabledReason({ ...BASE, hasAsset: false, canCommand: false })).toBe('Pick a drone first.');
   });
 
-  it('reports not commandable before the gamepad checks', () => {
+  it('reports not commandable before the input-source check', () => {
     expect(engageDisabledReason({ ...BASE, canCommand: false, gamepadConnected: false })).toBe(
       "This drone isn't commandable right now.",
     );
   });
 
-  it('reports unsupported gamepad API before "not connected"', () => {
-    expect(engageDisabledReason({ ...BASE, gamepadSupported: false, gamepadConnected: false })).toBe(
-      "This browser doesn't expose gamepad input.",
+  it('reports the transmitter not being plugged in as the last-mile reason', () => {
+    expect(engageDisabledReason({ ...BASE, gamepadConnected: false })).toBe(
+      'Plug your transmitter in, or switch to the on-screen controls.',
     );
   });
 
-  it('reports the transmitter not being plugged in as the last-mile reason', () => {
-    expect(engageDisabledReason({ ...BASE, gamepadConnected: false })).toBe('Plug your transmitter in first.');
+  it('does not require a gamepad at all when the on-screen source is selected', () => {
+    expect(engageDisabledReason({ ...BASE, sourceKind: 'virtual', gamepadConnected: false })).toBeUndefined();
   });
 
   it('is engaged is also enabled (a caller should not render the button in that state, but the gate itself does not special-case it)', () => {
@@ -55,9 +61,31 @@ describe('latencyLabel', () => {
 
 describe('channelBindingLabel', () => {
   it('renders "<label> → CH<n>"', () => {
-    expect(channelBindingLabel({ source: 'AXIS', sourceIndex: 0, rcChannel: 1, label: 'Roll' })).toBe('Roll → CH1');
-    expect(channelBindingLabel({ source: 'BUTTON', sourceIndex: 0, rcChannel: 5, label: 'Aux 1' })).toBe(
-      'Aux 1 → CH5',
-    );
+    expect(
+      channelBindingLabel({
+        source: 'AXIS',
+        function: 'ROLL',
+        travel: 'CENTERED',
+        sourceIndex: 0,
+        rcChannel: 1,
+        minMicros: 1000,
+        centerMicros: 1500,
+        maxMicros: 2000,
+        label: 'Roll',
+      }),
+    ).toBe('Roll → CH1');
+    expect(
+      channelBindingLabel({
+        source: 'AXIS',
+        function: 'THROTTLE',
+        travel: 'UNIDIRECTIONAL',
+        sourceIndex: 2,
+        rcChannel: 3,
+        minMicros: 1000,
+        centerMicros: 1000,
+        maxMicros: 2000,
+        label: 'Throttle',
+      }),
+    ).toBe('Throttle → CH3');
   });
 });

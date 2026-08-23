@@ -75,7 +75,7 @@ class VisionCvPropertiesTest {
 
     @Test
     void detectionDefaultEnabledDefaultsToFalseThroughTheConvenienceConstructor() {
-        // docs/plans/active/CV-DEMAND-PLAN.md §3.7: a deployment that never sets this stays on
+        // docs/plans/done/CV-DEMAND-PLAN.md §3.7: a deployment that never sets this stays on
         // today's behavior -- a new stream starts with detection off until something asks for it.
         VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f);
         assertFalse(properties.detectionDefaultEnabled());

@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 
 /**
- * A per-principal token-bucket limiter on {@code /api/**} (docs/plans/active/SCALE-100-PLAN.md §5 S6 item 3).
+ * A per-principal token-bucket limiter on {@code /api/**} (docs/plans/done/SCALE-100-PLAN.md §5 S6 item 3).
  *
  * <p><strong>What this is, and what it deliberately is not</strong> — the plan says it plainly:
  * this is <em>not</em> security hardening, it is a blast-radius bound. Today one misbehaving
@@ -66,7 +66,7 @@ import java.util.function.LongSupplier;
  * <h2>Memory — bounded, evicted</h2>
  * {@link #buckets} is a plain {@code ConcurrentHashMap} keyed by principal; left alone it would
  * retain one bucket per principal ever seen since boot, the exact class of leak
- * docs/plans/active/SCALE-100-PLAN.md §5 S2 fixed for {@code LiveUpdateRegistry}'s per-asset
+ * docs/plans/done/SCALE-100-PLAN.md §5 S2 fixed for {@code LiveUpdateRegistry}'s per-asset
  * buffers. {@link #evictIdleBuckets()} sweeps it on a background timer in the same shape as that
  * fix (single daemon thread, package-private sweep method so a test can trigger it directly
  * instead of waiting on the real timer).
@@ -76,7 +76,7 @@ public final class RateLimitFilter extends OncePerRequestFilter {
     /**
      * Default bucket capacity and refill rate, permits per rolling minute, used when {@code
      * vision-app} doesn't override it via {@code vision.api.rate-limit.permits-per-minute}
-     * (docs/plans/active/SCALE-100-PLAN.md §6). Chosen generously: the plan's §2.1 measures an
+     * (docs/plans/done/SCALE-100-PLAN.md §6). Chosen generously: the plan's §2.1 measures an
      * ungated cockpit tab at roughly 1 request/second; 600/minute (10/s sustained on average,
      * refilling continuously, burstable up to a full minute's allotment at once) comfortably
      * covers several such tabs open at once under one principal, while still bounding the runaway

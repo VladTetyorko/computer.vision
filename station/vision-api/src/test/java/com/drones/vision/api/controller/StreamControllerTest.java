@@ -95,13 +95,13 @@ class StreamControllerTest {
     private StreamService streamService;
     private StreamPublisherPort streamPublisherPort;
     private DetectionRepositoryPort detectionRepositoryPort;
-    /** Backs {@link StreamAccess}'s device&rarr;asset&rarr;owner resolution (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2). */
+    /** Backs {@link StreamAccess}'s device&rarr;asset&rarr;owner resolution (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2). */
     private AssetRepositoryPort assetRepositoryPort;
     private StreamDetectionSupport streamDetectionSupport;
     /**
      * A real instance (not a mock -- {@code LiveAndPollDetectionDemand} is {@code final} and this
      * repo carries no inline Mockito mock-maker), constructed with a never-watching SSE predicate so
-     * only the poll half (docs/plans/active/CV-DEMAND-PLAN.md §3.5) is exercised via {@link
+     * only the poll half (docs/plans/done/CV-DEMAND-PLAN.md §3.5) is exercised via {@link
      * #detectionDemand}'s own {@code detectionWanted}/{@code touched} reads in tests below.
      */
     private LiveAndPollDetectionDemand detectionDemand;
@@ -374,7 +374,7 @@ class StreamControllerTest {
 
     @Test
     void startMergesLabelDenyFilterOverrideOntoDefaults() throws Exception {
-        // docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2: labelDenyFilter is per-stream settable exactly
+        // docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2: labelDenyFilter is per-stream settable exactly
         // like labelFilter/confidenceThreshold/inferenceFps above.
         StreamId streamId = StreamId.random();
         when(streamService.start(any(), any(), any())).thenReturn(streamId);
@@ -518,7 +518,7 @@ class StreamControllerTest {
 
     @Test
     void startWithoutDetectionEnabledKeepsWhateverStreamDetectionSupportsDefaultConfigSays() throws Exception {
-        // docs/plans/active/CV-DEMAND-PLAN.md §1/§3.8 (wave D1, already landed): PipelineConfig.defaults()'s
+        // docs/plans/done/CV-DEMAND-PLAN.md §1/§3.8 (wave D1, already landed): PipelineConfig.defaults()'s
         // own detectionEnabled flipped to false -- a new stream is video-only until an operator or a
         // vision.cv.detection-default-enabled=true deployment override turns it on. This controller
         // never hardcodes that value itself; it merges purely onto whatever StreamDetectionSupport
@@ -744,7 +744,7 @@ class StreamControllerTest {
 
     @Test
     void detectionsTouchesTheDemandPortSoAPollingReaderCountsAsDemand() throws Exception {
-        // docs/plans/active/CV-DEMAND-PLAN.md §3.5's poll half: a Wall/Live page hitting this endpoint
+        // docs/plans/done/CV-DEMAND-PLAN.md §3.5's poll half: a Wall/Live page hitting this endpoint
         // has no asset id to subscribe to over SSE, so the read itself has to register the demand.
         StreamId streamId = StreamId.random();
         when(detectionRepositoryPort.query(any())).thenReturn(List.of());
@@ -1207,7 +1207,7 @@ class StreamControllerTest {
 
     @Test
     void tracksReportsWhyTheStreamIsSamplingAtTheRateItIs() throws Exception {
-        // docs/plans/active/CV-RATE-CONTROL-PLAN.md §1: `rate` sits BESIDE `latency` because a completion
+        // docs/plans/done/CV-RATE-CONTROL-PLAN.md §1: `rate` sits BESIDE `latency` because a completion
         // rate cannot say why it fell short -- a starving source and a saturated detector look
         // identical from `effectiveFps` alone and have opposite fixes.
         StreamId streamId = StreamId.random();
@@ -1231,7 +1231,7 @@ class StreamControllerTest {
 
     @Test
     void tracksReportsWhichDetectionGateExplainsTheCurrentState() throws Exception {
-        // docs/plans/active/CV-DEMAND-PLAN.md §3.6: "no boxes" has three causes an operator must be
+        // docs/plans/done/CV-DEMAND-PLAN.md §3.6: "no boxes" has three causes an operator must be
         // able to tell apart, and this is how the wire distinguishes them.
         StreamId streamId = StreamId.random();
         when(streamService.tracks(streamId)).thenReturn(List.of());
@@ -1254,7 +1254,7 @@ class StreamControllerTest {
 
     @Test
     void tracksReportsTransportAndDecodeMillisP50ForAPullModeStream() throws Exception {
-        // docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§7, wave M5: the two additive fields.
+        // docs/plans/done/MEDIA-SOT-PLAN.md §5.4/§7, wave M5: the two additive fields.
         StreamId streamId = StreamId.random();
         when(streamService.tracks(streamId)).thenReturn(List.of());
         when(streamService.detectionRate(streamId)).thenReturn(Optional.of(
@@ -1414,7 +1414,7 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$[0].tracking").doesNotExist());
     }
 
-    // ---- docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2: authority --------------------------------
+    // ---- docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2: authority --------------------------------
     //
     // Every test above runs under the class-level `currentUser` (unbounded scope, matching how a
     // deployment with `vision.auth.enabled=false` behaves today) and is untouched by this wave --

@@ -7,7 +7,7 @@ import com.drones.vision.map.domain.model.LayerId;
 
 /**
  * Everything needed to set an asset's {@link CameraPose} — the frozen {@code PUT
- * /api/assets/{assetId}/camera-pose} body (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5), used both
+ * /api/assets/{assetId}/camera-pose} body (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5), used both
  * for manual entry and for confirming a calibration solve.
  *
  * <p>A top-level record rather than a type nested in {@link CameraPoseService}, so the wire DTO in

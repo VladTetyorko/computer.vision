@@ -2,7 +2,7 @@ package com.drones.vision.perception.application.pipeline;
 
 /**
  * How {@link UsageTracker#applySample} coalesces its {@code AssetUsage} summary-counter write
- * (docs/plans/active/SCALE-100-PLAN.md S4). Framework-free like every other {@code *Settings} record
+ * (docs/plans/done/SCALE-100-PLAN.md S4). Framework-free like every other {@code *Settings} record
  * in this package ({@link AdaptiveRateSettings}, {@code StreamPipelineSettings}) — {@code vision-app}
  * binds {@code vision.persistence.telemetry.*} and passes an instance in, this context module never
  * reads Spring configuration itself.
@@ -13,7 +13,7 @@ package com.drones.vision.perception.application.pipeline;
  * counter, not a historical record — losing the last one before a crash only means the summary is
  * briefly stale, never wrong, since the next sample recomputes it from the same in-memory {@code
  * Tracking} state it was folded into. Coalescing it onto the same size-or-time
- * bound as {@code TelemetryBatchSettings} (docs/plans/active/SCALE-100-PLAN.md &sect;5 S4 item 3) turns N
+ * bound as {@code TelemetryBatchSettings} (docs/plans/done/SCALE-100-PLAN.md &sect;5 S4 item 3) turns N
  * summary writes into one for a fast-arriving burst, at the cost of the summary lagging the true
  * counts by up to {@link #batchWindowMillis()} — bounded exactly like {@code
  * TelemetryBatchSettings}'s own durability window, and for the same reason (CLAUDE.md rule 9's
@@ -53,7 +53,7 @@ public record UsageSummaryBatchSettings(int batchSizeSamples, long batchWindowMi
 
     /**
      * No coalescing: every sample writes its summary synchronously, exactly how {@link
-     * UsageTracker#applySample} behaved before docs/plans/active/SCALE-100-PLAN.md S4. What every
+     * UsageTracker#applySample} behaved before docs/plans/done/SCALE-100-PLAN.md S4. What every
      * pre-S4 constructor uses, so every pre-existing caller (and test) keeps its synchronous
      * one-save-per-sample behavior unchanged.
      */

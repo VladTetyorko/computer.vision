@@ -8,7 +8,7 @@ import com.drones.vision.kernel.UserId;
 import java.time.Instant;
 
 /**
- * The audited, asset-keyed, persisted pose of a stationary camera (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md
+ * The audited, asset-keyed, persisted pose of a stationary camera (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
  * decision D4) — one row per {@link AssetId}. Wraps a value shaped exactly like kernel's {@link
  * FixedCameraPose} (the five pure geometric numbers {@code FixedCameraGeo} projects from) plus the
  * bookkeeping a control-plane record needs: which asset this is, where its tracks should be drawn,
@@ -29,7 +29,7 @@ import java.time.Instant;
  *                      the horizon guard at projection time
  * @param hfovDegrees   the horizontal field of view, degrees; must be within {@code (10,160)}
  * @param targetLayerId which {@link MapLayer} this camera's tracks publish to, or {@code null} to use
- *                      the deployment's COP layer (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D10)
+ *                      the deployment's COP layer (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md D10)
  * @param source        how this pose was produced — hand-entered, or solved and then confirmed
  * @param rmsErrorPixels the calibration solve's residual, pixels, or {@code null} for a {@link
  *                       CameraPoseSource#MANUAL} pose (nothing was solved)

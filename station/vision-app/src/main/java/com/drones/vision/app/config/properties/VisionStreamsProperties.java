@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 import java.time.Duration;
 
 /**
- * Stream lifecycle policy ({@code vision.streams.*}, docs/plans/active/STREAM-STATE-PLAN.md &sect;2.7) —
+ * Stream lifecycle policy ({@code vision.streams.*}, docs/plans/done/STREAM-STATE-PLAN.md &sect;2.7) —
  * today only the idle policy that stops streams nobody is watching.
  *
  * <p><b>Its own root, not {@code vision.pipeline.*}.</b> Those keys tune how one pipeline processes

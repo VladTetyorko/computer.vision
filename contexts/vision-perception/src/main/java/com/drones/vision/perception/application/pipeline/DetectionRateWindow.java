@@ -24,7 +24,7 @@ import java.util.Objects;
  * per {@code onNext} and passed in, never read again here. See {@link StreamPipeline}'s
  * {@code latencyNanoSource} javadoc for why that distinction is load-bearing.
  *
- * <h2>Pull mode (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7, wave M5)</h2>
+ * <h2>Pull mode (docs/plans/done/MEDIA-SOT-PLAN.md &sect;7, wave M5)</h2>
  * A window is either {@link Transport#PUSH} or {@link Transport#PULL} for its whole life, decided once
  * at construction — a running stream is one or the other, never both. {@link #record}/{@link
  * #recordMissedDeadlines} are the <b>push</b>-mode sampler's own counters and are never called by a
@@ -115,7 +115,7 @@ final class DetectionRateWindow {
 
     /**
      * @param window    as the 1-argument constructor
-     * @param transport which loop's counters this window reports (docs/plans/active/MEDIA-SOT-PLAN.md wave M5);
+     * @param transport which loop's counters this window reports (docs/plans/done/MEDIA-SOT-PLAN.md wave M5);
      *                  fixed for the window's whole life
      */
     DetectionRateWindow(Duration window, Transport transport) {
@@ -147,7 +147,7 @@ final class DetectionRateWindow {
     }
 
     /**
-     * Folds one pull result's worker-reported diagnostics in (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7, D12):
+     * Folds one pull result's worker-reported diagnostics in (docs/plans/done/MEDIA-SOT-PLAN.md &sect;7, D12):
      * {@code source_fps}/{@code achieved_fps}/{@code missed_deadlines}/{@code dropped_frames} are kept
      * as the worker's latest restatement (cumulative counters, not deltas — nothing to sum), while
      * {@code decode_millis} joins a rolling window for {@link DetectionRate#decodeMillisP50()}.
@@ -203,7 +203,7 @@ final class DetectionRateWindow {
      *         sourceFps} (the JVM-measured/assumed video-source rate passed in — meaningless for a
      *         proxied stream that never flows through this JVM at all); {@code targetFps}/{@code
      *         demandFps} still come from the caller, since the Java rate controller runs unchanged in
-     *         pull mode (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7) and its output still travels on the wire.
+     *         pull mode (docs/plans/done/MEDIA-SOT-PLAN.md &sect;7) and its output still travels on the wire.
      */
     synchronized DetectionRate snapshot(double sourceFps, double targetFps, double demandFps) {
         return transport == Transport.PULL

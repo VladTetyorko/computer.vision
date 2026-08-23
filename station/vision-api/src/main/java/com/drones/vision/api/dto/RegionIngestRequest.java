@@ -4,7 +4,7 @@ import com.drones.vision.perception.domain.model.RegionBounds;
 import com.drones.vision.perception.domain.model.RegionIngestSpec;
 
 /**
- * Request body for {@code POST /api/geo/regions} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3,
+ * Request body for {@code POST /api/geo/regions} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3,
  * frozen shape: {@code {"name", "north", "south", "east", "west", "zoom"}} — no separate slug
  * field). {@link RegionIngestSpec} needs both a {@code regionId} (a lower-case-kebab identifier,
  * doubling as cv-service's on-disk directory name, D10) and a {@code name} (an operator-facing

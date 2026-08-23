@@ -74,7 +74,7 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  * controller — a JPEG thumbnail of a running stream's latest published frame, cheap enough for a
  * manager dashboard to poll per-visible-tile.
  *
- * <h2>Authority (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2)</h2>
+ * <h2>Authority (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2)</h2>
  * "No acting user is threaded through here" (above) was true for attribution, but not for
  * authorization — before this wave, none of these eight handlers checked whether the caller's
  * {@link com.drones.vision.platform.VisibilityScope} reached the stream's owning asset at all, so a
@@ -109,7 +109,7 @@ public class StreamController {
     private final SnapshotJpegEncoder snapshotJpegEncoder;
     /**
      * Bundles the deployment's default {@link PipelineConfig} and the detection-demand poll-touch
-     * seam (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.5/&sect;3.8) behind one parameter — see
+     * seam (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.5/&sect;3.8) behind one parameter — see
      * {@link StreamDetectionSupport}'s own javadoc for why these two single-method reads are bundled
      * rather than each taking its own constructor slot.
      */
@@ -139,7 +139,7 @@ public class StreamController {
      * body's fields, if present, override the corresponding values from
      * {@link StreamDetectionSupport#defaultConfig()} — the deployment's own default, which starts
      * equal to {@link PipelineConfig#defaults()} except for {@code detectionEnabled}
-     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.7/&sect;3.8, {@code
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.7/&sect;3.8, {@code
      * vision.cv.detection-default-enabled}); everything else comes from that same default.
      *
      * <p>What the body says about {@code tracking} travels as its own patch rather than baked into
@@ -152,7 +152,7 @@ public class StreamController {
      * @param request  optional overrides; {@code null}/absent means use every default
      * @return the started stream's id and (if available) its viewer URLs
      * @throws java.util.NoSuchElementException if the caller's scope may not reach this device's
-     *                                            asset (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2)
+     *                                            asset (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2)
      *                                            — the same 404 an unknown device already produces
      */
     @PostMapping("/api/devices/{deviceId}/stream")
@@ -179,7 +179,7 @@ public class StreamController {
      * Lists streams currently active on this instance.
      *
      * <p>Carries each stream's <b>state</b> and its <b>detection intent</b> alongside the viewer URLs
-     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5). Both are new, and both exist because this is
+     * (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.5). Both are new, and both exist because this is
      * the poll a fleet-wide client already runs: without them a client had to infer liveness from
      * mere presence in this list, and had no way at all to learn whether detection was on for a
      * stream — so it rendered its own local guess instead.
@@ -190,7 +190,7 @@ public class StreamController {
      */
     @GetMapping("/api/streams")
     public List<ActiveStreamResponse> list() {
-        // Filtered, not all-or-nothing 403'd (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2) -- a PILOT
+        // Filtered, not all-or-nothing 403'd (docs/plans/done/LIVE-SCOPE-PLAN.md §2.2) -- a PILOT
         // still sees their own assigned assets' streams, just not the rest of the fleet's.
         return streamAccess.filterVisible(streamService.streams()).stream()
                 .map(s -> ActiveStreamResponse.from(s, viewUrl(s.streamId()), whepUrl(s.streamId()),
@@ -206,7 +206,7 @@ public class StreamController {
      * @param streamId the stream to stop
      * @throws java.util.NoSuchElementException if {@code streamId} currently names a running stream
      *                                            whose asset the caller's scope may not reach
-     *                                            (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2) — an
+     *                                            (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2) — an
      *                                            id that does not currently resolve to a running
      *                                            stream keeps its pre-existing no-op/204 behavior
      */
@@ -247,7 +247,7 @@ public class StreamController {
      * @throws java.util.NoSuchElementException if {@code streamId} is unknown or not running on this
      *                                            instance (→404), or is running but the caller's
      *                                            scope may not reach its asset
-     *                                            (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2 — same
+     *                                            (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2 — same
      *                                            404, existence hidden either way)
      * @throws IllegalArgumentException          if the merged config fails {@link PipelineConfig}'s
      *                                            own validation, e.g. confidence outside [0,1], an
@@ -269,7 +269,7 @@ public class StreamController {
     }
 
     /**
-     * A running stream's effective configuration (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5) —
+     * A running stream's effective configuration (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.5) —
      * the read half {@link #updateConfig} never had.
      *
      * <p><b>Unlike {@link #tracks}, this is not forgiving.</b> An unknown or stopped stream is a 404,
@@ -284,7 +284,7 @@ public class StreamController {
      * @throws java.util.NoSuchElementException if {@code streamId} is unknown or not running on this
      *                                            instance (&rarr;404), or is running but the
      *                                            caller's scope may not reach its asset
-     *                                            (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2 — same
+     *                                            (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2 — same
      *                                            404)
      */
     @GetMapping("/api/streams/{streamId}/config")
@@ -306,7 +306,7 @@ public class StreamController {
      * list, {@code lockedTrackId: 0} and no {@code stats}, the same forgiving idiom {@link
      * #detections} uses, and the reason a polling client needs one code path instead of two. Only a
      * malformed UUID, or a <em>currently running</em> stream whose asset the caller's scope may not
-     * reach (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2), is an error — the latter 404s exactly
+     * reach (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2), is an error — the latter 404s exactly
      * like an unknown stream, so a caller polling a stream that just left their scope cannot tell
      * the two cases apart.
      *
@@ -322,7 +322,7 @@ public class StreamController {
      *
      * @param streamId the stream to inspect, as a canonical UUID string
      * @return the stream's tracks, its held target, the window's counters when there are any, and
-     *         which detection gate currently explains its boxes-or-no-boxes state (docs/plans/active/CV-DEMAND-PLAN.md
+     *         which detection gate currently explains its boxes-or-no-boxes state (docs/plans/done/CV-DEMAND-PLAN.md
      *         &sect;3.6)
      * @throws java.util.NoSuchElementException if {@code streamId} is currently running on a device
      *                                            whose asset the caller's scope may not reach
@@ -373,7 +373,7 @@ public class StreamController {
      * @return the stream's recent detection results, newest first
      * @throws java.util.NoSuchElementException if {@code streamId} is currently running on a device
      *                                            whose asset the caller's scope may not reach
-     *                                            (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2) — an
+     *                                            (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2) — an
      *                                            unknown/stopped stream keeps its pre-existing empty
      *                                            200
      */
@@ -386,7 +386,7 @@ public class StreamController {
         // ordering as #start/#updateConfig.
         DetectionQuery query = new DetectionQuery(id, null, null, null, limit);
         streamAccess.requireVisible(id);
-        // This read is itself detection demand (docs/plans/active/CV-DEMAND-PLAN.md §3.5, the
+        // This read is itself detection demand (docs/plans/done/CV-DEMAND-PLAN.md §3.5, the
         // poll half): a Wall/Live page polling this endpoint keeps the stream detecting, exactly
         // like an open SSE `detections:<assetId>` subscription does. Touched only once the caller is
         // known to be allowed to read this stream at all.
@@ -399,7 +399,7 @@ public class StreamController {
 
     /**
      * A JPEG snapshot of the latest published frame on a running stream (docs/plans/done/MVP3-PLAN.md C-a) —
-     * always the clean, undecorated frame (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1: server-side overlay
+     * always the clean, undecorated frame (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1: server-side overlay
      * burn-in no longer exists), since {@link StreamService#latestFrame} returns exactly
      * the instance the pipeline last handed to {@link StreamPublisherPort#publish}. Downscaled to
      * at most {@value SnapshotJpegEncoder#MAX_SNAPSHOT_WIDTH}px wide (aspect-preserving, see {@link
@@ -413,7 +413,7 @@ public class StreamController {
      * @return the JPEG bytes
      * @throws NoSuchElementException if the stream is unknown, is running but hasn't published a
      *                                 frame yet, or is running but the caller's scope may not reach
-     *                                 its asset (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2) — all
+     *                                 its asset (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2) — all
      *                                 three → 404, same mapping as every other unknown-id case in
      *                                 this codebase
      */

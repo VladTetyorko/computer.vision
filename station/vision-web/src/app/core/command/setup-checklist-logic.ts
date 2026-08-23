@@ -3,7 +3,7 @@ import { isPilot } from '../roster/roster-pivot-logic';
 
 /**
  * Pure, Angular-free logic behind `/command`'s "Set up this station" checklist
- * (docs/plans/active/OPS-UX-PLAN.md §3 B2) — a one-time onboarding nudge for a brand-new install,
+ * (docs/plans/done/OPS-UX-PLAN.md §3 B2) — a one-time onboarding nudge for a brand-new install,
  * gone the moment the station has grown past it. Nothing here calls `VisionApi` itself;
  * `CommandFacade` loads `UserSummary[]`/`GroupSummary[]`/asset counts and hands them to these
  * functions, matching every other `core/*-logic.ts` file's "pure function, tested without Angular"
@@ -27,7 +27,7 @@ export function hasOnlySeededUsers(users: readonly UserSummary[]): boolean {
 
 /**
  * Whether `/command` should show the setup checklist at all — the plan's own freshness test:
- * "no users beyond the seeded three, **or** zero assets" (docs/plans/active/OPS-UX-PLAN.md §3 B2). Either
+ * "no users beyond the seeded three, **or** zero assets" (docs/plans/done/OPS-UX-PLAN.md §3 B2). Either
  * half alone counts: a demo fleet spun up with Command's own "Add test drone" button before anyone
  * ever touched `/org` is `totalAssets > 0` with only-seeded users — still fresh, still worth the
  * nudge. A station with real users already onboarded but every asset since deleted is the mirror
@@ -54,7 +54,7 @@ export interface SetupChecklistRow {
 
 /**
  * Builds the four rows from live data — every `done` a direct read of already-loaded state, never a
- * separate "completed" flag that could drift from reality (docs/plans/active/OPS-UX-PLAN.md §3 B2: "each
+ * separate "completed" flag that could drift from reality (docs/plans/done/OPS-UX-PLAN.md §3 B2: "each
  * ticking itself off from live data"; "no dismiss button that hides an unfinished setup" — there is
  * nothing here *to* dismiss, a done row simply stops being actionable).
  *

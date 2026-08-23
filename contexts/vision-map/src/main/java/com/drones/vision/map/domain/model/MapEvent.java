@@ -3,7 +3,7 @@ package com.drones.vision.map.domain.model;
 /**
  * A live change to the map's data — a {@link Mark}, {@link Drawing}, {@link MapLayer}, or {@link
  * ProjectedTrack} created, updated, cleared, or deleted (docs/plans/done/MAP-REWORK-PLAN.md §2.3;
- * {@link EntityType#TRACK} added docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D11) — the
+ * {@link EntityType#TRACK} added docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D11) — the
  * payload {@code MapLiveUpdatePort#publishMapEvent} carries to a driving adapter.
  *
  * <p>{@link #payload()} is the domain object itself, its concrete type dictated by {@link
@@ -61,7 +61,7 @@ public record MapEvent(EntityType entity, Action action, LayerId layerId, Object
         DRAWING,
         /** {@link MapEvent#payload()} is a {@link MapLayer}. */
         LAYER,
-        /** {@link MapEvent#payload()} is a {@link ProjectedTrack} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D11). */
+        /** {@link MapEvent#payload()} is a {@link ProjectedTrack} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md D11). */
         TRACK
     }
 

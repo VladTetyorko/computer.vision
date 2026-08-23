@@ -911,7 +911,7 @@ class AssetControllerTest {
         verifyNoInteractions(telemetryRepositoryPort);
     }
 
-    // ---- authority, not visibility (docs/plans/active/OPS-UX-PLAN.md §1, Wave C) ----
+    // ---- authority, not visibility (docs/plans/done/OPS-UX-PLAN.md §1, Wave C) ----
     // A PILOT's scope makes an assigned asset visible (they may fly it) but grants no authority to
     // administer it; a MANAGER's scope grants authority throughout their own group subtree, and
     // nowhere else. See VisibilityScope#canManage/#canManageOrg and AssetController#requireManageable.

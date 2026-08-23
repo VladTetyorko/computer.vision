@@ -9,7 +9,7 @@ import { regionPhaseLabel, regionProgressPercent, regionStatusLabel, regionStatu
 import { RegionManagerFacade } from './region-manager-facade';
 
 /**
- * `/manage/geo/regions` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — the reference-imagery
+ * `/manage/geo/regions` (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — the reference-imagery
  * region list: an ingest form (bounds + zoom), live indexing progress for anything `BUILDING`, and
  * every settled region's own status/tile-count/holdout stats. Route-guarded (`geo.routes.ts`'s
  * `orgGuard`) rather than gated client-side only — unlike `/manage/training`, there is nothing here

@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Every REST handler must answer "who is allowed to do this?" — or say in writing that it does not
- * have to (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W1).
+ * have to (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W1).
  *
  * <p>This exists because the platform audit found 29 handlers with no authority check of any kind,
  * and not one of them was a decision — they were omissions, in a codebase where authorization is

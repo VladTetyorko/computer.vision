@@ -5,7 +5,7 @@ Subject: how detections are **rendered and interacted with on the `/fly` video s
 labels, trails, hover/click, the detections strip — reported by the owner as "not as efficient and
 clear as it could be, because of many detections overlaying each other".
 
-Companion doc: `docs/plans/active/CV-UX-RESEARCH.md` (2026-08-16) covers the Detection **settings
+Companion doc: `docs/plans/done/CV-UX-RESEARCH.md` (2026-08-16) covers the Detection **settings
 panel** (waves U1–U5, specced not built). This doc covers the **video surface itself**. The two
 share one philosophy — honest, tiered, primary-act-first — and their waves are disjoint by file.
 

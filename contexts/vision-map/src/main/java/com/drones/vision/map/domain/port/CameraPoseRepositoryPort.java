@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Driven port: persist and retrieve {@link CameraPose}s (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md
+ * Driven port: persist and retrieve {@link CameraPose}s (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
  * decision D4) — one row per {@link AssetId}, upsert, the same minimal shape every other repository
  * port in this module uses.
  *

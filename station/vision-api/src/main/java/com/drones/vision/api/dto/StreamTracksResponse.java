@@ -32,9 +32,9 @@ import java.util.List;
  * @param rate          why the stream is sampling at the rate it is, or absent before the first
  *                      sample. The companion to {@code latency} — that one is what a detection
  *                      cost, this one is how many were asked for and what became of them
- *                      (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1)
+ *                      (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;1)
  * @param detectionState which of the two independent detection gates currently explains this
- *                       stream's boxes-or-no-boxes state (docs/plans/active/CV-DEMAND-PLAN.md
+ *                       stream's boxes-or-no-boxes state (docs/plans/done/CV-DEMAND-PLAN.md
  *                       &sect;3.6), or absent for an unknown/not-running stream. See {@link
  *                       DetectionState}'s own javadoc: this reports gating, never health.
  */

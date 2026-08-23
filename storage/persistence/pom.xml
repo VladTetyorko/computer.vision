@@ -102,7 +102,7 @@
         </dependency>
         <!-- Test-only: DevAccountSeedMigrationTest verifies db/seed/dev's hardcoded password
              hashes against their plaintexts with the same BCryptPasswordEncoder vision-app's
-             BcryptPasswordHasher wraps (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1). This module has no
+             BcryptPasswordHasher wraps (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W1). This module has no
              runtime dependency on Spring Security and never will; version comes from
              spring-boot-dependencies, no root-pom pin needed, same as every other dependency here. -->
         <dependency>

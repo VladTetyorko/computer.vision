@@ -5,7 +5,7 @@ import com.drones.vision.kernel.AssetId;
 
 /**
  * Driven port: announce that a {@link TrackCorrection} was produced, so a driving adapter can push it
- * to connected viewers on the {@code geo:<assetId>} live topic (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * to connected viewers on the {@code geo:<assetId>} live topic (docs/plans/done/VISUAL-GEO-V2-PLAN.md
  * §3.4, D11). Mirrors {@link TelemetryLiveUpdatePort}'s contract exactly — this context's application
  * layer knows nothing about SSE, connections, topics, or resume/replay; that is entirely a driving
  * adapter's concern.

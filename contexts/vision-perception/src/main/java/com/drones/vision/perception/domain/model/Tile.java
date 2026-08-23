@@ -2,7 +2,7 @@ package com.drones.vision.perception.domain.model;
 
 /**
  * One fetched reference tile — a {@link TileCoordinate} plus its raw image bytes, exactly what
- * {@code cv_service/geo/pack.py}'s ZIP landing expects (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * {@code cv_service/geo/pack.py}'s ZIP landing expects (docs/plans/done/VISUAL-GEO-V2-PLAN.md
  * §1.3). Produced lazily by {@link com.drones.vision.perception.application.geo.DefaultReferenceRegionService}
  * as {@link com.drones.vision.perception.domain.port.ReferenceIndexPort#build} consumes its {@code
  * Iterable<Tile>} — never all fetched eagerly into memory (a region may carry up to {@code

@@ -13,7 +13,7 @@ import java.util.function.Supplier;
 
 /**
  * {@code vision-api}'s implementation of {@link VideoDemandPort}
- * (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2) &mdash; the union of every way this deployment can
+ * (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2) &mdash; the union of every way this deployment can
  * observe that somebody is watching a stream's video. Structurally the sibling of {@link
  * LiveAndPollDetectionDemand}, deliberately: same narrow-{@code Predicate} seams, same never-throws
  * contract, same fail-open direction.

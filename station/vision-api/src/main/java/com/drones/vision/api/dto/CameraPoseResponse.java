@@ -11,7 +11,7 @@ import java.time.Instant;
 /**
  * Wire representation of a {@link CameraPose} — the response body for {@code GET}/{@code PUT
  * /api/assets/{assetId}/camera-pose}, and the embedded {@code pose} field of a solved {@code
- * POST .../camera-pose/calibration} response (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5's
+ * POST .../camera-pose/calibration} response (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5's
  * frozen wire contract).
  *
  * <p>Position is <em>flattened</em> to {@code latitude}/{@code longitude} rather than nested,

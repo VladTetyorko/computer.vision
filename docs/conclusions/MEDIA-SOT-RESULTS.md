@@ -1,7 +1,7 @@
 # MEDIA-SOT-RESULTS — M9 measurements against the running stack
 
 **Status:** measurement complete, 2026-08-12. Wave M9 of
-[MEDIA-SOT-PLAN.md](../plans/active/MEDIA-SOT-PLAN.md) §8, closing the programme M0 opened —
+[MEDIA-SOT-PLAN.md](../plans/done/MEDIA-SOT-PLAN.md) §8, closing the programme M0 opened —
 [CV-PULL-SPIKE.md](CV-PULL-SPIKE.md) is the baseline this session re-measures against a live
 compose stack instead of a throwaway rig. No product code changed this wave (scope: `docs/**`,
 one `docker-compose.yml` env var, a throwaway harness under `cv-service/spikes/pull/m9/`). Numbers

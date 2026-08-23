@@ -39,7 +39,7 @@ import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs, type DetectionDen
  * reasoning, including why the replay library (`replay-library.html`) needed no boundary decision
  * of its own (it never shows video).
  *
- * **Evidence package (docs/plans/active/AFTER-ACTION-PLAN.md, wave W2)**: `<vision-after-action-panel>`
+ * **Evidence package (docs/plans/done/AFTER-ACTION-PLAN.md, wave W2)**: `<vision-after-action-panel>`
  * is mounted twice in `replay.html` — inside the `usageOpen` branch too, not just the loaded
  * cockpit — since the package is genuinely servable mid-flight (§5 hazard 4); both mounts bind the
  * same four `facade.afterAction*` reads, `ReplayPage` itself holds no state for it.

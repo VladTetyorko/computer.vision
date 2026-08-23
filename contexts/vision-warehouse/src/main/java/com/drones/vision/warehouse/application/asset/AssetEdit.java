@@ -39,7 +39,7 @@ public record AssetEdit(String displayName, CategoryId category, Map<String, Str
      * everywhere else, and it belongs to whoever manages the fleet.
      *
      * <p>Callers gate on this rather than on the endpoint, so a pilot renaming their own drone is
-     * allowed while the same endpoint still refuses a re-categorisation (docs/plans/active/OPS-UX-PLAN.md §1).
+     * allowed while the same endpoint still refuses a re-categorisation (docs/plans/done/OPS-UX-PLAN.md §1).
      */
     public boolean changesManagedFields() {
         return category != null;

@@ -323,7 +323,7 @@ export function droneDivIcon(
 }
 
 /**
- * A divIcon for a visual-geolocation correction (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave
+ * A divIcon for a visual-geolocation correction (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave
  * H6) — a hollow ring with a small heading tick, deliberately **not** {@link droneDivIcon}'s filled
  * arrow: §3.8 requires the corrected marker to read as "visually secondary to the raw one", never a
  * second "real" aircraft. `divergent` only toggles a CSS class (`nominal`/`divergent`) — the actual

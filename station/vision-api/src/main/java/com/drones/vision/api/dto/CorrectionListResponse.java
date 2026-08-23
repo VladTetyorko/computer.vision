@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * Response body for {@code GET /api/geo/corrections/live} and {@code GET /api/geo/corrections}
- * (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3).
+ * (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3).
  */
 public record CorrectionListResponse(List<CorrectionResponse> corrections) {
 }

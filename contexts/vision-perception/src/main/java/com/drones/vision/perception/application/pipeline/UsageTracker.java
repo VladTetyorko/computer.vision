@@ -67,7 +67,7 @@ import com.drones.vision.perception.application.stream.StreamService;
  *       sampleCount} — via {@link #applySample}, kept in one method per the
  *       port's "single write path" note. The durable {@link TelemetryRepositoryPort#save} call
  *       always happens on the sample's own thread; the summary write is coalesced onto {@link
- *       UsageSummaryBatchSettings}'s size-or-time bound (docs/plans/active/SCALE-100-PLAN.md S4) —
+ *       UsageSummaryBatchSettings}'s size-or-time bound (docs/plans/done/SCALE-100-PLAN.md S4) —
  *       see {@link #registerSummaryUpdate} for why that split is safe (the summary is a
  *       recomputable counter, not a historical record). The same method also hands the sample to
  *       the configured {@code telemetryObserver} (docs/plans/done/OPS-CORE-PLAN.md §G — geofence
@@ -206,7 +206,7 @@ public final class UsageTracker {
 
     /**
      * Same as the 7-argument constructor, plus how {@link #applySample} coalesces its usage-summary
-     * write — see {@link UsageSummaryBatchSettings}'s own javadoc (docs/plans/active/SCALE-100-PLAN.md
+     * write — see {@link UsageSummaryBatchSettings}'s own javadoc (docs/plans/done/SCALE-100-PLAN.md
      * S4). {@link UsageSummaryBatchSettings#immediate()} reproduces the 7-argument constructor's own
      * one-save-per-sample behavior exactly (what every pre-S4 caller, and this class's own tests,
      * still get); production wiring is meant to move to {@link UsageSummaryBatchSettings#defaults()}
@@ -721,7 +721,7 @@ public final class UsageTracker {
 
     /**
      * Writes (or defers) the folded {@code updated} summary per {@link #summaryBatchSettings}
-     * (docs/plans/active/SCALE-100-PLAN.md S4 item 3). Safe to defer, unlike the durable {@link
+     * (docs/plans/done/SCALE-100-PLAN.md S4 item 3). Safe to defer, unlike the durable {@link
      * TelemetryRepositoryPort#save} call right before it: this write is a recomputable running
      * counter on {@link AssetUsage}, not a historical record, so losing an unflushed one to a crash
      * only leaves the summary briefly stale — the very next sample folds a fresh one from the same
@@ -866,9 +866,9 @@ public final class UsageTracker {
         private final List<TelemetrySubscription> telemetrySubscriptions = new ArrayList<>();
         /** docs/plans/active/DRONE-ONBOARDING-PLAN.md §7, Wave O7: telemetry-only devices already counted toward {@link #activeDevices} via {@code UsageTracker#deviceTelemetryDiscovered} -- guards a repeated {@link UsageTracker#onTelemetryDeviceDiscovered} call for the same device from inflating the count. */
         private final Set<DeviceId> activeTelemetryOnlyDevices = new LinkedHashSet<>();
-        /** docs/plans/active/SCALE-100-PLAN.md S4: folds into {@link #usage} not yet written via {@code usageRepository.save}. */
+        /** docs/plans/done/SCALE-100-PLAN.md S4: folds into {@link #usage} not yet written via {@code usageRepository.save}. */
         private int unflushedSummaryUpdates;
-        /** docs/plans/active/SCALE-100-PLAN.md S4: the armed time-bound summary flush, if any — see {@code UsageTracker#registerSummaryUpdate}. */
+        /** docs/plans/done/SCALE-100-PLAN.md S4: the armed time-bound summary flush, if any — see {@code UsageTracker#registerSummaryUpdate}. */
         private ScheduledFuture<?> pendingSummaryFlush;
     }
 

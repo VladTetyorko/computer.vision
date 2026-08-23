@@ -258,7 +258,7 @@
   background: var(--border-strong);
 }
 
-/* Matches `applyTracks`' own `colors.trail` (--color-info) — the one shared hue every projected track draws with (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5, wave G5). */
+/* Matches `applyTracks`' own `colors.trail` (--color-info) — the one shared hue every projected track draws with (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5, wave G5). */
 .swatch.dot.track {
   background: var(--color-info);
 }
@@ -269,7 +269,7 @@
 }
 
 /* Hollow ring, not a filled dot — mirrors `correctionDivIcon`'s own glyph so the legend never
-   drifts from what `applyCorrections` actually draws (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8,
+   drifts from what `applyCorrections` actually draws (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8,
    wave H6). */
 .swatch.ring.geo-correction {
   width: 0.625rem;
@@ -588,7 +588,7 @@
   display: none; /* Leaflet's tooltip arrow reads oddly for a permanent, centered label */
 }
 
-/* ---- Track labels (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5, wave G5) — the stable id chip pinned
+/* ---- Track labels (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5, wave G5) — the stable id chip pinned
    above each projected track's dot, same frosted-pill treatment as `.zone-label` but top-anchored
    (`applyTracks`' own `direction: 'top'`) rather than centered on an area. ---------------------- */
 
@@ -606,7 +606,7 @@
   display: none;
 }
 
-/* ---- Visual-geolocation correction marker (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6)
+/* ---- Visual-geolocation correction marker (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6)
    `correctionDivIcon` (leaflet-loader.ts) builds the DOM; this only paints it. Hollow ring + tick,
    never a filled dot — "visually secondary to the raw one" — and never `--color-danger` even while
    divergent (§3.8's "never red for PROBABLE", extended to divergence generally: the same anti-alarm

@@ -4,7 +4,7 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * Plain, framework-free settings for {@link MediamtxProxyPublisher} (docs/plans/active/MEDIA-SOT-PLAN.md
+ * Plain, framework-free settings for {@link MediamtxProxyPublisher} (docs/plans/done/MEDIA-SOT-PLAN.md
  * &sect;5.5) — mirrors {@link PublishSettings}'s own "vision-app maps application.yaml onto this
  * record" shape; this class must never be constructed from a {@code @ConfigurationProperties} type
  * directly (that would point this module at {@code vision-app}, breaking the hexagon).

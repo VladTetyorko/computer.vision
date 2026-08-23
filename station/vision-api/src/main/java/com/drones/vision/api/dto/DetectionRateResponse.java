@@ -4,7 +4,7 @@ import com.drones.vision.perception.application.pipeline.DetectionRate;
 
 /**
  * The {@code "rate"} object of {@code GET /api/streams/{streamId}/tracks}
- * (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1) — why this stream is detecting at the rate it is.
+ * (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;1) — why this stream is detecting at the rate it is.
  *
  * <p><b>Why it sits beside {@code latency} rather than inside it.</b> {@link
  * PipelineLatencyResponse#effectiveFps()} already reports the rate boxes arrive at, and the first
@@ -37,7 +37,7 @@ import com.drones.vision.perception.application.pipeline.DetectionRate;
  * @param dropRatio       the fraction of served deadlines thrown away, in {@code [0,1]}; anything
  *                        above zero means the configured rate is not the delivered one
  * @param transport       which loop counted these figures: {@code "push"} (the JVM's own sampler) or
- *                        {@code "pull"} (a worker's, self-reported) — docs/plans/active/MEDIA-SOT-PLAN.md
+ *                        {@code "pull"} (a worker's, self-reported) — docs/plans/done/MEDIA-SOT-PLAN.md
  *                        &sect;5.4/&sect;7. Also the reader's cue for which definition {@code
  *                        PipelineLatencyResponse#roundTripMillis*} is using, since {@code latency} and
  *                        {@code rate} are always read together off the same stream

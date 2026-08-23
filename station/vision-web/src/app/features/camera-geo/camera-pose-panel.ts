@@ -25,7 +25,7 @@ import type { ActiveStream, CameraPoseResponse, DetectionState, Device } from '.
 const LOG_PREFIX = '[camera-geo]';
 
 /**
- * The camera-pose card on the asset manager page (`docs/plans/active/FIXED-CAMERA-GEO-PLAN.md` wave G5,
+ * The camera-pose card on the asset manager page (`docs/plans/done/FIXED-CAMERA-GEO-PLAN.md` wave G5,
  * §8's own G5 row) — a stationary camera's measured/solved aim (lat/lon/height-AGL/yaw/pitch/hFOV),
  * plus the owning stream's `DetectionState` so "calibrated but detection off" reads as an explained
  * state, not a silent dead map (D9). Mounted the same way `pilots-card.ts` is: a self-contained,

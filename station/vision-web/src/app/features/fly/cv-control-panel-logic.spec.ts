@@ -316,7 +316,7 @@ describe('cv-control-panel-logic', () => {
       expect(perfHint(false)).not.toMatch(/only trims what.s shown/i);
     });
 
-    it('does not fold in HIDDEN_CLASS_TRUTH — that sentence has exactly one home per surface (the Classes section), and this hint renders alongside it (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §2/§4)', () => {
+    it('does not fold in HIDDEN_CLASS_TRUTH — that sentence has exactly one home per surface (the Classes section), and this hint renders alongside it (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §2/§4)', () => {
       expect(perfHint(false)).not.toContain(HIDDEN_CLASS_TRUTH);
       expect(perfHint(true)).not.toContain(HIDDEN_CLASS_TRUTH);
     });
@@ -324,7 +324,7 @@ describe('cv-control-panel-logic', () => {
 
   // HIDDEN_CLASS_TRUTH's own content is covered by `core/detections/detections-logic.spec.ts` —
   // this file only asserts `perfHint` never duplicates it (above). FIRST_HIDE_HINT is gone as of
-  // wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3) along with the allowlist-complement toggle
+  // wave W5 (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3) along with the allowlist-complement toggle
   // it explained — see `cv-control-panel-logic.ts`'s own "Staged class-filter selection" comment.
 
   describe('intentCardSentence', () => {
@@ -658,7 +658,7 @@ describe('cv-control-panel-logic', () => {
     });
   });
 
-  // --- Seen-now chips (docs/plans/active/CV-UX-RESEARCH.md §4.1, wave U4) --------------------------
+  // --- Seen-now chips (docs/plans/done/CV-UX-RESEARCH.md §4.1, wave U4) --------------------------
 
   describe('recentObservedLabels', () => {
     it('collects distinct labels across results, capped', () => {
@@ -680,7 +680,7 @@ describe('cv-control-panel-logic', () => {
     });
   });
 
-  // --- Classes on screen right now (docs/plans/active/CV-UX-RESEARCH.md §3's status line) ---------
+  // --- Classes on screen right now (docs/plans/done/CV-UX-RESEARCH.md §3's status line) ---------
 
   describe('classesOnScreenCount', () => {
     it('counts distinct labels in the most recent result alone', () => {
@@ -696,7 +696,7 @@ describe('cv-control-panel-logic', () => {
     });
   });
 
-  // --- Detection status (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §1, CV-UX-RESEARCH.md
+  // --- Detection status (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §1, CV-UX-RESEARCH.md
   // §1.2/§3/§9.2) --------------------------------------------------------------------------------
 
   function rate(partial: Partial<DetectionRate> = {}): DetectionRate {

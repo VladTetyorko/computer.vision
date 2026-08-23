@@ -54,7 +54,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link TrackProjectionRunner} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D2/D3/D7,
+ * Unit tests for {@link TrackProjectionRunner} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md D2/D3/D7,
  * Wave G4) — real background scheduler throughout, driven at a fast tick interval and observed by
  * polling, the same style {@code CvChannelSupervisorTest} (this codebase's only other self-scheduled
  * bean) already uses rather than reaching for a fake clock.

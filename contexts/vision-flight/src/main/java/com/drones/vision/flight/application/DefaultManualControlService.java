@@ -5,7 +5,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
-import com.drones.vision.flight.domain.model.ChannelMap;
+import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.flight.domain.model.RcChannels;
 import com.drones.vision.kernel.UserId;
@@ -35,6 +35,12 @@ import com.drones.vision.platform.VisibilityScope;
 /**
  * The one implementation of {@link ManualControlService} (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md,
  * RC-CONTROL Phase 1 R2).
+ *
+ * <h2>The stick layout is chosen per session, from the vehicle</h2>
+ * The session no longer relays one frozen, airframe-blind map. {@code ManualControlLink#vehicleKind()}
+ * reports what the adapter is currently hearing, and {@link ControlProfile#forKind} turns that into
+ * the right stick layout — decisively, where the throttle rests: idle on a copter, stop on a rover
+ * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P2/P9).
  *
  * <h2>Device resolution &amp; scope gate</h2>
  * Mirrors {@link DefaultFlightCommandService} exactly: {@link #engage} resolves {@code assetId} via
@@ -255,7 +261,7 @@ public final class DefaultManualControlService implements ManualControlService {
         private final ManualControlLink link;
         private final WatchdogListener onWatchdog;
         private final Consumer<DefaultManualControlSession> onEnded;
-        private final ChannelMap channelMap = ChannelMap.defaultMap();
+        private final ControlProfile controlProfile;
 
         private final AtomicBoolean released = new AtomicBoolean(false);
         private volatile Instant lastInput;
@@ -268,6 +274,9 @@ public final class DefaultManualControlService implements ManualControlService {
             this.link = link;
             this.onWatchdog = onWatchdog;
             this.onEnded = onEnded;
+            // Resolved once, from what the vehicle is reporting right now -- not stored per asset,
+            // which would go stale exactly when an operator re-flashes the flight controller.
+            this.controlProfile = ControlProfile.forKind(link.vehicleKind());
             this.lastInput = clock.instant();
         }
 
@@ -298,7 +307,7 @@ public final class DefaultManualControlService implements ManualControlService {
                 return; // no-op once released/tripped
             }
             lastInput = clock.instant();
-            RcChannels channels = channelMap.apply(axes, buttons);
+            RcChannels channels = controlProfile.channelMap().apply(axes, buttons);
             manualControlPort.send(link, channels);
         }
 
@@ -329,8 +338,8 @@ public final class DefaultManualControlService implements ManualControlService {
         }
 
         @Override
-        public ChannelMap channelMap() {
-            return channelMap;
+        public ControlProfile controlProfile() {
+            return controlProfile;
         }
 
         @Override

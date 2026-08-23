@@ -29,7 +29,7 @@ import java.net.URI;
  * Wires stream egress (mediamtx publish/replay) and the snapshot JPEG encoder — the publish slice
  * of what used to be one 825-line {@code WiringConfiguration} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * wave D). Server-side detection/OSD overlay burn-in — the reason this class used to also own an
- * {@code overlayRenderer} bean — was removed entirely (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1): every
+ * {@code overlayRenderer} bean — was removed entirely (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1): every
  * published frame is the clean one now, and {@code adapter-overlay} no longer exists. Config
  * extraction (wave F3): {@link #streamPublisherPort} threads {@code vision.publish.encoder.*}/{@code .resilience.*}/
  * {@code .cadence.*} through a {@code PublishSettings}; {@link #replayFrameExtractionPort} threads
@@ -38,7 +38,7 @@ import java.net.URI;
  * com.drones.vision.api.support.SnapshotJpegEncoder} a real, property-bound bean instead of {@code
  * StreamController}/{@code DeviceProbeController} each self-constructing one from {@code
  * com.drones.vision.api.support.VisionApiProperties.defaults()}. {@link #hlsProxySettings}/{@link
- * #liveSettings} (docs/plans/active/SCALE-100-PLAN.md §5 S7) finish that same extraction for {@link
+ * #liveSettings} (docs/plans/done/SCALE-100-PLAN.md §5 S7) finish that same extraction for {@link
  * HlsProxyController}/{@link LiveUpdateRegistry} — the two classes whose settings the S1/S2 waves
  * deliberately left as local constants, reserving this file's bridge for this wave.
  *
@@ -75,7 +75,7 @@ public class PublishWiring {
      * Selects the {@link StreamPublisherPort} implementation per {@link
      * VisionPublishProperties#enabled()}: {@code false} falls back to the no-op publisher (e.g.
      * running or testing without mediamtx), exactly as before. {@code true} (the default) now builds a
-     * {@link PublisherRouter} (docs/plans/active/MEDIA-SOT-PLAN.md D3) wrapping {@link
+     * {@link PublisherRouter} (docs/plans/done/MEDIA-SOT-PLAN.md D3) wrapping {@link
      * #mediamtxStreamPublisher} (today's publisher, unchanged — {@code PublishSettings},
      * docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F3, still carries the encoder/resilience/cadence
      * tunables that used to be {@code H264RecorderFactory}/{@code PublishBackoff}/{@code
@@ -86,7 +86,7 @@ public class PublishWiring {
      * false} (D1), the router never routes anywhere but the direct publisher, so runtime behaviour is
      * byte-identical to the plain {@code MediamtxStreamPublisher} bean this method used to return.
      *
-     * <p>Fails fast (docs/plans/active/MEDIA-SOT-PLAN.md §3's legal-combination table) on the one
+     * <p>Fails fast (docs/plans/done/MEDIA-SOT-PLAN.md §3's legal-combination table) on the one
      * rejected row — see {@link #rejectProxyWithPushTransport}.
      */
     @Bean
@@ -105,7 +105,7 @@ public class PublishWiring {
     }
 
     /**
-     * docs/plans/active/MEDIA-SOT-PLAN.md §3's rejected legal-combination row (A=proxy, B=push):
+     * docs/plans/done/MEDIA-SOT-PLAN.md §3's rejected legal-combination row (A=proxy, B=push):
      * checked once here, at wiring time, rather than per-stream-start inside {@code
      * DefaultStreamService} — that class lives in {@code vision-application}, a module this wave does
      * not touch. {@code vision.publish.source-proxy.enabled=true} declares this deployment's intent to
@@ -121,7 +121,7 @@ public class PublishWiring {
             throw new IllegalStateException(
                     "vision.publish.source-proxy.enabled=true (mediamtx dials the camera itself) requires "
                             + "vision.cv.frame-transport=pull -- a proxied source means this JVM never holds a "
-                            + "video frame (docs/plans/active/MEDIA-SOT-PLAN.md D4), so leaving "
+                            + "video frame (docs/plans/done/MEDIA-SOT-PLAN.md D4), so leaving "
                             + "vision.cv.frame-transport=push (its current value) would start a stream that can "
                             + "never detect: there would be nothing for push mode to send cv-service. Set "
                             + "vision.cv.frame-transport=pull, or leave vision.publish.source-proxy.enabled=false.");
@@ -154,7 +154,7 @@ public class PublishWiring {
     }
 
     /**
-     * On-demand live-frame grab against mediamtx's own RTSP output (docs/plans/active/MEDIA-SOT-PLAN.md
+     * On-demand live-frame grab against mediamtx's own RTSP output (docs/plans/done/MEDIA-SOT-PLAN.md
      * waves M6/M7) — the collaborator {@code ApplicationServiceWiring#streamService} wraps {@code
      * DefaultStreamService} with ({@code com.drones.vision.app.stream.LiveFrameFallbackStreamService})
      * when {@link VisionPublishProperties.SourceProxy#enabled()} is {@code true}, so the snapshot
@@ -212,7 +212,7 @@ public class PublishWiring {
 
     /**
      * {@link HlsProxyController}'s upstream {@code HttpClient} timeouts and buffer/redirect bounds
-     * (docs/plans/active/SCALE-100-PLAN.md §5 S7) — mapped from {@link VisionApiProperties#hlsProxy()}
+     * (docs/plans/done/SCALE-100-PLAN.md §5 S7) — mapped from {@link VisionApiProperties#hlsProxy()}
      * the same way {@link #snapshotJpegEncoder} maps {@code snapshot}. A plain nested-record bean
      * (not the whole bridged {@code com.drones.vision.api.support.VisionApiProperties}) since that is
      * all the controller's own {@code @Autowired} constructor declares.
@@ -224,7 +224,7 @@ public class PublishWiring {
 
     /**
      * {@link LiveUpdateRegistry}'s coalesce/heartbeat cadence, per-topic ring-buffer capacities, and
-     * per-connection dispatch bounds (docs/plans/active/SCALE-100-PLAN.md §5 S7) — mapped from {@link
+     * per-connection dispatch bounds (docs/plans/done/SCALE-100-PLAN.md §5 S7) — mapped from {@link
      * VisionApiProperties#live()}, same shape as {@link #hlsProxySettings}.
      */
     @Bean

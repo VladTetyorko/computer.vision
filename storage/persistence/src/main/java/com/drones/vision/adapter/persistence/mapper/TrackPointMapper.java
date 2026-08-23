@@ -7,7 +7,7 @@ import com.drones.vision.map.domain.model.LayerId;
 import com.drones.vision.map.domain.model.TrackPoint;
 
 /**
- * {@link TrackPoint} ⟷ {@link TrackPointEntity} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7).
+ * {@link TrackPoint} ⟷ {@link TrackPointEntity} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D3/§7).
  *
  * <p>{@code toEntity} never carries an {@code id} — {@link TrackPoint} has none of its own, and
  * {@link TrackPointEntity#id()} is assigned by the database on insert (see that entity's own

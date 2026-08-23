@@ -32,7 +32,7 @@ import java.util.Map;
  * {@link com.drones.vision.flight.domain.port.TelemetrySourcePort#open} call, never shared across
  * two runtimes, since it accumulates the latest known value of each field across messages.
  *
- * <h2>Four state groups (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2; docs/plans/active/GEO-POSE-PLAN.md wave V2)</h2>
+ * <h2>Four state groups (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2; docs/plans/done/GEO-POSE-PLAN.md wave V2)</h2>
  * The merged fields split across four package-private mutable holders, by which domain concept
  * they feed: {@link PositionAndPowerState} (position/velocity/battery — {@link
  * Telemetry}'s own named fields plus their {@code extra}-only siblings, and, since wave V2, {@link
@@ -75,7 +75,7 @@ import java.util.Map;
  *       {@link Telemetry#altitudeMeters()} (÷ 1000 — the AMSL reading, not {@code relativeAlt}, to
  *       match {@link Telemetry#altitudeMeters()}'s "absolute" semantics used elsewhere in this
  *       codebase, e.g. {@code GeoPosition}); {@code relative_alt} (mm, height above home) → {@link
- *       Telemetry#aglMeters()} (÷ 1000, docs/plans/active/GEO-POSE-PLAN.md wave V2 — the AGL figure
+ *       Telemetry#aglMeters()} (÷ 1000, docs/plans/done/GEO-POSE-PLAN.md wave V2 — the AGL figure
  *       {@code altitudeMeters} does <b>not</b> carry); {@code time_boot_ms} → {@link
  *       Telemetry#deviceBootMillis()} (wave V2, no conversion); {@code hdg} (centidegrees, {@code
  *       65535} = unknown) → {@link Telemetry#headingDegrees()} (÷ 100, or {@code null} when

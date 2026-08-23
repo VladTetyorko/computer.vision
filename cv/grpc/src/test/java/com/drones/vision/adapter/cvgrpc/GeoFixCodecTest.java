@@ -63,7 +63,7 @@ class GeoFixCodecTest {
     }
 
     /**
-     * H8's gimbal-less fallback (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 2) — the SAME
+     * H8's gimbal-less fallback (docs/plans/done/VISUAL-GEO-V2-PLAN.md §9.11 defect 2) — the SAME
      * degrees-from-nadir conversion, sourced from the airframe when MAVLink {@code ATTITUDE} (#30) is
      * all the aircraft reports. Both conventions are named explicitly here too: the airframe's own
      * pitch is positive-up, the mount offset is positive-up <em>relative to the airframe</em>, and the

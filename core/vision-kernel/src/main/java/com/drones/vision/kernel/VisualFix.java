@@ -4,7 +4,7 @@ import java.time.Instant;
 
 /**
  * The measured result of one HEAVY-A visual-geolocation attempt against a single keyframe —
- * cv-service's {@code GeoFix} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1), carried into Java
+ * cv-service's {@code GeoFix} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1), carried into Java
  * unchanged. A pure value with two context consumers — {@code vision-perception} produces it (the
  * driving side of the localization session, H2b) and {@code vision-flight} consumes it (building the
  * aircraft's own corrected track, H2a §3.5) — the same two-consumer justification {@link Telemetry}

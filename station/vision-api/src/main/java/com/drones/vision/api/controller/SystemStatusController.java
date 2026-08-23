@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Driving REST adapter for {@code GET /api/system/status} (docs/plans/active/SYSTEM-STATUS-PLAN.md
+ * Driving REST adapter for {@code GET /api/system/status} (docs/plans/done/SYSTEM-STATUS-PLAN.md
  * §4.3) — UX-DESIGN §7.2's "honest status over optimistic status" doctrine: whether each subsystem
  * this deployment depends on (cv-service, the MAVLink link, video publish, live SSE updates) is
  * currently working, so an operator whose CV has died can see why instead of guessing from a frozen
@@ -48,7 +48,7 @@ public class SystemStatusController {
     /**
      * Worst-to-best ranking used by {@link #overall(List)}, deliberately excluding {@link
      * Health#DISABLED} (never a candidate — filtered out before this map is consulted). The plan
-     * (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.3) specifies "worst health across subsystems" but
+     * (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.3) specifies "worst health across subsystems" but
      * not the exact DOWN-vs-UNKNOWN precedence; this class's call is that a <em>confirmed</em> DOWN
      * outranks an <em>inconclusive</em> UNKNOWN, since a provider that cannot say what is going on is
      * less alarming than one that has confirmed a real outage.

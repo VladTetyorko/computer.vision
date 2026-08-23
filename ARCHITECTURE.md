@@ -88,7 +88,7 @@ vision/                                  (parent pom, dependency management)
 │                                         + warehouse, perception
 │
 │                                        Below: driven adapters, grouped by RESPONSIBILITY, not by
-│                                        pattern (docs/plans/active/MODULE-LAYOUT-PROPOSAL.md). The
+│                                        pattern (docs/plans/done/MODULE-LAYOUT-PROPOSAL.md). The
 │                                        artifactId of each is unchanged and shown in [brackets];
 │                                        "(planned)" entries are design intent, not code that exists.
 ├── video-input/                         How pixels get in
@@ -100,7 +100,7 @@ vision/                                  (parent pom, dependency management)
 │
 ├── video-output/                        How pixels get out
 │   ├── publish-hls/                     H.264 RTSP push → mediamtx, HLS/LL-HLS viewing [adapter-publish-hls]
-│   │                                    (server-side burn-in removed — docs/plans/active/CV-CLEAN-FEED-PLAN.md
+│   │                                    (server-side burn-in removed — docs/plans/done/CV-CLEAN-FEED-PLAN.md
 │   │                                    D-1; every published frame is the clean source frame, detection boxes
 │   │                                    render client-side in the web console)
 │   └── (planned) recording/             Segmented MP4 recording, retention policy
@@ -177,7 +177,7 @@ StreamPublisherPort                           ▼           ▼              ▼
 ```
 
 No server-side burn-in: the frame reaching `StreamPublisherPort` is always the clean source frame —
-`OverlayPort`/`AnnotatedFrame` were removed entirely (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1), not
+`OverlayPort`/`AnnotatedFrame` were removed entirely (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1), not
 defaulted off. Detection boxes are rendered client-side by the web console against the detection feed.
 
 Key policies (application layer, protocol-agnostic — KISS):
@@ -310,7 +310,7 @@ Domain additions land in their own phase (below) — Phase 0–2 domain stays le
 - [ ] Python `cv-service` inference server with pretrained YOLO (COCO classes).
 - [ ] `adapter-cv-grpc` implementing `DetectionPort`; sampling + backpressure policy.
 - [ ] Detection boxes/labels/confidence rendered client-side over the video (no server-side burn-in —
-      docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1; `adapter-overlay` was removed, not built).
+      docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1; `adapter-overlay` was removed, not built).
 - [ ] Detections persisted (`adapter-persistence`) + live detection feed over WebSocket.
 - **Milestone: browser shows live video with detection overlays; detections queryable.**
 
@@ -333,7 +333,7 @@ Domain additions land in their own phase (below) — Phase 0–2 domain stays le
 - [x] Recording + clip export: **shipped by a different route than planned** — mediamtx records
   natively and `StreamPublisherPort#playbackUrl` resolves the result, so no frame ever crosses into
   Java for recording. The `adapter-recording` this line originally planned, and the `RecordingPort`
-  it would have implemented, were both retired unbuilt (K4, docs/plans/active/DEAD-CODE-AUDIT.md §2).
+  it would have implemented, were both retired unbuilt (K4, docs/plans/done/DEAD-CODE-AUDIT.md §2).
 - [ ] `adapter-notify`: webhook, MQTT, Telegram.
 - **Milestone: platform acts on what it sees.**
 

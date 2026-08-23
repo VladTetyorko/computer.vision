@@ -18,7 +18,7 @@ import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
  * No-op implementation of all six live-update ports the former god-port {@code
  * LiveUpdatePublisherPort} split into (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b), plus
  * {@link TrackCorrectionLiveUpdatePort} added for visual geolocation's {@code geo:<assetId>} topic
- * (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5) — every method is a no-op. Wired when
+ * (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5) — every method is a no-op. Wired when
  * {@code vision.live.enabled=false} (docs/plans/done/REALTIME-PLAN.md
  * §4, item 4) — {@code vision-api}'s {@code /api/live} endpoint itself 404s in that case (its
  * controller/registry beans are conditionally absent), but the application layer ({@code

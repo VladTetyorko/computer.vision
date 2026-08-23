@@ -4,7 +4,7 @@ package com.drones.vision.adapter.mavlink;
  * Converts a MAVLink quaternion ({@code w, x, y, z} -- "1 0 0 0 is the null-rotation", per {@code
  * GIMBAL_DEVICE_ATTITUDE_STATUS}'s (#285) own field doc) into roll/pitch/yaw Euler angles in the
  * same "aeronautical frame (right-handed, Z-down, Y-right, X-front, ZYX, intrinsic)" that MAVLink's
- * {@code ATTITUDE} (#30) message documents for itself (docs/plans/active/GEO-POSE-PLAN.md §4.2,
+ * {@code ATTITUDE} (#30) message documents for itself (docs/plans/done/GEO-POSE-PLAN.md §4.2,
  * wave V2) -- the standard aerospace Tait-Bryan ZYX decomposition (yaw about Z applied
  * first/outermost, then pitch about the once-rotated Y, then roll about the twice-rotated X). This
  * is the textbook inverse of the equally standard ZYX quaternion-<em>from</em>-Euler construction

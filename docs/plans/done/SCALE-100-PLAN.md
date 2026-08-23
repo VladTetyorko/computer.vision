@@ -8,10 +8,10 @@ vision-app / adapter-persistence), with one small vision-web wave.
 crew"* to *"20–100 concurrent users and 10–30 concurrent streams on one JVM"* — **without**
 rearchitecting anything. Every change here is local surgery or configuration. The moment the answer
 requires a second instance, it belongs to
-[DOMAIN-SEPARATION-PLAN.md](DOMAIN-SEPARATION-PLAN.md), not here (§8).
+[DOMAIN-SEPARATION-PLAN.md](../active/DOMAIN-SEPARATION-PLAN.md), not here (§8).
 **Reads with:** [ARCHITECTURE.md](../../../ARCHITECTURE.md) ·
 [MEDIA-SOT-PLAN.md](MEDIA-SOT-PLAN.md) (whose shipped M6/M7 proxy-publisher path is what makes S1's
-bypass viable) · [DOMAIN-SEPARATION-PLAN.md](DOMAIN-SEPARATION-PLAN.md) (U2/U3, where the 50k answer
+bypass viable) · [DOMAIN-SEPARATION-PLAN.md](../active/DOMAIN-SEPARATION-PLAN.md) (U2/U3, where the 50k answer
 lives) · [POSTGRES-ONLY-CONTEXT.md](POSTGRES-ONLY-CONTEXT.md) (W1–W3, the in-progress move off the
 devsupport in-memory repositories that S3 assumes lands first)
 

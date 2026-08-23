@@ -352,7 +352,7 @@ class DefaultMarkServiceTest {
         GeolocationResult result = service.geolocate(pilotViewer(creator), spec);
 
         // The pre-fix behavior treated AMSL as AGL: 280 m ground range at the default 45-degree
-        // depression, instead of the true 100 m -- the bug docs/plans/active/GEO-POSE-PLAN.md §1 describes.
+        // depression, instead of the true 100 m -- the bug docs/plans/done/GEO-POSE-PLAN.md §1 describes.
         GeoPosition drone = new GeoPosition(50.45, 30.52, 280.0);
         GeoPosition preFixPoint = GeoProjection.project(drone, 0.0, 280.0, GeoProjection.DEFAULT_DEPRESSION_DEGREES);
 

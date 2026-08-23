@@ -107,7 +107,7 @@ class UsageTrackerTest {
     }
 
     /**
-     * docs/plans/active/SCALE-100-PLAN.md S4: same as {@link #tracker}, but with explicit {@link
+     * docs/plans/done/SCALE-100-PLAN.md S4: same as {@link #tracker}, but with explicit {@link
      * UsageSummaryBatchSettings} via the package-private test-seam constructor, so coalescing tests
      * can use a tiny batch window instead of waiting out production's default.
      */
@@ -275,7 +275,7 @@ class UsageTrackerTest {
 
     @Test
     void coalescedSummaryWriteDefersUntilTheSizeBoundThenFlushesTogether() {
-        // docs/plans/active/SCALE-100-PLAN.md S4 item 3: the durable telemetryRepository.save call
+        // docs/plans/done/SCALE-100-PLAN.md S4 item 3: the durable telemetryRepository.save call
         // still happens per-sample (asserted below); only the usageRepository summary write is
         // coalesced, onto a huge window so only the size bound can trip it here.
         Device telemetryDevice = telemetryDevice("tel-1");

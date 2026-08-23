@@ -133,7 +133,7 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
     }
 
     /**
-     * {@code RateLimitFilter}'s budget (docs/plans/active/SCALE-100-PLAN.md S6) — a blast-radius
+     * {@code RateLimitFilter}'s budget (docs/plans/done/SCALE-100-PLAN.md S6) — a blast-radius
      * bound, not security: it stops one runaway client from degrading the JVM for everyone else.
      *
      * <p><strong>Off by default, and that is a real decision, not caution.</strong> The filter keys

@@ -3,8 +3,10 @@ import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { RcMonitor } from './rc-monitor';
 import { RcInputService } from '../../core/rc/rc-input.service';
+import { VirtualRcInputService } from '../../core/rc/virtual-rc-input.service';
+import { RcSource } from '../../core/rc/rc-source.service';
 import { ManualControlClient, type ManualControlEngageState } from '../../core/rc/manual-control-client';
-import type { ManualControlChannelBinding } from '../../core/api/models';
+import type { ManualControlChannelBinding, VehicleKind } from '../../core/api/models';
 
 /** A duck-typed stand-in for `RcInputService` — writable signals a test can drive directly, since
  * the real service only mutates its own signals via `gamepadconnected`/`disconnected` browser
@@ -41,18 +43,50 @@ class FakeManualControlClient {
   readonly latencyMs = signal<number | undefined>(undefined);
   readonly channelMap = signal<readonly ManualControlChannelBinding[] | undefined>(undefined);
   readonly rateHz = signal<number | undefined>(undefined);
+  readonly vehicleKind = signal<VehicleKind | undefined>(undefined);
+  readonly profileCode = signal<string | undefined>(undefined);
+  readonly profileName = signal<string | undefined>(undefined);
   readonly watchdogTripped = signal(false);
 
   readonly engage = vi.fn();
   readonly release = vi.fn();
 }
 
+const centered = (
+  fn: string,
+  sourceIndex: number,
+  rcChannel: number,
+  label: string,
+): ManualControlChannelBinding => ({
+  source: 'AXIS',
+  function: fn as ManualControlChannelBinding['function'],
+  travel: 'CENTERED',
+  sourceIndex,
+  rcChannel,
+  minMicros: 1000,
+  centerMicros: 1500,
+  maxMicros: 2000,
+  label,
+});
+
+/** The rover map the backend sends for a `ROVER` heartbeat: steering on CH1, throttle on CH3, both
+ * centred (50 = stop), and nothing else bound. */
+const ROVER_MAP: readonly ManualControlChannelBinding[] = [
+  centered('STEERING', 0, 1, 'Steering'),
+  centered('THROTTLE', 2, 3, 'Throttle'),
+];
+
+/** `providers` is replaced wholesale by `overrideComponent`, so the real `RcSource`/
+ * `VirtualRcInputService` are re-listed here: only the two browser-touching collaborators are
+ * faked, and the source-selection logic under test stays the real one. */
 function render(fakeRc: FakeRcInputService, fakeClient: FakeManualControlClient) {
   TestBed.configureTestingModule({});
   TestBed.overrideComponent(RcMonitor, {
     set: {
       providers: [
         { provide: RcInputService, useValue: fakeRc },
+        VirtualRcInputService,
+        RcSource,
         { provide: ManualControlClient, useValue: fakeClient },
       ],
     },
@@ -65,14 +99,18 @@ function render(fakeRc: FakeRcInputService, fakeClient: FakeManualControlClient)
   return fixture;
 }
 
+const engageButton = (fixture: { nativeElement: HTMLElement }) =>
+  fixture.nativeElement.querySelector('.rc-engage button.big') as HTMLButtonElement;
+
 describe('RcMonitor — Take control', () => {
-  it('hides the monitor and the engage section entirely when the Gamepad API is unsupported', () => {
+  it('keeps the engage section when the Gamepad API is unsupported — control no longer needs one', () => {
     const fakeRc = new FakeRcInputService();
     fakeRc.setSupported(false);
     const fixture = render(fakeRc, new FakeManualControlClient());
 
     expect(fixture.nativeElement.textContent).toContain("doesn't expose gamepad input");
-    expect(fixture.nativeElement.querySelector('.rc-engage')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.rc-engage')).not.toBeNull();
+    expect(engageButton(fixture).disabled).toBe(false);
   });
 
   it('a disabled Take-control button shows the poka-yoke reason when the drone is not commandable', () => {
@@ -80,7 +118,7 @@ describe('RcMonitor — Take control', () => {
     fixture.componentRef.setInput('canCommand', false);
     fixture.detectChanges();
 
-    const button = fixture.nativeElement.querySelector('.rc-engage button') as HTMLButtonElement;
+    const button = engageButton(fixture);
     expect(button.textContent?.trim()).toBe('Take control');
     expect(button.disabled).toBe(true);
     expect(fixture.nativeElement.querySelector('.disabled-reason')?.textContent).toBe(
@@ -88,25 +126,43 @@ describe('RcMonitor — Take control', () => {
     );
   });
 
-  it('a disabled Take-control button shows the poka-yoke reason when no transmitter is plugged in', () => {
-    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+  it('defaults to the on-screen source with no transmitter, so Take control is enabled', () => {
+    const fakeClient = new FakeManualControlClient();
+    const fixture = render(new FakeRcInputService(), fakeClient);
 
-    const button = fixture.nativeElement.querySelector('.rc-engage button') as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(fixture.nativeElement.querySelector('.disabled-reason')?.textContent).toBe('Plug your transmitter in first.');
+    expect(engageButton(fixture).disabled).toBe(false);
+    engageButton(fixture).click();
+    expect(fakeClient.engage).toHaveBeenCalledWith('asset-1');
   });
 
-  it('an enabled Take-control button calls client.engage(assetId) on click', () => {
+  it('an enabled Take-control button calls client.engage(assetId) on click with a transmitter too', () => {
     const fakeRc = new FakeRcInputService();
     fakeRc.setConnected(true);
     const fakeClient = new FakeManualControlClient();
     const fixture = render(fakeRc, fakeClient);
 
-    const button = fixture.nativeElement.querySelector('.rc-engage button') as HTMLButtonElement;
+    const button = engageButton(fixture);
     expect(button.disabled).toBe(false);
     button.click();
 
     expect(fakeClient.engage).toHaveBeenCalledWith('asset-1');
+  });
+
+  it('a connected transmitter is selected automatically, and its unplugging blocks with a reason that names the way out', () => {
+    const fakeRc = new FakeRcInputService();
+    fakeRc.setConnected(true);
+    const fixture = render(fakeRc, new FakeManualControlClient());
+    const transmitter = fixture.nativeElement.querySelectorAll('.rc-source button')[1] as HTMLButtonElement;
+    expect(transmitter.classList.contains('active')).toBe(true);
+
+    // Unplugging never demotes the source — it blocks, so a yanked cable is a failsafe, not a
+    // silent handover to an on-screen stick sitting at idle.
+    fakeRc.setConnected(false);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.disabled-reason')?.textContent).toBe(
+      'Plug your transmitter in, or switch to the on-screen controls.',
+    );
   });
 
   it('the engaged state shows rateHz/latency and the channel map, with a big, text-labeled, danger-styled RELEASE control', () => {
@@ -116,12 +172,14 @@ describe('RcMonitor — Take control', () => {
     fakeClient.state.set('engaged');
     fakeClient.rateHz.set(33);
     fakeClient.latencyMs.set(41.6);
-    fakeClient.channelMap.set([{ source: 'AXIS', sourceIndex: 0, rcChannel: 1, label: 'Roll' }]);
+    fakeClient.vehicleKind.set('ROVER');
+    fakeClient.profileName.set('Ground vehicle');
+    fakeClient.channelMap.set(ROVER_MAP);
     const fixture = render(fakeRc, fakeClient);
 
     expect(fixture.nativeElement.textContent).toContain('33 Hz link');
     expect(fixture.nativeElement.textContent).toContain('42 ms RTT');
-    expect(fixture.nativeElement.textContent).toContain('Roll → CH1');
+    expect(fixture.nativeElement.textContent).toContain('Steering → CH1');
 
     const releaseButton = fixture.nativeElement.querySelector('.rc-engage button.btn.danger') as HTMLButtonElement;
     expect(releaseButton.textContent?.trim()).toBe('RELEASE');
@@ -129,6 +187,32 @@ describe('RcMonitor — Take control', () => {
 
     releaseButton.click();
     expect(fakeClient.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the on-screen surface, shaped by the engaged map, only for the virtual source', () => {
+    const fakeClient = new FakeManualControlClient();
+    fakeClient.state.set('engaged');
+    fakeClient.vehicleKind.set('ROVER');
+    fakeClient.profileName.set('Ground vehicle');
+    fakeClient.channelMap.set(ROVER_MAP);
+    const fixture = render(new FakeRcInputService(), fakeClient);
+
+    // A rover binds two controls, which share one steer/drive pad.
+    expect(fixture.nativeElement.querySelectorAll('.vcs-pad').length).toBe(1);
+    expect(fixture.nativeElement.textContent).toContain('Ground vehicle layout');
+  });
+
+  it('freezes the input choice while a session is live', () => {
+    const fakeClient = new FakeManualControlClient();
+    fakeClient.state.set('engaged');
+    fakeClient.channelMap.set(ROVER_MAP);
+    fakeClient.vehicleKind.set('ROVER');
+    fakeClient.profileName.set('Ground vehicle');
+    const fixture = render(new FakeRcInputService(), fakeClient);
+
+    const buttons = fixture.nativeElement.querySelectorAll('.rc-source button') as NodeListOf<HTMLButtonElement>;
+    expect(buttons[0].disabled).toBe(true);
+    expect(buttons[1].disabled).toBe(true);
   });
 
   it('the denied state shows the server-provided human reason', () => {

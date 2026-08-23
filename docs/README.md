@@ -29,18 +29,12 @@ rewrite the citations in the same commit.
 | [CYCLES-PLAN.md](main/CYCLES-PLAN.md) | how the work is run — alternating backend/UI cycles, delegation model, TX/RX doctrine |
 | [vision-architecture.drawio](main/vision-architecture.drawio) | the whole system as pictures — C4 context and containers, the hexagon, the runtime pipeline, the four human-in-the-loop flows, deployment |
 
-## plans/active/ — unbuilt or gated
+## plans/ — the portfolio
 
-| Doc | State |
-|---|---|
-| [CV-SCALE-PLAN.md](plans/active/CV-SCALE-PLAN.md) | S1/S2 shipped via CV-CONTROL; **S3 model roster, S4 multi-worker pool unbuilt; S5 decided GO, executed as MEDIA-SOT-PLAN** |
-| [MEDIA-SOT-PLAN.md](plans/active/MEDIA-SOT-PLAN.md) | waves M0–M9 all shipped and measured (results: [MEDIA-SOT-RESULTS.md](conclusions/MEDIA-SOT-RESULTS.md)); **real-camera glass-to-glass and the §6 clock-drift re-measurement stay gated on the H1 camera purchase** |
-| [DOMAIN-SEPARATION-PLAN.md](plans/active/DOMAIN-SEPARATION-PLAN.md) | target architecture: 8 bounded contexts, 4 runtime roles, urgency-classed communication (direct for U0/U1, NATS JetStream for U2/U3), asset-unit leases; **W1 shipped — the eight contexts are Maven modules; W2–W5 unbuilt** |
-| [LAYERING-REFACTOR-PLAN.md](plans/active/LAYERING-REFACTOR-PLAN.md) | conventions in force and widely cited; **the class decompositions (matrix K3) are not done** |
-| [DRONE-INFRA-PLAN.md](plans/active/DRONE-INFRA-PLAN.md) | I-a/b/e/g shipped; **edge kits (I-d) and command TX stage 3 remain, stage 3 gated** |
-| [RC-CONTROL-PLAN.md](plans/active/RC-CONTROL-PLAN.md) | Phase 0 + Phase 1 shipped; **Phase 2 (real airframe) gated on explicit user go** |
-| [TRACKING-V2-PLAN.md](plans/active/TRACKING-V2-PLAN.md) | waves C0–C5 all delivered 2026-08-12 (0 id-switches, 100% recovery on ten synthetic scenarios); `CameraPose` is now populated by Java too, so telemetry ego-motion compensation is live |
-| [TRACKING-V3-PLAN.md](plans/active/TRACKING-V3-PLAN.md) | one pipeline at five capability levels (ARMv6 relay → workstation, §5, costs measured); observation-centric identity (ORU/OCM), confidence-adaptive motion, late-detection back-correction, level-gated appearance tier; **waves V0–V8 unbuilt — V0 hardens the harness first, because V2's scoreboard is saturated** |
+**[plans/README.md](plans/README.md) is the status authority** — every plan doc classified
+DONE / PARTIAL / OPEN / REJECT, reconciled against `master` and against the tree, with the
+inbound-citation cost of touching each file. A plan's own header is frequently stale; that index
+is not. Read it before starting anything, and update it when a wave lands.
 
 ## conclusions/ — decisions and investigations
 

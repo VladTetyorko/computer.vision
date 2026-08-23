@@ -14,10 +14,13 @@ import com.drones.vision.api.support.CapabilityParsing;
  * Request body for {@code POST /api/devices}.
  *
  * <p>{@code options} is optional; a missing/{@code null} value is treated as
- * an empty map. {@code capabilities} is optional; a missing/empty value
- * defaults to {@code Set.of(Capability.VIDEO)}, preserving the Phase-1
- * VIDEO-only default. When present, each entry must match a {@link
- * Capability} name case-insensitively (see {@link CapabilityParsing}).
+ * an empty map. {@code capabilities} is optional; a missing/empty value is
+ * defaulted <b>from {@code protocol}</b> — {@code mavlink} to {@link
+ * Capability#TELEMETRY}, everything else to {@link Capability#VIDEO}, which
+ * preserves the Phase-1 VIDEO-only default for every protocol that had it
+ * (see {@link CapabilityParsing}'s own "why the default depends on the
+ * protocol"). When present, each entry must match a {@link Capability} name
+ * case-insensitively, and an explicit list always wins over the default.
  * There is no {@code type} field: the {@code DeviceType} enum was removed in
  * favor of the data-driven category model (see {@code CategoryController})
  * — categories apply to {@code Asset}s (via {@code CreateAssetRequest}), not
@@ -28,7 +31,8 @@ import com.drones.vision.api.support.CapabilityParsing;
  * @param uri          the stream's resource locator
  * @param options      adapter-specific parameters; may be {@code null} (treated as empty)
  * @param capabilities capability names (see {@link Capability}); may be {@code null}/empty
- *                     (defaults to {@code [VIDEO]})
+ *                     (then defaulted from {@code protocol}: {@code mavlink} → {@code
+ *                     [TELEMETRY]}, otherwise {@code [VIDEO]})
  */
 public record RegisterDeviceRequest(String name, String protocol, String uri, Map<String, String> options,
                                      List<String> capabilities) {
@@ -60,6 +64,6 @@ public record RegisterDeviceRequest(String name, String protocol, String uri, Ma
 
         StreamDescriptor descriptor =
                 new StreamDescriptor(protocol, parsedUri, options == null ? Map.of() : options);
-        return new DeviceRegistration(name, CapabilityParsing.parse(capabilities), descriptor);
+        return new DeviceRegistration(name, CapabilityParsing.parse(capabilities, protocol), descriptor);
     }
 }

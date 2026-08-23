@@ -6,7 +6,7 @@ import java.util.Objects;
 /**
  * Plain, framework-free settings for {@link HttpTileSource} (and, per-release, {@link
  * WaybackTileSource}) — the single source for every {@code vision.geo.visual.tiles.*} tunable
- * (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.6) this module needs. No Spring annotations here,
+ * (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.6) this module needs. No Spring annotations here,
  * mirroring {@code cv/grpc}'s {@code GrpcCvSettings}: {@code vision-app} owns a {@code
  * VisionGeoProperties} record bound to {@code application.yaml} and maps it to one of these before
  * handing it to {@link HttpTileSource}'s constructor (H5) — this class must never be constructed

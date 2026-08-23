@@ -85,7 +85,7 @@ export class App {
   protected readonly offline = computed(() => this.fleet.reachable() === false);
 
   /**
-   * The unsecured-station banner's own gate (docs/plans/active/OPS-UX-PLAN.md §2 A6,
+   * The unsecured-station banner's own gate (docs/plans/done/OPS-UX-PLAN.md §2 A6,
    * docs/conclusions/OPS-UX-REVIEW.md §O3 — "an operator has no way to know this station has no
    * login at all"). Requires **both** `auth.user()` resolved and `authEnabled() === false`, not
    * `authEnabled()` alone: `authEnabled` reads `false` for one tick before the boot `GET
@@ -102,7 +102,7 @@ export class App {
   private readonly bannerStack = viewChild.required<ElementRef<HTMLElement>>('shellBanners');
 
   /**
-   * The one silent-degradation case docs/plans/active/SYSTEM-STATUS-PLAN.md §1/§3.1 names: the SSE `/api/live`
+   * The one silent-degradation case docs/plans/done/SYSTEM-STATUS-PLAN.md §1/§3.1 names: the SSE `/api/live`
    * connection is `closed` (its own 60s retry loop, `core/live/live-store.ts#SSE_RETRY_INTERVAL_MS`,
    * exhausted at least once) while the backend's REST API is still perfectly `reachable()` — every
    * "live" surface in the app has already silently fallen back to its own 5s poll
@@ -152,7 +152,7 @@ export class App {
     const destroyRef = inject(DestroyRef);
     destroyRef.onDestroy(() => document.removeEventListener('keydown', onKeydown));
 
-    // Publishes the banner strip's real height as `--shell-banner-h` (docs/plans/active/OPS-UX-PLAN.md
+    // Publishes the banner strip's real height as `--shell-banner-h` (docs/plans/done/OPS-UX-PLAN.md
     // §2 A6 rev.2). The strip is `position: fixed`, so nothing reserves space for it automatically and
     // every viewport-anchored box in the app — the shell grid, the sidebar, `.cockpit`,
     // `.command-shell`, a `.side-panel` drawer — subtracts this token instead of overlapping it.

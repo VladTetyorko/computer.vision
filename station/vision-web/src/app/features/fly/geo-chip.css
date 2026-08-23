@@ -27,7 +27,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* "GEO ok" — neutral, plain text, no color override (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8's
+/* "GEO ok" — neutral, plain text, no color override (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8's
    own "GEO ok (neutral)"). */
 
 /* "GEO —" — dim, mirrors `.osd-metric.dim` next door in fly-osd.css. */

@@ -521,7 +521,7 @@ td.actions {
     margin-bottom: var(--space-16);
 }
 
-/* ---- Step 5: Assign — "Who flies this?" (docs/plans/active/OPS-UX-PLAN.md §2 A3) ------------- */
+/* ---- Step 5: Assign — "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) ------------- */
 
 .pilot-list {
     list-style: none;

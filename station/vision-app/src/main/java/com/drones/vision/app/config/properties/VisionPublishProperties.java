@@ -65,7 +65,7 @@ import java.time.Duration;
  * @param replay      {@code MediamtxReplayFrameExtractor}'s clip-window/read-timeout; defaulted as
  *                    a whole when absent
  * @param sourceProxy {@code MediamtxProxyPublisher}/{@code PublisherRouter}'s "mediamtx dials the
- *                    camera itself" switch (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch A, §5.5);
+ *                    camera itself" switch (docs/plans/done/MEDIA-SOT-PLAN.md §3 switch A, §5.5);
  *                    defaulted as a whole when absent
  */
 @ConfigurationProperties(prefix = "vision.publish")
@@ -130,7 +130,7 @@ public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
      * @param playbackBase base HTTP URL of mediamtx's playback server (docs/plans/done/OPS-CORE-PLAN.md §R,
      *                     docs/plans/done/CV-TRAINING-V2-PLAN.md §7), e.g. {@code http://localhost:19996};
      *                     default {@value Mediamtx#DEFAULT_PLAYBACK_BASE}
-     * @param apiBase      base HTTP URL of mediamtx's Control API (docs/plans/active/MEDIA-SOT-PLAN.md §5.3),
+     * @param apiBase      base HTTP URL of mediamtx's Control API (docs/plans/done/MEDIA-SOT-PLAN.md §5.3),
      *                     e.g. {@code http://localhost:19997} — {@code MediamtxProxyPublisher} calls this
      *                     to create/patch/delete a proxied path and poll its readiness; only reached when
      *                     {@link #sourceProxy()}'s {@code enabled} is {@code true}. Default {@value
@@ -164,7 +164,7 @@ public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
     }
 
     /**
-     * "mediamtx dials the camera itself" switch (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch A, §5.5,
+     * "mediamtx dials the camera itself" switch (docs/plans/done/MEDIA-SOT-PLAN.md §3 switch A, §5.5,
      * D3/D10) — read by {@code wiring.PublishWiring#streamPublisherPort} to decide whether the {@code
      * StreamPublisherPort} bean is a plain {@code MediamtxStreamPublisher} or a {@code PublisherRouter}
      * wrapping it alongside a {@code MediamtxProxyPublisher}.

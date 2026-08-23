@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * The {@link WireFormat#AUTO} decision rule (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R3). Getting
+ * The {@link WireFormat#AUTO} decision rule (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R3). Getting
  * this wrong is quiet and expensive in one direction: a remote deployment misread as loopback sends
  * ~17x the bytes over a link that cannot carry them.
  */

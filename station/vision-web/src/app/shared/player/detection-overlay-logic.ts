@@ -10,7 +10,7 @@ import { CV_STATUS_FRESH_SECONDS } from '../../core/detections/detections-logic'
  */
 
 /**
- * Declutter levels (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.6, wave W4) — the per-tile
+ * Declutter levels (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.6, wave W4) — the per-tile
  * density control, extended from W3's two-state `'overlay' | 'off'` to four named states. Avionics
  * practice (research §4.6): discrete, named declutter modes, never a slider. `'all'` draws every
  * tier (T0-T3, today's old `'overlay'` posture); `'priority'` draws T0+T1 (full boxes) plus T3 (dots)
@@ -115,7 +115,7 @@ export function selectDetectionResult(
  * The estimated on-screen instant — `nowMs` minus the sync latency, a `null` or negative latency
  * degrading to `0` (`overlaySyncLatencySeconds`'s own "not yet measured" rule). {@link
  * selectDetectionResult} (picking the right batch) and `shared/player/player.ts#redrawOverlay`'s own
- * extrapolation target (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave W7 — projecting the picked
+ * extrapolation target (docs/plans/done/CV-CLEAN-FEED-PLAN.md §7, wave W7 — projecting the picked
  * batch's boxes forward to this same instant) both call this one function rather than each re-deriving
  * the null/negative guard, so the two can never quietly disagree about which instant is "on screen
  * right now".
@@ -145,7 +145,7 @@ export function averageBatchIntervalMs(results: readonly DetectionResult[]): num
 
 /**
  * The latency figure {@link selectDetectionResult} should sync boxes against, given which transport
- * is actually attached (docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8).
+ * is actually attached (docs/plans/done/MEDIA-SOT-PLAN.md §6/§8 wave M8).
  *
  * HLS keeps its existing behaviour exactly: `behindLiveSeconds` (`shared/player/player.ts`'s own
  * measured live-edge distance) passes through unchanged.
@@ -169,7 +169,7 @@ export function overlaySyncLatencySeconds(
   return transport === 'webrtc' ? (whepLatencySeconds ?? 0) : behindLiveSeconds;
 }
 
-// --- Forward-projection (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave W7) ------------------------------
+// --- Forward-projection (docs/plans/done/CV-CLEAN-FEED-PLAN.md §7, wave W7) ------------------------------
 // W1 deleted the server-side `DetectionExtrapolator` that used to velocity-project every burned-in
 // box onto the exact frame being published; the client overlay `selectDetectionResult` picked above
 // only *selects* a batch by latency, it never moves anything — so whenever video latency runs behind
@@ -422,7 +422,7 @@ export function findPredecessorResult(
  * entirely, every other declutter level draws once a result is available (which tiers, specifically,
  * is {@link tiersForDeclutterLevel}'s job, not this function's — this is only the top-level "is the
  * canvas live at all" gate, unchanged in shape since W3). The video itself is always clean pixels now
- * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1: server-side burn-in is deleted, not defaulted off), so
+ * (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1: server-side burn-in is deleted, not defaulted off), so
  * `'off'` means genuinely no boxes anywhere — and, per `Player#overlayInteractive`'s own use of this
  * function, no hover/click either, not merely "hide the client canvas over the server's own baked-in
  * ones" the way it used to.
@@ -451,7 +451,7 @@ export function tiersForDeclutterLevel(mode: BoxesMode): ReadonlySet<DetectionTi
   }
 }
 
-// --- Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7) -----------------------
+// --- Staleness honesty (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7) -----------------------
 // The renderer already knows a batch's age (`capturedAt` vs `now`) — this turns that age into an
 // honest signal instead of drawing a stale batch at full confidence forever. Two thresholds, both
 // scaled off the stream's own observed cadence rather than one flat guess:
@@ -681,12 +681,12 @@ export function trackTrails(
   return byTrack;
 }
 
-// --- Sticky labels per track (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1) ---------------------------
+// --- Sticky labels per track (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 1) ---------------------------
 // TRACK-IDENTITY-RESEARCH.md §1's six-layer chain (item 6, "SPA"): an open-vocabulary detector rolls a
 // ~4585-class die on every pass, and every downstream layer — including this one, before this wave —
 // repeated the newest roll verbatim: the painted text, the class-bucket hue ({@link classBucketHue}
 // below), and the hover tooltip all flipped in lockstep with the raw per-frame label. L1
-// (docs/plans/active/TRACK-IDENTITY-PLAN.md §L1, `cv/cv-service/cv_service/tracking/track.py`) is the
+// (docs/plans/done/TRACK-IDENTITY-PLAN.md §L1, `cv/cv-service/cv_service/tracking/track.py`) is the
 // real fix — a server-side election, emitted on the wire — but ships from a different module on a
 // different runtime; this is the **stopgap + defense** for a cv-service deployment that hasn't (yet)
 // picked it up. {@link electStickyLabels} mirrors L1's contract (confidence-weighted tally,
@@ -702,7 +702,7 @@ export function trackTrails(
 // shares this exact election for its own sliding-window chips — see that module).
 
 /** Observations retained per track for the election tally — mirrors cv-service's own
- *  `CV_TRACK_LABEL_VOTE_WINDOW` (docs/plans/active/TRACK-IDENTITY-PLAN.md §L1 item 1), same default
+ *  `CV_TRACK_LABEL_VOTE_WINDOW` (docs/plans/done/TRACK-IDENTITY-PLAN.md §L1 item 1), same default
  *  (10) so both ends of the wire reason about "recent" identically. */
 export const STICKY_LABEL_VOTE_WINDOW = 10;
 
@@ -846,7 +846,7 @@ export function applyStickyLabels(
   });
 }
 
-// --- HiDPI canvas backing store (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) -----------------------------
+// --- HiDPI canvas backing store (docs/plans/done/MEDIA-SOT-PLAN.md §8 wave M8) -----------------------------
 // The overlay canvas used to size its backing store 1:1 with its CSS box (`canvas.width =
 // video.clientWidth`), so every box/trail/label drew at 1 device pixel per CSS pixel — soft/blurry on
 // any HiDPI display, quietly undercutting the reason the client overlay exists at all ("crisp boxes
@@ -872,7 +872,7 @@ export function canvasBackingSize(
   };
 }
 
-// --- Priority tiers (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2, wave W4) --------------------------
+// --- Priority tiers (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.2, wave W4) --------------------------
 // Every detection gets a computed draw tier, a pure function of what the client already knows (lock
 // state, hover, track/trail history, box geometry) — fixes D2 (always-on labels), D3 (no priority
 // model — a locked target looks like a tree), D5 (per-track confetti hues), D8 (trails scale with
@@ -933,7 +933,7 @@ export interface DetectionTierContext {
   readonly contentHeightPx: number;
   /**
    * The label currently hovered on the detections strip's remote-control chips
-   * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3, wave W5, research §3.5) — `null` when nothing is
+   * (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3, wave W5, research §3.5) — `null` when nothing is
    * hovered. An exact `detection.label` match promotes into T1 the same way {@link isMovingTrack}
    * does: unconditional, budget-exempt, so hovering "person" never gets crowded out by
    * {@link NOTABLE_TOP_K} already being spent elsewhere. Deliberately does *not* reach T3 (sub-scale
@@ -1028,7 +1028,7 @@ export function detectionTiers(
   return tiers;
 }
 
-// --- Tiered rendering weights (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2, wave W4) -----------------
+// --- Tiered rendering weights (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.2, wave W4) -----------------
 
 /** T2's own base alpha — "1px stroke at ~55% alpha, no label" (research §3.2's own T2 row). */
 export const T2_ALPHA_PERCENT = 55;
@@ -1064,7 +1064,7 @@ export const T0_STROKE_WIDTH_PX = 3;
 export const T1_STROKE_WIDTH_PX = 2;
 export const T2_STROKE_WIDTH_PX = 1;
 
-// --- Class-bucket box colors (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/D5, wave W4) ---------------
+// --- Class-bucket box colors (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.2/D5, wave W4) ---------------
 // Per-track hash hues made a dense scene read as confetti (D5, see `trackHue`'s own removal note
 // above) — color now carries *class*, not *identity* (identity stays the `#id` text and box
 // constancy, unchanged). Three buckets, each a **fixed** hue (never hashed — research's own "one
@@ -1163,7 +1163,7 @@ export function formatTierLabel(detection: Detection, tier: DetectionTier): stri
   return detection.track ? `#${detection.track.id} ${detection.label}` : detection.label;
 }
 
-// --- Label collision-yield (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.3, wave W4) --------------------
+// --- Label collision-yield (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.3, wave W4) --------------------
 
 /** Total labels {@link placeLabels} paints per frame, across every tier combined — research §3.3's
  *  own "cap total painted labels (~10)". T0's label is not specially exempted from this cap in code,

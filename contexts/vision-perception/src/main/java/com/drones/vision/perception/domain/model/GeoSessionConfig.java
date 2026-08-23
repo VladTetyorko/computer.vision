@@ -2,7 +2,7 @@ package com.drones.vision.perception.domain.model;
 
 /**
  * Declarative desired state for one localization session — the framework-free shape of proto's
- * {@code GeoControl} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1), minus the fields that are the
+ * {@code GeoControl} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1), minus the fields that are the
  * adapter's own transport concern ({@code stream_id}/{@code source_url}/{@code rtsp_transport}/
  * {@code stop}, already parameters or lifecycle methods on {@link
  * com.drones.vision.perception.domain.port.PulledGeolocationPort} itself) and minus {@code

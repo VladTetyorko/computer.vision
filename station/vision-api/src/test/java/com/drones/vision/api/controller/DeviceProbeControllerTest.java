@@ -88,6 +88,26 @@ class DeviceProbeControllerTest {
     }
 
     @Test
+    void aTelemetryOnlyProbeOmitsEveryFrameFieldRatherThanReportingAZeroSizedOne() throws Exception {
+        // docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §3 — the second legal 200 shape.
+        ProbeResult result = new ProbeResult(null, null, null, true, List.of("No video on this link — telemetry only"));
+        when(probeService.probe(any())).thenReturn(result);
+
+        String body = """
+                {"protocol":"mavlink","uri":"udp://0.0.0.0:14550"}
+                """;
+
+        mockMvc.perform(post("/api/devices/probe").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(true))
+                .andExpect(jsonPath("$.telemetryDetected").value(true))
+                .andExpect(jsonPath("$.widthPx").doesNotExist())
+                .andExpect(jsonPath("$.heightPx").doesNotExist())
+                .andExpect(jsonPath("$.frameJpegBase64").doesNotExist())
+                .andExpect(jsonPath("$.warnings[0]").value("No video on this link — telemetry only"));
+    }
+
+    @Test
     void probeReturns400ForABlankProtocol() throws Exception {
         mockMvc.perform(post("/api/devices/probe").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"protocol\":\"\",\"uri\":\"rtsp://cam\"}"))

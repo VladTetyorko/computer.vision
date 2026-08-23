@@ -1,8 +1,11 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, input, output } from '@angular/core';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Notice } from '../../shared/ui/notice';
 import { RcInputService } from '../../core/rc/rc-input.service';
+import { VirtualRcInputService } from '../../core/rc/virtual-rc-input.service';
+import { RcSource, type RcSourceKind } from '../../core/rc/rc-source.service';
 import { ManualControlClient } from '../../core/rc/manual-control-client';
+import { VirtualControlSurface } from './virtual-control-surface';
 import {
   axisToPercent,
   barLeftPercent,
@@ -20,24 +23,32 @@ import { channelBindingLabel, engageDisabledReason, latencyLabel } from './rc-mo
  * R5 (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md) adds **Take control** below it — the SITL relay engage/
  * release gesture, additive, the monitor above is unchanged.
  *
- * Provides its own `RcInputService` **and** `ManualControlClient` and drives `RcInputService`'s
- * lifecycle (reading starts when this drawer mounts, per `ngOnInit`); `ManualControlClient` needs
- * no explicit start — its own constructor wires the deadman triggers, and its own `DestroyRef`
- * teardown (this component unmounting, i.e. the RC panel closing) is one of them. The cockpit
- * mounts this component via `@if (isPanelOpen('rc'))`, so both the Gamepad rAF loop and any live
- * relay session only exist while the drawer is open.
+ * Provides the whole RC stack — `RcInputService`, `VirtualRcInputService`, `RcSource` and
+ * `ManualControlClient` — and drives `RcInputService`'s lifecycle (reading starts when this drawer
+ * mounts, per `ngOnInit`); `ManualControlClient` needs no explicit start: its own constructor wires
+ * the deadman triggers, and its own `DestroyRef` teardown (this component unmounting, i.e. the RC
+ * panel closing) is one of them. The cockpit mounts this component via `@if (isPanelOpen('rc'))`,
+ * so both the Gamepad rAF loop and any live relay session only exist while the drawer is open.
+ *
+ * <h2>A transmitter is no longer required</h2>
+ * Control can come from a plugged-in gamepad or from the on-screen surface
+ * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P10) — `RcSource` picks, and prefers a
+ * connected gamepad. The surface is shaped by the engaged `channelMap`, so a rover gets one
+ * steer/drive pad and an aircraft two, without this component knowing the difference.
  */
 @Component({
   selector: 'vision-rc-monitor',
-  imports: [SidePanel, Notice],
-  providers: [RcInputService, ManualControlClient],
+  imports: [SidePanel, Notice, VirtualControlSurface],
+  providers: [RcInputService, VirtualRcInputService, RcSource, ManualControlClient],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './rc-monitor.html',
   styleUrl: './rc-monitor.css',
 })
 export class RcMonitor implements OnInit {
   protected readonly rc = inject(RcInputService);
+  protected readonly source = inject(RcSource);
   protected readonly client = inject(ManualControlClient);
+  private readonly virtual = inject(VirtualRcInputService);
 
   /** The currently-flown asset — mirrors `flight-command-panel.ts`'s own `assetId`/
    * `assetDisplayName` inputs (`fly.html` renders both components inside the same
@@ -67,15 +78,37 @@ export class RcMonitor implements OnInit {
     engageDisabledReason({
       hasAsset: this.assetId().length > 0,
       canCommand: this.canCommand(),
-      gamepadSupported: this.rc.supported(),
+      sourceKind: this.source.kind(),
       gamepadConnected: this.rc.connected(),
       engageState: this.client.state(),
     }),
   );
   protected readonly engageDisabled = computed(() => this.disabledReason() !== undefined);
+  /** The input choice is frozen for the life of a session — swapping sticks mid-flight is not a
+   * gesture this platform offers, and the surface below is shaped by the engaged map anyway. */
+  protected readonly sourceLocked = computed(() => this.client.state() === 'engaging' || this.client.state() === 'engaged');
+
+  constructor() {
+    // The on-screen surface is shaped by whatever the server said this vehicle is; it exists only
+    // for the life of a session, so it is bound on `engaged` and cleared the moment the map goes.
+    effect(() => {
+      const map = this.client.channelMap();
+      if (map) {
+        this.virtual.bindTo(map);
+      } else {
+        this.virtual.clear();
+      }
+    });
+  }
 
   ngOnInit(): void {
     this.rc.start();
+  }
+
+  protected useSource(kind: RcSourceKind): void {
+    if (!this.sourceLocked()) {
+      this.source.use(kind);
+    }
   }
 
   protected engage(): void {

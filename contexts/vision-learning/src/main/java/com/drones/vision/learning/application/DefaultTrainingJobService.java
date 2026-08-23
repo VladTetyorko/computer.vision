@@ -35,7 +35,7 @@ import com.drones.vision.platform.VisibilityScope;
  *
  * <h2>Scope gate</h2>
  * {@link #start} requires {@link VisibilityScope#canAdminister()} — ADMIN only, mirroring {@code
- * DefaultModelRegistryService#promote}'s gate exactly (docs/plans/active/OPS-UX-PLAN.md §1):
+ * DefaultModelRegistryService#promote}'s gate exactly (docs/plans/done/OPS-UX-PLAN.md §1):
  * claiming the deployment's single training host is a deployment-global action, not a team-scoped
  * one, so a group manager's {@code canManageOrg()} is not the right gate here either.
  *

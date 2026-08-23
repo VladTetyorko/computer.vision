@@ -10,7 +10,7 @@ import java.io.IOException;
 /**
  * {@link DatasourceConnectionProviderImpl} extended to close the {@link DataSource} it wraps when
  * Hibernate stops it, so closing the {@code EntityManagerFactory} {@link PersistenceUnit#start}
- * returns also tears down the connection pool underneath it (docs/plans/active/SCALE-100-PLAN.md S3).
+ * returns also tears down the connection pool underneath it (docs/plans/done/SCALE-100-PLAN.md S3).
  *
  * <p>The base class is written for a container-managed {@link DataSource} (e.g. a JNDI lookup)
  * that Hibernate never owns and must never close. That assumption is wrong for {@link

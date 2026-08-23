@@ -1,7 +1,7 @@
 import type { Role } from '../api/models';
 
 /**
- * Pure decision behind `core/shell/landing-guard.ts` (docs/plans/active/OPS-UX-PLAN.md §2 A1) — where `''`
+ * Pure decision behind `core/shell/landing-guard.ts` (docs/plans/done/OPS-UX-PLAN.md §2 A1) — where `''`
  * resolves to. Before this, `app.routes.ts` had a static `redirectTo: 'fly'`: correct for a PILOT
  * (the cockpit is their whole job), but a MANAGER/ADMIN opening the app landed on a cockpit with
  * nothing assigned to fly rather than the command overview their role actually works from

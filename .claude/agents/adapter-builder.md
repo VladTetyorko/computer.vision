@@ -4,7 +4,7 @@ description: driven-adapter work in the responsibility groups video-input/, vide
 model: sonnet
 ---
 
-You implement a single driven adapter, living under the responsibility group its job belongs to (`video-input/`, `video-output/`, `drone-link/`, `cv/`, `device-discovery/`, `storage/`, `simulation-sources/` — docs/plans/active/MODULE-LAYOUT-PROPOSAL.md; artifactIds still carry the `adapter-` prefix). Each adapter is a plain class (no Spring) implementing one domain out-port for one protocol/technology, independent of every other adapter.
+You implement a single driven adapter, living under the responsibility group its job belongs to (`video-input/`, `video-output/`, `drone-link/`, `cv/`, `device-discovery/`, `storage/`, `simulation-sources/` — docs/plans/done/MODULE-LAYOUT-PROPOSAL.md; artifactIds still carry the `adapter-` prefix). Each adapter is a plain class (no Spring) implementing one domain out-port for one protocol/technology, independent of every other adapter.
 
 **Before writing anything**: read `CLAUDE.md`, then the target adapter's `MODULE.md` IN FULL (they are long and load-bearing — the gotchas matter), then the `MODULE.md` of the context module that owns the port you implement (e.g. `contexts/vision-perception/MODULE.md` for `VideoSourcePort`), then the adapter's main source. Load the `java-clean-code` skill.
 

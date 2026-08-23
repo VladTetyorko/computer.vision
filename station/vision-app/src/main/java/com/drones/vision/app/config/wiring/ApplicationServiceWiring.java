@@ -87,7 +87,7 @@ import java.util.concurrent.TimeUnit;
  * {@code ArchitectureTest}.
  *
  * <p>Every repository-shaped port is Postgres-backed via {@code adapter-persistence} since
- * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b removed the last two in-memory-only ones ({@link
+ * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b removed the last two in-memory-only ones ({@link
  * #auditTrailPort}/{@link #detectionEventRepositoryPort}); ports that back a genuinely optional
  * feature (CV detection, stream publishing, replay extraction) still fall back to an in-process
  * no-op when that feature is switched off — see {@code devsupport}'s remaining classes. The live
@@ -98,7 +98,7 @@ import java.util.concurrent.TimeUnit;
  * (vision-api, which implements all six — five ports the former god-port {@code
  * LiveUpdatePublisherPort} split into, docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b, plus a
  * sixth added for visual geolocation's {@code geo:<assetId>} topic,
- * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5) and {@code NoopLiveUpdatePublisher} (same
+ * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5) and {@code NoopLiveUpdatePublisher} (same
  * six-interface shape) per {@link VisionLiveProperties#enabled()} (default {@code true}); when
  * enabled, every one of the six bean methods resolves to the same {@code LiveUpdateRegistry}
  * singleton, so a call through any one port still lands on the one shared dispatcher. {@link
@@ -206,7 +206,7 @@ public class ApplicationServiceWiring {
     /**
      * Selects the {@link TrackCorrectionLiveUpdatePort} implementation — see {@link
      * #fleetLiveUpdatePort}; the sixth selector, added for visual geolocation's {@code
-     * geo:<assetId>} topic (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5), gated on the same
+     * geo:<assetId>} topic (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5), gated on the same
      * {@link VisionLiveProperties#enabled()} flag as the other five rather than a new one — {@code
      * vision.geo.visual.enabled} decides whether the feature runs at all; whether its SSE topic
      * exists is the live registry's own concern.
@@ -255,7 +255,7 @@ public class ApplicationServiceWiring {
 
     /**
      * Append-only record of who changed the fleet — Postgres-backed via {@link JpaAuditTrail}
-     * (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3/W2b: the durable replacement for the old
+     * (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W3/W2b: the durable replacement for the old
      * {@code InMemoryAuditTrail}, whose own javadoc called out that an audit trail evaporating on
      * restart was not one). When {@link VisionLiveProperties#enabled()} is {@code true}, wrapped in
      * {@link LiveUpdateAuditTrail}, which announces a "fleet changed" live update for every
@@ -274,7 +274,7 @@ public class ApplicationServiceWiring {
 
     /**
      * Debounced detection events (docs/plans/done/MVP2-PLAN.md §E, E-a) — Postgres-backed via {@link
-     * JpaDetectionEventRepository} (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3/W2b, replacing the
+     * JpaDetectionEventRepository} (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W3/W2b, replacing the
      * old {@code InMemoryDetectionEventRepository}). When {@link VisionLiveProperties#enabled()} is
      * {@code true}, wrapped in {@link LiveUpdateDetectionEventRepository}, which announces every
      * {@code save} as a live update.
@@ -319,7 +319,7 @@ public class ApplicationServiceWiring {
      * {@code geofenceMonitor} are threaded through unconditionally — both are always real beans.
      *
      * <p>Takes its summary-coalescing window from {@code vision.persistence.telemetry} — the same
-     * block {@code telemetryRepositoryPort} reads (docs/plans/active/SCALE-100-PLAN.md S4). The two
+     * block {@code telemetryRepositoryPort} reads (docs/plans/done/SCALE-100-PLAN.md S4). The two
      * writes this class makes per sample are one ingest decision, so they are configured by one
      * number even though they need two settings types to cross the module boundary.
      *
@@ -421,7 +421,7 @@ public class ApplicationServiceWiring {
      * #usageTracker} above — every stream pipeline this service starts announces its completed
      * detection results regardless of {@link VisionLiveProperties#enabled()}.
      *
-     * <h2>docs/plans/active/MEDIA-SOT-PLAN.md wave M7 — switch B and the live-frame fallback</h2>
+     * <h2>docs/plans/done/MEDIA-SOT-PLAN.md wave M7 — switch B and the live-frame fallback</h2>
      * {@code pullDetectionSettings} is built here, not injected, because it is a composite of two
      * things this method already has separate access to: {@link VisionCvProperties#pull()}'s {@code
      * rtsp-base} (the address the <b>worker</b> dials, D5) and {@code CvWiring}'s conditionally-present
@@ -437,7 +437,7 @@ public class ApplicationServiceWiring {
      * the plain {@code DefaultStreamService} exactly as before this wave, so {@code
      * LiveFrameFallbackStreamService} is never even constructed in the default configuration.
      *
-     * <p>{@code detectionDemandPort} (docs/plans/active/CV-DEMAND-PLAN.md §3.3) is an {@link
+     * <p>{@code detectionDemandPort} (docs/plans/done/CV-DEMAND-PLAN.md §3.3) is an {@link
      * ObjectProvider} because {@code CvWiring#detectionDemandPort} is itself conditionally present
      * on {@code vision.cv.demand.enabled} (default {@code true}) — resolving to {@code null} when
      * that flag is {@code false} reproduces {@code DefaultStreamService}'s pre-wave-D2 constructor
@@ -497,14 +497,14 @@ public class ApplicationServiceWiring {
      * device, asset, simulation and demo-fleet paths cannot disagree about them
      * (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1).
      *
-     * <p>{@code cvProperties.demand()} (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.4/&sect;3.7)
+     * <p>{@code cvProperties.demand()} (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.4/&sect;3.7)
      * supplies {@link StreamPipelineSettings#detectionDemandPollInterval()}/{@link
      * StreamPipelineSettings#detectionDemandGrace()} — the two tunables that only matter once {@link
      * #streamService} has actually wired a {@code DetectionDemandPort}, but are threaded through
      * unconditionally since {@link StreamPipelineSettings}'s own compact constructor requires both
      * regardless.
      *
-     * <p>{@code pipeline.videoStaleAfter()} (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.4) supplies
+     * <p>{@code pipeline.videoStaleAfter()} (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.4) supplies
      * {@link StreamPipelineSettings#videoStaleAfter()} — how long a stream may go without a frame
      * before its {@code StreamState} reads {@code STALLED}. It sits with the other per-stream
      * read-model tunables here rather than under a lifecycle root, because that is what it is: a
@@ -692,7 +692,7 @@ public class ApplicationServiceWiring {
      * whose {@code rtsp} video device is one of this app's own TX-fed feeds. {@code enabled} is
      * resolved once, here, from {@link VisionSimulationProperties#resumeOnBoot()} (default {@code
      * true}) — the former {@code VisionPersistenceProperties#enabled()} half of this gate is gone
-     * along with the flag itself (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b: Postgres is the
+     * along with the flag itself (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b: Postgres is the
      * only store now, so there is always something to resume from).
      */
     @Bean

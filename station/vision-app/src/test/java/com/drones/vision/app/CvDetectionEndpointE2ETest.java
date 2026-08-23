@@ -86,7 +86,7 @@ class CvDetectionEndpointE2ETest {
     static void cvProperties(DynamicPropertyRegistry registry) {
         registry.add("vision.cv.enabled", () -> "true");
         registry.add("vision.cv.endpoint", () -> "localhost:" + server.getPort());
-        // docs/plans/active/CV-DEMAND-PLAN.md §3.7: awaitNonEmptyDetections below does poll GET
+        // docs/plans/done/CV-DEMAND-PLAN.md §3.7: awaitNonEmptyDetections below does poll GET
         // .../detections (which itself counts as demand), so this test's own loop would likely keep
         // the real demand-poll task satisfied on its own -- but this test exists to prove the
         // detection-results pipe works end to end, not to also litigate demand-poll timing, so the
@@ -96,7 +96,7 @@ class CvDetectionEndpointE2ETest {
 
     /**
      * {@link PipelineConfig#defaults()} with {@code detectionEnabled} true} instead of its own
-     * default {@code false} (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1) -- this test starts its
+     * default {@code false} (docs/plans/done/CV-DEMAND-PLAN.md §1, wave D1) -- this test starts its
      * stream directly through {@link AssetStreamService}, bypassing the controller-level {@code
      * vision.cv.detection-default-enabled} deployment default entirely, so detection has to be
      * switched on explicitly here for any result to ever reach {@code DetectionRepositoryPort}.

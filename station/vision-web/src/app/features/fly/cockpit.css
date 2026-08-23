@@ -221,7 +221,7 @@
    remaining self-shelled drawer component (`<vision-flight-command-panel>`, still `position: fixed`
    internally via `side-panel.css`) plus the plain `<vision-side-panel>` instances below (including
    the merged Vision drawer, whose body is `<vision-detections-strip>` + `<vision-cv-control-panel>` —
-   the latter no longer wraps its own panel as of wave W5, docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3) all
+   the latter no longer wraps its own panel as of wave W5, docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3) all
    dock to the viewport regardless of being mounted here — mounting them inside `.grid-main` is purely
    "renders beside main's other overlays in the template", not a positioning requirement. */
 .grid-main {
@@ -270,7 +270,7 @@
   text-align: center;
 }
 
-/* Detection-off affordance (docs/plans/active/CV-DEMAND-PLAN.md wave D3) — shares `.stage-notice`'s own
+/* Detection-off affordance (docs/plans/done/CV-DEMAND-PLAN.md wave D3) — shares `.stage-notice`'s own
    position above (the three stage states are mutually exclusive, see `cockpit.html`'s own comment)
    but never the amber `.notice` chrome above it: detection defaulting off is the new normal, not a
    fault, so this reads as a neutral HUD pill instead — the same frosted-chrome family every other
@@ -278,7 +278,7 @@
    `fly-osd.ts`'s own `.osd-group`), not a warning banner. `.dot` (base, unmodified — styles.css) is
    the neutral/muted tier of this app's one dot-status language; a red dot here would say "problem",
    which off-by-default deliberately is not. */
-/* `.stream-state-chip` (docs/plans/active/STREAM-STATE-PLAN.md §2.3) shares this chrome verbatim: it is
+/* `.stream-state-chip` (docs/plans/done/STREAM-STATE-PLAN.md §2.3) shares this chrome verbatim: it is
    the same neutral "this is not a fault" HUD pill, just about video flow instead of detection —
    `STARTING` means the source opened and the first frame has not landed yet. The two faults
    (`STALLED`/`RECONNECTING`) take `.notice`'s amber instead and never reach this rule. */

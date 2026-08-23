@@ -130,7 +130,7 @@ describe('GeoStore', () => {
     expect(store.latest()).toBeUndefined();
   });
 
-  // --- LiveStore projection (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4) -----------------------
+  // --- LiveStore projection (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4) -----------------------
 
   it('subscribes live when LiveStore is open, reading straight from geoFor(assetId) — latest-wins, no accumulation', () => {
     const api = stubApi();
@@ -246,7 +246,7 @@ describe('GeoStore', () => {
     store.reset();
   });
 
-  // --- D9 flag-off (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8 "Off state: every geo surface is
+  // --- D9 flag-off (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8 "Off state: every geo surface is
   // absent, not empty") ---------------------------------------------------------------------------
 
   it('sets disabled() once a poll observes the D9 409 — distinct from the ordinary "no fix yet" undefined', async () => {

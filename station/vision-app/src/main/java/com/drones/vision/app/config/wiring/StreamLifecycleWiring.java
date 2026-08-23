@@ -22,7 +22,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
- * Wires the idle-stream policy (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2) &mdash; the answer to
+ * Wires the idle-stream policy (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2) &mdash; the answer to
  * "who ends a stream nobody is watching", which before this wave was nobody.
  *
  * <p>Every bean here is deliberately assembled from narrow seams rather than whole collaborators, so

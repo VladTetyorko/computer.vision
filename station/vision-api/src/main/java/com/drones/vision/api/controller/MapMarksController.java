@@ -86,7 +86,7 @@ public class MapMarksController {
     /**
      * Drops a mark projected from an asset's freshest telemetry (the cockpit "mark target" action).
      *
-     * <p>The response's {@code measured} field (docs/plans/active/GEO-POSE-PLAN.md G5, wave V3) tells the
+     * <p>The response's {@code measured} field (docs/plans/done/GEO-POSE-PLAN.md G5, wave V3) tells the
      * caller whether the fix used a real gimbal depression reading and a real AGL sample, or fell
      * back to the platform's 45°/AMSL assumptions — an operator-facing signal, not an accuracy
      * guarantee; the mark stays editable either way.

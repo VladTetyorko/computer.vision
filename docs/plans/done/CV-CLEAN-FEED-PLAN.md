@@ -9,8 +9,8 @@ Status: **authoritative implementation plan** (2026-08-20). Owner decisions this
 3. **Fix the object filter** — today's allowlist semantics are bad UX (hiding one class freezes
    the visible vocabulary); replace the operator-facing act with a deny-list.
 
-Grounding: `docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md` (D1–D9, the render model) and
-`docs/plans/active/CV-UX-RESEARCH.md` (§4 filter diagnosis, §9 candidates). This plan deliberately
+Grounding: `docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md` (D1–D9, the render model) and
+`docs/plans/done/CV-UX-RESEARCH.md` (§4 filter diagnosis, §9 candidates). This plan deliberately
 **unfreezes** parts of the CV-CONTROL wire contract; §2 below is the new frozen contract for all
 waves. App + SPA ship in one jar, so wire removals land atomically in one release.
 
@@ -142,7 +142,7 @@ After W4 (same files as W3/W4 plus strip/store).
 
 Full scoped verify chain, live click-through on `/fly` (the lesson: run the real path), measured
 before/after: published-frame CPU (burn-in gone), overlay draw stats. Update
-`CV-FLY-INTERACTION-CONTEXT.md`, memory, and mark research docs' overtaken sections
+memory and mark research docs' overtaken sections
 (CV-UX-RESEARCH §9.1 → done here; U-waves that W5 subsumes).
 
 ## 4. What this plan does NOT do

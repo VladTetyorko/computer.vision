@@ -52,6 +52,7 @@ import {
   canAdvanceFromVerify,
   creatorOwnershipGroup,
   defaultPilotSelection,
+  isTelemetryOnlyProtocol,
   nextStep,
   pilotsInGroup,
   prevStep,
@@ -484,6 +485,18 @@ export class OnboardingStore {
     () => this.probeStillCurrent() && this.lastProbeResult()?.ok === true,
   );
 
+  /**
+   * Whether the connection under test carries telemetry and no video
+   * (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §2 B3) — read by `onboarding.html` to word the
+   * Test step for the device in front of the operator instead of demanding a frame that, on a
+   * flight-controller link, cannot exist.
+   *
+   * Derived from the chosen protocol, not from the probe's own answer, deliberately: the step has to
+   * say what it is about to do *before* the probe runs, and "Not tested yet" is the state an
+   * operator reads first.
+   */
+  readonly telemetryOnlyLink = computed(() => isTelemetryOnlyProtocol(this.protocol()));
+
   readonly canAdvanceTest = computed(() => canAdvanceFromTest(this.connectMethod(), this.lastProbeOk()));
 
   async probe(): Promise<void> {
@@ -688,12 +701,12 @@ export class OnboardingStore {
     }
     await this.fleet.refresh({ quiet: true });
     this.toasts.ok(`"${displayName}" is ready.`);
-    // Docs/plans/active/OPS-UX-PLAN.md §2 A3: the wizard's last step, not a redirect — "Who flies this?"
+    // Docs/plans/done/OPS-UX-PLAN.md §2 A3: the wizard's last step, not a redirect — "Who flies this?"
     // renders in place of navigating straight to /assets/:id, see `enterAssignStep` below.
     await this.enterAssignStep(assetId, displayName);
   }
 
-  // --- Step 5: "Who flies this?" (docs/plans/active/OPS-UX-PLAN.md §2 A3) -------------------------------
+  // --- Step 5: "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) -------------------------------
   // Offered only *after* `POST /api/assets` has already succeeded (`finishCreate` above is this
   // section's one caller) — every signal below is therefore about assignment, never creation, and
   // `assignmentError` is read that way too (see its own doc comment and `confirmPilots`'s own

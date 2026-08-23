@@ -11,6 +11,7 @@ import com.drones.vision.flight.domain.model.CommandResult;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.flight.domain.model.FlightCapability;
+import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
@@ -220,7 +221,7 @@ class DefaultFlightCommandServiceTest {
         stubDetails(telemetryDevice);
         when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
         when(flightCommandPort.capabilities(telemetryDevice))
-                .thenReturn(new FlightCapability(true, true, true, List.of("Loiter", "RTL")));
+                .thenReturn(new FlightCapability(true, true, true, List.of("Loiter", "RTL"), VehicleKind.COPTER));
         when(flightCommandPort.setMode(telemetryDevice, "Loiter")).thenReturn(CommandResult.ACCEPTED);
 
         CommandResult result = service.setMode(assetId, "Loiter", actor, VisibilityScope.unbounded());
@@ -237,7 +238,7 @@ class DefaultFlightCommandServiceTest {
         stubDetails(telemetryDevice);
         when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
         when(flightCommandPort.capabilities(telemetryDevice))
-                .thenReturn(new FlightCapability(true, true, true, List.of("Loiter", "RTL")));
+                .thenReturn(new FlightCapability(true, true, true, List.of("Loiter", "RTL"), VehicleKind.COPTER));
         when(flightCommandPort.setMode(telemetryDevice, "RTL")).thenReturn(CommandResult.NO_ACK);
 
         assertEquals(CommandResult.NO_ACK, service.setMode(assetId, "RTL", actor, VisibilityScope.unbounded()));
@@ -248,7 +249,7 @@ class DefaultFlightCommandServiceTest {
         stubDetails(telemetryDevice);
         when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
         when(flightCommandPort.capabilities(telemetryDevice))
-                .thenReturn(new FlightCapability(true, true, true, List.of("Loiter", "RTL")));
+                .thenReturn(new FlightCapability(true, true, true, List.of("Loiter", "RTL"), VehicleKind.COPTER));
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> service.setMode(assetId, "Barrel-Roll", actor, VisibilityScope.unbounded()));
@@ -376,7 +377,7 @@ class DefaultFlightCommandServiceTest {
         when(assetService.details(any(VisibilityScope.class), eq(assetId)))
                 .thenReturn(new AssetDetails(summary, List.of(telemetryDevice), List.of()));
         when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
-        FlightCapability caps = new FlightCapability(true, true, true, List.of("Loiter", "RTL"));
+        FlightCapability caps = new FlightCapability(true, true, true, List.of("Loiter", "RTL"), VehicleKind.COPTER);
         when(flightCommandPort.capabilities(telemetryDevice)).thenReturn(caps);
 
         assertEquals(caps, service.capabilities(assetId, VisibilityScope.unbounded()));

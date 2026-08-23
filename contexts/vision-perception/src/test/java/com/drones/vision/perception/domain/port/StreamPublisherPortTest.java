@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * Pins {@link StreamPublisherPort#proxiesSource(Device)}'s default: an implementation that does
- * not override it (every implementation in the tree today, per docs/plans/active/MEDIA-SOT-PLAN.md
+ * not override it (every implementation in the tree today, per docs/plans/done/MEDIA-SOT-PLAN.md
  * &sect;4 D4) must report that it does not proxy the source, so {@code DefaultStreamService} keeps
  * opening a {@code VideoSourcePort} exactly as it does today.
  */

@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * LiveUpdateRegistry} beans entirely absent (so the endpoint 404s, same as any other unmapped
  * route), and neither {@link EventPublisherPort} nor {@link AuditTrailPort} wrapped in their
  * live-update decorators — i.e. the plain {@link JpaAuditTrail}/{@link
- * JpaDetectionEventRepository} delegates (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b —
+ * JpaDetectionEventRepository} delegates (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b —
  * Postgres-backed unconditionally now, not the old devsupport in-memory fallbacks) — see {@link
  * LiveWiringTest} for the opposite (enabled/default) counterpart.
  *

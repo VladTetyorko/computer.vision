@@ -144,14 +144,14 @@ public class HlsProxyController {
 
     /**
      * Stamped on every proxied fetch so the idle policy counts an HLS viewer as demand
-     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2). {@code null} when the policy is off, or when this
+     * (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2). {@code null} when the policy is off, or when this
      * deployment wired no video-demand port at all — in which case this controller behaves exactly
      * as it did before, the same optional-collaborator posture {@code StreamDetectionSupport} takes.
      */
     private final LiveHlsAndReaderVideoDemand videoDemand;
 
     /**
-     * Test seam (docs/plans/active/SCALE-100-PLAN.md §5 S7): defaults every tunable to {@link
+     * Test seam (docs/plans/done/SCALE-100-PLAN.md §5 S7): defaults every tunable to {@link
      * VisionApiProperties.HlsProxy#defaults()} — today's exact pre-extraction values — so the
      * existing test suite, which constructs this controller with only its upstream {@link URI},
      * keeps compiling and behaving identically. Package-private: production wiring always supplies
@@ -179,7 +179,7 @@ public class HlsProxyController {
      *                        {@code null} when no video-demand port is wired
      */
     /**
-     * The shape before {@code videoDemand} was added (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2),
+     * The shape before {@code videoDemand} was added (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2),
      * kept as a convenience constructor defaulting it to {@code null} — no demand stamping, i.e.
      * exactly this controller's pre-S4 behaviour. Same N-1-arg idiom the domain records use.
      *

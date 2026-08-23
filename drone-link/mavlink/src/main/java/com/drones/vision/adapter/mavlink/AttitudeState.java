@@ -13,7 +13,7 @@ import java.util.List;
  * {@link MavlinkTelemetryDecoder}'s accumulated aircraft-attitude / gimbal-orientation fields --
  * {@code ATTITUDE} (#30), {@code GIMBAL_DEVICE_ATTITUDE_STATUS} (#285, preferred), {@code
  * MOUNT_ORIENTATION} (#265, deprecated fallback) -- the newest addition to {@link
- * MavlinkTelemetryDecoder}'s three-way state split (docs/plans/active/GEO-POSE-PLAN.md wave V2). A
+ * MavlinkTelemetryDecoder}'s three-way state split (docs/plans/done/GEO-POSE-PLAN.md wave V2). A
  * fourth holder rather than folding into an existing one, matching {@link PositionAndPowerState}'s
  * own javadoc rationale: attitude/gimbal orientation is a new domain concern, not a variant of
  * position/power, flight-controller, or ardupilotmega-extras state. See {@code

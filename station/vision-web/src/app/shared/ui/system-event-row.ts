@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import type { SystemEventRow as SystemEventRowModel } from '../../core/system-events/system-events-logic';
 
 /**
- * `vision-system-event-row` — one generic `LiveEvent`-derived row (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2-
+ * `vision-system-event-row` — one generic `LiveEvent`-derived row (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.2-
  * §3.3), the notification bell's own system-events section. A **sibling** of `shared/ui/event-row.ts`
  * (`<vision-event-row>`), not a widened version of it: `EventRow` is typed to `DetectionEvent`
  * (`OPEN`/`CLOSED` state, `peakConfidence`) and every one of its call sites (`events-rail.ts`,

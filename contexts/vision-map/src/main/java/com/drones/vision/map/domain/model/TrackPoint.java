@@ -6,7 +6,7 @@ import com.drones.vision.kernel.GeoPosition;
 import java.time.Instant;
 
 /**
- * One stored point of a {@link ProjectedTrack}'s durable trail (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md
+ * One stored point of a {@link ProjectedTrack}'s durable trail (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
  * decision D3, §7 table {@code projected_track_points}) — append-only, decimated by {@code
  * TrackProjectionService} (a point is stored only after the track has moved
  * {@code trail.min-distance-meters} from the last stored point, D7), capped per track and pruned by

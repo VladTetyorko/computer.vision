@@ -13,7 +13,7 @@ import {
 } from './after-action-logic';
 
 /**
- * §3.1's own worked example (docs/plans/active/AFTER-ACTION-PLAN.md), typed verbatim as fixture data
+ * §3.1's own worked example (docs/plans/done/AFTER-ACTION-PLAN.md), typed verbatim as fixture data
  * per this wave's own brief ("the backend is not running, so build your specs against §3.1's example
  * payload treated as fixture data").
  *

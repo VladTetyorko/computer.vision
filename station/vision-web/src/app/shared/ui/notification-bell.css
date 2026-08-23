@@ -63,7 +63,7 @@
 }
 
 /* A plain wrapper `<div>`, not applied directly to `<vision-events-rail>`'s own host tag the way it
-   used to be — docs/plans/active/SYSTEM-STATUS-PLAN.md §3.3 added a second card (`.system-events` below) as its
+   used to be — docs/plans/done/SYSTEM-STATUS-PLAN.md §3.3 added a second card (`.system-events` below) as its
    sibling, so the popover shell needed a home of its own. Positioning otherwise unchanged from
    before this wave: mirrors `features/wall/wall.css`'s `.events-rail`/the pre-§U-c `command.css`'s
    `.events-rail-embed` "sizing/positioning stays each host's own concern"

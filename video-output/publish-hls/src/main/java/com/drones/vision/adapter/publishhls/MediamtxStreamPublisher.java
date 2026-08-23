@@ -285,7 +285,7 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
 
     /**
      * Snapshot of this publisher's currently-tracked streams — {@code video-publish}'s {@code
-     * SubsystemStatusPort} plumbing (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2), read by {@code
+     * SubsystemStatusPort} plumbing (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2), read by {@code
      * PublishStatusProvider} (same package). {@code total} is every stream between {@link
      * #streamStarted} and {@link #streamEnded}; {@code inOutage} names each one currently
      * mid-{@link PublishBackoff} outage (dropping frames, backing off reconnects) rather than

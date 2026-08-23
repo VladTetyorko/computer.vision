@@ -35,7 +35,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires visual geolocation (docs/plans/active/VISUAL-GEO-V2-PLAN.md, H5) — a <b>new file</b>, not an
+ * Wires visual geolocation (docs/plans/done/VISUAL-GEO-V2-PLAN.md, H5) — a <b>new file</b>, not an
  * edit to a shared one (the plan's own H5 deliverable line is explicit about this), mirroring {@code
  * FixedCameraGeoWiringConfiguration}'s shape: unconditional beans for the driven ports and
  * application services, so {@code GeoRegionController}/{@code GeoCorrectionController}

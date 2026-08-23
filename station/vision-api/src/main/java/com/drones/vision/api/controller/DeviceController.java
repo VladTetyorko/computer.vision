@@ -38,10 +38,10 @@ import com.drones.vision.api.security.CurrentUser;
  * The acting user comes from {@link CurrentUser} and is passed to every mutating call, so the
  * audit trail records a principal without {@link DeviceService} knowing how it was authenticated.
  * That attribution is not authorization — the platform audit behind
- * docs/plans/active/LIVE-SCOPE-PLAN.md §2 (W1) found every handler here passing {@code userId()}
+ * docs/plans/done/LIVE-SCOPE-PLAN.md §2 (W1) found every handler here passing {@code userId()}
  * and concluding, wrongly, that this controller was already guarded. It was not: see below.
  *
- * <h2>Authority (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2, W5)</h2>
+ * <h2>Authority (docs/plans/done/LIVE-SCOPE-PLAN.md §2.2, W5)</h2>
  * {@link #register}/{@link #delete} require {@link com.drones.vision.platform.VisibilityScope#canManageOrg()
  * scope().canManageOrg()} — the same org-level gate {@code AssetController#create} uses, not the
  * deployment-global {@code canAdminister()}. Both operations act on the device row's existence, not
@@ -106,7 +106,7 @@ public class DeviceController {
 
     /**
      * Lists registered devices, filtered to the ones {@link CurrentUser#scope()} may reach
-     * (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2, W5) — a PILOT sees their own assigned assets'
+     * (docs/plans/done/LIVE-SCOPE-PLAN.md §2.2, W5) — a PILOT sees their own assigned assets'
      * devices, never the whole fleet.
      *
      * @param includeDeleted whether to include soft-deleted devices; excluded by default, so

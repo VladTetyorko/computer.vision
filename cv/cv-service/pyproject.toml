@@ -70,7 +70,7 @@ cv = [
     "opencv-python>=5.0,<6",
     "lap>=0.5.12",
 ]
-# Visual geolocation (docs/plans/active/VISUAL-GEO-V2-PLAN.md H4): `cv_service/geo/{encoder,
+# Visual geolocation (docs/plans/done/VISUAL-GEO-V2-PLAN.md H4): `cv_service/geo/{encoder,
 # matchers}.py`'s real backends (`eigenplaces`/`cosplace` via `torch.hub`, `xfeat`/`loftr`).
 # Self-referential on `cv` (a plain "torch"/"torchvision" pin here would otherwise risk drifting
 # out of step with ultralytics' own torch/torchvision requirement, and `opencv-python` must stay

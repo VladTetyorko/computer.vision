@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
- * Deployment-wide pull-mode wiring (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, switch B — {@code
+ * Deployment-wide pull-mode wiring (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, switch B — {@code
  * vision.cv.frame-transport}) — supplied once to {@code DefaultStreamService}'s constructor, the same
  * "one settings object in, one binding per stream out" shape {@link StreamPipelineSettings} already
  * has for video-source supervision. {@code null} on that constructor means push mode for every stream
@@ -19,7 +19,7 @@ import java.util.function.Supplier;
  * @param port      the driven port {@code DefaultStreamService#start} calls {@link
  *                  PulledDetectionPort#open} on (lazily, inside a {@link SupervisedPublisher}'s
  *                  opener) for every stream it starts
- * @param rtspBase  the base RTSP URL the <b>worker</b> dials (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.5,
+ * @param rtspBase  the base RTSP URL the <b>worker</b> dials (docs/plans/done/MEDIA-SOT-PLAN.md &sect;5.5,
  *                  {@code vision.cv.pull.rtsp-base}) — deliberately not the JVM-facing publish base:
  *                  a remote worker needs the host's LAN address, not {@code localhost}. Joined with
  *                  {@code streamId.value()} (D2: the mediamtx path name) to build each pull's {@code

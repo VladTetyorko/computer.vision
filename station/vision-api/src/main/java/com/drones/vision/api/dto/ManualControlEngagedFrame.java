@@ -14,13 +14,25 @@ import java.util.List;
  *                   transmits sooner when new input arrives, so a client should treat this as how
  *                   often it must send an unchanged frame to keep the session alive, not as a cap
  *                   on how fast it may report a change
- * @param channelMap the channel map this session was engaged with, for display
+ * @param vehicleKind  what the vehicle most recently reported itself to be — {@code "COPTER"},
+ *                     {@code "PLANE"}, {@code "ROVER"}, or {@code "UNKNOWN"}. {@code "UNKNOWN"} is
+ *                     an honest answer, not an error: it means the vehicle has not identified
+ *                     itself as anything this platform recognizes, and the map below is the
+ *                     historical everything-centred one rather than a guess
+ *                     (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P8)
+ * @param profileCode  the profile's short channel-order code, e.g. {@code "AETR"} for an aircraft,
+ *                     {@code "S-T-"} for a ground vehicle ({@code -} where nothing is bound)
+ * @param profileName  what to call this vehicle in front of an operator, e.g. {@code "Multirotor"}
+ * @param channelMap   the channel map this session was engaged with, for display and for shaping the
+ *                     operator's control surface
  */
-public record ManualControlEngagedFrame(String type, String assetId, int rateHz,
+public record ManualControlEngagedFrame(String type, String assetId, int rateHz, String vehicleKind,
+                                         String profileCode, String profileName,
                                          List<ManualControlChannelBindingResponse> channelMap) {
 
     /** Convenience constructor: fills in the fixed {@code type} literal. */
-    public ManualControlEngagedFrame(String assetId, int rateHz, List<ManualControlChannelBindingResponse> channelMap) {
-        this("engaged", assetId, rateHz, channelMap);
+    public ManualControlEngagedFrame(String assetId, int rateHz, String vehicleKind, String profileCode,
+                                      String profileName, List<ManualControlChannelBindingResponse> channelMap) {
+        this("engaged", assetId, rateHz, vehicleKind, profileCode, profileName, channelMap);
     }
 }

@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * Response body for {@code GET /api/streams/{streamId}/config}
- * (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5) — <b>the read half of a knob that was write-only
+ * (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.5) — <b>the read half of a knob that was write-only
  * over HTTP.</b>
  *
  * <p>Before this endpoint, {@code PATCH .../config} could change detection on/off, the model, the
@@ -31,11 +31,11 @@ import java.util.List;
  *                            the measured truth, and this field must never be rendered as one
  * @param labelFilter         the running class filter; <b>empty means "every class"</b>, matching
  *                            {@code PipelineConfig}'s own convention, not "no classes"
- * @param labelDenyFilter     the running class deny list (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2);
+ * @param labelDenyFilter     the running class deny list (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2);
  *                            <b>empty means "deny nothing"</b>. Applied alongside {@code labelFilter}
  *                            at the single drop site in {@code StreamPipeline}, never a separate stage
  * @param detectionEnabled    the operator's own per-stream detect-on/off intent — one of the two
- *                            independent gates (docs/plans/active/CV-DEMAND-PLAN.md &sect;1). This
+ *                            independent gates (docs/plans/done/CV-DEMAND-PLAN.md &sect;1). This
  *                            says what was <i>asked for</i>, never whether inference is running;
  *                            {@code GET .../tracks}'s {@code detectionState} answers that
  * @param tracking            the running tracking configuration

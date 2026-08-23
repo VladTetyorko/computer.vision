@@ -7,7 +7,7 @@
    `.row`/`.spread`, native control styling) are relied on below — see that file for anything
    referenced but not defined here.
 
-   Slimmed by docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1: every rule for a control that moved to
+   Slimmed by docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1: every rule for a control that moved to
    `CvSetupModal` (intent cards, the class checklist, the Tune/Expert `<details>` shells, the flow
    strip, the capability readout) moved with it into `cv-setup-modal.css` — this file only keeps
    what the seven-item fly-time panel still renders. `.cv-section.emphasized`/
@@ -36,7 +36,7 @@
   color: var(--text-muted);
 }
 
-/* ---- Detect hero (docs/plans/active/CV-UX-RESEARCH.md §3, wave U1) — the primary act, at the top
+/* ---- Detect hero (docs/plans/done/CV-UX-RESEARCH.md §3, wave U1) — the primary act, at the top
    of the panel; a quiet card. ---- */
 
 .cv-hero {
@@ -55,7 +55,7 @@
   padding-left: calc(1rem + var(--space-8) + var(--space-8));
 }
 
-/* ---- "Looking for" summary row (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 §1.1 item 2) — a
+/* ---- "Looking for" summary row (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1 §1.1 item 2) — a
    door into the setup modal's own intent cards, not a second copy of them. */
 .cv-summary-row {
   display: flex;

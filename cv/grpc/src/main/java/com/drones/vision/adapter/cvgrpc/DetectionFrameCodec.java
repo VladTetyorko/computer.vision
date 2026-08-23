@@ -210,7 +210,7 @@ final class DetectionFrameCodec {
     }
 
     /**
-     * Maps the response's six pull-mode-only diagnostic fields (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.1
+     * Maps the response's six pull-mode-only diagnostic fields (docs/plans/done/MEDIA-SOT-PLAN.md &sect;5.1
      * fields 16-21, decision D12) onto a {@link PullTelemetry} — the carrier M4 could decode the wire
      * for but had nowhere in the domain to put. Returns {@code null} (push mode, matching this class's
      * pre-D12 behavior byte-for-byte) exactly when every one of the six fields is still at its proto
@@ -286,7 +286,7 @@ final class DetectionFrameCodec {
      * "derive it from the horizontal FOV and the frame aspect ratio", which is exactly what
      * cv-service's {@code pose_gmc} does with it.
      *
-     * <p>Package-private (not {@code private}), docs/plans/active/MEDIA-SOT-PLAN.md wave M4:
+     * <p>Package-private (not {@code private}), docs/plans/done/MEDIA-SOT-PLAN.md wave M4:
      * {@link PulledDetectionSession} reuses this exact mapping for {@code PullControl.camera_pose} —
      * the wire shape is identical between {@code FrameRequest} and {@code PullControl}, so this is the
      * one place either builds one.
@@ -303,10 +303,10 @@ final class DetectionFrameCodec {
     }
 
     /**
-     * Package-private (not {@code private}), docs/plans/active/MEDIA-SOT-PLAN.md wave M4: {@link
+     * Package-private (not {@code private}), docs/plans/done/MEDIA-SOT-PLAN.md wave M4: {@link
      * PulledDetectionSession} reuses this exact mapping for {@code PullControl.tracking} — {@code
      * PullControl} carries the identical wire {@code TrackingConfig} message {@code FrameRequest}
-     * does (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.1: "reused verbatim, including TargetLock/lock_seq
+     * does (docs/plans/done/MEDIA-SOT-PLAN.md &sect;5.1: "reused verbatim, including TargetLock/lock_seq
      * semantics"), so this is the one place either builds one — both the push path ({@link #encode})
      * and the pull path ({@code PulledDetectionSession#controlBuilder}) get {@code capability_level}/
      * {@code reupdate_max_gap_millis} for free from this single method.
@@ -428,7 +428,7 @@ final class DetectionFrameCodec {
     /**
      * Downscales an oversized {@code BGR24} frame to {@code detectWidth} and sends it in this
      * instance's {@link #wireFormat} — JPEG-encoded, or raw when the endpoint is close enough that
-     * the encode costs more than the bytes do (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R3).
+     * the encode costs more than the bytes do (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R3).
      *
      * <p>The raw branch skips {@link #encodeJpeg} here <b>and</b> a decode inside cv-service, which
      * together were most of the ~25 ms of non-inference round trip measured in

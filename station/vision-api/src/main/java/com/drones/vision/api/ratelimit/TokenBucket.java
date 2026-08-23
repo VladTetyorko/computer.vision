@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Every method is {@code synchronized}: the critical section is pure in-memory arithmetic,
  * never I/O or another lock, so this carries none of the virtual-thread carrier-pinning risk
- * docs/plans/active/SCALE-100-CONTEXT.md §7 flags for a blocking call held under {@code
+ * docs/plans/done/SCALE-100-CONTEXT.md §7 flags for a blocking call held under {@code
  * synchronized} — the same reasoning {@code LiveRingBuffer}'s own javadoc gives for its
  * synchronized, in-memory-only methods.
  */

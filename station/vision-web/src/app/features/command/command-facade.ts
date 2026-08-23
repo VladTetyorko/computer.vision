@@ -131,7 +131,7 @@ export class CommandFacade {
 
   /**
    * Wall-clock ms, ticked from `refreshSummary()`'s own 5s poll (below) rather than a second timer —
-   * `activePipelineErrorMessagesByStreamId`'s 15-minute decay window (docs/plans/active/SYSTEM-STATUS-PLAN.md
+   * `activePipelineErrorMessagesByStreamId`'s 15-minute decay window (docs/plans/done/SYSTEM-STATUS-PLAN.md
    * §3.4) needs *some* source of "time is passing" independent of new `LiveEvent`s arriving, or a
    * stream that errored once and then went silent would stay flagged forever until the next
    * unrelated live event happened to re-run this computed. Piggybacking on the poll this page
@@ -140,7 +140,7 @@ export class CommandFacade {
   private readonly nowSignal = signal(Date.now());
 
   /**
-   * `streamId → active PIPELINE_ERROR message` (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4), derived from
+   * `streamId → active PIPELINE_ERROR message` (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4), derived from
    * `LiveStore.liveEvents()` exactly like `geofenceBreachesByAssetId` above, but keyed by `streamId`
    * (a pipeline error carries no `assetId` — see that function's own doc comment) rather than
    * `assetId`. Feeds `buildEntityRows`' `pipeline-error` reason.
@@ -247,7 +247,7 @@ export class CommandFacade {
   private readonly addingTestDroneSignal = signal(false);
   readonly addingTestDrone = this.addingTestDroneSignal.asReadonly();
 
-  // --- "Set up this station" checklist (docs/plans/active/OPS-UX-PLAN.md §3 B2) ------------------------------
+  // --- "Set up this station" checklist (docs/plans/done/OPS-UX-PLAN.md §3 B2) ------------------------------
   // ADMIN-only (`AuthStore.user()?.topRole`) — ADMIN is the one role that can act on every row (create a
   // group, create a user, add a source, assign a pilot), so a MANAGER/PILOT landing on `/command` never
   // sees a checklist pointing at doors they can't open. **Dev parity**: with `vision.auth.enabled=false`
@@ -300,7 +300,7 @@ export class CommandFacade {
 
     void this.loadSetupChecklistData();
 
-    // The checklist's own "assign a pilot" row (docs/plans/active/OPS-UX-PLAN.md §3 B2): re-checks pilot
+    // The checklist's own "assign a pilot" row (docs/plans/done/OPS-UX-PLAN.md §3 B2): re-checks pilot
     // coverage on every fleet-summary tick while the checklist is showing and nothing has been found yet
     // — `hasAnyPilotAssignmentSignal` only ever flips false→true (see its own doc comment), so this stops
     // polling for good the moment it finds one, rather than fanning out `listAssetPilots` forever.

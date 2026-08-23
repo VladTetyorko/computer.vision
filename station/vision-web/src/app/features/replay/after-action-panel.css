@@ -18,7 +18,7 @@
     margin: 0 0 var(--space-16);
 }
 
-/* ---- Part list — one row per part, always all six (docs/plans/active/AFTER-ACTION-PLAN.md §3.1) --- */
+/* ---- Part list — one row per part, always all six (docs/plans/done/AFTER-ACTION-PLAN.md §3.1) --- */
 
 .part-list {
     list-style: none;

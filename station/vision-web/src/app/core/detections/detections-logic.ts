@@ -96,7 +96,7 @@ export function freshResults(
   return results.filter((result) => isFresh(result.capturedAt, nowMs, freshSeconds));
 }
 
-// --- Class deny-list (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2/D-3, wave W5) -------------------------------
+// --- Class deny-list (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2/D-3, wave W5) -------------------------------
 //
 // Lives here — not in `features/fly/cv-control-panel-logic.ts` where the deny-toggle used to be a
 // (now-deleted) allowlist-complement hack — because both the CV control panel's own class-chip
@@ -108,7 +108,7 @@ export function freshResults(
 /**
  * The one honesty disclosure shown wherever an operator can hide a class — stated once, not
  * re-litigated per surface. `PipelineConfig#denyFilter` is enforced once, pre-fan-out
- * (`docs/plans/active/CV-CLEAN-FEED-PLAN.md` D-2/wave W1): screen, alerts and recording all lose a
+ * (`docs/plans/done/CV-CLEAN-FEED-PLAN.md` D-2/wave W1): screen, alerts and recording all lose a
  * denied label identically, and the model itself never stops scanning for it — hiding is a display
  * choice, not a performance one.
  */

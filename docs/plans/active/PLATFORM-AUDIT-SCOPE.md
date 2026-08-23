@@ -308,7 +308,7 @@ authority, not observation. The gap is fully specced and estimated; it is simply
 
 ## 8. Deferred / out of scope for this audit
 
-- Full read of `docs/plans/active/SCALE-100-PLAN.md` — not needed: `RateLimitFilter` is a throughput
+- Full read of `docs/plans/done/SCALE-100-PLAN.md` — not needed: `RateLimitFilter` is a throughput
   safeguard (per-principal request budget), off by default, keyed on `CurrentUser#userId()`, and its
   own javadoc (`VisionApiProperties.java:136-146`) already explains why it stays off until auth is on
   (one dev principal would give every caller one shared bucket). No authorization interaction found.

@@ -160,7 +160,7 @@ public record VisionApplicationProperties(
      * @param adaptiveRate          whether and how far the sample rate may rise above the
      *                              operator's {@code inferenceFps} when a tracked target is about
      *                              to leave its association budget
-     *                              (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2); defaulted as a
+     *                              (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2); defaulted as a
      *                              whole when absent
      */
     public record Pipeline(@DefaultValue(Pipeline.DEFAULT_ASSUMED_SOURCE_FPS) int assumedSourceFps,
@@ -176,7 +176,7 @@ public record VisionApplicationProperties(
         static final String DEFAULT_ASSUMED_SOURCE_FPS = "30";
         /**
          * How long a running stream may go without a frame before {@code StreamState} reports it
-         * {@code STALLED} rather than {@code LIVE} (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.4).
+         * {@code STALLED} rather than {@code LIVE} (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.4).
          * A deliberately slow source (a 1 fps still camera) must raise this, or it reads
          * {@code STALLED} forever against a threshold tuned for video.
          */

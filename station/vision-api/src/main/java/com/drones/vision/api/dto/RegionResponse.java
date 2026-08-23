@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 
 /**
- * Wire shape for {@link ReferenceRegion} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3) — the
+ * Wire shape for {@link ReferenceRegion} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3) — the
  * {@code GET}/{@code POST /api/geo/regions} response element. The stats fields ({@code
  * tileCount}..{@code builtAt}) are {@code null} for a {@code BUILDING}/{@code FAILED} region — see
  * {@link ReferenceRegion#summary()}'s own "non-null iff READY/NEVER_ACCEPT" contract — and omitted

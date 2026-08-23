@@ -52,7 +52,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc tests for {@link CameraPoseController} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5's
+ * MockMvc tests for {@link CameraPoseController} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5's
  * frozen wire contract, Wave G4) — flag-off {@code 409} on every method, the {@code
  * AssetController}-matching 404-vs-403 split (D10), and calibration's never-persists guarantee (D5).
  */

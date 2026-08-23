@@ -272,7 +272,7 @@ Steps 1–4 of the original recommendation are done and merged (`56c7354`), meas
 V2 re-merged, then the latency instrument, then `CameraPose`, then the confidence split — each with
 its outcome checked by running the real path rather than by reading a green suite.
 
-**Done since, on `feat/cv-rate-control`** (docs/plans/active/CV-RATE-CONTROL-PLAN.md): items 1 and 2
+**Done since, on `feat/cv-rate-control`** (docs/plans/done/CV-RATE-CONTROL-PLAN.md): items 1 and 2
 below, plus the sampler defect that turned out to underlie the 7.58 — see the re-measurement in §3.
 The pipeline had no rate control loop at all: it quantized a fixed rate to an integer frame stride
 and counted none of what it dropped.

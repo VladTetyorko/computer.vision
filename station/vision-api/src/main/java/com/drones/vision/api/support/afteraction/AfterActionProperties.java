@@ -3,7 +3,7 @@ package com.drones.vision.api.support.afteraction;
 import com.drones.vision.events.application.ReplayServiceSettings;
 
 /**
- * Framework-free tunables for the after-action package (docs/plans/active/AFTER-ACTION-PLAN.md D8):
+ * Framework-free tunables for the after-action package (docs/plans/done/AFTER-ACTION-PLAN.md D8):
  * no {@code @ConfigurationProperties} here — {@code vision-api} may not depend on {@code
  * vision-app} — mirroring {@code OnboardingProperties}/{@code VisionApiProperties}'s own "plain
  * settings record, {@code vision-app} binds a Spring mirror onto an instance of this" bridge.

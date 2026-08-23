@@ -12,7 +12,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 /**
  * Plain unit test (no Spring context) for {@link ApplicationServiceWiring#simulationResumeRunner}.
  *
- * <p>Before docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b this method ANDed {@code
+ * <p>Before docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b this method ANDed {@code
  * vision.persistence.enabled} together with {@link VisionSimulationProperties#resumeOnBoot()};
  * that flag is gone (Postgres is unconditional now), so this is a plain one-property
  * pass-through and there is only one gate left to prove.

@@ -1,6 +1,6 @@
 """The identity decision: a gated cost matrix and the assignment that solves it.
 
-`docs/plans/active/TRACKING-V2-PLAN.md` §3.3, `docs/conclusions/TRACKING-REVIEW.md` §4.3.
+`docs/plans/done/TRACKING-V2-PLAN.md` §3.3, `docs/conclusions/TRACKING-REVIEW.md` §4.3.
 
 **The inversion this file exists to perform.** Before it, `ByteTrackEngine`
 held the tracks, the motion model and the matching, and `TrackBook` ran
@@ -47,7 +47,7 @@ FORBIDDEN = float("inf")
 #
 # R9's blanket "a flipping label is cosmetic -- do not special-case" is
 # OVERTURNED for the open-vocabulary (prompt-free, ~4585-class) path by
-# `docs/plans/active/TRACK-IDENTITY-PLAN.md` -- there the flip is semantic
+# `docs/plans/done/TRACK-IDENTITY-PLAN.md` -- there the flip is semantic
 # noise, not a naming variant across composite-mode models, and wave L1
 # (`track.py`'s per-track label election) is the special-casing R9 declined,
 # now owner-ordered. This composite-prefix tolerance stands unchanged; the

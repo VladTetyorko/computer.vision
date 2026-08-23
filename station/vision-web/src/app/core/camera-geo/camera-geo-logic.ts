@@ -11,7 +11,7 @@ import type {
 } from '../api/models';
 
 /**
- * Pure, Angular-free logic behind wave G5 of `docs/plans/active/FIXED-CAMERA-GEO-PLAN.md` — the pose panel
+ * Pure, Angular-free logic behind wave G5 of `docs/plans/done/FIXED-CAMERA-GEO-PLAN.md` — the pose panel
  * (`features/camera-geo/camera-pose-panel.ts`) and the calibration wizard
  * (`features/camera-geo/camera-calibration-wizard.ts`) on the asset manager page, plus the map track
  * layer's own reducer/derivations consumed by `core/map-data/tracks-store.ts` and

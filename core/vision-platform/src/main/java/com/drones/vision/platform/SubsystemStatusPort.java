@@ -2,13 +2,13 @@ package com.drones.vision.platform;
 
 /**
  * Driven port: report whether one subsystem is currently working, for {@code
- * SystemStatusController}'s {@code GET /api/system/status} (docs/plans/active/SYSTEM-STATUS-PLAN.md
+ * SystemStatusController}'s {@code GET /api/system/status} (docs/plans/done/SYSTEM-STATUS-PLAN.md
  * §4). An operator-facing honesty seam — UX-DESIGN's §7.2 "honest status over optimistic status"
  * doctrine — not a health-check protocol; there is no ping/pong here, only "what do you know right
  * now about your own subsystem".
  *
  * <p>Every implementation is adapter-side (cv/grpc, drone-link/mavlink, video-output/publish-hls,
- * station/vision-api each provide one — docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2) because the
+ * station/vision-api each provide one — docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2) because the
  * dependency rule forbids one adapter depending on another; this port is the seam that lets {@code
  * vision-app} collect a {@code List<SubsystemStatusPort>} from adapters that otherwise cannot see
  * each other, and lets {@code vision-api}'s controller depend only on {@code vision-platform} rather

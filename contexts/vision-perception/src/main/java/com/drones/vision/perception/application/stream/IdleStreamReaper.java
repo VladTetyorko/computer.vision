@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 /**
- * Stops streams nobody is watching (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2).
+ * Stops streams nobody is watching (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2).
  *
  * <p><b>The measured problem.</b> Nothing in this system was responsible for ending a stream. A
  * stream left running by accident on the owner's machine burned ~2.9 cores &mdash; app plus

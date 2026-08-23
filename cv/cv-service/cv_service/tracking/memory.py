@@ -1,6 +1,6 @@
 """The dormant gallery: what lets a track id survive not being seen.
 
-`docs/plans/active/TRACKING-V2-PLAN.md` §3.4, `docs/conclusions/TRACKING-REVIEW.md` §4.4.
+`docs/plans/done/TRACKING-V2-PLAN.md` §3.4, `docs/conclusions/TRACKING-REVIEW.md` §4.4.
 
 **The defect this closes.** Before it, a track existed only while boxes kept
 overlapping frame to frame, and was deleted when they stopped. Nothing in the

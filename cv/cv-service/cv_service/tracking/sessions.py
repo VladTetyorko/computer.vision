@@ -1,6 +1,6 @@
 """`SessionRegistry`: `StreamTrackingSession` pooled by `stream_id`, not by RPC call.
 
-`docs/plans/active/TRACKING-V2-PLAN.md` wave C5b,
+`docs/plans/done/TRACKING-V2-PLAN.md` wave C5b,
 `docs/conclusions/TRACKING-REVIEW.md` finding B5 ("Session state lives in the
 RPC call ... an RF link blip, a reconnect, a worker restart resets every id
 in the scene to 1. On a drone link that is not an edge case.").

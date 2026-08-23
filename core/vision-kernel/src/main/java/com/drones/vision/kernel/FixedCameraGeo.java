@@ -3,7 +3,7 @@ package com.drones.vision.kernel;
 import java.util.Optional;
 
 /**
- * Pixel → ray → ground for a stationary camera (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §3,
+ * Pixel → ray → ground for a stationary camera (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §3,
  * decision D1) — the half of the projection {@link GeoProjection}'s own javadoc says does not
  * exist anywhere in the platform: "no camera-intrinsics data exists anywhere in the platform, so a
  * detection's position within the frame never moves the projected point." This class is that

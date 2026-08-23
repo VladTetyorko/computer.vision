@@ -95,7 +95,7 @@ class MavlinkTelemetryDecoderTest {
         assertEquals(-2.5, sample.extra().get("vyMps"), 1e-9);
         assertEquals(0.1, sample.extra().get("vzMps"), 1e-9);
         assertEquals(DEVICE_ID, sample.deviceId());
-        // docs/plans/active/GEO-POSE-PLAN.md wave V2: relative_alt/time_boot_ms, decoded alongside
+        // docs/plans/done/GEO-POSE-PLAN.md wave V2: relative_alt/time_boot_ms, decoded alongside
         // this message's pre-existing fields.
         assertEquals(100.0, sample.aglMeters(), 1e-9, "relativeAlt(100000) mm -> 100.0 m AGL");
         assertEquals(1000L, sample.deviceBootMillis());
@@ -181,7 +181,7 @@ class MavlinkTelemetryDecoderTest {
 
     @Test
     void ignoresUnrecognizedMessageTypes() throws IOException {
-        // ATTITUDE used to be the example here, but docs/plans/active/GEO-POSE-PLAN.md wave V2 made
+        // ATTITUDE used to be the example here, but docs/plans/done/GEO-POSE-PLAN.md wave V2 made
         // it a recognized message (see mapsAttitudeRollPitchYawFromRadiansToDegrees below) -- SYSTEM_TIME
         // is a plain common-dialect message this decoder still has no field for, so it keeps
         // exercising the same "genuinely unmapped message type" path.
@@ -494,7 +494,7 @@ class MavlinkTelemetryDecoderTest {
         assertEquals(4.25, sample.extra().get("rangefinderDistanceM"), 1e-6);
     }
 
-    // --- docs/plans/active/GEO-POSE-PLAN.md wave V2: ATTITUDE / GIMBAL_DEVICE_ATTITUDE_STATUS / MOUNT_ORIENTATION ---
+    // --- docs/plans/done/GEO-POSE-PLAN.md wave V2: ATTITUDE / GIMBAL_DEVICE_ATTITUDE_STATUS / MOUNT_ORIENTATION ---
 
     @Test
     void mapsAttitudeRollPitchYawFromRadiansToDegrees() throws IOException {

@@ -10,8 +10,20 @@ package com.drones.vision.flight.domain.model;
  * #deadband()}, linear-map it to {@code [minMicros, maxMicros]}, then clamp the result. See that
  * method's own javadoc for the two sources' different mapping shapes.
  *
+ * <h2>Travel is in the microseconds, not in a flag</h2>
+ * A binding is unidirectional exactly when its rest point equals its minimum ({@code centerMicros
+ * == minMicros}) — a copter's throttle, idle at 1000&nbsp;µs — and centred otherwise — a rover's
+ * throttle, stopped at 1500&nbsp;µs with reverse below it. {@link #travel()} <em>derives</em> that
+ * rather than storing it, so a stored flag can never disagree with the numbers it describes
+ * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P4). The mapping math needs no branch
+ * for it: the negative half of {@link #toMicros} scales by {@code (centerMicros - minMicros)},
+ * which is zero for a unidirectional binding, so an accidental negative input pins at idle instead
+ * of doing something surprising.
+ *
  * @param source       {@link Source#AXIS} (normalized input {@code [-1,1]}, e.g. a stick) or
  *                     {@link Source#BUTTON} (normalized input {@code [0,1]}, e.g. a switch)
+ * @param function     what this binding does to the vehicle — the meaning the RC channel number
+ *                     alone does not carry (RC1 is roll on a copter, steering on a rover)
  * @param sourceIndex  index into the Gamepad API's {@code axes}/{@code buttons} array this
  *                     binding reads from; must not be negative
  * @param rcChannel    the 1-based RC channel this binding drives; must be within {@code [1,18]}
@@ -25,16 +37,35 @@ package com.drones.vision.flight.domain.model;
  *                     {@code [0,1]}
  * @param reversed     whether the raw input direction is inverted before mapping
  */
-public record ControlBinding(Source source, int sourceIndex, int rcChannel,
+public record ControlBinding(Source source, ControlFunction function, int sourceIndex, int rcChannel,
                               int minMicros, int centerMicros, int maxMicros,
                               double deadband, boolean reversed) {
 
     /** What kind of physical control feeds a {@link ControlBinding}. */
     public enum Source { AXIS, BUTTON }
 
+    /**
+     * Where a control rests when nothing is touching it, and therefore what its full travel means.
+     * Derived from the microseconds — see this record's own "Travel is in the microseconds" section.
+     */
+    public enum Travel {
+
+        /** Rests at {@link ControlBinding#centerMicros()}, travels both ways: roll, pitch, yaw, a rover's throttle. */
+        CENTERED,
+
+        /** Rests at {@link ControlBinding#minMicros()}, travels one way: a copter's throttle, and every button. */
+        UNIDIRECTIONAL
+    }
+
+    /** Neutral pulse width — the rest point of every centred binding, and RC's own convention. */
+    public static final int CENTER_MICROS = 1500;
+
     public ControlBinding {
         if (source == null) {
             throw new IllegalArgumentException("ControlBinding source must not be null");
+        }
+        if (function == null) {
+            throw new IllegalArgumentException("ControlBinding function must not be null");
         }
         if (sourceIndex < 0) {
             throw new IllegalArgumentException("ControlBinding sourceIndex must not be negative: " + sourceIndex);
@@ -61,6 +92,64 @@ public record ControlBinding(Source source, int sourceIndex, int rcChannel,
                     "ControlBinding " + field + " must be within [" + RcChannels.MIN_MICROS + ","
                             + RcChannels.MAX_MICROS + "]: " + micros);
         }
+    }
+
+    /**
+     * A stick that rests at its centre and travels both ways — roll, pitch, yaw, steering, and a
+     * rover's throttle, where centre is <em>stop</em> and the lower half is reverse.
+     *
+     * @param function    what the binding does to the vehicle
+     * @param sourceIndex index into the input's {@code axes} array
+     * @param rcChannel   the 1-based RC channel to drive
+     * @return a centred binding over the full {@code [1000,2000]} µs travel, no deadband, not reversed
+     */
+    public static ControlBinding centeredAxis(ControlFunction function, int sourceIndex, int rcChannel) {
+        return new ControlBinding(Source.AXIS, function, sourceIndex, rcChannel,
+                RcChannels.MIN_MICROS, CENTER_MICROS, RcChannels.MAX_MICROS, 0.0, false);
+    }
+
+    /**
+     * A control that rests at its minimum and travels one way — a copter's or plane's throttle,
+     * where rest is <em>idle</em>, not half power.
+     *
+     * @param function    what the binding does to the vehicle
+     * @param sourceIndex index into the input's {@code axes} array
+     * @param rcChannel   the 1-based RC channel to drive
+     * @return a unidirectional binding whose rest point is {@link RcChannels#MIN_MICROS}
+     */
+    public static ControlBinding unidirectionalAxis(ControlFunction function, int sourceIndex, int rcChannel) {
+        return new ControlBinding(Source.AXIS, function, sourceIndex, rcChannel,
+                RcChannels.MIN_MICROS, RcChannels.MIN_MICROS, RcChannels.MAX_MICROS, 0.0, false);
+    }
+
+    /**
+     * A two-position switch: unpressed maps to {@link RcChannels#MIN_MICROS}, pressed to {@link
+     * RcChannels#MAX_MICROS}. {@code centerMicros} plays no part in a button's mapping (see {@link
+     * #toMicros(double)}) and is set to the minimum only to satisfy this record's own
+     * {@code min <= center <= max} invariant.
+     *
+     * <p>No {@link ControlProfile} binds a button by default — arm, disarm and mode select go
+     * through the flight-command REST surface instead, per ArduPilot's own advice not to let a
+     * joystick own the mode or aux channels (docs/plans/active/OPERATOR-CONTROL-CONTEXT.md D6/S3).
+     *
+     * @param function    what the binding does to the vehicle
+     * @param sourceIndex index into the input's {@code buttons} array
+     * @param rcChannel   the 1-based RC channel to drive
+     * @return a button binding over the full {@code [1000,2000]} µs travel
+     */
+    public static ControlBinding button(ControlFunction function, int sourceIndex, int rcChannel) {
+        return new ControlBinding(Source.BUTTON, function, sourceIndex, rcChannel,
+                RcChannels.MIN_MICROS, RcChannels.MIN_MICROS, RcChannels.MAX_MICROS, 0.0, false);
+    }
+
+    /**
+     * Where this control rests, derived from its own microseconds rather than stored beside them.
+     *
+     * @return {@link Travel#UNIDIRECTIONAL} when the rest point is the minimum, {@link
+     *         Travel#CENTERED} otherwise
+     */
+    public Travel travel() {
+        return centerMicros == minMicros ? Travel.UNIDIRECTIONAL : Travel.CENTERED;
     }
 
     /**

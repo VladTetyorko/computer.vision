@@ -307,7 +307,7 @@ Placed in the file's existing wave-banner idiom. **No existing field number, nam
 `Ack` and `google.protobuf.Empty` are reused from the shipped contract.
 
 ```proto
-// ---- VISUAL-GEO-V2, heavy-A (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1) -------------------
+// ---- VISUAL-GEO-V2, heavy-A (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1) -------------------
 // Pull-only: the worker dials the video source itself, exactly like Inference.DetectPulled.
 // There is no frame payload on this wire, in either direction.
 
@@ -949,7 +949,7 @@ construction**, asserted explicitly in H5.
 
 | Wave | Agent | Scope (disjoint) | Blocked on |
 |---|---|---|---|
-| **H0** | adapter-builder (Sonnet) — **GATE** | `cv/cv-service/spikes/geo/**` + `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §9 only. No production code anywhere | — |
+| **H0** | adapter-builder (Sonnet) — **GATE** | `cv/cv-service/spikes/geo/**` + `docs/plans/done/VISUAL-GEO-V2-PLAN.md` §9 only. No production code anywhere | — |
 | **H1** | adapter-builder | `proto/vision/v1/cv.proto` + `cv/vision-proto/**` only | §3.1 (this doc) |
 | **H2a** | domain-modeler + application-service | `core/vision-kernel/**`, `core/vision-platform/**`, `contexts/vision-flight/**` only | §3.2/§3.5 |
 | **H2b** | domain-modeler + application-service | `contexts/vision-perception/**` only | §3.1/§3.2 |
@@ -957,7 +957,7 @@ construction**, asserted explicitly in H5.
 | **H4** | adapter-builder | `cv/cv-service/cv_service/geo/**`, `cv_service/grpc/servicers.py`, `cv_service/config.py`, `cv/cv-service/tests/geo/**`, `tests/grpc/test_geolocation_servicer.py`, `pyproject.toml`, `Dockerfile` only | H1, **H0's measured choice** |
 | **H5** | spring-integrator | `storage/persistence/**`, `station/vision-api/**`, `station/vision-app/**` only | H2a, H2b, H3 |
 | **H6** | web-ui | `station/vision-web/**` only | §3.3/§3.4/§3.8 to build; H5 to integrate |
-| **H7** | Opus | `docs/plans/active/VISUAL-GEO-V2-DEMO.md` + `infra/**` + scratch scripts only. **No product code** | H4, H5, H6 |
+| **H7** | Opus | `docs/plans/done/VISUAL-GEO-V2-DEMO.md` + `infra/**` + scratch scripts only. **No product code** | H4, H5, H6 |
 | **H8** | Opus | integration pass — cross-cutting fixes only, in whatever module the pass finds broken | H7 |
 
 ### H0 — eval harness, matcher bake-off, rectify-first re-rank (GATE)
@@ -1053,7 +1053,7 @@ pointed at it) — never the default `~/.cache`, so a container or a second mach
 ### H7 — DEMO, executed
 
 Not a script of what should work — a **transcript of what was run**, in
-`docs/plans/active/VISUAL-GEO-V2-DEMO.md`, marked ✅ executed / ⛔ not run with the reason.
+`docs/plans/done/VISUAL-GEO-V2-DEMO.md`, marked ✅ executed / ⛔ not run with the reason.
 
 Required steps:
 1. `docker compose up` — postgres + mediamtx + cv-service + vision-app; `cv-service` with the `geo`

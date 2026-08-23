@@ -49,7 +49,7 @@ import { landingGuard } from './core/shell/landing-guard';
  * contributes nothing to a child's own path, so `/fly`, `/command`, etc. are unchanged). `/login`
  * itself sits **outside** that group — the one route that must stay reachable with no session.
  *
- * **`landingGuard` (docs/plans/active/OPS-UX-PLAN.md §2 A1)** resolves the bare `''` path by role — ADMIN/MANAGER
+ * **`landingGuard` (docs/plans/done/OPS-UX-PLAN.md §2 A1)** resolves the bare `''` path by role — ADMIN/MANAGER
  * land on `/command` (the fleet-wide overview their authority spans), PILOT lands on `/fly` (the
  * cockpit is their whole job, unchanged from before this task). `redirectTo` alone can't express
  * this — it fires before any session is resolved and can only ever name one static target.

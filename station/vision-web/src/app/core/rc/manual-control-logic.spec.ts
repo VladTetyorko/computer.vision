@@ -35,18 +35,28 @@ describe('manual-control-logic', () => {
 
   describe('parseManualControlServerMessage', () => {
     it('parses a valid engaged frame', () => {
-      const raw = JSON.stringify({
+      const engaged = {
         type: 'engaged',
         assetId: 'asset-1',
         rateHz: 33,
-        channelMap: [{ source: 'AXIS', sourceIndex: 0, rcChannel: 1, label: 'Roll' }],
-      });
-      expect(parseManualControlServerMessage(raw)).toEqual({
-        type: 'engaged',
-        assetId: 'asset-1',
-        rateHz: 33,
-        channelMap: [{ source: 'AXIS', sourceIndex: 0, rcChannel: 1, label: 'Roll' }],
-      });
+        vehicleKind: 'ROVER',
+        profileCode: 'S-T-',
+        profileName: 'Ground vehicle',
+        channelMap: [
+          {
+            source: 'AXIS',
+            function: 'STEERING',
+            travel: 'CENTERED',
+            sourceIndex: 0,
+            rcChannel: 1,
+            minMicros: 1000,
+            centerMicros: 1500,
+            maxMicros: 2000,
+            label: 'Steering',
+          },
+        ],
+      };
+      expect(parseManualControlServerMessage(JSON.stringify(engaged))).toEqual(engaged);
     });
 
     it('rejects an engaged frame with a malformed channelMap entry — the whole message, not a partial accept', () => {
@@ -54,7 +64,20 @@ describe('manual-control-logic', () => {
         type: 'engaged',
         assetId: 'asset-1',
         rateHz: 33,
-        channelMap: [{ source: 'AXIS', sourceIndex: 0 /* missing rcChannel/label */ }],
+        vehicleKind: 'ROVER',
+        profileCode: 'S-T-',
+        profileName: 'Ground vehicle',
+        channelMap: [{ source: 'AXIS', sourceIndex: 0 /* missing everything else */ }],
+      });
+      expect(parseManualControlServerMessage(raw)).toBeUndefined();
+    });
+
+    it('rejects an engaged frame that omits the profile the surface is shaped from', () => {
+      const raw = JSON.stringify({
+        type: 'engaged',
+        assetId: 'asset-1',
+        rateHz: 33,
+        channelMap: [],
       });
       expect(parseManualControlServerMessage(raw)).toBeUndefined();
     });

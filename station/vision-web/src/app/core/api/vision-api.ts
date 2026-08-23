@@ -502,7 +502,7 @@ export class VisionApi {
    * blockquote ("live strip: removed") — left in place rather than deleted at the time, a small,
    * self-contained, still-correct method kept on the bet that a future consumer would want it again.
    * That bet paid off: `features/camera-geo/camera-calibration-wizard.ts`
-   * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md wave G5) now binds this straight to the calibration
+   * (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md wave G5) now binds this straight to the calibration
    * frame `<img>` an operator clicks landmarks on. Still lives here (not inlined at the call site) so
    * `VisionApi` stays "the only place the frontend knows REST URLs" (this file's own top doc
    * comment) even for a path that's never actually passed through `HttpClient`.
@@ -636,7 +636,7 @@ export class VisionApi {
     return firstValueFrom(this.http.delete<void>(`/api/map/drawings/${encodeURIComponent(id)}`));
   }
 
-  // --- Fixed-camera geolocation (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5's frozen wire contract) -----
+  // --- Fixed-camera geolocation (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5's frozen wire contract) -----
   // Asset-scoped like every other `/api/assets/{id}/…` endpoint (D10): out-of-scope reads 404, a
   // write on a visible-but-unmanageable asset 403. While `vision.geo.fixed-camera.enabled=false`
   // (the default) every endpoint here 409s — `core/camera-geo/camera-geo-logic.ts#isFixedCameraGeoDisabledError`
@@ -671,7 +671,7 @@ export class VisionApi {
     return firstValueFrom(this.http.get<MapTracksResponse>('/api/map/tracks'));
   }
 
-  // --- Visual geolocation v2 (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3's frozen wire contract, wave H6) ---
+  // --- Visual geolocation v2 (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3's frozen wire contract, wave H6) ---
   // All six routes 409 with D9's exact envelope while `vision.geo.visual.enabled=false` —
   // `core/geo/geo-logic.ts#isVisualGeoDisabledError` is what a caller checks for that case, the
   // same "check for the frozen message, degrade to the generic sentence otherwise" idiom
@@ -726,7 +726,7 @@ export class VisionApi {
     );
   }
 
-  // --- After-action evidence package (docs/plans/active/AFTER-ACTION-PLAN.md §3's frozen wire contract, wave W2) ---
+  // --- After-action evidence package (docs/plans/done/AFTER-ACTION-PLAN.md §3's frozen wire contract, wave W2) ---
   // One request against one finished (or still-open) flight, everything the platform knows about
   // it: this manifest, plus the ZIP archive's own URL below. `features/replay/**`'s after-action
   // panel is the one consumer.
@@ -922,7 +922,7 @@ export class VisionApi {
     );
   }
 
-  // --- System status (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.3's frozen wire contract, S3) --------------
+  // --- System status (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.3's frozen wire contract, S3) --------------
 
   /**
    * The platform's own live self-check — CV inference, MAVLink telemetry, video publish, live
@@ -1050,7 +1050,7 @@ export class VisionApi {
   }
 
   /**
-   * The fleet-wide audit trail, newest first (`GET /api/audit`, docs/plans/active/OPS-UX-PLAN.md §3 B1) —
+   * The fleet-wide audit trail, newest first (`GET /api/audit`, docs/plans/done/OPS-UX-PLAN.md §3 B1) —
    * unlike {@link myActivity} above, not scoped to the caller's own actions. Gated server-side on
    * `VisibilityScope#canManageOrg()` (`AuditController`'s own class javadoc); a PILOT session gets a
    * `403` with a real message (`ErrorResponse.message`), which `features/audit/audit-facade.ts`

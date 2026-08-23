@@ -118,7 +118,7 @@ export function relativeTimeLabel(atIso: string, nowMs: number): string {
 /**
  * The minimal shape {@link describeEventSource} needs — satisfied structurally by both
  * `DetectionEvent` (`streamId` always present) and `LiveEvent` (`streamId` optional, no `assetId`
- * at all — docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2's system-event feed reuses this rather than
+ * at all — docs/plans/done/SYSTEM-STATUS-PLAN.md §3.2's system-event feed reuses this rather than
  * duplicating the identical device-name resolution as a second copy in `core/system-events/**`).
  */
 export interface EventSourceIdentifiers {

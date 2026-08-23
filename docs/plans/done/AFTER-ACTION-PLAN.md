@@ -1,7 +1,6 @@
 # AFTER-ACTION-PLAN — the evidence package (row C13)
 
 **Status:** authoritative spec (2026-08-19). Branch `feat/after-action` off `master` @ `554fc105`.
-**Context:** [AFTER-ACTION-CONTEXT.md](AFTER-ACTION-CONTEXT.md) — what exists, verified. Not repeated here.
 **Row:** `docs/main/MASTER-MATRIX.md` §5 C13 · S–M ~40 h · D0 · €0 · depends on recording (HAVE) + I7 passport (HAVE).
 **Persona:** the **referee/judge** of `docs/main/UX-DESIGN.md` §2 — the one person who opens this app
 to answer *"what actually happened, and can you prove it?"*

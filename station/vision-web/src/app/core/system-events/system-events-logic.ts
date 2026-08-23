@@ -3,7 +3,7 @@ import type { ActiveStream, Device, LiveEvent } from '../api/models';
 
 /**
  * Pure, Angular-free logic behind `core/system-events/system-events-store.ts` and the notification
- * bell's own system-events section (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2-§3.4, wave S1) — maps the
+ * bell's own system-events section (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.2-§3.4, wave S1) — maps the
  * generic `LiveEvent` feed (`core/live/live-store.ts#liveEvents`, the `event` SSE topic) into display
  * rows and derives the one cross-cutting reading `core/fleet/attention-logic.ts` needs from it (an
  * active, undecayed `PIPELINE_ERROR` per stream).
@@ -23,7 +23,7 @@ import type { ActiveStream, Device, LiveEvent } from '../api/models';
 export type SystemEventSeverity = 'danger' | 'warn' | 'neutral';
 
 /**
- * `EventType`'s own severity, per docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2's frozen table: `PIPELINE_ERROR`/
+ * `EventType`'s own severity, per docs/plans/done/SYSTEM-STATUS-PLAN.md §3.2's frozen table: `PIPELINE_ERROR`/
  * `GEOFENCE_BREACH` are `danger` (a broken perception pipeline or a physical boundary crossing, both
  * "this needs a person right now"); `DEVICE_OFFLINE` is `warn` (a piece of hardware went quiet, worth
  * knowing, not yet a crisis); `DEVICE_ONLINE`/`STREAM_STARTED`/`STREAM_STOPPED`/`TRAINING` are
@@ -88,7 +88,7 @@ export interface SystemEventRow {
 
 /**
  * Maps one `LiveEvent` to a {@link SystemEventRow}, or `undefined` for `DETECTION` — **deliberately
- * excluded** (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2): detections already have their own surface
+ * excluded** (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.2): detections already have their own surface
  * (`core/events/events-store.ts#EventsStore` → the bell's existing dropdown, the Wall rail, the fleet
  * map's markers, `/monitor/alerts`), and duplicating every detection into this generic log too would
  * be exactly the alert-noise failure mode UX-DESIGN names as fatal — a second, competing feed for the
@@ -150,7 +150,7 @@ export function describeSystemEventSource(
   return describeEventSource(row, devices, streams);
 }
 
-// --- `pipeline-error` attention reason (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4) ----------------------
+// --- `pipeline-error` attention reason (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4) ----------------------
 
 /**
  * How long an undecayed `PIPELINE_ERROR` stays an active attention reason once nothing else has
@@ -181,7 +181,7 @@ export const PIPELINE_ERROR_ATTENTION_WINDOW_MS = 15 * 60 * 1000;
  *   `STREAM_STARTED` for it arrived, which the backend's own id generation makes practically moot.
  * - Absent either signal, a `PIPELINE_ERROR` older than {@link PIPELINE_ERROR_ATTENTION_WINDOW_MS}
  *   decays on its own — a point-in-time event is not a permanent level, and a reason that never
- *   clears is worse than no reason at all (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4's own framing).
+ *   clears is worse than no reason at all (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4's own framing).
  *
  * `events` is assumed newest-first (see {@link systemEventRows}) — a single forward scan finds each
  * `streamId`'s most recent `STREAM_STARTED`-or-`PIPELINE_ERROR` in one pass, exactly like

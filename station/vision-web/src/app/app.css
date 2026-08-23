@@ -72,7 +72,7 @@ vision-undo-toast {
   display: contents;
 }
 
-/* The shell's one banner region (docs/plans/active/OPS-UX-PLAN.md §2 A6 rev.2). `position: fixed`,
+/* The shell's one banner region (docs/plans/done/OPS-UX-PLAN.md §2 A6 rev.2). `position: fixed`,
    NOT an in-flow sibling of `<router-outlet>`: an in-flow banner would sit above the routed page's
    own root inside `main`'s `height`/`overflow-y: auto` box — harmless for an ordinary scrolling page,
    but `.cockpit`/`.command-shell` (`features/fly/cockpit.css`, `features/command/command.css`) size

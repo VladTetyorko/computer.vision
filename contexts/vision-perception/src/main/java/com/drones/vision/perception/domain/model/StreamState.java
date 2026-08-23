@@ -1,7 +1,7 @@
 package com.drones.vision.perception.domain.model;
 
 /**
- * Whether a running stream's <b>video</b> is actually flowing (docs/plans/active/STREAM-STATE-PLAN.md
+ * Whether a running stream's <b>video</b> is actually flowing (docs/plans/done/STREAM-STATE-PLAN.md
  * &sect;2.1), made legible instead of left for a client to reconstruct by latching on a poll gap
  * &mdash; the guess {@code cockpit-facade.ts} had to make while {@code GET /api/streams} carried no
  * state at all.
@@ -43,7 +43,7 @@ public enum StreamState {
     RECONNECTING,
 
     /**
-     * A <b>proxied</b> source (docs/plans/active/MEDIA-SOT-PLAN.md D4): the active publisher dials the
+     * A <b>proxied</b> source (docs/plans/done/MEDIA-SOT-PLAN.md D4): the active publisher dials the
      * device itself, this JVM opens no {@code VideoSourcePort}, and no frame ever reaches it &mdash;
      * so liveness is genuinely unknowable from here.
      *

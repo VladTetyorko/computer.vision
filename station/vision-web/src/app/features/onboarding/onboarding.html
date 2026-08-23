@@ -698,7 +698,14 @@
       <!-- ---- Step 3: Test (UX-DESIGN §5.1 "test-before-save"; skipped for Simulate) -------- -->
       @case ('test') {
         <h2>Test</h2>
-        <p class="muted hint">Before this becomes an asset, make sure it actually produces a frame.</p>
+        <!-- Wording is protocol-aware (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §2 B3): a
+             flight-controller link has no video and never will, so demanding a frame from one told
+             the operator to produce something that cannot exist. -->
+        @if (facade.store.telemetryOnlyLink()) {
+          <p class="muted hint">Before this becomes an asset, make sure this platform can actually hear it.</p>
+        } @else {
+          <p class="muted hint">Before this becomes an asset, make sure it actually produces a frame.</p>
+        }
 
         <div class="row">
           <button type="button" class="btn" (click)="facade.store.probe()" [disabled]="facade.store.probing()">
@@ -712,16 +719,27 @@
           <vision-notice variant="danger">{{ error }}</vision-notice>
         } @else if (facade.store.lastProbeResult(); as result) {
           <div class="test-result">
-            <img
-              class="test-frame"
-              [src]="'data:image/jpeg;base64,' + result.frameJpegBase64"
-              alt="Decoded test frame from the connection"
-            />
+            <!-- `frameJpegBase64` is absent, not empty, on a telemetry-only 200 — see
+                 `core/api/models.ts#ProbeDeviceResult`'s own "two legal 200 shapes". -->
+            @if (result.frameJpegBase64) {
+              <img
+                class="test-frame"
+                [src]="'data:image/jpeg;base64,' + result.frameJpegBase64"
+                alt="Decoded test frame from the connection"
+              />
+            }
             <dl class="facts">
-              <div class="fact">
-                <dt>Resolution</dt>
-                <dd class="mono">{{ result.widthPx }}×{{ result.heightPx }}</dd>
-              </div>
+              @if (result.widthPx !== undefined && result.heightPx !== undefined) {
+                <div class="fact">
+                  <dt>Resolution</dt>
+                  <dd class="mono">{{ result.widthPx }}×{{ result.heightPx }}</dd>
+                </div>
+              } @else {
+                <div class="fact">
+                  <dt>Video</dt>
+                  <dd>None — telemetry link</dd>
+                </div>
+              }
               @if (result.codec) {
                 <div class="fact"><dt>Codec</dt><dd>{{ result.codec }}</dd></div>
               }
@@ -746,7 +764,11 @@
         }
 
         @if (!facade.store.canAdvanceTest()) {
-          <p class="disabled-reason">Run the test and get a successful frame before continuing.</p>
+          @if (facade.store.telemetryOnlyLink()) {
+            <p class="disabled-reason">Run the test and hear the vehicle before continuing.</p>
+          } @else {
+            <p class="disabled-reason">Run the test and get a successful frame before continuing.</p>
+          }
         }
       }
 
@@ -844,7 +866,7 @@
         </button>
       }
 
-      <!-- ---- Step 5: Assign — "Who flies this?" (docs/plans/active/OPS-UX-PLAN.md §2 A3) ------------------- -->
+      <!-- ---- Step 5: Assign — "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) ------------------- -->
       @case ('assign') {
         <h2>Who flies this?</h2>
         <p class="muted hint">

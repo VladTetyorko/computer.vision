@@ -12,7 +12,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code track_corrections} — mirrors {@link com.drones.vision.flight.domain.model.TrackCorrection}
- * (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, {@code V23__track_corrections.sql});
+ * (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, {@code V23__track_corrections.sql});
  * {@code TrackCorrectionMapper} owns the mapping in both directions.
  *
  * <p>{@code id} is a synthetic {@code BIGINT GENERATED ALWAYS AS IDENTITY} column the schema
@@ -22,7 +22,7 @@ import java.util.UUID;
  * same choice {@link CameraPoseEntity}/{@link TrackPointEntity} make for their own positions.
  *
  * <h2>Frozen-schema lossy round trip (V23, not a bug)</h2>
- * The DDL is frozen by docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.7 and persists a deliberate
+ * The DDL is frozen by docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.7 and persists a deliberate
  * subset of two richer domain shapes:
  * <ul>
  *   <li>{@code rawPosition}'s {@code altitudeMeters} has no column — only {@code raw_latitude}/
@@ -41,7 +41,7 @@ import java.util.UUID;
  *       are the two booleans {@code DefaultTrackCorrectionService} reads to decide PROBABLE vs
  *       CONFIRMED, so reading them back as {@code false} left a replayed correction unable to say
  *       why it was only PROBABLE — against D5's "why is always one click away"
- *       (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 4). They now have columns.</li>
+ *       (docs/plans/done/VISUAL-GEO-V2-PLAN.md §9.11 defect 4). They now have columns.</li>
  * </ul>
  * The remaining losses are consequences of the plan's own frozen contract, not omissions to fix here.
  *

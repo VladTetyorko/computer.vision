@@ -1,6 +1,6 @@
 """CLI: `python -m tools.trackeval --scenario NAME --mode MODE [--all]`.
 
-`docs/plans/active/TRACKING-V2-PLAN.md` §4 (wave C0). Deliberately thin --
+`docs/plans/done/TRACKING-V2-PLAN.md` §4 (wave C0). Deliberately thin --
 argument parsing and printing only. `sequences.py` builds the data,
 `replay.py` runs the real session, `metrics.py` scores it; nothing here
 reimplements any of the three.

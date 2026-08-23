@@ -36,7 +36,7 @@ import { nextCollapseAction, showDetectionOffChip, type ToolRailPanelId } from '
 const ACTIVE_PANEL_KEY = 'vision.fly.activePanel';
 
 /** This page's one mutually-exclusive **dialog** group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — the
- * Stop-stream confirm and, as of docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1, the CV setup modal.
+ * Stop-stream confirm and, as of docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1, the CV setup modal.
  * Typed as a union (not a bare string), mirroring `flight-command-panel.ts#CommandDialog`/
  * `command.ts#CommandOverlay`'s identical precedent. Both members share the one `UiStore` group
  * (transient, no `storageKey`, same as `arm-confirm-dialog.ts`'s own group) so opening one always
@@ -66,7 +66,7 @@ type CockpitDialog = 'stop' | 'cv-setup';
  *   - the overlay state a `UiStore` group is explicitly meant to be **host-owned** (per that class's
  *     own doc comment "a host owns one instance directly", mirrored by `asset-detail.ts`'s
  *     `editors`/`panels` and `command.ts`'s `overlay`): `panels` (the six tool-rail drawers) and
- *     `dialog` (the Stop-stream confirm and, as of docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1,
+ *     `dialog` (the Stop-stream confirm and, as of docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1,
  *     the CV setup modal);
  *   - DOM-only concerns no facade could hold anyway: the fullscreen `viewChild`/`toggleFullscreen`,
  *     and the page-scoped `document` `keydown` listener (`handleKeydown`) that maps physical keys to
@@ -138,13 +138,13 @@ export class CockpitPage {
 
   /**
    * `cockpit.html`'s own video-surface "Detection is off — video only" chip
-   * (docs/plans/active/CV-DEMAND-PLAN.md wave D3) — a thin template-friendly wrapper over the facade's raw
+   * (docs/plans/done/CV-DEMAND-PLAN.md wave D3) — a thin template-friendly wrapper over the facade's raw
    * signals, same posture as {@link isPanelOpen} below; the actual decision is the pure, unit-tested
    * `fly-logic.ts#showDetectionOffChip`.
    */
   protected readonly detectionOffChipVisible = computed(() =>
     // `facade.detectionOn()`, not the draft — the chip must describe the stream on screen
-    // (docs/plans/active/STREAM-STATE-PLAN.md §3.1). It also stands down while the video itself has
+    // (docs/plans/done/STREAM-STATE-PLAN.md §3.1). It also stands down while the video itself has
     // something to say ({@link videoNotice}): "Detection off — video only" is a misleading thing to
     // read over a stalled feed, since there is no video either.
     showDetectionOffChip(this.facade.live(), this.facade.detectionOn()) && !this.facade.videoNotice(),
@@ -155,7 +155,7 @@ export class CockpitPage {
   /**
    * The right-edge icon tool-rail's one-open-at-a-time drawer manager (docs/plans/done/UI-REDESIGN-PLAN.md
    * Wave 2, D-D/F3). Frozen rail ids (`ToolRailPanelId`): `flight`, `rc`, `cv`, `marks`, `map`,
-   * `help` — `cv` is the merged Vision drawer as of wave W5 (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3),
+   * `help` — `cv` is the merged Vision drawer as of wave W5 (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3),
    * the former separate `detections` id having been folded into it — see `fly-logic.ts#ToolRailPanelId`'s
    * own doc comment.
    */
@@ -212,7 +212,7 @@ export class CockpitPage {
     this.dialog.close('stop');
   }
 
-  // --- CV setup modal (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1) ------------------------------
+  // --- CV setup modal (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1) ------------------------------
   // `CvControlPanel#setupRequested` (the "Change…"/"Detection setup…" buttons) calls
   // `requestCvSetup()`; the modal's own `(closed)` output (scrim click, the header "×", or `Esc` via
   // `collapseOverlays()` below) calls `closeCvSetup()`. Opening this dialog does **not** touch

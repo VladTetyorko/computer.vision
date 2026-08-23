@@ -18,7 +18,7 @@ import java.util.List;
  * and friends reach the API layer at all; see {@link TrackingTelemetry}'s own javadoc for why
  * this is one nullable component and not five flat ones.
  *
- * <p>{@code pullTelemetry} (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.1/D12) is {@code null} in push mode —
+ * <p>{@code pullTelemetry} (docs/plans/done/MEDIA-SOT-PLAN.md &sect;5.1/D12) is {@code null} in push mode —
  * the same nullable-component idiom {@code tracking} already established for exactly this reason:
  * a result produced by the worker's pull loop carries its own diagnostics, a result produced by a
  * push-mode {@code DetectStream} call has none to carry.
@@ -59,7 +59,7 @@ public record DetectionResult(StreamId streamId, long frameSequence, Instant cap
     /**
      * Convenience constructor for a push-mode result — defaults {@link #pullTelemetry()} to {@code
      * null}, the same "N-1-arg convenience ctor" idiom used elsewhere. This was the canonical
-     * constructor before docs/plans/active/MEDIA-SOT-PLAN.md wave M5/D12 added {@link #pullTelemetry()}; every
+     * constructor before docs/plans/done/MEDIA-SOT-PLAN.md wave M5/D12 added {@link #pullTelemetry()}; every
      * pre-existing 6-arg call site compiles unchanged.
      */
     public DetectionResult(StreamId streamId, long frameSequence, Instant capturedAt, List<Detection> detections,

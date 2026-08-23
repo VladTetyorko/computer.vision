@@ -19,7 +19,7 @@ by deliberate, repeatedly-stated convention (except three: `categories.parent_id
 `device_capabilities.device_id → devices.id ON DELETE CASCADE`, `asset_devices.asset_id → assets.id
 ON DELETE CASCADE`, and `map_layer_grants.layer_id → map_layers.id ON DELETE CASCADE`). The
 no-FK convention exists to preserve write-parity with the now-**deleted** `InMemory*` reference
-repositories (`docs/plans/active/POSTGRES-ONLY-CONTEXT.md` §OQ1 already flags this as stale and
+repositories (`docs/plans/done/POSTGRES-ONLY-CONTEXT.md` §OQ1 already flags this as stale and
 unresolved — see Defect 5).
 
 | Table | Context | Growth class | Migration | Retention/cap |

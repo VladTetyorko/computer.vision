@@ -89,7 +89,7 @@ export interface RegisterDeviceRequest {
  * reverse-proxies HLS byte fetches), WHEP is a POST/SDP + ICE exchange a stateless proxy cannot
  * forward, so this is never app-relative and must never be proxied — POST straight to it.
  *
- * **`burnedIn` is gone** (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3) — server-side burn-in
+ * **`burnedIn` is gone** (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1, wave W3) — server-side burn-in
  * itself is deleted, not defaulted off, so there is no longer a wire field to mirror; the video is
  * always clean pixels and the client canvas overlay (`shared/player/detection-overlay-logic.ts`) is
  * simply the product now.
@@ -106,7 +106,7 @@ export interface ActiveStream {
 }
 
 /**
- * Mirrors the Java `StreamState` enum (docs/plans/active/STREAM-STATE-PLAN.md §2.3) — whether a running
+ * Mirrors the Java `StreamState` enum (docs/plans/done/STREAM-STATE-PLAN.md §2.3) — whether a running
  * stream's **video** is actually flowing, measured server-side from frame arrivals rather than
  * inferred here from "the player has not errored yet".
  *
@@ -114,7 +114,7 @@ export interface ActiveStream {
  * returned, and a stopped stream is not in that list at all — it is an `AssetUsage` row on a
  * different axis. A stream that vanishes from the list has ended; that is the signal, not a state.
  *
- * `'UNOBSERVED'` is the honest answer for a proxied source (docs/plans/active/MEDIA-SOT-PLAN.md D4): no
+ * `'UNOBSERVED'` is the honest answer for a proxied source (docs/plans/done/MEDIA-SOT-PLAN.md D4): no
  * `VideoSourcePort` runs inside the JVM, so the backend counts zero frames forever and must say
  * "cannot judge" instead of reporting a fault that is not there. Absent (old server) degrades the
  * same way — see `stream-state-logic.ts`.
@@ -133,7 +133,7 @@ export type StreamState = 'STARTING' | 'LIVE' | 'STALLED' | 'RECONNECTING' | 'UN
  * `labelFilter`/`detectionEnabled` (docs/plans/done/CV-CONTROL-PLAN.md §2's frozen contract) are this cycle's
  * own additions, both optional — an absent `labelFilter` keeps today's "empty = all labels"
  * semantics, an absent `detectionEnabled` defaults to `PipelineConfig.DEFAULT_DETECTION_ENABLED`
- * server-side — **`false`** as of docs/plans/active/CV-DEMAND-PLAN.md wave D1 (flipped from `true`: detection
+ * server-side — **`false`** as of docs/plans/done/CV-DEMAND-PLAN.md wave D1 (flipped from `true`: detection
  * is opt-in per stream now, not opt-out). This app never relies on that server fallback either way —
  * `core/settings/settings-store.ts#SettingsStore.effective()` always resolves a concrete
  * `detectionEnabled` value, and every call site that starts a stream
@@ -143,7 +143,7 @@ export type StreamState = 'STARTING' | 'LIVE' | 'STALLED' | 'RECONNECTING' | 'UN
  * wave, §D3) is what actually governs a stream this app started, not this field's absence. Both are
  * also PATCH-able live afterward — see `UpdateStreamConfigRequest`.
  *
- * `labelDenyFilter` (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5) mirrors `dto.StartStreamRequest
+ * `labelDenyFilter` (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2, wave W5) mirrors `dto.StartStreamRequest
  * #labelDenyFilter` one for one: an explicit empty array is a real value meaning "deny nothing",
  * absent leaves the server default (also "deny nothing") alone. Enforced server-side in
  * `StreamPipeline`'s single drop site, *after* `labelFilter` — a label that fails the allowlist or
@@ -188,7 +188,7 @@ export interface StartStreamRequest {
  * `tracking`-only patch). See {@link TrackingConfigRequest}'s own doc comment for the one-of-three
  * `lock` rule.
  *
- * `labelDenyFilter` (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5) mirrors `dto.
+ * `labelDenyFilter` (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2, wave W5) mirrors `dto.
  * UpdateStreamConfigRequest#labelDenyFilter` — the one field added since the §2 contract froze,
  * present/absent following the exact same "only present fields change" partial-patch rule as
  * `labelFilter`; an explicit `[]` means "deny nothing" (a real value, not "leave unchanged"). Hot,
@@ -499,7 +499,7 @@ export interface StreamTrack {
 }
 
 /**
- * Mirrors `dto.DetectionState` (docs/plans/active/CV-DEMAND-PLAN.md §3.6) — which of the two
+ * Mirrors `dto.DetectionState` (docs/plans/done/CV-DEMAND-PLAN.md §3.6) — which of the two
  * independent detection gates currently explains a stream's boxes-or-no-boxes state: `'OFF'` (the
  * operator's own choice), `'IDLE_NO_VIEWERS'` (enabled, but nobody has consumed this stream's
  * detections within the grace period — not a fault), `'RUNNING'` (both gates open; says nothing
@@ -511,10 +511,10 @@ export type DetectionState = 'OFF' | 'IDLE_NO_VIEWERS' | 'RUNNING';
 
 /**
  * Mirrors the `"rate"` object of `GET /api/streams/{streamId}/tracks` (`dto.DetectionRateResponse`,
- * docs/plans/active/CV-RATE-CONTROL-PLAN.md §1) — why this stream is detecting at the rate it is.
+ * docs/plans/done/CV-RATE-CONTROL-PLAN.md §1) — why this stream is detecting at the rate it is.
  * `submittedFps` is the one figure `cv-control-panel.ts`'s honest status line actually reads (the
  * *measured* rate, replacing the fps slider's now-false "this is the rate" label per
- * docs/plans/active/CV-UX-RESEARCH.md §1.2) — every other field mirrors the DTO 1:1 for parity even
+ * docs/plans/done/CV-UX-RESEARCH.md §1.2) — every other field mirrors the DTO 1:1 for parity even
  * though only `submittedFps` has a reader today.
  */
 export interface DetectionRate {
@@ -563,7 +563,7 @@ export interface PipelineLatency {
  * response confirms a lock, never from local click intent (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's
  * honesty rule) — see `cv-control-panel.ts`'s own doc comment.
  *
- * `rate`/`latency`/`detectionState` (docs/plans/active/CV-UX-RESEARCH.md §7 wave U3, the backend
+ * `rate`/`latency`/`detectionState` (docs/plans/done/CV-UX-RESEARCH.md §7 wave U3, the backend
  * already served all three — this app simply hadn't read them) are each independently absent when
  * there's nothing honest to report yet (no completed detection, or an old server) — never a zeroed
  * placeholder.
@@ -603,7 +603,7 @@ export interface CvTrackersResponse {
 
 /** Mirrors `dto.StartStreamResponse`. `whepUrl` follows the same absolute-origin rule as
  *  `ActiveStream#whepUrl`; `burnedIn` is gone for the same reason — see that field's own doc
- *  comment (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1, wave W3). */
+ *  comment (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1, wave W3). */
 export interface StartStreamResult {
   readonly streamId: string;
   readonly viewUrl?: string;
@@ -668,8 +668,16 @@ export interface ProbeDeviceRequest {
  * Mirrors the probe endpoint's 200 response — one decoded frame plus the facts the Test step shows
  * (WxH, codec, fps, whether telemetry was detected alongside the video) and any non-fatal warnings.
  * `codec`/`fps` are the two fields the pinned contract itself marks optional (not every source
- * reports them); everything else is always present on a 200 — a probe that can't produce a frame at
- * all is the documented 422 path instead (an `HttpErrorResponse`, not a `{ok: false}` body).
+ * reports them). A probe that can't prove the connection *at all* is the documented 422 path
+ * instead (an `HttpErrorResponse`, not a `{ok: false}` body).
+ *
+ * **Two legal 200 shapes** (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §3). A video probe
+ * returns every frame field. A **telemetry-only** probe — `mavlink`, a link that carries no video
+ * and never will — omits `widthPx`/`heightPx`/`frameJpegBase64` entirely, which is why all three are
+ * typed optional here. The backend deliberately omits them rather than sending a `0×0` frame a
+ * client could not tell apart from a real one, so `frameJpegBase64 === undefined` is the reliable
+ * "there is no picture to show" test; do not reintroduce a truthiness check on `widthPx`, which a
+ * genuine (if absurd) zero-width frame would also fail.
  *
  * **`warnings` is typed optional despite `dto.ProbeDeviceResponse`'s own Javadoc claiming "always
  * present, possibly empty"** — verified live against the actual running backend (§U-d's backend
@@ -681,12 +689,12 @@ export interface ProbeDeviceRequest {
  */
 export interface ProbeDeviceResult {
   readonly ok: boolean;
-  readonly widthPx: number;
-  readonly heightPx: number;
+  readonly widthPx?: number;
+  readonly heightPx?: number;
   readonly codec?: string;
   readonly fps?: number;
   readonly telemetryDetected: boolean;
-  readonly frameJpegBase64: string;
+  readonly frameJpegBase64?: string;
   readonly warnings?: readonly string[];
 }
 
@@ -695,7 +703,7 @@ export interface ProbeDeviceResult {
  * error envelope, `{error, message}`, read by `core/api-error.ts#describeHttpError` and every
  * flag-disabled-409 detector (`core/readiness/readiness-logic.ts#isProbeDisabledError`,
  * `core/camera-geo/camera-geo-logic.ts#isFixedCameraGeoDisabledError`). Noted here because
- * `docs/plans/active/FIXED-CAMERA-GEO-PLAN.md` §5's own preamble illustrates its flag-off 409 as
+ * `docs/plans/done/FIXED-CAMERA-GEO-PLAN.md` §5's own preamble illustrates its flag-off 409 as
  * `{"detail": "…"}` instead — a different key from this established shape.
  * `isFixedCameraGeoDisabledError` checks both defensively rather than picking one and guessing wrong.
  */
@@ -1282,7 +1290,7 @@ export interface DevicesSnapshot {
  * **per-connection filtering** — the server delivers a map event only to connections whose captured
  * viewer may see the event's `layerId`, so this client never filters map data for visibility.
  *
- * **`geo` is the 8th, from docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4 (wave H6/H5)** — `geo:<assetId>`,
+ * **`geo` is the 8th, from docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4 (wave H6/H5)** — `geo:<assetId>`,
  * opt-in like `telemetry`/`detections` (not always-on), coalescing latest-wins with ring capacity 1
  * (the freshest correction is the only one that matters, CLAUDE.md rule 9); payload is
  * {@link CorrectionResponse} verbatim, byte-identical to the REST shape.
@@ -1590,7 +1598,7 @@ export interface PatchDrawingRequest {
  * every `core/map-data/**` store does its own initial `GET` first and folds deltas on top.
  */
 /**
- * The `track` entity on the map SSE topic (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D11).
+ * The `track` entity on the map SSE topic (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5/D11).
  *
  * Wave G5 shipped this uppercase because §5 froze it that way, and flagged the mismatch rather than
  * normalizing it silently. §5 was wrong: the shipped `MapEventPayload.java` lowercases every
@@ -1638,7 +1646,7 @@ export interface MapEventPayload {
   readonly track?: ProjectedTrackLive;
 }
 
-// --- Fixed-camera geolocation (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5's frozen wire contract, wave G5) ---
+// --- Fixed-camera geolocation (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5's frozen wire contract, wave G5) ---
 // The backend does not exist yet as of this wave (G4 is blocked on G2+G3) — every shape below is
 // typed directly off the plan's §5 prose, not off a running server; property names/status
 // codes/enum spellings are what §5 calls frozen. One more discrepancy flagged here (see
@@ -1770,7 +1778,7 @@ export interface MapTracksResponse {
   readonly tracks: readonly ProjectedTrackResponse[];
 }
 
-// --- Visual geolocation v2 (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3/§3.4's frozen wire contract, wave H6) ---
+// --- Visual geolocation v2 (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/§3.4's frozen wire contract, wave H6) ---
 // Built against the plan text, not a running server — H5 (persistence/REST/SSE) lands concurrently.
 // D9's flag-off envelope is the app's real, shipped `ApiErrorBody` shape (`{error, message}`), no
 // ambiguity to flag here (contrast Fixed-camera-geo's `detail`-vs-`message` discrepancy above).
@@ -2001,7 +2009,18 @@ export interface FlightCapability {
   readonly armSupported: boolean;
   readonly modeSelectSupported: boolean;
   readonly selectableModes: readonly string[];
+  readonly vehicleKind: VehicleKind;
 }
+
+/**
+ * What kind of machine is on the other end — decoded live from the vehicle's own heartbeat, never
+ * stored or guessed (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P1/P9).
+ *
+ * `'UNKNOWN'` is an honest answer, not an error state: the vehicle has not identified itself as
+ * anything the platform recognizes. Render it as such — there is no safe default to substitute,
+ * because a throttle resting at its minimum is idle on a copter and *full reverse* on a rover.
+ */
+export type VehicleKind = 'COPTER' | 'PLANE' | 'ROVER' | 'UNKNOWN';
 
 // --- Guided drone onboarding (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire contract) --------------
 
@@ -2221,7 +2240,7 @@ export interface RemediationResult {
   readonly reprobe: ReadinessReport | null;
 }
 
-// --- System status (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.1/§4.3's frozen wire contract, S3) -----------
+// --- System status (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.1/§4.3's frozen wire contract, S3) -----------
 // `GET /api/system/status` — the platform's own honest "is it working right now" surface
 // (`SubsystemStatusPort`/`SystemStatusController`, station/vision-api). Backs `core/system-status/**`
 // (the shell rollup dot + `/manage/system`) and `/debug`'s repointed Health card.
@@ -2229,7 +2248,7 @@ export interface RemediationResult {
 /**
  * Mirrors `platform.SubsystemStatusPort.Health` — one subsystem's own reading. `'DISABLED'` means
  * "switched off by config" and **must render as neutral/off, never as a fault**
- * (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.1's own explicit rule — a deliberately-disabled subsystem is not
+ * (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.1's own explicit rule — a deliberately-disabled subsystem is not
  * a problem); `'UNKNOWN'` covers both "a provider threw while answering" and ordinary "nothing to
  * report yet" cases (e.g. `mavlink-link` before any vehicle is claimed, per the S2 outcome notes this
  * type's own doc comment is transcribed from) — this app treats it the same honest, uncoloured way as
@@ -2391,7 +2410,7 @@ export interface Assignment {
 
 /**
  * Mirrors `dto.AuditEntryResponse` — one entry of `GET /api/me/activity` (docs/plans/done/U-SCOPE-PLAN.md
- * feature 7), the acting user's own recent actions, **and**, since docs/plans/active/OPS-UX-PLAN.md §3 B1,
+ * feature 7), the acting user's own recent actions, **and**, since docs/plans/done/OPS-UX-PLAN.md §3 B1,
  * `GET /api/audit` (`core/api/vision-api.ts#listAudit`), the fleet-wide equivalent behind
  * `features/audit/**` — the same DTO on the wire, so one type backs both. `summary` is written to
  * read on its own (no id reconstruction needed); `details` carries before→after specifics, and,
@@ -2421,15 +2440,51 @@ export interface AuditEntry {
 // the full hardware/safety framing; this file only carries the JSON shapes.
 
 /**
- * One physical control → one RC channel, as sent on the `engaged` frame's `channelMap` — trims
- * `domain.model.ControlBinding` to what the client needs to *display* the map (the calibration
- * fields `minMicros`/`centerMicros`/`maxMicros`/`deadband`/`reversed` stay server-side; nothing
- * here recomputes microseconds — that mapping is entirely the backend's `ChannelMap#apply` job).
+ * What one control *does* to the vehicle. RC1 is roll on a copter and steering on a rover, so the
+ * channel number alone never carried the meaning — this does.
+ */
+export type ControlFunction =
+  | 'ROLL'
+  | 'PITCH'
+  | 'THROTTLE'
+  | 'YAW'
+  | 'STEERING'
+  | 'AUX_1'
+  | 'AUX_2'
+  | 'AUX_3'
+  | 'AUX_4';
+
+/**
+ * Where a control rests, and therefore what its travel means
+ * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P3).
+ *
+ * - `'CENTERED'` — rests at `centerMicros`, travels both ways. Roll, pitch, yaw, steering, **and a
+ *   rover's throttle**, where centre is *stop*: 50→0 is reverse, 50→100 is forward.
+ * - `'UNIDIRECTIONAL'` — rests at `minMicros`, travels one way. A copter's or plane's throttle:
+ *   0→100 with rest at 0, because a released stick on a multirotor must be idle, not half power.
+ *
+ * This is the field a control surface must branch on. Drawing both throttles the same way is the
+ * exact defect the profiles exist to close.
+ */
+export type ControlTravel = 'CENTERED' | 'UNIDIRECTIONAL';
+
+/**
+ * One physical control → one RC channel, as sent on the `engaged` frame's `channelMap`. Mirrors
+ * `domain.model.ControlBinding`.
+ *
+ * The microsecond fields are carried so a client can *render* the control honestly (where it rests,
+ * how far it travels) — nothing here recomputes them for the wire: mapping an input to microseconds
+ * is entirely the backend's `ChannelMap#apply` job, and `deadband`/`reversed` stay server-side.
  */
 export interface ManualControlChannelBinding {
   readonly source: 'AXIS' | 'BUTTON';
+  readonly function: ControlFunction;
+  readonly travel: ControlTravel;
   readonly sourceIndex: number;
   readonly rcChannel: number;
+  readonly minMicros: number;
+  readonly centerMicros: number;
+  readonly maxMicros: number;
   readonly label: string;
 }
 
@@ -2476,10 +2531,21 @@ export type ManualControlClientMessage =
 
 // Server → client frames.
 
+/**
+ * `vehicleKind`/`profileCode`/`profileName` were added additively
+ * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P13) — the server resolves the vehicle
+ * kind from the heartbeat it is hearing at engage time and shapes `channelMap` from it, so the
+ * client renders what the machine actually is rather than assuming a multirotor.
+ */
 export interface ManualControlEngagedMessage {
   readonly type: 'engaged';
   readonly assetId: string;
   readonly rateHz: number;
+  readonly vehicleKind: VehicleKind;
+  /** Short channel-order code, e.g. `'AETR'` for an aircraft, `'S-T-'` for a ground vehicle. */
+  readonly profileCode: string;
+  /** What to call this vehicle in front of an operator, e.g. `'Multirotor'`. */
+  readonly profileName: string;
   readonly channelMap: readonly ManualControlChannelBinding[];
 }
 
@@ -2691,7 +2757,7 @@ export interface TrainingJobsResponse {
   readonly jobs: readonly TrainingJobResponse[];
 }
 
-// --- After-action evidence package (docs/plans/active/AFTER-ACTION-PLAN.md §3's frozen wire contract, wave W2) ---
+// --- After-action evidence package (docs/plans/done/AFTER-ACTION-PLAN.md §3's frozen wire contract, wave W2) ---
 // One request against one finished flight returns everything the platform knows about it, in open
 // formats, with an explicit account of what's missing/approximate (D3). Two endpoints (D2): this
 // JSON manifest — also what `features/replay/**`'s after-action panel renders directly — and a ZIP

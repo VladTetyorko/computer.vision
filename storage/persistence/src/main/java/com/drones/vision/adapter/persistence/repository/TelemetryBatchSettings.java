@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.persistence.repository;
 
 /**
- * How {@link JpaTelemetryRepository#save} batches its writes (docs/plans/active/SCALE-100-PLAN.md S4).
+ * How {@link JpaTelemetryRepository#save} batches its writes (docs/plans/done/SCALE-100-PLAN.md S4).
  * Framework-free, matching {@code PersistencePoolSettings}'s own convention: {@code vision-app}
  * binds {@code vision.persistence.telemetry.*} and passes this record in, rather than this module
  * reading Spring configuration itself.
@@ -10,7 +10,7 @@ package com.drones.vision.adapter.persistence.repository;
  * {@link #batchWindowMillis()} have elapsed since the first still-buffered one for that usage,
  * whichever comes first. Until then it exists only in this repository instance's own heap — a
  * crash (or an unclean restart) loses whatever is still buffered for every open usage, bounded to
- * at most one window's worth per usage (docs/plans/active/SCALE-100-PLAN.md &sect;5 S4's stated
+ * at most one window's worth per usage (docs/plans/done/SCALE-100-PLAN.md &sect;5 S4's stated
  * trade-off; CLAUDE.md rule 9's "newest data wins" intent is why the default window is kept small
  * rather than zero).
  *
@@ -49,7 +49,7 @@ public record TelemetryBatchSettings(int batchSizeSamples, long batchWindowMilli
 
     /**
      * No buffering: every {@link JpaTelemetryRepository#save} call persists and flushes before
-     * returning, exactly how this repository behaved before docs/plans/active/SCALE-100-PLAN.md S4. What the
+     * returning, exactly how this repository behaved before docs/plans/done/SCALE-100-PLAN.md S4. What the
      * one/two-argument {@link JpaTelemetryRepository} constructors use, so every pre-existing
      * caller (and test) keeps its synchronous read-after-write behavior unchanged.
      */

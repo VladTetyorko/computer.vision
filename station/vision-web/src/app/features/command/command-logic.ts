@@ -74,7 +74,7 @@ function rowRank(row: EntityRow): number {
  * new top-rank `geofence-breach` reason — `CommandPage` builds this from
  * `core/geofence/geofence-logic.ts#groupBreachesByAsset(activeGeofenceBreaches(liveStore.liveEvents()))`.
  *
- * `pipelineErrorMessagesByStreamId` (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4, optional) is keyed by
+ * `pipelineErrorMessagesByStreamId` (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4, optional) is keyed by
  * `streamId`, not `assetId` — a `PIPELINE_ERROR` event carries only the stream it happened on (see
  * `core/system-events/system-events-logic.ts#activePipelineErrorMessagesByStreamId`'s own doc
  * comment) — so each row resolves its own entry via `asset.streamId`, which is itself only present

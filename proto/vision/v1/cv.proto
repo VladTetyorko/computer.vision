@@ -59,7 +59,7 @@ enum DetectorReason {
   DETECTOR_REASON_COASTED_OUT    = 6;  // (e) COASTING longer than max_age_frames
 }
 
-// Camera attitude at capture time (docs/plans/active/TRACKING-V2-PLAN.md §2).
+// Camera attitude at capture time (docs/plans/done/TRACKING-V2-PLAN.md §2).
 //
 // Feeds two consumers that need the same numbers: ego-motion compensation, which warps a track's
 // predicted box into the current frame before any IoU is computed (without it, a yawing aircraft
@@ -128,7 +128,7 @@ message TrackingConfig {
 // TrackingConfig above, and for the same reason: a one-shot control message can be lost with no
 // error and no retry, so a restated desired state is self-healing. `source_url` and
 // `rtsp_transport` are read from the FIRST message of the call only; every other field is hot and
-// takes effect as soon as the worker sees it (docs/plans/active/MEDIA-SOT-PLAN.md §5.1).
+// takes effect as soon as the worker sees it (docs/plans/done/MEDIA-SOT-PLAN.md §5.1).
 message PullControl {
   string stream_id            = 1;   // vision StreamId; ALSO the mediamtx path name (D2)
   string source_url           = 2;   // rtsp://{host}:8554/{stream_id} -- read from the FIRST message only
@@ -312,7 +312,7 @@ service Training {
   rpc PromoteModel(ModelRefMsg) returns (Ack);
 }
 
-// ---- VISUAL-GEO-V2, heavy-A (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1) -------------------
+// ---- VISUAL-GEO-V2, heavy-A (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1) -------------------
 // Pull-only: the worker dials the video source itself, exactly like Inference.DetectPulled.
 // There is no frame payload on this wire, in either direction.
 

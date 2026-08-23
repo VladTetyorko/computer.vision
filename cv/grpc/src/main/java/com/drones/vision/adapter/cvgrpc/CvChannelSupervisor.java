@@ -179,7 +179,7 @@ public final class CvChannelSupervisor implements AutoCloseable {
      * The message {@link GrpcDetectionPort#detect} embeds verbatim in a {@link CvUnavailableException}
      * while the gate is closed — see that exception's javadoc for why its message is its whole
      * contract. Also the operator-facing sentence {@link CvStatusProvider} reports verbatim as
-     * {@code SubsystemStatus.detail()} while the gate is closed (docs/plans/active/SYSTEM-STATUS-PLAN.md
+     * {@code SubsystemStatus.detail()} while the gate is closed (docs/plans/done/SYSTEM-STATUS-PLAN.md
      * §4.2) — one sentence, two callers, never reformatted.
      */
     public String describe() {

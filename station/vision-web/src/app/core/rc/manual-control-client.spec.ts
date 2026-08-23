@@ -3,6 +3,8 @@ import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManualControlClient } from './manual-control-client';
 import { RcInputService } from './rc-input.service';
+import { VirtualRcInputService } from './virtual-rc-input.service';
+import { RcSource } from './rc-source.service';
 import { MIN_SEND_GAP_MS, keepaliveIntervalMs } from './manual-control-logic';
 
 /** A minimal `WebSocket` test double — captures every `send()` call and lets a test drive
@@ -96,7 +98,7 @@ function lastSocket(): MockWebSocket {
 function create(fakeRc: FakeRcInputService): { client: ManualControlClient; injector: EnvironmentInjector } {
   TestBed.configureTestingModule({});
   const injector = createEnvironmentInjector(
-    [ManualControlClient, { provide: RcInputService, useValue: fakeRc }],
+    [ManualControlClient, RcSource, VirtualRcInputService, { provide: RcInputService, useValue: fakeRc }],
     TestBed.inject(EnvironmentInjector),
   );
   return { client: injector.get(ManualControlClient), injector };
@@ -109,9 +111,25 @@ function engageAndOpen(client: ManualControlClient, assetId = 'asset-1'): MockWe
   return ws;
 }
 
+/** The engaged frame's own vehicle-profile fields, which `parseManualControlServerMessage` requires
+ * — the server always sends them (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P13). */
+const PROFILE = { vehicleKind: 'COPTER', profileCode: 'AETR', profileName: 'Multirotor' } as const;
+
+const ROLL_BINDING = {
+  source: 'AXIS' as const,
+  function: 'ROLL' as const,
+  travel: 'CENTERED' as const,
+  sourceIndex: 0,
+  rcChannel: 1,
+  minMicros: 1000,
+  centerMicros: 1500,
+  maxMicros: 2000,
+  label: 'Roll',
+};
+
 function engageAndConfirm(client: ManualControlClient, rateHz = 30): MockWebSocket {
   const ws = engageAndOpen(client);
-  ws.triggerMessage({ type: 'engaged', assetId: 'asset-1', rateHz, channelMap: [] });
+  ws.triggerMessage({ type: 'engaged', assetId: 'asset-1', rateHz, ...PROFILE, channelMap: [] });
   return ws;
 }
 
@@ -155,14 +173,16 @@ describe('ManualControlClient', () => {
     fakeRc.setAxes([0.4, -0.2]);
     fakeRc.setButtons([1]);
     const { client } = create(fakeRc);
-    const channelMap = [{ source: 'AXIS' as const, sourceIndex: 0, rcChannel: 1, label: 'Roll' }];
+    const channelMap = [ROLL_BINDING];
 
     const ws = engageAndOpen(client);
-    ws.triggerMessage({ type: 'engaged', assetId: 'asset-1', rateHz: 25, channelMap });
+    ws.triggerMessage({ type: 'engaged', assetId: 'asset-1', rateHz: 25, ...PROFILE, channelMap });
 
     expect(client.state()).toBe('engaged');
     expect(client.channelMap()).toEqual(channelMap);
     expect(client.rateHz()).toBe(25);
+    expect(client.vehicleKind()).toBe('COPTER');
+    expect(client.profileName()).toBe('Multirotor');
     expect(ws.sent.length).toBe(1); // only the engage frame so far — nothing has been sampled yet
 
     // The first sampling flush carries the reading straight out: the send path is driven by the
@@ -299,7 +319,7 @@ describe('ManualControlClient', () => {
       expect(client.state()).toBe('idle');
     });
 
-    it('the gamepad disconnecting releases an engaged session', () => {
+    it('the selected input source going away (the gamepad unplugged) releases an engaged session', () => {
       const fakeRc = new FakeRcInputService();
       const { client } = create(fakeRc);
       const ws = engageAndConfirm(client);

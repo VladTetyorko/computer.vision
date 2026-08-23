@@ -12,7 +12,7 @@ import java.util.Locale;
 import java.util.function.Supplier;
 
 /**
- * {@code mavlink-link}'s {@link SubsystemStatusPort} (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2):
+ * {@code mavlink-link}'s {@link SubsystemStatusPort} (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2):
  * reports whether currently-claimed MAVLink vehicles are actually heard from, using {@link
  * LinkHealth.Health} per claimed vehicle — this class is {@link LinkHealth}'s first production
  * consumer; every prior call site was test-only (docs/plans/active/MAVLINK-CORE-PLAN.md).

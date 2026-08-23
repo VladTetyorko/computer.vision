@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 
 /**
- * Wire shape for {@code TrackCorrection} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3) — the
+ * Wire shape for {@code TrackCorrection} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3) — the
  * {@code GET /api/geo/corrections/live} and {@code GET /api/geo/corrections} response element, and
  * the {@code geo:<assetId>} SSE envelope payload (§3.4), byte-identical between the two.
  *

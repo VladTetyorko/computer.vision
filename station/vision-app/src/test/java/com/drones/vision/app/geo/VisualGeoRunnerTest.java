@@ -60,7 +60,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link VisualGeoRunner}'s session lifecycle (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * Unit tests for {@link VisualGeoRunner}'s session lifecycle (docs/plans/done/VISUAL-GEO-V2-PLAN.md
  * §9.11 defect 1, wave H8) — real background scheduler driven at a fast tick and observed by polling,
  * the same style {@code TrackProjectionRunnerTest} (this runner's own template) already uses.
  *

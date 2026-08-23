@@ -19,7 +19,7 @@ import java.util.Set;
  * UpdateStreamConfigResponse#modelReArmed()}) — video is untouched either way. {@code
  * maxInFlightInferences} and {@code eventRule}, and the model's {@code version}, are deliberately
  * not exposed here — not PATCH-able in v1 (frozen contract §3). {@code labelDenyFilter}
- * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) is the one field added since that freeze, mirroring
+ * (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2) is the one field added since that freeze, mirroring
  * {@code labelFilter}'s own semantics one for one.
  *
  * @param confidenceThreshold replacement confidence threshold, or absent to keep the current one

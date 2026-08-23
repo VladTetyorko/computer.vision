@@ -1,6 +1,6 @@
 """`flow` -- ego-motion compensation from pixels, the standard BoT-SORT GMC approach.
 
-`docs/plans/active/TRACKING-V2-PLAN.md` §3.1, `docs/conclusions/TRACKING-REVIEW.md` §4.5.
+`docs/plans/done/TRACKING-V2-PLAN.md` §3.1, `docs/conclusions/TRACKING-REVIEW.md` §4.5.
 
 **The defect this closes**, same as `pose_gmc.py`'s: association is IoU-based
 in image space, so a camera pan charges its own motion to every object in

@@ -88,7 +88,7 @@ public record AfterActionPackage(AssetId assetId, String assetName, UsageId usag
 
     /**
      * Every non-{@code null} note, verbatim, in part order, regardless of {@code state}
-     * (docs/plans/active/AFTER-ACTION-PLAN.md &sect;3.1's {@code caveats} rule, corrected — the
+     * (docs/plans/done/AFTER-ACTION-PLAN.md &sect;3.1's {@code caveats} rule, corrected — the
      * plan's own worked example originally suppressed a {@code PRESENT} part's note, which would
      * have hidden the marks part's standing "not bound to a flight" qualifier, D5, from every
      * package that has any marks at all). A caveat and its {@code parts[].note} are the same

@@ -1,4 +1,4 @@
-# docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4 -- global Spring TestContext seams, auto-detected via
+# docs/plans/done/POSTGRES-ONLY-CONTEXT.md W4 -- global Spring TestContext seams, auto-detected via
 # SpringFactoriesLoader so every @SpringBootTest context in this module picks them up with zero
 # per-class annotation. See com.drones.vision.app.testsupport for the implementations.
 

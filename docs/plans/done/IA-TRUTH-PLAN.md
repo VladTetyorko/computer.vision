@@ -1,7 +1,7 @@
 # IA-TRUTH-PLAN — make the navigation tell the truth
 
 Status: **active** (2026-08-16). Branch `feat/system-status` (continues the same cycle).
-Companion to `docs/plans/active/SYSTEM-STATUS-PLAN.md` — same theme one level up: that plan made the
+Companion to `docs/plans/done/SYSTEM-STATUS-PLAN.md` — same theme one level up: that plan made the
 *running system* honest about its state; this one makes the *app* honest about itself.
 
 Grounded in a fresh audit of the live tree against `docs/conclusions/UX-SIMPLIFY-REVIEW.md`

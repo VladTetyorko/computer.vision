@@ -28,7 +28,7 @@ import java.util.Objects;
  * #recent}, docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/extracts/design/10-replay.md), flight replay
  * (docs/plans/done/MVP2-PLAN.md §R, R-a) — a downsampled, time-windowed view over one {@code AssetUsage}'s
  * telemetry/detection history — plus (docs/plans/done/OPS-CORE-PLAN.md §R, R-b) that same usage's
- * recorded-clip URL, if one is available, plus (docs/plans/active/STREAM-STATE-PLAN.md §2.6) the
+ * recorded-clip URL, if one is available, plus (docs/plans/done/STREAM-STATE-PLAN.md §2.6) the
  * reverse lookup {@link #byStream} — the usage one stream opened. All four are usage-scoped reads
  * that belong together on one controller rather than standing up a new class per endpoint (see
  * {@code .claude/skills/java-clean-code/SKILL.md}: "can an existing service/controller own this method
@@ -146,7 +146,7 @@ public class UsageTimelineController {
 
     /**
      * Serves the usage one stream opened — "what happened to stream X"
-     * (docs/plans/active/STREAM-STATE-PLAN.md §2.6).
+     * (docs/plans/done/STREAM-STATE-PLAN.md §2.6).
      *
      * <p>A running stream is in {@code GET /api/streams} with a {@code StreamState}; a stopped one
      * is not, deliberately — {@code StreamState} has no {@code STOPPED} member because a stopped

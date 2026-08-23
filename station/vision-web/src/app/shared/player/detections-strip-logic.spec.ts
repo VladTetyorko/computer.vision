@@ -14,7 +14,7 @@ function detection(partial: Partial<Detection>): Detection {
 }
 
 /** A tracked detection — {@link detection}'s own shape plus a `track`, needed for the sticky-label
- *  grouping cases below (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 2). */
+ *  grouping cases below (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 2). */
 function trackedDetection(partial: Partial<Detection>, trackId: number): Detection {
   return detection({
     track: { id: trackId, state: 'CONFIRMED', source: 'TRACKER', velocityX: 0, velocityY: 0, reupdated: false },
@@ -55,7 +55,7 @@ describe('stripChips', () => {
     expect(stripChips([newer, older]).map((c) => c.label)).toEqual(['car', 'person']);
   });
 
-  it('aggregates the max concurrent count within the window, not a naive sum across batches (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 2)', () => {
+  it('aggregates the max concurrent count within the window, not a naive sum across batches (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 2)', () => {
     // Both batches land inside the default 5s window (2s apart) — the same handful of people
     // re-detected every batch must not multiply into a growing count; the busiest single instant wins.
     const newer = result({

@@ -15,7 +15,7 @@ import java.util.Optional;
 
 /**
  * {@link TrackTrailRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7.
+ * docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D3/§7.
  *
  * <p>{@link #save} always {@code persist}s a brand-new row (append-only — {@link TrackPoint}
  * carries no id to merge by, see {@link TrackPointEntity}'s own javadoc), the same "always

@@ -3,7 +3,7 @@ package com.drones.vision.perception.application.stream;
 import java.time.Duration;
 
 /**
- * When the idle policy stops a stream nobody is watching (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.7).
+ * When the idle policy stops a stream nobody is watching (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.7).
  *
  * <p>Its own record rather than three more components on {@code StreamPipelineSettings}: that record
  * describes how one pipeline processes frames, this describes whether a stream should exist at all.

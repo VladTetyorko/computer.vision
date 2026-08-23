@@ -106,7 +106,7 @@ public class ApiExceptionHandler {
     }
 
     /**
-     * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3 — a region-index call ({@code GET}/{@code DELETE
+     * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3 — a region-index call ({@code GET}/{@code DELETE
      * /api/geo/regions}) that could not reach cv-service maps to {@code 503}, distinct from every
      * other mapping here: the request itself was well-formed and authorized, but the collaborator
      * this endpoint proxies to is down.

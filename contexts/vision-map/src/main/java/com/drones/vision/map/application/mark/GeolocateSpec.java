@@ -24,7 +24,7 @@ import com.drones.vision.map.application.LayerResolver;
  * @param label               short human-readable label; must not be blank
  * @param note                optional free-text detail; blank normalizes to {@code null}
  * @param depressionDegrees  an operator-supplied override for the camera depression angle, degrees,
- *                            or {@code null} to let the resolved pose decide (docs/plans/active/GEO-POSE-PLAN.md
+ *                            or {@code null} to let the resolved pose decide (docs/plans/done/GEO-POSE-PLAN.md
  *                            §4.3/V3): a real gimbal depression reading wins when the telemetry has
  *                            one, else {@code GeoProjection.DEFAULT_DEPRESSION_DEGREES}. A non-null
  *                            value here always wins over a gimbal reading — it means "override the

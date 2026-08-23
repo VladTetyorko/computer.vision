@@ -143,7 +143,7 @@ Wave D writes **no product code and no tests.**
 ## 5b. Wave E — the synthetic dev group  *(proposal, not yet approved)*
 
 > **Item (1) below is done, via a different mechanism than proposed — flag before picking this wave
-> back up.** docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 (station/vision-app + storage/persistence,
+> back up.** docs/plans/done/POSTGRES-ONLY-CONTEXT.md W1 (station/vision-app + storage/persistence,
 > merged to `fix/postgres-only-auth`) independently found this exact bug and fixed it: `AuthSeedRunner`
 > is **deleted** (not given a `GroupService` explicit-id parameter — Option A's outcome, a different
 > route to it), and `storage/persistence`'s `V13__identity_baseline.sql` now seeds the root group at
@@ -209,7 +209,7 @@ Effort: S. **Not started — this section is a proposal awaiting a decision**, u
 ## 6. Out of scope here, and why
 
 - **The Fly Detection panel** (review §U5) already has its own finished spec in
-  docs/plans/active/CV-UX-RESEARCH.md, and its subject matter sits on the unmerged `feat/cv-demand`
+  docs/plans/done/CV-UX-RESEARCH.md, and its subject matter sits on the unmerged `feat/cv-demand`
   work this branch descends from. It is scheduled separately, not folded in here.
 - **Reworking `VisibilityScope`'s shape.** §1 is deliberately a pure addition.
 - **A fourth `Role`.** See wave D.

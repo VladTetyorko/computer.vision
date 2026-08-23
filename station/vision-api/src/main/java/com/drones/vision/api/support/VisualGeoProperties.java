@@ -2,7 +2,7 @@ package com.drones.vision.api.support;
 
 /**
  * Framework-free tunables for visual geolocation's {@code vision-api} edge
- * (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3/D9), the same "plain settings record, {@code
+ * (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/D9), the same "plain settings record, {@code
  * vision-app} binds its Spring-{@code @ConfigurationProperties} mirror onto an instance of this"
  * bridge {@link FixedCameraGeoProperties}'s own javadoc documents in full — {@code vision-api} may
  * not depend on {@code vision-app}, so its own {@code @ConfigurationProperties}-annotated {@code

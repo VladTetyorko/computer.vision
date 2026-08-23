@@ -10,7 +10,7 @@ import { isVisualGeoDisabledError } from './geo-logic';
 const POLL_INTERVAL_MS = 2_000;
 
 /**
- * Tracks one asset's latest visual-geolocation correction (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3/§3.4,
+ * Tracks one asset's latest visual-geolocation correction (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/§3.4,
  * wave H6) — the cockpit divergence chip + detail popover's (`features/fly/cockpit`) and `TacticalMap`'s
  * corrected-track layer's own source. Polls `GET /api/geo/corrections/live` every 2s while visible
  * — filtering the fleet-wide "latest per asset" response down to the one tracked asset, since §3.3 has

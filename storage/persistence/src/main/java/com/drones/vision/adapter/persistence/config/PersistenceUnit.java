@@ -53,7 +53,7 @@ import org.hibernate.cfg.Configuration;
  * <strong>Correction:</strong> a prior version of this paragraph claimed HikariCP was "already on
  * the classpath transitively via Hibernate's own dependencies" and that adding it was "a
  * config-only change" — both were false, verified by {@code mvn -pl storage/persistence
- * dependency:list} returning no pool library at all (docs/plans/active/SCALE-100-PLAN.md §2 g2,
+ * dependency:list} returning no pool library at all (docs/plans/done/SCALE-100-PLAN.md §2 g2,
  * 2026-08-17). {@code com.zaxxer:HikariCP} had to be added to {@code pom.xml} and this class had
  * to change, which is what this paragraph and {@link ClosingDatasourceConnectionProvider}'s own
  * javadoc now document — including why the provider is a hand-written {@code DataSource} wrapper
@@ -67,7 +67,7 @@ import org.hibernate.cfg.Configuration;
  * from the caller-supplied {@link PersistencePoolSettings} (CLAUDE.md rule 1: no hardcoded pool
  * sizing or timeout literal lives in this class).
  *
- * <p><strong>Dev-account seeding ({@code seedDevUsers})</strong> — docs/plans/active/POSTGRES-ONLY-CONTEXT.md
+ * <p><strong>Dev-account seeding ({@code seedDevUsers})</strong> — docs/plans/done/POSTGRES-ONLY-CONTEXT.md
  * W1: {@code classpath:db/seed/dev} (today, one migration — {@code V90001__dev_accounts.sql}, the
  * DEV-ONLY {@code admin}/{@code manager}/{@code pilot} accounts) is a Flyway location Flyway only
  * ever sees when {@code seedDevUsers} is {@code true}, so a database migrated with the flag off
@@ -113,7 +113,7 @@ public final class PersistenceUnit {
     /**
      * {@link #start(String, String, String, boolean, PersistencePoolSettings)} with dev-account
      * seeding off and default pool sizing — the shape every caller used before
-     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 introduced the seeding flag, kept so existing callers
+     * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W1 introduced the seeding flag, kept so existing callers
      * (e.g. {@code PostgresDockerIntegrationTest}) don't need to change.
      *
      * @param jdbcUrl  JDBC URL, e.g. {@code jdbc:postgresql://localhost:5432/vision}
@@ -129,7 +129,7 @@ public final class PersistenceUnit {
 
     /**
      * {@link #start(String, String, String, boolean, PersistencePoolSettings)} with default pool
-     * sizing — the shape every caller used before docs/plans/active/SCALE-100-PLAN.md S3 introduced pool
+     * sizing — the shape every caller used before docs/plans/done/SCALE-100-PLAN.md S3 introduced pool
      * settings, kept so existing callers don't need to change.
      *
      * @param jdbcUrl      JDBC URL, e.g. {@code jdbc:postgresql://localhost:5432/vision}
@@ -151,7 +151,7 @@ public final class PersistenceUnit {
     /**
      * Migrates the schema then opens an {@link EntityManagerFactory} mapping every entity in
      * {@link com.drones.vision.adapter.persistence.entity}, both riding the one pooled {@code
-     * DataSource} this method builds from {@code poolSettings} (docs/plans/active/SCALE-100-PLAN.md S3).
+     * DataSource} this method builds from {@code poolSettings} (docs/plans/done/SCALE-100-PLAN.md S3).
      *
      * @param jdbcUrl      JDBC URL, e.g. {@code jdbc:postgresql://localhost:5432/vision}
      * @param username     database user
@@ -174,7 +174,7 @@ public final class PersistenceUnit {
                 ? new String[] {"classpath:db/migration", "classpath:db/seed/dev"}
                 : new String[] {"classpath:db/migration"};
         Flyway.configure()
-                // Shares the same pooled DataSource Hibernate will use below (docs/plans/active/SCALE-100-PLAN.md
+                // Shares the same pooled DataSource Hibernate will use below (docs/plans/done/SCALE-100-PLAN.md
                 // S3) instead of opening its own independent, unpooled JDBC connection — migration
                 // and every subsequent request now draw from one bounded pool.
                 .dataSource(dataSource)
@@ -228,7 +228,7 @@ public final class PersistenceUnit {
         // field that uses it, unlike an @Entity, which must be named explicitly here.
         configuration.addAnnotatedClass(MapLayerEntity.class);
         configuration.addAnnotatedClass(MapDrawingEntity.class);
-        // docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 (V14__audit_trail.sql, V15__detection_events.sql).
+        // docs/plans/done/POSTGRES-ONLY-CONTEXT.md W3 (V14__audit_trail.sql, V15__detection_events.sql).
         configuration.addAnnotatedClass(AuditEntryEntity.class);
         configuration.addAnnotatedClass(DetectionEventEntity.class);
         // docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 (V17__vehicle_profiles.sql, V18__feature_requirements.sql).
@@ -239,12 +239,12 @@ public final class PersistenceUnit {
         // Jpa*Repository persist/merge call; mapped here anyway so JpaDbAuditLogRepository's reads
         // go through the same jakarta.persistence API as every other repository in this module.
         configuration.addAnnotatedClass(DbAuditLogEntity.class);
-        // docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/D4 (V22__fixed_camera_geo.sql) --
+        // docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D3/D4 (V22__fixed_camera_geo.sql) --
         // CameraPoseEntity is audited (trg_audit_camera_poses), TrackPointEntity is not (see that
         // migration's own header).
         configuration.addAnnotatedClass(CameraPoseEntity.class);
         configuration.addAnnotatedClass(TrackPointEntity.class);
-        // docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7 (V23__track_corrections.sql) -- excluded
+        // docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.5/§3.7 (V23__track_corrections.sql) -- excluded
         // from db_audit_log, same reasoning as TrackPointEntity above.
         configuration.addAnnotatedClass(TrackCorrectionEntity.class);
         return configuration.buildSessionFactory();
@@ -253,7 +253,7 @@ public final class PersistenceUnit {
     /**
      * The one pooled {@code DataSource} {@link #start} shares between Flyway and Hibernate — see
      * this class's own javadoc for why sharing one pool (rather than each building its own) is
-     * the point of docs/plans/active/SCALE-100-PLAN.md S3.
+     * the point of docs/plans/done/SCALE-100-PLAN.md S3.
      */
     private static HikariDataSource buildDataSource(String jdbcUrl, String username, String password,
                                                       PersistencePoolSettings poolSettings) {

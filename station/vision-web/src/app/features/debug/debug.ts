@@ -37,7 +37,7 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
  * wave's scope** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md's own wave-2 brief) — the console/Health/Last-scan
  * three-card layout is otherwise unchanged.
  *
- * **Health card repointed at `GET /api/system/status` (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.3, wave S3).**
+ * **Health card repointed at `GET /api/system/status` (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.3, wave S3).**
  * The card's primary content is now the platform's own self-reported status (`SystemStatusStore`,
  * the same `providedIn: 'root'` singleton the shell rollup dot and `/manage/system` both read — no
  * second HTTP call, this page is simply a third reader), with a link to the full `/manage/system`
@@ -66,7 +66,7 @@ export class DebugPage {
   protected readonly methods = METHODS;
   protected readonly historyLimit = DEBUG_HISTORY_LIMIT;
 
-  // --- System status (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.3) --------------------------------
+  // --- System status (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.3) --------------------------------
 
   /** Already warm by the time this page mounts — `AppSidebar` (always mounted) injects the same
    *  singleton for its own rollup dot, so there is no extra fetch to kick off here (contrast

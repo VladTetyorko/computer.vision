@@ -77,17 +77,17 @@ import com.drones.vision.perception.application.stream.TrackingConfigPatch;
  *                                        deployment has not described its optics
  * @param adaptiveRate                   whether and how far the sample rate may rise above {@code
  *                                        inferenceFps} when the tracked target is about to leave
- *                                        its association budget (docs/plans/active/CV-RATE-CONTROL-PLAN.md
+ *                                        its association budget (docs/plans/done/CV-RATE-CONTROL-PLAN.md
  *                                        wave R2); never {@code null}, use {@link
  *                                        AdaptiveRateSettings#disabled()} to pin the rate
  * @param detectionDemandPollInterval    how often {@code DefaultStreamService}'s demand-poll task
  *                                        re-evaluates every running stream's {@code
- *                                        DetectionDemandPort} (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.3,
+ *                                        DetectionDemandPort} (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3,
  *                                        &sect;3.4); must be positive. Irrelevant, and the task never even
  *                                        scheduled, when no port is wired
  * @param detectionDemandGrace           how long a stream keeps detecting after its last observed
  *                                        demand before {@link StreamPipeline#updateDetectionDemand}
- *                                        is told {@code false} (docs/plans/active/CV-DEMAND-PLAN.md &sect;2,
+ *                                        is told {@code false} (docs/plans/done/CV-DEMAND-PLAN.md &sect;2,
  *                                        &sect;3.3) — the window that keeps navigating between pages from
  *                                        thrashing the detector on and off; must be positive
  */
@@ -123,7 +123,7 @@ public record StreamPipelineSettings(
 
     /**
      * How long a running stream may go without a frame before {@code StreamState} reports it
-     * {@code STALLED} rather than {@code LIVE} (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.4).
+     * {@code STALLED} rather than {@code LIVE} (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.4).
      *
      * <p>5s is unambiguous against the source rates this deployment actually runs (~28 fps measured)
      * — roughly 140 missed frames — while staying short enough that an operator sees a dead feed
@@ -220,7 +220,7 @@ public record StreamPipelineSettings(
     }
 
     /**
-     * The canonical constructor before docs/plans/active/CV-DEMAND-PLAN.md wave D1 added the two demand
+     * The canonical constructor before docs/plans/done/CV-DEMAND-PLAN.md wave D1 added the two demand
      * tunables, kept as a convenience constructor defaulting both to {@link
      * #DEFAULT_DETECTION_DEMAND_POLL_INTERVAL}/{@link #DEFAULT_DETECTION_DEMAND_GRACE} — the values
      * the plan itself pins (2s/30s) — so every pre-existing call site, including {@code
@@ -242,7 +242,7 @@ public record StreamPipelineSettings(
     }
 
     /**
-     * The shape before {@link #videoStaleAfter()} was added (docs/plans/active/STREAM-STATE-PLAN.md
+     * The shape before {@link #videoStaleAfter()} was added (docs/plans/done/STREAM-STATE-PLAN.md
      * &sect;2.4), defaulting it to {@link #DEFAULT_VIDEO_STALE_AFTER} — the value the plan itself
      * pins (5s) — so every pre-existing call site compiles unchanged. Same "N-1-arg convenience
      * ctor" idiom as every other addition to this record.

@@ -37,7 +37,7 @@ public interface UsageService {
 
     /**
      * Finds the usage one stream opened — the same row {@link #recent} would list, reached by the
-     * stream id a caller is already holding (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.6).
+     * stream id a caller is already holding (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.6).
      *
      * <p>This is the read side of "a stopped stream is not a state, it is a record": a stream that
      * has ended is gone from {@code GET /api/streams}, and this is how a caller finds out what it

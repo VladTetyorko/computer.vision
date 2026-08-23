@@ -1,6 +1,6 @@
 package com.drones.vision.flight.application;
 
-import com.drones.vision.flight.domain.model.ChannelMap;
+import com.drones.vision.flight.domain.model.ControlProfile;
 
 import java.util.List;
 
@@ -36,8 +36,15 @@ public interface ManualControlSession {
      */
     void release();
 
-    /** The channel map this session was engaged with — echoed to the client in its {@code engaged} frame. */
-    ChannelMap channelMap();
+    /**
+     * The stick layout this session was engaged with, chosen from the vehicle kind the link
+     * reported — echoed to the client in its {@code engaged} frame so the operator's control
+     * surface is shaped like the machine it is driving
+     * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P2).
+     *
+     * @return the profile; never {@code null}, and fixed for the life of the session
+     */
+    ControlProfile controlProfile();
 
     /** {@code false} once released, whether explicitly or by the watchdog. */
     boolean active();
@@ -45,7 +52,7 @@ public interface ManualControlSession {
     /**
      * The engaged link's own keepalive cadence in whole Hz — echoed to the client in its {@code
      * engaged} frame so it can pace its own sends against the rate the adapter actually transmits
-     * at, rather than a number mirrored by hand (docs/plans/active/RC-LATENCY-PLAN.md §2 C).
+     * at, rather than a number mirrored by hand (docs/plans/done/RC-LATENCY-PLAN.md §2 C).
      */
     int rateHz();
 }

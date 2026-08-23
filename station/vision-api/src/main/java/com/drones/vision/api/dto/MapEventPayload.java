@@ -12,7 +12,7 @@ import java.util.Locale;
 /**
  * The payload of one envelope on the {@code map} SSE topic (docs/plans/done/MAP-REWORK-PLAN.md §4.3) —
  * replacing the {@code marks}-topic {@code MarkPayload} it supersedes, which carried marks only.
- * {@code track} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D11) rides the same topic, not a new
+ * {@code track} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5/D11) rides the same topic, not a new
  * one — the existing per-connection {@code canView(layerId)} scoping in {@code
  * LiveUpdateRegistry#publishMapEvent} applies to a {@code TRACK} event exactly as it already does to
  * {@code MARK}/{@code DRAWING}/{@code LAYER}, so nothing there needed to change for this wave.

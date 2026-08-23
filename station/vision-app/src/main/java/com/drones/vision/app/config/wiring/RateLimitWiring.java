@@ -12,7 +12,7 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * Registers {@code vision-api}'s per-principal request limiter
- * (docs/plans/active/SCALE-100-PLAN.md S6 item 3), and only when an operator asks for it.
+ * (docs/plans/done/SCALE-100-PLAN.md S6 item 3), and only when an operator asks for it.
  *
  * <p>Its own {@code @Configuration} class rather than a method on {@code ApplicationServiceWiring}
  * for the same reason {@code DiscoveryWiringConfiguration} and {@code PublishWiring} are: this is a

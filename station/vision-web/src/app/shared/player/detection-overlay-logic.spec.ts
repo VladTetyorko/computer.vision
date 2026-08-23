@@ -161,7 +161,7 @@ describe('shouldDrawOverlay', () => {
   });
 });
 
-// --- Declutter levels (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.6, wave W4) ------------------------
+// --- Declutter levels (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.6, wave W4) ------------------------
 // 'overlay'/'off' (W3) is now a four-state density cycle: 'all' -> 'priority' -> 'locked' -> 'off'.
 
 describe('cycleBoxesMode', () => {
@@ -227,7 +227,7 @@ describe('averageBatchIntervalMs', () => {
   });
 });
 
-// --- Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7) ---------------------------
+// --- Staleness honesty (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4, D7) ---------------------------
 
 describe('detectionAlphaPercent', () => {
   it('is full alpha while within the fade threshold', () => {
@@ -278,7 +278,7 @@ describe('detectionsPausedNotice', () => {
   });
 });
 
-// --- WHEP-aware overlay sync latency (docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8) ---------------------
+// --- WHEP-aware overlay sync latency (docs/plans/done/MEDIA-SOT-PLAN.md §6/§8 wave M8) ---------------------
 
 describe('overlaySyncLatencySeconds', () => {
   it('HLS keeps behindLive unchanged, including null', () => {
@@ -295,7 +295,7 @@ describe('overlaySyncLatencySeconds', () => {
   });
 });
 
-// --- HiDPI canvas backing store (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) -------------------------------
+// --- HiDPI canvas backing store (docs/plans/done/MEDIA-SOT-PLAN.md §8 wave M8) -------------------------------
 
 describe('canvasBackingSize', () => {
   it('is a 1:1 pass-through at devicePixelRatio 1 — no behavior change on a standard display', () => {
@@ -482,7 +482,7 @@ describe('trackTrails', () => {
   });
 });
 
-// --- Priority tiers (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2, wave W4) ---------------------------
+// --- Priority tiers (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.2, wave W4) ---------------------------
 
 function trackedDetection(partial: Partial<Detection> = {}, trackId = 1): Detection {
   return fullDetection({
@@ -509,7 +509,7 @@ function tierContext(partial: Partial<DetectionTierContext> = {}): DetectionTier
   };
 }
 
-// --- Sticky labels per track (docs/plans/active/TRACK-IDENTITY-PLAN.md §L3 item 1) ---------------------------
+// --- Sticky labels per track (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 1) ---------------------------
 
 /** Builds a `results` batch list (newest-first) from oldest-first `(label, confidence)` observations for
  *  one track — {@link electStickyLabels}/{@link electFromObservations}'s own replay direction, reversed
@@ -744,7 +744,7 @@ describe('detectionTiers', () => {
     expect(tiers.get(ambient)).toBe('T2');
   });
 
-  // --- Class hover promotion (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3, wave W5) -----------------
+  // --- Class hover promotion (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3, wave W5) -----------------
 
   it('a size-eligible detection whose label matches hoveredClass promotes to T1 regardless of confidence', () => {
     const matched = fullDetection({ label: 'person', confidence: 0.01, box: { x: 0, y: 0, width: 0.2, height: 0.2 } });
@@ -793,7 +793,7 @@ describe('detectionTiers', () => {
   });
 });
 
-// --- Forward-projection (docs/plans/active/CV-CLEAN-FEED-PLAN.md §7, wave W7) ------------------------------
+// --- Forward-projection (docs/plans/done/CV-CLEAN-FEED-PLAN.md §7, wave W7) ------------------------------
 
 describe('extrapolateDetections', () => {
   it('matches by track id and projects the center along the implied velocity', () => {
@@ -1024,7 +1024,7 @@ describe('tierAlphaPercent', () => {
   });
 });
 
-// --- Class-bucket box colors (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.2/D5, wave W4) ---------------
+// --- Class-bucket box colors (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.2/D5, wave W4) ---------------
 
 describe('classBucket', () => {
   it('recognizes person-like labels', () => {
@@ -1106,7 +1106,7 @@ describe('formatTierLabel', () => {
   });
 });
 
-// --- Label collision-yield (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.3, wave W4) --------------------
+// --- Label collision-yield (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.3, wave W4) --------------------
 
 describe('placeLabels', () => {
   function candidate(key: string, box: { x: number; y: number; width: number; height: number }): LabelCandidate {

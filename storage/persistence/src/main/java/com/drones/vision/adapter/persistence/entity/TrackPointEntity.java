@@ -12,7 +12,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code projected_track_points} — mirrors {@link com.drones.vision.map.domain.model.TrackPoint}
- * field-for-field (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7, {@code
+ * field-for-field (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D3/§7, {@code
  * V22__fixed_camera_geo.sql}); {@code TrackPointMapper} owns the mapping in both directions.
  *
  * <p>{@code id} is a synthetic {@code BIGINT GENERATED ALWAYS AS IDENTITY} column the schema

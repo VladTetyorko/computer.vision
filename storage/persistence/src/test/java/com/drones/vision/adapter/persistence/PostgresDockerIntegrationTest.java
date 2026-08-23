@@ -206,7 +206,7 @@ class PostgresDockerIntegrationTest {
      * trg_audit_*} to — kept here, not just in the migration's own header, so {@link
      * DbAuditLogCoverageTests} fails loudly the moment a future migration adds a table and
      * nobody consciously classifies it. Mirrors that migration's "Included" list, plus {@code
-     * camera_poses} added by {@code V22__fixed_camera_geo.sql} (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md
+     * camera_poses} added by {@code V22__fixed_camera_geo.sql} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
      * decision D4 — a camera's pose is control-plane configuration, not telemetry).
      */
     private static final Set<String> AUDITED_TABLES = Set.of(
@@ -225,7 +225,7 @@ class PostgresDockerIntegrationTest {
      * have); see V21's header for the reasoning behind every other entry, including why {@code
      * asset_images} is grouped with {@code sample_images} rather than with the control-plane set
      * it might otherwise resemble. {@code track_corrections}, added by {@code
-     * V23__track_corrections.sql} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.7/D12), is the same
+     * V23__track_corrections.sql} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.7/D12), is the same
      * classification as {@code projected_track_points}: append-only, ~1 Hz per flying asset,
      * telemetry-character machine output.
      */
@@ -804,7 +804,7 @@ class PostgresDockerIntegrationTest {
         }
 
         /**
-         * docs/plans/active/SCALE-100-PLAN.md S4, item 2: below the size bound and nowhere near the
+         * docs/plans/done/SCALE-100-PLAN.md S4, item 2: below the size bound and nowhere near the
          * (deliberately huge) time bound, a batching repository must not have written anything yet
          * -- proving {@link #save} genuinely defers the write rather than writing through and
          * merely pretending to batch. The size bound then flushes every buffered sample together in
@@ -829,7 +829,7 @@ class PostgresDockerIntegrationTest {
         }
 
         /**
-         * docs/plans/active/SCALE-100-PLAN.md S4's stated trade-off, proven rather than asserted by
+         * docs/plans/done/SCALE-100-PLAN.md S4's stated trade-off, proven rather than asserted by
          * inspection: a sample below the size bound sits only in heap -- exactly what a crash right
          * now would lose -- but the configured window bounds that loss, flushing it on its own once
          * the deadline passes even though nothing else ever arrived to trip the size bound.
@@ -856,7 +856,7 @@ class PostgresDockerIntegrationTest {
         /**
          * The buffer map is keyed by usage and sits on the telemetry hot path, so a drained batch
          * that is not *removed* leaks one entry per flight for the life of the JVM -- the same
-         * unbounded-map defect (docs/plans/active/SCALE-100-PLAN.md fact 2f) S2 had to fix in {@code
+         * unbounded-map defect (docs/plans/done/SCALE-100-PLAN.md fact 2f) S2 had to fix in {@code
          * LiveUpdateRegistry}, reintroduced by the change meant to relieve that pressure. Both
          * flush paths are covered because they evict independently: the size bound drains inline on
          * a caller thread, the window drains on the scheduler.
@@ -2342,7 +2342,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — the durable audit trail: append-only record, plus
+     * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W3 — the durable audit trail: append-only record, plus
      * newest-first {@code findRecent}/{@code findByTarget}/{@code findByActor}.
      */
     @Nested
@@ -2433,7 +2433,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — {@link DetectionEventRepositoryPort}'s genuine
+     * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W3 — {@link DetectionEventRepositoryPort}'s genuine
      * upsert-by-id semantics (unlike {@code DetectionRepositoryPort}'s append-only rows),
      * newest-first {@code findRecent}/{@code findByStream} ordering by {@code lastSeen}, and the
      * {@code sinceInclusive} lower bound.
@@ -2818,7 +2818,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4 — every {@link CameraPoseRepositoryPort}
+     * docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D4 — every {@link CameraPoseRepositoryPort}
      * method against a real Postgres, plus the upsert-by-{@code assetId} contract the port's own
      * javadoc calls out.
      */
@@ -2910,7 +2910,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7 — every {@link TrackTrailRepositoryPort}
+     * docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D3/§7 — every {@link TrackTrailRepositoryPort}
      * method against a real Postgres: append-only inserts, oldest-to-newest ordering, the D7
      * per-track cap ({@link TrackTrailRepositoryPort#trimToMostRecent}), and the D7 retention prune
      * ({@link TrackTrailRepositoryPort#deleteOlderThan}).
@@ -3030,7 +3030,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, H5 — every {@link
+     * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.5/§3.7, H5 — every {@link
      * TrackCorrectionRepositoryPort} method against a real Postgres: append-only inserts,
      * oldest-to-newest ordering, {@link TrackCorrectionRepositoryPort#findLatest}, the retention
      * prune ({@link TrackCorrectionRepositoryPort#deleteOlderThan}) and the per-usage cap ({@link
@@ -3047,7 +3047,7 @@ class PostgresDockerIntegrationTest {
         /**
          * {@code cellCalibrated}/{@code sequenceConverged} are deliberately set {@code true} here:
          * H8 gave them real columns, so a round trip that still read {@code false} back would be the
-         * regression this fixture exists to catch (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11
+         * regression this fixture exists to catch (docs/plans/done/VISUAL-GEO-V2-PLAN.md §9.11
          * defect 4). {@code candidateCount}/{@code supportingFrames}/{@code baselineMeters} stay at
          * the mapper's documented placeholder values, since those genuinely have no column.
          */
@@ -3193,7 +3193,7 @@ class PostgresDockerIntegrationTest {
         }
 
         /**
-         * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.7/D12 — {@code track_corrections} carries no
+         * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.7/D12 — {@code track_corrections} carries no
          * {@code trg_audit_*} trigger at all, the same {@code projected_track_points} precedent (see
          * {@code aTrackTrailInsertProducesNoDbAuditLogRow} above): a flying asset writing at ~1 Hz
          * would flood a table meant for a human's intent, not machine output.
@@ -3216,7 +3216,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — same {@code information_schema} shape as the V7-V12
+     * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W3 — same {@code information_schema} shape as the V7-V12
      * schema tests, for the brand-new {@code audit_entries} table: asserts {@code details} is a
      * required {@code jsonb} column and the primary key is exactly {@code id}, proving {@code
      * V14__audit_trail.sql} applied cleanly on top of V1-V13.
@@ -3243,7 +3243,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3 — same shape as the V14 schema test above, for the
+     * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W3 — same shape as the V14 schema test above, for the
      * brand-new {@code detection_events} table: asserts {@code asset_id}/{@code position_latitude}
      * stay nullable (an event may be assetless and positionless) while {@code last_seen} is
      * required, proving {@code V15__detection_events.sql} applied cleanly on top of V1-V14.
@@ -3376,7 +3376,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/plans/active/SCALE-100-PLAN.md S3 -- proves the pool is real, not merely configured. Two
+     * docs/plans/done/SCALE-100-PLAN.md S3 -- proves the pool is real, not merely configured. Two
      * independent, mutually-reinforcing proofs: the {@link ConnectionProvider} Hibernate actually
      * runs against is {@link ClosingDatasourceConnectionProvider} (not the built-in unpooled
      * provider that used to serve every request here), and a deliberately tiny pool genuinely caps
@@ -3555,7 +3555,7 @@ class PostgresDockerIntegrationTest {
         }
 
         /**
-         * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4/§7 — {@code camera_poses} is on the
+         * docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D4/§7 — {@code camera_poses} is on the
          * audited side of V22, opposite {@code projected_track_points} below. Same
          * insert-then-update-then-inspect shape as {@link
          * #insertUpdateAndDeleteThroughAnExistingRepositoryEachLeaveTheirOwnAuditRowNewestFirst}
@@ -3584,7 +3584,7 @@ class PostgresDockerIntegrationTest {
         }
 
         /**
-         * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D3/§7 — {@code projected_track_points}
+         * docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D3/§7 — {@code projected_track_points}
          * carries no {@code trg_audit_*} trigger at all (V22's own header explains why: a tracked
          * car at ~1 Hz would write thousands of rows per car-hour into a table meant for a human's
          * intent, not machine output). Asserted directly against {@code db_audit_log} itself rather
@@ -3710,7 +3710,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4/§7 — proves {@code
+     * docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D4/§7 — proves {@code
      * V22__fixed_camera_geo.sql} applied cleanly on top of V1-V21: {@code camera_poses.asset_id} is
      * the primary key (not nullable), {@code camera_poses.target_layer_id} stays nullable (a pose
      * may target the default COP layer), and {@code projected_track_points.id} is the

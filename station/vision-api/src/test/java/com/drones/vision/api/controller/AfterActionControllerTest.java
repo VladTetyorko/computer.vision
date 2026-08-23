@@ -44,7 +44,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc coverage of {@link AfterActionController} (docs/plans/active/AFTER-ACTION-PLAN.md, the
+ * MockMvc coverage of {@link AfterActionController} (docs/plans/done/AFTER-ACTION-PLAN.md, the
  * frozen wire contract &sect;3) — the two endpoints' happy paths and every &sect;3.3 error
  * mapping. Mocks {@link AfterActionAssembler} directly (a concrete final class; this module's
  * Mockito already mocks final application classes the same way, e.g. {@code

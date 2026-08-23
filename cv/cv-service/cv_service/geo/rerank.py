@@ -1,4 +1,4 @@
-"""Geometric re-rank of retrieval candidates (docs/plans/active/VISUAL-GEO-V2-PLAN.md §4.2,
+"""Geometric re-rank of retrieval candidates (docs/plans/done/VISUAL-GEO-V2-PLAN.md §4.2,
 frozen; H4 production port of `spikes/geo/rerank.py` + `spikes/geo/rectify_rerank.py`).
 
 Score `sᵢ = inlier_countᵢ` from a MAGSAC homography fit (`cv_service.geo.pose.fit_homography_pose`),

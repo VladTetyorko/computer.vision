@@ -15,7 +15,7 @@ import java.util.List;
 
 /**
  * {@link AuditTrailPort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W3.
+ * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W3.
  *
  * <p>{@link #record} always {@code persist}s a brand-new row, never {@code merge}s — per the
  * port's own contract, entries are immutable historical facts that are never updated or deleted,

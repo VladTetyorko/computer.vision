@@ -1,7 +1,7 @@
 # CREW-CONTROL-PLAN — who is flying, who is watching, and how a person gets in
 
 Status: **authoritative spec** (2026-08-16). Branch: `feat/ops-ux` (wave D of
-[OPS-UX-PLAN.md](OPS-UX-PLAN.md) §5). Findings answered:
+[OPS-UX-PLAN.md](../done/OPS-UX-PLAN.md) §5). Findings answered:
 [docs/conclusions/OPS-UX-REVIEW.md](../../conclusions/OPS-UX-REVIEW.md) §A2 (nobody owns control),
 §A3 (there is no crew, only pilots), §O2 (invitations that invite nobody).
 

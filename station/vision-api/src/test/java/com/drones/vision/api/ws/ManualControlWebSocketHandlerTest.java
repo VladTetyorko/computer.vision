@@ -8,7 +8,8 @@ import com.drones.vision.flight.application.ManualControlSession;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.flight.application.WatchdogListener;
 import com.drones.vision.kernel.AssetId;
-import com.drones.vision.flight.domain.model.ChannelMap;
+import com.drones.vision.flight.domain.model.ControlProfile;
+import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,11 +73,26 @@ class ManualControlWebSocketHandlerTest {
         assertEquals("engaged", frame.get("type").asString());
         assertEquals(assetId.value().toString(), frame.get("assetId").asString());
         assertTrue(frame.get("channelMap").isArray());
-        assertEquals(8, frame.get("channelMap").size());
-        JsonNode rollBinding = frame.get("channelMap").get(0);
-        assertEquals("AXIS", rollBinding.get("source").asString());
-        assertEquals(1, rollBinding.get("rcChannel").asInt());
-        assertEquals("Roll", rollBinding.get("label").asString());
+
+        // The frame describes the vehicle the session is actually engaged to -- a rover here, so
+        // channel 1 is steering, not roll, and the label is no longer invented from the channel
+        // number (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P5).
+        assertEquals("ROVER", frame.get("vehicleKind").asString());
+        assertEquals("S-T-", frame.get("profileCode").asString());
+        assertEquals("Ground vehicle", frame.get("profileName").asString());
+        assertEquals(2, frame.get("channelMap").size());
+
+        JsonNode steering = frame.get("channelMap").get(0);
+        assertEquals("AXIS", steering.get("source").asString());
+        assertEquals(1, steering.get("rcChannel").asInt());
+        assertEquals("STEERING", steering.get("function").asString());
+        assertEquals("Steering", steering.get("label").asString());
+
+        JsonNode throttle = frame.get("channelMap").get(1);
+        assertEquals("THROTTLE", throttle.get("function").asString());
+        assertEquals("CENTERED", throttle.get("travel").asString(),
+                "a rover's throttle rests at stop with reverse below it -- 50-0 back, 50-100 forward");
+        assertEquals(1500, throttle.get("centerMicros").asInt());
     }
 
     @Test
@@ -311,7 +327,10 @@ class ManualControlWebSocketHandlerTest {
         public int rateHz() {
             return RATE_HZ;
         }
-        private final ChannelMap channelMap = ChannelMap.defaultMap();
+        /** A rover, deliberately: its map is the one that differs most from the old frozen default. */
+        static final VehicleKind KIND = VehicleKind.ROVER;
+
+        private final ControlProfile controlProfile = ControlProfile.forKind(KIND);
         private final List<Object[]> channelCalls = Collections.synchronizedList(new ArrayList<>());
         private volatile boolean active = true;
         private volatile boolean released;
@@ -328,8 +347,8 @@ class ManualControlWebSocketHandlerTest {
         }
 
         @Override
-        public ChannelMap channelMap() {
-            return channelMap;
+        public ControlProfile controlProfile() {
+            return controlProfile;
         }
 
         @Override

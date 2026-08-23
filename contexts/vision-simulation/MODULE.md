@@ -157,7 +157,7 @@ same rule `events`/`flight` follow (no `simulation.application.simulation`).
   nothing is pushing to that URI anymore. **Fixed by `#resumeAll()`** (see the API surface entry
   above) — `vision-app`'s `SimulationResumeRunner` (an `ApplicationRunner`, gated on
   `vision.simulation.resume-on-boot` — the `vision.persistence.enabled` half of that gate is gone,
-  docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b) calls it once the context is up. Nothing distinguishes
+  docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b) calls it once the context is up. Nothing distinguishes
   "this RTSP device is one of our own TX-fed feeds" from "a real external
   RTSP camera" in storage — the only reliable signal is structural: an RTSP device whose `uri` host:port
   matches this app's own configured mediamtx push target is always one of this app's own feeds, since

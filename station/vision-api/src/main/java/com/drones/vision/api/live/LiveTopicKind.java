@@ -8,7 +8,7 @@ import java.util.stream.Collectors;
  * #DETECTION_EVENTS} extend the channel for the fleet/warehouse and events UIs; {@link #MAP}
  * extends it again for the common operational picture, docs/plans/done/MAP-REWORK-PLAN.md
  * §4.3; {@link #GEO} extends it again for visual geolocation's corrected track,
- * docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4/D11) — {@link #wire()}
+ * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11) — {@link #wire()}
  * is both the topic-string prefix (e.g. {@code "telemetry:<assetId>"}) and the {@code
  * com.drones.vision.api.dto.LiveEnvelopeResponse#type()} value for envelopes of that kind, since
  * the two are deliberately the same vocabulary.
@@ -55,7 +55,7 @@ enum LiveTopicKind {
      */
     MAP("map"),
     /**
-     * Per-asset visual-geolocation corrected track, opt-in (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+     * Per-asset visual-geolocation corrected track, opt-in (docs/plans/done/VISUAL-GEO-V2-PLAN.md
      * §3.4, D11) — exactly {@link #TELEMETRY}'s shape and scoping: unfiltered, a client must name
      * {@code geo:<assetId>} in {@code ?topics=} to receive it. Ring-buffer capacity 1: the freshest
      * {@code CorrectionResponse} is the only one that matters (CLAUDE.md rule 9); replay after

@@ -22,7 +22,7 @@ spring:
   application:
     name: vision
   # threads.virtual.enabled is deliberately NOT set here, reversing
-  # docs/plans/active/SCALE-100-PLAN.md §4 decision 2, which pinned it "on".
+  # docs/plans/done/SCALE-100-PLAN.md §4 decision 2, which pinned it "on".
   # This project targets Java 21 (root pom java.version), where a virtual thread
   # that blocks inside a `synchronized` block PINS its carrier thread -- JEP 491
   # removes that only from Java 24. Blocking I/O held under `synchronized` is
@@ -46,7 +46,7 @@ spring:
   # choose it. The S0 numbers show thread count, not connection count, as the
   # binding constraint at 100 viewers.
 
-# Liveness probe (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.4) -- ONLY `health` is exposed over
+# Liveness probe (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.4) -- ONLY `health` is exposed over
 # HTTP. Deliberately not metrics/env/beans/configprops: this is a container healthcheck endpoint
 # (docker-compose.yml's vision-app service) and the /debug page's Health card, not an operator
 # metrics surface -- env/beans especially could leak configuration an operator has no reason to see
@@ -71,7 +71,7 @@ vision:
     # "Test infrastructure" section); a Docker-less environment skips those
     # tests cleanly rather than failing with a connection error. There used to
     # be a vision.persistence.enabled flag selecting a devsupport in-memory
-    # fallback instead; docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b removed it --
+    # fallback instead; docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b removed it --
     # a flag with exactly one legal value (true, since W4) was a lie.
     #
     # JDBC URL/credentials of the Postgres database. Defaults match
@@ -85,14 +85,14 @@ vision:
     # Whether PersistenceUnit also applies classpath:db/seed/dev -- three DEV-ONLY
     # accounts (admin/admin, manager/manager, pilot/pilot -- password equal to
     # username) plus the fixed root group they join; there is no in-memory
-    # equivalent (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1 deleted the old
+    # equivalent (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W1 deleted the old
     # code-based AuthSeedRunner, which used to seed unconditionally into
     # whichever repositories were wired). ANY DATABASE WITH THIS ON IS UNSECURED
     # -- docker-compose.yml sets it true for the friends-demo stack; nothing
     # else should.
     seed-dev-users: false
     # HikariCP sizing for the ONE pool PersistenceUnit shares between Flyway and
-    # Hibernate (docs/plans/active/SCALE-100-PLAN.md S3). Before S3 there was no
+    # Hibernate (docs/plans/done/SCALE-100-PLAN.md S3). Before S3 there was no
     # pool at all -- Hibernate's built-in DriverManager provider opened a
     # connection per EntityManager and said "not intended for production use" at
     # every startup. Every key below is commented out because it DOCUMENTS the
@@ -111,7 +111,7 @@ vision:
     #   connection-timeout: 30s
     #   leak-detection-threshold: 30s
     # How the telemetry ingest path batches its writes
-    # (docs/plans/active/SCALE-100-PLAN.md S4). Telemetry is the only table
+    # (docs/plans/done/SCALE-100-PLAN.md S4). Telemetry is the only table
     # written once per incoming sample, and before S4 each of those samples cost
     # a persist + flush() + retention prune, plus a second AssetUsage summary
     # write right behind it -- the per-sample round trip that put a floor under
@@ -143,7 +143,7 @@ vision:
     # static/SPA routes -- but a session only has someone to log in as if
     # vision.persistence.seed-dev-users is also true (see above), or real users
     # were created through UserService.
-    enabled: false
+    enabled: true
 
   # --- adapter-publish-hls: stream egress (Phase 1, see docs/plans/done/PHASE1-PLAN.md Task U5) ---
   publish:
@@ -186,7 +186,7 @@ vision:
       # override it. A non-localhost whepBase deployment must now set this explicitly (docs/plans/done/CV-TRAINING-V2-PLAN.md
       # §I's one deliberate behavior change -- an implicit guess became an explicit property).
       # playback-base: http://localhost:19996
-      # mediamtx's Control API base (docs/plans/active/MEDIA-SOT-PLAN.md §5.3, wave M7) -- MediamtxProxyPublisher's
+      # mediamtx's Control API base (docs/plans/done/MEDIA-SOT-PLAN.md §5.3, wave M7) -- MediamtxProxyPublisher's
       # create/patch/get/delete-path calls, only ever reached when source-proxy.enabled=true below. Default
       # http://localhost:19997 matches docker-compose.yml's host-mapped Control API port (mediamtx's own
       # in-container default is 9997, same collision-avoidance convention as hls-base/whep-base/playback-base
@@ -211,7 +211,7 @@ vision:
       # the first stream start.
       # api-user:
       # api-password:
-    # "mediamtx dials the camera itself" switch (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch A, §5.5, D3/D10,
+    # "mediamtx dials the camera itself" switch (docs/plans/done/MEDIA-SOT-PLAN.md §3 switch A, §5.5, D3/D10,
     # wave M7) -- MediamtxProxyPublisher/PublisherRouter's own config. RTSP-only: PublisherRouter only ever routes
     # a device here when its stream protocol is "rtsp" (sim/mjpeg/v4l2 devices always publish through the direct
     # JVM path regardless of this flag). Every default below reproduces today's behaviour exactly (D1) --
@@ -288,7 +288,7 @@ vision:
     # vision.cv.enabled=true.
     # jpeg-quality: 0.8
     # How a DOWNSCALED frame reaches cv-service: auto | jpeg | bgr24
-    # (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R3). The wire has always carried
+    # (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R3). The wire has always carried
     # IMAGE_ENCODING_BGR24 and cv-service has always decoded it; only the Java side used to
     # re-encode unconditionally, because the downscale path was written when every deployment was
     # remote. Sending raw removes a JPEG encode here AND a decode there -- together most of the
@@ -347,7 +347,7 @@ vision:
     #   what would otherwise be a WARN-with-full-stack-trace flood (one per failed detection probe, every
     #   probe identical and worthless) with one predictable line per interval.
     #   outage-log-interval: 60s
-    # How frames reach cv-service (docs/plans/active/MEDIA-SOT-PLAN.md §3 switch B, §5.5, D5/D12, wave M7):
+    # How frames reach cv-service (docs/plans/done/MEDIA-SOT-PLAN.md §3 switch B, §5.5, D5/D12, wave M7):
     # push | pull. push (default) is today's behaviour, byte-identical (D1): this JVM samples frames and sends
     # them to cv-service over the DetectStream RPC (the detect-width/jpeg-quality/wire-format knobs above). pull
     # switches EVERY stream this deployment starts (one deployment-wide choice, not per-device -- only proxying
@@ -356,7 +356,7 @@ vision:
     # dropped-frame diagnostics back on the wire. Needs vision.cv.enabled=true OR this set to pull for the shared
     # gRPC channel to be built at all (CvWiring#cvGrpcChannel's condition covers both).
     # frame-transport: push
-    # Worker-pull config surface (docs/plans/active/MEDIA-SOT-PLAN.md §5.5); only read when frame-transport=pull.
+    # Worker-pull config surface (docs/plans/done/MEDIA-SOT-PLAN.md §5.5); only read when frame-transport=pull.
     # pull:
     #   Base RTSP URL the WORKER (cv-service) dials -- deliberately separate from
     #   vision.publish.mediamtx.rtsp-base above: a remote worker (e.g. the GB4005 box) must dial the host's LAN
@@ -369,14 +369,14 @@ vision:
     #   vision.publish.resilience.initial-backoff/.max-backoff's shape and defaults exactly.
     #   reconnect-initial-backoff: 500ms
     #   reconnect-max-backoff: 10s
-    # What a NEW stream's PipelineConfig.detectionEnabled starts at (docs/plans/active/CV-DEMAND-PLAN.md
+    # What a NEW stream's PipelineConfig.detectionEnabled starts at (docs/plans/done/CV-DEMAND-PLAN.md
     # §1/§3.7/§3.8) -- StreamController/AssetStreamController/DemoFleet all merge request overrides
     # onto this deployment default rather than the domain's own PipelineConfig.defaults() directly, so
     # this one key reaches every start path. false (default): every stream starts with detection OFF
     # -- "just video" until an operator turns it on, per the owner's own framing. An explicit
     # detectionEnabled in a start request, or a later PATCH .../config, always wins over this default.
     # detection-default-enabled: false
-    # The system-derived detection-demand gate (docs/plans/active/CV-DEMAND-PLAN.md §2-3.7): inference
+    # The system-derived detection-demand gate (docs/plans/done/CV-DEMAND-PLAN.md §2-3.7): inference
     # only runs when BOTH detection-default-enabled (or a later PATCH)'s operator intent AND someone is
     # actually consuming the output -- an open Fly cockpit (SSE detections:<assetId>) or a recent
     # GET /api/streams/{id}/detections poll (Wall/Live pages). Un-gated (demand always true) is what a
@@ -482,7 +482,7 @@ vision:
     # entirely) and the port falls back to a no-op -- steady-state polling is the
     # only way to observe fleet/telemetry/detections/event changes in that case.
     enabled: true
-    # How long LiveAssetAccess (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3) reuses a resolved
+    # How long LiveAssetAccess (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3) reuses a resolved
     # "may this caller see this asset's telemetry/detections/geo?" answer before re-deriving it
     # from a fresh VisibilityScope. This is the staleness window a revoked (or newly granted)
     # asset assignment buys: for up to this long after the change, a mid-connection viewer may
@@ -492,7 +492,7 @@ vision:
     # layer's mere existence.
     asset-access-ttl-ms: 5000
 
-  # --- vision-api: per-principal request rate limit (docs/plans/active/SCALE-100-PLAN.md S6) ---
+  # --- vision-api: per-principal request rate limit (docs/plans/done/SCALE-100-PLAN.md S6) ---
   # (the rest of vision.api.* is the commented tunables block further down; this
   # one is a live toggle, so it is spelled out here rather than buried there.)
   api:
@@ -540,7 +540,7 @@ vision:
 
 
   # --- RC manual-control relay (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md, RC-CONTROL Phase 1;
-  #     latency structure reworked by docs/plans/active/RC-LATENCY-PLAN.md) ---
+  #     latency structure reworked by docs/plans/done/RC-LATENCY-PLAN.md) ---
   # rc:
   #   Input-loss watchdog timeout (milliseconds) for a /ws/manual-control relay session: a session
   #   with no "channels" frame for this long auto-releases (WiringConfiguration#manualControlService,
@@ -567,7 +567,7 @@ vision:
   #   max-override-hz: 50
   #   release-frames: 3
 
-  # --- Fixed-camera geolocation (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §6, D8, Wave G4) ---
+  # --- Fixed-camera geolocation (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §6, D8, Wave G4) ---
   geo:
     fixed-camera:
       # false (default, D8): TrackProjectionRunner is never scheduled, every camera-pose/map-tracks
@@ -602,7 +602,7 @@ vision:
         # over-confident pose.
         max-rms-error-pixels: 25.0
 
-    # --- Visual (single-camera, moving-aircraft) geolocation (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.6, D9) ---
+    # --- Visual (single-camera, moving-aircraft) geolocation (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.6, D9) ---
     visual:
       # false (default, D9 -- "ships off, and off means invisible"): no VisualGeoRunner bean is
       # scheduled, no gRPC geo session is ever opened, no `geo` SSE event is ever published, and
@@ -784,7 +784,7 @@ vision:
     #     One value per instance, not per camera: a deployment mixing lenses needs this lifted onto
     #     the asset, which is the follow-up this default is deliberately conservative for.
     #     camera-hfov-degrees: 0.0
-    #     ADAPTIVE RATE (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2). A fixed inference rate is
+    #     ADAPTIVE RATE (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2). A fixed inference rate is
     #     both wasteful when nothing is moving and far too slow during a manoeuvre: at 30 deg/s of
     #     yaw across a 60 deg lens the scene shifts half a frame width per second, which a 0.2-wide
     #     box loses association with in well under a second (docs/conclusions/CV-RATE-BUDGET.md 2).
@@ -820,7 +820,7 @@ vision:
     # this binds onto (see that record's own "Wiring status" javadoc); this is the Spring-bound
     # com.drones.vision.app.config.properties.VisionApiProperties (wave D) that PublishWiring maps
     # across to build a real SnapshotJpegEncoder bean. HlsProxyController and LiveUpdateRegistry now
-    # read their own hls-proxy/live fields below too (docs/plans/active/SCALE-100-PLAN.md §5 S7,
+    # read their own hls-proxy/live fields below too (docs/plans/done/SCALE-100-PLAN.md §5 S7,
     # via PublishWiring#hlsProxySettings/#liveSettings) -- AssetImageController and the
     # per-controller paging defaults are the only ones still reading their own local constants
     # (not yet threaded through this record's own paging/upload fields below).
@@ -837,7 +837,7 @@ vision:
     #     max-redirect-hops: 5
     #   The SSE data plane's coalescing/heartbeat cadence, per-topic ring-buffer capacities, and
     #   LiveUpdateRegistry's per-connection dispatch bounds (docs/plans/done/REALTIME-PLAN.md §4;
-    #   send-timeout/buffer-eviction added docs/plans/active/SCALE-100-PLAN.md §5 S2/S7). No
+    #   send-timeout/buffer-eviction added docs/plans/done/SCALE-100-PLAN.md §5 S2/S7). No
     #   dispatch-threads key: LiveUpdateRegistry dispatches connection writes on
     #   Executors.newVirtualThreadPerTaskExecutor(), which has no pool-size/thread-count concept to
     #   configure -- see that field's own javadoc for why this key is deliberately not offered.

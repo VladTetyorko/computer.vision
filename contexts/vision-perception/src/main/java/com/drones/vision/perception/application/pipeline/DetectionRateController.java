@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /**
  * Chooses the rate {@link StreamPipeline} samples at, from how fast the tracked target is about to
- * leave its own association budget (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;2, closing gap 1 of
+ * leave its own association budget (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;2, closing gap 1 of
  * docs/conclusions/CV-RATE-BUDGET.md).
  *
  * <h2>The inequality this exists to keep true</h2>

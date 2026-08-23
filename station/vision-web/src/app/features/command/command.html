@@ -72,7 +72,7 @@
     <vision-notice variant="warn">Could not reach the fleet summary — retrying every 5 seconds. The map below still works independently.</vision-notice>
   }
 
-  <!-- docs/plans/active/OPS-UX-PLAN.md §3 B2: ADMIN-only, and only while the station is still fresh
+  <!-- docs/plans/done/OPS-UX-PLAN.md §3 B2: ADMIN-only, and only while the station is still fresh
        (`CommandFacade.showSetupChecklist`'s own doc comment has the exact rule) — in normal flow
        above the map, never a modal/overlay, so it never blocks the map underneath. -->
   @if (facade.showSetupChecklist()) {

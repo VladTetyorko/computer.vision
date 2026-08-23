@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Hand-computed cross-checks for {@link QuaternionEuler#fromQuaternion}, the one piece of genuinely
- * new math in docs/plans/active/GEO-POSE-PLAN.md wave V2 (the parked {@code feat/visual-geo} branch
+ * new math in docs/plans/done/GEO-POSE-PLAN.md wave V2 (the parked {@code feat/visual-geo} branch
  * flagged its own quaternion path as "not hardware/SITL-validated" -- this class exists so this one
  * isn't). Every input quaternion below is built from a known roll/pitch/yaw triple via the standard
  * ZYX quaternion-<em>from</em>-Euler construction ({@code q = qz(yaw)&middot;qy(pitch)&middot;qx(roll)},

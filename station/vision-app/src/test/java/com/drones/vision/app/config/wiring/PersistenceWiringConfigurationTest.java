@@ -35,7 +35,7 @@ import static org.mockito.Mockito.mock;
  * used by the constructed repository (its constructor only stores the reference) — in the right
  * {@code Jpa*Repository}, so this proves the wiring without needing a real database.
  *
- * <p>Before docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b these methods also took a {@code
+ * <p>Before docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b these methods also took a {@code
  * VisionPersistenceProperties}/{@code ObjectProvider<EntityManagerFactory>} pair and branched on
  * {@code vision.persistence.enabled} to select between this and a devsupport in-memory fallback;
  * that flag had exactly one legal value after W4 and is gone entirely now, so every method below is a
@@ -85,7 +85,7 @@ class PersistenceWiringConfigurationTest {
 
     /**
      * The only bean here that reads configuration beyond the connection itself
-     * (docs/plans/active/SCALE-100-PLAN.md S4). Wiring it with immediate settings — or forgetting to
+     * (docs/plans/done/SCALE-100-PLAN.md S4). Wiring it with immediate settings — or forgetting to
      * pass them at all, which the one-argument constructor makes easy and silent — would leave the
      * per-sample flush in place while every doc claims it is gone, so the *default* configuration is
      * what this pins.

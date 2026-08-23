@@ -9,13 +9,13 @@ import { applyTrackEvent } from '../camera-geo/camera-geo-logic';
  * Safety-net only, mirroring `LayersStore`/`MarksStore`'s own 30s cadence: the `map` live topic is
  * always-on and this store folds every `TRACK` delta in as it arrives (D3), so this poll exists
  * purely to reconcile a connection that was briefly down, or a deployment where the fixed-camera-geo
- * flag flips on mid-session (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D8).
+ * flag flips on mid-session (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md D8).
  */
 const TRACKS_POLL_INTERVAL_MS = 30_000;
 
 /**
  * `TracksStore` — the app's one source of truth for projected map tracks
- * (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D3, wave G5). `providedIn: 'root'`, started at boot
+ * (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5/D3, wave G5). `providedIn: 'root'`, started at boot
  * alongside `MarksStore`/`LayersStore`/`DrawingsStore` — the same "one poller, every host reads the
  * same signal" posture, since `<vision-tactical-map>`'s track layer is meant to be embeddable on
  * every host that already carries the other map-data stores (Command, the Fly cockpit, `/live`,

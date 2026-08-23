@@ -3,7 +3,7 @@ import { LiveStore } from '../live/live-store';
 import { systemEventRows, type SystemEventRow } from './system-events-logic';
 
 /**
- * The system-event log (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.2) — a thin, `providedIn: 'root'`
+ * The system-event log (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.2) — a thin, `providedIn: 'root'`
  * projection of `LiveStore.liveEvents()` through `system-events-logic.ts#systemEventRows`. Unlike
  * `core/events/events-store.ts#EventsStore` (which polls `GET /api/events` and needs its own
  * activate/release refcount + dedupe/notification state), this store owns no poll, no HTTP call, and

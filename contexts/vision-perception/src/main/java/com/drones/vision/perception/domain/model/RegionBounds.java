@@ -1,7 +1,7 @@
 package com.drones.vision.perception.domain.model;
 
 /**
- * A reference region's bounding box in WGS-84 degrees (docs/plans/active/VISUAL-GEO-V2-PLAN.md
+ * A reference region's bounding box in WGS-84 degrees (docs/plans/done/VISUAL-GEO-V2-PLAN.md
  * §3.3's {@code RegionResponse} {@code north}/{@code south}/{@code east}/{@code west}). Flat
  * (north/south/east/west) rather than two {@link com.drones.vision.kernel.GeoPosition} corners —
  * a region is a rectangle in lat/lon, never a pair of independently altitude-bearing points, and

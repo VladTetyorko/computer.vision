@@ -1,7 +1,7 @@
 package com.drones.vision.perception.domain.model;
 
 /**
- * Which of the two independent detection gates (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.6) is
+ * Which of the two independent detection gates (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.6) is
  * responsible for the current absence (or presence) of boxes on a stream, made legible instead of
  * left for a client to infer from {@code submittedFps == 0} &mdash; a reading that cannot tell
  * "the operator turned it off," "nobody is watching right now," and "the detector is stalled" apart,

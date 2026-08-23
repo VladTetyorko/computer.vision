@@ -31,13 +31,13 @@ const ASSET_POLL_INTERVAL_MS = 5_000;
  * picker visit is typically brief. Narrowing this page's own dependencies to what it actually
  * displays is a deliberate simplification of the split, not an oversight.
  *
- * **`AuthStore` (docs/plans/active/OPS-UX-PLAN.md §2 A2)** — the one addition this wave makes. `emptyState`
+ * **`AuthStore` (docs/plans/done/OPS-UX-PLAN.md §2 A2)** — the one addition this wave makes. `emptyState`
  * feeds `drone-picker.html`'s empty leg entirely from `fly-logic.ts#pickerEmptyStateCopy`: `topRole`
  * decides the wording (PILOT vs ADMIN/MANAGER), `memberships` names the PILOT's group. No new HTTP
  * call — `listAssets()` is already visibility-scoped, so an empty response for a PILOT already means
  * "nothing assigned to you" (see that function's own doc comment).
  *
- * **Poll gated on `LiveStore` (docs/plans/active/SCALE-100-PLAN.md §5 S6, item 1)** — mirrors
+ * **Poll gated on `LiveStore` (docs/plans/done/SCALE-100-PLAN.md §5 S6, item 1)** — mirrors
  * `core/fleet/fleet-store.ts#FleetStore`'s identical transport-switch effect: the 5s poll pauses
  * while `LiveStore` reports an open connection and resumes, refetching immediately, the moment it
  * drops. The `fleet` topic (`List<AssetSummaryResponse>`) is exactly this picker's own domain, so a

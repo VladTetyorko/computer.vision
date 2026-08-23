@@ -7,6 +7,12 @@ import java.util.List;
  * A full set of {@link ControlBinding}s: which gamepad axis/button drives which RC channel
  * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1/§5).
  *
+ * <p>A plain container plus the mapping pass — it does not decide <em>which</em> bindings a given
+ * vehicle should have. That is {@link ControlProfile}'s job, because the answer depends on what the
+ * machine is (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P2). The airframe-blind
+ * {@code defaultMap()} this class used to expose is gone: it rested a copter's throttle at half
+ * power, and nothing in the type could tell that was wrong.
+ *
  * @param bindings the control bindings that make up this map; defensively copied
  */
 public record ChannelMap(List<ControlBinding> bindings) {
@@ -16,43 +22,6 @@ public record ChannelMap(List<ControlBinding> bindings) {
             throw new IllegalArgumentException("ChannelMap bindings must not be null");
         }
         bindings = List.copyOf(bindings);
-    }
-
-    /**
-     * The frozen v1 default map (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §5): gamepad axes 0..3 (roll/
-     * pitch/throttle/yaw) onto RC channels 1..4 — centered at 1500µs, {@code [1000,2000]} full
-     * travel, no deadband, not reversed; gamepad buttons 0..3 (aux 1..4, e.g. the flight-mode
-     * switch) onto RC channels 5..8 — {@code [1000,2000]}, not reversed. Channels 9..18 are not
-     * used — see {@link RcChannels}'s class javadoc for why.
-     *
-     * @return the default channel map
-     */
-    public static ChannelMap defaultMap() {
-        return new ChannelMap(List.of(
-                axis(0, 1),  // Roll (aileron)
-                axis(1, 2),  // Pitch (elevator)
-                axis(2, 3),  // Throttle
-                axis(3, 4),  // Yaw (rudder)
-                aux(0, 5),   // Aux 1 (flight-mode switch)
-                aux(1, 6),   // Aux 2
-                aux(2, 7),   // Aux 3
-                aux(3, 8)    // Aux 4
-        ));
-    }
-
-    private static ControlBinding axis(int sourceIndex, int rcChannel) {
-        return new ControlBinding(ControlBinding.Source.AXIS, sourceIndex, rcChannel,
-                RcChannels.MIN_MICROS, 1500, RcChannels.MAX_MICROS, 0.0, false);
-    }
-
-    private static ControlBinding aux(int sourceIndex, int rcChannel) {
-        // A button has no natural center (§5's table lists "1000/—/2000" — center unused). Setting
-        // centerMicros = minMicros here is a modeling choice, not part of the mapping math:
-        // ControlBinding#toMicros's button formula ignores centerMicros entirely and maps
-        // 0 (unpressed) -> minMicros, 1 (pressed) -> maxMicros directly. minMicros<=centerMicros
-        // <=maxMicros still needs a value to satisfy the record's invariant, so it doubles as that.
-        return new ControlBinding(ControlBinding.Source.BUTTON, sourceIndex, rcChannel,
-                RcChannels.MIN_MICROS, RcChannels.MIN_MICROS, RcChannels.MAX_MICROS, 0.0, false);
     }
 
     /**

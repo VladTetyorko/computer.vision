@@ -4,7 +4,7 @@ import { AuthStore } from '../auth/auth-store';
 import { landingRouteFor } from './landing-logic';
 
 /**
- * Resolves `''` by role (docs/plans/active/OPS-UX-PLAN.md §2 A1) — replaces the old static
+ * Resolves `''` by role (docs/plans/done/OPS-UX-PLAN.md §2 A1) — replaces the old static
  * `redirectTo: 'fly'` in `app.routes.ts`, which sent every role, including a MANAGER/ADMIN, to the
  * cockpit. A **guard**, not `redirectTo`, on purpose: `redirectTo` fires before any session is
  * resolved, so a static redirect can only ever encode one destination — it cannot wait for
@@ -21,7 +21,7 @@ import { landingRouteFor } from './landing-logic';
  * of a role signal, not a manager, so `landingRouteFor` deliberately ignores it and keeps `/fly`
  * for that mode. See its own javadoc for why: honouring it would move every unsecured install off
  * the cockpit and break the same "with auth off nothing changes" invariant the backend half of this
- * task froze (docs/plans/active/OPS-UX-PLAN.md §1).
+ * task froze (docs/plans/done/OPS-UX-PLAN.md §1).
  */
 export const landingGuard: CanActivateFn = async () => {
   const auth = inject(AuthStore);

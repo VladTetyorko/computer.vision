@@ -125,7 +125,7 @@ public final class SupervisedPublisher<T> implements Flow.Publisher<T> {
 
     /**
      * Whether this publisher is currently between a terminal signal and the next successfully
-     * delivered item (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.2) — i.e. the source failed or
+     * delivered item (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.2) — i.e. the source failed or
      * completed, and nothing has flowed since.
      *
      * <p>Derived entirely from the existing outage latch, which is set when an outage begins and

@@ -10,7 +10,7 @@ import java.util.Optional;
 
 /**
  * Skips every {@code @SpringBootTest} class cleanly — not with 34 connection-refused failures —
- * when no Docker daemon is reachable. docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4 made Postgres the
+ * when no Docker daemon is reachable. docs/plans/done/POSTGRES-ONLY-CONTEXT.md W4 made Postgres the
  * default (W2b then removed the {@code vision.persistence.enabled} flag entirely), so every one of
  * this module's {@code @SpringBootTest} classes needs the real Postgres {@link
  * PostgresContextCustomizerFactory} points it at; a developer without Docker must still get a
@@ -34,7 +34,7 @@ import java.util.Optional;
  * {@code SimulationResumeWiringConfigurationTest}, ...) build no Spring context and need no
  * database — gating them too would shrink Docker-less coverage for no reason. Every context-loading
  * test class in this module uses bare {@code @SpringBootTest}
- * today (verified by grep, docs/plans/active/POSTGRES-ONLY-CONTEXT.md W4's own report); a future class using
+ * today (verified by grep, docs/plans/done/POSTGRES-ONLY-CONTEXT.md W4's own report); a future class using
  * {@code @DataJpaTest}/{@code @WebMvcTest}/some other context-loading annotation instead would need
  * adding here too.
  */
@@ -43,7 +43,7 @@ public class DockerGatedExecutionCondition implements ExecutionCondition {
     private static final ConditionEvaluationResult ENABLED =
             ConditionEvaluationResult.enabled("not a @SpringBootTest class, or Docker is available");
     private static final ConditionEvaluationResult DISABLED_NO_DOCKER = ConditionEvaluationResult.disabled(
-            "Postgres is unconditional now (docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b) — this "
+            "Postgres is unconditional now (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b) — this "
                     + "@SpringBootTest class needs a real Postgres container, and no Docker daemon is "
                     + "reachable in this environment");
 

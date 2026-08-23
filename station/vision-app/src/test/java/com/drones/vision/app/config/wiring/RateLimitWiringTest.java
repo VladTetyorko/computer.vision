@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 /**
- * The rate limiter is the one wave of docs/plans/active/SCALE-100-PLAN.md that ships <em>off</em>,
+ * The rate limiter is the one wave of docs/plans/done/SCALE-100-PLAN.md that ships <em>off</em>,
  * so "off" is the behavior worth pinning: a filter that quietly registered anyway would 429
  * legitimate traffic in the default (auth-disabled, one-shared-principal) configuration this app
  * runs in today — see {@code VisionApiProperties.RateLimit}'s javadoc for why that keying makes the

@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Every case here is about the same question the class exists to answer honestly: is somebody
- * watching? A wrong "no" stops an operator's video (docs/plans/active/STREAM-STATE-PLAN.md §3.2).
+ * watching? A wrong "no" stops an operator's video (docs/plans/done/STREAM-STATE-PLAN.md §3.2).
  */
 class LiveHlsAndReaderVideoDemandTest {
 

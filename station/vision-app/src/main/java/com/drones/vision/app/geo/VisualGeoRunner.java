@@ -105,7 +105,7 @@ import java.util.stream.Collectors;
  * map. H7 found that this runner then wedged permanently: the dead {@link OpenSession} stayed in
  * {@link #openSessions}, so {@link #ensureSessionOpen}'s "already open for this stream" early return
  * kept firing forever and geolocation ended silently even after {@code CvChannelSupervisor} recovered
- * the channel (docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11, defect 1). {@link LatestFixSubscriber}
+ * the channel (docs/plans/done/VISUAL-GEO-V2-PLAN.md §9.11, defect 1). {@link LatestFixSubscriber}
  * now latches its own termination, and a terminated subscriber makes {@link #ensureSessionOpen} treat
  * the session as closed: it runs {@link #closeSafely} — which clears {@code
  * GeolocationSessionService}'s own open-session bookkeeping too, so a fresh {@code start} is legal

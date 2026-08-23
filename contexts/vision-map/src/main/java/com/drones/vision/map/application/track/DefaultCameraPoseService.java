@@ -19,7 +19,7 @@ import java.util.Optional;
  * The one implementation of {@link CameraPoseService}.
  *
  * <p>Deliberately holds no dependency on any warehouse port — {@link CameraPose} is keyed by {@link
- * AssetId} (a kernel type), and per docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D2 that is
+ * AssetId} (a kernel type), and per docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D2 that is
  * enough: "structurally the frozen DAG prices a new edge higher than filing 'where a sensor sits on
  * the shared picture' with the picture." Whether {@code assetId} actually names a real, visible asset
  * is the {@code vision-api} edge's job (D10), not this service's.

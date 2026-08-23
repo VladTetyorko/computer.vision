@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.function.Supplier;
 
 /**
- * {@code cv-service}'s {@link SubsystemStatusPort} (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2):
+ * {@code cv-service}'s {@link SubsystemStatusPort} (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2):
  * reports whether the shared gRPC channel to cv-service is currently reachable, using {@link
  * CvChannelSupervisor} — the same object {@code GrpcDetectionPort} already asks before every
  * detection call.

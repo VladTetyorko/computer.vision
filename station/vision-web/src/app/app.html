@@ -1,4 +1,4 @@
-<!-- One banner region for the whole shell (docs/plans/active/OPS-UX-PLAN.md §2 A6 rev.2). Every
+<!-- One banner region for the whole shell (docs/plans/done/OPS-UX-PLAN.md §2 A6 rev.2). Every
      station-wide notice renders here, in one stack, in severity order — never as an in-flow sibling
      of `<router-outlet>` (which would push `.cockpit`/`.command-shell`'s viewport-height root below
      the fold) and never as independent `position: fixed` strips (which is how the unsecured banner
@@ -20,7 +20,7 @@
     </div>
   }
 
-  <!-- The silent-degradation case (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.1) — mutually exclusive
+  <!-- The silent-degradation case (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.1) — mutually exclusive
        with the banner above (`liveDegraded` requires `reachable() === true`, `offline` requires
        `false`), so the two never stack. SYSTEM-STATUS asked for a `<vision-notice>` card above the
        routed outlet; it renders here instead, because OPS-UX-PLAN §2 A6 rev.2 has since made this

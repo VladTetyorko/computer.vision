@@ -28,7 +28,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Assembles one flight's after-action evidence package (docs/plans/active/AFTER-ACTION-PLAN.md,
+ * Assembles one flight's after-action evidence package (docs/plans/done/AFTER-ACTION-PLAN.md,
  * the frozen wire contract &sect;3) out of five contexts' existing read surfaces — {@code
  * vision-warehouse} (the asset/usage), {@code vision-events} (telemetry/detections/recording),
  * {@code vision-map} (marks), {@code vision-flight} (the flight passport) and {@code

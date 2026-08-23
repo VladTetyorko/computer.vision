@@ -13,10 +13,17 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  * item 3): a successful probe never omits {@code ok}, so a caller can tell a 200 apart from a
  * (differently-shaped) error body without inspecting the HTTP status alone.
  *
+ * <p><b>Two legal shapes</b> (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §3). A video
+ * probe returns the shape it always has. A <em>telemetry-only</em> probe — a link like {@code
+ * mavlink} that carries no video and never will — omits {@code widthPx}/{@code heightPx}/{@code
+ * frameJpegBase64} entirely rather than reporting a fabricated {@code 0x0} frame, which a client
+ * could not tell apart from a real one. {@code ok} and {@code telemetryDetected} are unchanged in
+ * both, so the "did this connection prove itself" question still has exactly one answer.
+ *
  * @param ok                always {@code true} — a failed probe never reaches this type, it
  *                          throws instead (see {@link com.drones.vision.api.controller.DeviceProbeController})
- * @param widthPx           the grabbed frame's width, in pixels
- * @param heightPx          the grabbed frame's height, in pixels
+ * @param widthPx           the grabbed frame's width, in pixels; absent on a telemetry-only probe
+ * @param heightPx          the grabbed frame's height, in pixels; absent on a telemetry-only probe
  * @param codec             best-effort codec label, or absent when not knowable from a single
  *                          decoded frame (see {@link ProbeResult#codec()})
  * @param fps               a configured/requested frame-rate hint, or absent when the descriptor
@@ -24,22 +31,28 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  * @param telemetryDetected whether a telemetry source was found and produced a sample
  * @param frameJpegBase64   the grabbed frame, JPEG-encoded and Base64-encoded, downscaled the same
  *                          way {@code GET /api/streams/{streamId}/snapshot} downscales its own
- *                          preview (see {@code SnapshotJpegEncoder})
+ *                          preview (see {@code SnapshotJpegEncoder}); absent on a telemetry-only
+ *                          probe
  * @param warnings          human-readable, non-fatal notices (e.g. "No telemetry detected — OSD
  *                          unavailable"); always present, possibly empty
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record ProbeDeviceResponse(boolean ok, int widthPx, int heightPx, String codec, Integer fps,
+public record ProbeDeviceResponse(boolean ok, Integer widthPx, Integer heightPx, String codec, Integer fps,
                                    boolean telemetryDetected, String frameJpegBase64, List<String> warnings) {
 
     /**
      * Maps a {@link ProbeResult} plus its already-encoded JPEG preview to the wire response.
      *
      * @param result    the probe's result
-     * @param jpegBytes the JPEG-encoded preview frame (see {@code SnapshotJpegEncoder#encode})
+     * @param jpegBytes the JPEG-encoded preview frame (see {@code SnapshotJpegEncoder#encode}), or
+     *                   {@code null} when the probe grabbed no frame to encode
      * @return the response body for a successful probe
      */
     public static ProbeDeviceResponse from(ProbeResult result, byte[] jpegBytes) {
+        if (result.telemetryOnly()) {
+            return new ProbeDeviceResponse(true, null, null, null, result.fps(), result.telemetryDetected(), null,
+                    result.warnings());
+        }
         return new ProbeDeviceResponse(true, result.frame().width(), result.frame().height(), result.codec(),
                 result.fps(), result.telemetryDetected(), Base64.getEncoder().encodeToString(jpegBytes),
                 result.warnings());

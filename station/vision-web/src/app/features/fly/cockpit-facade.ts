@@ -113,7 +113,7 @@ export class CockpitFacade {
   readonly detections = inject(DetectionsStore);
   readonly events = inject(EventsStore);
   readonly geofence = inject(GeofenceStore);
-  /** Visual-geolocation corrections (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3/§3.4/§3.8, wave H6) — the
+  /** Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/§3.4/§3.8, wave H6) — the
    * divergence chip/detail popover (`fly-osd.ts`) and `mapCorrections` below both read this directly. */
   readonly geo = inject(GeoStore);
   /**
@@ -161,7 +161,7 @@ export class CockpitFacade {
   private lastCapabilitiesKey: string | undefined = undefined;
 
   /** `null` until the asset poll is actually paused/resumed for the first time — see
-   * `applyAssetPollTransport` (docs/plans/active/SCALE-100-PLAN.md §5 S6, item 1). */
+   * `applyAssetPollTransport` (docs/plans/done/SCALE-100-PLAN.md §5 S6, item 1). */
   private assetPollStopFn: (() => void) | null = null;
 
   // --- Video device selection ------------------------------------------------------------------
@@ -200,7 +200,7 @@ export class CockpitFacade {
   /** `stream()#state` projected to a primitive — `stream()` itself is a fresh object every ~5s poll
    * tick even when nothing changed (this file's own recurring "guarded on a derived primitive"
    * convention, e.g. `lastTelemetryDeviceId` below); whether this stream's *video* is actually
-   * flowing, measured server-side (docs/plans/active/STREAM-STATE-PLAN.md §2.3). `undefined` with
+   * flowing, measured server-side (docs/plans/done/STREAM-STATE-PLAN.md §2.3). `undefined` with
    * nothing running, or against a backend that predates the field; `stream-state-logic.ts#videoNotice`
    * degrades both to silence. */
   readonly streamState = computed(() => this.stream()?.state);
@@ -211,7 +211,7 @@ export class CockpitFacade {
 
   /**
    * **The one place this cockpit decides where a detection control's position comes from**
-   * (docs/plans/active/STREAM-STATE-PLAN.md §3.1) — the running stream's own server-side intent while
+   * (docs/plans/done/STREAM-STATE-PLAN.md §3.1) — the running stream's own server-side intent while
    * something is running, this browser's draft otherwise. The rail's off-dot, the video-surface
    * "Turn on" chip and the drawer's Detect switch all read this one value, so they cannot disagree
    * with each other or with the backend; before this plan all three rendered the draft, i.e. a
@@ -225,7 +225,7 @@ export class CockpitFacade {
    * without this there is a round-trip during which a click appears to have done nothing. */
   readonly detectionPending = signal(false);
 
-  /** Staleness honesty (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.4) — "Detections paused —
+  /** Staleness honesty (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4) — "Detections paused —
    * last seen Ns ago" once the newest batch is older than `DETECTION_STALE_CUTOFF_SECONDS`, or `null`
    * to say nothing (mirrors {@link videoNotice}'s own shape). Gated on {@link detectionOn}: a stream
    * the operator has turned detection off for already has its own honest "off" chip
@@ -369,7 +369,7 @@ export class CockpitFacade {
   });
 
   /**
-   * `<vision-tactical-map>`'s `[corrections]` (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — 0
+   * `<vision-tactical-map>`'s `[corrections]` (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — 0
    * or 1 rows, the followed asset's own latest visual-geolocation correction. `GeoStore.latest()`
    * reads `undefined` on a `NO_FIX`/not-yet-computed row (and always while `vision.geo.visual.enabled`
    * is off, since the poll then either 404s silently or never returns this asset) — either way an
@@ -383,11 +383,11 @@ export class CockpitFacade {
   readonly latencySeconds = signal<number | null>(null);
   readonly transport = signal<Transport>('hls');
   /** Defaults to {@link DEFAULT_DECLUTTER_LEVEL} ('priority') — burn-in no longer exists at all
-   * (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1), so there is nothing left for this to re-derive
+   * (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1), so there is nothing left for this to re-derive
    * against; a plain `signal`, not the old `linkedSignal` over `streamBurnedIn`. The operator's own
    * pick — `B`, or a click in `cv-control-panel.html` — sticks across device/asset switches exactly
    * like `transport` above. Widened from a two-state toggle to four named declutter levels as of wave
-   * W4 (docs/plans/active/CV-FLY-INTERACTION-RESEARCH.md §3.6) — see {@link cycleBoxes}. */
+   * W4 (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.6) — see {@link cycleBoxes}. */
   readonly boxesMode = signal<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
 
   /**
@@ -403,7 +403,7 @@ export class CockpitFacade {
 
   /**
    * The class currently hovered in the merged Vision drawer's strip (wave W5,
-   * docs/plans/active/CV-CLEAN-FEED-PLAN.md D-3, research §3.5) — `shared/player/detections-strip.ts`'s own
+   * docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3, research §3.5) — `shared/player/detections-strip.ts`'s own
    * `(hoveredClassChange)`, relayed straight into `<vision-player [hoveredClass]>` (`cockpit.html`),
    * which temporarily promotes every box of that class to tier T1
    * (`shared/player/detection-overlay-logic.ts#detectionTiers`). Mirrors {@link lockedTrackId}'s own
@@ -537,7 +537,7 @@ export class CockpitFacade {
       }
     });
 
-    // Visual-geolocation corrections (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, wave H6) — keyed
+    // Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4, wave H6) — keyed
     // directly on `activeAssetId()`, no device/stream indirection to guard on (unlike telemetry/
     // detections above): `GeoStore.track()` is already a no-op for an unchanged assetId (its own
     // `lastTrackAssetId` field), so this effect needs no derived-primitive guard of its own.
@@ -597,7 +597,7 @@ export class CockpitFacade {
     this.assetPollStopFn = this.scheduleAssetPoll();
 
     // Pause/resume the asset poll against `LiveStore`'s own connection state
-    // (docs/plans/active/SCALE-100-PLAN.md §5 S6, item 1) — mirrors
+    // (docs/plans/done/SCALE-100-PLAN.md §5 S6, item 1) — mirrors
     // `core/fleet/fleet-store.ts#FleetStore`'s identical transport-switch effect: pause while live
     // is open, resume and refetch immediately the moment it drops (the switcher list/active asset
     // may be stale from however long the connection was up).
@@ -628,7 +628,7 @@ export class CockpitFacade {
 
   /**
    * Switches whether the local 5s asset poll is running — mirrors `FleetStore#applyTransport`
-   * exactly (docs/plans/active/SCALE-100-PLAN.md §5 S6, item 1). `liveAvailable` pauses the poll;
+   * exactly (docs/plans/done/SCALE-100-PLAN.md §5 S6, item 1). `liveAvailable` pauses the poll;
    * its absence resumes it, refetching immediately first (mirrors the reconnect-driven branch every
    * other gated poller in this app takes). A no-op when the poll is already in the requested state
    * (`assetPollStopFn`'s own nullness tracks that).
@@ -787,7 +787,7 @@ export class CockpitFacade {
   }
 
   /**
-   * The "Turn on" action on `cockpit.html`'s own video-surface affordance (docs/plans/active/CV-DEMAND-PLAN.md
+   * The "Turn on" action on `cockpit.html`'s own video-surface affordance (docs/plans/done/CV-DEMAND-PLAN.md
    * wave D3) — the honest chip shown over the video whenever {@link detectionOn} is `false` and a
    * stream is actually live (`fly-logic.ts#showDetectionOffChip`). A thin alias for
    * {@link setDetection}, which is the one write path the drawer's own switch also emits into, so
@@ -799,7 +799,7 @@ export class CockpitFacade {
 
   /**
    * The single write path behind every Detect on/off affordance in this cockpit — the chip above and
-   * `CvControlPanel#onDetectionEnabledToggle` alike (docs/plans/active/STREAM-STATE-PLAN.md §3.1), so the
+   * `CvControlPanel#onDetectionEnabledToggle` alike (docs/plans/done/STREAM-STATE-PLAN.md §3.1), so the
    * two can never apply the same operator intent under two different rules.
    *
    * Two writes, deliberately unequal in status. The draft is updated because it is what the next

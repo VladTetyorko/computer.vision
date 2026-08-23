@@ -48,7 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc tests for {@link GeoCorrectionController} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3,
+ * MockMvc tests for {@link GeoCorrectionController} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3,
  * H5) — the D9 flag-off {@code 409} on both routes, the per-visible-asset {@code /live} read, and
  * the usage-scoped history read's 404-hides-existence rule.
  */
@@ -190,7 +190,7 @@ class GeoCorrectionControllerTest {
 
     @Test
     void forUsageSerializesTheTwoBooleansThatDecidePromotion() throws Exception {
-        // docs/plans/active/VISUAL-GEO-V2-PLAN.md §9.11 defect 4, H8: cellCalibrated and
+        // docs/plans/done/VISUAL-GEO-V2-PLAN.md §9.11 defect 4, H8: cellCalibrated and
         // sequenceConverged are what DefaultTrackCorrectionService reads to choose PROBABLE over
         // CONFIRMED, so an operator asking "why only PROBABLE?" must be able to see them.
         AssetId assetId = AssetId.random();

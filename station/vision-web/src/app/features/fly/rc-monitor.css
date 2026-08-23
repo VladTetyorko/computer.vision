@@ -137,3 +137,17 @@
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* Input-source picker — two mutually-exclusive choices, so the selected one is marked rather than
+   the unselected ones being hidden. */
+.rc-source {
+  display: flex;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+
+.rc-source .btn.active {
+  border-color: var(--color-info);
+  color: var(--color-info-text);
+  background: var(--color-info-soft);
+}

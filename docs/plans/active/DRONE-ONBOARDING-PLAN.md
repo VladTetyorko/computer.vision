@@ -1,7 +1,7 @@
 # DRONE-ONBOARDING-PLAN — the aircraft lifecycle, and the pipeline that installs it
 
-Status: **authoritative spec, unbuilt.** Context gathered first in `DRONE-ONBOARDING-CONTEXT.md`
-(read it for what was verified vs inferred, and for the constraints C1–C13 this plan obeys).
+Status: **O1–O8 and O11–O14 merged to master 2026-08-19** (behind `vision.onboarding.*.enabled=false`);
+**O9/O10 remain operator-gated.** Constraints C1–C13 that this plan obeys are restated in §0.
 
 **Ask (verbatim):** *"how our system will interact with a drones before flight, in flight and after
 flight. I need a good, proper flow of adding a drone to our app not only from video and telemetry

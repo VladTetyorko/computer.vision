@@ -1,7 +1,7 @@
 # SCALE-100 wave S0 -- load rig
 
 A load-testing harness for `vision-app`, built for
-[`docs/plans/active/SCALE-100-PLAN.md`](../../docs/plans/active/SCALE-100-PLAN.md) wave S0. It drives a
+[`docs/plans/done/SCALE-100-PLAN.md`](../../docs/plans/done/SCALE-100-PLAN.md) wave S0. It drives a
 running instance at stated concurrency and prints a table: REST p50/p99 latency, SSE envelope lag, JVM
 heap + GC pause, thread count, DB connection count, and process CPU, at whatever levels you ask for
 (the plan wants 5 / 20 / 50 / 100).

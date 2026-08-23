@@ -1,6 +1,6 @@
 # tools/trackeval
 
-The tracking-accuracy evaluation harness (`docs/plans/active/TRACKING-V2-PLAN.md`
+The tracking-accuracy evaluation harness (`docs/plans/done/TRACKING-V2-PLAN.md`
 §4, wave C0). It closes `docs/conclusions/TRACKING-REVIEW.md` finding E: every
 number `cv/cv-service/MODULE.md`'s "Tracking engine" section reports is a **cost**
 number (ms, CPU%, duty ratio) — nothing measured whether tracking actually lost

@@ -12,7 +12,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
- * {@code vision-api}'s implementation of {@link DetectionDemandPort} (docs/plans/active/CV-DEMAND-PLAN.md
+ * {@code vision-api}'s implementation of {@link DetectionDemandPort} (docs/plans/done/CV-DEMAND-PLAN.md
  * &sect;3.5) — collapses the two driving protocols the frontend actually uses into the one fact
  * {@code DefaultStreamService}'s demand-poll task wants:
  *
@@ -49,14 +49,14 @@ import java.util.function.Supplier;
  * IDLE_NO_VIEWERS} to an operator who is, in fact, sitting right there watching. A wrong answer that
  * costs CPU is recoverable and visible; a wrong answer that silently stops detection and then
  * explains itself with a falsehood is neither. Every other failure decision in this feature points
- * the same way (docs/plans/active/CV-DEMAND-PLAN.md §3.2/§3.3: an absent port gates nothing, and the
+ * the same way (docs/plans/done/CV-DEMAND-PLAN.md §3.2/§3.3: an absent port gates nothing, and the
  * pipeline's own demand flag initialises {@code true}).
  *
  * <p>A {@code null} {@code assetId} is <i>not</i> a failure and is not covered by the above — it is
  * the ordinary "this stream has no owning asset" case, which simply skips the SSE half and lets the
  * poll half answer on its own.
  *
- * <h2>Third OR-term: a calibrated fixed camera (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D9)</h2>
+ * <h2>Third OR-term: a calibrated fixed camera (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md D9)</h2>
  * {@link #hasCameraPose}, exactly like {@link #watchingDetections}, is a narrow {@code
  * Predicate<AssetId>} seam rather than a dependency on {@code TrackProjectionRunner} itself —
  * {@code CvWiring#detectionDemandPort} resolves it from an {@code ObjectProvider}, defaulting to
@@ -87,7 +87,7 @@ public final class LiveAndPollDetectionDemand implements DetectionDemandPort {
      * @param watchingDetections whether any live connection is watching an asset's detections
      * @param pollTtl            how long a {@link #touched} stream counts as polled-demand
      * @param hasCameraPose      whether an asset currently has a stored, flag-enabled camera pose
-     *                           (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md D9) — {@code
+     *                           (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md D9) — {@code
      *                           TrackProjectionRunner#hasCameraPose}, or {@code assetId -> false}
      *                           when the feature is off/absent
      */

@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * {@link PulledGeolocationPort} that never talks to cv-service — the flag-off fallback for {@code
- * vision.geo.visual.enabled=false} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §0/D9, "off means
+ * vision.geo.visual.enabled=false} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §0/D9, "off means
  * invisible"). Whichever wiring wave (H5) decides how {@code vision.geo.visual.enabled} selects a
  * bean is free to either omit a {@link PulledGeolocationPort} bean entirely when disabled (most of
  * this feature's beans are simply absent) or wire this class instead — this class exists for

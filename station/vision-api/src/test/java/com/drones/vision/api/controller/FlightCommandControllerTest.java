@@ -7,6 +7,7 @@ import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.flight.domain.model.CommandResult;
 import com.drones.vision.flight.domain.model.FlightCapability;
+import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
@@ -254,7 +255,7 @@ class FlightCommandControllerTest {
     void flightCapabilitiesReturns200WithTheSnapshotShape() throws Exception {
         AssetId assetId = AssetId.random();
         when(flightCommandService.capabilities(eq(assetId), any(VisibilityScope.class)))
-                .thenReturn(new FlightCapability(true, true, true, List.of("Loiter", "RTL")));
+                .thenReturn(new FlightCapability(true, true, true, List.of("Loiter", "RTL"), VehicleKind.COPTER));
 
         mockMvc.perform(get("/api/assets/{id}/flight-capabilities", assetId.value()))
                 .andExpect(status().isOk())

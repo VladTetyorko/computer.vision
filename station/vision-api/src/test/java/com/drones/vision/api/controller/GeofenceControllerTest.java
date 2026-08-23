@@ -59,7 +59,7 @@ class GeofenceControllerTest {
     /**
      * A {@link MockMvc} bound to a fresh {@link GeofenceController} acting as {@code user} — same
      * mocked {@link #geofenceService}, only the acting {@link CurrentUser} changes
-     * (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2, W5's {@code canAdminister()} authority tests below).
+     * (docs/plans/done/LIVE-SCOPE-PLAN.md §2.2, W5's {@code canAdminister()} authority tests below).
      */
     private MockMvc mockMvcFor(CurrentUser user) {
         return MockMvcBuilders.standaloneSetup(new GeofenceController(geofenceService, user))
@@ -280,7 +280,7 @@ class GeofenceControllerTest {
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }
 
-    // ---- docs/plans/active/LIVE-SCOPE-PLAN.md §2.2, W5: authority --------------------------------
+    // ---- docs/plans/done/LIVE-SCOPE-PLAN.md §2.2, W5: authority --------------------------------
     //
     // Every test above runs under the class-level `currentUser` (unbounded scope, matching how a
     // deployment with `vision.auth.enabled=false` behaves today) and is untouched by this wave --

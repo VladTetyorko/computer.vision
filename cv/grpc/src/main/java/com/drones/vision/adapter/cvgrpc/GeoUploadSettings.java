@@ -5,7 +5,7 @@ import java.util.Objects;
 
 /**
  * Plain, framework-free settings for {@link GrpcReferenceIndexPort}'s {@code BuildReferenceIndex}
- * upload (docs/plans/active/VISUAL-GEO-V2-PLAN.md &sect;3.6) — a separate record from {@link
+ * upload (docs/plans/done/VISUAL-GEO-V2-PLAN.md &sect;3.6) — a separate record from {@link
  * GrpcCvSettings} even though its two fields mirror {@link GrpcCvSettings#uploadTimeout()}/{@link
  * GrpcCvSettings#uploadChunkBytes()} exactly: the geolocation feature is independently flag-gated
  * ({@code vision.geo.visual.enabled}, D9) and this module's other settings/wiring must never force

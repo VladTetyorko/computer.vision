@@ -228,7 +228,7 @@ class HlsProxyControllerTest {
     }
 
     /**
-     * The wave's acceptance gate (docs/plans/active/SCALE-100-PLAN.md §5 S1): the per-request
+     * The wave's acceptance gate (docs/plans/done/SCALE-100-PLAN.md §5 S1): the per-request
      * {@code HttpClient} was replaced with one shared client that has no {@link
      * java.net.CookieHandler}. A shared {@code CookieHandler} would remember whichever cookie it
      * last saw for the upstream host and hand it to the *next* request through that same client --
@@ -283,7 +283,7 @@ class HlsProxyControllerTest {
 
     /**
      * Byte-range requests are dropped today (harmless for live HLS, which never sends one) but
-     * wrong for the recording playback path (docs/plans/active/SCALE-100-PLAN.md §5 S1, task 3).
+     * wrong for the recording playback path (docs/plans/done/SCALE-100-PLAN.md §5 S1, task 3).
      */
     @Test
     void rangeHeaderIsForwardedUpstreamAndContentRangeAcceptRangesArePassedBack() throws Exception {
@@ -312,7 +312,7 @@ class HlsProxyControllerTest {
     }
 
     /**
-     * docs/plans/active/SCALE-100-PLAN.md §5 S7: {@code maxRedirectHops} is no longer the private
+     * docs/plans/done/SCALE-100-PLAN.md §5 S7: {@code maxRedirectHops} is no longer the private
      * {@code static final} constant it used to be — it comes from the {@link
      * VisionApiProperties.HlsProxy} passed to the {@code @Autowired} constructor. This proves that
      * value is actually enforced, not just stored: an upstream that redirects forever hits the

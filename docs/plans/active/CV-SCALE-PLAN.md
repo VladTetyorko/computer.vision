@@ -117,7 +117,7 @@ The prerequisite for "change one stream, only it changes."
 
 ### S5 — Pull-based frames (the real scale ceiling, biggest change) — **DECIDED: GO**
 The decision was taken on 2026-08-12 and its execution is owned by
-[MEDIA-SOT-PLAN.md](MEDIA-SOT-PLAN.md), which widens it from "the worker pulls frames" to "mediamtx is
+[MEDIA-SOT-PLAN.md](../done/MEDIA-SOT-PLAN.md), which widens it from "the worker pulls frames" to "mediamtx is
 the video source of truth for viewing *and* CV". The body below stands as the original statement of the
 problem; the frozen contract, the phasing and the waves live in that plan.
 

@@ -527,7 +527,7 @@ class GrpcDetectionPortTest {
 
     @Test
     void detectSendsTheDownscaledFrameRawWhenTheWireFormatIsBgr24() throws Exception {
-        // docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R3: the same downscale, without the JPEG encode
+        // docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R3: the same downscale, without the JPEG encode
         // here or the matching decode inside cv-service -- together most of the ~25ms of
         // non-inference round trip measured in docs/conclusions/CV-RATE-BUDGET.md 3.
         CapturingServicer servicer = new CapturingServicer();

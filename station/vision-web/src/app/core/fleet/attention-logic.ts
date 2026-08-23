@@ -73,7 +73,7 @@ export interface AttentionReason {
  * battery-low: a dead battery mid-flight and a lost telemetry link mid-flight are the same kind of
  * "this drone may not come back" risk. `gps-degraded` ranks below battery-low but above
  * `pipeline-error` — a degraded fix matters, but a battery running low is the more universally
- * urgent of the two. `pipeline-error` (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4) ranks below every
+ * urgent of the two. `pipeline-error` (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4) ranks below every
  * flight-safety reason above it — a broken detection pipeline is a perception-quality problem, not a
  * "this drone may not come back" one — but above open-events, since a stream that stopped seeing
  * *anything* is a more actionable fact than an already-open, already-triaged detection event. Open
@@ -223,7 +223,7 @@ function pipelineErrorReason(detail: string | undefined): AttentionReason | unde
  *
  * `gpsFixType` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d, optional), `geofenceBreaches`
  * (docs/plans/done/OPS-CORE-PLAN.md §G-c, optional), and `pipelineErrorDetail`
- * (docs/plans/active/SYSTEM-STATUS-PLAN.md §3.4, optional) are the three reason inputs not carried by
+ * (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4, optional) are the three reason inputs not carried by
  * `AssetAttention` itself — see `gpsDegradedReason`'s/`geofenceBreachReason`'s/`pipelineErrorReason`'s
  * own doc comments for where a caller sources each. A caller with none in hand (e.g.
  * `features/reports/reports-logic.ts`'s read-only dashboard, which has no live map marker or

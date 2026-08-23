@@ -26,7 +26,7 @@ import java.util.Objects;
  *
  * <p>Constructor-injected with {@link GeofenceService} and {@link CurrentUser}.
  *
- * <h2>Authority (docs/plans/active/LIVE-SCOPE-PLAN.md §2.2, W5) — geofences are safety-relevant</h2>
+ * <h2>Authority (docs/plans/done/LIVE-SCOPE-PLAN.md §2.2, W5) — geofences are safety-relevant</h2>
  * A geofence zone is a no-fly boundary; an unauthorized edit here is not an information leak the way
  * an unscoped read elsewhere might be, it is a flight-safety event — a keep-out zone silently
  * widened or a keep-in boundary silently relaxed changes what is safe to fly, for every asset, not

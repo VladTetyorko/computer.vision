@@ -1,6 +1,6 @@
 """`lk` -- the FOLLOW default: Lucas-Kanade sparse optical flow.
 
-`docs/plans/done/TRACKING-PLAN.md` §5.B, `docs/plans/active/TRACKING-V2-PLAN.md` wave
+`docs/plans/done/TRACKING-PLAN.md` §5.B, `docs/plans/done/TRACKING-V2-PLAN.md` wave
 C1 (review finding C3). Tracks <=40 `goodFeaturesToTrack` corners inside the
 locked box with `cv2.calcOpticalFlowPyrLK`, then moves the box by the median
 corner translation and rescales it by the median radial expansion about the

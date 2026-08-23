@@ -28,7 +28,7 @@ import java.util.stream.Collectors;
  *
  * <p><strong>Dev-only credentials.</strong> Every demo user is created with the same well-known
  * password ({@link #PASSWORD}), the same stance the {@code admin}/{@code admin} account seeded by
- * {@code storage/persistence}'s {@code db/seed/dev} migration takes (docs/plans/active/POSTGRES-ONLY-CONTEXT.md
+ * {@code storage/persistence}'s {@code db/seed/dev} migration takes (docs/plans/done/POSTGRES-ONLY-CONTEXT.md
  * W1, when {@code vision.persistence.seed-dev-users=true}): fine behind {@code
  * vision.auth.enabled=false} on a laptop, never acceptable in a real deployment — which is why the
  * whole demo package is removable with one property.

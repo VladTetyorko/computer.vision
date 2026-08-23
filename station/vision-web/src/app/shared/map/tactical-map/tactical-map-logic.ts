@@ -75,7 +75,7 @@ export interface MapDrawing {
 }
 
 /**
- * The map's track display model (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5, wave G5) — unlike
+ * The map's track display model (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5, wave G5) — unlike
  * {@link TacticalMark}/{@link MapDrawing}, no projection is needed: `ProjectedTrackResponse` already
  * carries exactly what this component draws (position, range, error radius, trail), so this is a
  * plain re-export, named for symmetry with its siblings rather than because the shape narrows.
@@ -236,7 +236,7 @@ export function visibleDrawings(drawings: readonly MapDrawing[], hidden: readonl
 }
 
 /**
- * Filters projected map tracks (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D10, wave G5) by the same
+ * Filters projected map tracks (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5/D10, wave G5) by the same
  * per-layer eye toggle every other data overlay respects — `layerId` is a track's own target layer
  * (default the COP, §5), so a track shares its layer's toggle with any marks/drawings already on it.
  */

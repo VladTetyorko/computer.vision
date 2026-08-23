@@ -68,7 +68,7 @@ class AssetStreamControllerTest {
         assetService = mock(AssetService.class);
         assetStreamService = mock(AssetStreamService.class);
         streamPublisherPort = mock(StreamPublisherPort.class);
-        // StreamViewerLinks is a plain final class wrapping this port (docs/plans/active/CV-DEMAND-PLAN.md
+        // StreamViewerLinks is a plain final class wrapping this port (docs/plans/done/CV-DEMAND-PLAN.md
         // §3.8) -- a real instance backed by the mocked port, matching this codebase's established
         // pattern of not mocking final support classes.
         StreamViewerLinks streamViewerLinks = new StreamViewerLinks(streamPublisherPort);
@@ -82,7 +82,7 @@ class AssetStreamControllerTest {
 
     /**
      * A {@link CurrentUser} answering with {@link #ownership}/{@link #ownerId} but a caller-supplied
-     * {@link VisibilityScope}, for the docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2 authority tests
+     * {@link VisibilityScope}, for the docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2 authority tests
      * below -- same idiom {@code AssetControllerTest} uses. {@link PrincipalResolver#viewer()} is
      * never called by this controller, so it throws rather than fake a map viewer no test here needs.
      */
@@ -264,7 +264,7 @@ class AssetStreamControllerTest {
         verifyNoInteractions(assetService);
     }
 
-    // ---- docs/plans/active/LIVE-SCOPE-PLAN.md §2, W2: authority --------------------------------
+    // ---- docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2: authority --------------------------------
     //
     // Before this wave, #stopStream ran with no scope check at all -- any caller could stop any
     // asset's stream. These tests fail without StreamAccess's sibling here, #requireInScope: a

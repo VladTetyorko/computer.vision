@@ -6,7 +6,7 @@ import java.util.Objects;
 
 /**
  * Pure Web Mercator (slippy-map) tile math: which {@code z/x/y} tiles cover a {@link RegionBounds}
- * at a given zoom (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3's tile-count validation and D10's
+ * at a given zoom (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3's tile-count validation and D10's
  * {@code CV_GEO_DATA_DIR/<regionId>/<z>_<x>_<y>.jpg} layout). The standard OSM/Web-Mercator
  * projection formulas are mathematical constants (CLAUDE.md rule 1) — nothing here is a tunable
  * knob.

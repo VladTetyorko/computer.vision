@@ -214,7 +214,7 @@ class MediamtxControlApiTest {
     @Test
     void extractHasReadersRefusesToGuessWhenTheFieldIsAbsent() {
         // "Could not tell" must not collapse into "nobody is watching": the caller stops streams on
-        // the latter and fails open on the former (docs/plans/active/STREAM-STATE-PLAN.md §3.2).
+        // the latter and fails open on the former (docs/plans/done/STREAM-STATE-PLAN.md §3.2).
         assertThrows(MediamtxControlApiException.class, () -> MediamtxControlApi.extractHasReaders("p", "{}"));
         assertThrows(MediamtxControlApiException.class, () -> MediamtxControlApi.extractHasReaders("p", null));
     }

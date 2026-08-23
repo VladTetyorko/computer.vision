@@ -8,7 +8,7 @@ package com.drones.vision.kernel;
  * created from it is stamped {@link MarkSource#DETECTION} and stays draggable/editable so an operator
  * can correct it.
  *
- * <p>{@link #aimFrom} (docs/plans/active/GEO-POSE-PLAN.md §4.1, wave V1) resolves a {@link
+ * <p>{@link #aimFrom} (docs/plans/done/GEO-POSE-PLAN.md §4.1, wave V1) resolves a {@link
  * CameraAim} from whatever a {@link Telemetry} sample actually reports, preferring a measured gimbal
  * orientation over the airframe heading and the platform's guessed depression default; {@link
  * #project(GeoPosition, CameraAim)} projects from that resolved aim. A device that reports none of
@@ -46,7 +46,7 @@ public final class GeoProjection {
     /**
      * The resolved aim of a drone's camera, as produced by {@link #aimFrom} — the single place the
      * precedence rules between a measured gimbal reading and the platform's guessed defaults live
-     * (docs/plans/active/GEO-POSE-PLAN.md §4.1, G5). Feeds {@link #project(GeoPosition, CameraAim)}.
+     * (docs/plans/done/GEO-POSE-PLAN.md §4.1, G5). Feeds {@link #project(GeoPosition, CameraAim)}.
      *
      * @param bearingDegrees    the direction the camera is pointed, degrees clockwise from true
      *                          north; finite (any value — {@link #project} normalizes it modulo 360)
@@ -79,7 +79,7 @@ public final class GeoProjection {
     /**
      * Resolves a {@link CameraAim} from whatever a telemetry sample actually reports, preferring a
      * measured gimbal orientation over an airframe heading and a guessed depression angle
-     * (docs/plans/active/GEO-POSE-PLAN.md §4.1). This is the one place the precedence between
+     * (docs/plans/done/GEO-POSE-PLAN.md §4.1). This is the one place the precedence between
      * "measured" and "assumed" inputs is decided; {@link #project(GeoPosition, CameraAim)} does not
      * re-derive it.
      *
@@ -96,7 +96,7 @@ public final class GeoProjection {
      *       rather than fed into the math as-is.</li>
      *   <li><b>{@code aglMeters}</b>: {@code telemetry.aglMeters()} if present, else {@code
      *       telemetry.altitudeMeters()} — the pre-existing behavior, which deliberately carries
-     *       today's AMSL-vs-AGL error (docs/plans/active/GEO-POSE-PLAN.md G6/§6) forward as the
+     *       today's AMSL-vs-AGL error (docs/plans/done/GEO-POSE-PLAN.md G6/§6) forward as the
      *       honest fallback rather than silently correcting it here.</li>
      *   <li><b>{@code measured}</b>: {@code true} only when the depression angle came from a real
      *       gimbal reading <em>and</em> {@code telemetry.aglMeters()} was present — the two inputs
@@ -210,7 +210,7 @@ public final class GeoProjection {
      * Convenience overload of {@link #project(GeoPosition, double, double, double)} that takes a
      * resolved {@link CameraAim} — the shape {@link #aimFrom} produces — instead of separate
      * heading/altitude/depression arguments. The 4-arg overload's signature and behavior are
-     * unchanged (docs/plans/active/GEO-POSE-PLAN.md G6); this simply unpacks {@code aim} and
+     * unchanged (docs/plans/done/GEO-POSE-PLAN.md G6); this simply unpacks {@code aim} and
      * delegates, so the projection math has a single source of truth.
      *
      * @param drone the drone's current position

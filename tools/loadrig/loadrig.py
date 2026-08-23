@@ -2,7 +2,7 @@
 """SCALE-100 wave S0 load rig.
 
 Drives a running vision-app instance at stated concurrency levels and measures
-what docs/plans/active/SCALE-100-PLAN.md sec 5 (S0) asks for: p50/p99 REST
+what docs/plans/done/SCALE-100-PLAN.md sec 5 (S0) asks for: p50/p99 REST
 latency, SSE envelope lag, JVM heap + GC pause, thread count, DB connection
 count, and process CPU -- at 5 / 20 / 50 / 100 concurrent "users".
 
@@ -317,7 +317,7 @@ def rest_sampler_worker(base_url: str, stop_event: threading.Event, result: Leve
 def sse_client_worker(base_url: str, stop_event: threading.Event, result: LevelResult) -> None:
     """Holds one SSE connection open on /api/live and records envelope lag
     for every `type":"event"` payload -- those carry a server "at" timestamp
-    (docs/plans/active/SCALE-100-PLAN.md's own live/detection path), so lag is a
+    (docs/plans/done/SCALE-100-PLAN.md's own live/detection path), so lag is a
     real measurement (client receipt - server "at"), not a proxy metric.
     Other topics (fleet/devices/map) are counted as arrivals but have no
     per-payload timestamp to diff against."""

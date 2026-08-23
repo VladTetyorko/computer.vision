@@ -47,7 +47,7 @@ import {
 } from './cv-control-panel-logic';
 
 /**
- * The Fly cockpit's **Detection setup modal** (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1, §1
+ * The Fly cockpit's **Detection setup modal** (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1, §1
  * "Surface 2 — calm hands: decisions") — a centered dialog over the cockpit holding every
  * set-once/expert CV knob that used to live inside `cv-control-panel.ts`'s own "Tune"/"Expert"
  * disclosures: the "Looking for" model intent cards (each with a one-sentence "what it finds" plus
@@ -145,7 +145,7 @@ export class CvSetupModal {
   protected readonly hasStream = computed(() => !!this.streamId());
 
   /** The honest "hidden classes drop everywhere" sentence — shown verbatim once, at the foot of
-   *  the merged Classes section (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5 — the pre-P2 split
+   *  the merged Classes section (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §5 — the pre-P2 split
    *  across "Seen now" and "All classes" rendered this twice; the merge is also what fixed that). */
   protected readonly hiddenClassTruth = HIDDEN_CLASS_TRUTH;
 
@@ -180,7 +180,7 @@ export class CvSetupModal {
     chipCandidates(this.labelFilterSeed(), this.settings.effective().labelDenyFilter, observedLabels(this.detections.results())),
   );
   /** The most-recently-observed labels, in recency order — {@link filteredChips}' own sort
-   *  priority (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5). This is all that survives of the
+   *  priority (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §5). This is all that survives of the
    *  pre-P2 "Seen now" mini-checklist once it merged into the one full checklist below: recency was
    *  its real value, kept here as a sort key instead of a second rendered list. */
   protected readonly recentLabels = computed(() => recentObservedLabels(this.detections.results()));
@@ -303,7 +303,7 @@ export class CvSetupModal {
   }
 
   /** Whether `label` is on the operator's own deny-list — the merged Classes checklist's explicit
-   *  "hidden, click to un-hide" indicator (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5's "hidden
+   *  "hidden, click to un-hide" indicator (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §5's "hidden
    *  classes (deny-list) management … with un-hide"), mirroring `detections-strip.html`'s identical
    *  `chip.hidden` treatment so an operator sees the same "— hidden" wording in both places. The
    *  same {@link toggleChip} click both hides and un-hides — this only changes what the chip *says*. */

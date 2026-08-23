@@ -44,7 +44,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
- * Wave M5's own "done" bar (docs/plans/active/MEDIA-SOT-PLAN.md &sect;8): a hand-faked {@link PulledDetectionPort}
+ * Wave M5's own "done" bar (docs/plans/done/MEDIA-SOT-PLAN.md &sect;8): a hand-faked {@link PulledDetectionPort}
  * drives storage, events and the rate/latency read models identically to push mode, and push-mode
  * detection ({@link DetectionPort}) is never touched by a pull-mode pipeline. {@link
  * StreamPipelineTest} stays untouched — every one of its constructors defaults {@code pullDetection}
@@ -244,7 +244,7 @@ class StreamPipelinePullModeTest {
                 new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.6, 15, 2, Set.of())));
     }
 
-    // --- the detection gate reaches pull mode too (docs/plans/active/CV-DEMAND-PLAN.md &sect;5, the ---
+    // --- the detection gate reaches pull mode too (docs/plans/done/CV-DEMAND-PLAN.md &sect;5, the ---
     // --- "one honest gap" closed at the application layer -- push mode's own gate applied here)   ---
 
     @Test
@@ -329,7 +329,7 @@ class StreamPipelinePullModeTest {
         verify(detectionRepositoryPort).save(resumed);
     }
 
-    // --- docs/plans/active/CV-DEMAND-PLAN.md §5/§7: closing the gate clears what it already served,
+    // --- docs/plans/done/CV-DEMAND-PLAN.md §5/§7: closing the gate clears what it already served,
     // in pull mode too -- the coordinator's correction to this file's own first cut, which only
     // proved gated-off results are dropped and left an established result's *prior* boxes standing.
     // A frozen pull-mode result is exactly as dishonest a poll response as a frozen push-mode one:

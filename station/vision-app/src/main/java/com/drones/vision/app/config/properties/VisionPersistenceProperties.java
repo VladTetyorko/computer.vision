@@ -14,7 +14,7 @@ import java.time.Duration;
  *
  * <p>Consumed by {@code PersistenceWiringConfiguration}, which wires {@code adapter-persistence}'s
  * {@code Jpa*Repository} implementations — the only repository implementations left, since
- * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b deleted the devsupport in-memory fallbacks — against
+ * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b deleted the devsupport in-memory fallbacks — against
  * {@link #jdbcUrl()}/{@link #username()}/{@link #password()}, migrating the schema with Flyway on
  * first use. A reachable Postgres is therefore required to run this app, or its {@code vision-app}
  * test suite (see that module's MODULE.md "Test infrastructure" section for how the test suite gets
@@ -27,18 +27,18 @@ import java.time.Duration;
  *                      also applies {@code classpath:db/seed/dev} — the DEV-ONLY {@code admin}/
  *                      {@code manager}/{@code pilot} accounts (password equal to username) that used
  *                      to be seeded unconditionally by the now-deleted {@code AuthSeedRunner}; there
- *                      is no in-memory equivalent (see docs/plans/active/POSTGRES-ONLY-CONTEXT.md W1).
+ *                      is no in-memory equivalent (see docs/plans/done/POSTGRES-ONLY-CONTEXT.md W1).
  *                      Default {@code false}: an operator does not get username-equals-password
  *                      login accounts unless they explicitly ask for them too — {@code
  *                      docker-compose.yml}'s friends-demo stack is the one place that does.
  *                      <strong>Never set this on anything but a local/demo database.</strong>
  * @param pool          HikariCP sizing for the one pool {@code PersistenceUnit} shares between
- *                      Flyway and Hibernate (docs/plans/active/SCALE-100-PLAN.md S3). Every field
+ *                      Flyway and Hibernate (docs/plans/done/SCALE-100-PLAN.md S3). Every field
  *                      defaults to {@code PersistencePoolSettings.defaults()}, so an unset {@code
  *                      vision.persistence.pool} block is the same pool an explicit one describing
  *                      the defaults would build.
  * @param telemetry     how the telemetry ingest path batches its writes
- *                      (docs/plans/active/SCALE-100-PLAN.md S4) — one block governing both write
+ *                      (docs/plans/done/SCALE-100-PLAN.md S4) — one block governing both write
  *                      paths, see {@link Telemetry}.
  */
 @ConfigurationProperties(prefix = "vision.persistence")
@@ -77,7 +77,7 @@ public record VisionPersistenceProperties(@DefaultValue(VisionPersistencePropert
     }
 
     /**
-     * Binds {@code vision.persistence.telemetry.*} (docs/plans/active/SCALE-100-PLAN.md S4) — how
+     * Binds {@code vision.persistence.telemetry.*} (docs/plans/done/SCALE-100-PLAN.md S4) — how
      * long, and how many samples deep, the ingest path may buffer before it writes.
      *
      * <p>One block, two bridges: the durable sample write lives in {@code adapter-persistence}

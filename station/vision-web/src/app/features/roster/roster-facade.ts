@@ -84,7 +84,7 @@ export class RosterFacade {
   );
 
   /**
-   * The mirror gap (docs/plans/active/OPS-UX-PLAN.md §3 B3): how many users who hold a `PILOT`
+   * The mirror gap (docs/plans/done/OPS-UX-PLAN.md §3 B3): how many users who hold a `PILOT`
    * membership somewhere are assigned to zero assets. Built the same way as `assetsWithoutPilotCount`
    * above — against every loaded pilot row, not the search-filtered subset — so both headline tiles
    * answer "as things stand", not "as currently filtered".

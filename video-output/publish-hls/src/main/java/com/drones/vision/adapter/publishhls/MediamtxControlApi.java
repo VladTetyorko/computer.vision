@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 
 /**
  * Thin client for the four mediamtx v3 Control API operations {@link MediamtxProxyPublisher} needs
- * (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.3): create/patch a path (idempotent start), read its
+ * (docs/plans/done/MEDIA-SOT-PLAN.md &sect;5.3): create/patch a path (idempotent start), read its
  * readiness, and delete it (idempotent stop). Every response shape below was verified against a real
  * {@code bluenviron/mediamtx:1.19.3} by wave M0's {@code curl} transcript,
  * {@code cv-service/spikes/pull/results/mediamtx_api_transcript.txt} — this class codes directly
@@ -84,7 +84,7 @@ final class MediamtxControlApi {
     }
 
     /**
-     * Creates a path whose {@code source} is {@code sourceUrl} (docs/plans/active/MEDIA-SOT-PLAN.md
+     * Creates a path whose {@code source} is {@code sourceUrl} (docs/plans/done/MEDIA-SOT-PLAN.md
      * &sect;5.3 "create path" — verified {@code {"status":"ok"}}/HTTP 200). If the path already
      * exists — the normal case restarting a stream against a path mediamtx never tore down — falls
      * through to {@code PATCH} with the same body: the "already exists &rarr; patch" idempotent-start
@@ -112,7 +112,7 @@ final class MediamtxControlApi {
     }
 
     /**
-     * @return {@code true} once mediamtx reports the path {@code ready} (docs/plans/active/MEDIA-SOT-PLAN.md
+     * @return {@code true} once mediamtx reports the path {@code ready} (docs/plans/done/MEDIA-SOT-PLAN.md
      *         &sect;5.3 "readiness"; {@code {"ready":bool,...}}/HTTP 200). A 404 ({@code path not
      *         found}) is reported as simply not-ready — right after creation there can be a brief
      *         window before mediamtx registers the path, and callers of this method are polling in
@@ -132,7 +132,7 @@ final class MediamtxControlApi {
 
     /**
      * Whether mediamtx currently has at least one reader on the path
-     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2).
+     * (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2).
      *
      * <p>This is the only term of the idle policy's video demand that can see a <b>WHEP/WebRTC</b>
      * viewer: those connect straight to mediamtx and never touch this application, so without asking
@@ -168,7 +168,7 @@ final class MediamtxControlApi {
 
     /**
      * Deletes a path. A 404 — the path was already deleted, or never existed — is treated as success
-     * (docs/plans/active/MEDIA-SOT-PLAN.md &sect;5.3 "delete path": verified 404 for both a
+     * (docs/plans/done/MEDIA-SOT-PLAN.md &sect;5.3 "delete path": verified 404 for both a
      * just-deleted and a never-existing path), matching {@link
      * com.drones.vision.perception.domain.port.StreamPublisherPort#streamEnded}'s own idempotency contract.
      */

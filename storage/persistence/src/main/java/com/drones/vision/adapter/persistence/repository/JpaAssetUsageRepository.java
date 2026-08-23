@@ -33,7 +33,7 @@ import java.util.Optional;
  * not once per incoming sample, so it is not the "append-heavy" table docs/plans/done/MVP2-PLAN.md P-b's
  * retention guard targets.
  *
- * <p>{@link #findByStream(StreamId)} (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.6) queries the
+ * <p>{@link #findByStream(StreamId)} (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.6) queries the
  * <b>existing</b> {@code stream_id} column ({@code V4__usage_stream_id.sql}) &mdash; that wave adds no
  * migration, and therefore no index: {@code stream_id} is unindexed, so this is a sequential scan.
  * That is deliberate at this table's size (one row per flight, not one per sample) and for this

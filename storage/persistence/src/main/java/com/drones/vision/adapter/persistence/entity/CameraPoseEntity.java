@@ -14,7 +14,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code camera_poses} — mirrors {@link com.drones.vision.map.domain.model.CameraPose}
- * field-for-field (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md decision D4, {@code
+ * field-for-field (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md decision D4, {@code
  * V22__fixed_camera_geo.sql}); {@code CameraPoseMapper} owns the mapping in both directions.
  *
  * <p>{@code asset_id} is the primary key, not a synthetic one — one row per asset, {@code save} is

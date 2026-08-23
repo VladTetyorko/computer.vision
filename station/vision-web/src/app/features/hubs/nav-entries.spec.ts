@@ -82,7 +82,7 @@ describe('NAV_MODES', () => {
 
     /**
      * A group is always role-scoped, with exactly one named, documented exception: `System status`
-     * (docs/plans/active/SYSTEM-STATUS-PLAN.md §5.1) sits in `diagnostics` but is deliberately not
+     * (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1) sits in `diagnostics` but is deliberately not
      * `managerOnly` — an operator whose CV pipeline just died needs to see why, not be told to find a
      * manager. This carve-out must stay narrow (one specific entry, not a loosened rule) — any *other*
      * grouped entry gaining `managerOnly: false` should still fail this test.
@@ -112,7 +112,7 @@ describe('NAV_MODES', () => {
     });
 
     /**
-     * docs/plans/active/OPS-UX-PLAN.md §2 A4: the concurrent backend wave gates `POST /api/assets` on
+     * docs/plans/done/OPS-UX-PLAN.md §2 A4: the concurrent backend wave gates `POST /api/assets` on
      * `canManageOrg()`, so the nav must not dangle a door the API now refuses — "Add source" moved
      * from ungated to `managerOnly` (it stays ungrouped: it's a primary action for the roles that can
      * use it, not tucked into an advanced/diagnostics disclosure).
@@ -146,7 +146,7 @@ describe('NAV_MODES', () => {
     });
 
     /**
-     * docs/plans/active/OPS-UX-PLAN.md §3 B1: "Audit trail" mirrors the backend's own `canManageOrg()`
+     * docs/plans/done/OPS-UX-PLAN.md §3 B1: "Audit trail" mirrors the backend's own `canManageOrg()`
      * gate on `AuditController#list` — a PILOT must never see a door the API would 403 on.
      */
     it('Audit trail is managerOnly and ungrouped (Monitor never groups)', () => {

@@ -6,7 +6,7 @@ import java.util.List;
 
 /**
  * Everything {@link CameraCalibrationSolver#solve} needs — the frozen {@code POST
- * /api/assets/{assetId}/camera-pose/calibration} body (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md
+ * /api/assets/{assetId}/camera-pose/calibration} body (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
  * §5, decision D5): the camera's operator-measured position and height (the solver does not solve
  * these), the calibration image's dimensions, and 2–8 clicked landmark correspondences.
  *

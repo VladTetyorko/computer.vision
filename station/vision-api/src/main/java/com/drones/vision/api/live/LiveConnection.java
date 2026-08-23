@@ -23,9 +23,9 @@ import java.util.function.Predicate;
  * One open {@code GET /api/live} connection: its {@link SseEmitter}, the mutable set of topics it
  * currently cares about (docs/plans/done/REALTIME-PLAN.md §4, item 2 — grown/shrunk in place by {@code PATCH
  * /api/live/{connectionId}/topics} without reconnecting), the {@link UserId} it belongs to
- * (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3 — so {@code LiveUpdateRegistry#updateTopics} can
+ * (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3 — so {@code LiveUpdateRegistry#updateTopics} can
  * refuse a caller who does not own it), and the map-visibility/asset-visibility predicates captured
- * for its viewer at connect time (docs/plans/done/MAP-REWORK-PLAN.md §4.3; docs/plans/active/LIVE-SCOPE-PLAN.md
+ * for its viewer at connect time (docs/plans/done/MAP-REWORK-PLAN.md §4.3; docs/plans/done/LIVE-SCOPE-PLAN.md
  * §2, W3).
  *
  * <h2>Threading</h2>
@@ -34,7 +34,7 @@ import java.util.function.Predicate;
  * without external locking. Every {@code send*}/{@link #heartbeat()} call still acquires {@link
  * #sendLock} around the actual {@link SseEmitter#send} call, since two writes to the same emitter
  * must never interleave on the wire — but {@link #sendLock} is a {@link ReentrantLock}, not {@code
- * synchronized}: this connection's write is dispatched onto a virtual thread (docs/plans/active/SCALE-100-PLAN.md
+ * synchronized}: this connection's write is dispatched onto a virtual thread (docs/plans/done/SCALE-100-PLAN.md
  * §5 S2 item 2, see {@code LiveUpdateRegistry}'s {@code connectionWriteExecutor}), and a {@code
  * synchronized} block held across a blocking I/O call pins that virtual thread's carrier for the
  * whole blocked duration regardless of contention — exactly the kind of stall this wave exists to
@@ -65,7 +65,7 @@ final class LiveConnection {
             new AtomicReference<>(CompletableFuture.completedFuture(null));
 
     /**
-     * @param ownerUserId     who opened this connection (docs/plans/active/LIVE-SCOPE-PLAN.md §2,
+     * @param ownerUserId     who opened this connection (docs/plans/done/LIVE-SCOPE-PLAN.md §2,
      *                        W3) — a plain identity value, never a live handle back to the request;
      *                        used only for {@code LiveUpdateRegistry#updateTopics}'s ownership check
      * @param mapVisibility   whether this connection's viewer may see a {@code map} event about a
@@ -76,7 +76,7 @@ final class LiveConnection {
      *                        predicate's own staleness bound.
      * @param assetVisibility whether this connection's viewer may currently see a per-asset topic's
      *                        {@link AssetId} — supplied by {@code LiveController} from {@code
-     *                        LiveAssetAccess#deliveryPredicate} (docs/plans/active/LIVE-SCOPE-PLAN.md
+     *                        LiveAssetAccess#deliveryPredicate} (docs/plans/done/LIVE-SCOPE-PLAN.md
      *                        §2, W3), same evaluated-fresh contract as {@code mapVisibility}
      */
     LiveConnection(String id, SseEmitter emitter, UserId ownerUserId, Predicate<String> mapVisibility,
@@ -94,7 +94,7 @@ final class LiveConnection {
 
     /**
      * @return the {@link UserId} that opened this connection — {@code LiveUpdateRegistry#updateTopics}'s
-     *         ownership check (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3)
+     *         ownership check (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3)
      */
     UserId ownerUserId() {
         return ownerUserId;
@@ -111,7 +111,7 @@ final class LiveConnection {
      *       (docs/plans/done/MAP-REWORK-PLAN.md §4.3);</li>
      *   <li>anything else carrying a non-null {@link LiveEnvelopeResponse#assetId()} (a {@code
      *       telemetry}/{@code detections}/{@code geo} envelope) is gated by {@link #assetVisibility}
-     *       (docs/plans/active/LIVE-SCOPE-PLAN.md §2, W3) — this is the defense against a scope
+     *       (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3) — this is the defense against a scope
      *       changing mid-connection (an assignment revoked) after a topic was legitimately
      *       subscribed to: {@code LiveController}/{@code LiveAssetAccess} already keep an
      *       unauthorized topic from ever being added (see their own javadoc), so this check is what
@@ -153,7 +153,7 @@ final class LiveConnection {
     }
 
     /**
-     * Writes one already-serialized envelope (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 1 — the caller
+     * Writes one already-serialized envelope (docs/plans/done/SCALE-100-PLAN.md §5 S2 item 1 — the caller
      * serializes once in {@code LiveUpdateRegistry#serialize} and hands the same {@code String} to
      * every subscribed connection, rather than each connection re-encoding the same object). {@code
      * seq} still carries the SSE event's own {@code id:} field so {@code Last-Event-ID} resume keeps
@@ -182,7 +182,7 @@ final class LiveConnection {
     }
 
     /**
-     * Queues a data-envelope write onto {@link #writeChain} (docs/plans/active/SCALE-100-PLAN.md §5 S2 item 2)
+     * Queues a data-envelope write onto {@link #writeChain} (docs/plans/done/SCALE-100-PLAN.md §5 S2 item 2)
      * — see this class's "Ordering under concurrent dispatch" javadoc. The returned future completes
      * (successfully or exceptionally) once the write has actually run; it never completes exceptionally
      * with a checked type since {@link #send} is wrapped in {@link UncheckedIOException}, and it never

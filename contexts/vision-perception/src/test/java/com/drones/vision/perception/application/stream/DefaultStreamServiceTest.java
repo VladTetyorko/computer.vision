@@ -89,7 +89,7 @@ class DefaultStreamServiceTest {
 
     /**
      * {@link PipelineConfig#defaults()} with detection explicitly turned on
-     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;1, wave D1 flipped {@link
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;1, wave D1 flipped {@link
      * PipelineConfig#DEFAULT_DETECTION_ENABLED} to {@code false}) — for the tests below whose actual
      * intent is that detection runs on the started stream, as distinct from the many other tests in
      * this file that only care a stream started at all and never touch {@code detectionPort}.
@@ -196,7 +196,7 @@ class DefaultStreamServiceTest {
 
     @Test
     void anIdleStopSaysSoInBothTheMessageAndTheAttributes() {
-        // docs/plans/active/STREAM-STATE-PLAN.md §3.2: a stop the system decided must not read as a crash.
+        // docs/plans/done/STREAM-STATE-PLAN.md §3.2: a stop the system decided must not read as a crash.
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
         service.stop(streamId, StopReason.IDLE_NO_VIEWERS);
@@ -504,7 +504,7 @@ class DefaultStreamServiceTest {
 
     @Test
     void threadsATelemetrySupplierWhenAFieldOfViewIsConfigured() {
-        // INVARIANT (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1): the telemetry supplier that feeds
+        // INVARIANT (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1): the telemetry supplier that feeds
         // CameraAttitude/ego-motion is built from usageTracker + a configured field of view alone --
         // it once shipped dead because its construction was gated on an OverlayPort being present
         // (docs/conclusions/CV-RATE-BUDGET.md gap 3), which silently meant a deployment with a
@@ -703,7 +703,7 @@ class DefaultStreamServiceTest {
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
         when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
-        // detectionEnabled explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
+        // detectionEnabled explicit (docs/plans/done/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
         // this test's whole point is that detection keeps running across the hot-knob swap.
         PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
                 EventRuleConfig.defaults(), true);
@@ -735,7 +735,7 @@ class DefaultStreamServiceTest {
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
         when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
-        // detectionEnabled explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
+        // detectionEnabled explicit (docs/plans/done/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
         // this test's whole point is that the next sampled frame still detects, on the new model.
         PipelineConfig started = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 1000, 5, Set.of(),
                 EventRuleConfig.defaults(), true);
@@ -759,7 +759,7 @@ class DefaultStreamServiceTest {
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
         when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
                 emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
-        // detectionEnabled explicit (docs/plans/active/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
+        // detectionEnabled explicit (docs/plans/done/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor default):
         // this test's whole point is that detection keeps running with the merged config.
         PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "v1"), 0.4, 1000, 3, Set.of("person"),
                 EventRuleConfig.defaults(), true);
@@ -839,7 +839,7 @@ class DefaultStreamServiceTest {
      * Pushes frames until one serves a sample deadline, and returns the {@link TrackingConfig} it
      * carried into {@code detect}.
      *
-     * <p>Sampling is deadline-based (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R1) and this test
+     * <p>Sampling is deadline-based (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R1) and this test
      * pushes frames microseconds apart, so a push made right after a config change usually lands
      * inside the previous sample interval and is correctly held back. Pushing until one lands keeps
      * this helper about the config it set out to observe rather than about the sampler's cadence.
@@ -1091,7 +1091,7 @@ class DefaultStreamServiceTest {
         assertEquals(Optional.empty(), service.trackingStats(streamId));
     }
 
-    // --- docs/plans/active/CV-DEMAND-PLAN.md §2, §3.3-3.4: detection-demand grace period and scheduler resilience ---
+    // --- docs/plans/done/CV-DEMAND-PLAN.md §2, §3.3-3.4: detection-demand grace period and scheduler resilience ---
 
     /** {@link StreamPipelineSettings#defaults()} with its two demand tunables replaced. */
     private static StreamPipelineSettings settingsWithDetectionDemand(Duration pollInterval, Duration grace) {
@@ -1201,7 +1201,7 @@ class DefaultStreamServiceTest {
                 "must gate off at once, not stay RUNNING for a grace period nothing ever earned");
     }
 
-    // --- docs/plans/active/CV-DEMAND-PLAN.md §3.6: DetectionState -- forgiving read, delegation ---
+    // --- docs/plans/done/CV-DEMAND-PLAN.md §3.6: DetectionState -- forgiving read, delegation ---
 
     @Test
     void detectionStateIsEmptyForAnUnknownOrStoppedStreamAndPresentWhileRunning() {

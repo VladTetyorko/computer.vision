@@ -3,7 +3,7 @@ package com.drones.vision.flight.application;
 import java.time.Duration;
 
 /**
- * The Java half of D5's two-owner gate (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.6/§4.3/§4.5) —
+ * The Java half of D5's two-owner gate (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.6/§4.3/§4.5) —
  * every knob {@code DefaultTrackCorrectionService} needs, sourced from {@code
  * vision.geo.visual.gate.*}/{@code vision.geo.visual.divergence.*} in the running app (CLAUDE.md rule
  * 1 — no magic numbers in this module).

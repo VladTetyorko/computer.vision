@@ -20,7 +20,7 @@ import com.drones.vision.platform.VisibilityScope;
  * ({@link VisibilityScope#canManage(com.drones.vision.kernel.Ownership)}) can run without pulling in
  * the full asset-detail assembly. Two dependencies, well under the cap.
  *
- * <h2>Authority, not visibility (docs/plans/active/OPS-UX-PLAN.md §1)</h2>
+ * <h2>Authority, not visibility (docs/plans/done/OPS-UX-PLAN.md §1)</h2>
  * A grant/revoke changes who may fly an asset — that is a management action on the asset, not a
  * read of it, so {@link #requireGrantable} gates on {@link
  * VisibilityScope#canManage(com.drones.vision.kernel.Ownership)} rather than {@link

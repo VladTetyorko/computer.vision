@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * {@link StreamPublisherPort} that picks, per device, between {@link MediamtxProxyPublisher} (D3 —
  * mediamtx dials the camera itself) and a plain JVM-side publisher such as {@link
- * MediamtxStreamPublisher} (docs/plans/active/MEDIA-SOT-PLAN.md &sect;3, switch A) — {@code
+ * MediamtxStreamPublisher} (docs/plans/done/MEDIA-SOT-PLAN.md &sect;3, switch A) — {@code
  * vision-app} wires exactly one {@link StreamPublisherPort} (this class), so neither {@code
  * StreamPipeline} nor {@code DefaultStreamService} needs to know two publishers exist.
  *

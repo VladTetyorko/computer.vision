@@ -52,7 +52,7 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   `awaitAck`/`cancelAckWait` pass-throughs — TX port classes now depend on a real collaborator).
   Public constructors unchanged: `MavlinkTelemetrySource()`, `MavlinkTelemetrySource(MavlinkSettings)`;
   package-private `MavlinkTelemetrySource(long silenceWindowMillis)` test seam.
-  **`public List<com.drones.mavlink.session.LinkHealth.Health> claimedVehicleHealth()`** (docs/plans/active/SYSTEM-STATUS-PLAN.md
+  **`public List<com.drones.mavlink.session.LinkHealth.Health> claimedVehicleHealth()`** (docs/plans/done/SYSTEM-STATUS-PLAN.md
   §4.2, wave S2) — flattens `claimedVehicleHealth()` (see `MavlinkGateway`, below) across every gateway
   this source holds. **Public**, not package-private like this class's other accessors — a deliberate,
   narrow exception, made specifically so `vision-app`'s `SystemStatusWiring` (a different package) can
@@ -139,7 +139,8 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   why a naive fire-and-forget loop is an actual bug here, not a style choice. Every outcome is only
   ever logged (INFO on accepted, WARNING otherwise); nothing here has a caller waiting on a result.
 - `final class MavlinkFlightCommander implements FlightCommandPort` — `setMode`/`returnToHome`/
-  `arm`/`disarm`/`capabilities`, unchanged resolve/reject rules and wire bytes (see Gotchas for
+  `arm`/`disarm`/`capabilities` (the latter now also reporting `FlightModes.vehicleKind(target.mavType())`
+  as `FlightCapability#vehicleKind`), unchanged resolve/reject rules and wire bytes (see Gotchas for
   what's frozen). Delegates the actual send/await to a fresh, per-call `com.drones.mavlink.service.CommandService`
   built from the resolved device's `MavlinkGateway.sink()`/`.correlator()`, **zero retries**
   (deliberately, to preserve the pre-existing single-shot wire behaviour). `static final int
@@ -147,7 +148,10 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   — single source of truth, same idiom as before W4). Constructors unchanged:
   `MavlinkFlightCommander(MavlinkTelemetrySource)`, `MavlinkFlightCommander(MavlinkTelemetrySource, Duration ackTimeout)`.
 - `final class MavlinkManualControlSender implements ManualControlPort` — `engage`/`send`/`release`, its
-  `AdapterLink` now also carrying **`rateHz()`** = `coreRc.clampedOverrideHz()` (docs/plans/active/RC-LATENCY-PLAN.md
+  `AdapterLink` now also carrying **`vehicleKind()`** = `FlightModes.vehicleKind(target.mavType())`
+  (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P9 — resolved from the heartbeat being
+  heard at `engage` time and fixed for the link's life, so the stick layout the operator gets is the
+  vehicle's own; a target that never sent a heartbeat yields `UNKNOWN`) and **`rateHz()`** = `coreRc.clampedOverrideHz()` (docs/plans/done/RC-LATENCY-PLAN.md
   §2 C — the real keepalive rate, so `vision-api` stops mirroring a constant). Latency behaviour follows
   `mavlink-core`'s reworked `ManualControlService`: a stick that moves reaches the wire on arrival
   (bounded by `vision.rc.max-override-hz`) instead of waiting out a fixed tick, while `vision.rc.override-hz`
@@ -170,7 +174,7 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   socket is now a `com.drones.mavlink.transport.UdpTargetLink` + `com.drones.mavlink.codec.FrameWriter`
   instead of a hand-rolled `DatagramSocket`/`MavlinkConnection` pair. Constructors unchanged.
 - `final class MavlinkLinkStatusProvider implements SubsystemStatusPort` (`vision-platform`,
-  docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2, **new**, wave S2) — `mavlink-link`'s health self-report
+  docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2, **new**, wave S2) — `mavlink-link`'s health self-report
   backing `GET /api/system/status`. Constructor takes `Supplier<List<LinkHealth.Health>>` (`vision-app`
   passes `mavlinkTelemetrySource::claimedVehicleHealth`, see above) rather than the source directly —
   matches `CvStatusProvider`'s (cv/grpc) supplier-based shape. No vehicle is claimed → `Health.UNKNOWN`
@@ -182,7 +186,7 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   least once, some just stale) → `Health.DEGRADED`, `detail` names the staleness age of the oldest
   reading. `hint` is "Check the MAVLink radio/link and vehicle power" for both `DOWN`/`DEGRADED`.
 - `final class MavlinkTelemetryDecoder` (package-private) — state-holder split, now four-way as of
-  docs/plans/active/GEO-POSE-PLAN.md wave V2 (`PositionAndPowerState`/`FlightStatusState`/
+  docs/plans/done/GEO-POSE-PLAN.md wave V2 (`PositionAndPowerState`/`FlightStatusState`/
   `ArdupilotExtras`/`AttitudeState`); `accept`'s own dispatch/return-null/system-lock contract is
   unchanged. `Telemetry accept(MavlinkMessage<?>)` is a one-line adapter onto
   `Telemetry accept(int originSystemId, Object payload)` — `MavlinkGateway` calls the latter
@@ -201,7 +205,8 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   double yawDegrees)`. No MAVLink/dronefleet types in its signature — pure math, independently unit
   tested (`QuaternionEulerTest`) against hand-computed values built via the inverse (Euler→quaternion)
   formula. See Gotchas for the convention and gimbal-lock behavior.
-- `final class FlightModes`, `final class MavlinkRoute` (package-private) — untouched by W4/V2.
+- `final class FlightModes` (package-private) — mode-name tables, plus **`static VehicleKind vehicleKind(int mavType)`** (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §1.4): sorts a `HEARTBEAT.type` into `COPTER`/`PLANE`/`ROVER` over the same `MAV_TYPE` sets `tableFor` already used for mode selection, and `UNKNOWN` for anything else (a GCS, an antenna tracker, a type this class has never seen). Deliberately **autopilot-independent**, unlike `tableFor`: what kind of machine it is does not depend on whose firmware is flying it.
+- `final class MavlinkRoute` (package-private) — untouched by W4/V2.
 
 ## Message → field mapping
 
@@ -493,7 +498,7 @@ docs/plans/active/MAVLINK-CORE-PLAN.md **W4 done**: rewired onto `drone-link/mav
 constructors unchanged (D8). `vision-app`'s wiring config, ArchUnit rules, and every other adapter
 are untouched (out of that wave's file scope).
 
-docs/plans/active/GEO-POSE-PLAN.md **wave V2 done**: this adapter now decodes the pose measurements
+docs/plans/done/GEO-POSE-PLAN.md **wave V2 done**: this adapter now decodes the pose measurements
 `GeoProjection.aimFrom` (vision-kernel wave V1) needs — `GLOBAL_POSITION_INT.relative_alt`/
 `time_boot_ms`, `ATTITUDE` (#30), `GIMBAL_DEVICE_ATTITUDE_STATUS` (#285, preferred) and
 `MOUNT_ORIENTATION` (#265, deprecated fallback) — landing on `Telemetry.aglMeters`/`attitude`/
@@ -515,7 +520,7 @@ not run a simulated gimbal, so `GIMBAL_DEVICE_ATTITUDE_STATUS`/`MOUNT_ORIENTATIO
 golden-bytes tests only, not against a live SITL gimbal — flagged as untested against a real sender in
 the report for this wave.
 
-docs/plans/active/SYSTEM-STATUS-PLAN.md **§4.2, wave S2 done**: `mavlink-link`'s health self-report for
+docs/plans/done/SYSTEM-STATUS-PLAN.md **§4.2, wave S2 done**: `mavlink-link`'s health self-report for
 `GET /api/system/status` (station/vision-api). Two small, additive changes to existing classes —
 `MavlinkGateway.claimedVehicleHealth()` (package-private) and `MavlinkTelemetrySource.claimedVehicleHealth()`
 (widened to **public**, a deliberate exception to this class's usual package-private-plumbing convention,
@@ -610,3 +615,5 @@ connection, `VFR_HUD` observed near its requested 2 Hz — all without `MavlinkV
 being constructed, i.e. without any parameter read or write anywhere in the test. That is the corrected
 form of the plan's own stated exit criterion (see O8 Gotchas for why the literal criterion, written
 around a parameter that does not exist on this firmware, could not be run as stated).
+
+**docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md Wave P3 done** (this adapter's half of per-vehicle stick layouts): `FlightModes.vehicleKind(int mavType)` added; `MavlinkFlightCommander#capabilities` and `MavlinkManualControlSender`'s `AdapterLink` both now report it. **Nothing new is decoded** — the vehicle family was already being classified from `HEARTBEAT.type` to pick a mode table, then thrown away. This wave only routes a fact the adapter had all along up to the layer that needed it, which is why the diff is three small methods and no wire change. 6 new `FlightModesTest` assertions + updated `MavlinkFlightCommanderTest`/`MavlinkManualControlSenderTest`; `./mvnw -B -pl drone-link/mavlink -am test` green.

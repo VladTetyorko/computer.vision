@@ -26,7 +26,7 @@ import java.util.Set;
 
 /**
  * {@link StreamService} decorator that falls back to a live, on-demand grab from mediamtx's own RTSP
- * output when the delegate has no cached frame — the gap docs/plans/active/MEDIA-SOT-PLAN.md wave M6
+ * output when the delegate has no cached frame — the gap docs/plans/done/MEDIA-SOT-PLAN.md wave M6
  * opened and wave M7 closes: in proxy mode ({@code vision.publish.source-proxy.enabled=true}) the JVM
  * opens no {@code VideoSourcePort} at all (D4), so {@code DefaultStreamService#latestFrame}/{@code
  * latestRawFrame} — which back the snapshot endpoint ({@code StreamController}) and training-sample

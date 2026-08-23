@@ -130,7 +130,7 @@ public interface StreamPublisherPort {
     /**
      * Whether this publisher itself dials {@code device}'s source, rather than expecting the
      * application layer to open a {@code VideoSourcePort} and hand it frames via {@link
-     * #publish(StreamId, VideoFrame)} (docs/plans/active/MEDIA-SOT-PLAN.md &sect;4, D3/D4 — a
+     * #publish(StreamId, VideoFrame)} (docs/plans/done/MEDIA-SOT-PLAN.md &sect;4, D3/D4 — a
      * proxying publisher, e.g. one that points mediamtx's own Control API at the camera's RTSP
      * URL, means no JVM ever decodes this stream's video for viewing).
      *

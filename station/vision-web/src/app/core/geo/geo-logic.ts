@@ -11,7 +11,7 @@ import type {
 import { VISUAL_GEO_DISABLED_MESSAGE } from '../api/models';
 
 /**
- * Pure, Angular-free logic behind wave H6 of `docs/plans/active/VISUAL-GEO-V2-PLAN.md` — the cockpit's
+ * Pure, Angular-free logic behind wave H6 of `docs/plans/done/VISUAL-GEO-V2-PLAN.md` — the cockpit's
  * divergence chip + detail popover (`features/fly/cockpit`), the `TacticalMap` corrected-track layer
  * (`shared/map/tactical-map/tactical-map.ts`), the replay corrected polyline + divergence band
  * (`features/replay/**`), and the region-manager page (`features/geo/**`). Built entirely against

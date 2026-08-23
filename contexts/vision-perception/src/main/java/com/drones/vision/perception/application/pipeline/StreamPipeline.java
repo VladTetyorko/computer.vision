@@ -62,7 +62,7 @@ import com.drones.vision.perception.application.stream.StreamService;
  *       regardless of whether it is sampled for inference, and regardless of
  *       whether a detection outage (see below) is in progress — the video
  *       path never depends on the CV service being healthy.</li>
- *   <li><b>Published video is always clean pixels</b> (docs/plans/active/CV-CLEAN-FEED-PLAN.md
+ *   <li><b>Published video is always clean pixels</b> (docs/plans/done/CV-CLEAN-FEED-PLAN.md
  *       D-1): the frame handed to {@link StreamPublisherPort#publish} is exactly the frame this
  *       source produced — there is no server-side burn-in of detections or a telemetry OSD
  *       anymore. Boxes are data only, fanned out via {@link #latestDetections()}/{@link
@@ -80,7 +80,7 @@ import com.drones.vision.perception.application.stream.StreamService;
  * frame, the achieved rate equals the requested rate for any source faster
  * than it — unlike the integer {@code sequence % everyNth} stride this
  * replaced, which could only approximate a target the source rate was not a
- * multiple of (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1).
+ * multiple of (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;1).
  *
  * <p>The source's arrival rate is still measured — each frame's
  * inter-arrival delta (from an injectable {@link LongSupplier} nanotime
@@ -107,7 +107,7 @@ import com.drones.vision.perception.application.stream.StreamService;
  *
  * <p>The most recently <b>published</b> frame is likewise kept in a {@code volatile} field ({@link
  * #latestFrame()}, docs/plans/done/MVP3-PLAN.md C-a) — the same instance {@link StreamPublisherPort#publish}
- * was just handed, exactly the source's own pixels (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1 —
+ * was just handed, exactly the source's own pixels (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1 —
  * there is no server-side rendering stage anymore), a latest-wins reference swap with no
  * per-frame copy. This is what backs the manager dashboard's per-stream JPEG snapshot endpoint and
  * training-sample capture alike, since a clean published frame is exactly what both want.
@@ -197,7 +197,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private volatile PipelineConfig config;
 
     /**
-     * Detection <b>demand</b> (docs/plans/active/CV-DEMAND-PLAN.md &sect;1, &sect;3.2) — the system-derived
+     * Detection <b>demand</b> (docs/plans/done/CV-DEMAND-PLAN.md &sect;1, &sect;3.2) — the system-derived
      * "someone is actually consuming the output" gate, independent of {@link #config}'s {@link
      * PipelineConfig#detectionEnabled()} operator-intent gate. {@code volatile}, the same live-swap
      * shape as {@link #config} itself: {@link #updateDetectionDemand} writes it from {@code
@@ -211,7 +211,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private volatile boolean detectionDemand = true;
 
     /**
-     * Guards {@link #gateWasOpen} (docs/plans/active/CV-DEMAND-PLAN.md &sect;5/&sect;7's gate-close-clearing
+     * Guards {@link #gateWasOpen} (docs/plans/done/CV-DEMAND-PLAN.md &sect;5/&sect;7's gate-close-clearing
      * correction): {@link #updateConfig} (operator intent, an HTTP-request thread) and {@link
      * #updateDetectionDemand} (viewer demand, {@code DefaultStreamService}'s demand-poll scheduler
      * thread) can each close the gate, so the read-compare-write in {@link
@@ -242,12 +242,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final DetectionExtrapolator extrapolator;
 
     /**
-     * Pull-mode detection driver (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5/D6) — {@code null} means push
+     * Pull-mode detection driver (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, D5/D6) — {@code null} means push
      * mode: {@link #maybeDetect} samples frames and calls {@link #detectionPort} directly, unchanged.
      * Non-null switches this pipeline to {@link PullResultSubscriber}, which subscribes to {@link
      * PullDetectionBinding#results()} and forwards every arriving result whose {@link
      * #detectionGateOpen()} holds to the same {@link #onDetectionResult} fan-out push mode uses — a
-     * gated-off result is dropped instead (docs/plans/active/CV-DEMAND-PLAN.md &sect;5) — the seam is
+     * gated-off result is dropped instead (docs/plans/done/CV-DEMAND-PLAN.md &sect;5) — the seam is
      * here and in {@link #maybeDetect}'s guard, never inside {@link #onDetectionResult} itself.
      */
     private final PullDetectionBinding pullDetection;
@@ -273,7 +273,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final PipelineLatencyWindow pipelineLatency;
 
     /**
-     * What the sampler decided, per deadline (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1). Peer of
+     * What the sampler decided, per deadline (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;1). Peer of
      * {@link #pipelineLatency} rather than part of it — see {@link DetectionRateWindow} for why the
      * two halves of the rate loop are not one window.
      */
@@ -281,7 +281,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Chooses the rate {@link #sampleIntervalNanos} schedules deadlines at
-     * (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R2). Built here rather than injected for the same
+     * (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2). Built here rather than injected for the same
      * reason {@link #extrapolator} is: it is this pipeline's own per-stream bookkeeping, not a
      * substitutable collaborator.
      */
@@ -336,7 +336,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private volatile long framesObserved = 0L;
     private volatile double measuredFps = -1.0;
 
-    // Deadline-based sampling state (docs/plans/active/CV-RATE-CONTROL-PLAN.md wave R1), replacing the
+    // Deadline-based sampling state (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R1), replacing the
     // `sequence % everyNth` stride this class used to sample by. Same threading note as the cadence
     // fields above: written only from onNext, volatile purely for visibility between successive
     // calls. `sampleScheduleArmed` distinguishes "no deadline yet" from a legitimate deadline
@@ -479,7 +479,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Wiring seam: same as the 14-argument constructor, plus an optional pull-mode detection driver
-     * (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5/D6) — see {@link PullDetectionBinding}. Public, for the
+     * (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, D5/D6) — see {@link PullDetectionBinding}. Public, for the
      * same reason the 14-argument constructor is: {@code DefaultStreamService} supplies its own
      * resolved collaborators from a different feature package.
      *
@@ -575,7 +575,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /**
      * Signals {@link StreamPublisherPort#streamStarted} and subscribes to the
      * source publisher, beginning frame processing — plus, in pull mode
-     * (docs/plans/active/MEDIA-SOT-PLAN.md wave M5), subscribing {@link PullResultSubscriber} to {@link
+     * (docs/plans/done/MEDIA-SOT-PLAN.md wave M5), subscribing {@link PullResultSubscriber} to {@link
      * #pullDetection}'s result publisher, which is what actually opens the pull (its {@code opener}
      * runs lazily, on this {@code subscribe} call, exactly like the video source's own supervised
      * publisher). Must be called exactly once.
@@ -618,7 +618,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * #detectionGateOpen()} from open to closed, this call also clears that same state — see {@link
      * #handleDetectionGateTransition()} — for a different reason than the model-change case above:
      * turning detection off means there will never be another answer to hold the last one against
-     * (docs/plans/active/CV-DEMAND-PLAN.md &sect;5/&sect;7), not merely that the next answer will look
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;5/&sect;7), not merely that the next answer will look
      * different.
      *
      * <p><b>Limitation, honestly documented</b> (docs/plans/done/CV-CONTROL-PLAN.md &sect;A's own escape
@@ -654,7 +654,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             clearDetectionDerivedState();
         }
         handleDetectionGateTransition();
-        // docs/plans/active/MEDIA-SOT-PLAN.md wave M5, item 7: PATCH .../config keeps working in pull mode -- its
+        // docs/plans/done/MEDIA-SOT-PLAN.md wave M5, item 7: PATCH .../config keeps working in pull mode -- its
         // fields travel on the next PullControl via reconfigure() instead of the next FrameRequest,
         // since there is no per-frame outbound call in pull mode to carry them on.
         if (pullDetection != null) {
@@ -663,7 +663,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Live-swaps this pipeline's detection-demand gate (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.2) — the
+     * Live-swaps this pipeline's detection-demand gate (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.2) — the
      * same no-lock, visible-on-the-next-frame shape as {@link #updateConfig}, and mirroring its
      * argument's own name: {@code demanded}, not {@code enabled}, since this is a fact about
      * consumers, never an operator's own choice. Called only from {@code
@@ -683,7 +683,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * @return whether detection is currently demanded (docs/plans/active/CV-DEMAND-PLAN.md &sect;1) — a
+     * @return whether detection is currently demanded (docs/plans/done/CV-DEMAND-PLAN.md &sect;1) — a
      *         volatile read, {@code true} until/unless {@link #updateDetectionDemand} ever says
      *         otherwise, so a pipeline whose {@code DefaultStreamService} has no {@code
      *         DetectionDemandPort} wired never observes this as {@code false}
@@ -693,7 +693,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Which of the two independent detection gates (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.6)
+     * Which of the two independent detection gates (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.6)
      * currently explains this stream's boxes-or-no-boxes state — {@link DetectionState#OFF} takes
      * precedence over {@link DetectionState#IDLE_NO_VIEWERS} when both hold, since the operator's own
      * choice is the more specific truth: an operator who disabled detection does not need to also be
@@ -713,11 +713,11 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * How many frames this pipeline has observed (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.2) —
+     * How many frames this pipeline has observed (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.2) —
      * {@code 0} distinguishes "started, nothing has arrived yet" from "frames arrived and stopped,"
      * which {@link StreamState} needs and no other read model exposes.
      *
-     * <p>A proxied stream (docs/plans/active/MEDIA-SOT-PLAN.md D4) opens no video source in this JVM
+     * <p>A proxied stream (docs/plans/done/MEDIA-SOT-PLAN.md D4) opens no video source in this JVM
      * and therefore reports {@code 0} forever — a caller must establish observability separately
      * rather than read this as a stall; {@link StreamState#resolve} takes that as its own first
      * parameter for exactly this reason.
@@ -791,7 +791,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * @return why this stream is sampling at the rate it is, over the stats window
-     *         (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1) — the source rate, the targeted rate, the
+     *         (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;1) — the source rate, the targeted rate, the
      *         achieved rate, and which of the three losses accounts for any difference. The
      *         companion to {@link #pipelineLatency()}: that one says what a detection cost, this one
      *         says how many were asked for and what became of them. Never {@code null}.
@@ -802,7 +802,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * @return the most recently published frame — exactly the source's own pixels
-     *         (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1: there is no server-side rendering stage
+     *         (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1: there is no server-side rendering stage
      *         anymore), the same instance handed to {@link StreamPublisherPort#publish}
      *         (docs/plans/done/MVP3-PLAN.md C-a) — or {@link Optional#empty()} before the first
      *         frame has published. A latest-wins reference swap, same single-{@code
@@ -821,7 +821,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * @return the most recently published frame — an alias for {@link #latestFrame()}, kept as its
      *         own named method because training-sample capture (docs/plans/done/CV-TRAINING-PLAN.md
      *         §2/§D) reaches this API by this name specifically. Frames are always clean now
-     *         (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1) — there is no separate pre-overlay
+     *         (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1) — there is no separate pre-overlay
      *         instance to distinguish anymore.
      */
     public Optional<VideoFrame> latestRawFrame() {
@@ -860,7 +860,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * <p>Short-circuits on an unconfigured field of view <b>before</b> touching the supplier: with
      * no optics described the attitude could not drive compensation anyway, so the default
      * deployment pays nothing at all for this feature. This is {@link #telemetrySupplier}'s only
-     * remaining consumer (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1 removed the telemetry-OSD
+     * remaining consumer (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1 removed the telemetry-OSD
      * burn-in that used to be its other one) — see {@code DefaultStreamService}'s wiring for the
      * INVARIANT that this supplier is still built unconditionally with respect to overlay, gated
      * only on this field of view being configured.
@@ -944,7 +944,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * stride was recomputed from a drifting EWMA on every frame, which moved the phase of {@code
      * sequence % N} as well as its period. A deadline has neither problem: every deadline is served
      * by exactly one frame, so the achieved rate equals the target for any source faster than it
-     * (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1, losses L1/L2).
+     * (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;1, losses L1/L2).
      *
      * <h2>The late clamp</h2>
      * When a frame arrives more than a whole interval after the deadline it serves, the schedule is
@@ -1041,7 +1041,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * The same two-gate conjunction {@link #maybeDetect} and {@link PullResultSubscriber#onNext}
-     * both gate on (docs/plans/active/CV-DEMAND-PLAN.md &sect;1, &sect;3.2): {@link
+     * both gate on (docs/plans/done/CV-DEMAND-PLAN.md &sect;1, &sect;3.2): {@link
      * PipelineConfig#detectionEnabled()} (the operator's own per-stream choice) <b>and</b> {@link
      * #detectionDemand()} (the system-derived "someone is actually watching" fact). Pulled into one
      * method, read from both places, so push and pull mode can never drift out of sync about what
@@ -1055,7 +1055,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /**
      * Detects a true&rarr;false transition of {@link #detectionGateOpen()} and, exactly when one
      * occurs, clears every piece of detection-derived state a consumer could otherwise keep reading
-     * as fresh ({@link #clearDetectionDerivedState()}) — docs/plans/active/CV-DEMAND-PLAN.md
+     * as fresh ({@link #clearDetectionDerivedState()}) — docs/plans/done/CV-DEMAND-PLAN.md
      * &sect;5/&sect;7's gate-close-clearing correction: turning detection off (or losing the last
      * viewer) means there will never be another answer, so holding the last one and re-serving it
      * forever — the reported "turn on and off doesn't work" complaint — asserts something false.
@@ -1116,7 +1116,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * one flipping back resumes detection on the next sampled frame, exactly where the (frozen,
      * untouched) outage/backoff state left off.
      *
-     * <p>Also gated on {@link #pullDetection} being absent (docs/plans/active/MEDIA-SOT-PLAN.md wave M5): in
+     * <p>Also gated on {@link #pullDetection} being absent (docs/plans/done/MEDIA-SOT-PLAN.md wave M5): in
      * pull mode the worker runs its own (ported) deadline sampler and decides when to detect, so this
      * pipeline's own sampler/in-flight bound/{@link #detectionPort} submission never runs — {@link
      * PullResultSubscriber} is the whole of pull-mode detection. This is the one line push mode's own
@@ -1282,7 +1282,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /**
      * Fans out one completed result — after enforcing {@link PipelineConfig#labelFilter()}/{@link
      * PipelineConfig#labelDenyFilter()} exactly once, centrally, here (docs/plans/done/CV-CONTROL-PLAN.md
-     * &sect;A, the dormant-field fix; deny-list joined docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2) —
+     * &sect;A, the dormant-field fix; deny-list joined docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2) —
      * to every downstream consumer: {@link #latestDetections()}, {@link #extrapolator}, {@link
      * #trackBook}, {@link #trackingStats}, {@link #eventEngine}, {@link #liveUpdatePublisherPort},
      * and persistence/the {@code DETECTION} event. Filtering once here, before any of those, is what
@@ -1296,7 +1296,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * DetectionExtrapolator} so the decomposition this class is queued for inherits well-shaped
      * perception stages rather than a fatter method.
      *
-     * <p><b>Re-checks {@link #detectionGateOpen()} on entry</b> (docs/plans/active/CV-DEMAND-PLAN.md
+     * <p><b>Re-checks {@link #detectionGateOpen()} on entry</b> (docs/plans/done/CV-DEMAND-PLAN.md
      * &sect;5/&sect;7): both callers already gate before reaching here — {@link #maybeDetect} before
      * submitting, {@link PullResultSubscriber#onNext} before forwarding — but a push-mode inference
      * submitted while the gate was open can complete on an arbitrary executor thread ({@link
@@ -1333,13 +1333,13 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Drops every detection whose label either fails a non-empty {@link PipelineConfig#labelFilter()}
-     * or matches {@link PipelineConfig#labelDenyFilter()} (docs/plans/active/CV-CLEAN-FEED-PLAN.md
+     * or matches {@link PipelineConfig#labelDenyFilter()} (docs/plans/done/CV-CLEAN-FEED-PLAN.md
      * D-2) — an empty allowlist keeps everything (unchanged semantics), an empty deny-list denies
      * nothing. The two answer different questions: the allowlist, when non-empty, is the model-intent
      * seed ("only these labels ever exist for this stream"); the deny-list is the everyday "hide this
      * class" act, and writing to it never touches the allowlist — a class not yet observed keeps
      * appearing instead of being silently swept into an enumerated allowlist complement (the defect
-     * docs/plans/active/CV-UX-RESEARCH.md &sect;4.4 diagnosed). Returns {@code result} unchanged
+     * docs/plans/done/CV-UX-RESEARCH.md &sect;4.4 diagnosed). Returns {@code result} unchanged
      * (same instance) when nothing was actually dropped, so the common case (neither filter
      * configured, or every detection already matches) allocates nothing new.
      *
@@ -1369,7 +1369,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /**
      * Folds a pull result's worker-reported diagnostics into {@link #detectionRate}/{@link
      * #pipelineLatency}/{@link #rateController} — the pull-mode analogue of what {@link
-     * #submitDetection}'s completion callback does for push mode (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7).
+     * #submitDetection}'s completion callback does for push mode (docs/plans/done/MEDIA-SOT-PLAN.md &sect;7).
      * A {@code null} {@link DetectionResult#pullTelemetry()} (a malformed/early response,
      * {@link DetectionFrameCodec}'s own all-zero-means-absent case) is skipped rather than guessed at.
      *
@@ -1396,13 +1396,13 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Pull-mode detection driver (docs/plans/active/MEDIA-SOT-PLAN.md wave M5, D5/D6): subscribes to {@link
+     * Pull-mode detection driver (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, D5/D6): subscribes to {@link
      * #pullDetection}'s live result publisher and forwards every arriving {@link DetectionResult} to
      * the same {@link #onDetectionResult} fan-out push mode uses, after folding its worker-reported
      * diagnostics into the rate/latency windows ({@link #recordPullTelemetry}). Requests one item at a
      * time, mirroring this pipeline's own video-path backpressure discipline ({@link #onSubscribe}).
      *
-     * <p><b>Gated on {@link #detectionGateOpen()}</b> (docs/plans/active/CV-DEMAND-PLAN.md &sect;5's
+     * <p><b>Gated on {@link #detectionGateOpen()}</b> (docs/plans/done/CV-DEMAND-PLAN.md &sect;5's
      * "one honest gap", closed at the application layer): in pull mode the worker owns its own
      * sampling loop, so {@link #maybeDetect} never runs for this pipeline and this is the only place
      * left to apply the operator/demand gate. Before this gate existed every arriving result was
@@ -1423,7 +1423,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * precedent unprompted — {@link #maybeDetect}'s own early return means {@link #detectionRate}
      * never observes a single sample while a push stream is gated off, so a gated pull stream now
      * reports the same "nothing submitted" honesty. The worker still burns the CPU regardless (a
-     * cross-language follow-up wave, not fixable from here — see docs/plans/active/CV-DEMAND-PLAN.md
+     * cross-language follow-up wave, not fixable from here — see docs/plans/done/CV-DEMAND-PLAN.md
      * &sect;5); that cost is real but is not this read model's job to surface.
      *
      * <p><b>{@link #latestDetections}/{@link #extrapolator}/{@link #trackBook} are cleared</b> the

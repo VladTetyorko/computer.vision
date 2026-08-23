@@ -5,7 +5,7 @@ are too much in one place — split into separate surfaces opened one by one, si
 modal for the rest. `/fly` is the operator's cockpit for flying *any* drone on *any* setup:
 simple, useful, easy — with the ability to set up.
 
-Design rationale inherited from `docs/plans/active/CV-UX-RESEARCH.md` (§1 diagnosis, §2 task
+Design rationale inherited from `docs/plans/done/CV-UX-RESEARCH.md` (§1 diagnosis, §2 task
 ranking, §5 intent cards, §6 disposition) — that doc's *tiering* is kept; its *one-panel with
 collapsed tiers* layout is **superseded** by this split. Builds on CV-CLEAN-FEED waves W3–W5
 (branch `feat/cv-clean-feed`; this work is sub-branch `feat/cv-panel-split`, merged back on green).

@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
  * Context test proving {@link com.drones.vision.app.config.wiring.PersistenceWiringConfiguration}
  * wires every fleet-side (docs/plans/done/MVP2-PLAN.md P-a) and history (P-b) repository port to its
  * {@code Jpa*Repository} implementation — the only implementation left, since
- * docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b deleted the devsupport in-memory fallbacks and the
+ * docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b deleted the devsupport in-memory fallbacks and the
  * {@code vision.persistence.enabled} flag that used to select between them — and that a real
  * {@link EntityManagerFactory} bean exists. See {@code
  * com.drones.vision.app.config.wiring.PersistenceWiringConfigurationTest} for the same bean-method
@@ -161,7 +161,7 @@ class PersistenceWiringTest {
     void defaultConfigurationCreatesExactlyOneEntityManagerFactory() {
         assertFalse(applicationContext.getBeansOfType(EntityManagerFactory.class).isEmpty(),
                 "persistenceEntityManagerFactory must run (and open a real database connection) "
-                        + "unconditionally, since docs/plans/active/POSTGRES-ONLY-CONTEXT.md W2b removed "
+                        + "unconditionally, since docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b removed "
                         + "the flag that used to gate it");
     }
 }

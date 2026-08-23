@@ -21,7 +21,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@code live-updates}'s {@link com.drones.vision.platform.SubsystemStatusPort}
- * (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2) — a minimal {@link LiveUpdateRegistry} (same test
+ * (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2) — a minimal {@link LiveUpdateRegistry} (same test
  * double shape as {@link LiveUpdateRegistryTest}, sharing its {@link ImmediateScheduledExecutorService})
  * drives the two branches: healthy with nothing ever dropped, and degraded once a capacity-1
  * "latest only" buffer (e.g. {@code fleetBuffer}) has replaced an unread entry at least once.

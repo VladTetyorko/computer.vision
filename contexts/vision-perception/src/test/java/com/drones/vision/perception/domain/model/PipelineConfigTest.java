@@ -29,7 +29,7 @@ class PipelineConfigTest {
         assertTrue(defaults.labelFilter().isEmpty(), "empty labelFilter means all labels");
         assertTrue(defaults.labelDenyFilter().isEmpty(), "empty labelDenyFilter means deny nothing");
         assertEquals(EventRuleConfig.defaults(), defaults.eventRule());
-        // docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1: the flip. A new stream is video-only until an
+        // docs/plans/done/CV-DEMAND-PLAN.md §1, wave D1: the flip. A new stream is video-only until an
         // operator turns detection on for it, so many concurrent streams stay affordable by default.
         assertFalse(defaults.detectionEnabled(), "detection defaults off as of CV-DEMAND-PLAN wave D1");
         // docs/plans/done/TRACKING-PLAN.md §5.G, wave T8: this is the flip. PipelineConfig.defaults() shipped
@@ -47,7 +47,7 @@ class PipelineConfigTest {
 
         assertEquals(EventRuleConfig.defaults(), config.eventRule());
         assertFalse(config.detectionEnabled(),
-                "5-arg ctor chain defaults detectionEnabled=false (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1)");
+                "5-arg ctor chain defaults detectionEnabled=false (docs/plans/done/CV-DEMAND-PLAN.md §1, wave D1)");
         assertEquals(TrackingConfig.off(), config.tracking(), "5-arg ctor chain still defaults tracking=off");
         assertTrue(config.labelDenyFilter().isEmpty(),
                 "5-arg ctor chain defaults labelDenyFilter to empty (deny nothing)");
@@ -61,7 +61,7 @@ class PipelineConfigTest {
 
         assertEquals(customRule, config.eventRule());
         assertFalse(config.detectionEnabled(),
-                "6-arg ctor chain defaults detectionEnabled=false (docs/plans/active/CV-DEMAND-PLAN.md §1, wave D1)");
+                "6-arg ctor chain defaults detectionEnabled=false (docs/plans/done/CV-DEMAND-PLAN.md §1, wave D1)");
         assertEquals(TrackingConfig.off(), config.tracking(), "6-arg ctor chain still defaults tracking=off");
         assertTrue(config.labelDenyFilter().isEmpty());
     }

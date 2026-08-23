@@ -94,7 +94,7 @@ public interface MarkService {
      * Drops a {@code DETECTION} mark, projected from an asset's freshest telemetry (the cockpit
      * "geolocate" action), {@code UNVERIFIED} by default.
      *
-     * <p>Since docs/plans/active/GEO-POSE-PLAN.md wave V3, the projection resolves a {@code
+     * <p>Since docs/plans/done/GEO-POSE-PLAN.md wave V3, the projection resolves a {@code
      * GeoProjection.CameraAim} from the telemetry (preferring a measured gimbal depression and a real
      * AGL sample over the platform's 45°/AMSL assumptions) rather than reading raw heading/altitude
      * fields directly — see {@link DefaultMarkService} for the precedence. {@link

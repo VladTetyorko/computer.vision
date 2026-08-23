@@ -19,7 +19,7 @@ describe('SettingsStore', () => {
       model: DEFAULT_DETECTION_MODEL,
       labelFilter: [],
       labelDenyFilter: [],
-      // docs/plans/active/CV-DEMAND-PLAN.md wave D3: detection is opt-in now, off until the operator turns
+      // docs/plans/done/CV-DEMAND-PLAN.md wave D3: detection is opt-in now, off until the operator turns
       // it on, both server-side (PipelineConfig.DEFAULT_DETECTION_ENABLED) and here.
       detectionEnabled: false,
     });
@@ -154,17 +154,17 @@ describe('SettingsStore', () => {
 
   // ---- Detection model (docs/plans/done/CV-CONTROL-PLAN.md Wave E, extending docs/plans/done/CV-MODELS-PLAN.md item 4) --
 
-  it('defaults every built-in profile to the general model, all classes, detection off (docs/plans/active/CV-DEMAND-PLAN.md wave D3)', () => {
+  it('defaults every built-in profile to the general model, all classes, detection off (docs/plans/done/CV-DEMAND-PLAN.md wave D3)', () => {
     for (const profile of BUILT_IN_PROFILES) {
       expect(profile.model).toBe(DEFAULT_DETECTION_MODEL);
       expect(profile.labelFilter).toEqual([]);
-      // docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5: every built-in also denies nothing.
+      // docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2, wave W5: every built-in also denies nothing.
       expect(profile.labelDenyFilter).toEqual([]);
       expect(profile.detectionEnabled).toBe(false);
     }
   });
 
-  // ---- Label deny-list (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-2, wave W5) -------------------------
+  // ---- Label deny-list (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2, wave W5) -------------------------
 
   it('adjusting labelDenyFilter turns the active profile into a revertible custom draft, independent of labelFilter', () => {
     store.adjust({ labelDenyFilter: ['tree', 'bush'] });
@@ -264,7 +264,7 @@ describe('SettingsStore', () => {
 
     store.revertDraft();
     expect(store.effective().labelFilter).toEqual([]);
-    // Balanced's own default, docs/plans/active/CV-DEMAND-PLAN.md wave D3.
+    // Balanced's own default, docs/plans/done/CV-DEMAND-PLAN.md wave D3.
     expect(store.effective().detectionEnabled).toBe(false);
   });
 
@@ -348,7 +348,7 @@ describe('SettingsStore', () => {
 
     expect(reloaded.effective().labelFilter).toEqual([]);
     // `'yes'` isn't a boolean, so this counts as "no decision was ever made" — backfills to the
-    // app's current honest default (off, docs/plans/active/CV-DEMAND-PLAN.md wave D3), not the stale `true`
+    // app's current honest default (off, docs/plans/done/CV-DEMAND-PLAN.md wave D3), not the stale `true`
     // this used to fall back to.
     expect(reloaded.effective().detectionEnabled).toBe(false);
     expect(reloaded.effective().confidenceThreshold).toBe(0.6);
@@ -381,7 +381,7 @@ describe('SettingsStore', () => {
     expect(reloaded.customProfiles()[0].model).toBe(DEFAULT_DETECTION_MODEL);
     expect(reloaded.customProfiles()[0].labelFilter).toEqual([]);
     // A field that was never there is "no decision was ever made" — backfills to the app's current
-    // honest default (off, docs/plans/active/CV-DEMAND-PLAN.md wave D3), same reasoning as the corrupt-value
+    // honest default (off, docs/plans/done/CV-DEMAND-PLAN.md wave D3), same reasoning as the corrupt-value
     // case right above. Contrast with the next two tests, where the field IS present.
     expect(reloaded.customProfiles()[0].detectionEnabled).toBe(false);
     expect(reloaded.activeProfile().id).toBe('custom-old-preset');
@@ -391,7 +391,7 @@ describe('SettingsStore', () => {
     expect(reloaded.effective().inferenceFps).toBe(8);
   });
 
-  it("preserves a returning user's own explicit detectionEnabled=true across this wave's default flip (docs/plans/active/CV-DEMAND-PLAN.md wave D3 — a real prior choice is never silently reverted)", () => {
+  it("preserves a returning user's own explicit detectionEnabled=true across this wave's default flip (docs/plans/done/CV-DEMAND-PLAN.md wave D3 — a real prior choice is never silently reverted)", () => {
     localStorage.setItem(
       'vision.settings.v1',
       JSON.stringify({

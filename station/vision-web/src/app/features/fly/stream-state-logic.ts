@@ -1,7 +1,7 @@
 import type { StreamState } from '../../core/api/models';
 
 /**
- * The one rule of docs/plans/active/STREAM-STATE-PLAN.md §3.1 — **where a detection control reads its
+ * The one rule of docs/plans/done/STREAM-STATE-PLAN.md §3.1 — **where a detection control reads its
  * position from**, applied identically by the Detect switch (`cv-control-panel.html`), the tool
  * rail's off-dot and the video-surface "Turn on" chip (`cockpit.html`).
  *
@@ -29,7 +29,7 @@ export interface VideoNotice {
 
 /**
  * Turns `ActiveStream.state` into what the operator is told over the video, or `null` for "say
- * nothing" (docs/plans/active/STREAM-STATE-PLAN.md §2.3).
+ * nothing" (docs/plans/done/STREAM-STATE-PLAN.md §2.3).
  *
  * Two of the five states deliberately produce no message. `LIVE` needs none — the video is the
  * message. `UNOBSERVED` is the honest "cannot judge": a proxied source runs no `VideoSourcePort`

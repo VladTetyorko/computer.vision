@@ -81,7 +81,7 @@ public interface StreamService {
 
     /**
      * Stops a stream and releases its source, recording <b>why</b> on the emitted
-     * {@code STREAM_STOPPED} event (docs/plans/active/STREAM-STATE-PLAN.md &sect;3.2). A no-op for an
+     * {@code STREAM_STOPPED} event (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2). A no-op for an
      * unknown or already-stopped id.
      *
      * <p>{@link #stop(StreamId)} is this method with {@link StopReason#OPERATOR}. The reason exists
@@ -110,7 +110,7 @@ public interface StreamService {
 
     /**
      * The most recently published frame on a running stream (docs/plans/done/MVP3-PLAN.md C-a) —
-     * exactly the source's own pixels (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1: there is no
+     * exactly the source's own pixels (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1: there is no
      * server-side rendering stage anymore), the instance the pipeline last handed to {@link
      * com.drones.vision.perception.domain.port.StreamPublisherPort#publish}. Backs the per-stream JPEG
      * snapshot endpoint.
@@ -126,7 +126,7 @@ public interface StreamService {
      * (docs/plans/done/CV-TRAINING-PLAN.md &sect;2/&sect;D) — an alias for {@link
      * #latestFrame(StreamId)}, exactly {@link StreamPipeline#latestRawFrame()}, kept as its own
      * named method because training-sample capture reaches this API by this name specifically.
-     * Frames are always clean now (docs/plans/active/CV-CLEAN-FEED-PLAN.md D-1) — there is no
+     * Frames are always clean now (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1) — there is no
      * separate pre-overlay instance to distinguish from {@link #latestFrame} anymore.
      *
      * @param streamId the stream to inspect
@@ -191,7 +191,7 @@ public interface StreamService {
 
     /**
      * A running stream's sampler accounting over the stats window
-     * (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;1) — exactly {@link StreamPipeline#detectionRate()}.
+     * (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;1) — exactly {@link StreamPipeline#detectionRate()}.
      *
      * <p>The companion to {@link #pipelineLatency(StreamId)}: that one reports what a detection
      * cost, this one reports how many were asked for and what became of them, which is what turns
@@ -206,7 +206,7 @@ public interface StreamService {
 
     /**
      * Which of the two independent detection gates currently explains a running stream's
-     * boxes-or-no-boxes state (docs/plans/active/CV-DEMAND-PLAN.md &sect;3.6) — exactly {@link
+     * boxes-or-no-boxes state (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.6) — exactly {@link
      * StreamPipeline#detectionState()}. See {@link DetectionState}'s own javadoc: this reports
      * gating, never health — a stalled detector still reads {@link DetectionState#RUNNING}, which
      * is what {@link #detectionRate(StreamId)}/outage events are for.
@@ -220,7 +220,7 @@ public interface StreamService {
 
     /**
      * Whether a running stream's <b>video</b> is actually flowing right now
-     * (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.3) — the fact a client previously had to
+     * (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.3) — the fact a client previously had to
      * reconstruct by latching on a poll gap, because {@code GET /api/streams} carried no state.
      *
      * <p>See {@link StreamState}'s own javadoc for why this is a third axis and not a widening of
@@ -237,7 +237,7 @@ public interface StreamService {
 
     /**
      * A running stream's <b>effective</b> configuration — the missing read half of a knob that was
-     * write-only over HTTP (docs/plans/active/STREAM-STATE-PLAN.md &sect;2.5).
+     * write-only over HTTP (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.5).
      *
      * <p>{@link #updateConfig(StreamId, PipelineConfigPatch)} could change {@code detectionEnabled},
      * the model, the label filter and the whole tracking configuration, and nothing could read any of

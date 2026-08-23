@@ -13,7 +13,7 @@
 /* Dims, does not blank, the video behind it — `--scrim-strong` is the frontend-style skill's own
    "compositing wash over live video/map" token (§2), the deliberate choice over `--hud-bg-strong`
    (the near-opaque wash every non-video-adjacent dialog in this app uses): this dialog opens
-   directly over the cockpit's live stage-video (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P1 — "the
+   directly over the cockpit's live stage-video (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1 — "the
    video stays visible behind the scrim"), so the backdrop itself must stay legible-but-dim rather
    than reading as opaque. No `backdrop-filter` blur for the same reason — a blur this strong over
    video reads as "blanked", not "dimmed". */
@@ -73,7 +73,7 @@
   color: var(--text-muted);
 }
 
-/* ---- "Looking for" intent cards (docs/plans/active/CV-UX-RESEARCH.md §5, wave U2) ------------ */
+/* ---- "Looking for" intent cards (docs/plans/done/CV-UX-RESEARCH.md §5, wave U2) ------------ */
 
 .intent-cards {
   display: flex;
@@ -116,7 +116,7 @@
 }
 
 /* The intent card's own one-sentence "what it finds" + the selected open-vocab card's shrunk CPU
-   line (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §1 item 2) — plain `.hint` sizing/color, just
+   line (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §1 item 2) — plain `.hint` sizing/color, just
    scoped to sit inside a card instead of a whole section. */
 .intent-card-sentence {
   margin: 0;
@@ -148,7 +148,7 @@
   color: var(--color-info-text);
 }
 
-/* Hidden classes (deny-list) management, with un-hide (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2
+/* Hidden classes (deny-list) management, with un-hide (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2
    §5) — mirrors `detections-strip.css`'s identical `.strip-chip-hidden` treatment (soft-amber
    `.chip.warn` tokens: a deliberate operator choice worth flagging at a glance, not an error) so
    the two surfaces read the same "hidden, click to un-hide" state the same way. Takes precedence
@@ -242,7 +242,7 @@
 /* The staged **allowlist** edit's own "count + Submit + Discard" row — a plain `.notice` shell, no
    `.warn`/`.danger` intent: unapplied work in progress is not bad news, just a fact that must stay
    visible per the frontend-style skill's "unapplied state must be visible" rule. Rendered once, in
-   the merged Classes section (docs/plans/active/CV-PANEL-SPLIT-PLAN.md P2 §5 — the pre-P2 "Seen
+   the merged Classes section (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §5 — the pre-P2 "Seen
    now" mini-checklist used to render an identical second copy of this row; merging the two sections
    into one removed the duplicate along with it). */
 .cv-pending-row {
@@ -252,7 +252,7 @@
   gap: var(--space-8);
 }
 
-/* ---- "Expert" disclosure (docs/plans/active/CV-UX-RESEARCH.md §3/§7, wave U1) — the same native
+/* ---- "Expert" disclosure (docs/plans/done/CV-UX-RESEARCH.md §3/§7, wave U1) — the same native
    `<details>` idiom `app-sidebar.css`'s own `.disclosure` established for "Advanced"/"Upcoming"; a
    feature-local rule set rather than reusing that class directly, since Angular's view
    encapsulation scopes `app-sidebar.css` to `AppSidebar`'s own template. */

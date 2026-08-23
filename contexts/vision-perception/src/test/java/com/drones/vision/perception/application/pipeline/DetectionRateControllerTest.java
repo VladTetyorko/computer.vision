@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The rate loop's arithmetic (docs/plans/active/CV-RATE-CONTROL-PLAN.md &sect;2, closing gap 1 of
+ * The rate loop's arithmetic (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;2, closing gap 1 of
  * docs/conclusions/CV-RATE-BUDGET.md). Every expectation here is derived from the association-budget
  * inequality rather than from an observed value, so a change in the formula fails these rather than
  * quietly re-baselining them.

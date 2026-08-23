@@ -2,7 +2,7 @@ package com.drones.vision.perception.domain.model;
 
 /**
  * A reference region's lifecycle state, as reported by {@code GET /api/geo/regions}
- * (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.3's {@code RegionResponse#status}). {@code BUILDING}
+ * (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3's {@code RegionResponse#status}). {@code BUILDING}
  * and {@code FAILED} are Java-side facts — an in-flight (or lastly-failed) ingest job tracked in
  * memory only, per D10; {@code READY} and {@code NEVER_ACCEPT} are cv-service facts, derived from
  * {@link ReferenceIndexSummary} once {@code ListRegions} reports the region built.

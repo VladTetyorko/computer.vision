@@ -22,7 +22,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires the fixed-camera geolocation feature (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §4/§8,
+ * Wires the fixed-camera geolocation feature (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §4/§8,
  * Wave G4) — a separate {@code @Configuration} from {@code ApplicationServiceWiring}/{@code
  * PersistenceWiringConfiguration}, kept its own file per that plan's hazard 5 ("{@code
  * station/vision-app} wiring ... frequently touched by other active branches — keep G4's wiring in

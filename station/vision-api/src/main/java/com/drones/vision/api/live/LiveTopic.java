@@ -41,7 +41,7 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
         return new LiveTopic(LiveTopicKind.DETECTIONS, assetId);
     }
 
-    /** Visual geolocation's per-asset corrected-track topic (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.4, D11). */
+    /** Visual geolocation's per-asset corrected-track topic (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4, D11). */
     static LiveTopic geo(AssetId assetId) {
         return new LiveTopic(LiveTopicKind.GEO, assetId);
     }

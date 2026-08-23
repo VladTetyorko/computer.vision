@@ -2,8 +2,8 @@
 
 Status: **investigation delivered** (2026-08-20), implementation awaits owner pick. Owner ask:
 "better tracking and following the object — same object changes plant → helicopter → electric
-chair; investigate and doublecheck what we can do." Companion context:
-`TRACK-IDENTITY-CONTEXT.md`. Code facts verified 2026-08-20 against the tree (post-W7,
+chair; investigate and doublecheck what we can do."
+Code facts verified 2026-08-20 against the tree (post-W7,
 `feat/cv-clean-feed`); every claim below carries its citation.
 
 ## 1. Diagnosis — the six-layer causal chain, zero smoothing points

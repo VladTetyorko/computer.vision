@@ -21,7 +21,7 @@ import com.drones.vision.platform.VisibilityScope;
  *
  * <h2>Scope gate</h2>
  * {@link #promote} requires {@link VisibilityScope#canAdminister()} — ADMIN only, not any
- * manager (docs/plans/active/OPS-UX-PLAN.md §1: promoting the live CV model swaps what every
+ * manager (docs/plans/done/OPS-UX-PLAN.md §1: promoting the live CV model swaps what every
  * stream in the deployment infers with, a deployment-global blast radius no single group's manager
  * should have from managing their own subtree alone; {@code DefaultDatasetService#create}'s
  * {@code canManageOrg()} gate is the right shape for a *team-scoped* action, this is not one).

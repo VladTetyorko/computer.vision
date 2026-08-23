@@ -9,7 +9,7 @@ that one reason.
 
 Raw per-config JSON (including every per-frame row): `spikes/geo/results/bakeoff.json` and
 `spikes/geo/results/false_convergence_gate.json`. This file is the human-readable digest — the
-same numbers now also live in `docs/plans/active/VISUAL-GEO-V2-PLAN.md` §9.
+same numbers now also live in `docs/plans/done/VISUAL-GEO-V2-PLAN.md` §9.
 
 ## Regions rebuilt (deliverable 2)
 

@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Objects;
 
 /**
- * Read-only view of live projected tracks (docs/plans/active/FIXED-CAMERA-GEO-PLAN.md §5/D3) —
+ * Read-only view of live projected tracks (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §5/D3) —
  * {@code GET /api/map/tracks}. What a page reload rebuilds the picture from; live deltas ride the
  * existing {@code map} SSE topic instead (see {@code MapEventPayload}'s {@code track} field).
  *

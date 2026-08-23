@@ -27,7 +27,7 @@ const PART_COUNT_NOUN: Record<AfterActionPart, string> = {
 
 /**
  * `<vision-after-action-panel>` — the evidence-package card on `ReplayPage`
- * (docs/plans/active/AFTER-ACTION-PLAN.md, wave W2). Deliberately dumb, mirroring
+ * (docs/plans/done/AFTER-ACTION-PLAN.md, wave W2). Deliberately dumb, mirroring
  * `shared/ui/preflight-checklist.ts`'s own "items in, no store/DI" shape: everything it renders is
  * `manifest` transformed through the pure `core/after-action/after-action-logic.ts`, plus the three
  * plain load-state inputs `ReplayFacade` already tracks the same way it tracks the recording pane

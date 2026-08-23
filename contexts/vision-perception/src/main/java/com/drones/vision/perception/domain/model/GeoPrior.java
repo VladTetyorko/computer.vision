@@ -2,7 +2,7 @@ package com.drones.vision.perception.domain.model;
 
 /**
  * Restricts a localization session's retrieval to a disc around where the station already believes
- * the aircraft is — proto's {@code GeoPrior} (docs/plans/active/VISUAL-GEO-V2-PLAN.md §3.1).
+ * the aircraft is — proto's {@code GeoPrior} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.1).
  *
  * @param latitude     degrees, range [-90,90]
  * @param longitude    degrees, range [-180,180]
