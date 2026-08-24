@@ -226,15 +226,25 @@ public class ApplicationServiceWiring {
      * manualControlPort} resolves to {@code TelemetryWiring#mavlinkManualControlSender}, the one
      * {@link ManualControlPort} bean in this context today.
      *
-     * <p>Uses {@code DefaultManualControlService}'s <b>6-arg canonical constructor</b> — not either
+     * <p>Uses {@code DefaultManualControlService}'s <b>7-arg canonical constructor</b> — not either
      * convenience constructor — so {@link VisionRcProperties#watchdogTimeoutMs()} actually takes
-     * effect; the convenience constructors hardcode {@code DEFAULT_WATCHDOG_TIMEOUT_MS}.
+     * effect; the convenience constructors hardcode {@code DEFAULT_WATCHDOG_TIMEOUT_MS} and engage
+     * with the built-in layout only.
+     *
+     * <p>The last argument is the seam that makes an operator's saved controller layout actually fly
+     * the aircraft (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decision C6): {@code
+     * ControlProfileService#activeFor} resolves {@code (actor, live vehicle kind)} to their active
+     * profile, falling back to the built-in. A method reference rather than the whole service,
+     * because the session needs exactly this one question answered — and because injecting the
+     * service would put a sixth dependency on a class that already does enough
+     * ({@code .claude/skills/java-clean-code/SKILL.md} §3).
      */
     @Bean
     public ManualControlService manualControlService(AssetService assetService, ManualControlPort manualControlPort,
-                                                       AuditTrailPort auditTrailPort, VisionRcProperties rcProperties) {
+                                                       AuditTrailPort auditTrailPort, VisionRcProperties rcProperties,
+                                                       ControlProfileService controlProfileService) {
         return new DefaultManualControlService(assetService, manualControlPort, auditTrailPort, Clock.systemUTC(),
-                rcWatchdogScheduler(), rcProperties.watchdogTimeoutMs());
+                rcWatchdogScheduler(), rcProperties.watchdogTimeoutMs(), controlProfileService::activeFor);
     }
 
     private static ScheduledExecutorService rcWatchdogScheduler() {

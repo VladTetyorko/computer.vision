@@ -2,6 +2,7 @@ package com.drones.vision.api.dto;
 
 import com.drones.vision.flight.domain.model.ControlBinding;
 import com.drones.vision.flight.domain.model.ControlFunction;
+import com.drones.vision.flight.domain.model.ControlInputKind;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -59,7 +60,7 @@ class ManualControlFrameDtoTest {
     @Test
     void engagedFrameSerializesWithTheFixedTypeLiteralAndItsChannelMap() {
         ManualControlEngagedFrame frame = new ManualControlEngagedFrame("11111111-1111-1111-1111-111111111111",
-                33, "COPTER", "AETR", "Multirotor",
+                33, "COPTER", "22222222-2222-2222-2222-222222222222", "BUILT_IN", "AETR", "Multirotor",
                 List.of(ManualControlChannelBindingResponse.from(
                         ControlBinding.centeredAxis(ControlFunction.ROLL, 0, 1))));
 
@@ -70,6 +71,23 @@ class ManualControlFrameDtoTest {
         assertTrue(json.contains("\"label\":\"Roll\""));
         assertTrue(json.contains("\"vehicleKind\":\"COPTER\""));
         assertTrue(json.contains("\"profileCode\":\"AETR\""));
+        assertTrue(json.contains("\"profileId\":\"22222222-2222-2222-2222-222222222222\""));
+        assertTrue(json.contains("\"profileSource\":\"BUILT_IN\""));
+    }
+
+    /**
+     * The field that tells a client to draw a detented switch rather than a slider — and the one
+     * place the wire distinguishes what a control <em>is</em> from which array it arrives in
+     * (CONTROLLER-SETUP decision C1).
+     */
+    @Test
+    void aChannelMapEntryCarriesTheInputKindItWasBoundAs() {
+        String detented = JSON.writeValueAsString(ManualControlChannelBindingResponse.from(
+                ControlBinding.switched(ControlFunction.AUX_1, ControlBinding.Source.AXIS,
+                        ControlInputKind.SWITCH_3, 4, 6)));
+
+        assertTrue(detented.contains("\"source\":\"AXIS\""));
+        assertTrue(detented.contains("\"kind\":\"SWITCH_3\""));
     }
 
     /** The one field a client cannot render an honest throttle without (VEHICLE-CONTROL-PROFILES §2 P3). */

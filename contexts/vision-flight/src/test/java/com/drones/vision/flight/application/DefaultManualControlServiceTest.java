@@ -7,6 +7,7 @@ import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.flight.domain.model.ControlProfile;
+import com.drones.vision.flight.domain.model.ControlProfileId;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -119,6 +120,47 @@ class DefaultManualControlServiceTest {
         assertEquals(assetId.value().toString(), entry.targetId());
         assertEquals("MANUAL_CONTROL", entry.details().get("command"));
         assertEquals("ENGAGE", entry.details().get("result"));
+    }
+
+    /**
+     * The seam that makes controller setup mean anything (docs/plans/active/
+     * CONTROLLER-SETUP-CONTEXT.md C6): a session engages with the operator's own active layout,
+     * resolved against the kind the <em>link</em> is reporting — never a kind stored anywhere.
+     */
+    @Test
+    void engageEngagesWithTheProfileTheSelectorResolvesForThisOperatorAndVehicle() {
+        stubDetails(device);
+        ControlProfile saved = ControlProfile.forKind(FakeManualControlPort.FakeLink.KIND)
+                .copyAs(ControlProfileId.random(), "Field rover");
+        List<UserId> askedFor = new ArrayList<>();
+        List<VehicleKind> askedAbout = new ArrayList<>();
+        DefaultManualControlService withProfiles = new DefaultManualControlService(assetService, manualControlPort,
+                auditTrail, clock, scheduler, 300L, (owner, kind) -> {
+                    askedFor.add(owner);
+                    askedAbout.add(kind);
+                    return saved;
+                });
+
+        ManualControlSession session = withProfiles.engage(assetId, actor, VisibilityScope.unbounded(), () -> { });
+
+        assertEquals(saved, session.controlProfile());
+        assertEquals(List.of(actor), askedFor);
+        assertEquals(List.of(FakeManualControlPort.FakeLink.KIND), askedAbout);
+    }
+
+    /**
+     * A session must never engage with no map at all — there is no safe way to fail open on a
+     * throttle — so a selector that answers nothing is the built-in, not a null profile.
+     */
+    @Test
+    void engageFallsBackToTheBuiltInWhenTheSelectorResolvesNothing() {
+        stubDetails(device);
+        DefaultManualControlService withProfiles = new DefaultManualControlService(assetService, manualControlPort,
+                auditTrail, clock, scheduler, 300L, (owner, kind) -> null);
+
+        ManualControlSession session = withProfiles.engage(assetId, actor, VisibilityScope.unbounded(), () -> { });
+
+        assertEquals(ControlProfile.forKind(FakeManualControlPort.FakeLink.KIND), session.controlProfile());
     }
 
     @Test

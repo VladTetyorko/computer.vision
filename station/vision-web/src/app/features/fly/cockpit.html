@@ -218,18 +218,6 @@
            `position: fixed`, so where it mounts in the DOM doesn't matter for layout — mounting it
            here just keeps it beside the rest of `main`'s own overlays). -->
 
-      <!-- Flight (Mode/Arm/Disarm) — migrated into the shared drawer shell (D-E); the host still
-           gates the whole component on `canShowCommands()`, unchanged. -->
-      <vision-flight-command-panel
-        [assetId]="a.assetId"
-        [assetDisplayName]="a.displayName"
-        [capabilities]="facade.capabilities()"
-        [canCommand]="facade.canShowCommands()"
-        [armed]="facade.telemetry.latest()?.flightState?.armed"
-        [open]="isPanelOpen('flight')"
-        (close)="panels.close()"
-      />
-
       <!-- ---- Vision drawer — merged from the former separate `cv` (CV control) and `detections`
            (strip) drawers into one (wave W5, docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3), id kept as
            `cv` (`fly-logic.ts#ToolRailPanelId`'s own doc comment — least-disruptive: a returning
@@ -270,16 +258,20 @@
         </vision-side-panel>
       }
 
-      <!-- Controller (RC transmitter monitor + Take control) — docs/plans/active/RC-CONTROL-PLAN.md Phase 0
-           (the read-only monitor, always available) + docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R5 (the SITL
-           relay engage/release below it, gated on the same `canShowCommands()` the flight panel
-           uses). Mounted only while open so its Gamepad rAF poll loop — and any live relay session,
-           via `ManualControlClient`'s own `DestroyRef` teardown — only run then. -->
+      <!-- Controller — the one drawer an operator commands from (docs/plans/active/RC-CONTROL-PLAN.md
+           Phase 0's read-only monitor + docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R5's engage/release
+           + the mode/arm/disarm section the former separate `flight` drawer used to be,
+           docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10 — `<vision-flight-command-panel>` is
+           body-only now and mounts inside this component). Mounted only while open so its Gamepad
+           rAF poll loop — and any live relay session, via `ManualControlClient`'s own `DestroyRef`
+           teardown — only run then. -->
       @if (isPanelOpen('rc')) {
         <vision-rc-monitor
           [assetId]="a.assetId"
           [assetDisplayName]="a.displayName"
           [canCommand]="facade.canShowCommands()"
+          [capabilities]="facade.capabilities()"
+          [armed]="facade.telemetry.latest()?.flightState?.armed"
           (close)="panels.close()"
         />
       }
@@ -381,16 +373,8 @@
                            deliberately last and separated — it's reference, not a flying tool. -->
     <div class="grid-rail">
       <div class="rail-group" role="group" aria-label="Control">
-        @if (facade.canShowCommands()) {
-          <vision-icon-button
-            icon="drone"
-            label="Flight controls"
-            variant="hud"
-            [active]="isPanelOpen('flight')"
-            (activated)="togglePanel('flight')"
-          />
-        }
-        <!-- Controller (RC monitor) — always available; a read-only monitor, not a command. -->
+        <!-- One button for the merged drawer (C10): the monitor is always available, and the
+             mode/arm/disarm section inside gates itself on `canShowCommands()`. -->
         <vision-icon-button
           icon="gamepad"
           label="Controller"

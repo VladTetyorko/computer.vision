@@ -20,6 +20,14 @@ import java.util.List;
  *                     itself as anything this platform recognizes, and the map below is the
  *                     historical everything-centred one rather than a guess
  *                     (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P8)
+ * @param profileId    the engaged layout's id, as a canonical UUID string — the handle a client uses
+ *                     to look the full layout (including its action bindings) up in
+ *                     {@code GET /api/control-profiles}
+ * @param profileSource {@code "SAVED"} when the operator's own active profile was engaged,
+ *                     {@code "BUILT_IN"} when the platform's fallback for this vehicle kind was
+ *                     (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decisions C6/C7). Worth
+ *                     showing: an operator who configured a layout and is nonetheless flying the
+ *                     built-in has an activation problem they cannot otherwise see
  * @param profileCode  the profile's short channel-order code, e.g. {@code "AETR"} for an aircraft,
  *                     {@code "S-T-"} for a ground vehicle ({@code -} where nothing is bound)
  * @param profileName  what to call this vehicle in front of an operator, e.g. {@code "Multirotor"}
@@ -27,12 +35,14 @@ import java.util.List;
  *                     operator's control surface
  */
 public record ManualControlEngagedFrame(String type, String assetId, int rateHz, String vehicleKind,
-                                         String profileCode, String profileName,
+                                         String profileId, String profileSource, String profileCode,
+                                         String profileName,
                                          List<ManualControlChannelBindingResponse> channelMap) {
 
     /** Convenience constructor: fills in the fixed {@code type} literal. */
-    public ManualControlEngagedFrame(String assetId, int rateHz, String vehicleKind, String profileCode,
-                                      String profileName, List<ManualControlChannelBindingResponse> channelMap) {
-        this("engaged", assetId, rateHz, vehicleKind, profileCode, profileName, channelMap);
+    public ManualControlEngagedFrame(String assetId, int rateHz, String vehicleKind, String profileId,
+                                      String profileSource, String profileCode, String profileName,
+                                      List<ManualControlChannelBindingResponse> channelMap) {
+        this("engaged", assetId, rateHz, vehicleKind, profileId, profileSource, profileCode, profileName, channelMap);
     }
 }

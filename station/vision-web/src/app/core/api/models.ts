@@ -2477,7 +2477,12 @@ export type ControlTravel = 'CENTERED' | 'UNIDIRECTIONAL';
  * is entirely the backend's `ChannelMap#apply` job, and `deadband`/`reversed` stay server-side.
  */
 export interface ManualControlChannelBinding {
-  readonly source: 'AXIS' | 'BUTTON';
+  readonly source: ControlSource;
+  /** What the operator declared this control physically *is* — a different question from `source`
+   * (an EdgeTX 3-position switch is a `SWITCH_3` read from the `AXIS` array). Added additively by
+   * docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decision C1; it is what lets a surface draw a
+   * detented switch instead of a slider. */
+  readonly kind: ControlInputKind;
   readonly function: ControlFunction;
   readonly travel: ControlTravel;
   readonly sourceIndex: number;
@@ -2546,6 +2551,13 @@ export interface ManualControlEngagedMessage {
   readonly profileCode: string;
   /** What to call this vehicle in front of an operator, e.g. `'Multirotor'`. */
   readonly profileName: string;
+  /** The engaged layout's id — the handle to find its action bindings in `GET /api/control-profiles`
+   * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md §4.4). */
+  readonly profileId: string;
+  /** Whether the operator's own saved layout was engaged, or the platform's fallback. An operator
+   * who configured one and is nonetheless flying `'BUILT_IN'` has an activation problem they cannot
+   * otherwise see. */
+  readonly profileSource: ControlProfileSource;
   readonly channelMap: readonly ManualControlChannelBinding[];
 }
 
@@ -2824,4 +2836,149 @@ export interface AfterActionManifest {
   readonly parts: readonly AfterActionPartStatus[];
   readonly complete: boolean;
   readonly caveats: readonly string[];
+}
+
+// --- Controller setup: what each stick/button/switch does -------------------------------------
+// docs/plans/active/CONTROLLER-SETUP-CONTEXT.md §4. `/api/control-profiles` CRUD + catalogue; the
+// engaged `channelMap` above is the same binding model, narrowed to what a live session needs.
+
+/** Which Gamepad array a control's value is read from. */
+export type ControlSource = 'AXIS' | 'BUTTON';
+
+/**
+ * What a control physically *is*, as the operator declared it — deliberately separate from
+ * {@link ControlSource} (decision C1): an EdgeTX 3-position switch arrives on the *axes* array, a
+ * latching toggle on the *buttons* array. `'SWITCH_3'` can only be read from an axis; one button
+ * cannot report three positions.
+ */
+export type ControlInputKind = 'AXIS' | 'BUTTON' | 'SWITCH_2' | 'SWITCH_3';
+
+/**
+ * Where a switch is sitting — ArduPilot's own three positions, at the firmware's own PWM bands
+ * (<1200 µs LOW, 1200–1800 MIDDLE, >1800 HIGH). A `SWITCH_2` uses LOW/HIGH; a `BUTTON` is HIGH
+ * while pressed.
+ */
+export type SwitchPosition = 'LOW' | 'MIDDLE' | 'HIGH';
+
+/**
+ * What a switch position fires. Short on purpose: this is what the platform can genuinely send, not
+ * what a ground station could imagine (CONTROLLER-SETUP-CONTEXT.md §2.4). `'AUX_FUNCTION'` is the
+ * escape hatch that reaches every switch-driven ArduPilot feature by `RCx_OPTION` number.
+ */
+export type ControlAction =
+  | 'ARM'
+  | 'DISARM'
+  | 'TOGGLE_ARM'
+  | 'EMERGENCY_STOP'
+  | 'RETURN_TO_HOME'
+  | 'SET_MODE'
+  | 'AUX_FUNCTION';
+
+/** What an action needs configured alongside it, and therefore what the UI must ask for. */
+export type ControlActionParameter = 'NONE' | 'MODE_NAME' | 'AUX_FUNCTION';
+
+/** Whether a layout is one the operator saved or one of the platform's built-ins. */
+export type ControlProfileSource = 'SAVED' | 'BUILT_IN';
+
+/**
+ * One control that *streams* into an RC channel. `travel`/`label` are derived server-side and
+ * ignored on write — send them back unchanged or omit them, the server recomputes either way.
+ */
+export interface ControlBinding {
+  readonly source: ControlSource;
+  readonly kind: ControlInputKind;
+  readonly function: ControlFunction;
+  readonly sourceIndex: number;
+  readonly rcChannel: number;
+  readonly minMicros: number;
+  readonly centerMicros: number;
+  readonly maxMicros: number;
+  readonly deadband: number;
+  readonly reversed: boolean;
+  readonly travel?: ControlTravel;
+  readonly label?: string;
+}
+
+/** What one position of a switch does. `parameter` is a mode name, an `RCx_OPTION` number, or absent. */
+export interface PositionAction {
+  readonly position: SwitchPosition;
+  readonly action: ControlAction;
+  readonly parameter?: string | null;
+}
+
+/** One control whose *positions* fire one-shot commands, instead of streaming into a channel. */
+export interface ActionBinding {
+  readonly source: ControlSource;
+  readonly kind: ControlInputKind;
+  readonly sourceIndex: number;
+  readonly positions: readonly PositionAction[];
+}
+
+/**
+ * One controller layout. A built-in is read-only — every write endpoint refuses its id — and is
+ * copied rather than edited (`POST /api/control-profiles`).
+ *
+ * `active` answers "is this what a session would actually engage with", which for a built-in means
+ * the operator has activated no saved profile for its vehicle kind.
+ */
+export interface ControlProfile {
+  readonly id: string;
+  readonly source: ControlProfileSource;
+  readonly kind: VehicleKind;
+  readonly code: string;
+  readonly name: string;
+  readonly active: boolean;
+  readonly updatedAt?: string;
+  readonly channelMap: readonly ControlBinding[];
+  readonly actionMap: readonly ActionBinding[];
+}
+
+/** `POST /api/control-profiles` — starts a copy of the built-in for `kind`. */
+export interface CreateControlProfileRequest {
+  readonly kind: VehicleKind;
+  readonly name: string;
+}
+
+/** `PUT /api/control-profiles/{id}` — the whole layout, replaced in one write (see the DTO's own
+ * javadoc for why this is not a per-binding PATCH). */
+export interface UpdateControlProfileRequest {
+  readonly name: string;
+  readonly channelMap: readonly ControlBinding[];
+  readonly actionMap: readonly ActionBinding[];
+}
+
+/**
+ * `GET /api/control-profiles/catalog` — everything the setup page may offer, answered by the
+ * backend rather than duplicated here (decision C8): a UI holding its own copy eventually offers an
+ * action the server refuses, discovered at the moment the operator flicks the switch.
+ */
+export interface ControlCatalog {
+  readonly vehicleKinds: readonly { readonly name: VehicleKind; readonly label: string }[];
+  readonly inputKinds: readonly {
+    readonly name: ControlInputKind;
+    readonly label: string;
+    readonly sources: readonly ControlSource[];
+    readonly positions: readonly SwitchPosition[];
+  }[];
+  readonly positions: readonly {
+    readonly name: SwitchPosition;
+    readonly label: string;
+    /** The value `MAV_CMD_DO_AUX_FUNCTION` expects — so nothing here hardcodes that HIGH is 2. */
+    readonly level: number;
+  }[];
+  readonly functions: readonly { readonly name: ControlFunction; readonly label: string }[];
+  readonly actions: readonly {
+    readonly name: ControlAction;
+    readonly label: string;
+    readonly parameter: ControlActionParameter;
+    /** Needs the extra confirmation friction of decision C9 — the arm/disarm family. */
+    readonly dangerous: boolean;
+  }[];
+  readonly auxFunctions: readonly { readonly number: number; readonly label: string }[];
+}
+
+/** `POST /api/assets/{id}/aux-function` — `level` is ArduPilot's own 0 LOW / 1 MIDDLE / 2 HIGH. */
+export interface AuxFunctionRequest {
+  readonly function: number;
+  readonly level: number;
 }

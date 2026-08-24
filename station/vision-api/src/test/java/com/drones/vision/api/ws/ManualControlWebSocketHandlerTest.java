@@ -9,6 +9,7 @@ import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.flight.application.WatchdogListener;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.flight.domain.model.ControlProfile;
+import com.drones.vision.flight.domain.model.ControlProfileId;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,6 +81,13 @@ class ManualControlWebSocketHandlerTest {
         assertEquals("ROVER", frame.get("vehicleKind").asString());
         assertEquals("S-T-", frame.get("profileCode").asString());
         assertEquals("Ground vehicle", frame.get("profileName").asString());
+
+        // Which layout is in force, and whether it is the operator's own or the platform's fallback
+        // (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md §4.4): nothing is saved in this fake, so it
+        // is the built-in -- and an operator who configured one would see that it is not being used.
+        assertEquals("BUILT_IN", frame.get("profileSource").asString());
+        assertEquals(ControlProfileId.builtIn(VehicleKind.ROVER).value().toString(),
+                frame.get("profileId").asString());
         assertEquals(2, frame.get("channelMap").size());
 
         JsonNode steering = frame.get("channelMap").get(0);

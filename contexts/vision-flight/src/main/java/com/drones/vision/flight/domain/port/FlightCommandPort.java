@@ -124,6 +124,48 @@ public interface FlightCommandPort {
     CommandResult returnToHome(Device device);
 
     /**
+     * Force-disarms the aircraft behind {@code device}, bypassing the autopilot's own checks — the
+     * kill switch every ground station calls "Emergency Stop"
+     * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md §2.4).
+     *
+     * <p>Equivalent to {@code disarm(device, true)} and implemented as exactly that on MAVLink (the
+     * {@code 21196} force parameter). It exists as its own method because it is a different
+     * <em>intent</em>: {@code disarm} asks the vehicle to stop when it is safe to, this insists.
+     * <b>An airborne vehicle will fall.</b>
+     *
+     * @param device the device whose aircraft should stop immediately
+     * @return {@link CommandResult#ACCEPTED} or {@link CommandResult#NO_ACK}
+     * @throws IllegalArgumentException if {@code device} is unsupported or its firmware is not
+     *                                   commandable
+     * @throws IllegalStateException    if the aircraft explicitly refused the command
+     */
+    CommandResult emergencyStop(Device device);
+
+    /**
+     * Triggers one of the aircraft's own auxiliary functions by number, at a switch level — MAVLink
+     * {@code MAV_CMD_DO_AUX_FUNCTION} (218), the command behind every {@code RCx_OPTION} feature an
+     * ArduPilot airframe has (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decision C5).
+     *
+     * <p>This is the platform's one generic command, and it is generic on purpose: it reaches motor
+     * emergency stop (31), RC-override enable (46), camera trigger (9), gripper (19), parachute (22)
+     * and everything else the firmware defines, without this platform having to model each of them
+     * and without it pretending to reach features a given airframe does not have. What the number
+     * means is the <em>vehicle's</em> business; whether the vehicle acts on it shows up as the
+     * acknowledgement, not as a claim made here.
+     *
+     * @param device   the device whose aircraft should run the function
+     * @param function the {@code RCx_OPTION} function number
+     * @param level    the switch level the function is being driven to — {@code 0} low, {@code 1}
+     *                 middle, {@code 2} high, matching {@code MAV_CMD_DO_AUX_FUNCTION}'s own
+     *                 encoding (see {@code SwitchPosition#auxFunctionLevel()})
+     * @return {@link CommandResult#ACCEPTED} or {@link CommandResult#NO_ACK}
+     * @throws IllegalArgumentException if {@code device} is unsupported, its firmware is not
+     *                                   commandable, or {@code level} is outside {@code [0,2]}
+     * @throws IllegalStateException    if the aircraft explicitly refused the command
+     */
+    CommandResult auxFunction(Device device, int function, int level);
+
+    /**
      * A best-effort snapshot of what commands the aircraft behind {@code device} currently accepts,
      * derived entirely from the firmware/vehicle-family this platform has most recently heard it
      * report. Never throws and never blocks on the network: an unsupported, never-heard, or

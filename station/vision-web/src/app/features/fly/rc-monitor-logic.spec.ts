@@ -64,6 +64,7 @@ describe('channelBindingLabel', () => {
     expect(
       channelBindingLabel({
         source: 'AXIS',
+        kind: 'AXIS',
         function: 'ROLL',
         travel: 'CENTERED',
         sourceIndex: 0,
@@ -77,6 +78,7 @@ describe('channelBindingLabel', () => {
     expect(
       channelBindingLabel({
         source: 'AXIS',
+        kind: 'AXIS',
         function: 'THROTTLE',
         travel: 'UNIDIRECTIONAL',
         sourceIndex: 2,

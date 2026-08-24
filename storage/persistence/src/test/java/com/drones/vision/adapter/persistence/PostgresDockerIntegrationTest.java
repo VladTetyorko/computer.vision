@@ -1,5 +1,20 @@
 package com.drones.vision.adapter.persistence;
 
+import com.drones.vision.adapter.persistence.repository.JpaControlProfileRepository;
+import com.drones.vision.flight.domain.model.ActionBinding;
+import com.drones.vision.flight.domain.model.ActionMap;
+import com.drones.vision.flight.domain.model.ChannelMap;
+import com.drones.vision.flight.domain.model.ControlAction;
+import com.drones.vision.flight.domain.model.ControlBinding;
+import com.drones.vision.flight.domain.model.ControlFunction;
+import com.drones.vision.flight.domain.model.ControlInputKind;
+import com.drones.vision.flight.domain.model.ControlProfile;
+import com.drones.vision.flight.domain.model.ControlProfileId;
+import com.drones.vision.flight.domain.model.OwnedControlProfile;
+import com.drones.vision.flight.domain.model.PositionAction;
+import com.drones.vision.flight.domain.model.SwitchPosition;
+import com.drones.vision.flight.domain.model.VehicleKind;
+import com.drones.vision.flight.domain.port.ControlProfileRepositoryPort;
 import com.drones.vision.map.domain.model.AccessLevel;
 import com.drones.vision.map.domain.model.Affiliation;
 import com.drones.vision.learning.domain.model.Annotation;
@@ -163,6 +178,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -207,13 +223,16 @@ class PostgresDockerIntegrationTest {
      * DbAuditLogCoverageTests} fails loudly the moment a future migration adds a table and
      * nobody consciously classifies it. Mirrors that migration's "Included" list, plus {@code
      * camera_poses} added by {@code V22__fixed_camera_geo.sql} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
-     * decision D4 — a camera's pose is control-plane configuration, not telemetry).
+     * decision D4 — a camera's pose is control-plane configuration, not telemetry) and {@code
+     * control_profiles} added by {@code V24__control_profiles.sql}
+     * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C4 — a saved layout decides what a switch
+     * does to an aircraft, which is control-plane configuration by any reading).
      */
     private static final Set<String> AUDITED_TABLES = Set.of(
             "categories", "devices", "device_capabilities", "assets", "asset_devices",
             "asset_usages", "geofence_zones", "groups", "users", "pilot_assignments",
             "marks", "datasets", "map_layers", "map_layer_grants", "map_drawings",
-            "vehicle_profiles", "feature_requirements", "camera_poses");
+            "vehicle_profiles", "feature_requirements", "camera_poses", "control_profiles");
 
     /**
      * Every other base table in the schema as of V22 — high-volume append-only event tables, the
@@ -2555,6 +2574,117 @@ class PostgresDockerIntegrationTest {
 
             assertEquals(List.of(after.id(), atCursor.id()), found,
                     "sinceInclusive excludes strictly-before events but includes the boundary");
+        }
+    }
+
+    /**
+     * {@link JpaControlProfileRepository} (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C4).
+     *
+     * <p>The round-trip test is not ceremony here: a profile's bindings are stored as jsonb lists of
+     * the <em>domain records themselves</em>, so this is the only place that proves an operator's
+     * saved layout survives a write and a read at all — including the enums, the switch positions and
+     * the per-position action parameters.
+     */
+    @Nested
+    class ControlProfileRepositoryTests {
+
+        private final ControlProfileRepositoryPort repository = new JpaControlProfileRepository(entityManagerFactory);
+
+        private OwnedControlProfile profileFor(UserId owner, VehicleKind kind, String name, boolean active) {
+            ControlProfile layout = ControlProfile.forKind(kind).copyAs(ControlProfileId.random(), name);
+            return new OwnedControlProfile(owner, layout, active, NOW);
+        }
+
+        @Test
+        void findByIdReturnsEmptyForUnknownProfile() {
+            assertTrue(repository.findById(ControlProfileId.random()).isEmpty());
+        }
+
+        @Test
+        void everyBindingShapeSurvivesTheJsonbRoundTrip() {
+            UserId owner = UserId.random();
+            ControlProfile layout = ControlProfile.forKind(VehicleKind.ROVER)
+                    .copyAs(ControlProfileId.random(), "Bench rover")
+                    .withBindings(
+                            new ChannelMap(List.of(
+                                    ControlBinding.centeredAxis(ControlFunction.STEERING, 0, 1),
+                                    ControlBinding.switched(ControlFunction.AUX_1, ControlBinding.Source.AXIS,
+                                            ControlInputKind.SWITCH_3, 5, 6),
+                                    new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS,
+                                            ControlFunction.THROTTLE, 2, 3, 1100, 1500, 1900, 0.05, true))),
+                            new ActionMap(List.of(
+                                    ActionBinding.pressButton(0, ControlAction.ARM),
+                                    new ActionBinding(ControlBinding.Source.AXIS, ControlInputKind.SWITCH_3, 4,
+                                            List.of(new PositionAction(SwitchPosition.LOW, ControlAction.SET_MODE,
+                                                            "Manual"),
+                                                    new PositionAction(SwitchPosition.MIDDLE,
+                                                            ControlAction.AUX_FUNCTION, "46"),
+                                                    PositionAction.of(SwitchPosition.HIGH,
+                                                            ControlAction.EMERGENCY_STOP))))));
+
+            repository.save(new OwnedControlProfile(owner, layout, false, NOW));
+
+            OwnedControlProfile found = repository.findById(layout.id()).orElseThrow();
+            assertEquals(layout, found.profile());
+            assertEquals(owner, found.owner());
+        }
+
+        @Test
+        void savingTwiceUpdatesInPlaceRatherThanAppending() {
+            UserId owner = UserId.random();
+            OwnedControlProfile first = profileFor(owner, VehicleKind.COPTER, "Bench copter", false);
+            repository.save(first);
+
+            repository.save(new OwnedControlProfile(owner,
+                    first.profile().copyAs(first.id(), "Field copter"), false, NOW));
+
+            assertEquals("Field copter", repository.findById(first.id()).orElseThrow().profile().displayName());
+            assertEquals(1, repository.findAllByOwner(owner).size());
+        }
+
+        @Test
+        void activatingMovesTheFlagWithinOneKindAndLeavesOtherKindsAlone() {
+            UserId owner = UserId.random();
+            OwnedControlProfile roverA = profileFor(owner, VehicleKind.ROVER, "Rover A", false);
+            OwnedControlProfile roverB = profileFor(owner, VehicleKind.ROVER, "Rover B", false);
+            OwnedControlProfile copter = profileFor(owner, VehicleKind.COPTER, "Copter", false);
+            repository.save(roverA);
+            repository.save(roverB);
+            repository.save(copter);
+
+            repository.activate(owner, roverA.id());
+            repository.activate(owner, roverB.id());
+            repository.activate(owner, copter.id());
+
+            assertEquals(roverB.id(), repository.findActive(owner, VehicleKind.ROVER).orElseThrow().id());
+            assertEquals(copter.id(), repository.findActive(owner, VehicleKind.COPTER).orElseThrow().id());
+            assertTrue(repository.findActive(owner, VehicleKind.PLANE).isEmpty());
+        }
+
+        @Test
+        void oneOperatorsProfilesAreInvisibleToAnother() {
+            UserId alice = UserId.random();
+            UserId bob = UserId.random();
+            OwnedControlProfile alices = profileFor(alice, VehicleKind.ROVER, "Alice rover", false);
+            repository.save(alices);
+            repository.activate(alice, alices.id());
+
+            assertTrue(repository.findAllByOwner(bob).isEmpty());
+            assertTrue(repository.findActive(bob, VehicleKind.ROVER).isEmpty());
+            assertThrows(NoSuchElementException.class, () -> repository.activate(bob, alices.id()));
+        }
+
+        @Test
+        void deletingLeavesNoActiveProfileBehind() {
+            UserId owner = UserId.random();
+            OwnedControlProfile profile = profileFor(owner, VehicleKind.ROVER, "Bench rover", false);
+            repository.save(profile);
+            repository.activate(owner, profile.id());
+
+            repository.delete(profile.id());
+
+            assertTrue(repository.findById(profile.id()).isEmpty());
+            assertTrue(repository.findActive(owner, VehicleKind.ROVER).isEmpty());
         }
     }
 

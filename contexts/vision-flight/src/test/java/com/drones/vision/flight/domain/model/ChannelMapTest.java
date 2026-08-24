@@ -37,15 +37,15 @@ class ChannelMapTest {
     @Test
     void defensivelyCopiesBindings() {
         List<ControlBinding> bindings = new ArrayList<>(List.of(
-                new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, 0.0, false)));
+                new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, 0.0, false)));
         ChannelMap map = new ChannelMap(bindings);
 
-        bindings.add(new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 1, 2, 1000, 1500, 2000, 0.0, false));
+        bindings.add(new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 1, 2, 1000, 1500, 2000, 0.0, false));
 
         assertEquals(1, map.bindings().size());
         assertThrows(UnsupportedOperationException.class,
                 () -> map.bindings().add(
-                        new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 1, 2, 1000, 1500, 2000, 0.0, false)));
+                        new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 1, 2, 1000, 1500, 2000, 0.0, false)));
     }
 
     // --- apply() ---
@@ -90,8 +90,8 @@ class ChannelMapTest {
     @Test
     void applyLeavesUnboundChannelsAsIgnore() {
         ChannelMap map = new ChannelMap(List.of(
-                new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 2, 1000, 1500, 2000, 0.0, false),
-                new ControlBinding(ControlBinding.Source.BUTTON, ControlFunction.AUX_1, 0, 4, 1000, 1000, 2000, 0.0, false)));
+                new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 2, 1000, 1500, 2000, 0.0, false),
+                new ControlBinding(ControlBinding.Source.BUTTON, ControlInputKind.BUTTON, ControlFunction.AUX_1, 0, 4, 1000, 1000, 2000, 0.0, false)));
 
         RcChannels channels = map.apply(List.of(0.7), List.of(1.0));
 

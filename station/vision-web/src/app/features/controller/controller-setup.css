@@ -1,0 +1,227 @@
+/* Two columns: the layouts you have, and the one you are editing. Collapses to one below --bp-md,
+   where an editor squeezed beside a list stops being readable long before it stops fitting. */
+
+.setup-grid {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) 1fr;
+  gap: var(--space-16);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  /* --bp-md */
+  .setup-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Layouts ------------------------------------------------------------------------------ */
+
+.layout-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.layout-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.layout-row.selected {
+  border-color: var(--color-info);
+}
+
+.layout-pick {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+
+.layout-meta {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.layout-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.new-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-top: var(--space-24);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--border);
+}
+
+.new-layout-row {
+  display: flex;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.new-layout-row input {
+  flex: 1;
+  min-width: 10ch;
+}
+
+/* ---- Editor ------------------------------------------------------------------------------- */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.editor-actions {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.name-field {
+  display: flex;
+  flex-direction: column;
+  max-width: 32ch;
+}
+
+/* ---- Live transmitter inventory ----------------------------------------------------------- */
+
+.inventory {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.inventory-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.inventory-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* One physical control, offered as something to map. A bound one stays visible but inert — it is
+   still part of the transmitter, it just already has a row below. */
+.input-chip {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.input-chip:disabled {
+  cursor: default;
+}
+
+.input-chip.bound {
+  color: var(--text-muted);
+}
+
+.input-chip.on {
+  border-color: var(--color-info);
+}
+
+/* ---- Control rows ------------------------------------------------------------------------- */
+
+.control-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.control-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.control-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.control-head-spacer {
+  flex: 1;
+}
+
+.control-name {
+  font-weight: 600;
+}
+
+.control-row {
+  display: flex;
+  gap: var(--space-16);
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.control-row label {
+  display: flex;
+  flex-direction: column;
+}
+
+.control-row label.grow {
+  flex: 1;
+  min-width: 12ch;
+}
+
+.control-row label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.position-row {
+  align-items: flex-end;
+  padding-left: var(--space-8);
+  border-left: 2px solid var(--border);
+}
+
+.position-name {
+  min-width: 5ch;
+  padding-bottom: var(--space-8);
+  color: var(--text-muted);
+}
+
+.issue-list {
+  margin: 0;
+  padding-left: var(--space-16);
+}

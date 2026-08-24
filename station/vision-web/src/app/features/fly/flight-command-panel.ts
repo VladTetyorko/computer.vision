@@ -1,10 +1,9 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { UiStore } from '../../core/ui/ui-store';
 import { VisionApi } from '../../core/api/vision-api';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
 import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
-import { SidePanel } from '../../shared/ui/side-panel';
 import { ArmConfirmDialog } from './arm-confirm-dialog';
 import type { FlightCapability } from '../../core/api/models';
 import { commandOutcomeToast, disarmConfirmMessage, modeConfirmMessage } from './flight-command-panel-logic';
@@ -17,15 +16,24 @@ type CommandDialog = 'mode' | 'arm' | 'disarm';
 /**
  * The Fly cockpit's Arm/Disarm/Mode panel (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2 — "UI — Wave C"),
  * extending Stage 1's `shared/ui/return-home-button.ts` with the two next command classes now that
- * capability-gating (`GET .../flight-capabilities`) is real. Migrated into the shared
- * `vision-side-panel` drawer shell (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-E): this used to be a single
- * `.command-cluster` frosted-pill island always visible in `fly.html`'s `.hud-header`; it now
- * renders as the `flight` tool-rail drawer's body, with `open`/`close` driven by `FlyPage`'s own
- * `PanelState` (`panels`) — same "own HTTP call + toast directly" shape as `ReturnHomeButton`
- * throughout, since there's no shared store a one-shot command like any of these three could
- * sensibly live behind.
+ * capability-gating (`GET .../flight-capabilities`) is real.
  *
- * **Single consumer today** (only `FlyPage`) — lives under `features/fly/`, not `shared/ui/`, unlike
+ * <h2>Body-only, inside the Controller drawer</h2>
+ * This began as a frosted-pill island in the cockpit header, became the `flight` tool-rail drawer
+ * (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-E), and is now the top section of the **Controller**
+ * drawer (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decision C10) — it owns no
+ * `<vision-side-panel>`, no `open`, no `close`; `<vision-rc-monitor>` is the one drawer shell for
+ * both, exactly as `<vision-cv-control-panel>` became body-only inside the merged Vision drawer.
+ *
+ * The merge is not cosmetic: mode and arm/disarm are what an operator reaches for *while* deciding
+ * whether to take the sticks, and a separate drawer meant closing one to reach the other. It also
+ * puts the clicked Arm control next to the switch-bound one, which is the same command by a
+ * different gesture (`core/rc/control-action-dispatcher.ts`).
+ *
+ * Same "own HTTP call + toast directly" shape as `ReturnHomeButton` throughout, since there's no
+ * shared store a one-shot command like any of these three could sensibly live behind.
+ *
+ * **Single consumer today** (only `<vision-rc-monitor>`) — lives under `features/fly/`, not `shared/ui/`, unlike
  * `ReturnHomeButton` (which already had two call sites, `FlyPage` + Command's `AssetPanel`, the day
  * it was written). Promote it to `shared/ui/` the day a second consumer needs it, per this codebase's
  * own established "second consumer moves it" precedent — not before.
@@ -54,7 +62,7 @@ type CommandDialog = 'mode' | 'arm' | 'disarm';
  */
 @Component({
   selector: 'vision-flight-command-panel',
-  imports: [ConfirmDialog, ArmConfirmDialog, SidePanel],
+  imports: [ConfirmDialog, ArmConfirmDialog],
   templateUrl: './flight-command-panel.html',
   styleUrl: './flight-command-panel.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -68,17 +76,6 @@ export class FlightCommandPanel {
   readonly canCommand = input<boolean>(false);
   /** Latest telemetry's `flightState.armed` — gates Disarm's crash-warning copy, nothing else. */
   readonly armed = input<boolean | undefined>(undefined);
-  /** Whether the `flight` drawer is open — driven by the host's `PanelState` (`fly.ts`'s `panels`),
-   * not this component's own state (docs/plans/done/UI-REDESIGN-PLAN.md D-E). Distinct from {@link canCommand}:
-   * that's the *host* gate (is there anything to show at all), this is purely "is the drawer open
-   * right now" — both must hold for the command cluster to actually render (see the template). */
-  readonly open = input<boolean>(false);
-  /** Emitted when the drawer's own close control (`<vision-side-panel>`'s head button, or Esc) fires
-   * — the host is the one that actually closes it (`panels.close()`). Confirm dialogs below are
-   * deliberately siblings of `<vision-side-panel>` in the template, not projected inside it — see
-   * this class's own doc comment above the arm section for why that placement matters. */
-  readonly close = output<void>();
-
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
 
@@ -140,18 +137,13 @@ export class FlightCommandPanel {
 
   // --- Arm -------------------------------------------------------------------------------------
   /**
-   * Gates `<vision-arm-confirm-dialog>` in the template — deliberately rendered as a **sibling** of
-   * `<vision-side-panel>`, never projected inside it (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2 migration
-   * note). `<vision-side-panel>`'s own `<aside>` catches `Esc` and emits `close` (which `fly.ts`
-   * wires to `panels.close()`); if the arm/mode/disarm confirm dialogs lived *inside* that `<aside>`
-   * as projected content, a stray `Esc` press while one is open would bubble up through it and close
-   * the whole drawer — silently tearing down the confirm dialog along with it, defeating
-   * `ConfirmDialog`/`ArmConfirmDialog`'s own explicit "no Escape dismissal" poka-yoke rule (both
-   * components' own doc comments). Keeping the three confirm dialogs as template-level siblings
-   * instead means an `Esc` press while one is open still bubbles to `fly.ts`'s own document-level
-   * handler and may close the *drawer behind it* (harmless — the confirm dialog is a full
-   * `position: fixed` scrim covering everything regardless of whether the drawer underneath is
-   * "open"), but never dismisses the confirm dialog itself; only its own Cancel/Confirm buttons do.
+   * Gates `<vision-arm-confirm-dialog>` in the template. Now that this panel is projected into the
+   * Controller drawer, its three confirms are DOM children of that drawer's `<aside>` — which
+   * catches `Esc` — so an `Esc` pressed while a confirm is up would otherwise close the drawer out
+   * from under it, and with it any live manual-control session. Both modals therefore own the key
+   * themselves: they take focus on open and stop `Esc` at their own backdrop (see
+   * `shared/ui/confirm-dialog.ts`), which is what a modal should have been doing all along. Neither
+   * dialog *dismisses* on `Esc` — that poka-yoke is unchanged; only its own buttons close it.
    */
   protected readonly armBusy = signal(false);
 

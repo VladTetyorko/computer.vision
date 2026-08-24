@@ -111,6 +111,46 @@ public interface FlightCommandService {
     CommandResult disarm(AssetId assetId, boolean force, UserId actor, VisibilityScope scope);
 
     /**
+     * Force-disarms {@code assetId}'s aircraft, bypassing its own pre-arm/disarm checks — the
+     * emergency stop every ground station offers (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md
+     * §2.4). Scope-gated and audited exactly like {@link #disarm}.
+     *
+     * <p>Distinct from {@code disarm(assetId, true, ...)} only in intent and in the audit line it
+     * writes, which is the point: a trail that cannot tell a considered disarm from a panic stop
+     * cannot answer the question anyone actually asks afterwards.
+     *
+     * @param assetId the asset to stop
+     * @param actor   the user performing the command, for the audit trail
+     * @param scope   the acting user's visibility scope
+     * @return {@link CommandResult#ACCEPTED} or {@link CommandResult#NO_ACK}
+     * @throws java.util.NoSuchElementException if {@code assetId} is unknown
+     * @throws com.drones.vision.platform.AccessDeniedException if the asset is outside {@code scope}
+     * @throws IllegalStateException            if the asset has no commandable device, or the
+     *                                           command attempt itself was refused
+     */
+    CommandResult emergencyStop(AssetId assetId, UserId actor, VisibilityScope scope);
+
+    /**
+     * Runs one of the aircraft's own auxiliary functions by number, at a switch level — the generic
+     * command behind every switch an operator binds to something this platform does not model
+     * natively (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decision C5). Scope-gated and audited
+     * like every other command here.
+     *
+     * @param assetId  the asset to command
+     * @param function the {@code RCx_OPTION} function number
+     * @param level    the switch level: {@code 0} low, {@code 1} middle, {@code 2} high
+     * @param actor    the user performing the command, for the audit trail
+     * @param scope    the acting user's visibility scope
+     * @return {@link CommandResult#ACCEPTED} or {@link CommandResult#NO_ACK}
+     * @throws java.util.NoSuchElementException if {@code assetId} is unknown
+     * @throws com.drones.vision.platform.AccessDeniedException if the asset is outside {@code scope}
+     * @throws IllegalArgumentException         if {@code level} is outside {@code [0,2]}
+     * @throws IllegalStateException            if the asset has no commandable device, or the
+     *                                           command attempt itself was refused
+     */
+    CommandResult auxFunction(AssetId assetId, int function, int level, UserId actor, VisibilityScope scope);
+
+    /**
      * A best-effort snapshot of what commands {@code assetId}'s aircraft currently accepts, for a
      * driving adapter to decide which controls to show (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2).
      *

@@ -1,4 +1,16 @@
-<vision-side-panel title="Controller" icon="gamepad" subtitle="RC transmitter monitor" (close)="close.emit()">
+<vision-side-panel title="Controller" icon="gamepad" subtitle="Mode · arm · sticks" (close)="close.emit()">
+  <!-- Flight commands (mode / arm / disarm) — the former separate `flight` drawer, merged in here as
+       a body-only section (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10). First, because it is
+       what an operator answers before deciding whether to take the sticks below; it gates itself on
+       `canCommand`/`capabilities` and renders nothing at all when the vehicle takes no commands. -->
+  <vision-flight-command-panel
+    [assetId]="assetId()"
+    [assetDisplayName]="assetDisplayName()"
+    [capabilities]="capabilities()"
+    [canCommand]="canCommand()"
+    [armed]="armed()"
+  />
+
   <!-- The read-only transmitter monitor. Purely about a plugged-in gamepad, so the whole block is
        hidden when there is none — "Take control" below is deliberately outside it, because control
        no longer needs one (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P10). -->
@@ -41,6 +53,35 @@
     <div class="rc-switches">
       @for (b of rc.buttons(); track $index) {
         <span class="rc-switch" [class.on]="isOn(b)">{{ buttonLabel($index) }}</span>
+      }
+    </div>
+  }
+
+  <!-- Bound switches (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C2/C3) — what this operator's
+       layout fires when a switch moves. Deliberately above "Take control" and outside it: these go
+       over the ordinary command endpoints, so they work without taking the sticks at all. -->
+  @if (actionBindings().length > 0) {
+    <div class="rc-actions">
+      <span class="label rc-group-label">Bound switches</span>
+      <ul class="rc-binding-list">
+        @for (binding of actionBindings(); track controlLabel(binding.source, binding.sourceIndex)) {
+          <li>
+            <span class="rc-binding-name">{{ controlLabel(binding.source, binding.sourceIndex) }}</span>
+            <span class="rc-binding-actions">
+              @for (position of binding.positions; track position.position) {
+                <span class="chip">{{ position.position }} · {{ actionLabel(position.action, position.parameter) }}</span>
+              }
+            </span>
+          </li>
+        }
+      </ul>
+      @if (dispatcher.holding(); as holding) {
+        <vision-notice variant="warn">{{ holding }}.</vision-notice>
+      } @else if (dispatcher.lastFired(); as fired) {
+        <p class="muted hint">{{ fired }}</p>
+      }
+      @if (!canCommand()) {
+        <p class="muted hint">These do nothing until this drone accepts commands.</p>
       }
     </div>
   }

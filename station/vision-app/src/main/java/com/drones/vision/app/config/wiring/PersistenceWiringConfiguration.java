@@ -6,6 +6,7 @@ import com.drones.vision.flight.domain.port.FeatureRequirementRepositoryPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TrackCorrectionRepositoryPort;
+import com.drones.vision.flight.domain.port.ControlProfileRepositoryPort;
 import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
@@ -183,6 +184,17 @@ public class PersistenceWiringConfiguration {
     @Bean
     public VehicleProfileRepositoryPort vehicleProfileRepositoryPort(EntityManagerFactory entityManagerFactory) {
         return new JpaVehicleProfileRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C4 — the operator's saved controller
+     * layouts ({@code V24__control_profiles.sql}). Unlike most ports here this one is edited in
+     * place rather than appended to: an operator keeps rearranging the same profile, so the
+     * repository's {@code save} is a merge under a stable id.
+     */
+    @Bean
+    public ControlProfileRepositoryPort controlProfileRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaControlProfileRepository(entityManagerFactory);
     }
 
     /**

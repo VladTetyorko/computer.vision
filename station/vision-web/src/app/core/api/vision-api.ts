@@ -35,8 +35,13 @@ import type {
   DeviceEdit,
   FleetReadiness,
   FleetSummary,
+  AuxFunctionRequest,
+  ControlCatalog,
+  ControlProfile,
+  CreateControlProfileRequest,
   FlightCapability,
   FlightCommandResponse,
+  UpdateControlProfileRequest,
   GeofenceZone,
   GeofenceZoneRequest,
   GeolocateMarkRequest,
@@ -837,6 +842,79 @@ export class VisionApi {
         force ? { force } : {},
       ),
     );
+  }
+
+  /**
+   * Force-disarms — QGroundControl's own Emergency Stop, and the same `21196` magic parameter
+   * underneath. **This stops the motors wherever the vehicle is**; a multirotor in the air falls.
+   * A separate call from {@link disarm} rather than `disarm(force: true)` on purpose: the two are
+   * different commands with different audit entries, and a UI that blurs them eventually fires the
+   * wrong one. Same error shape as {@link setMode}.
+   */
+  emergencyStop(assetId: string): Promise<FlightCommandResponse> {
+    return firstValueFrom(
+      this.http.post<FlightCommandResponse>(`/api/assets/${encodeURIComponent(assetId)}/emergency-stop`, {}),
+    );
+  }
+
+  /**
+   * Fires one ArduPilot auxiliary function at one switch level — the generic escape hatch a bound
+   * 2- or 3-position switch uses to reach a feature this platform has no dedicated command for
+   * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md §2.3). `level` is ArduPilot's own 0 LOW / 1
+   * MIDDLE / 2 HIGH, read off `GET /api/control-profiles/catalog` rather than assumed. `400` for an
+   * out-of-range function/level, otherwise the same error shape as {@link setMode}.
+   */
+  auxFunction(assetId: string, request: AuxFunctionRequest): Promise<FlightCommandResponse> {
+    return firstValueFrom(
+      this.http.post<FlightCommandResponse>(`/api/assets/${encodeURIComponent(assetId)}/aux-function`, request),
+    );
+  }
+
+  // --- Controller setup (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md §4.4's frozen contract) ------
+  // Gated by profile *ownership*, not by visibility scope: a layout describes one person's
+  // transmitter, so these answer for the signed-in operator and nobody else.
+
+  /**
+   * Every layout available to the operator — their saved profiles newest-edit-first, then the
+   * platform's built-ins. A built-in comes back `active: true` exactly when they have activated no
+   * saved profile for its vehicle kind, i.e. when it is what a session would really engage with.
+   */
+  controlProfiles(): Promise<readonly ControlProfile[]> {
+    return firstValueFrom(this.http.get<ControlProfile[]>('/api/control-profiles'));
+  }
+
+  /** Everything the setup page may offer — see {@link ControlCatalog} for why this is a server read. */
+  controlCatalog(): Promise<ControlCatalog> {
+    return firstValueFrom(this.http.get<ControlCatalog>('/api/control-profiles/catalog'));
+  }
+
+  /** Starts a new layout as a copy of the built-in for `kind` (`201`); not activated. */
+  createControlProfile(request: CreateControlProfileRequest): Promise<ControlProfile> {
+    return firstValueFrom(this.http.post<ControlProfile>('/api/control-profiles', request));
+  }
+
+  /**
+   * Replaces one saved layout's name and both binding maps. `400` when the layout violates its own
+   * invariants — one control bound twice, one RC channel driven twice, a 3-position switch on a
+   * button — surfaced verbatim by `describeHttpError`; `403` for another operator's profile; `404`
+   * for one nobody saved.
+   */
+  updateControlProfile(id: string, request: UpdateControlProfileRequest): Promise<ControlProfile> {
+    return firstValueFrom(
+      this.http.put<ControlProfile>(`/api/control-profiles/${encodeURIComponent(id)}`, request),
+    );
+  }
+
+  /** Makes one layout the operator's active one for its vehicle kind (`204`). */
+  activateControlProfile(id: string): Promise<void> {
+    return firstValueFrom(
+      this.http.post<void>(`/api/control-profiles/${encodeURIComponent(id)}/activate`, {}),
+    );
+  }
+
+  /** Deletes one saved layout (`204`); its vehicle kind falls back to the built-in. */
+  deleteControlProfile(id: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/control-profiles/${encodeURIComponent(id)}`));
   }
 
   // --- Guided drone onboarding (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire contract) -----------

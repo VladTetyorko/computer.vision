@@ -139,7 +139,7 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   why a naive fire-and-forget loop is an actual bug here, not a style choice. Every outcome is only
   ever logged (INFO on accepted, WARNING otherwise); nothing here has a caller waiting on a result.
 - `final class MavlinkFlightCommander implements FlightCommandPort` — `setMode`/`returnToHome`/
-  `arm`/`disarm`/`capabilities` (the latter now also reporting `FlightModes.vehicleKind(target.mavType())`
+  `arm`/`disarm`/`emergencyStop`/`auxFunction`/`capabilities` (`capabilities` also reporting `FlightModes.vehicleKind(target.mavType())`
   as `FlightCapability#vehicleKind`), unchanged resolve/reject rules and wire bytes (see Gotchas for
   what's frozen). Delegates the actual send/await to a fresh, per-call `com.drones.mavlink.service.CommandService`
   built from the resolved device's `MavlinkGateway.sink()`/`.correlator()`, **zero retries**
@@ -147,6 +147,15 @@ grep) — every socket/session/service concern goes through `drone-link/mavlink-
   TARGET_COMPONENT_AUTOPILOT = 1` (referenced by `VehicleClaimPolicy` and `MavlinkManualControlSender`
   — single source of truth, same idiom as before W4). Constructors unchanged:
   `MavlinkFlightCommander(MavlinkTelemetrySource)`, `MavlinkFlightCommander(MavlinkTelemetrySource, Duration ackTimeout)`.
+  - **`emergencyStop(Device)`** (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md §2.4) — a **forced disarm**
+    on the wire (`MAV_CMD_COMPONENT_ARM_DISARM` with the `21196` magic), byte-identical to
+    `disarm(device, true)`; QGroundControl's own `Vehicle::emergencyStop` sends exactly this. It is a
+    separate method purely so the log line and the audit trail record which of the two the operator meant.
+  - **`auxFunction(Device, int function, int level)`** (decision C5) — `MAV_CMD_DO_AUX_FUNCTION` (218):
+    `param1` = the `RCx_OPTION` function number, `param2` = `0` low / `1` middle / `2` high; a `level`
+    outside `[0,2]` throws `IllegalArgumentException` before anything is resolved or sent. **This adapter
+    keeps no table of aux functions on purpose** — a stale copy of the firmware's own list is worse than
+    none, so what a number means stays the vehicle's business and whether it acted shows up as the ack.
 - `final class MavlinkManualControlSender implements ManualControlPort` — `engage`/`send`/`release`, its
   `AdapterLink` now also carrying **`vehicleKind()`** = `FlightModes.vehicleKind(target.mavType())`
   (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P9 — resolved from the heartbeat being
@@ -617,3 +626,5 @@ form of the plan's own stated exit criterion (see O8 Gotchas for why the literal
 around a parameter that does not exist on this firmware, could not be run as stated).
 
 **docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md Wave P3 done** (this adapter's half of per-vehicle stick layouts): `FlightModes.vehicleKind(int mavType)` added; `MavlinkFlightCommander#capabilities` and `MavlinkManualControlSender`'s `AdapterLink` both now report it. **Nothing new is decoded** — the vehicle family was already being classified from `HEARTBEAT.type` to pick a mode table, then thrown away. This wave only routes a fact the adapter had all along up to the layer that needed it, which is why the diff is three small methods and no wire change. 6 new `FlightModesTest` assertions + updated `MavlinkFlightCommanderTest`/`MavlinkManualControlSenderTest`; `./mvnw -B -pl drone-link/mavlink -am test` green.
+
+**docs/plans/active/CONTROLLER-SETUP-CONTEXT.md Wave C3 done** (this adapter's half of operator-bound switches): `MavlinkFlightCommander` gained `emergencyStop` (forced disarm, `21196`) and `auxFunction` (`MAV_CMD_DO_AUX_FUNCTION` 218). Both reuse the existing resolve → `requireCommandableFirmware` → `send` → await-ack path, so the frozen wire rules in Gotchas apply to them unchanged. One command reaches every `RCx_OPTION` feature an airframe has, which is why no per-gadget port method (gimbal, gripper, camera) was added — see the context doc §3.1.

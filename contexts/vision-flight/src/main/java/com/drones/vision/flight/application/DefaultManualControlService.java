@@ -114,6 +114,7 @@ public final class DefaultManualControlService implements ManualControlService {
     private final Clock clock;
     private final ScheduledExecutorService watchdogScheduler;
     private final long watchdogTimeoutMs;
+    private final ControlProfileSelector profileSelector;
 
     private final Object sessionLock = new Object();
     private DefaultManualControlSession activeSession;
@@ -131,10 +132,29 @@ public final class DefaultManualControlService implements ManualControlService {
         this(assetService, manualControlPort, auditTrail, clock, watchdogScheduler, DEFAULT_WATCHDOG_TIMEOUT_MS);
     }
 
-    /** Canonical ctor: as the 5-arg ctor, with an explicit watchdog timeout (e.g. {@code vision.rc.watchdog-timeout-ms}). */
+    /**
+     * As the 5-arg ctor, with an explicit watchdog timeout (e.g. {@code vision.rc.watchdog-timeout-ms}).
+     * Resolves built-in profiles only — see the canonical 7-arg ctor.
+     */
     public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
                                         AuditTrailPort auditTrail, Clock clock,
                                         ScheduledExecutorService watchdogScheduler, long watchdogTimeoutMs) {
+        this(assetService, manualControlPort, auditTrail, clock, watchdogScheduler, watchdogTimeoutMs,
+                ControlProfileSelector.builtInOnly());
+    }
+
+    /**
+     * Canonical ctor, additionally taking the {@link ControlProfileSelector} that decides which
+     * layout a session engages with (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C6). Every other
+     * constructor here defaults it to {@link ControlProfileSelector#builtInOnly()}, which is exactly
+     * the behaviour this service had before operators could save profiles — a caller that does not
+     * pass one gets the platform's own layout, never a null map.
+     */
+    public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
+                                        AuditTrailPort auditTrail, Clock clock,
+                                        ScheduledExecutorService watchdogScheduler, long watchdogTimeoutMs,
+                                        ControlProfileSelector profileSelector) {
+        this.profileSelector = Objects.requireNonNull(profileSelector, "profileSelector must not be null");
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.manualControlPort = Objects.requireNonNull(manualControlPort, "manualControlPort must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
@@ -274,9 +294,12 @@ public final class DefaultManualControlService implements ManualControlService {
             this.link = link;
             this.onWatchdog = onWatchdog;
             this.onEnded = onEnded;
-            // Resolved once, from what the vehicle is reporting right now -- not stored per asset,
-            // which would go stale exactly when an operator re-flashes the flight controller.
-            this.controlProfile = ControlProfile.forKind(link.vehicleKind());
+            // Resolved once per engage, from what the vehicle is reporting right now -- not stored
+            // per asset, which would go stale exactly when an operator re-flashes the flight
+            // controller (P9). The operator's own saved layout for that kind wins over the built-in
+            // if they have one; the selector owns that fallback so this session never has to.
+            ControlProfile resolved = profileSelector.forSession(actor, link.vehicleKind());
+            this.controlProfile = resolved != null ? resolved : ControlProfile.forKind(link.vehicleKind());
             this.lastInput = clock.instant();
         }
 

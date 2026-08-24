@@ -7,6 +7,7 @@ import {
   isWatchMode,
   lastSeenLabel,
   latestFinishedUsage,
+  migratedPanelId,
   nextCollapseAction,
   pickerEmptyStateCopy,
   positionLabel,
@@ -270,5 +271,21 @@ describe('pickerEmptyStateCopy (docs/plans/done/OPS-UX-PLAN.md §2 A2 — truthf
   it('MANAGER/ADMIN copy is unaffected by memberships — the fleet-empty message never mentions a group', () => {
     const state = pickerEmptyStateCopy('MANAGER', [membership('Alpha Squadron')]);
     expect(state.message).not.toContain('Alpha Squadron');
+  });
+});
+
+describe('migratedPanelId (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10 — the retired `flight` drawer)', () => {
+  it('lands a persisted `flight` on the drawer that absorbed it', () => {
+    expect(migratedPanelId('flight')).toBe('rc');
+  });
+
+  it('leaves every id the rail still has exactly as it was', () => {
+    for (const id of ['rc', 'cv', 'marks', 'map', 'help']) {
+      expect(migratedPanelId(id)).toBe(id);
+    }
+  });
+
+  it('keeps "nothing was open" meaning nothing is open', () => {
+    expect(migratedPanelId(null)).toBeNull();
   });
 });

@@ -87,6 +87,8 @@ public final class DefaultFlightCommandService implements FlightCommandService {
     private static final String COMMAND_RTL = "RTL";
     private static final String COMMAND_ARM = "ARM";
     private static final String COMMAND_DISARM = "DISARM";
+    private static final String COMMAND_EMERGENCY_STOP = "EMERGENCY_STOP";
+    private static final String COMMAND_AUX_PREFIX = "AUX:";
     private static final String COMMAND_MODE_PREFIX = "MODE:";
     private static final String ATTR_ASSET_ID = "assetId";
     private static final String ATTR_COMMAND = "command";
@@ -142,6 +144,27 @@ public final class DefaultFlightCommandService implements FlightCommandService {
         requireCommandArgs(assetId, actor, scope);
         Device device = resolveForCommand(assetId, actor, scope, COMMAND_DISARM);
         return sendAndAudit(assetId, actor, COMMAND_DISARM, device, d -> flightCommandPort.disarm(d, force));
+    }
+
+    @Override
+    public CommandResult emergencyStop(AssetId assetId, UserId actor, VisibilityScope scope) {
+        requireCommandArgs(assetId, actor, scope);
+        Device device = resolveForCommand(assetId, actor, scope, COMMAND_EMERGENCY_STOP);
+        return sendAndAudit(assetId, actor, COMMAND_EMERGENCY_STOP, device, flightCommandPort::emergencyStop);
+    }
+
+    @Override
+    public CommandResult auxFunction(AssetId assetId, int function, int level, UserId actor, VisibilityScope scope) {
+        requireCommandArgs(assetId, actor, scope);
+        // Range-checked before anything is resolved or sent, so a malformed binding is a 400 and
+        // never reaches an aircraft -- the same "guard before an attempt" split setMode uses for an
+        // unknown mode name.
+        if (level < 0 || level > 2) {
+            throw new IllegalArgumentException("Aux function switch level must be within [0,2]: " + level);
+        }
+        String command = COMMAND_AUX_PREFIX + function + "@" + level;
+        Device device = resolveForCommand(assetId, actor, scope, command);
+        return sendAndAudit(assetId, actor, command, device, d -> flightCommandPort.auxFunction(d, function, level));
     }
 
     @Override

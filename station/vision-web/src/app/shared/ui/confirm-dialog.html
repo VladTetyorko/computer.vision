@@ -1,11 +1,15 @@
-<div class="backdrop">
+<!-- Esc stops here: a modal must not let a key pressed inside it reach whatever hosts
+     it. Without this, the same Esc that this dialog deliberately ignores would bubble to an
+     enclosing `<vision-side-panel>` and close the drawer underneath -- which, since the flight
+     controls moved into the Controller drawer, would tear down a live manual-control session. -->
+<div class="backdrop" (keydown.escape)="$event.stopPropagation()">
   <div class="dialog card" role="alertdialog" aria-modal="true">
     <p>{{ message() }}</p>
     <div class="row dialog-actions">
       <button type="button" class="btn danger" (click)="confirmed.emit()" [disabled]="busy()">
         {{ busy() ? 'Sending…' : confirmLabel() }}
       </button>
-      <button type="button" class="btn secondary" (click)="cancelled.emit()" [disabled]="busy()">
+      <button type="button" class="btn secondary" #safe (click)="cancelled.emit()" [disabled]="busy()">
         {{ cancelLabel() }}
       </button>
     </div>

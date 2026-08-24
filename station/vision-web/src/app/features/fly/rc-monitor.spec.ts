@@ -6,7 +6,17 @@ import { RcInputService } from '../../core/rc/rc-input.service';
 import { VirtualRcInputService } from '../../core/rc/virtual-rc-input.service';
 import { RcSource } from '../../core/rc/rc-source.service';
 import { ManualControlClient, type ManualControlEngageState } from '../../core/rc/manual-control-client';
-import type { ManualControlChannelBinding, VehicleKind } from '../../core/api/models';
+import { ControlActionDispatcher } from '../../core/rc/control-action-dispatcher';
+import { ControlProfileStore } from '../../core/rc/control-profile-store';
+import { rulesFrom } from '../../core/rc/control-action-logic';
+import { VisionApi } from '../../core/api/vision-api';
+import type {
+  ControlCatalog,
+  ControlProfile,
+  FlightCapability,
+  ManualControlChannelBinding,
+  VehicleKind,
+} from '../../core/api/models';
 
 /** A duck-typed stand-in for `RcInputService` — writable signals a test can drive directly, since
  * the real service only mutates its own signals via `gamepadconnected`/`disconnected` browser
@@ -52,6 +62,54 @@ class FakeManualControlClient {
   readonly release = vi.fn();
 }
 
+/** The layouts store, stubbed — the drawer only ever reads `profiles`/`rules` and calls `load`. */
+class FakeControlProfileStore {
+  readonly profilesSignal = signal<readonly ControlProfile[]>([]);
+  readonly catalogSignal = signal<ControlCatalog | undefined>(undefined);
+  readonly profiles = this.profilesSignal.asReadonly();
+  readonly catalog = this.catalogSignal.asReadonly();
+  readonly loading = signal(false).asReadonly();
+  readonly loaded = signal(true).asReadonly();
+  readonly rules = computed(() => rulesFrom(this.catalogSignal()));
+  readonly load = vi.fn().mockResolvedValue(undefined);
+}
+
+/** The dispatcher, stubbed — what it does with a frame is `control-action-dispatcher.spec.ts`'s
+ * job; what this drawer owes it is one `bind` call with the profile it resolved. */
+class FakeControlActionDispatcher {
+  readonly lastFired = signal<string | undefined>(undefined);
+  readonly holding = signal<string | undefined>(undefined);
+  readonly bind = vi.fn();
+  readonly setArmed = vi.fn();
+}
+
+const ROVER_CAPABILITY: FlightCapability = {
+  commandable: true,
+  armSupported: true,
+  modeSelectSupported: true,
+  selectableModes: ['MANUAL', 'HOLD'],
+  vehicleKind: 'ROVER',
+};
+
+/** One saved rover layout with a single arm-bound switch — the shape the drawer lists. */
+const ROVER_PROFILE: ControlProfile = {
+  id: 'profile-1',
+  source: 'SAVED',
+  kind: 'ROVER',
+  code: 'CUSTOM',
+  name: 'Bench rover',
+  active: true,
+  channelMap: [],
+  actionMap: [
+    {
+      source: 'BUTTON',
+      kind: 'BUTTON',
+      sourceIndex: 1,
+      positions: [{ position: 'HIGH', action: 'ARM', parameter: null }],
+    },
+  ],
+};
+
 const centered = (
   fn: string,
   sourceIndex: number,
@@ -59,6 +117,7 @@ const centered = (
   label: string,
 ): ManualControlChannelBinding => ({
   source: 'AXIS',
+  kind: 'AXIS',
   function: fn as ManualControlChannelBinding['function'],
   travel: 'CENTERED',
   sourceIndex,
@@ -79,8 +138,14 @@ const ROVER_MAP: readonly ManualControlChannelBinding[] = [
 /** `providers` is replaced wholesale by `overrideComponent`, so the real `RcSource`/
  * `VirtualRcInputService` are re-listed here: only the two browser-touching collaborators are
  * faked, and the source-selection logic under test stays the real one. */
-function render(fakeRc: FakeRcInputService, fakeClient: FakeManualControlClient) {
+function render(
+  fakeRc: FakeRcInputService,
+  fakeClient: FakeManualControlClient,
+  extras: { store?: FakeControlProfileStore; dispatcher?: FakeControlActionDispatcher } = {},
+) {
   TestBed.configureTestingModule({});
+  const store = extras.store ?? new FakeControlProfileStore();
+  const dispatcher = extras.dispatcher ?? new FakeControlActionDispatcher();
   TestBed.overrideComponent(RcMonitor, {
     set: {
       providers: [
@@ -88,6 +153,10 @@ function render(fakeRc: FakeRcInputService, fakeClient: FakeManualControlClient)
         VirtualRcInputService,
         RcSource,
         { provide: ManualControlClient, useValue: fakeClient },
+        { provide: ControlProfileStore, useValue: store },
+        { provide: ControlActionDispatcher, useValue: dispatcher },
+        // The merged flight section (C10) injects this; nothing in these tests clicks a command.
+        { provide: VisionApi, useValue: {} },
       ],
     },
   });
@@ -234,5 +303,50 @@ describe('RcMonitor — Take control', () => {
     fakeClient.watchdogTripped.set(true);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('input stalled');
+  });
+});
+
+describe('RcMonitor — the merged Controller drawer (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10)', () => {
+  it('shows mode and arm/disarm inside this one drawer, with no drawer of their own', () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
+    fixture.detectChanges();
+
+    const panels = fixture.nativeElement.querySelectorAll('vision-side-panel');
+    expect(panels.length).toBe(1);
+    expect(fixture.nativeElement.querySelector('.command-cluster')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.arm-btn')).not.toBeNull();
+  });
+
+  it('hides the flight section entirely for a vehicle whose capabilities never resolved', () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+
+    expect(fixture.nativeElement.querySelector('.command-cluster')).toBeNull();
+  });
+
+  it('lists the switches the operator bound, and points the dispatcher at that same layout', () => {
+    const store = new FakeControlProfileStore();
+    const dispatcher = new FakeControlActionDispatcher();
+    store.profilesSignal.set([ROVER_PROFILE]);
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store, dispatcher });
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.querySelector('.rc-actions')?.textContent ?? '';
+    expect(text).toContain('Sw 2');
+    expect(text).toContain('Arm');
+    expect(dispatcher.bind).toHaveBeenCalledWith('asset-1', ROVER_PROFILE, store.rules(), true);
+  });
+
+  it('binds nothing for a vehicle kind the operator has no layout for', () => {
+    const store = new FakeControlProfileStore();
+    const dispatcher = new FakeControlActionDispatcher();
+    store.profilesSignal.set([ROVER_PROFILE]);
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store, dispatcher });
+    fixture.componentRef.setInput('capabilities', { ...ROVER_CAPABILITY, vehicleKind: 'COPTER' as VehicleKind });
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.rc-actions')).toBeNull();
+    expect(dispatcher.bind).toHaveBeenLastCalledWith('asset-1', undefined, store.rules(), true);
   });
 });

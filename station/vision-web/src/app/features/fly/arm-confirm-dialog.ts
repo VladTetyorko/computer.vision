@@ -1,4 +1,14 @@
-import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  afterNextRender,
+  computed,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { armFinalConfirmLabel, armWarningMessage } from './flight-command-panel-logic';
 
 export type ArmConfirmStage = 'warn' | 'final';
@@ -48,8 +58,16 @@ export class ArmConfirmDialog {
 
   protected readonly stage = signal<ArmConfirmStage>('warn');
 
+  /** Cancel on the first stage — focused on open (see `confirm-dialog.ts` for why a modal must own
+   * the focus it is asking a question with, not leave it on the button that opened it). */
+  private readonly safe = viewChild.required<ElementRef<HTMLElement>>('safe');
+
   protected readonly warningMessage = computed(() => armWarningMessage(this.assetDisplayName()));
   protected readonly finalLabel = computed(() => armFinalConfirmLabel(this.assetDisplayName()));
+
+  constructor() {
+    afterNextRender(() => this.safe().nativeElement.focus());
+  }
 
   protected continueToFinalStage(): void {
     this.stage.set('final');

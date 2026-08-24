@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, afterNextRender, input, output, viewChild } from '@angular/core';
 
 /**
  * A generic, mandatory confirm modal (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1's own poka-yoke
@@ -18,6 +18,10 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
  *
  * Deliberately no backdrop-click-to-dismiss and no `Escape` handling — every dismissal is an
  * explicit button click (Confirm or Cancel), never an accidental key press/misclick either way.
+ * Ignoring Escape is not the same as letting it through, though: the backdrop swallows it, and
+ * focus moves to `Cancel` on open so a key pressed while this is up is genuinely inside the modal
+ * — otherwise an `Esc` here would close a host drawer this dialog is projected into, which since
+ * the flight controls moved into the Controller drawer would drop a live control session.
  */
 @Component({
   selector: 'vision-confirm-dialog',
@@ -34,4 +38,11 @@ export class ConfirmDialog {
 
   readonly confirmed = output<void>();
   readonly cancelled = output<void>();
+
+  /** The safe button — focused on open, so Enter dismisses rather than confirms. */
+  private readonly safe = viewChild.required<ElementRef<HTMLElement>>('safe');
+
+  constructor() {
+    afterNextRender(() => this.safe().nativeElement.focus());
+  }
 }

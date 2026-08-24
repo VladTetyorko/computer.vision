@@ -110,8 +110,8 @@ export const TICKER_MAX_EVENTS = 4;
 /** The tool-rail's frozen ids (docs/plans/done/UI-REDESIGN-PLAN.md D-D; `rc` added by docs/plans/active/RC-CONTROL-PLAN.md
  * Phase 0 — the read-only RC transmitter monitor; `marks` added by docs/plans/done/TACTICAL-MARKS-PLAN.md M5
  * — the shared tactical-marks operational picture). This union's own declaration order is no longer
- * the rail's visual order: docs/conclusions/UX-SIMPLIFY-REVIEW.md F4 groups the rail by job — Control (flight,
- * rc), Vision (cv), Situational (marks), Help (pinned last, separated) — see fly.html's
+ * the rail's visual order: docs/conclusions/UX-SIMPLIFY-REVIEW.md F4 groups the rail by job — Control
+ * (rc), Vision (cv), Situational (marks), Help (pinned last, separated) — see fly.html's
  * own comment above `.grid-rail` for the full grouping. Every id/gate/behavior below is unchanged;
  * only where each button sits in the rail moved. **`layers` was removed** (per direct user request)
  * — the detection-boxes rendering-mode control it used to hold its own drawer for now lives inside
@@ -123,8 +123,28 @@ export const TICKER_MAX_EVENTS = 4;
  * opens the same drawer; there is no `detections` id left to migrate away from). See `cockpit.html`'s
  * own comment above the merged drawer block for the full reasoning, including why the drawer stays
  * reachable in watch mode (the strip) even though the control body (`<vision-cv-control-panel>`)
- * does not. */
-export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'marks' | 'map' | 'help';
+ * does not.
+ *
+ * **`flight` was merged into `rc` by docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10**: mode and
+ * arm/disarm are now the top section of the Controller drawer rather than a drawer of their own,
+ * so there is one "how do I command this vehicle" button instead of two adjacent ones. Unlike the
+ * `detections`→`cv` merge above, the retired id was the *persisted* one for anyone who last left
+ * that drawer open, so it is migrated rather than dropped — see {@link migratedPanelId}. */
+export type ToolRailPanelId = 'rc' | 'cv' | 'marks' | 'map' | 'help';
+
+/**
+ * Where a persisted open-drawer id should land today, for ids this rail no longer has.
+ *
+ * `UiStore` restores whatever string `localStorage` holds, and an id no button asks about restores
+ * as "nothing open" — silently, which reads to a returning operator as the app forgetting. The one
+ * retired id is `flight`, and its contents did not go away: they are inside `rc` (C10).
+ *
+ * @param stored the persisted id, or `null` when nothing was open
+ * @returns the id to open now — `stored` unchanged for anything still on the rail
+ */
+export function migratedPanelId(stored: string | null): string | null {
+  return stored === 'flight' ? 'rc' : stored;
+}
 
 /**
  * `Esc`'s own "closest thing open, first" priority (docs/plans/done/UI-REDESIGN-PLAN.md D-D: "Esc calls

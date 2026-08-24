@@ -1,5 +1,6 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.dto.AuxFunctionRequest;
 import com.drones.vision.api.dto.FlightCapabilitiesResponse;
 import com.drones.vision.api.dto.ForceCommandRequest;
 import com.drones.vision.api.dto.ReturnHomeResponse;
@@ -125,6 +126,46 @@ public class FlightCommandController {
         ForceCommandRequest body = request != null ? request : ForceCommandRequest.EMPTY;
         CommandResult result = flightCommandService.disarm(AssetId.of(id), body.forceOrDefault(),
                 currentUser.userId(), currentUser.scope());
+        return ReturnHomeResponse.from(result);
+    }
+
+    /**
+     * Force-disarms the asset's aircraft regardless of the autopilot's own checks — QGroundControl's
+     * {@code Emergency Stop}, and the same {@code 21196} magic parameter underneath.
+     *
+     * <p><b>This stops the motors wherever the vehicle is.</b> A multirotor in the air falls. It is
+     * a separate endpoint from {@link #disarm} rather than a flag on it precisely so that neither
+     * an audit entry nor a UI can confuse the two: {@code disarm} asks the autopilot, this one does
+     * not (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md §2.4).
+     *
+     * @param id the asset to command, as a canonical UUID string
+     * @return the command outcome ({@code ACCEPTED}/{@code NO_ACK})
+     */
+    @PostMapping("/api/assets/{id}/emergency-stop")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ReturnHomeResponse emergencyStop(@PathVariable String id) {
+        CommandResult result = flightCommandService.emergencyStop(AssetId.of(id), currentUser.userId(),
+                currentUser.scope());
+        return ReturnHomeResponse.from(result);
+    }
+
+    /**
+     * Fires one ArduPilot auxiliary function at one switch level — the generic escape hatch that
+     * lets a bound switch reach a feature this platform has no dedicated command for (motor
+     * emergency stop, gripper, parachute, camera trigger, RC-override enable), without this module
+     * pretending to model each of them (CONTROLLER-SETUP-CONTEXT.md §2.3, decision C5).
+     *
+     * @param id      the asset to command, as a canonical UUID string
+     * @param request the function number and switch level ({@code 0} LOW / {@code 1} MIDDLE /
+     *                {@code 2} HIGH); both range-checked before anything is resolved or sent, so a
+     *                malformed binding is a 400 that never reaches an aircraft
+     * @return the command outcome ({@code ACCEPTED}/{@code NO_ACK})
+     */
+    @PostMapping("/api/assets/{id}/aux-function")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ReturnHomeResponse auxFunction(@PathVariable String id, @RequestBody AuxFunctionRequest request) {
+        CommandResult result = flightCommandService.auxFunction(AssetId.of(id), request.requireFunction(),
+                request.requireLevel(), currentUser.userId(), currentUser.scope());
         return ReturnHomeResponse.from(result);
     }
 

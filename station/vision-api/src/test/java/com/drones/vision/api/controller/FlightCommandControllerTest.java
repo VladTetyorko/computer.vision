@@ -283,4 +283,56 @@ class FlightCommandControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }
+
+    // --- emergency stop / aux function (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C5) ---
+
+    @Test
+    void emergencyStopReturns202AndIsItsOwnCommand() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(flightCommandService.emergencyStop(eq(assetId), eq(ownerId), any(VisibilityScope.class)))
+                .thenReturn(CommandResult.ACCEPTED);
+
+        mockMvc.perform(post("/api/assets/{id}/emergency-stop", assetId.value()))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.result").value("ACCEPTED"));
+
+        verify(flightCommandService).emergencyStop(eq(assetId), eq(ownerId), any(VisibilityScope.class));
+    }
+
+    @Test
+    void auxFunctionPassesTheFunctionAndSwitchLevelThrough() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(flightCommandService.auxFunction(eq(assetId), eq(46), eq(2), eq(ownerId), any(VisibilityScope.class)))
+                .thenReturn(CommandResult.NO_ACK);
+
+        mockMvc.perform(post("/api/assets/{id}/aux-function", assetId.value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"function\":46,\"level\":2}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.result").value("NO_ACK"));
+
+        verify(flightCommandService).auxFunction(eq(assetId), eq(46), eq(2), eq(ownerId), any(VisibilityScope.class));
+    }
+
+    /**
+     * A malformed binding must be a 400 at the edge, never a command sent at a level the firmware
+     * would reinterpret -- the same "guard before an attempt" split {@code setMode} uses.
+     */
+    @Test
+    void auxFunctionReturns400ForAnOutOfRangeLevelOrFunctionAndNeverTouchesTheService() throws Exception {
+        AssetId assetId = AssetId.random();
+
+        mockMvc.perform(post("/api/assets/{id}/aux-function", assetId.value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"function\":46,\"level\":3}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/assets/{id}/aux-function", assetId.value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"function\":9001,\"level\":1}"))
+                .andExpect(status().isBadRequest());
+
+        verify(flightCommandService, org.mockito.Mockito.never())
+                .auxFunction(any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(),
+                        any(), any());
+    }
 }

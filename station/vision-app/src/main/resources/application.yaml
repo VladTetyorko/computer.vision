@@ -143,7 +143,7 @@ vision:
     # static/SPA routes -- but a session only has someone to log in as if
     # vision.persistence.seed-dev-users is also true (see above), or real users
     # were created through UserService.
-    enabled: true
+    enabled: false
 
   # --- adapter-publish-hls: stream egress (Phase 1, see docs/plans/done/PHASE1-PLAN.md Task U5) ---
   publish:
@@ -566,6 +566,31 @@ vision:
   #   min-override-hz: 10
   #   max-override-hz: 50
   #   release-frames: 3
+
+  # --- Controller setup: what each stick/button/switch of the operator's transmitter does
+  #     (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md, decisions C5/C8) ---
+  # control:
+  #   The ArduPilot auxiliary functions (RCx_OPTION numbers) the controller setup page offers by
+  #   name. Configurable because the list is the firmware's, not ours: ArduPilot adds options every
+  #   release, and a station flying newer firmware than this jar was built against must be able to
+  #   offer one without a rebuild. Setting this REPLACES the built-in menu rather than adding to it.
+  #
+  #   It is a menu, not a whitelist -- POST /api/assets/{id}/aux-function accepts any number in
+  #   [0,400], so a short menu narrows what is easy to pick, never what is possible to send.
+  #
+  #   Everything else the setup page offers (input kinds, switch positions, channel functions,
+  #   bindable actions) comes from the domain's own enums and is deliberately NOT configurable: that
+  #   list is what this platform can genuinely command, and a deployment cannot widen it by config.
+  #
+  #   Commented out here to document the default rather than override it -- the defaults are
+  #   AuxFunctionCatalog.defaults() (RTL 4, camera trigger 9, auto 16, land 18, gripper 19,
+  #   parachute 22, motor e-stop 31, RC override enable 46, guided 55, loiter 56, disarm 81,
+  #   arm/disarm 153, arm/e-stop 165).
+  #   aux-functions:
+  #     - number: 46
+  #       label: RC override enable
+  #     - number: 31
+  #       label: Motor emergency stop
 
   # --- Fixed-camera geolocation (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md §6, D8, Wave G4) ---
   geo:

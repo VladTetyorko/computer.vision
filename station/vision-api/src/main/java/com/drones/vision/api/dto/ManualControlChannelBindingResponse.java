@@ -19,7 +19,13 @@ import com.drones.vision.flight.domain.model.ControlBinding;
  * com.drones.vision.flight.domain.model.ControlFunction}, and the label is simply that function's
  * own (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P5).
  *
- * @param source      {@code "AXIS"} or {@code "BUTTON"} — what kind of physical control feeds it
+ * @param source      {@code "AXIS"} or {@code "BUTTON"} — which Gamepad array the value is read from
+ * @param kind        what the operator declared the control physically <em>is</em>: {@code "AXIS"},
+ *                    {@code "BUTTON"}, {@code "SWITCH_2"} or {@code "SWITCH_3"}. A different
+ *                    question from {@code source} — an EdgeTX 3-position switch is a
+ *                    {@code SWITCH_3} read from the {@code AXIS} array — and the field a client
+ *                    needs to draw a detented switch instead of a slider
+ *                    (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decision C1)
  * @param function    what it does to the vehicle: {@code "ROLL"}, {@code "PITCH"}, {@code "THROTTLE"},
  *                    {@code "YAW"}, {@code "STEERING"}, {@code "AUX_1".."AUX_4"}
  * @param travel      {@code "CENTERED"} (rests at {@code centerMicros}, travels both ways) or
@@ -34,9 +40,9 @@ import com.drones.vision.flight.domain.model.ControlBinding;
  * @param maxMicros   pulse width at the control's maximum
  * @param label       a short human label, e.g. {@code "Throttle"}, {@code "Steering"}
  */
-public record ManualControlChannelBindingResponse(String source, String function, String travel, int sourceIndex,
-                                                   int rcChannel, int minMicros, int centerMicros, int maxMicros,
-                                                   String label) {
+public record ManualControlChannelBindingResponse(String source, String kind, String function, String travel,
+                                                   int sourceIndex, int rcChannel, int minMicros, int centerMicros,
+                                                   int maxMicros, String label) {
 
     /**
      * Maps one domain binding to its wire form.
@@ -45,8 +51,8 @@ public record ManualControlChannelBindingResponse(String source, String function
      * @return the wire entry
      */
     public static ManualControlChannelBindingResponse from(ControlBinding binding) {
-        return new ManualControlChannelBindingResponse(binding.source().name(), binding.function().name(),
-                binding.travel().name(), binding.sourceIndex(), binding.rcChannel(), binding.minMicros(),
-                binding.centerMicros(), binding.maxMicros(), binding.function().label());
+        return new ManualControlChannelBindingResponse(binding.source().name(), binding.kind().name(),
+                binding.function().name(), binding.travel().name(), binding.sourceIndex(), binding.rcChannel(),
+                binding.minMicros(), binding.centerMicros(), binding.maxMicros(), binding.function().label());
     }
 }

@@ -264,6 +264,12 @@ export const NAV_MODES: readonly NavMode[] = [
         to: '/manage/roster',
         managerOnly: true,
       },
+      {
+        icon: 'gamepad',
+        name: 'Controller',
+        description: 'What each stick, switch and button on your transmitter does — your own layouts, per vehicle kind.',
+        to: '/manage/controller',
+      },
       // --- Configuration — set up once, not every day; ADMIN/MANAGER only ----------------------
       {
         icon: 'category',

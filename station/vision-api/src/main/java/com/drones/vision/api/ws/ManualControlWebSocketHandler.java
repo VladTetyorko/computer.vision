@@ -1,6 +1,7 @@
 package com.drones.vision.api.ws;
 
 import com.drones.vision.api.dto.ManualControlAckFrame;
+import com.drones.vision.api.dto.ControlProfileResponse;
 import com.drones.vision.api.dto.ManualControlChannelBindingResponse;
 import com.drones.vision.api.dto.ManualControlDeniedFrame;
 import com.drones.vision.api.dto.ManualControlEngagedFrame;
@@ -198,8 +199,9 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
             state.session = mcSession;
             ControlProfile profile = mcSession.controlProfile();
             sendFrame(session, state, new ManualControlEngagedFrame(assetId.value().toString(), mcSession.rateHz(),
-                    profile.kind().name(), profile.code(), profile.displayName(),
-                    toChannelMapResponse(profile)));
+                    profile.kind().name(), profile.id().value().toString(),
+                    profile.isBuiltIn() ? ControlProfileResponse.SOURCE_BUILT_IN : ControlProfileResponse.SOURCE_SAVED,
+                    profile.code(), profile.displayName(), toChannelMapResponse(profile)));
         } catch (AccessDeniedException e) {
             sendFrame(session, state, new ManualControlDeniedFrame(CODE_OUT_OF_SCOPE, e.getMessage()));
         } catch (IllegalStateException e) {

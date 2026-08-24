@@ -151,3 +151,38 @@
   color: var(--color-info-text);
   background: var(--color-info-soft);
 }
+
+/* Bound switches (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C2/C3) — a read-out of what the
+   operator's own layout fires, in the same quiet list register as the channel map below it. */
+.rc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.rc-binding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.rc-binding-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.rc-binding-name {
+  min-width: 4rem;
+  color: var(--text-muted);
+}
+
+.rc-binding-actions {
+  display: flex;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}

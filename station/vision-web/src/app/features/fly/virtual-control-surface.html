@@ -1,0 +1,57 @@
+<div class="vcs">
+  @if (caveat(); as text) {
+    <vision-notice variant="warn">{{ text }}</vision-notice>
+  }
+
+  <div class="vcs-head">
+    <span class="vcs-profile">{{ profileName() }} layout</span>
+    <button type="button" class="btn small" (click)="centreAll()">Centre all</button>
+  </div>
+
+  <div class="vcs-pads">
+    @for (pad of pads(); track pad.id) {
+      <div class="vcs-pad-wrap">
+        <div
+          class="vcs-pad"
+          [class.single-axis]="!pad.y"
+          tabindex="0"
+          role="application"
+          [attr.aria-label]="pad.label"
+          (pointerdown)="onPointerDown($event, pad)"
+          (pointermove)="onPointerMove($event, pad)"
+          (pointerup)="onPointerUp($event, pad)"
+          (pointercancel)="onPointerUp($event, pad)"
+          (keydown)="onKeyDown($event, pad)"
+        >
+          <span class="vcs-cross-v"></span>
+          <span class="vcs-cross-h"></span>
+          <span
+            class="vcs-knob"
+            [style.left.%]="knobLeftPercent(pad.x, value(pad.x))"
+            [style.top.%]="knobTopPercent(pad.y, value(pad.y))"
+          ></span>
+        </div>
+
+        <div class="vcs-readouts">
+          @if (pad.y) {
+            <span class="vcs-readout"
+              ><span class="vcs-readout-name">{{ pad.y.label }}</span
+              ><span class="vcs-readout-value mono">{{ percent(pad.y) }}</span></span
+            >
+          }
+          @if (pad.x) {
+            <span class="vcs-readout"
+              ><span class="vcs-readout-name">{{ pad.x.label }}</span
+              ><span class="vcs-readout-value mono">{{ percent(pad.x) }}</span></span
+            >
+          }
+        </div>
+      </div>
+    }
+  </div>
+
+  <p class="muted hint vcs-hint">
+    Drag a pad to move its controls; arrow keys nudge the focused pad. A centred control springs
+    back when you let go — a throttle that rests at idle holds where you leave it, like a stick.
+  </p>
+</div>

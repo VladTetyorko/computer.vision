@@ -57,6 +57,10 @@ const ROUTED_PAGES = [
   'readiness/readiness',
   // Visual geolocation v2 region manager (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6).
   'geo/region-manager',
+  // Controller setup (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C11) — the page injects
+  // `RcInputService` directly (a browser-input service, not a store), the layouts themselves come
+  // through its facade.
+  'controller/controller-setup',
 ];
 
 // All feature .ts sources, inlined as raw strings at build time. Keys look like

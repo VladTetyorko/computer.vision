@@ -8,11 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class ControlBindingTest {
 
     private static ControlBinding axis(double deadband, boolean reversed) {
-        return new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, deadband, reversed);
+        return new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, deadband, reversed);
     }
 
     private static ControlBinding button(double deadband, boolean reversed) {
-        return new ControlBinding(ControlBinding.Source.BUTTON, ControlFunction.AUX_1, 0, 5, 1000, 1000, 2000, deadband, reversed);
+        return new ControlBinding(ControlBinding.Source.BUTTON, ControlInputKind.BUTTON, ControlFunction.AUX_1, 0, 5, 1000, 1000, 2000, deadband, reversed);
     }
 
     // --- compact ctor validation ---
@@ -20,44 +20,44 @@ class ControlBindingTest {
     @Test
     void rejectsNullSource() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(null, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, 0.0, false));
+                () -> new ControlBinding(null, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, 0.0, false));
     }
 
     @Test
     void rejectsNegativeSourceIndex() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, -1, 1, 1000, 1500, 2000, 0.0, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, -1, 1, 1000, 1500, 2000, 0.0, false));
     }
 
     @Test
     void rejectsRcChannelOutOfRange() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 0, 1000, 1500, 2000, 0.0, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 0, 1000, 1500, 2000, 0.0, false));
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 19, 1000, 1500, 2000, 0.0, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 19, 1000, 1500, 2000, 0.0, false));
     }
 
     @Test
     void rejectsMicrosOutsideDeviceRange() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 999, 1500, 2000, 0.0, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 999, 1500, 2000, 0.0, false));
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2001, 0.0, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2001, 0.0, false));
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 1000, 2001, 2000, 0.0, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 1000, 2001, 2000, 0.0, false));
     }
 
     @Test
     void rejectsOutOfOrderMicros() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 1600, 1500, 2000, 0.0, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 1600, 1500, 2000, 0.0, false));
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 1400, 0.0, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 1400, 0.0, false));
     }
 
     @Test
     void acceptsMinEqualsCenterEqualsMax() {
-        ControlBinding binding = new ControlBinding(ControlBinding.Source.BUTTON, ControlFunction.AUX_1, 0, 5, 1500, 1500, 1500, 0.0, false);
+        ControlBinding binding = new ControlBinding(ControlBinding.Source.BUTTON, ControlInputKind.BUTTON, ControlFunction.AUX_1, 0, 5, 1500, 1500, 1500, 0.0, false);
 
         assertEquals(1500, binding.toMicros(0.0));
         assertEquals(1500, binding.toMicros(1.0));
@@ -66,11 +66,11 @@ class ControlBindingTest {
     @Test
     void rejectsDeadbandOutsideZeroToOne() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, -0.01, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, -0.01, false));
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, 1.01, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, 1.01, false));
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, Double.NaN, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 1, 1000, 1500, 2000, Double.NaN, false));
     }
 
     // --- toMicros: AXIS ---

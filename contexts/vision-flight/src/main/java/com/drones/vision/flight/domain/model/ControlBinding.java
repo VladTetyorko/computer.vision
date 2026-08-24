@@ -21,7 +21,14 @@ package com.drones.vision.flight.domain.model;
  * of doing something surprising.
  *
  * @param source       {@link Source#AXIS} (normalized input {@code [-1,1]}, e.g. a stick) or
- *                     {@link Source#BUTTON} (normalized input {@code [0,1]}, e.g. a switch)
+ *                     {@link Source#BUTTON} (normalized input {@code [0,1]}, e.g. a switch) — which
+ *                     array the reading is taken from
+ * @param kind         what the control <em>is</em>, as the operator declared it: a continuous axis, a
+ *                     momentary button, or a 2-/3-position switch (docs/plans/active/
+ *                     CONTROLLER-SETUP-CONTEXT.md C1). Distinct from {@code source}, which only says
+ *                     where the number comes from — an EdgeTX 3-position switch is a {@link
+ *                     ControlInputKind#SWITCH_3} read from the <em>axes</em> array. Must satisfy
+ *                     {@link ControlInputKind#allows(Source)}
  * @param function     what this binding does to the vehicle — the meaning the RC channel number
  *                     alone does not carry (RC1 is roll on a copter, steering on a rover)
  * @param sourceIndex  index into the Gamepad API's {@code axes}/{@code buttons} array this
@@ -37,7 +44,8 @@ package com.drones.vision.flight.domain.model;
  *                     {@code [0,1]}
  * @param reversed     whether the raw input direction is inverted before mapping
  */
-public record ControlBinding(Source source, ControlFunction function, int sourceIndex, int rcChannel,
+public record ControlBinding(Source source, ControlInputKind kind, ControlFunction function, int sourceIndex,
+                              int rcChannel,
                               int minMicros, int centerMicros, int maxMicros,
                               double deadband, boolean reversed) {
 
@@ -63,6 +71,13 @@ public record ControlBinding(Source source, ControlFunction function, int source
     public ControlBinding {
         if (source == null) {
             throw new IllegalArgumentException("ControlBinding source must not be null");
+        }
+        if (kind == null) {
+            throw new IllegalArgumentException("ControlBinding kind must not be null");
+        }
+        if (!kind.allows(source)) {
+            throw new IllegalArgumentException("ControlBinding " + kind + " cannot be read from a " + source
+                    + " source (a single button cannot report three positions)");
         }
         if (function == null) {
             throw new IllegalArgumentException("ControlBinding function must not be null");
@@ -104,7 +119,7 @@ public record ControlBinding(Source source, ControlFunction function, int source
      * @return a centred binding over the full {@code [1000,2000]} µs travel, no deadband, not reversed
      */
     public static ControlBinding centeredAxis(ControlFunction function, int sourceIndex, int rcChannel) {
-        return new ControlBinding(Source.AXIS, function, sourceIndex, rcChannel,
+        return new ControlBinding(Source.AXIS, ControlInputKind.AXIS, function, sourceIndex, rcChannel,
                 RcChannels.MIN_MICROS, CENTER_MICROS, RcChannels.MAX_MICROS, 0.0, false);
     }
 
@@ -118,7 +133,7 @@ public record ControlBinding(Source source, ControlFunction function, int source
      * @return a unidirectional binding whose rest point is {@link RcChannels#MIN_MICROS}
      */
     public static ControlBinding unidirectionalAxis(ControlFunction function, int sourceIndex, int rcChannel) {
-        return new ControlBinding(Source.AXIS, function, sourceIndex, rcChannel,
+        return new ControlBinding(Source.AXIS, ControlInputKind.AXIS, function, sourceIndex, rcChannel,
                 RcChannels.MIN_MICROS, RcChannels.MIN_MICROS, RcChannels.MAX_MICROS, 0.0, false);
     }
 
@@ -138,8 +153,34 @@ public record ControlBinding(Source source, ControlFunction function, int source
      * @return a button binding over the full {@code [1000,2000]} µs travel
      */
     public static ControlBinding button(ControlFunction function, int sourceIndex, int rcChannel) {
-        return new ControlBinding(Source.BUTTON, function, sourceIndex, rcChannel,
+        return new ControlBinding(Source.BUTTON, ControlInputKind.BUTTON, function, sourceIndex, rcChannel,
                 RcChannels.MIN_MICROS, RcChannels.MIN_MICROS, RcChannels.MAX_MICROS, 0.0, false);
+    }
+
+    /**
+     * A switch driving an RC channel directly — a 2- or 3-position switch on an aux channel.
+     *
+     * <p>No built-in profile creates one (decision P7/D6: ArduPilot's own advice is to bind switches
+     * to <em>commands</em>, not to aux channels, especially alongside a real receiver). It exists
+     * because an operator who has read that advice and wants an aux channel anyway is entitled to
+     * one — the platform states the trade-off rather than removing the choice.
+     *
+     * @param function    what the binding does to the vehicle, typically an {@code AUX_*}
+     * @param source      which array the switch is read from
+     * @param kind        {@link ControlInputKind#SWITCH_2} or {@link ControlInputKind#SWITCH_3}
+     * @param sourceIndex index into that array
+     * @param rcChannel   the 1-based RC channel to drive
+     * @return a binding whose detents land at 1000/1500/2000 µs
+     * @throws IllegalArgumentException if {@code kind} is not a switch, or cannot be read from
+     *                                   {@code source}
+     */
+    public static ControlBinding switched(ControlFunction function, Source source, ControlInputKind kind,
+                                          int sourceIndex, int rcChannel) {
+        if (kind == null || !kind.isSwitched() || kind == ControlInputKind.BUTTON) {
+            throw new IllegalArgumentException("ControlBinding.switched requires a 2- or 3-position switch: " + kind);
+        }
+        return new ControlBinding(source, kind, function, sourceIndex, rcChannel,
+                RcChannels.MIN_MICROS, CENTER_MICROS, RcChannels.MAX_MICROS, 0.0, false);
     }
 
     /**
@@ -170,7 +211,32 @@ public record ControlBinding(Source source, ControlFunction function, int source
      * @return the microsecond pulse width, clamped to {@code [minMicros, maxMicros]}
      */
     public int toMicros(double normalized) {
+        if (kind.isSwitched() && kind != ControlInputKind.BUTTON) {
+            return switchMicros(normalized);
+        }
         return source == Source.AXIS ? axisMicros(normalized) : buttonMicros(normalized);
+    }
+
+    /**
+     * A switch driving a channel snaps to a detent rather than relaying whatever the raw reading
+     * happened to be: {@link SwitchPosition#LOW} to {@link #minMicros()}, {@link
+     * SwitchPosition#MIDDLE} to {@link #centerMicros()}, {@link SwitchPosition#HIGH} to {@link
+     * #maxMicros()}.
+     *
+     * <p>The detents land squarely outside ArduPilot's own aux-function bands (&lt;1200 / &gt;1800
+     * µs), so a switch this platform shows as HIGH is a switch the firmware also reads as HIGH.
+     * {@link #deadband()} plays no part — a detent has no dead zone to be in.
+     */
+    private int switchMicros(double normalized) {
+        SwitchPosition position = SwitchPosition.of(source, kind, normalized);
+        if (reversed) {
+            position = position.reversed();
+        }
+        return switch (position) {
+            case LOW -> minMicros;
+            case MIDDLE -> centerMicros;
+            case HIGH -> maxMicros;
+        };
     }
 
     private int axisMicros(double normalized) {

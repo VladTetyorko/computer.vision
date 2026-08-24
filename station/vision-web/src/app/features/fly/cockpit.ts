@@ -17,7 +17,6 @@ import { FailsafeBanner } from './failsafe-banner';
 import { PreflightChecklist } from '../../shared/ui/preflight-checklist';
 import { DiagnosticsCard } from './diagnostics-card';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
-import { FlightCommandPanel } from './flight-command-panel';
 import { CvControlPanel } from './cv-control-panel';
 import { CvSetupModal } from './cv-setup-modal';
 import { RcMonitor } from './rc-monitor';
@@ -25,7 +24,7 @@ import { DrawingToolbar } from '../../shared/map/map-controls/drawing-toolbar';
 import { LayerManager } from '../../shared/map/map-controls/layer-manager';
 import { MarksPanel } from './marks-panel';
 import { CockpitFacade } from './cockpit-facade';
-import { nextCollapseAction, showDetectionOffChip, type ToolRailPanelId } from './fly-logic';
+import { migratedPanelId, nextCollapseAction, showDetectionOffChip, type ToolRailPanelId } from './fly-logic';
 
 /** `UiStore`'s own storage key for this page's tool-rail (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D) —
  * one key for all seven drawers (`flight`/`rc`/`cv`/`detections`/`marks`/`map`/`help`; the former
@@ -96,7 +95,6 @@ type CockpitDialog = 'stop' | 'cv-setup';
     PreflightChecklist,
     DiagnosticsCard,
     ReturnHomeButton,
-    FlightCommandPanel,
     CvControlPanel,
     CvSetupModal,
     RcMonitor,
@@ -154,10 +152,11 @@ export class CockpitPage {
 
   /**
    * The right-edge icon tool-rail's one-open-at-a-time drawer manager (docs/plans/done/UI-REDESIGN-PLAN.md
-   * Wave 2, D-D/F3). Frozen rail ids (`ToolRailPanelId`): `flight`, `rc`, `cv`, `marks`, `map`,
-   * `help` — `cv` is the merged Vision drawer as of wave W5 (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3),
-   * the former separate `detections` id having been folded into it — see `fly-logic.ts#ToolRailPanelId`'s
-   * own doc comment.
+   * Wave 2, D-D/F3). Frozen rail ids (`ToolRailPanelId`): `rc`, `cv`, `marks`, `map`, `help` — `cv`
+   * is the merged Vision drawer as of wave W5 (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3) and `rc` the
+   * merged Controller drawer as of docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10, the former
+   * separate `detections` and `flight` ids having been folded into them — see
+   * `fly-logic.ts#ToolRailPanelId`'s own doc comment.
    */
   protected readonly panels = new UiStore(ACTIVE_PANEL_KEY);
 
@@ -168,6 +167,13 @@ export class CockpitPage {
   }
 
   constructor() {
+    // A drawer this rail no longer has, restored from a previous session, would silently open
+    // nothing — so the retired `flight` id lands on the drawer that absorbed it (C10).
+    const restored = migratedPanelId(this.panels.active());
+    if (restored !== this.panels.active() && restored !== null) {
+      this.panels.open(restored);
+    }
+
     // Route-driven asset selection (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F12) — reruns whenever `assetId()`
     // itself changes, including the very first activation; `CockpitFacade#selectAsset` no-ops if the
     // id is unchanged (mirrors `LivePage`'s identical `effect(() => this.facade.setDeviceId(...))`).

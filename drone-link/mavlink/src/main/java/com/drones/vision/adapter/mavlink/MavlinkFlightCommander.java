@@ -86,6 +86,10 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     private static final float ARM_DISARM_FORCE = 21196.0f;
     private static final float ARM_DISARM_NO_FORCE = 0.0f;
 
+    /** {@code MAV_CMD_DO_AUX_FUNCTION}'s switch-level parameter range — 0 low, 1 middle, 2 high. */
+    private static final int AUX_LEVEL_LOW = 0;
+    private static final int AUX_LEVEL_HIGH = 2;
+
     /**
      * Zero -- {@link CommandService}'s own retry mechanism (silent resend with {@code confirmation}
      * incremented) is deliberately not used here: this class's pre-existing, SITL-proven wire
@@ -162,6 +166,31 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
         return send(resolved, MavCmd.MAV_CMD_COMPONENT_ARM_DISARM,
                 armParam, force ? ARM_DISARM_FORCE : ARM_DISARM_NO_FORCE, 0f, 0f, 0f, 0f, 0f,
                 force ? verb + " (forced)" : verb);
+    }
+
+    @Override
+    public CommandResult emergencyStop(Device device) {
+        // The kill switch is a forced disarm on the wire -- ArduPilot has no separate opcode for it,
+        // and QGroundControl's own Vehicle::emergencyStop sends exactly this. Kept a distinct method
+        // (rather than telling callers "just pass force=true") so the log line and the audit trail
+        // both record which of the two an operator actually meant.
+        return armOrDisarm(device, DISARM, true, "emergency stop");
+    }
+
+    @Override
+    public CommandResult auxFunction(Device device, int function, int level) {
+        if (level < AUX_LEVEL_LOW || level > AUX_LEVEL_HIGH) {
+            throw new IllegalArgumentException("Aux function switch level must be within ["
+                    + AUX_LEVEL_LOW + "," + AUX_LEVEL_HIGH + "]: " + level);
+        }
+        ResolvedTarget resolved = resolveReachableTarget(device);
+        requireCommandableFirmware(resolved.target());
+        // param1 = the RCx_OPTION function number, param2 = 0 low / 1 middle / 2 high. What the
+        // number means is the vehicle's business: this adapter deliberately keeps no table of aux
+        // functions, because a stale copy of the firmware's own list is worse than none.
+        return send(resolved, MavCmd.MAV_CMD_DO_AUX_FUNCTION,
+                (float) function, (float) level, 0f, 0f, 0f, 0f, 0f,
+                "aux-function " + function + " at level " + level);
     }
 
     @Override

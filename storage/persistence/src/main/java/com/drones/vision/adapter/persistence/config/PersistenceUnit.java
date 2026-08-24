@@ -24,6 +24,7 @@ import com.drones.vision.adapter.persistence.entity.TrackCorrectionEntity;
 import com.drones.vision.adapter.persistence.entity.TrackPointEntity;
 import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
+import com.drones.vision.adapter.persistence.entity.ControlProfileEntity;
 import com.drones.vision.adapter.persistence.entity.VehicleProfileEntity;
 
 import com.zaxxer.hikari.HikariConfig;
@@ -233,6 +234,7 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(DetectionEventEntity.class);
         // docs/plans/active/DRONE-ONBOARDING-PLAN.md O5 (V17__vehicle_profiles.sql, V18__feature_requirements.sql).
         configuration.addAnnotatedClass(VehicleProfileEntity.class);
+        configuration.addAnnotatedClass(ControlProfileEntity.class);
         configuration.addAnnotatedClass(FeatureRequirementEntity.class);
         // Database-level change audit (V21__db_audit_log.sql) -- read-only from Hibernate's side,
         // every row is written by the migration's own audit_row_change() trigger, never by a
