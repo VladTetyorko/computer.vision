@@ -15,6 +15,7 @@
 #include "ILogger.h"
 #include "INetworkLink.h"
 #include "MavlinkUdpLink.h"
+#include "ParameterStore.h"
 
 uint32_t g_hostMillis = 0;
 WiFiUDP* g_lastSocket = nullptr;
@@ -50,10 +51,11 @@ std::vector<uint8_t> readFile(const char* path) {
 int main(int argc, char** argv) {
   if (argc < 3) { fprintf(stderr, "usage: %s <rx_fixture.bin> <tx_frames.bin>\n", argv[0]); return 2; }
 
-  const AppConfig& cfg = appConfig();
+  // The store owns the live config; the link binds to it, not to appConfig().
+  ParameterStore parameters;
   StderrLogger logger;
   FakeNetwork  network;
-  MavlinkUdpLink link(cfg.link, cfg.rc, cfg.telemetry, cfg.timing, network, logger);
+  MavlinkUdpLink link(parameters, network, logger);
 
   g_hostMillis = 100000;
   if (!link.begin()) { fprintf(stderr, "begin() failed\n"); return 1; }

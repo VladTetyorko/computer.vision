@@ -17,6 +17,7 @@
 #include "IMotorDriver.h"
 #include "INetworkLink.h"
 #include "MavlinkUdpLink.h"
+#include "ParameterStore.h"
 #include "VehicleController.h"
 
 uint32_t g_hostMillis = 0;
@@ -83,9 +84,11 @@ int main(int argc, char** argv) {
   g_rc = load("rc"); g_arm = load("arm");
   g_ch5hi = load("ch5hi"); g_ch5lo = load("ch5lo"); g_ch5mid = load("ch5mid");
 
-  const AppConfig& cfg = appConfig();
+  // The store owns the live config; the link binds to it, not to appConfig().
+  ParameterStore   parameters;
+  const AppConfig& cfg = parameters.config();
   QuietLogger logger; FakeNetwork network; FakeMotors motors; FakeImu imu;
-  MavlinkUdpLink link(cfg.link, cfg.rc, cfg.telemetry, cfg.timing, network, logger);
+  MavlinkUdpLink link(parameters, network, logger);
   VehicleController vehicle(link, motors, imu, cfg.timing, logger);
   vehicle.begin();
 
@@ -122,7 +125,7 @@ int main(int argc, char** argv) {
 
   // ================= ch5 arm switch =================
   printf("\n-- ch5 arm switch --\n");
-  MavlinkUdpLink link2(cfg.link, cfg.rc, cfg.telemetry, cfg.timing, network, logger);
+  MavlinkUdpLink link2(parameters, network, logger);
   VehicleController vehicle2(link2, motors, imu, cfg.timing, logger);
   g_hostMillis = 100000;
   link2.begin();
