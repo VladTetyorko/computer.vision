@@ -10,37 +10,47 @@
     <p class="muted">Loading…</p>
   } @else {
     <div class="setup-grid">
-      <!-- ---- Layouts ------------------------------------------------------------------------ -->
+      <!-- ---- Layouts, grouped by the vehicle they apply to ------------------------------------ -->
       <section class="card layouts">
         <vision-section-header title="Layouts" subtitle="One per vehicle kind is active at a time." />
 
-        <ul class="layout-list">
-          @for (profile of facade.profiles(); track profile.id) {
-            <li class="layout-row" [class.selected]="facade.selected()?.id === profile.id">
-              <button type="button" class="layout-pick" (click)="facade.select(profile.id)">
-                <span class="layout-name">{{ profile.name }}</span>
-                <span class="layout-meta">
-                  <span class="chip">{{ profile.kind }}</span>
-                  @if (profile.source === 'BUILT_IN') {
-                    <span class="chip">Built-in</span>
-                  }
-                  @if (profile.active) {
-                    <span class="chip ok">Active</span>
-                  }
-                </span>
-              </button>
-              <span class="layout-actions">
-                @if (!profile.active) {
-                  <button type="button" class="btn small" (click)="facade.activate(profile.id)">Activate</button>
+        <ul class="layout-groups">
+          @for (group of groups(); track group.kind) {
+            <li class="layout-group">
+              <div class="group-head">
+                <span class="group-name">{{ group.label }}</span>
+                <span class="group-active">{{ activeSummary(group) }}</span>
+              </div>
+
+              <ul class="layout-list">
+                @for (profile of group.profiles; track profile.id) {
+                  <li class="layout-row" [class.selected]="facade.selected()?.id === profile.id">
+                    <button type="button" class="layout-pick" (click)="facade.select(profile.id)">
+                      <span class="layout-name">{{ profile.name }}</span>
+                      <span class="layout-meta">
+                        @if (profile.source === 'BUILT_IN') {
+                          <span class="chip">Built-in</span>
+                        }
+                        @if (profile.active) {
+                          <span class="chip ok">Active</span>
+                        }
+                      </span>
+                    </button>
+                    <span class="layout-actions">
+                      @if (!profile.active) {
+                        <button type="button" class="btn small" (click)="facade.activate(profile.id)">Activate</button>
+                      }
+                      @if (profile.source === 'SAVED') {
+                        <vision-icon-button
+                          icon="trash"
+                          label="Delete this layout"
+                          (activated)="requestDelete(profile.id)"
+                        />
+                      }
+                    </span>
+                  </li>
                 }
-                @if (profile.source === 'SAVED') {
-                  <vision-icon-button
-                    icon="trash"
-                    label="Delete this layout"
-                    (activated)="requestDelete(profile.id)"
-                  />
-                }
-              </span>
+              </ul>
             </li>
           }
         </ul>
@@ -73,10 +83,10 @@
         </div>
       </section>
 
-      <!-- ---- Editor ------------------------------------------------------------------------- -->
+      <!-- ---- Editor --------------------------------------------------------------------------- -->
       <section class="card editor">
         @if (facade.selected(); as profile) {
-          <vision-section-header [title]="profile.name" [subtitle]="'For ' + profile.kind">
+          <vision-section-header [title]="profile.name" [subtitle]="'For ' + kindLabel(profile.kind)">
             <span actions class="editor-actions">
               @if (facade.editable()) {
                 <button type="button" class="btn secondary" [disabled]="!facade.dirty()" (click)="facade.discard()">
@@ -110,19 +120,64 @@
               </label>
             }
 
-            <!-- Live transmitter inventory — the answer to "which one is Sw 5". -->
-            <div class="inventory">
-              <div class="inventory-head">
+            <!-- Your transmitter, drawn. The answer to "which one is Sw 5" is that it moves. -->
+            <div class="transmitter">
+              <div class="transmitter-head">
                 <span class="label">Your transmitter</span>
                 @if (rc.connected()) {
                   <span class="chip ok"><span class="dot ok"></span>{{ rc.deviceLabel() }}</span>
                   @if (facade.editable()) {
-                    <button type="button" class="btn small" [class.active]="learning()" (click)="toggleLearn()">
-                      {{ learning() ? 'Move a control…' : 'Detect' }}
+                    <button type="button" class="btn small" [class.active]="guiding()" (click)="toggleGuided()">
+                      {{ guiding() ? 'Stop' : 'Guide me' }}
+                    </button>
+                    <button type="button" class="btn small secondary" [class.active]="detecting()" (click)="toggleAutodetect()">
+                      {{ detecting() ? 'Stop autodetect' : 'Autodetect' }}
                     </button>
                   }
                 }
               </div>
+
+              @if (guiding()) {
+                <vision-notice variant="neutral">
+                  @if (guidedStep(); as step) {
+                    <p class="guide-line">
+                      Move the control you use for <strong>{{ step.label }}</strong>.
+                    </p>
+                    <p class="muted hint">
+                      Step {{ guidedProgress().at }} of {{ guidedProgress().of }} — it will drive CH{{ step.rcChannel }},
+                      {{ step.travel === 'CENTERED' ? 'resting at centre' : 'resting at idle' }}.
+                    </p>
+                  } @else {
+                    <p class="guide-line">
+                      <strong>Sticks done — {{ guidedBound() }} bound.</strong>
+                      Switches aren't asked about here: run Autodetect and flick the ones you want, or point at them
+                      on the picture.
+                    </p>
+                  }
+                  <span class="guide-actions">
+                    @if (guidedStep()) {
+                      <button type="button" class="btn small secondary" (click)="skipGuidedStep()">
+                        I don't have one
+                      </button>
+                    } @else {
+                      <button type="button" class="btn small" (click)="toggleAutodetect()">Autodetect switches</button>
+                    }
+                    <button type="button" class="btn small secondary" (click)="toggleGuided()">
+                      {{ guidedStep() ? 'Stop' : 'Done' }}
+                    </button>
+                  </span>
+                </vision-notice>
+              }
+
+              @if (detecting()) {
+                <vision-notice variant="neutral">
+                  Move every control you want mapped — one at a time. Hold a switch through each of its
+                  positions so it can be told apart from a stick.
+                  @if (detectedCount() > 0) {
+                    <strong>{{ detectedCount() }} found so far.</strong>
+                  }
+                </vision-notice>
+              }
 
               @if (!rc.connected()) {
                 <p class="muted hint">
@@ -131,66 +186,168 @@
                   positions below just won't light up.
                 </p>
               } @else {
-                <div class="inventory-grid">
-                  @for (v of rc.axes(); track $index) {
-                    <button
-                      type="button"
-                      class="input-chip"
-                      [class.bound]="isBound('AXIS', $index)"
-                      [disabled]="!facade.editable() || isBound('AXIS', $index)"
-                      (click)="facade.addControl('AXIS', $index)"
+                <div class="diagram-controls">
+                  <label class="inline-field">
+                    <span class="label">Stick mode</span>
+                    <select
+                      [disabled]="!facade.editable()"
+                      aria-label="Transmitter stick mode"
+                      [ngModel]="stickMode()"
+                      (ngModelChange)="setStickMode($event)"
                     >
-                      <span>{{ axisLabel($index) }}</span>
-                      <span class="mono">{{ axisToPercent(v) }}</span>
-                    </button>
-                  }
-                  @for (b of rc.buttons(); track $index) {
-                    <button
-                      type="button"
-                      class="input-chip"
-                      [class.bound]="isBound('BUTTON', $index)"
-                      [class.on]="isOn(b)"
-                      [disabled]="!facade.editable() || isBound('BUTTON', $index)"
-                      (click)="facade.addControl('BUTTON', $index)"
+                      @for (option of stickModes; track option.mode) {
+                        <option [value]="option.mode">{{ option.label }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label class="inline-field">
+                    <span class="label">Stick direction</span>
+                    <select
+                      [disabled]="!facade.editable()"
+                      aria-label="Which way a stick reads on this picture"
+                      [ngModel]="positiveIsUp() ? 'up' : 'down'"
+                      (ngModelChange)="setPositiveIsUp($event === 'up')"
                     >
-                      <span>{{ buttonLabel($index) }}</span>
-                    </button>
-                  }
+                      <option value="up">Pushing forward draws the dot up</option>
+                      <option value="down">Pushing forward draws the dot down</option>
+                    </select>
+                  </label>
                 </div>
+                <p class="muted hint">
+                  Both only change this picture — what the vehicle does is decided by the channel each control
+                  drives. Change the direction if a stick reads upside down here.
+                </p>
               }
             </div>
 
-            <!-- ---- The rows ------------------------------------------------------------------ -->
-            @if (draft.controls.length === 0) {
-              <vision-empty
-                icon="gamepad"
-                title="Nothing is mapped yet"
-                message="Pick a control above, or use Detect and move the one you mean."
-              />
-            } @else {
-              <ul class="control-list">
-                @for (control of draft.controls; track draftKey(control)) {
-                  <li class="control-card">
+            <!-- ---- The drawing and the one control being edited, side by side ------------------ -->
+            <div class="work">
+              <div class="work-main">
+                @if (rc.connected()) {
+                  <vision-controller-diagram
+                    [axes]="rc.axes()"
+                    [buttons]="rc.buttons()"
+                    [controls]="diagramControls()"
+                    [stickMode]="stickMode()"
+                    [positiveIsUp]="positiveIsUp()"
+                    [interactive]="facade.editable()"
+                    [highlight]="selectedControl() ?? lastDetected()"
+                    (picked)="onDiagramPick($event)"
+                  />
+                }
+
+                <!-- What leaves the station: the only place travel and reverse can be checked. -->
+                <div class="outputs">
+                  <div class="outputs-head">
+                    <span class="label">What the vehicle receives</span>
+                    <span class="muted hint">
+                      Live, with travel and reverse applied. A channel nothing drives is left as it was.
+                    </span>
+                  </div>
+                  <ul class="output-list">
+                    @for (out of outputs(); track out.rcChannel) {
+                      <li class="output-row" [class.idle]="out.micros === undefined">
+                        <button
+                          type="button"
+                          class="output-pick"
+                          [disabled]="!facade.editable() || out.controlKey === undefined"
+                          [class.selected]="out.controlKey !== undefined && selectedControl() === out.controlKey"
+                          (click)="selectChannel(out)"
+                        >
+                          <span class="out-ch mono">CH{{ out.rcChannel }}</span>
+                          <span class="out-fn">
+                            {{ out.functionLabel ?? 'not sent' }}
+                            @if (out.reversed) {
+                              <span class="chip">reversed</span>
+                            }
+                          </span>
+                          <span class="out-track" aria-hidden="true">
+                            <span class="out-rest" [style.left.%]="out.restPercent"></span>
+                            @if (out.micros !== undefined) {
+                              <span class="out-marker" [style.left.%]="out.offsetPercent"></span>
+                            }
+                          </span>
+                          <span class="out-micros mono">{{ out.micros === undefined ? '—' : out.micros }}</span>
+                        </button>
+                      </li>
+                    }
+                  </ul>
+                </div>
+
+                <!-- Everything mapped, one line each. In a built-in this is the whole story. -->
+                <div class="mapped">
+                  <span class="label">Mapped controls</span>
+                  @if (draft.controls.length === 0) {
+                    <vision-empty
+                      icon="gamepad"
+                      title="Nothing is mapped yet"
+                      message="Hit Guide me and answer for each stick, or point at a control on the picture."
+                    />
+                  } @else {
+                    <ul class="control-list">
+                      @for (control of draft.controls; track draftKey(control)) {
+                        <li
+                          class="control-row"
+                          [id]="cardId(draftKey(control))"
+                          [class.selected]="selectedControl() === draftKey(control)"
+                          [class.detected]="lastDetected() === draftKey(control)"
+                        >
+                          <button
+                            type="button"
+                            class="control-pick"
+                            [disabled]="!facade.editable()"
+                            (click)="select(draftKey(control))"
+                          >
+                            <span class="control-name">{{ draftLabel(control) }}</span>
+                            <span class="control-binding">{{ summary(control) }}</span>
+                            @if (rc.connected() && control.kind !== 'AXIS') {
+                              <span class="chip">{{ positionNow(control) }}</span>
+                            }
+                          </button>
+                          @if (facade.editable()) {
+                            <vision-icon-button
+                              icon="trash"
+                              label="Unmap this control"
+                              (activated)="removeControl(draftKey(control))"
+                            />
+                          }
+                        </li>
+                      }
+                    </ul>
+                  }
+                </div>
+
+                @if (facade.issues().length > 0) {
+                  <vision-notice variant="warn">
+                    <ul class="issue-list">
+                      @for (issue of facade.issues(); track issue) {
+                        <li>{{ issue }}</li>
+                      }
+                    </ul>
+                  </vision-notice>
+                }
+              </div>
+
+              @if (facade.editable()) {
+                <aside class="work-editor" [id]="editorId">
+                  @if (editing(); as control) {
                     <header class="control-head">
                       <span class="control-name">{{ draftLabel(control) }}</span>
                       @if (rc.connected() && control.kind !== 'AXIS') {
                         <span class="chip">{{ positionNow(control) }}</span>
                       }
                       <span class="control-head-spacer"></span>
-                      @if (facade.editable()) {
-                        <vision-icon-button
-                          icon="trash"
-                          label="Unmap this control"
-                          (activated)="facade.removeControl(draftKey(control))"
-                        />
-                      }
+                      <vision-icon-button
+                        icon="trash"
+                        label="Unmap this control"
+                        (activated)="removeControl(draftKey(control))"
+                      />
                     </header>
 
-                    <div class="control-row">
+                    <div class="control-row-fields">
                       <label>
                         <span class="label">This is a</span>
                         <select
-                          [disabled]="!facade.editable()"
                           [ngModel]="control.kind"
                           (ngModelChange)="facade.setKind(draftKey(control), $event)"
                         >
@@ -202,7 +359,6 @@
                       <label>
                         <span class="label">and it</span>
                         <select
-                          [disabled]="!facade.editable()"
                           [ngModel]="control.role"
                           (ngModelChange)="facade.setRole(draftKey(control), $event)"
                         >
@@ -213,11 +369,10 @@
                     </div>
 
                     @if (control.role === 'CHANNEL') {
-                      <div class="control-row">
+                      <div class="control-row-fields">
                         <label>
                           <span class="label">Function</span>
                           <select
-                            [disabled]="!facade.editable()"
                             [ngModel]="control.function"
                             (ngModelChange)="facade.setFunction(draftKey(control), $event)"
                           >
@@ -229,11 +384,10 @@
                         <label>
                           <span class="label">Channel</span>
                           <select
-                            [disabled]="!facade.editable()"
                             [ngModel]="control.rcChannel"
                             (ngModelChange)="facade.setChannel(draftKey(control), +$event)"
                           >
-                            @for (channel of channels; track channel) {
+                            @for (channel of channels(); track channel) {
                               <option [value]="channel">CH{{ channel }}</option>
                             }
                           </select>
@@ -241,7 +395,7 @@
                         <label>
                           <span class="label">Rests at</span>
                           <select
-                            [disabled]="!facade.editable() || control.kind === 'BUTTON'"
+                            [disabled]="control.kind === 'BUTTON'"
                             [ngModel]="control.travel"
                             (ngModelChange)="facade.setTravel(draftKey(control), $event)"
                           >
@@ -252,7 +406,6 @@
                         <label class="checkbox">
                           <input
                             type="checkbox"
-                            [disabled]="!facade.editable()"
                             [ngModel]="control.reversed"
                             (ngModelChange)="facade.setReversed(draftKey(control), $event)"
                           />
@@ -266,12 +419,11 @@
                         </vision-notice>
                       }
                       @for (position of positions(control); track position) {
-                        <div class="control-row position-row">
+                        <div class="control-row-fields position-row">
                           <span class="position-name">{{ position }}</span>
                           <label class="grow">
                             <span class="label">fires</span>
                             <select
-                              [disabled]="!facade.editable()"
                               [ngModel]="actionAt(control, position)?.action ?? ''"
                               (ngModelChange)="onActionChange(draftKey(control), position, $event)"
                             >
@@ -289,7 +441,6 @@
                                 <input
                                   type="text"
                                   placeholder="e.g. HOLD"
-                                  [disabled]="!facade.editable()"
                                   [ngModel]="bound.parameter ?? ''"
                                   (ngModelChange)="facade.setPositionParameter(draftKey(control), position, $event)"
                                 />
@@ -298,7 +449,6 @@
                               <label class="grow">
                                 <span class="label">function</span>
                                 <select
-                                  [disabled]="!facade.editable()"
                                   [ngModel]="bound.parameter ?? ''"
                                   (ngModelChange)="facade.setPositionParameter(draftKey(control), position, $event)"
                                 >
@@ -313,20 +463,14 @@
                         </div>
                       }
                     }
-                  </li>
-                }
-              </ul>
-            }
-
-            @if (facade.issues().length > 0) {
-              <vision-notice variant="warn">
-                <ul class="issue-list">
-                  @for (issue of facade.issues(); track issue) {
-                    <li>{{ issue }}</li>
+                  } @else {
+                    <p class="muted hint editor-hint">
+                      Point at a control on the picture — or pick one from the list — to change what it does.
+                    </p>
                   }
-                </ul>
-              </vision-notice>
-            }
+                </aside>
+              }
+            </div>
           }
         } @else {
           <vision-empty

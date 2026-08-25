@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, input, output } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Notice } from '../../shared/ui/notice';
 import { RcInputService } from '../../core/rc/rc-input.service';
@@ -50,7 +51,7 @@ import type { FlightCapability } from '../../core/api/models';
  */
 @Component({
   selector: 'vision-rc-monitor',
-  imports: [SidePanel, Notice, VirtualControlSurface, FlightCommandPanel],
+  imports: [RouterLink, SidePanel, Notice, VirtualControlSurface, FlightCommandPanel],
   providers: [RcInputService, VirtualRcInputService, RcSource, ManualControlClient, ControlActionDispatcher],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './rc-monitor.html',

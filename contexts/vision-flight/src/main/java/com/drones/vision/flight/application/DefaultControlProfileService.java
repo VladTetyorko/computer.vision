@@ -5,6 +5,7 @@ import com.drones.vision.flight.domain.model.ChannelMap;
 import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.flight.domain.model.ControlProfileId;
 import com.drones.vision.flight.domain.model.OwnedControlProfile;
+import com.drones.vision.flight.domain.model.TransmitterView;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.flight.domain.port.ControlProfileRepositoryPort;
 import com.drones.vision.kernel.UserId;
@@ -14,6 +15,7 @@ import java.time.Clock;
 import java.util.Arrays;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Objects;
 
 /**
@@ -77,20 +79,43 @@ public final class DefaultControlProfileService implements ControlProfileService
 
     @Override
     public OwnedControlProfile update(UserId owner, ControlProfileId id, String name, ChannelMap channelMap,
-                                      ActionMap actionMap) {
+                                      ActionMap actionMap, TransmitterView view) {
         OwnedControlProfile existing = requireOwned(owner, id);
         ControlProfile updated = existing.profile()
                 .withBindings(channelMap, actionMap)
                 .copyAs(id, requireName(name));
-        OwnedControlProfile saved = new OwnedControlProfile(owner, updated, existing.active(), clock.instant());
+        OwnedControlProfile saved = new OwnedControlProfile(owner, updated, existing.active(), clock.instant(),
+                Objects.requireNonNullElse(view, TransmitterView.DEFAULT));
         repository.save(saved);
         return saved;
     }
 
     @Override
     public void activate(UserId owner, ControlProfileId id) {
+        Objects.requireNonNull(owner, "owner must not be null");
+        Objects.requireNonNull(id, "id must not be null");
+        Optional<VehicleKind> builtIn = id.builtInKind();
+        if (builtIn.isPresent()) {
+            fallBackToBuiltIn(owner, builtIn.get());
+            return;
+        }
         requireOwned(owner, id);
         repository.activate(owner, id);
+    }
+
+    /**
+     * "Activate the built-in" is not a write to the built-in — it is the <em>absence</em> of an
+     * active saved profile for that kind, which is exactly what {@link #activeFor} already falls
+     * back to. So this clears the owner's active flag for the kind and stops; nothing is copied,
+     * because a copy would be an editable duplicate the operator never asked for, free to drift
+     * from the built-in it was cut from.
+     *
+     * <p>Idempotent: with nothing active for that kind there is nothing to clear, and saying so
+     * would be an error message about a state the operator was trying to reach anyway.
+     */
+    private void fallBackToBuiltIn(UserId owner, VehicleKind kind) {
+        repository.findActive(owner, kind).ifPresent(active ->
+                repository.save(new OwnedControlProfile(owner, active.profile(), false, clock.instant(), active.view())));
     }
 
     @Override
@@ -101,15 +126,20 @@ public final class DefaultControlProfileService implements ControlProfileService
 
     /**
      * Loads a stored profile and refuses it unless the caller owns it. Built-in ids never reach
-     * storage at all, so they fail here as "no such profile" — which is the truth: there is no saved
-     * profile by that id, and the built-in behind it is not a thing that can be edited (C7).
+     * storage at all, so they are rejected up front — there is no saved profile by that id, and the
+     * built-in behind it is not a thing that can be edited or deleted (C7).
+     *
+     * <p>{@link #activate} deliberately does <em>not</em> come through here: activating a built-in
+     * is a legitimate request meaning "stop using my saved layout for this kind", and it is handled
+     * before this guard runs.
      */
     private OwnedControlProfile requireOwned(UserId owner, ControlProfileId id) {
         Objects.requireNonNull(owner, "owner must not be null");
         Objects.requireNonNull(id, "id must not be null");
         if (id.isBuiltIn()) {
             throw new IllegalArgumentException("Built-in control profiles cannot be edited or deleted: " + id.value()
-                    + " -- create a copy of it instead");
+                    + " -- create a copy of it instead. (Activating one is allowed, and means \"use the"
+                    + " built-in\" -- see activate.)");
         }
         OwnedControlProfile profile = repository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("No control profile " + id.value()));

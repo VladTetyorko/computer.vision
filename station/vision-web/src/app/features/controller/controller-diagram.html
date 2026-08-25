@@ -1,0 +1,96 @@
+<div class="diagram">
+  @if (layout().sticks.length > 0) {
+    <div class="sticks">
+      @for (stick of layout().sticks; track stick.side) {
+        <figure class="stick">
+          <figcaption class="stick-label">{{ stick.label }}</figcaption>
+          <div class="pad" aria-hidden="true">
+            <span class="pad-crosshair-x"></span>
+            <span class="pad-crosshair-y"></span>
+            <span
+              class="pad-dot"
+              [style.left.%]="padLeft(stick.horizontal)"
+              [style.top.%]="padTop(stick.vertical)"
+            ></span>
+          </div>
+          <div class="stick-slots">
+            @for (slot of [stick.vertical, stick.horizontal]; track $index) {
+              @if (slot) {
+                <button
+                  type="button"
+                  class="slot mapped"
+                  [class.detected]="isHighlighted('AXIS', slot.axis)"
+                  [disabled]="!interactive()"
+                  (click)="pick('AXIS', slot.axis)"
+                >
+                  <span class="slot-head">
+                    <span class="tag-name">{{ $index === 0 ? 'up/down' : 'left/right' }}</span>
+                    <span class="mono tag-value">{{ percent(axisValue(slot.axis)) }}%</span>
+                  </span>
+                  <span class="tag-binding">{{ axisLabel(slot.axis) }} · {{ caption('AXIS', slot.axis) }}</span>
+                </button>
+              } @else {
+                <span class="slot empty">
+                  <span class="tag-name">{{ $index === 0 ? 'up/down' : 'left/right' }}</span>
+                  <span class="tag-binding">nothing on this stick</span>
+                </span>
+              }
+            }
+          </div>
+        </figure>
+      }
+    </div>
+  }
+
+  @if (layout().bars.length > 0) {
+    <ul class="bars">
+      @for (axis of layout().bars; track axis) {
+        <li>
+          <button
+            type="button"
+            class="bar"
+            [class.mapped]="!!caption('AXIS', axis)"
+            [class.detected]="isHighlighted('AXIS', axis)"
+            [disabled]="!interactive()"
+            (click)="pick('AXIS', axis)"
+          >
+            <span class="bar-head">
+              <span class="tag-name">{{ axisLabel(axis) }}</span>
+              <span class="mono tag-value">{{ percent(axisValue(axis)) }}%</span>
+            </span>
+            @if (caption('AXIS', axis); as bound) {
+              <span class="tag-binding">{{ bound }}</span>
+            }
+            <span class="bar-track" aria-hidden="true">
+              <span class="bar-detent low"></span>
+              <span class="bar-detent mid"></span>
+              <span class="bar-detent high"></span>
+              <span class="bar-marker" [style.left.%]="barOffset(axis)"></span>
+            </span>
+          </button>
+        </li>
+      }
+    </ul>
+  }
+
+  @if (buttons().length > 0) {
+    <div class="buttons">
+      @for (pressed of buttons(); track $index) {
+        <button
+          type="button"
+          class="btn-pill"
+          [class.mapped]="!!caption('BUTTON', $index)"
+          [class.on]="isOn(pressed)"
+          [class.detected]="isHighlighted('BUTTON', $index)"
+          [disabled]="!interactive()"
+          (click)="pick('BUTTON', $index)"
+        >
+          <span class="tag-name">{{ buttonLabel($index) }}</span>
+          @if (caption('BUTTON', $index); as bound) {
+            <span class="tag-binding">{{ bound }}</span>
+          }
+        </button>
+      }
+    </div>
+  }
+</div>

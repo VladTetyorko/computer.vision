@@ -2,6 +2,7 @@ package com.drones.vision.api.dto;
 
 import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.flight.domain.model.OwnedControlProfile;
+import com.drones.vision.flight.domain.model.TransmitterView;
 
 import java.time.Instant;
 import java.util.List;
@@ -29,10 +30,14 @@ import java.util.List;
  * @param updatedAt  when it was last saved; {@code null} for a built-in, which was never saved
  * @param channelMap the controls that stream into RC channels
  * @param actionMap  the controls whose positions fire commands
+ * @param stickMode  the owner's transmitter mode, 1-4 — how the layout is <em>drawn</em>, never what
+ *                   it sends. A built-in reports the platform default, having no owner to ask
+ * @param forwardIsUp whether pushing a stick forward makes its axis read positive on this operator's
+ *                   radio; drawing only, like {@code stickMode}
  */
 public record ControlProfileResponse(String id, String source, String kind, String code, String name, boolean active,
                                       Instant updatedAt, List<ControlBindingPayload> channelMap,
-                                      List<ActionBindingPayload> actionMap) {
+                                      List<ActionBindingPayload> actionMap, int stickMode, boolean forwardIsUp) {
 
     /** Wire value of {@link #source()} for a profile the operator saved. */
     public static final String SOURCE_SAVED = "SAVED";
@@ -49,7 +54,7 @@ public record ControlProfileResponse(String id, String source, String kind, Stri
      * @return the wire entry, with a {@code null} {@code updatedAt}
      */
     public static ControlProfileResponse builtIn(ControlProfile profile, boolean active) {
-        return from(profile, SOURCE_BUILT_IN, active, null);
+        return from(profile, SOURCE_BUILT_IN, active, null, TransmitterView.DEFAULT);
     }
 
     /**
@@ -59,14 +64,15 @@ public record ControlProfileResponse(String id, String source, String kind, Stri
      * @return the wire entry
      */
     public static ControlProfileResponse saved(OwnedControlProfile profile) {
-        return from(profile.profile(), SOURCE_SAVED, profile.active(), profile.updatedAt());
+        return from(profile.profile(), SOURCE_SAVED, profile.active(), profile.updatedAt(), profile.view());
     }
 
     private static ControlProfileResponse from(ControlProfile profile, String source, boolean active,
-                                               Instant updatedAt) {
+                                               Instant updatedAt, TransmitterView view) {
         return new ControlProfileResponse(profile.id().value().toString(), source, profile.kind().name(),
                 profile.code(), profile.displayName(), active, updatedAt,
                 profile.channelMap().bindings().stream().map(ControlBindingPayload::from).toList(),
-                profile.actionMap().bindings().stream().map(ActionBindingPayload::from).toList());
+                profile.actionMap().bindings().stream().map(ActionBindingPayload::from).toList(),
+                view.stickMode(), view.forwardIsUp());
     }
 }

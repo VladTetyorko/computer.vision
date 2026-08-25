@@ -24,8 +24,21 @@ import java.time.Instant;
  *                  kind may be active — a rule the repository enforces atomically, since two active
  *                  profiles would make the choice depend on read order
  * @param updatedAt when it last changed, for display and for "which of these did I edit last"
+ * @param view      how the owner's transmitter is arranged, which changes how the layout is drawn
+ *                  and nothing else — see {@link TransmitterView} for why it lives here rather than
+ *                  on the layout
  */
-public record OwnedControlProfile(UserId owner, ControlProfile profile, boolean active, Instant updatedAt) {
+public record OwnedControlProfile(UserId owner, ControlProfile profile, boolean active, Instant updatedAt,
+                                   TransmitterView view) {
+
+    /**
+     * A record of a profile whose owner has not said how their transmitter is arranged — everything
+     * saved before {@link TransmitterView} existed, and every profile created since, until the
+     * operator changes the picture.
+     */
+    public OwnedControlProfile(UserId owner, ControlProfile profile, boolean active, Instant updatedAt) {
+        this(owner, profile, active, updatedAt, TransmitterView.DEFAULT);
+    }
 
     public OwnedControlProfile {
         if (owner == null) {
@@ -40,6 +53,9 @@ public record OwnedControlProfile(UserId owner, ControlProfile profile, boolean 
         }
         if (updatedAt == null) {
             throw new IllegalArgumentException("OwnedControlProfile updatedAt must not be null");
+        }
+        if (view == null) {
+            throw new IllegalArgumentException("OwnedControlProfile view must not be null");
         }
     }
 

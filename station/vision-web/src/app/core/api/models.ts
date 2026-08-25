@@ -2931,6 +2931,14 @@ export interface ControlProfile {
   readonly updatedAt?: string;
   readonly channelMap: readonly ControlBinding[];
   readonly actionMap: readonly ActionBinding[];
+  /**
+   * The owner's transmitter mode, 1–4, and which way its vertical axes read. Both change only how
+   * the layout is **drawn** — never a microsecond on the wire — and both are stored per layout
+   * rather than per browser, so setting a layout up on one machine and flying it from another does
+   * not ask the same question twice. A built-in reports the platform default, having no owner.
+   */
+  readonly stickMode: number;
+  readonly forwardIsUp: boolean;
 }
 
 /** `POST /api/control-profiles` — starts a copy of the built-in for `kind`. */
@@ -2945,6 +2953,9 @@ export interface UpdateControlProfileRequest {
   readonly name: string;
   readonly channelMap: readonly ControlBinding[];
   readonly actionMap: readonly ActionBinding[];
+  /** See `ControlProfile`; omitted by a client with no opinion, which the backend reads as the default. */
+  readonly stickMode?: number;
+  readonly forwardIsUp?: boolean;
 }
 
 /**
@@ -2975,6 +2986,12 @@ export interface ControlCatalog {
     readonly dangerous: boolean;
   }[];
   readonly auxFunctions: readonly { readonly number: number; readonly label: string }[];
+  /**
+   * The highest RC channel worth binding — what the relay actually puts on the wire, not the
+   * `[1,18]` the backend will validate. Served rather than assumed (C8): a binding above it is
+   * stored and shown and never sent, so offering more would be offering nothing.
+   */
+  readonly maxRcChannel: number;
 }
 
 /** `POST /api/assets/{id}/aux-function` — `level` is ArduPilot's own 0 LOW / 1 MIDDLE / 2 HIGH. */

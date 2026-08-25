@@ -1,5 +1,6 @@
 import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { describe, expect, it, vi } from 'vitest';
 import { RcMonitor } from './rc-monitor';
 import { RcInputService } from '../../core/rc/rc-input.service';
@@ -99,6 +100,8 @@ const ROVER_PROFILE: ControlProfile = {
   code: 'CUSTOM',
   name: 'Bench rover',
   active: true,
+  stickMode: 2,
+  forwardIsUp: true,
   channelMap: [],
   actionMap: [
     {
@@ -143,7 +146,8 @@ function render(
   fakeClient: FakeManualControlClient,
   extras: { store?: FakeControlProfileStore; dispatcher?: FakeControlActionDispatcher } = {},
 ) {
-  TestBed.configureTestingModule({});
+  // The drawer links to `/manage/controller` (C11), so `RouterLink` needs a router to resolve against.
+  TestBed.configureTestingModule({ providers: [provideRouter([])] });
   const store = extras.store ?? new FakeControlProfileStore();
   const dispatcher = extras.dispatcher ?? new FakeControlActionDispatcher();
   TestBed.overrideComponent(RcMonitor, {
@@ -346,7 +350,27 @@ describe('RcMonitor — the merged Controller drawer (docs/plans/active/CONTROLL
     fixture.componentRef.setInput('capabilities', { ...ROVER_CAPABILITY, vehicleKind: 'COPTER' as VehicleKind });
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.querySelector('.rc-actions')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.rc-binding-list')).toBeNull();
     expect(dispatcher.bind).toHaveBeenLastCalledWith('asset-1', undefined, store.rules(), true);
+  });
+
+  it('offers the way into the setup page when nothing is bound — the empty state is the signpost (C11)', () => {
+    const store = new FakeControlProfileStore();
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store });
+
+    const link = fixture.nativeElement.querySelector('.rc-actions a[href="/manage/controller"]');
+    expect(link).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.rc-actions').textContent).toContain('Nothing on your transmitter');
+  });
+
+  it('still offers it once switches are bound, so a layout can be changed without hunting for the page', () => {
+    const store = new FakeControlProfileStore();
+    store.profilesSignal.set([ROVER_PROFILE]);
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store });
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.rc-binding-list')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.rc-setup-link[href="/manage/controller"]')).not.toBeNull();
   });
 });

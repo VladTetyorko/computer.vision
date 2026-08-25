@@ -24,6 +24,8 @@ function profile(over: Partial<ControlProfile>): ControlProfile {
     code: 'S-T-',
     name: 'Bench rover',
     active: false,
+    stickMode: 2,
+    forwardIsUp: true,
     channelMap: [],
     actionMap: [],
     ...over,

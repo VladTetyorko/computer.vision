@@ -6,6 +6,7 @@ import com.drones.vision.flight.domain.model.ControlBinding;
 import com.drones.vision.flight.domain.model.ControlFunction;
 import com.drones.vision.flight.domain.model.ControlInputKind;
 import com.drones.vision.flight.domain.model.ControlProfile;
+import com.drones.vision.flight.domain.model.RcChannels;
 import com.drones.vision.flight.domain.model.SwitchPosition;
 import com.drones.vision.flight.domain.model.VehicleKind;
 
@@ -32,10 +33,15 @@ import java.util.List;
  * @param actions      what a switch position can fire, and what each needs configured alongside it
  * @param auxFunctions the {@code RCx_OPTION} numbers this deployment offers by name; a menu, not a
  *                     whitelist — any number in range may be bound
+ * @param maxRcChannel the highest RC channel a binding may usefully drive — the number the relay
+ *                     actually puts on the wire ({@code RcChannels#RELAYED_CHANNELS}), not the
+ *                     {@code [1,18]} a {@code ControlBinding} will validate. A UI offering more
+ *                     would be offering channels the aircraft never hears about
  */
 public record ControlCatalogResponse(List<VehicleKindOption> vehicleKinds, List<InputKindOption> inputKinds,
                                       List<PositionOption> positions, List<FunctionOption> functions,
-                                      List<ActionOption> actions, List<AuxFunctionOption> auxFunctions) {
+                                      List<ActionOption> actions, List<AuxFunctionOption> auxFunctions,
+                                      int maxRcChannel) {
 
     /**
      * @param name  the {@code VehicleKind} name
@@ -115,6 +121,7 @@ public record ControlCatalogResponse(List<VehicleKindOption> vehicleKinds, List<
                         .toList(),
                 auxFunctions.functions().stream()
                         .map(function -> new AuxFunctionOption(function.number(), function.label()))
-                        .toList());
+                        .toList(),
+                RcChannels.RELAYED_CHANNELS);
     }
 }

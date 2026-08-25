@@ -33,6 +33,22 @@ public record RcChannels(List<Integer> microsByChannel) {
     /** Maximum real (non-sentinel) microsecond pulse width. */
     public static final int MAX_MICROS = 2000;
 
+    /**
+     * How many channels the manual-control relay actually puts on the wire today: {@code 1..8}
+     * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §5's v1 scope).
+     *
+     * <p>Named here, in the domain, because it is not only the adapter's business: a
+     * {@link ControlBinding} may legally target {@code [1,18]} — the MAVLink message has the fields
+     * — but a binding above this number is stored, shown, and <b>never sent</b>. Anything offering
+     * an operator a channel to pick must offer only channels that reach the aircraft, so it needs
+     * this number rather than the validation range.
+     *
+     * <p>Raising it is not a one-line change: {@code RC_CHANNELS_OVERRIDE} uses a <em>different</em>
+     * release sentinel for channels 9–18 ({@code 65534}, not {@code 0}) — see
+     * docs/plans/active/OPERATOR-CONTROL-CONTEXT.md G13, still open.
+     */
+    public static final int RELAYED_CHANNELS = 8;
+
     public RcChannels {
         if (microsByChannel == null) {
             throw new IllegalArgumentException("RcChannels microsByChannel must not be null");

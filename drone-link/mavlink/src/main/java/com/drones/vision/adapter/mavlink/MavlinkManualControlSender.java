@@ -80,8 +80,10 @@ public final class MavlinkManualControlSender implements ManualControlPort {
 
     private static final System.Logger LOG = System.getLogger(MavlinkManualControlSender.class.getName());
 
-    /** v1 scope: {@code RC_CHANNELS_OVERRIDE} channels 1..8 only (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §5). */
-    static final int CHANNEL_COUNT = 8;
+    /** v1 scope: {@code RC_CHANNELS_OVERRIDE} channels 1..8 only (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §5).
+     *  Reads the domain's own {@link RcChannels#RELAYED_CHANNELS} rather than repeating the number, so the
+     *  controller-setup UI cannot offer a channel this relay would silently drop. */
+    static final int CHANNEL_COUNT = RcChannels.RELAYED_CHANNELS;
 
     private static final Duration SCHEDULER_CLOSE_JOIN_TIMEOUT = Duration.ofSeconds(5);
 

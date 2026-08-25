@@ -5,6 +5,7 @@ import com.drones.vision.flight.domain.model.ChannelMap;
 import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.flight.domain.model.ControlProfileId;
 import com.drones.vision.flight.domain.model.OwnedControlProfile;
+import com.drones.vision.flight.domain.model.TransmitterView;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.UserId;
 
@@ -83,6 +84,7 @@ public interface ControlProfileService {
      * @param name       the new name; must not be blank
      * @param channelMap the new channel bindings
      * @param actionMap  the new action bindings
+     * @param view       how the owner's transmitter is arranged; affects only how the layout is drawn
      * @return the updated profile
      * @throws java.util.NoSuchElementException if no such profile is stored
      * @throws com.drones.vision.platform.AccessDeniedException if it belongs to someone else
@@ -91,15 +93,20 @@ public interface ControlProfileService {
      *                                   twice, one RC channel driven twice)
      */
     OwnedControlProfile update(UserId owner, ControlProfileId id, String name, ChannelMap channelMap,
-                               ActionMap actionMap);
+                               ActionMap actionMap, TransmitterView view);
 
     /**
      * Makes one profile the owner's active layout for its own vehicle kind, deactivating whichever
      * of theirs held that place before.
      *
+     * <p><b>A built-in id is valid here</b>, unlike in {@code update}/{@code delete}: activating a
+     * built-in means "use the built-in for this kind", which is expressed by clearing the owner's
+     * active flag for that kind rather than by storing anything. Idempotent, and it never copies —
+     * a copy would be an editable duplicate free to drift from the built-in it came from.
+     *
      * @param owner the acting user
-     * @param id    the profile to activate
-     * @throws java.util.NoSuchElementException if no such profile is stored
+     * @param id    the profile to activate, saved or built-in
+     * @throws java.util.NoSuchElementException if no such saved profile is stored
      * @throws com.drones.vision.platform.AccessDeniedException if it belongs to someone else
      */
     void activate(UserId owner, ControlProfileId id);

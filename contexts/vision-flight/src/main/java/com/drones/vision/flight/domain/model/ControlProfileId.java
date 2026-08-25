@@ -1,6 +1,7 @@
 package com.drones.vision.flight.domain.model;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -76,11 +77,23 @@ public record ControlProfileId(UUID value) {
      * @return {@code true} if this equals {@link #builtIn(VehicleKind)} for any kind
      */
     public boolean isBuiltIn() {
+        return builtInKind().isPresent();
+    }
+
+    /**
+     * The vehicle kind this id is the built-in profile <em>of</em>, or empty when it names a saved
+     * profile.
+     *
+     * <p>Exists because "activate the built-in" has to know which kind's active flag to clear — the
+     * built-in itself is never a stored row to point at, so the kind has to come back out of the id
+     * that was derived from it.
+     */
+    public Optional<VehicleKind> builtInKind() {
         for (VehicleKind kind : VehicleKind.values()) {
             if (builtIn(kind).equals(this)) {
-                return true;
+                return Optional.of(kind);
             }
         }
-        return false;
+        return Optional.empty();
     }
 }

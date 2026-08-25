@@ -60,9 +60,14 @@
   <!-- Bound switches (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C2/C3) — what this operator's
        layout fires when a switch moves. Deliberately above "Take control" and outside it: these go
        over the ordinary command endpoints, so they work without taking the sticks at all. -->
-  @if (actionBindings().length > 0) {
-    <div class="rc-actions">
-      <span class="label rc-group-label">Bound switches</span>
+  <div class="rc-actions">
+    <span class="label rc-group-label">Bound switches</span>
+    @if (actionBindings().length === 0) {
+      <p class="muted hint">
+        Nothing on your transmitter is bound to a command yet.
+        <a routerLink="/manage/controller">Set up your controller</a> to choose what each switch does.
+      </p>
+    } @else {
       <ul class="rc-binding-list">
         @for (binding of actionBindings(); track controlLabel(binding.source, binding.sourceIndex)) {
           <li>
@@ -83,8 +88,9 @@
       @if (!canCommand()) {
         <p class="muted hint">These do nothing until this drone accepts commands.</p>
       }
-    </div>
-  }
+      <a class="rc-setup-link" routerLink="/manage/controller">Change what these do</a>
+    }
+  </div>
 
   <!-- Take control (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R5) — the relay engage/release gesture.
        Deliberately a sibling of the monitor above, not nested inside it: a mid-session gamepad

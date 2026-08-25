@@ -17,6 +17,7 @@
 
 /* ---- Layouts ------------------------------------------------------------------------------ */
 
+.layout-groups,
 .layout-list {
   list-style: none;
   margin: 0;
@@ -24,6 +25,30 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
+}
+
+.layout-groups {
+  gap: var(--space-16);
+}
+
+/* One heading per vehicle kind, saying what is active for it — which is what "one active at a
+   time" actually means, and what a flat list of four Active chips said the opposite of. */
+.group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.group-name {
+  font-weight: 600;
+}
+
+.group-active {
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
 .layout-row {
@@ -104,55 +129,181 @@
   max-width: 32ch;
 }
 
-/* ---- Live transmitter inventory ----------------------------------------------------------- */
+/* ---- The transmitter, and how it is drawn -------------------------------------------------- */
 
-.inventory {
+.transmitter {
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
 }
 
-.inventory-head {
+.transmitter-head {
   display: flex;
   align-items: center;
   gap: var(--space-8);
   flex-wrap: wrap;
 }
 
-.inventory-grid {
+.diagram-controls {
   display: flex;
+  align-items: flex-end;
   flex-wrap: wrap;
   gap: var(--space-8);
 }
 
-/* One physical control, offered as something to map. A bound one stays visible but inert — it is
-   still part of the transmitter, it just already has a row below. */
-.input-chip {
+.inline-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.guide-line {
+  margin: 0 0 var(--space-4);
+}
+
+.guide-actions {
+  display: flex;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+/* ---- The drawing and the one control being edited ------------------------------------------ */
+
+/* The editor sits beside the picture rather than two screens below it: pointing at a stick and
+   then hunting for its card was the page's own longest journey. */
+.work {
+  display: grid;
+  grid-template-columns: 1fr minmax(18rem, 24rem);
+  gap: var(--space-16);
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  /* --bp-lg */
+  .work {
+    grid-template-columns: 1fr;
+  }
+}
+
+.work-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.work-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  position: sticky;
+  top: var(--space-16);
+}
+
+.editor-hint {
+  margin: 0;
+}
+
+/* ---- What the vehicle receives -------------------------------------------------------------- */
+
+.outputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.outputs-head {
   display: flex;
   align-items: baseline;
   gap: var(--space-8);
-  padding: var(--space-4) var(--space-8);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel-raised);
-  color: inherit;
-  cursor: pointer;
-  font-size: 0.85rem;
+  flex-wrap: wrap;
 }
 
-.input-chip:disabled {
+.output-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.output-pick {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 4rem minmax(8rem, 1fr) minmax(6rem, 2fr) 4rem;
+  align-items: center;
+  gap: var(--space-8);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-8);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.output-pick:disabled {
   cursor: default;
 }
 
-.input-chip.bound {
-  color: var(--text-muted);
-}
-
-.input-chip.on {
+.output-pick.selected {
   border-color: var(--color-info);
 }
 
-/* ---- Control rows ------------------------------------------------------------------------- */
+.output-row.idle .out-fn,
+.output-row.idle .out-micros {
+  color: var(--text-muted);
+}
+
+.out-fn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.out-micros {
+  text-align: right;
+}
+
+/* The pulse-width envelope, 1000 to 2000 µs, with a tick where this channel rests. */
+.out-track {
+  position: relative;
+  height: var(--space-8);
+  border-radius: var(--radius-sm);
+  background: var(--panel-hover);
+}
+
+.out-rest,
+.out-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  transform: translateX(-50%);
+}
+
+.out-rest {
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.out-marker {
+  width: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-info);
+}
+
+/* ---- Mapped controls ------------------------------------------------------------------------ */
+
+.mapped {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
 
 .control-list {
   list-style: none;
@@ -160,16 +311,55 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-16);
+  gap: var(--space-4);
 }
 
-.control-card {
+.control-row {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-8);
-  padding: var(--space-16);
+  padding: var(--space-4) var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+.control-row.selected {
+  border-color: var(--color-info);
+}
+
+/* The row for the control just pointed at or just flicked — the same call-out the diagram gives
+   it, so the two halves of the page are visibly the same thing. */
+.control-row.detected {
+  border-color: var(--color-success);
+}
+
+.control-pick {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.control-pick:disabled {
+  cursor: default;
+}
+
+.control-name {
+  font-weight: 600;
+  min-width: 6ch;
+}
+
+.control-binding {
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
 .control-head {
@@ -182,28 +372,26 @@
   flex: 1;
 }
 
-.control-name {
-  font-weight: 600;
-}
+/* ---- The one control's fields --------------------------------------------------------------- */
 
-.control-row {
+.control-row-fields {
   display: flex;
   gap: var(--space-16);
   flex-wrap: wrap;
   align-items: flex-end;
 }
 
-.control-row label {
+.control-row-fields label {
   display: flex;
   flex-direction: column;
 }
 
-.control-row label.grow {
+.control-row-fields label.grow {
   flex: 1;
   min-width: 12ch;
 }
 
-.control-row label.checkbox {
+.control-row-fields label.checkbox {
   flex-direction: row;
   align-items: center;
   gap: var(--space-8);
