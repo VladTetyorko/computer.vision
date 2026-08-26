@@ -23,7 +23,7 @@ accept one as a filter).
 `Capability`, `StreamDescriptor`, `Telemetry`…) · `vision-platform` (`AuditTrailPort`/`AuditEntry` —
 every mutation writes one; `VisibilityScope` — every scoped read filters by it) · nothing else.
 **Used by:** every other context, every adapter, `vision-app`, `vision-api`.
-**Build/test:** `./mvnw -B -pl contexts/vision-warehouse test` — 191 tests green.
+**Build/test:** `./mvnw -B -pl contexts/vision-warehouse test` — 210 tests green.
 
 **Warehouse is the pure leaf of the whole context graph** (docs/plans/active/DOMAIN-SEPARATION-W1.md
 §16's measured edge list: `warehouse -> (nothing)`) — nothing it owns reads any other context, and
@@ -88,6 +88,11 @@ being real (see the dependency table in docs/plans/active/DOMAIN-SEPARATION-W1.m
 - `CategoryService` (interface) → `DefaultCategoryService(CategoryRepositoryPort)` — `List<DeviceCategory> categories()`, sorted by `CategoryId.slug()`
 - `CategoryCounts(categoryId, categoryName, total, active, deactivated, deleted, streaming)` — one `FleetSummary#categories()` row
 
+### `application.directory` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3)
+- `AssetDirectoryService` (interface) → `DefaultAssetDirectoryService(AssetRepositoryPort, DeviceRepositoryPort)` — a deliberately narrow read-only seam so perception's `UsageTracker` can resolve "which asset/device does this stream/telemetry source belong to" **without** depending on `AssetService`/`DeviceService`. Those two already depend on `AssetLiveStatePort`, whose only implementation (`StreamBackedAssetLiveState`) depends on `UsageTracker` — so `UsageTracker -> AssetService -> AssetLiveStatePort -> UsageTracker` would be a Spring bean cycle. `AssetDirectoryService` is backed only by the two raw repository ports, breaking the cycle while still keeping perception off `AssetRepositoryPort`/`DeviceRepositoryPort` directly (its own `*RepositoryPort` imports from this module dropped to zero — see this context's and perception's Gotchas)
+  - `Optional<Asset> findByDevice(DeviceId)` — the asset that owns a device, if any (`assetRepository.findByDeviceId`)
+  - `Optional<Device> findDevice(DeviceId)` — a device by id (`deviceRepository.findById`)
+
 ### `application.device` (package `warehouse.application.device` — disambiguated from perception's own `device` leaf, W1.6d)
 - `DeviceService` (interface) → `DefaultDeviceService(DeviceRepositoryPort, AssetLiveStatePort, AuditTrailPort, EventPublisherPort)` — stops a device's stream via `assetLiveStatePort.stopStreamsForDevices(Set.of(deviceId))`, never by iterating `StreamService` itself
   - `Device register(DeviceRegistration, UserId)` — publishes `DEVICE_ONLINE`, audits `CREATED`; `List<Device> devices()` / `devices(includeDeleted)`; `Optional<Device> find(DeviceId)`; `Device update(DeviceId, DeviceEdit, UserId)` partial; `Device setState(...)` idempotent, stops the stream leaving service; `Device delete(...)` **soft**, stays a member of its asset
@@ -111,6 +116,12 @@ being real (see the dependency table in docs/plans/active/DOMAIN-SEPARATION-W1.m
   - `List<UsageSummary> recent(VisibilityScope, AssetId|null, int limit)` newest-first; `Optional<UsageSummary> byStream(VisibilityScope, StreamId)` (STREAM-STATE S5) — the same row shape reached by stream id, with out-of-scope and does-not-exist collapsed to the same empty answer
   - `List<UsageSummary> recent(VisibilityScope, AssetId assetIdOrNull, int limit)` — clamped to `MAX_LIMIT=500`; scope filtering runs **after** the repository's own `limit` (a known, accepted first-cut limitation — a scoped caller can see fewer than `limit` rows even when more of their own flights exist further back)
   - `UsageSummary(usageId, assetId, assetName, startedAt, endedAt, durationSeconds, sampleCount)` — `assetName=""` (never `null`) when the owning asset can't be resolved at all, and that row is included only for an `unbounded()` caller, silently dropped for every other scope (no `Ownership` left to check)
+- `UsageSessionService` (interface) → `DefaultUsageSessionService(AssetUsageRepositoryPort)` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3) — **this is the only place in the codebase that constructs a new `AssetUsage` or writes one to `AssetUsageRepositoryPort`.** Before R3, perception's `UsageTracker` imported `AssetUsageRepositoryPort` directly and built/saved/closed the aggregate itself; this service pulls that ownership into warehouse, exposing exactly the verbs a session's lifecycle needs — perception now calls this instead of touching the repository port. `fold`/`updatePhase` are pure transforms (never write); `open`/`close` always persist (session boundaries); `save` is the explicit low-level write escape hatch perception's own batching (`UsageSummaryBatchSettings`, immediate-vs-deferred/coalesced) uses to control exactly when a mid-session update hits the repository — this service does not decide that timing, the caller does
+  - `AssetUsage open(AssetId, StreamId streamIdOrNull, Instant startedAt)` — constructs+persists a new `PREFLIGHT` usage; `streamId=null` opens a telemetry-only session (no video device)
+  - `AssetUsage fold(AssetUsage, GeoPosition positionOrNull, UsagePhase)` — pins `startPosition` on the first positioned sample, advances `lastPosition`, always increments `sampleCount`, replaces `phase`; **never persists**
+  - `AssetUsage updatePhase(AssetUsage, UsagePhase)` — replaces only `phase`; **never persists**
+  - `AssetUsage close(AssetUsage, UsagePhase, Instant endedAt)` — stamps `endedAt` and `phase`, then persists; the session-boundary counterpart to `open`
+  - `AssetUsage save(AssetUsage)` — persists as-is, for a caller (perception's batching) that already folded/updated and now decides it's time to write
 
 ## Conventions
 - **Validation**: every domain record validates in its compact constructor (`if (…) throw new IllegalArgumentException(…)`); the application layer uses `Objects.requireNonNull`.
@@ -133,8 +144,26 @@ being real (see the dependency table in docs/plans/active/DOMAIN-SEPARATION-W1.m
 - **`DefaultAssetService`/`DefaultDeviceService`/`DefaultFleetSummaryService`/`DefaultAssetStatsService` may never import anything from `perception.**` again** — that is exactly the cycle W1.6e closed. Any new "read something live" need must add a method to `AssetLiveStatePort`, not a new direct collaborator.
 - **`AssetUsage#phase` is typed `UsagePhase` (this module), not `vision-flight`'s `FlightPhase`, and that is deliberate, not a naming accident** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.2/§7, Wave O7): the plan puts the phase *rule* (`FlightPhaseRule`) in flight and the `AssetUsage.phase` *field* here, in the pure leaf that may not depend on flight or any other context. `UsagePhase` mirrors `FlightPhase`'s six values by name only, as a wholly independent enum; **this module never runs the rule and never imports flight** — perception's `UsageTracker` (which legally depends on both) is the one place that runs `FlightPhaseRule` and maps its verdict onto `UsagePhase` before calling `AssetUsage#withPhase`/the convenience ctor. If a future change ever needs this module to reason about phase transitions itself, that is a sign the rule needs its own port here, not a warehouse → flight dependency.
 - **`createFromCandidate`'s duplicate check only ever compares `spec.devices()` (new registrations)** — it does not re-check `existingDeviceIds` entries, which already go through `#assignDevice`'s own eligibility rule (must exist, not deleted, not owned elsewhere). A candidate spec mixing both lists gets both checks, just via two different code paths.
+- **`AssetUsage` is constructed/persisted exclusively by `DefaultUsageSessionService`** (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3) — nothing else in the codebase, including any other service in this module, should call `new AssetUsage(...)` or `assetUsageRepositoryPort.save(...)` directly; go through `UsageSessionService`'s verbs instead. `AssetDirectoryService` is the sibling seam for asset/device *reads* from outside this module — the same wave's other half, and deliberately not folded into `AssetService`/`DeviceService` (see `application.directory` above for why: the Spring bean cycle those two would otherwise create with perception's `AssetLiveStatePort`/`UsageTracker`).
 
 ## Status
+
+**ARCHITECTURE-AUDIT-2026-08-26 wave R3 done** (finding D1 — "session is one concept wearing four
+names, owned by nobody"): warehouse now owns the entire `AssetUsage` lifecycle. New
+`application.usage.UsageSessionService`/`DefaultUsageSessionService` is the sole constructor/persister
+of `AssetUsage` (see Gotchas); new `application.directory.AssetDirectoryService`/
+`DefaultAssetDirectoryService` gives perception a read-only asset/device lookup that avoids a Spring
+bean cycle through `AssetLiveStatePort`. `vision-perception`'s `UsageTracker` dropped from four
+`*RepositoryPort` imports across two foreign contexts (`AssetRepositoryPort`, `DeviceRepositoryPort`,
+`AssetUsageRepositoryPort` here, plus flight's `TelemetryRepositoryPort`) to zero — it now depends only
+on these two new warehouse services plus flight's new `application.telemetry.TelemetryService` (see
+that module's MODULE.md). All phase-translation rules, the telemetry-only-aircraft null-`streamId`
+open, `UsageSummaryBatchSettings` batching, and the source backoff ladders are unchanged — `UsageTracker`
+still runs `FlightPhaseRule`/translates to `UsagePhase` itself (warehouse still never depends on
+flight), it just calls a service instead of a repository for the actual read/write. Wired in
+`station/vision-app`'s `ApplicationServiceWiring`. **191 → 210 tests**
+(`./mvnw -B -pl contexts/vision-warehouse -am test`, green); `ContextArchitectureTest` 4/4, no new or
+changed cross-context edges.
 
 **ARCHITECTURE-AUDIT-2026-08-26 wave R4 done** (this module's half — "the drone has no camera yet"):
 `Device`/`DeviceRegistration`/`DeviceEdit` gained `origin` (`kernel.DeviceOrigin{LIVE,SIMULATED}`),

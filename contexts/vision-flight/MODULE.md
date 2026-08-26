@@ -34,8 +34,9 @@ proving `passport`/`driftFromPreviousFlight`'s usage-ownership check without the
 carries — see Gotchas). No other context. **Used by:** `vision-perception`
 (the `UsageTracker`/`GeofenceMonitor` wiring seam, see Gotchas), `vision-api`, `vision-app`,
 `adapter-mavlink` (O4's `MavlinkVehicleConfigurator` is the expected `VehicleConfigPort` implementation).
-**Build/test:** `./mvnw -B -pl contexts/vision-flight test` — **330 tests green** (144 pre-O3 + 72 added by
-O3 + 24 added by O11 + 47 added by H2a + 43 added by CONTROLLER-SETUP C1/C2).
+**Build/test:** `./mvnw -B -pl contexts/vision-flight test` — **333 tests green** (144 pre-O3 + 72 added by
+O3 + 24 added by O11 + 47 added by H2a + 43 added by CONTROLLER-SETUP C1/C2 + 3 added by
+ARCHITECTURE-AUDIT-2026-08-26 R3).
 
 ## API surface
 
@@ -163,6 +164,10 @@ O3 + 24 added by O11 + 47 added by H2a + 43 added by CONTROLLER-SETUP C1/C2).
   - `void evaluate(AssetId, Telemetry)` — ignores a sample with no lat/lon entirely; self-populates the cache lazily on first use if `refresh()` was never called. Breach rules (frozen): `KEEP_OUT` breaches iff inside the polygon at any altitude; `KEEP_IN` breaches iff at least one enabled `KEEP_IN` zone exists and the position is outside **every** enabled `KEEP_IN` zone (union computed once per sample), or inside this zone but above its own `maxAltitudeMeters`. Per-`(assetId,zoneId)` breach state is in-heap only; only an edge transition raises one `Event(GEOFENCE_BREACH, ...)` via both ports
 - `GeofenceZoneSpec(name, kind, polygon, maxAltitudeMeters, enabled)` — one shape for both create and update; duplicates `GeofenceZone`'s own polygon-size/altitude validation for fail-fast
 
+### `application.telemetry` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3)
+- `TelemetryService` (interface) → `DefaultTelemetryService(TelemetryRepositoryPort)` — a deliberately minimal ownership seam, not a broader feature: this context now owns telemetry *persistence* as a named service instead of perception importing `TelemetryRepositoryPort` directly. One method only — adding a second telemetry concern (reads, live-update fan-out, etc.) should prompt reconsidering the name/shape, not silently growing this interface
+  - `void record(UsageId, Telemetry)` — delegates straight to `telemetryRepository.save(usageId, telemetry)`; perception's `UsageTracker` calls this once per applied sample, after warehouse's `UsageSessionService#fold` has folded the sample into the `AssetUsage` in memory
+
 ## Conventions
 - **Validation**: domain records validate in their compact constructor; the application layer uses `Objects.requireNonNull`.
 - **The acting user is a method parameter (`UserId actor`/`VisibilityScope scope`)**, never a constructor dependency.
@@ -203,6 +208,18 @@ O3 + 24 added by O11 + 47 added by H2a + 43 added by CONTROLLER-SETUP C1/C2).
 - **`first_armed_at`/`last_disarmed_at` on `asset_usages` (added by `V19__asset_usage_phase.sql`) are still mapped to no domain field, deliberately, and this wave did not close that gap.** They live on `AssetUsage`, which is `vision-warehouse`'s type — out of this wave's strict `contexts/vision-flight`/`storage/persistence` file scope, and O5's own migration header already documents the same "schema-only on purpose" choice (see `storage/persistence`'s `v19MigrationAddsNullablePhaseColumnsOnTopOfV1ThroughV18` test). This wave's passport/drift design does not need them either way: `FlightPassport`/`ConfigDriftCalculator` key entirely off `VehicleProfile.observedAt()` (when a snapshot was actually captured) plus `AssetUsage.startedAt()` (already mapped), never off arm/disarm timestamps. A future wave adding "time armed" to the passport would need a `vision-warehouse` change (domain field + entity + mapper both directions + round-trip test), not a `vision-flight` one.
 
 ## Status
+
+**ARCHITECTURE-AUDIT-2026-08-26 wave R3 done** (finding D1 — "session is one concept wearing four
+names, owned by nobody"; this module's half): new `application.telemetry.TelemetryService`/
+`DefaultTelemetryService` is now the sole caller of `TelemetryRepositoryPort#save` — perception's
+`UsageTracker` no longer imports `TelemetryRepositoryPort` (or any other `*RepositoryPort` from this
+module or `vision-warehouse`) directly, it calls this service instead. `TelemetryRepositoryPort#findByUsage`
+is untouched (no read-side seam added this wave — nothing outside this module reads telemetry directly
+today). Wired in `station/vision-app`'s `ApplicationServiceWiring`. No domain/port change, no behavior
+change — `UsageTracker`'s telemetry-write call site now goes through one extra pass-through layer.
+**330 → 333 tests** (`./mvnw -B -pl contexts/vision-flight -am test`, green); `ContextArchitectureTest`
+4/4, no new or changed cross-context edges (flight still depends on warehouse the same way it always
+did, for `AssetService`/`AssetLiveStatePort`/`AssetUsageRepositoryPort`).
 
 **W1.7b/c** (docs/plans/active/DOMAIN-SEPARATION-W1.md §16): `vision-domain`/`vision-application` dissolved; flight's `.domain`/`.application` packages became this one module, a directory move with the ArchUnit layer boundary preserved. `Telemetry`/`FlightState` had already left for `vision-kernel` and `AssetUsage`/`AssetUsageRepositoryPort` for `vision-warehouse` in W1.6c, so this module's own domain surface is narrower than it once was — see the module-level note above. 144/144 tests green.
 
