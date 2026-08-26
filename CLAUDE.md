@@ -79,6 +79,7 @@ If the configuration can be changed during the runtime - use the database and ca
 7) Records are ok to use in the code
 8) Configuration files should be in the root of the project, and appliable to all modules. If the module is "independent" - changes on main should be reflected on it too
 9) Failsaife and up-to-date are one of priorities in our project. Newest data/telemetry/detections etc should be used, even if previous is still available.
+10) A new collaborator means updating the call sites, or bundling into a settings record — never one more constructor overload, and never a parameter whose contract is "null means the feature is off". The old "N-1-arg convenience constructor" convention is **withdrawn**: it produced ten constructors on `UsageTracker` and nine on `StreamPipeline`. Rule and rationale in `.claude/skills/java-clean-code/SKILL.md` §3.
 
 ## Deployment maintenance
 - I will run this application on different servers, so the run of application should be reflected in docker-compose.yml
