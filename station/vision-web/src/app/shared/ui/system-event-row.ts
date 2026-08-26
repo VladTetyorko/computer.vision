@@ -10,17 +10,15 @@ import type { SystemEventRow as SystemEventRowModel } from '../../core/system-ev
  * widening `EventRow.event` to a union would have forced every one of those templates to keep
  * narrowing a shape they never asked for, for a row whose fields (`severity`/`title`/`detail`, no
  * open/closed state or confidence at all) barely overlap `DetectionEvent`'s own. A dedicated sibling
- * with its own small template was the lower-risk, more honest option; see `MODULE.md`'s own wave S1
- * entry for the full "why a sibling, not a union" writeup.
+ * with its own small template was the lower-risk, more honest option.
  *
  * **Informational, not a navigation target** — mirrors `features/asset-detail/**`'s own Events
- * section precedent (`MODULE.md`: "Rows reuse the identical … markup … minus the click affordance —
- * informational here, not a navigation target"), rather than `vision-event-row`'s clickable rail/bell
- * rows. A generic system event (`STREAM_STARTED`, `DEVICE_OFFLINE`, …) has no single canonical
- * destination the way a detection event's asset/live-cockpit target does, and this wave's own scope
- * (`SYSTEM-STATUS-PLAN.md` S1) is "give these events a durable, readable home", not "wire a second
- * navigation graph" — a later wave can add a click target once there's a real page (`/manage/system`,
- * S3) for one to resolve to.
+ * section, which reuses this markup minus the click affordance, rather than `vision-event-row`'s
+ * clickable rail/bell rows. A generic system event (`STREAM_STARTED`, `DEVICE_OFFLINE`, …) has no
+ * single canonical destination the way a detection event's asset/live-cockpit target does, and the
+ * scope (`SYSTEM-STATUS-PLAN.md` S1) is "give these events a durable, readable home", not "wire a
+ * second navigation graph" — a later wave can add a click target once there's a real page
+ * (`/manage/system`, S3) for one to resolve to.
  */
 @Component({
   selector: 'vision-system-event-row',

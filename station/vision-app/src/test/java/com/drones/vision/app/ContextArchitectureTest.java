@@ -114,9 +114,9 @@ class ContextArchitectureTest {
      */
     private static final Set<String> REPOSITORY_PORT_EXEMPTIONS = new TreeSet<>(Set.of(
             // --- vision-events: the pure downstream sink (see DECLARED_EDGES's own comment and
-            // contexts/vision-events/MODULE.md, "wave R5b"/"wave R5c"). Three genuinely bulk,
-            // time-windowed historical reads -- "what happened during this finished flight" -- that
-            // a per-caller application-service method would not make cleaner, only relocate. Kept
+            // contexts/vision-events/MODULE.md). Five class-to-port edges over three ports, every one
+            // a bulk, time-windowed historical read -- "what happened during this finished flight" --
+            // that a per-caller application-service method would not make cleaner, only relocate. Kept
             // deliberately; this half of the list is not expected to shrink.
             "ReplaySources -> com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort",
             "ReplaySources -> com.drones.vision.perception.domain.port.DetectionRepositoryPort",
