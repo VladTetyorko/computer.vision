@@ -390,7 +390,7 @@ section records what actually landed, including where the audit's own text was w
 
 | Rec | State | What landed |
 |---|---|---|
-| R1 | **merged** | The N-1-arg convenience-constructor convention is **withdrawn** — rule text in `.claude/skills/java-clean-code/SKILL.md` §3 + `CLAUDE.md` rule 10, then the classes: `UsageTracker` 10 → **1** public ctor (936 → 778 lines), `StreamPipeline` 9 → **1** (1530 → 1373), `DefaultStreamService` 8 → **1**. Optional collaborators became `Optional<T>` fields on three new settings/collaborator records; zero "pass `null` to skip that feature" javadoc survives in the three files. `vision-perception` 564/564, `vision-app` 248/248, behaviour byte-identical. |
+| R1 | **merged — but see the measurement below** | The N-1-arg convenience-constructor convention is **withdrawn** — rule text in `.claude/skills/java-clean-code/SKILL.md` §3 + `CLAUDE.md` rule 10, then the classes: `UsageTracker` 10 → **1** public ctor (936 → 778 lines), `StreamPipeline` 9 → **1** (1530 → 1373), `DefaultStreamService` 8 → **1**. Optional collaborators became `Optional<T>` fields on three new settings/collaborator records; zero "pass `null` to skip that feature" javadoc survives in the three files. `vision-perception` 564/564, `vision-app` 248/248, behaviour byte-identical. |
 | R1b | see below | `AssetUsage` still carried three convenience constructors R1 never reached, and R2 added a fourth. Collapsed to the one canonical constructor, every call site explicit. |
 | R2 | **merged** | `AssetSessionController` — `POST`/`DELETE /api/assets/{id}/session` — with **no video stream and no device traffic on either verb**, a deliberate divergence from this row's own §9 text; full reasoning and the three named collision tests are in the §9 R2 cell above. `onTelemetryDeviceDiscovered` **deleted** (7 tests removed with it), not wired — it and `engage` answered the same question, and shipping both would have been a second, disagreeing session-opening path. New kernel `UsageOrigin{STREAM,OPERATOR}` + `AssetUsage.origin` + `V26` migration (backfills existing rows to `STREAM`). `vision-kernel` 205/205, `vision-warehouse` 223/223, `vision-perception` 571/571, `adapter-persistence` 224/224, `vision-api` 859/859, `vision-app` 259/259 — all green, no UI (out of file scope by design). **Two things were removed from the wave before it merged**, both of them the exact debt R1 exists to delete: a `default` overload of `UsageSessionService#open` that accepted a `UsageOrigin` and, in its own javadoc's words, silently ignored it; and a third `UsageOrigin` value, `TELEMETRY`, that no code could produce — the same wave had just deleted its only would-be producer. |
 | R3 + R5a | **merged** | Warehouse's new `UsageSessionService` is the only code in the platform that constructs or persists an `AssetUsage`; flight's `TelemetryService` owns telemetry writes. `UsageTracker` dropped all four foreign repository ports for three application services. `AssetDirectoryService` wraps warehouse's repository ports directly rather than reusing `AssetService` — see §11's cycle note below. |
@@ -399,6 +399,35 @@ section records what actually landed, including where the audit's own text was w
 | R5c + R5d | **merged** | The two reads R5b left blocked, plus the two that R5c had written into the ArchUnit exemption list as "unpaid debt" — `DefaultStreamService` and `DefaultAssetStreamService` now take `AssetDirectoryService`, net-zero parameters, same exceptions and messages. The exemption list is down to **7 entries, all deliberate design**: vision-events' 5 bulk reads and `DefaultLabelingService`'s 2 one-hop reads through `ReplaySources`. |
 | R6 | **merged** | `cv-service` splits by `CV_SERVICE_ROLE` into `inference` vs `training`+`geolocation` processes (`cv-split` Compose profile, host ports 50061/50062); Java side gained `CvTarget`/`CvChannels`/`StaticTargetsNameResolver` — ordered failover on one channel via grpc's own `pick_first`, no load-balancer logic invented. Then wired: `vision.cv.inference.targets` / `vision.cv.training.target`, both empty by default so a one-process deployment is byte-identical. Routing the control-plane RPCs at the training channel also closed a latent `NoUniqueBeanDefinitionException` — the visual-geo wiring injected `ObjectProvider<ManagedChannel>` unqualified, so it would have thrown the moment a second channel bean existed. `vision-app` 248 → 258. |
 | R7 | **merged** | **Secure by default.** The permit-all filter chain used to be selected when `vision.auth.enabled` was simply absent, so the shipped default was `anyRequest().permitAll()` with CSRF off and the whole `VisibilityScope` apparatus unexercised. Secured is now the default and permit-all cannot win a tie. The three controllers §4 ledgered as unscoped were each decided: `HlsProxyController` **scoped** (it was a real leak — any caller, any stream, out-of-scope now 404s before the upstream is contacted), `EventController` **scoped**, `DeviceProbeController` **`@OpenByDesign`** (its request and response carry no `AssetId` or `Ownership` to scope against). |
+
+**R1 withdrew the rule; it did not retire the idiom, and the gap is two orders of magnitude.**
+R1's row above is accurate about what it did — the convention is withdrawn in `CLAUDE.md` and the
+skill file, and the three classes the audit named by name were collapsed. What neither the
+recommendation nor the wave measured is how many *other* classes carry the same shape. Counted after
+the fact across every `src/main/java` in the reactor: **59 classes declare more than one public
+constructor. 56 of them chain through `this(...)`**, injecting defaults for the arguments the shorter
+form omits. The 3 that do not are legitimate and should stay — two exception `message` / `message,
+cause` pairs (`ProbeFailedException`, `MediamtxControlApiException`) and a JPA no-arg
+(`AssignmentId`).
+
+Spot-checking the chained ones confirms they are the idiom rather than genuinely distinct
+construction paths: `MjpegVideoSource()` → `this(MjpegSettings.defaults())`,
+`DefaultFleetSummaryService(assetService, liveState)` → `this(..., MAX_ASSETS_IN_SUMMARY,
+OPEN_EVENTS_SCAN_LIMIT)`, `DefaultTrainingJobService(...)` → `this(..., defaultExecutor(),
+Instant::now, MAX_FINISHED_JOBS)`. `SimulationSpec` alone chains three of them.
+
+So the honest status is **4 of ~56 converted** (R1's three, plus `AssetUsage` in R1b) — the rule is in
+force for new code and the worst-named offenders are gone, but the existing surface is essentially
+untouched. Retrofitting the remaining ~52 is a real project with real regression risk, not a
+cleanup, and it is **deliberately not attempted here**: the audit recommended withdrawing the
+convention and named three classes, and quietly expanding that into a 52-class sweep would be
+invented scope. It is the obvious next task, and it wants its own plan doc and its own waves.
+
+The generalisable lesson is the one this audit keeps re-learning: **"the convention is withdrawn" and
+"the convention is gone from the codebase" are different claims, and only the first one was ever
+verified.** A rule that is not enforced by a test is a rule that decays — an ArchUnit rule failing the
+build on a second public constructor (with an explicit, justified exemption list, exactly as R5's
+repository-port rule works) is what would make the withdrawal stick.
 
 **Migration numbering — one collision left, deliberately not resolved here.** `master` tops out at
 `V24__control_profiles.sql`. This branch adds `V25__device_origin.sql` (R4) and
