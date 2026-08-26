@@ -61,6 +61,8 @@ import com.drones.vision.events.application.*;
 import com.drones.vision.simulation.application.*;
 import com.drones.vision.perception.application.stream.*;
 import com.drones.vision.warehouse.application.usage.*;
+import com.drones.vision.warehouse.application.directory.*;
+import com.drones.vision.flight.application.telemetry.*;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -325,9 +327,48 @@ public class ApplicationServiceWiring {
     }
 
     /**
+     * Read-only device/asset identity lookups for {@link #usageTracker}
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3) — see {@link AssetDirectoryService}'s
+     * own javadoc for why this is a narrower seam than {@link #assetService}/{@link #deviceService}
+     * rather than a reuse of either: routing {@code usageTracker} through {@code AssetService} would
+     * close a Spring bean cycle ({@code usageTracker -> assetService -> assetLiveStatePort ->
+     * usageTracker}, since {@link #assetLiveStatePort} itself depends on {@code usageTracker}).
+     */
+    @Bean
+    public AssetDirectoryService assetDirectoryService(AssetRepositoryPort assetRepositoryPort,
+                                                         DeviceRepositoryPort deviceRepositoryPort) {
+        return new DefaultAssetDirectoryService(assetRepositoryPort, deviceRepositoryPort);
+    }
+
+    /**
+     * Owns the {@code AssetUsage} session lifecycle for {@link #usageTracker}
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3) — see {@link UsageSessionService}'s
+     * own javadoc for why warehouse, not perception, is the only module that constructs/persists an
+     * {@code AssetUsage}.
+     */
+    @Bean
+    public UsageSessionService usageSessionService(AssetUsageRepositoryPort assetUsageRepositoryPort) {
+        return new DefaultUsageSessionService(assetUsageRepositoryPort);
+    }
+
+    /**
+     * Owns telemetry-sample persistence for {@link #usageTracker}
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3) — see {@link TelemetryService}'s own
+     * javadoc; a thin ownership seam, not a feature.
+     */
+    @Bean
+    public TelemetryService telemetryService(TelemetryRepositoryPort telemetryRepositoryPort) {
+        return new DefaultTelemetryService(telemetryRepositoryPort);
+    }
+
+    /**
      * Drives {@link com.drones.vision.warehouse.domain.model.AssetUsage} lifecycle and telemetry sampling
-     * from {@link StreamService}'s start/stop notifications. {@code telemetryLiveUpdatePort} and
-     * {@code geofenceMonitor} are threaded through unconditionally — both are always real beans.
+     * from {@link StreamService}'s start/stop notifications, delegating what a session <em>is</em> —
+     * construction, persistence — to {@link #assetDirectoryService}/{@link #usageSessionService}/{@link
+     * #telemetryService} (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3: {@code
+     * UsageTracker} used to hold four repository ports across warehouse and flight directly; it now
+     * holds none). {@code telemetryLiveUpdatePort} and {@code geofenceMonitor} are threaded through
+     * unconditionally — both are always real beans.
      *
      * <p>Takes its summary-coalescing window from {@code vision.persistence.telemetry} — the same
      * block {@code telemetryRepositoryPort} reads (docs/plans/done/SCALE-100-PLAN.md S4). The two
@@ -344,10 +385,9 @@ public class ApplicationServiceWiring {
      * bean took an observer at all — nothing in this module binds {@code vision.flight.phase.*} yet.
      */
     @Bean
-    public UsageTracker usageTracker(AssetRepositoryPort assetRepositoryPort,
-                                      DeviceRepositoryPort deviceRepositoryPort,
-                                      AssetUsageRepositoryPort assetUsageRepositoryPort,
-                                      TelemetryRepositoryPort telemetryRepositoryPort,
+    public UsageTracker usageTracker(AssetDirectoryService assetDirectoryService,
+                                      UsageSessionService usageSessionService,
+                                      TelemetryService telemetryService,
                                       List<TelemetrySourcePort> telemetrySources,
                                       TelemetryLiveUpdatePort telemetryLiveUpdatePort,
                                       GeofenceMonitor geofenceMonitor,
@@ -356,8 +396,7 @@ public class ApplicationServiceWiring {
         // geofenceMonitor::evaluate, not the monitor itself: UsageTracker (perception) takes a
         // BiConsumer seam so it never depends on the flight context — docs/plans/active/DOMAIN-SEPARATION-W1.md §5 C2
         UsageTrackerSettings defaultSettings = UsageTrackerSettings.defaults();
-        return new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort,
-                telemetryRepositoryPort, telemetrySources,
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, telemetrySources,
                 new UsageTrackerSettings(Optional.of(telemetryLiveUpdatePort), Optional.of(geofenceMonitor::evaluate),
                         defaultSettings.sourceInitialBackoffNanos(), defaultSettings.sourceMaxBackoffNanos(),
                         persistenceProperties.telemetry().toSummarySettings(), UsagePhaseSettings.defaults(),

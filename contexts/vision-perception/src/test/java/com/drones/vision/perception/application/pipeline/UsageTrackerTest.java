@@ -24,6 +24,12 @@ import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
+import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
+import com.drones.vision.warehouse.application.directory.DefaultAssetDirectoryService;
+import com.drones.vision.warehouse.application.usage.UsageSessionService;
+import com.drones.vision.warehouse.application.usage.DefaultUsageSessionService;
+import com.drones.vision.flight.application.telemetry.TelemetryService;
+import com.drones.vision.flight.application.telemetry.DefaultTelemetryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -65,6 +71,16 @@ class UsageTrackerTest {
     private TelemetryRepositoryPort telemetryRepository;
     private Ownership ownership;
 
+    // docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3: UsageTracker no longer holds the
+    // four repository ports above directly -- it holds these three application services instead.
+    // Each is the REAL Default* implementation wrapping the very same mocked repository ports this
+    // test already stubs/verifies against, so every existing `verify(usageRepository, times(n))`
+    // assertion keeps proving the same thing it always did (the service is a direct pass-through),
+    // while UsageTracker itself now only ever sees the service interfaces.
+    private AssetDirectoryService assetDirectoryService;
+    private UsageSessionService usageSessionService;
+    private TelemetryService telemetryService;
+
     @BeforeEach
     void setUp() {
         assetRepository = mock(AssetRepositoryPort.class);
@@ -74,16 +90,20 @@ class UsageTrackerTest {
         ownership = new Ownership(UserId.random(), GroupId.random());
 
         when(usageRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assetDirectoryService = new DefaultAssetDirectoryService(assetRepository, deviceRepository);
+        usageSessionService = new DefaultUsageSessionService(usageRepository);
+        telemetryService = new DefaultTelemetryService(telemetryRepository);
     }
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources) {
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 UsageTrackerSettings.defaults());
     }
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources, TelemetryLiveUpdatePort liveUpdatePublisherPort) {
         UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(Optional.of(liveUpdatePublisherPort), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
                         defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
@@ -97,7 +117,7 @@ class UsageTrackerTest {
      */
     private UsageTracker tracker(List<TelemetrySourcePort> sources, GeofenceMonitor geofenceMonitor) {
         UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), Optional.of(geofenceMonitor::evaluate),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
                         defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
@@ -110,7 +130,7 @@ class UsageTrackerTest {
      */
     private UsageTracker trackerWithFastRetry(List<TelemetrySourcePort> sources) {
         UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20),
                         defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
@@ -124,7 +144,7 @@ class UsageTrackerTest {
     private UsageTracker trackerWithSummaryBatching(List<TelemetrySourcePort> sources,
                                                      UsageSummaryBatchSettings summaryBatchSettings) {
         UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(), summaryBatchSettings,
                         defaults.phaseSettings(), defaults.usagePhaseObserver()));
@@ -138,7 +158,7 @@ class UsageTrackerTest {
     private UsageTracker trackerWithPhaseSettings(List<TelemetrySourcePort> sources,
                                                    UsagePhaseSettings phaseSettings) {
         UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
                         UsageSummaryBatchSettings.immediate(), phaseSettings, defaults.usagePhaseObserver()));
@@ -158,7 +178,7 @@ class UsageTrackerTest {
     private UsageTracker trackerWithPhaseObserver(List<TelemetrySourcePort> sources, UsagePhaseSettings phaseSettings,
                                                    UsagePhaseObserver usagePhaseObserver) {
         UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
                         UsageSummaryBatchSettings.immediate(), phaseSettings, usagePhaseObserver));
