@@ -133,17 +133,23 @@ vision:
     #   batch-size: 100
     #   batch-window: 200ms
 
-  # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3) ---
+  # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3; default flipped by
+  # docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7) ---
   auth:
-    # false (default): NOTHING is secured -- the Spring Security filter chain is
-    # permit-all + CSRF-off, so every existing test and the running SPA behave
-    # exactly as before auth existed; CurrentUser returns the fixed dev principal
-    # (auto-admin) and /api/auth/* report that dev admin with authEnabled=false.
-    # true: a session is required for /api/** except /api/auth/login|logout and
-    # static/SPA routes -- but a session only has someone to log in as if
-    # vision.persistence.seed-dev-users is also true (see above), or real users
-    # were created through UserService.
-    enabled: false
+    # true (default, set explicitly): a session is required for /api/** and /ws/**
+    # except /api/auth/login|logout and static/SPA routes -- but a session only has
+    # someone to log in as if vision.persistence.seed-dev-users is also true (see
+    # above), or real users were created through UserService. This is the safe
+    # default for a platform deployed onto operator-controlled servers (CLAUDE.md,
+    # "Deployment maintenance") -- a deployment that never touches this key still
+    # gets access control.
+    # false: the dev/demo escape hatch. NOTHING is secured -- the Spring Security
+    # filter chain becomes permit-all + CSRF-off, CurrentUser returns the fixed dev
+    # principal (auto-admin, unbounded VisibilityScope) for every request, and
+    # /api/auth/* report that dev admin with authEnabled=false. Turn this on for a
+    # local run or a demo stack with no login flow set up -- never for anything
+    # reachable by someone who isn't already trusted with the whole fleet.
+    enabled: true
 
   # --- adapter-publish-hls: stream egress (Phase 1, see docs/plans/done/PHASE1-PLAN.md Task U5) ---
   publish:
