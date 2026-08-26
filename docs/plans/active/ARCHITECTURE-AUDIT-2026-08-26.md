@@ -401,6 +401,15 @@ section records what actually landed, including where the audit's own text was w
 | R7 | **merged** | **Secure by default.** The permit-all filter chain used to be selected when `vision.auth.enabled` was simply absent, so the shipped default was `anyRequest().permitAll()` with CSRF off and the whole `VisibilityScope` apparatus unexercised. Secured is now the default and permit-all cannot win a tie. The three controllers §4 ledgered as unscoped were each decided: `HlsProxyController` **scoped** (it was a real leak — any caller, any stream, out-of-scope now 404s before the upstream is contacted), `EventController` **scoped**, `DeviceProbeController` **`@OpenByDesign`** (its request and response carry no `AssetId` or `Ownership` to scope against). |
 | R8 | **merged** | Every `MODULE.md` in the reactor is a contract again, not a changelog. 26 docs, **27,238 → 4,253 lines** measured against the audit's own baseline `212311e0`; the largest single drop was `station/vision-web` at 13,377 → 102. What went was dated wave-by-wave Status narrative — every gotcha naming a real trap was carried forward, and rewriting against source rather than copying forward corrected stale claims in six of them (see below). Ten docs sit above the 150-line target because their surface genuinely is that large (`vision-api` is 155 table rows of endpoints, `adapter-persistence` 56 rows of tables); none of the ten still carries wave narrative. |
 
+**Also found while trimming the docs: `leaflet` is a runtime dependency declared as a dev one.**
+`station/vision-web/package.json` lists `leaflet` under `devDependencies` only, while
+`shared/map/tile-cache/leaflet-loader.ts` does a real `await import('leaflet')` at runtime and
+`tactical-map.ts` imports its types. Nothing is broken today — the Maven frontend plugin runs
+`npm ci --no-audit --no-fund`, with dev dependencies present, and the map bundles fine. It breaks the
+first time anyone adds the obvious production flag, `npm ci --omit=dev`, and it breaks as a blank
+map rather than a build error. A one-line move to `dependencies` fixes it; deliberately not done
+inside a verification run, since it changes `package-lock.json` and invalidates the build in flight.
+
 **Found while trimming the docs, not by the audit: a MAVLink link that dies mid-stream tells nobody.**
 `adapter-mavlink` never emits `onError` or `onComplete` on the telemetry publisher it hands out — the
 only mentions of either in its production sources are javadoc explaining that *bind* failure is
