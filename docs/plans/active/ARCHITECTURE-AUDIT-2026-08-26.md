@@ -240,16 +240,32 @@ and describing it otherwise is the main risk of the current plan set.
 | D7 — asset leases, worker role | Unbuilt (W3) |
 
 **Finding T1 — cross-context reads go through the other context's *repository ports*, not its API.**
-17 direct imports of a foreign `*RepositoryPort`:
 
-| Reader | Foreign port it reaches |
+> **Corrected 2026-08-26**, same day, before remediation began. The first draft of this finding said
+> "17 direct imports". That count came from a grep for any foreign `*Port` and swept in seven pairs
+> that are **legal by design**: driven ports declared for adapters (`TelemetrySourcePort`,
+> `FeedTransmitterPort`, `StreamPublisherPort`), a published live port (`TelemetryLiveUpdatePort`),
+> and `AssetLiveStatePort` — which is not a violation at all but the very pattern this finding
+> recommends, already in use at six sites. The honest number is **15 cross-context repository reads
+> in 8 classes**, listed below. The objection stands; its size was overstated, and R5 is an **M**,
+> not the **L** first assigned.
+
+| Reader class | Foreign repository it reaches |
 |---|---|
-| perception | warehouse `AssetRepositoryPort`, `DeviceRepositoryPort`, `AssetUsageRepositoryPort`; flight `TelemetryRepositoryPort`, `TelemetrySourcePort` |
-| events | warehouse `AssetUsageRepositoryPort`; perception `DetectionRepositoryPort`, `StreamPublisherPort`; flight `TelemetryRepositoryPort` |
-| identity | warehouse `AssetRepositoryPort` |
-| flight | warehouse `AssetUsageRepositoryPort` |
-| learning | warehouse `AssetRepositoryPort` |
-| simulation | warehouse `CategoryRepositoryPort`; perception `FeedTransmitterPort` |
+| `perception/UsageTracker` | warehouse `AssetRepositoryPort`, `DeviceRepositoryPort`, `AssetUsageRepositoryPort`; flight `TelemetryRepositoryPort` |
+| `perception/DefaultStreamService` | warehouse `DeviceRepositoryPort` |
+| `perception/DefaultAssetStreamService` | warehouse `AssetRepositoryPort` |
+| `events/DefaultReplayService` | warehouse `AssetUsageRepositoryPort`; perception `DetectionRepositoryPort`; flight `TelemetryRepositoryPort` |
+| `events/ReplaySources` | warehouse `AssetUsageRepositoryPort`; perception `DetectionRepositoryPort` |
+| `identity/DefaultAssignmentService` | warehouse `AssetRepositoryPort` |
+| `flight/DefaultVehicleProfileService` | warehouse `AssetUsageRepositoryPort` |
+| `learning/DefaultLabelingService` | warehouse `AssetRepositoryPort` |
+| `simulation/DefaultSimulationService` | warehouse `CategoryRepositoryPort` |
+
+Four of the fifteen are `UsageTracker`, and they are not reads at all — perception **writes** another
+context's records there (it opens, folds and closes warehouse's `AssetUsage`, and saves flight's
+telemetry samples). That is the deepest edge in the set, it is the same code R3 has to touch, and it
+should be fixed as one change with R3 rather than as a separate pass.
 
 Every one is legal under the ArchUnit allow-list and each was justified individually ("one fact, no
 need for a full assembly"). Collectively they are **a shared database accessed through Java
@@ -329,7 +345,7 @@ Sequenced. Each row is independently shippable; none needs a new module, entity 
 | **R2** | **Ship `engage`/`disengage`** — `POST|DELETE /api/assets/{id}/session`. `engage` starts a pipeline per `VIDEO` device (**zero is legal**) and calls `onTelemetryDeviceDiscovered` per `TELEMETRY` device; `disengage` is the terminal-`CLOSED` path O7 never had. Keep `/stream` as the device-level verb. | Fixes the operator's actual complaint; half the work is wiring a tested method that has **0 callers** | M |
 | **R3** | **Give the session state machine one owner.** Move `FlightPhaseRule` + `UsagePhase` into the module that runs them (perception), or invert it behind a `SessionPhasePort` warehouse declares. Delete the `UsagePhase ↔ FlightPhase` mappers and one of the two enums. | Removes two isomorphic enums, two mappers and a three-module round trip for one fact | M |
 | **R4** | **Add `Device.origin{LIVE,SIMULATED}`** (kernel enum + column + API field), delete the `simulated` category (load-bearing at exactly 2 sites), let `resumeAll` filter on origin. | Makes "camera not fitted yet" and "camera on the bench" the same operation, and lets the cockpit badge a synthetic feed honestly | S |
-| **R5** | **Make cross-context reads go through services, not repository ports.** Add an ArchUnit rule: *no context may import another context's `*RepositoryPort`.* Convert the 17 sites to the owning context's application service, or invert behind a declared port the way `AssetLiveStatePort` already does. | This is the actual precondition for W2–W5. Doing it now, in one JVM, costs a refactor; doing it later costs a distributed rewrite | **L — but do it before W2** |
+| **R5** | **Make cross-context reads go through services, not repository ports.** Add an ArchUnit rule: *no context may import another context's `*RepositoryPort`.* Convert the **15** sites to a narrow read interface published by the owning context, the way `AssetLiveStatePort` already is at six sites. `UsageTracker`'s four go with R3, not here. | This is the actual precondition for W2–W5. Doing it now, in one JVM, costs a refactor; doing it later costs a distributed rewrite | **M — but do it before W2** |
 | **R6** | **Split `cv-service` into `cv-inference` and `cv-training` processes** (same image, different entrypoint; `Geolocation` follows training). Then give the Java side a target **list** instead of a host:port (CV-SCALE goal 5). | A training run currently degrades every live stream, and there is no failover behind `CvChannelSupervisor` | M |
 | **R7** | **Flip the safe defaults.** `vision.auth.enabled=true` by default with a documented `false` escape hatch for dev. Re-audit the 3 unscoped controllers that are not reference data (`HlsProxy`, `DeviceProbe`, `Event`). | A platform meant for "different servers" must not ship with `anyRequest().permitAll()` as the default | S |
 | **R8** | **Cut MODULE.md back to a contract:** purpose · dependencies · API surface · conventions · gotchas. Move every *"wave W1.6e did X"* narrative into the plan doc that owns the wave. Target ≤300 lines per module. | 23.6k lines of doc is a context-window tax on every agent task, paid before any work starts | M |
