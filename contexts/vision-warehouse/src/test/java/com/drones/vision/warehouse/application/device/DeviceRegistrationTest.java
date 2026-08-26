@@ -1,6 +1,7 @@
 package com.drones.vision.warehouse.application.device;
 
 import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.DeviceOrigin;
 import com.drones.vision.kernel.StreamDescriptor;
 import org.junit.jupiter.api.Test;
 
@@ -45,5 +46,26 @@ class DeviceRegistrationTest {
         mutable.add(Capability.PTZ);
 
         assertEquals(Set.of(Capability.VIDEO), registration.capabilities());
+    }
+
+    @Test
+    void defaultsOriginToLiveWhenOmitted() {
+        DeviceRegistration registration = new DeviceRegistration("cam", Set.of(Capability.VIDEO), STREAM);
+
+        assertEquals(DeviceOrigin.LIVE, registration.origin());
+    }
+
+    @Test
+    void acceptsAnExplicitOrigin() {
+        DeviceRegistration registration =
+                new DeviceRegistration("cam", Set.of(Capability.VIDEO), STREAM, DeviceOrigin.SIMULATED);
+
+        assertEquals(DeviceOrigin.SIMULATED, registration.origin());
+    }
+
+    @Test
+    void rejectsNullOrigin() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new DeviceRegistration("cam", Set.of(Capability.VIDEO), STREAM, null));
     }
 }

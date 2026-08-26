@@ -1,6 +1,7 @@
 package com.drones.vision.adapter.persistence.entity;
 
 import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.DeviceOrigin;
 import com.drones.vision.kernel.LifecycleState;
 
 import jakarta.persistence.CollectionTable;
@@ -65,12 +66,17 @@ public class DeviceEntity {
     @Column(name = "state", nullable = false, length = 32)
     private LifecycleState state;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "origin", nullable = false, length = 32)
+    private DeviceOrigin origin;
+
     /** JPA only. */
     protected DeviceEntity() {
     }
 
     public DeviceEntity(UUID id, String name, Set<Capability> capabilities, String streamProtocol,
-                         String streamUri, Map<String, String> streamOptions, LifecycleState state) {
+                         String streamUri, Map<String, String> streamOptions, LifecycleState state,
+                         DeviceOrigin origin) {
         this.id = id;
         this.name = name;
         this.capabilities = new LinkedHashSet<>(capabilities);
@@ -78,6 +84,7 @@ public class DeviceEntity {
         this.streamUri = streamUri;
         this.streamOptions = new LinkedHashMap<>(streamOptions);
         this.state = state;
+        this.origin = origin;
     }
 
     public UUID id() {
@@ -106,5 +113,9 @@ public class DeviceEntity {
 
     public LifecycleState state() {
         return state;
+    }
+
+    public DeviceOrigin origin() {
+        return origin;
     }
 }

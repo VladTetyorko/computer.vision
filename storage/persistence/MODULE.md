@@ -21,7 +21,13 @@ reference `HikariConfig`/`HikariDataSource` directly), `org.postgresql:postgresq
 (Jackson 3, for jsonb columns — see Conventions) · **Used by:** vision-app
 (`PersistenceWiringConfiguration` — unconditional since docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b;
 the `vision.persistence.enabled` flag is gone, Postgres is the only store)
-**Build/test:** `./mvnw -B -pl storage/persistence -am test` — **214 tests** (up from 205, `Skipped: 0`,
+**Build/test:** `./mvnw -B -pl storage/persistence -am test` — **223 tests** (up from 214,
+docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md wave R4: `devices` gained an `origin` column
+(`V25__device_origin.sql`, `NOT NULL DEFAULT 'LIVE'`, backfilling `SIMULATED` for devices already on
+a `simulated`-category asset) — `DeviceEntity#origin` (`@Enumerated(EnumType.STRING)`, same
+convention as `#state`), `DeviceMapper` updated both directions, +1 `PostgresDockerIntegrationTest`
+round-tripping both the `LIVE` default and an explicit `SIMULATED` value; `Skipped: 0`,
+docker reachable — measured directly via three consecutive foreground runs) — **214 tests** (up from 205, `Skipped: 0`,
 docker reachable — measured directly via three consecutive foreground runs, docs/plans/active/
 VISUAL-GEO-V2-PLAN.md wave H5: `track_corrections` (excluded, `CorrectionStatus.NO_FIX` rows included) —
 `TrackCorrectionEntity`, `JpaTrackCorrectionRepository` implementing `TrackCorrectionRepositoryPort`
@@ -319,6 +325,16 @@ creating. Flagged here rather than silently decided, per this wave's brief.
   `idx_track_corrections_frame_at (frame_at)` alone (`deleteOlderThan`'s table-wide prune).
 
 - `V24__control_profiles.sql` (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C6, wave C4) — one new table, purely additive. `control_profiles` (`id` UUID PK; `owner_user_id` UUID `NOT NULL`; `vehicle_kind` `VARCHAR(32)`; `code` `VARCHAR(16)`; `display_name` `VARCHAR(120)`; `active` boolean default false; `updated_at` timestamptz; `channel_map`/`action_map` `JSONB NOT NULL DEFAULT '[]'`). Two indexes, and the second is load-bearing: `idx_control_profiles_owner (owner_user_id, updated_at DESC)` for `findAllByOwner`, and a **partial unique index** `uq_control_profiles_active (owner_user_id, vehicle_kind) WHERE active` that makes the *database* the enforcer of "at most one active profile per operator per vehicle kind". Two active rows would otherwise leave `findActive` picking by read order — which surfaces days later as "my sticks were different today" and is untraceable when it does. **Audited** (`trg_audit_control_profiles`, reusing V21's `audit_row_change()` function): a saved layout decides what a switch does to an aircraft, so "which binding was in force at the time" is exactly what an investigation asks. **The built-in profiles are deliberately not rows here** — `ControlProfile.forKind()` must answer on a server whose table is empty, so the fallback cannot depend on a migration having seeded anything (C7); a built-in's id is derived from its vehicle kind instead.
+- `V25__device_origin.sql` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R4) — one column added
+  to the existing `devices` table, purely additive over V1-V24, no new table. `ALTER TABLE devices ADD
+  COLUMN origin VARCHAR(32) NOT NULL DEFAULT 'LIVE'` (`DeviceOrigin{LIVE,SIMULATED}`, `@Enumerated(
+  EnumType.STRING)`, same convention as `devices.state`), then a backfill `UPDATE devices SET origin =
+  'SIMULATED' WHERE id IN (SELECT ad.device_id FROM asset_devices ad JOIN assets a ON a.id =
+  ad.asset_id WHERE a.category_id = 'simulated')` — every device already sitting on a `simulated`-
+  category asset is retagged `SIMULATED` at migration time, so R4's category→origin shift does not
+  orphan any pre-existing simulated device (the column default alone would have left them all reading
+  `LIVE`, which is wrong for a device that was, in fact, synthetic). Not audited — `devices` was never
+  in the `db_audit_log` trigger list, and adding a column changes no table's audit membership.
 
 ### `src/main/resources/db/seed/dev` — a second, conditional Flyway location
 
@@ -1993,3 +2009,20 @@ an already-excluded table do not change its classification.
 - **`jsonb` for both maps, matching the existing convention.** A control profile is read back whole and never queried by binding, so it follows `vehicle_profiles`/`detection_results` rather than growing a child table.
 
 `./mvnw -B -pl storage/persistence test` — see the wave's own Verification table in the context doc §6 for the measured count.
+
+## docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R4 done (device origin, persistence half)
+
+`V25__device_origin.sql`, `DeviceEntity#origin`, `DeviceMapper` both directions — see the Schema
+entry above for the exact migration shape (additive column + a targeted backfill retagging every
+device already sitting on a `simulated`-category asset). No new table, no new port, no new
+repository — `DeviceRepositoryPort#save`/`findById`/`findAll` are unchanged signatures, `Device`
+just carries one more field now (`contexts/vision-warehouse`'s own MODULE.md has the full domain-
+side R4 writeup). `DbAuditLogCoverageTests` needed no change: it asserts table membership, not
+column membership, and `devices` was already `INCLUDED`/audited before this column existed.
+
+`./mvnw -B -pl storage/persistence -am test`: **223/223 green** (up from 214) — new
+`savedDeviceRoundTripsOriginAndDefaultsExistingCallersToLive` in `PostgresDockerIntegrationTest`
+covers both the `LIVE` default (a `Device` saved via the pre-R4 5-arg convenience ctor) and an
+explicit `SIMULATED` value round-tripping through a real Postgres 16 container; `UpgradePathMigrationTest`
+(4/4) confirms V25 applies cleanly on top of an already-migrated schema. Docker was reachable and
+used for real — not skipped.

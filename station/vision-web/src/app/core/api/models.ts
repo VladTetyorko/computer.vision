@@ -36,12 +36,26 @@ export interface SetLifecycleStateRequest {
 }
 
 /**
+ * Mirrors `kernel.DeviceOrigin` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R4) — whether a
+ * device is a real sensor (`LIVE`) or a synthetic one fitted onto an asset (`SIMULATED`). Lets
+ * "simulated" stop being an asset-wide category and become a property of one device, so an
+ * operator can fit a synthetic camera onto an otherwise-real vehicle that has no camera yet. Sent
+ * case-insensitively; responses always echo the enum's `name()`, like `Capability`.
+ */
+export type DeviceOrigin = 'LIVE' | 'SIMULATED';
+
+/**
  * Mirrors `dto.DeviceResponse`.
  *
  * There is no `type` field: the `DeviceType` enum was removed server-side in favor of the
  * data-driven category model, which applies to `Asset`s, not raw devices (see `Category`,
  * `AssetSummary`). `state` can now be `DELETED` too (docs/main/CYCLES-PLAN.md §8 — a device can be
  * archived, e.g. as the last source of an asset, without the asset itself going away).
+ *
+ * `origin` is always populated on the wire (`DeviceResponse#origin` is never null), but kept
+ * optional here — same as `Capability` was on first introduction — so existing test fixtures and
+ * mocks built before R4 (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md) keep compiling;
+ * tighten to required in the UI wave that actually renders it.
  */
 export interface Device {
   readonly id: string;
@@ -51,6 +65,7 @@ export interface Device {
   readonly uri: string;
   readonly options: Record<string, string>;
   readonly state: LifecycleState;
+  readonly origin?: DeviceOrigin;
 }
 
 /**
@@ -66,11 +81,13 @@ export interface DeviceEdit {
   readonly uri?: string;
   readonly options?: Record<string, string>;
   readonly capabilities?: readonly Capability[];
+  readonly origin?: DeviceOrigin;
 }
 
 /**
  * Mirrors `dto.RegisterDeviceRequest`. `capabilities` is optional; a missing/empty value
- * defaults server-side to `[VIDEO]`. No `type` field — see `Device`.
+ * defaults server-side to `[VIDEO]`. `origin` is optional and defaults server-side to `LIVE`. No
+ * `type` field — see `Device`.
  */
 export interface RegisterDeviceRequest {
   readonly name: string;
@@ -78,6 +95,7 @@ export interface RegisterDeviceRequest {
   readonly uri: string;
   readonly options?: Record<string, string>;
   readonly capabilities?: readonly Capability[];
+  readonly origin?: DeviceOrigin;
 }
 
 /**
@@ -873,9 +891,9 @@ export interface AssetStats {
  * always a **new** device registration (`name`/`protocol`/`uri`), never a reference to an existing
  * `Device` by id: `CreateAssetRequest`/`AssetSpec` carry no such field (verified by reading
  * `AssetController#create`/`CreateAssetRequest.java`/`AssetSpec.java` — `AssetService#create` calls
- * `deviceService.register(...)` for every entry, unconditionally). `options`/`capabilities` are
- * optional, `@JsonInclude(NON_NULL)`-style like every other request DTO here — omit rather than
- * send `undefined`/empty.
+ * `deviceService.register(...)` for every entry, unconditionally). `options`/`capabilities`/`origin`
+ * are optional, `@JsonInclude(NON_NULL)`-style like every other request DTO here — omit rather than
+ * send `undefined`/empty. `origin` defaults server-side to `LIVE`, same as `RegisterDeviceRequest`.
  */
 export interface CreateAssetDeviceSpec {
   readonly name: string;
@@ -883,6 +901,7 @@ export interface CreateAssetDeviceSpec {
   readonly uri: string;
   readonly options?: Record<string, string>;
   readonly capabilities?: readonly Capability[];
+  readonly origin?: DeviceOrigin;
 }
 
 /**

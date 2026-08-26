@@ -149,6 +149,52 @@ class DeviceControllerTest {
         verify(deviceService).register(captor.capture(), any());
         assertEquals(Set.of(Capability.VIDEO), captor.getValue().capabilities());
         assertEquals("cam-1", captor.getValue().name());
+        assertEquals(com.drones.vision.kernel.DeviceOrigin.LIVE, captor.getValue().origin());
+    }
+
+    @Test
+    void registerAcceptsAnExplicitSimulatedOrigin() throws Exception {
+        Device saved = device();
+        when(deviceService.register(any(), any())).thenReturn(saved);
+
+        String body = """
+                {"name":"cam-1","protocol":"sim","uri":"sim://cam-1","origin":"SIMULATED"}
+                """;
+
+        mockMvc.perform(post("/api/devices").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<DeviceRegistration> captor =
+                ArgumentCaptor.forClass(DeviceRegistration.class);
+        verify(deviceService).register(captor.capture(), any());
+        assertEquals(com.drones.vision.kernel.DeviceOrigin.SIMULATED, captor.getValue().origin());
+    }
+
+    @Test
+    void registerReturns400ForAnUnknownOrigin() throws Exception {
+        String body = """
+                {"name":"cam-1","protocol":"sim","uri":"sim://cam-1","origin":"FAKE"}
+                """;
+
+        mockMvc.perform(post("/api/devices").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+
+        verifyNoInteractions(deviceService);
+    }
+
+    @Test
+    void registerResponseCarriesTheDeviceOrigin() throws Exception {
+        Device saved = device();
+        when(deviceService.register(any(), any())).thenReturn(saved);
+
+        String body = """
+                {"name":"cam-1","protocol":"sim","uri":"sim://cam-1"}
+                """;
+
+        mockMvc.perform(post("/api/devices").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.origin").value("LIVE"));
     }
 
     @Test
@@ -310,6 +356,27 @@ class DeviceControllerTest {
         ArgumentCaptor<DeviceEdit> captor = ArgumentCaptor.forClass(DeviceEdit.class);
         verify(deviceService).update(eq(id), captor.capture(), any());
         assertEquals("renamed", captor.getValue().name());
+    }
+
+    @Test
+    void updateAppliesAReplacementOrigin() throws Exception {
+        DeviceId id = DeviceId.random();
+        Device updated = new Device(id, "cam-1", Set.of(Capability.VIDEO),
+                new StreamDescriptor("sim", URI.create("sim://cam-1"), Map.of()),
+                LifecycleState.ACTIVE, com.drones.vision.kernel.DeviceOrigin.SIMULATED);
+        when(deviceService.update(eq(id), any(), any())).thenReturn(updated);
+
+        String body = """
+                {"origin":"simulated"}
+                """;
+
+        mockMvc.perform(patch("/api/devices/{id}", id.value()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.origin").value("SIMULATED"));
+
+        ArgumentCaptor<DeviceEdit> captor = ArgumentCaptor.forClass(DeviceEdit.class);
+        verify(deviceService).update(eq(id), captor.capture(), any());
+        assertEquals(com.drones.vision.kernel.DeviceOrigin.SIMULATED, captor.getValue().origin());
     }
 
     @Test

@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import com.drones.vision.api.support.CapabilityParsing;
+import com.drones.vision.api.support.DeviceOriginParsing;
 
 /**
  * Request body for {@code PATCH /api/devices/{id}}.
@@ -28,12 +29,15 @@ import com.drones.vision.api.support.CapabilityParsing;
  * @param uri          replacement resource locator; required when changing the stream
  * @param options      replacement adapter-specific parameters; only meaningful alongside protocol and uri
  * @param capabilities replacement capability names, or absent to keep the current set; must not be empty when present
+ * @param origin       replacement origin ({@code LIVE} or {@code SIMULATED}, matched
+ *                     case-insensitively), or absent to keep the current one — how an operator
+ *                     re-declares a bench-tested simulated camera as real once it is swapped in
  */
 public record UpdateDeviceRequest(String name, String protocol, String uri, Map<String, String> options,
-                                   List<String> capabilities) {
+                                   List<String> capabilities, String origin) {
 
     /** No body at all: an edit that changes nothing. */
-    public static final UpdateDeviceRequest EMPTY = new UpdateDeviceRequest(null, null, null, null, null);
+    public static final UpdateDeviceRequest EMPTY = new UpdateDeviceRequest(null, null, null, null, null, null);
 
     /**
      * Maps this request to the application-level edit.
@@ -42,7 +46,7 @@ public record UpdateDeviceRequest(String name, String protocol, String uri, Map<
      * @throws IllegalArgumentException if a present field is invalid, or the stream is only partly specified
      */
     public DeviceEdit toEdit() {
-        return new DeviceEdit(name, parseCapabilities(), parseStream());
+        return new DeviceEdit(name, parseCapabilities(), parseStream(), DeviceOriginParsing.parseOptional(origin));
     }
 
     private Set<Capability> parseCapabilities() {
