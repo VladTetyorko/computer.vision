@@ -374,7 +374,30 @@ review. **R2 alone next** — it is the only one that can be judged by an operat
 
 Not run: no build, no test run, no live stack. Every number above is a count over the tree at
 `212311e0`, and every architectural claim is read from `MODULE.md` / plan docs / poms / ArchUnit rule
-names — not from reading implementations. Specifically **not verified**: whether the 17 foreign-port
-reads are each genuinely single-fact (each was justified individually in its MODULE.md; the objection
-here is to the aggregate, not to any one of them); whether `HlsProxyController` leaks scope in
-practice; whether R6's process split is safe against `cv-service`'s model-cache assumptions.
+names — not from reading implementations. Specifically **not verified at audit time**: whether the
+foreign-port reads are each genuinely single-fact (each was justified individually in its MODULE.md;
+the objection here is to the aggregate, not to any one of them); whether `HlsProxyController` leaks
+scope in practice; whether R6's process split is safe against `cv-service`'s model-cache assumptions.
+
+Two of those three were settled during remediation, and one of them the audit had guessed too kindly:
+`HlsProxyController` **did** serve any `streamId`'s video bytes to any caller, with no scope check at
+all — see §11 R7. The foreign-port count was also wrong in the first draft and is corrected in §6 T1.
+
+## 11. Remediation log
+
+Remediation runs on branch `refactor/audit-remediation`, one merge commit per recommendation. This
+section records what actually landed, including where the audit's own text was wrong.
+
+| Rec | State | What landed |
+|---|---|---|
+| R1 | **merged** | The N-1-arg convenience-constructor convention is **withdrawn** — rule text in `.claude/skills/java-clean-code/SKILL.md` §3 + `CLAUDE.md` rule 10, then the classes: `UsageTracker` 10 → **1** public ctor (936 → 778 lines), `StreamPipeline` 9 → **1** (1530 → 1373), `DefaultStreamService` 8 → **1**. Optional collaborators became `Optional<T>` fields on three new settings/collaborator records; zero "pass `null` to skip that feature" javadoc survives in the three files. `vision-perception` 564/564, `vision-app` 248/248, behaviour byte-identical. |
+| R6 | **merged** | `cv-service` splits by `CV_SERVICE_ROLE` into `inference` vs `training`+`geolocation` processes (`cv-split` Compose profile, host ports 50061/50062); Java side gained `CvTarget`/`CvChannels`/`StaticTargetsNameResolver` — ordered failover on one channel via grpc's own `pick_first`, no load-balancer logic invented. |
+| R7 | **merged** | **Secure by default.** The permit-all filter chain used to be selected when `vision.auth.enabled` was simply absent, so the shipped default was `anyRequest().permitAll()` with CSRF off and the whole `VisibilityScope` apparatus unexercised. Secured is now the default and permit-all cannot win a tie. The three controllers §4 ledgered as unscoped were each decided: `HlsProxyController` **scoped** (it was a real leak — any caller, any stream, out-of-scope now 404s before the upstream is contacted), `EventController` **scoped**, `DeviceProbeController` **`@OpenByDesign`** (its request and response carry no `AssetId` or `Ownership` to scope against). |
+
+Open at the time of writing: R4, R2, R3, R5, R8, R9.
+
+**One process lesson worth keeping.** R7 reported one failing test as "pre-existing, reproduced on a
+clean stash." It was not: a later wave's worktree, branched from `master` with none of R7's changes,
+ran the same module **248/248 green**. A `git stash` that leaves an untracked file behind does not
+produce a clean tree, and "pre-existing" is a claim that has to be measured on a tree you have
+actually verified is clean — not on one you assume is.
