@@ -2706,6 +2706,46 @@ against real Postgres via Testcontainers — Docker ran, not skipped.
 **Deferred, not silently dropped:** `HlsProxyController#proxy` (W4, separate wave, not in this
 wave's file scope) is the one live-surface `TEMPORARY_UNSCOPED` entry this wave does not touch.
 
+### R7 (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, finding A2) — the three remaining unscoped controllers
+
+Re-audited by actually reading what each handler returns, not guessing:
+
+- **`HlsProxyController#proxy`** (the deferred entry above) — genuinely scopes: proxies one asset's
+  live video bytes, so it gets exactly `StreamController`'s own gate. New `StreamAccess` constructor
+  parameter (required in all three constructors — never optional, an authorization seam that could
+  be silently skipped by construction would defeat the point); a private `requireVisibleStream`
+  calls `StreamAccess.requireVisible(StreamId)` before the upstream is ever contacted. A `streamId`
+  path segment that fails `StreamId.of(...)` is treated as "not currently running" (a no-op, not a
+  400) — production `streamId`s are always canonical UUIDs (`MediamtxUrls`), so a non-UUID segment
+  can only be a request this app never generated, which mediamtx has nothing to serve either way.
+  Out-of-scope running stream → `404` (existence never revealed), before the upstream HTTP call.
+- **`DeviceProbeController#probe`** — `@OpenByDesign`: `ProbeDeviceRequest` names a caller-supplied
+  `protocol`+`uri`, not an existing device or asset; nothing is created, nothing already in anyone's
+  fleet is read. No `AssetId`/`Ownership` anywhere in the request or `ProbeDeviceResponse` to scope
+  against — a check here would be theater, the same shape `OnboardingController#probeCandidate`
+  already carries `@OpenByDesign` for.
+- **`EventController`** — genuinely scopes: a `DetectionEvent` is fleet-operational data tied to one
+  asset, not reference data. New `StreamAccess`/`CurrentUser` constructor parameters. `#forStream`
+  mirrors `StreamController#detections` exactly (`requireVisible(StreamId)`, no-op for a
+  not-currently-running stream, so the pre-existing "unknown stream → empty list" contract is
+  unchanged). `#recent` has no single stream to gate on, so it filters the fleet-wide list instead of
+  403ing the whole request (mirrors `StreamController#list`'s `filterVisible` posture) — a `null`
+  `assetId` (device not yet attached to any asset) is visible only to a caller who
+  `scope.canAdminister()`, the same "unowned device" fallback `StreamAccess.visibleAsset` already
+  applies.
+
+**Tests:** `HlsProxyControllerTest` +2 (running stream on a foreign asset → 404, no upstream server
+even started so a pass proves the upstream was never touched; running stream on the caller's own
+assigned asset → 200, proxying continues) — all 12 pre-existing wire-mechanics tests pass a real
+no-op `StreamAccess` (a `StreamService` stub reporting no running streams) via a new
+`openStreamAccess()` helper, unchanged otherwise. `EventControllerTest` +3 (fleet-wide filter drops a
+foreign-asset event and a null-assetId event for a PILOT scope, keeps the caller's own; running
+stream on a foreign asset → 404; running stream on the caller's own asset → 200) via a
+`mockMvcFor(CurrentUser)`/`currentUserWithScope(VisibilityScope)` pair mirroring
+`StreamControllerTest`'s own idiom. `DeviceProbeControllerTest` unchanged (no constructor change).
+**Before/after: vision-api 836 → 841 (+5)**; `EndpointAuthorizationTest`'s `TEMPORARY_UNSCOPED` no
+longer names any of the three (see vision-app/MODULE.md's own EndpointAuthorizationTest entry).
+
 ## docs/plans/done/CV-CLEAN-FEED-PLAN.md W1 done (burn-in removed, deny-list filter added — vision-api half)
 
 Server-side detection burn-in removed entirely, not defaulted off (D-1): `StartStreamRequest`/
