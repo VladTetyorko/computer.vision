@@ -402,6 +402,16 @@ section records what actually landed, including where the audit's own text was w
 | R5c + R5d | **merged** | The two reads R5b left blocked, plus the two that R5c had written into the ArchUnit exemption list as "unpaid debt" — `DefaultStreamService` and `DefaultAssetStreamService` now take `AssetDirectoryService`, net-zero parameters, same exceptions and messages. The exemption list is down to **7 entries, all deliberate design**: vision-events' 5 bulk reads and `DefaultLabelingService`'s 2 one-hop reads through `ReplaySources`. |
 | R1b | see below | `AssetUsage` still carried three convenience constructors R1 never reached, and R2 added a fourth. Collapsed to the one canonical constructor, every call site explicit. |
 
+**Migration numbering — one collision left, deliberately not resolved here.** `master` tops out at
+`V24__control_profiles.sql`. This branch adds `V25__device_origin.sql` (R4) and
+`V26__asset_usage_origin.sql` (R2). The unmerged branch `feat/controller-setup-c15` branched from the
+same `V24` and also claims `V25`, as `V25__control_profile_transmitter_view.sql`. Whichever merges
+second has to renumber; this branch is the one going to `master`, so `V25`/`V26` stand and
+`controller-setup-c15` becomes `V27` when it lands. Worth knowing because the failure mode is
+confusing: a stale `V25` left in `target/classes` from a build in the same directory on the other
+branch makes `adapter-persistence` fail with `FlywayException: Found more than one migration with
+version 25` against a working tree that does not contain the file at all. `clean` is the fix.
+
 Open at the time of writing: R8, R9. **R10 was deliberately not attempted** — a NATS/JetStream broker
 is `DOMAIN-SEPARATION-W1.md`'s W2, a new subsystem rather than remediation of existing debt, and
 building it under the banner of "fix the audit findings" would be invented scope.
