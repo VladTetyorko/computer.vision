@@ -18,12 +18,16 @@ from cv_service.config import (
     DEFAULT_MAX_UPLOAD_BYTES,
     DEFAULT_MODEL,
     DEFAULT_PORT,
+    DEFAULT_ROLE,
     DEFAULT_SHUTDOWN_GRACE_SECONDS,
     DEFAULT_TRACK_CAPABILITY_LEVEL,
+    ROLE_INFERENCE,
+    ROLE_TRAINING,
     Settings,
     _default_max_concurrent_inferences,
     _parse_bool,
     _parse_capability_level,
+    _parse_choice,
     _parse_device,
     _parse_imgsz,
     _parse_positive_float,
@@ -186,6 +190,7 @@ def _clear_cv_env(monkeypatch):
         "CV_MAX_UPLOAD_BYTES",
         "CV_GRPC_WORKERS",
         "CV_SHUTDOWN_GRACE",
+        "CV_SERVICE_ROLE",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -207,6 +212,7 @@ def test_settings_from_env_defaults_match_historical_literals(monkeypatch):
     assert settings.max_upload_bytes == DEFAULT_MAX_UPLOAD_BYTES == 2 * 1024 * 1024 * 1024
     assert settings.grpc_workers == DEFAULT_GRPC_WORKERS == 10
     assert settings.shutdown_grace_seconds == DEFAULT_SHUTDOWN_GRACE_SECONDS == 5
+    assert settings.role == DEFAULT_ROLE == "all"
 
 
 def test_settings_from_env_honors_every_override(monkeypatch, tmp_path):
@@ -221,6 +227,7 @@ def test_settings_from_env_honors_every_override(monkeypatch, tmp_path):
     monkeypatch.setenv("CV_MAX_UPLOAD_BYTES", "1024")
     monkeypatch.setenv("CV_GRPC_WORKERS", "3")
     monkeypatch.setenv("CV_SHUTDOWN_GRACE", "1")
+    monkeypatch.setenv("CV_SERVICE_ROLE", "inference")
 
     settings = Settings.from_env()
 
@@ -234,6 +241,7 @@ def test_settings_from_env_honors_every_override(monkeypatch, tmp_path):
     assert settings.max_upload_bytes == 1024
     assert settings.grpc_workers == 3
     assert settings.shutdown_grace_seconds == 1
+    assert settings.role == "inference"
 
 
 @pytest.mark.parametrize(
@@ -276,3 +284,50 @@ def test_settings_is_frozen():
     settings = Settings()
     with pytest.raises(Exception):
         settings.port = 1234  # type: ignore[misc]
+
+
+# --- role / CV_SERVICE_ROLE (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6) -----
+
+
+def test_parse_choice_accepts_a_known_choice():
+    assert _parse_choice("inference", DEFAULT_ROLE, ("all", "inference", "training"), "X") == "inference"
+
+
+def test_parse_choice_is_case_insensitive():
+    assert _parse_choice("INFERENCE", DEFAULT_ROLE, ("all", "inference", "training"), "X") == "inference"
+
+
+def test_parse_choice_defaults_when_unset():
+    assert _parse_choice(None, DEFAULT_ROLE, ("all", "inference", "training"), "X") == DEFAULT_ROLE
+    assert _parse_choice("", DEFAULT_ROLE, ("all", "inference", "training"), "X") == DEFAULT_ROLE
+
+
+def test_parse_choice_falls_back_to_default_on_an_unknown_value():
+    assert _parse_choice("bogus", DEFAULT_ROLE, ("all", "inference", "training"), "X") == DEFAULT_ROLE
+
+
+def test_settings_from_env_role_defaults_to_all(monkeypatch):
+    _clear_cv_env(monkeypatch)
+
+    settings = Settings.from_env()
+
+    assert settings.role == "all"
+
+
+@pytest.mark.parametrize("raw,expected", [("inference", ROLE_INFERENCE), ("TRAINING", ROLE_TRAINING), ("all", "all")])
+def test_settings_from_env_honors_cv_service_role(monkeypatch, raw, expected):
+    _clear_cv_env(monkeypatch)
+    monkeypatch.setenv("CV_SERVICE_ROLE", raw)
+
+    settings = Settings.from_env()
+
+    assert settings.role == expected
+
+
+def test_settings_from_env_role_falls_back_to_default_on_garbage(monkeypatch):
+    _clear_cv_env(monkeypatch)
+    monkeypatch.setenv("CV_SERVICE_ROLE", "not-a-real-role")
+
+    settings = Settings.from_env()
+
+    assert settings.role == DEFAULT_ROLE

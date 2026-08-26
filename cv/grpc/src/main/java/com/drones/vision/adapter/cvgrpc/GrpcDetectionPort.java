@@ -9,7 +9,6 @@ import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.proto.v1.FrameRequest;
 import com.drones.vision.proto.v1.InferenceGrpc;
 import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -120,14 +119,7 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
 
     private static ManagedChannel buildChannel(String host, int port, GrpcCvSettings settings) {
         Objects.requireNonNull(settings, "settings must not be null");
-        ManagedChannelBuilder<?> builder = ManagedChannelBuilder.forAddress(host, port)
-                .keepAliveTime(settings.keepAliveTime().toMillis(), TimeUnit.MILLISECONDS)
-                .keepAliveTimeout(settings.keepAliveTimeout().toMillis(), TimeUnit.MILLISECONDS)
-                .keepAliveWithoutCalls(settings.keepAliveWithoutCalls());
-        if (settings.plaintext()) {
-            builder.usePlaintext();
-        }
-        return builder.build();
+        return CvChannels.forTarget(new CvTarget(host, port), settings);
     }
 
     @Override
