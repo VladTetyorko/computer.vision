@@ -135,15 +135,7 @@ class ContextArchitectureTest {
             // reached one hop further along the one door events deliberately left open -- not a new
             // or accidental coupling.
             "DefaultLabelingService -> com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort",
-            "DefaultLabelingService -> com.drones.vision.perception.domain.port.DetectionRepositoryPort",
-
-            // --- vision-perception: NOT fixed by this wave -- contexts/vision-perception/** was
-            // explicitly out of wave R5c's file scope. Unlike the events group above this is
-            // ordinary unpaid debt from the audit's own table, not a design decision -- it should
-            // shrink to zero in a follow-up wave the way DefaultAssignmentService and wave R5c's two
-            // fixes already did, not grow.
-            "DefaultStreamService -> com.drones.vision.warehouse.domain.port.DeviceRepositoryPort",
-            "DefaultAssetStreamService -> com.drones.vision.warehouse.domain.port.AssetRepositoryPort"));
+            "DefaultLabelingService -> com.drones.vision.perception.domain.port.DetectionRepositoryPort"));
 
     private static JavaClasses classes;
 

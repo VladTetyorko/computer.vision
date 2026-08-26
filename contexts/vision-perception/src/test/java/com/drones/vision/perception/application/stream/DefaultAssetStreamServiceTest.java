@@ -13,7 +13,7 @@ import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.model.Device;
-import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,13 +39,14 @@ import static org.mockito.Mockito.when;
  * Moved from {@code warehouse.application.asset.DefaultAssetServiceTest} together with the
  * startStream logic itself (docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e); assertions
  * and scenarios are unchanged, only the collaborator this class resolves the asset through
- * ({@link AssetRepositoryPort} directly, rather than {@code AssetService}).
+ * ({@link AssetDirectoryService}, since docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5,
+ * rather than {@code AssetService} or its own {@code AssetRepositoryPort} directly).
  */
 class DefaultAssetStreamServiceTest {
 
     private static final CategoryId DRONE = new CategoryId("drone");
 
-    private AssetRepositoryPort assetRepository;
+    private AssetDirectoryService assetDirectory;
     private DeviceService deviceService;
     private StreamService streamService;
     private Ownership ownership;
@@ -53,12 +54,12 @@ class DefaultAssetStreamServiceTest {
 
     @BeforeEach
     void setUp() {
-        assetRepository = mock(AssetRepositoryPort.class);
+        assetDirectory = mock(AssetDirectoryService.class);
         deviceService = mock(DeviceService.class);
         streamService = mock(StreamService.class);
         ownership = new Ownership(UserId.random(), GroupId.random());
 
-        service = new DefaultAssetStreamService(assetRepository, deviceService, streamService);
+        service = new DefaultAssetStreamService(assetDirectory, deviceService, streamService);
     }
 
     @Test
@@ -66,7 +67,7 @@ class DefaultAssetStreamServiceTest {
         Device cam = device("cam-1");
         Device telemetry = telemetryDevice("tel-1");
         Asset stored = asset(Set.of(cam.id(), telemetry.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        when(assetDirectory.find(stored.id())).thenReturn(Optional.of(stored));
         when(deviceService.find(cam.id())).thenReturn(Optional.of(cam));
         when(deviceService.find(telemetry.id())).thenReturn(Optional.of(telemetry));
         StreamId expected = StreamId.random();
@@ -83,7 +84,7 @@ class DefaultAssetStreamServiceTest {
         Device first = device("cam-a");
         Device second = device("cam-b");
         Asset stored = asset(Set.of(first.id(), second.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        when(assetDirectory.find(stored.id())).thenReturn(Optional.of(stored));
         when(deviceService.find(first.id())).thenReturn(Optional.of(first));
         when(deviceService.find(second.id())).thenReturn(Optional.of(second));
 
@@ -102,7 +103,7 @@ class DefaultAssetStreamServiceTest {
         Device cam = device("cam-1");
         Device stranger = device("someone-elses-cam");
         Asset stored = asset(Set.of(cam.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        when(assetDirectory.find(stored.id())).thenReturn(Optional.of(stored));
 
         assertThrows(IllegalArgumentException.class,
                 () -> service.startStream(stored.id(), stranger.id(), PipelineConfig.defaults()));
@@ -114,7 +115,7 @@ class DefaultAssetStreamServiceTest {
         Device first = device("cam-a");
         Device second = device("cam-b");
         Asset stored = asset(Set.of(first.id(), second.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        when(assetDirectory.find(stored.id())).thenReturn(Optional.of(stored));
         StreamId expected = StreamId.random();
         when(streamService.start(eq(second.id()), any(), any())).thenReturn(expected);
 
@@ -130,7 +131,7 @@ class DefaultAssetStreamServiceTest {
     void startStreamRefusesWhenTheAssetIsNotInService() {
         Device cam = device("cam-1");
         Asset stored = asset(Set.of(cam.id())).withState(LifecycleState.DEACTIVATED);
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        when(assetDirectory.find(stored.id())).thenReturn(Optional.of(stored));
 
         assertThrows(IllegalStateException.class,
                 () -> service.startStream(stored.id(), cam.id(), PipelineConfig.defaults()));
@@ -143,7 +144,7 @@ class DefaultAssetStreamServiceTest {
         Device retired = device("cam-retired").withState(LifecycleState.DEACTIVATED);
         Device removed = device("cam-removed").withState(LifecycleState.DELETED);
         Asset stored = asset(Set.of(working.id(), retired.id(), removed.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        when(assetDirectory.find(stored.id())).thenReturn(Optional.of(stored));
         when(deviceService.find(working.id())).thenReturn(Optional.of(working));
         when(deviceService.find(retired.id())).thenReturn(Optional.of(retired));
         when(deviceService.find(removed.id())).thenReturn(Optional.of(removed));
@@ -159,7 +160,7 @@ class DefaultAssetStreamServiceTest {
     void startStreamRefusesWhenNoDeviceOfTheAssetCanProduceVideo() {
         Device telemetry = telemetryDevice("tel-1");
         Asset stored = asset(Set.of(telemetry.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        when(assetDirectory.find(stored.id())).thenReturn(Optional.of(stored));
         when(deviceService.find(telemetry.id())).thenReturn(Optional.of(telemetry));
 
         IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
@@ -172,7 +173,7 @@ class DefaultAssetStreamServiceTest {
     @Test
     void startStreamThrowsForUnknownAsset() {
         AssetId unknown = AssetId.random();
-        when(assetRepository.findById(unknown)).thenReturn(Optional.empty());
+        when(assetDirectory.find(unknown)).thenReturn(Optional.empty());
 
         assertThrows(NoSuchElementException.class,
                 () -> service.startStream(unknown, null, PipelineConfig.defaults()));
