@@ -23,6 +23,8 @@ import com.drones.vision.perception.application.stream.*;
 import com.drones.vision.learning.application.*;
 
 import io.grpc.ManagedChannel;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -37,11 +39,20 @@ import org.springframework.context.annotation.Configuration;
  * <p>Also wires the model registry control plane (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9):
  * {@link #modelRegistryPort}/{@link #modelRegistryService} behind {@code ModelRegistryController}
  * (vision-api, component-scanned), gated by the same {@link VisionTrainingProperties#enabled()}
- * property. {@link #modelRegistryPort} consumes {@code CvWiring}'s shared {@link
- * ManagedChannel} bean directly (not via {@link org.springframework.beans.factory.ObjectProvider})
- * — safe because that channel bean's own {@code @ConditionalOnExpression} matches whenever this
- * property is {@code true}, the exact same guarantee that lets {@link #trainingStores} below take
- * its port arguments as plain, unconditional parameters.
+ * property.
+ *
+ * <p><b>Channel routing (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6)</b>: {@code
+ * Training/*} RPCs belong to the training role, so {@link #datasetUploadPort}/{@link
+ * #modelRegistryPort}/{@link #trainingPort} all resolve their channel through {@code
+ * CvWiring#controlPlaneChannel} — {@code cvTrainingChannel} when {@code vision.cv.training.target}
+ * is set (a split deployment), else the same shared {@code cvGrpcChannel} {@link
+ * com.drones.vision.adapter.cvgrpc.GrpcDetectionPort} uses, byte-identical to before this routing
+ * existed. Each takes two {@code @Qualifier}-annotated {@code ObjectProvider<ManagedChannel>}
+ * parameters rather than a plain {@code ManagedChannel cvGrpcChannel}: once {@code
+ * CvWiring#cvGrpcChannel} is marked {@code @Primary} (needed so every <em>other</em> unqualified
+ * injection point keeps compiling), a plain parameter named {@code cvGrpcChannel} would silently
+ * keep resolving the primary bean regardless of its name — routing to the training channel needs an
+ * explicit qualifier, not name-based autowiring.
  *
  * <p>{@code
  * ModelRegistryPort}'s history: dormant since docs/plans/done/CV-CONTROL-PLAN.md §D noted "not the dormant
@@ -88,18 +99,22 @@ import org.springframework.context.annotation.Configuration;
 public class TrainingWiringConfiguration {
 
     /**
-     * Ships a composed YOLO dataset to cv-service over the shared gRPC channel
+     * Ships a composed YOLO dataset to cv-service over the training/control-plane channel
      * (docs/plans/done/CV-TRAINING-V2-PLAN.md §3/§6) — the replacement for the deleted {@code
      * FilesystemDatasetExport} bean; the same channel {@link #modelRegistryPort}/{@link
-     * #trainingPort} already reuse. {@code settings} maps {@link VisionCvProperties#upload()} (plus
-     * every other {@code GrpcCvSettings} field) onto {@code GrpcCvSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
-     * wave F4) — the same mapping {@code CvWiring#detectionPort} performs, duplicated here since
-     * this bean lives in a separate {@code @Configuration} class with no shared private helper.
+     * #trainingPort} resolve via {@code CvWiring#controlPlaneChannel} (see class javadoc). {@code
+     * settings} maps {@link VisionCvProperties#upload()} (plus every other {@code GrpcCvSettings}
+     * field) onto {@code GrpcCvSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F4) — the
+     * same mapping {@code CvWiring#detectionPort} performs, duplicated here since this bean lives in
+     * a separate {@code @Configuration} class with no shared private helper.
      */
     @Bean
     @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
-    public DatasetUploadPort datasetUploadPort(ManagedChannel cvGrpcChannel, VisionCvProperties cvProperties) {
-        return new GrpcDatasetUploadPort(cvGrpcChannel, CvWiring.toGrpcCvSettings(cvProperties));
+    public DatasetUploadPort datasetUploadPort(@Qualifier("cvTrainingChannel") ObjectProvider<ManagedChannel> cvTrainingChannel,
+                                                @Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel,
+                                                VisionCvProperties cvProperties) {
+        ManagedChannel channel = CvWiring.controlPlaneChannel(cvTrainingChannel, cvGrpcChannel);
+        return new GrpcDatasetUploadPort(channel, CvWiring.toGrpcCvSettings(cvProperties));
     }
 
     /**
@@ -166,18 +181,22 @@ public class TrainingWiringConfiguration {
 
     /**
      * The CV model registry's gRPC client (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) —
-     * {@code Training/ListModels}/{@code Training/PromoteModel} over {@code CvWiring#cvGrpcChannel},
-     * the exact same channel {@code GrpcDetectionPort} uses for {@code
-     * Inference/DetectStream} when {@code vision.cv.enabled=true} too (see that bean's own javadoc,
-     * "Shutdown ownership", for why this class never closes it). Behind {@code
-     * ModelRegistryController} (vision-api, component-scanned). {@code cvProperties.registry().callTimeout()}
-     * (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F4, {@code vision.cv.registry.call-timeout}) replaces
-     * {@code GrpcModelRegistryPort.CALL_TIMEOUT_SECONDS} as the actual per-call deadline.
+     * {@code Training/ListModels}/{@code Training/PromoteModel} over {@code CvWiring#controlPlaneChannel}
+     * (see class javadoc) — the training channel when split, else the same channel {@code
+     * GrpcDetectionPort} uses for {@code Inference/DetectStream} when {@code vision.cv.enabled=true}
+     * too (see that bean's own javadoc, "Shutdown ownership", for why this class never closes it).
+     * Behind {@code ModelRegistryController} (vision-api, component-scanned). {@code
+     * cvProperties.registry().callTimeout()} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F4,
+     * {@code vision.cv.registry.call-timeout}) replaces {@code GrpcModelRegistryPort.CALL_TIMEOUT_SECONDS}
+     * as the actual per-call deadline.
      */
     @Bean
     @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
-    public ModelRegistryPort modelRegistryPort(ManagedChannel cvGrpcChannel, VisionCvProperties cvProperties) {
-        return new GrpcModelRegistryPort(cvGrpcChannel, cvProperties.registry().callTimeout());
+    public ModelRegistryPort modelRegistryPort(@Qualifier("cvTrainingChannel") ObjectProvider<ManagedChannel> cvTrainingChannel,
+                                                @Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel,
+                                                VisionCvProperties cvProperties) {
+        ManagedChannel channel = CvWiring.controlPlaneChannel(cvTrainingChannel, cvGrpcChannel);
+        return new GrpcModelRegistryPort(channel, cvProperties.registry().callTimeout());
     }
 
     /**
@@ -194,20 +213,16 @@ public class TrainingWiringConfiguration {
 
     /**
      * The training-run gRPC client (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 — the last backend
-     * wave) — {@code Training/StartTraining} over {@link WiringConfiguration#cvGrpcChannel}, the
-     * <em>same</em> shared channel {@link #modelRegistryPort} and {@code GrpcDetectionPort}
-     * already use (see {@link GrpcModelRegistryPort}'s own javadoc, "Channel reuse"). Taking the
-     * channel as a plain, unconditional parameter (not an {@link
-     * org.springframework.beans.factory.ObjectProvider}) is safe for the same reason {@link
-     * #modelRegistryPort} does: this bean's own {@code @ConditionalOnProperty} on {@code
-     * vision.training.enabled} already guarantees {@code cvGrpcChannel}'s {@code
-     * @ConditionalOnExpression} matches too. Behind {@code TrainingJobController} (vision-api,
-     * component-scanned) via {@link #trainingJobService} below.
+     * wave) — {@code Training/StartTraining} over {@code CvWiring#controlPlaneChannel} (see class
+     * javadoc), the <em>same</em> channel {@link #modelRegistryPort} and {@code GrpcDetectionPort}
+     * resolve too (see {@link GrpcModelRegistryPort}'s own javadoc, "Channel reuse"). Behind {@code
+     * TrainingJobController} (vision-api, component-scanned) via {@link #trainingJobService} below.
      */
     @Bean
     @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
-    public TrainingPort trainingPort(ManagedChannel cvGrpcChannel) {
-        return new GrpcTrainingPort(cvGrpcChannel);
+    public TrainingPort trainingPort(@Qualifier("cvTrainingChannel") ObjectProvider<ManagedChannel> cvTrainingChannel,
+                                      @Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel) {
+        return new GrpcTrainingPort(CvWiring.controlPlaneChannel(cvTrainingChannel, cvGrpcChannel));
     }
 
     /**

@@ -375,6 +375,8 @@ Unlike HLS, WHEP gets **no proxy controller and no app-relative view base**. `Pu
 - `trainingPort` → `new GrpcTrainingPort(cvGrpcChannel)` (adapter-cv-grpc, docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave) — the **same** `cvGrpcChannel` instance `modelRegistryPort`/`datasetUploadPort` above and `detectionPort` (`WiringConfiguration`) already share, taken as a plain, unconditional constructor parameter for the identical reason `modelRegistryPort` does. `GrpcTrainingPort#startTraining` blocks for the lifetime of the whole training run (potentially many epochs); nothing about that is Spring's concern — `trainingJobService` below is what keeps it off a request thread.
 - `trainingJobService` → `new DefaultTrainingJobService(trainingPort, labelingService, auditTrailPort)` — behind `TrainingJobController` (vision-api, component-scanned); gained `labelingService` as a collaborator (docs/plans/done/CV-TRAINING-V2-PLAN.md §4/§E) — `start`'s synchronous "does this dataset have `LABELED` samples" pre-check and `runJob`'s upload-then-train sequence both call back into it. `DefaultTrainingJobService`'s own production constructor still submits each run to its own internal cached daemon-thread executor (not a bean — nothing else in this context needs to see it), so the blocking `trainingPort.startTraining` call never holds an HTTP request thread.
 
+**R6 update (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6, 2026-08-26):** `datasetUploadPort`/`modelRegistryPort`/`trainingPort` above no longer take `cvGrpcChannel` as a plain, unconditionally-resolved `ManagedChannel` parameter. Since `CvWiring#cvGrpcChannel` is now `@Primary` (see "CV inference wiring" above), that plain parameter would have kept silently resolving the **inference** channel by type even after a second, differently-named `cvTrainingChannel` bean existed — a real risk once a split deployment exists, not a hypothetical, since nothing about a plain-typed parameter would have failed to compile or start. All three now take two `@Qualifier`-disambiguated `ObjectProvider<ManagedChannel>` parameters and resolve via `CvWiring.controlPlaneChannel(cvTrainingChannel, cvGrpcChannel)` (package-private static helper, `cvTrainingChannel.getIfAvailable(cvGrpcChannel::getObject)`) — training/control-plane RPCs prefer the training channel when `vision.cv.training.target` is set, and fall back to the shared inference channel otherwise, so the default single-process path is unchanged. `detectionPort`/`pulledDetectionPort`/`cvChannelSupervisor` (`CvWiring`) stay explicitly on `@Qualifier("cvGrpcChannel")` — inference never routes through the training channel. See the wave's own EOF section, "Wave R6", for the full rationale and `CvSplitChannelWiringTest` for the proof.
+
 **Default-off guardrail** (docs/plans/done/CV-TRAINING-PLAN.md §G): with `vision.training.enabled=false` (the default), every bean above and all four controllers are entirely absent from the context — `GET/POST /api/datasets`[/{id}], `POST /api/streams/{id}/samples`, `POST /api/usages/{id}/samples`, `GET /api/samples/{id}/image`, `PUT /api/samples/{id}/annotations`, `GET /api/cv/registry/models`/`POST /api/cv/registry/models/{id}/promote`, and `POST /api/datasets/{id}/train`/`GET /api/training/jobs`[/{jobId}] all 404 like any unmapped route, exactly as before this feature existed — the manual `/api/datasets/{id}/export`* routes are simply gone, not part of this guardrail anymore. `TrainingDisabledWiringTest` proves this via `ApplicationContext#getBeansOfType` (the same "a plain `@Autowired` would fail the context on zero candidates" reasoning `LiveDisabledWiringTest`/`DiscoveryDisabledWiringTest` already document) — now also asserting `DatasetUploadPort`/`ReplaySources` are absent (in place of the deleted `DatasetExportPort` check), plus the pre-existing `ModelRegistryController`/`ModelRegistryService`/`ModelRegistryPort`/`TrainingJobController`/`TrainingJobService`/`TrainingPort`/shared-`ManagedChannel` absence assertions; `TrainingEnabledWiringTest` (`vision.training.enabled=true` — no `@TempDir`/`@DynamicPropertySource` needed anymore, since `exportDir` is gone) proves the opposite — every bean resolves to its real implementation (`GrpcDatasetUploadPort`, not `FilesystemDatasetExport`) and all four controllers resolve.
 
 `application.yaml` keeps its pre-existing `vision.training.enabled=false` line (unchanged, still the guardrail default); the commented-out `vision.training.export-dir=data/training-exports` documentation line is deleted along with the property itself (docs/plans/done/CV-TRAINING-V2-PLAN.md §A). `.gitignore`'s `/data/` entry (added for the now-deleted export directory) is stale but harmless — nothing writes under `data/` anymore.
@@ -393,7 +395,11 @@ New bean, `PublishWiring#replayFrameExtractionPort(VisionPublishProperties)` —
 
 `VisionCvProperties` (`@ConfigurationProperties(prefix="vision.cv")`, mirrors `VisionPublishProperties`'s record-plus-`@DefaultValue` idiom): `enabled` (`@DefaultValue("false")` — today's behavior, no cv-service required), `endpoint: String` (`@DefaultValue("localhost:50051")`, e.g. `host:port`; an optional `scheme://` prefix is tolerated and stripped), `detectWidth: int` (`@DefaultValue("640")`, docs/plans/done/REMOTE-CV-PLAN.md P1 item 5) `jpegQuality: float` (`@DefaultValue("0.8")`), `wireFormat: String` (`@DefaultValue("auto")`, validated in the compact ctor via `WireFormat.parse` so a typo fails at context startup rather than silently falling back — docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R3) and `frameTransport: String` (docs/plans/done/MEDIA-SOT-PLAN.md wave M7, `@DefaultValue("push")`, validated `push|pull`; `pullEnabled()` is the boolean convenience every wiring decision reads) — the first three thread straight into `GrpcDetectionPort`'s own wire-tuning knobs (see adapter-cv-grpc/MODULE.md's "Payload shrinking" section) so per-network tuning (e.g. `vision.cv.detect-width=480` over a slow VPN link) needs no rebuild; `frameTransport` is switch B, see "Media source-of-truth wiring" below. `host()`/`port()` parse `endpoint` on demand (not cached — cheap, called once per bean construction) and throw `IllegalArgumentException` for a malformed value; there is no `URI`-typed field like `VisionPublishProperties.Mediamtx`'s bases because `"localhost:50051"` is not a valid absolute `java.net.URI` (a bare `host:port` string parses as an opaque URI with scheme `localhost` and scheme-specific-part `50051` — not what's wanted), so this property stays a plain validated `String` instead. The compact constructor validates all non-`enabled` fields the same manual `if (...) throw new IllegalArgumentException(...)` way: `endpoint` non-blank, `detectWidth >= 64`, `jpegQuality` in `(0, 1]`, `frameTransport` in `{push, pull}` — the first three are the same bounds `GrpcDetectionPort`'s own canonical constructor enforces (adapter-cv-grpc), so an invalid value fails fast at Spring context startup rather than later inside the adapter. A `pull: Pull` record (`rtspBase: URI`, `reconnectInitialBackoff`/`reconnectMaxBackoff: Duration`, defaulted as a whole when absent) rides alongside — see "Media source-of-truth wiring" below.
 
+**R6 addition (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6, 2026-08-26) — two more nested records, for a split cv-service.** `inference: Inference` (one component, `targets: List<String>`, `@DefaultValue` empty list via `vision.cv.inference.targets`) and `training: Training` (one component, `target: String`, `@DefaultValue` empty string via `vision.cv.training.target`) — both defaulted as a whole when absent, same "nested record substituted wholesale" contract every sibling (`Pull`/`Reconnect`/`Demand`) already follows. The compact constructor validates each non-empty entry via `CvTarget.parseAll`/`CvTarget.parse` (adapter-cv-grpc) at construction time — a malformed `host:port` fails Spring context startup with a message naming the offending property key (`"vision.cv.inference.targets entries must each be host:port, was [...]"` / `"vision.cv.training.target must be host:port, was ..."`), not the first RPC. Three new accessors: `inferenceTargets(): List<CvTarget>` (the configured list when non-empty, else a **single**-element list built from `host()`/`port()` — a one-process deployment gets exactly the endpoint it already configured, never an empty list); `trainingTarget(): CvTarget` (the configured value when non-blank, else the same `host()`/`port()` fallback); `trainingTargetConfigured(): boolean` (whether `vision.cv.training.target` was actually set — `CvWiring#cvTrainingChannel`'s own `@ConditionalOnProperty` is the real gate, this accessor exists for readability/testing). **No new convenience constructor was added** (java-clean-code skill §3, "no overload chains" — R1): the two pre-existing legacy convenience constructors (15-arg and 4-arg) each grew by passing one more `null` for `inference`/`training`, documented in their own javadoc as "legacy, slated for removal," rather than gaining a 16th/5th constructor. `VisionCvPropertiesTest` covers all three accessors and both validation failures (6 new test methods).
+
 **Shared channel (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 — T9, then extended by the training-job wave, docs/plans/done/CV-TRAINING-V2-PLAN.md §3's upload port, and docs/plans/done/MEDIA-SOT-PLAN.md wave M7's pull port)**: `CvWiring#cvGrpcChannel(VisionCvProperties)` builds one plaintext `ManagedChannel` to cv-service — the same HTTP/2 keepalive tuning `GrpcDetectionPort`'s own host/port convenience constructor used to build internally (20s ping / 5s timeout / pings-without-calls; duplicated as plain constants in `WiringConfiguration` since `GrpcDetectionPort`'s own constants are package-private to `adapter-cv-grpc`) — gated by `@ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false} or '${vision.cv.frame-transport:push}' == 'pull'")` (the third disjunct added by wave M7), so it exists whenever *any* property enables a consumer: `detectionPort` below (`vision.cv.enabled=true`), `TrainingWiringConfiguration#modelRegistryPort`/`trainingPort`/`datasetUploadPort` (`vision.training.enabled=true`, see "CV training loop wiring" above), or `pulledDetectionPort` below (`vision.cv.frame-transport=pull`). With every flag at its default (`false`/`false`/`push`), no channel is built at all — the opt-in guardrail, proven by `TrainingDisabledWiringTest`/`CvWiringTest`. `detectionPort`, `modelRegistryPort`, `trainingPort`, and (as of docs/plans/done/CV-TRAINING-V2-PLAN.md §3) `datasetUploadPort` all consume this **one** bean instance rather than each independently building/configuring their own connection to cv-service — see `GrpcModelRegistryPort`'s own javadoc ("Channel reuse") for the motivation. `CvAndTrainingSharedChannelWiringTest` (both flags `true`) is the one test that actually proves sharing: exactly one `ManagedChannel` bean exists and `detectionPort`/`modelRegistryPort`/`trainingPort` all resolved against it (`datasetUploadPort` isn't separately asserted there — `TrainingEnabledWiringTest` already proves it resolves to `GrpcDatasetUploadPort` over the shared channel).
+
+**R6 update (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6, 2026-08-26) — this bean is now the *inference* channel, and a second, optional channel exists.** `cvGrpcChannel` is unchanged in every way that matters to the default single-process deployment (same `@ConditionalOnExpression`, same keepalive/plaintext settings, same instance shared by `detectionPort`/`cvChannelSupervisor`/`pulledDetectionPort`) except two things: it now builds via `CvChannels.forTargets(cvProperties.inferenceTargets(), settings)` (adapter-cv-grpc, verified to apply the identical three keepalive settings + conditional `.usePlaintext()` this bean used to build inline — `inferenceTargets()` returns a **single**-element list built from `host()`/`port()` when `vision.cv.inference.targets` is unset, so `forTargets` degrades to `forTarget` and the channel is byte-identical to before), and it is now `@Primary`. A second bean, `cvTrainingChannel` (`@ConditionalOnProperty(prefix = "vision.cv", name = "training.target")`, absent unless that key is set), lets a split cv-service deployment point `Training`/`Geolocation` RPCs at a second process — see "CV training loop wiring" and the Visual geolocation section above for the consumers, and the wave's own EOF section ("Wave R6") for the full routing rationale, including the `NoUniqueBeanDefinitionException` this wave found and fixed. Proven not to disturb the default path by `CvWiringTest`/`CvEnabledWiringTest`/`CvAndTrainingSharedChannelWiringTest` staying green unmodified, plus new `CvSplitChannelWiringTest` proving the two-channel case.
 
 `CvWiring#detectionPort(VisionCvProperties, ObjectProvider<ManagedChannel>)` selects `GrpcDetectionPort(cvGrpcChannel.getObject(), cvProperties.detectWidth(), cvProperties.jpegQuality())` when `enabled=true` (the channel obtained via `ObjectProvider`, the same idiom `PersistenceWiringConfiguration`'s repository-port beans use for a conditionally-present bean — safe because `cvGrpcChannel`'s own condition is guaranteed to match whenever `cvProperties.enabled()` is `true`), else `NoopDetectionPort`.
 
@@ -739,6 +745,8 @@ Spring Security lives **only here** (added `spring-boot-starter-security` to thi
 **R7 default flip (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, finding A3):** `vision.auth.enabled` now defaults to **`true`** — `securedFilterChain` is `@ConditionalOnProperty(..., havingValue = "true", matchIfMissing = true)`, `permitAllFilterChain` is `havingValue = "false"` with **no** `matchIfMissing` (so it is the explicit opt-out, never a fallback). `application.yaml` sets `vision.auth.enabled: true` explicitly with a comment naming `false` the dev/demo escape hatch. Every pre-existing full-context test that relied on the old permit-all default now gets it back via `station/vision-app/src/test/resources/application.properties` (`vision.auth.enabled=false`) — deliberately a `.properties` file, not a same-named `application.yaml`: a second `classpath:/application.yaml` in test resources was tried first and found to **shadow** (not merge with) this module's real `application.yaml` outright — `ClassLoader#getResource` is singular, so the smaller test file silently replaced every other `vision.*` default for the whole suite (caught by `PublishWiringTest#whepUrlIsMediamtxsOwnAddressPerHostModeDefault` reverting to `VisionPublishProperties`'s bare Java-record default). A same-base-name `application.properties` is a different resource and loads alongside `application.yaml` instead of instead of it, with Spring Boot's documented `.properties`-over-`.yaml` precedence at the same config-data location settling the one key both files touch. A handful of tests that specifically exercise the secured chain (`AuthEnabledFlowTest`, `ScopedAssetReadAuthEnabledTest`, `OrgManagementAuthEnabledTest`, `ManualControlSecurityEnabledTest`, ...) override this back to `true` via their own `@SpringBootTest(properties = "vision.auth.enabled=true")`, which always wins over any `application.properties`/`.yaml`.
 
 `./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` (Docker ran): vision-api **841/841 green** (+5 new scope tests); vision-app **247/248**, one **pre-existing, unrelated** failure (`PublishWiringTest#whepUrlIsMediamtxsOwnAddressPerHostModeDefault`) reproduced identically on a clean stash of this wave's changes — not this wave's regression to fix.
+
+**Correction (wave R6, docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6, 2026-08-26): the `PublishWiringTest` failure above does not reproduce and was not this wave's to fix either.** R6's own foreground `./mvnw -B -pl station/vision-app -am test -DskipWeb` run — full 258-test suite, this wave's split-channel changes included — came back **`Tests run: 258, Failures: 0, Errors: 0, Skipped: 0`**, and `PublishWiringTest` specifically: **`Tests run: 8, Failures: 0, Errors: 0, Skipped: 0 -- in com.drones.vision.app.PublishWiringTest`**. Re-run in isolation (`-Dtest=PublishWiringTest -Dsurefire.failIfNoSpecifiedTests=false`) against the same tree: also 8/8 green. Every auth-chain test named above (`AuthEnabledFlowTest`, `ScopedAssetReadAuthEnabledTest`, `OrgManagementAuthEnabledTest`, `ManualControlSecurityEnabledTest`, `EndpointAuthorizationTest`) passed in the same run, alongside the default-config (`vision.auth.enabled=false`-via-`.properties`) tests — direct evidence that the `.properties`-over-`.yaml` precedence R7 relied on holds in practice, not just in theory: both the secured-by-default full-context tests and the `.properties`-overridden default-config tests were green side by side in one suite run. No change was made to `SecurityConfig.java` or `application.properties` — there was no reproducible defect to fix. Root cause of the original R7 report is unknown (most likely a one-off measurement, not a latent regression); if it resurfaces, capture the surefire report's exact assertion message (expected vs. actual WHEP URL) rather than re-asserting "pre-existing."
 
 - **`permitAllFilterChain`** (now the explicit opt-out, `havingValue="false"`, no `matchIfMissing`) — `anyRequest().permitAll()` + **CSRF disabled**. Nothing is secured; this is the dev/demo shape, not the default. **CSRF is disabled here too, not just in the secured chain** — the real running app routes through this filter when opted into, and a default-on CSRF filter would 403 the SPA's own `POST /api/*` calls.
 - **`securedFilterChain`** (now the default, `havingValue="true", matchIfMissing=true`) — session required for `/api/**` **and `/ws/**`** (the latter added by docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R4 — an unauthenticated `/ws/manual-control` handshake is now rejected `401` by this same rule before the upgrade ever completes, exactly as `/api/**` already was; see `ManualControlSecurityEnabledTest`/`ManualControlSecurityDisabledTest`) except `/api/auth/login`/`/api/auth/logout`; static/SPA routes public. Reads/writes the principal via a shared `securityContextRepository` bean (`HttpSessionSecurityContextRepository`, enabled-only) — the same bean `SecuritySessionAuthenticator` saves into on login. Unauthenticated `/api/**` (incl. `/api/auth/me`, which is *not* in the permit-list) → `401` via `HttpStatusEntryPoint(UNAUTHORIZED)`. `httpBasic`/`formLogin`/`logout` all disabled (login/logout run through the controller-seam). **CSRF decision: disabled for the API, documented** (see `SecurityConfig`'s javadoc) — JSON-only, same-origin, `SameSite=Lax` session cookie; cookie-to-header double-submit noted as the hardening follow-up, deferred to avoid the chicken-and-egg it adds to a custom JSON login endpoint.
@@ -2843,6 +2851,22 @@ onto `TrackCorrectionSettings`/`ReferenceRegionSettings`/`TileSourceSettings`/`G
   `CvWiring`'s shared `ManagedChannel`/`CvChannelSupervisor` (D3 — one channel to cv-service, not
   two); `CvWiring`'s own `@ConditionalOnExpression` for that channel/supervisor pair was extended to
   include `vision.geo.visual.enabled`, so either flag alone is enough to stand the channel up.
+
+  **R6 update (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6, 2026-08-26):** both beans now
+  take **two** `@Qualifier`-disambiguated `ObjectProvider<ManagedChannel>` parameters
+  (`@Qualifier("cvTrainingChannel")` and `@Qualifier("cvGrpcChannel")`) instead of one unqualified
+  `ObjectProvider<ManagedChannel>`, resolved through `CvWiring.controlPlaneChannel(cvTrainingChannel,
+  cvGrpcChannel)` — `cvTrainingChannel.getIfAvailable(cvGrpcChannel::getObject)`. **This was a genuine
+  fix, not a hardening exercise**: `CvWiring#cvGrpcChannel` is now `@Primary` (see "CV inference
+  wiring" below), and an *unqualified* `ObjectProvider<ManagedChannel>.getObject()` throws
+  `NoUniqueBeanDefinitionException` the moment a second `ManagedChannel` bean
+  (`cvTrainingChannel`) exists in the context — a real context-startup break a split cv-service
+  deployment would have hit, proven fixed by `CvSplitChannelWiringTest`. **Known, honest limitation,
+  not addressed here**: `pulledGeolocationPort`'s reconnect/circuit-breaking still shares
+  `CvWiring#cvChannelSupervisor`, and that supervisor watches only the **inference** channel
+  (`cvGrpcChannel`) — if a split deployment's training channel degrades independently, nothing here
+  notices. Building a second supervisor for the training channel was explicitly out of this wave's
+  scope; see the wave's own EOF section, "Wave R6", for the full routing rationale.
 - `referenceRegionService`, `geolocationSessionService`, `trackCorrectionService` — unconditional
   application-service beans.
 - `visualGeoRunner` — `@Bean(initMethod = "start", destroyMethod = "close")`, the **one** flag-gated
@@ -3035,3 +3059,114 @@ reachable in this environment, so every `@SpringBootTest` ran against a real Pos
   `contexts/vision-perception`, rather than being collapsed to one, because real out-of-scope callers
   (`vision-learning`, this module) still reference `latestRawFrame()` by that specific name.
 
+
+## Wave R6 (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6) — split cv-service channels — done 2026-08-26
+
+Wires `cv/grpc`'s (adapter-cv-grpc) new `CvTarget`/`CvChannels` primitives (built by a prior wave) into
+this module so a deployment can point inference and training/geolocation RPCs at two different
+cv-service processes, while a default deployment (one flag, one `endpoint`) stays byte-identical to
+before this wave. No new REST endpoint, no UI-visible change — purely a backend wiring wave.
+
+**Two new config keys, both optional, both empty/absent by default:**
+- `vision.cv.inference.targets` — `List<String>` of `host:port` entries, **default: empty list**.
+  Ordered failover target list for the inference channel (`Inference`/`DetectStream`), tried in order
+  via grpc-java's own `pick_first` policy on connection failure. Empty means "use `vision.cv.endpoint`
+  as the one target" — `VisionCvProperties#inferenceTargets()` degrades to a single-element list built
+  from `host()`/`port()`, and `CvChannels.forTargets` degrades to `CvChannels.forTarget` internally, so
+  the channel `CvWiring#cvGrpcChannel` builds is unchanged in every observable way from before this
+  wave when this key is unset.
+- `vision.cv.training.target` — single `host:port` string, **default: empty string**. When set, a
+  second `ManagedChannel` bean (`cvTrainingChannel`) is built pointed at it, and `Training`/`Geolocation`
+  RPCs route through it instead of the inference channel. When unset (the default),
+  `CvWiring#cvTrainingChannel`'s `@ConditionalOnProperty` means the bean does not exist at all, and
+  every consumer falls back to the shared inference channel exactly as before this wave.
+
+Both keys are added **commented out** to `application.yaml`'s existing `vision.cv` block (right after
+`endpoint:`), pointing at the `cv-split` Compose profile's two services (`cv-service-inference`:50061,
+`cv-service-training`:50062, already present in the root `docker-compose.yml` before this wave) — see
+that file for the exact wording, including the honest limitation called out in-place (see below).
+
+**`VisionCvProperties` gained two nested records** (`Inference`, `Training`) and three accessor methods
+(`inferenceTargets()`, `trainingTarget()`, `trainingTargetConfigured()`) — full description in the "CV
+inference wiring"/API-surface section above ("R6 addition"). **No new convenience constructor**
+(java-clean-code skill §3, finding R1 of this same audit) — the two pre-existing legacy convenience
+constructors each grew by one more trailing `null`, documented "legacy, slated for removal," rather
+than a new overload.
+
+**`CvWiring#cvGrpcChannel` is now the *inference* channel, and is `@Primary`.** Rewritten to build via
+`CvChannels.forTargets(cvProperties.inferenceTargets(), settings)` instead of the inline
+`ManagedChannelBuilder` chain it used before. **Verified, not assumed**: read `CvChannels.applyCommonSettings`
+(adapter-cv-grpc) before deleting the old inline code — it applies the identical three keepalive
+settings (`keepAliveTime`/`keepAliveTimeout`/`keepAliveWithoutCalls`, all via `.toMillis()`) and the
+same conditional `.usePlaintext()` this bean used to apply directly, so a single-target channel built
+through `CvChannels.forTarget` is byte-identical to what this bean built inline before. `@Primary` is
+new — added because a second `ManagedChannel` bean (`cvTrainingChannel`) can now exist in the same
+context, and every pre-existing unqualified consumer (`cvChannelSupervisor`, `detectionPort`,
+`pulledDetectionPort`) needed to keep resolving the inference channel unambiguously; all three now
+carry an explicit `@Qualifier("cvGrpcChannel")` so the choice is stated, not merely inferred from
+`@Primary` defaulting.
+
+**New bean, `cvTrainingChannel`** — `@ConditionalOnProperty(prefix = "vision.cv", name = "training.target")`,
+built via `CvChannels.forTarget(cvProperties.trainingTarget(), settings)`. Its own javadoc states the
+honest limit plainly: pointing it at the same `host:port` as the inference channel opens a second,
+redundant TCP connection to the same process — there is no dedup, by design (two independently-lettered
+config keys, not a shared-connection cache).
+
+**New package-private static helper, `CvWiring.controlPlaneChannel(ObjectProvider<ManagedChannel>
+cvTrainingChannel, ObjectProvider<ManagedChannel> cvGrpcChannel)`** — `cvTrainingChannel.getIfAvailable(cvGrpcChannel::getObject)`.
+Every `Training`/`Geolocation` RPC consumer calls this instead of resolving either channel bean
+directly, so the "prefer training channel if configured, else fall back to inference" rule lives in
+exactly one place.
+
+**Routing fixed, not merely added — two genuine breaks found and closed:**
+1. `TrainingWiringConfiguration#datasetUploadPort`/`#modelRegistryPort`/`#trainingPort` previously took
+   a plain `ManagedChannel cvGrpcChannel` parameter. Once `CvWiring#cvGrpcChannel` became `@Primary`,
+   that plain, unqualified-by-type parameter would have **silently kept resolving the inference channel**
+   regardless of its parameter name, the moment a second `ManagedChannel` bean existed — never a compile
+   or startup error, just the wrong RPCs riding the wrong channel. Fixed by switching all three to the
+   two-`@Qualifier`-parameter + `controlPlaneChannel` shape above.
+2. `VisualGeoWiringConfiguration#pulledGeolocationPort`/`#referenceIndexPort` previously took an
+   **unqualified** `ObjectProvider<ManagedChannel>`. This one is a real break, not a hypothetical: an
+   unqualified `ObjectProvider<ManagedChannel>.getObject()` throws `NoUniqueBeanDefinitionException`
+   the instant a second `ManagedChannel` bean of the same type exists in the context — a split
+   deployment with `vision.cv.training.target` set would have failed to start these two beans outright.
+   Fixed the same way. **Known, honest limitation left in place** (documented in this bean's own
+   javadoc and in the "Wave H5" section above): `pulledGeolocationPort` still shares
+   `CvWiring#cvChannelSupervisor`, which watches only the inference channel — a training-channel-only
+   degradation is invisible to it. Building a second supervisor was explicitly out of this wave's
+   scope (told not to).
+3. `detectionPort`/`pulledDetectionPort`/`cvChannelSupervisor` (`CvWiring`) were **not** broken by the
+   `@Primary` change (an unqualified `ObjectProvider` still resolves the sole `@Primary` candidate
+   without ambiguity), but each now carries an explicit `@Qualifier("cvGrpcChannel")` anyway, so the
+   choice reads as a decision rather than an accident of bean-count.
+
+**Tests**: `VisionCvPropertiesTest` **12 → 18** (+6: `inferenceTargetsFallsBackToHostAndPortWhenUnset`,
+`inferenceTargetsParsesTheConfiguredListWhenPresent`, `malformedInferenceTargetIsRejectedAtConstruction`,
+`trainingTargetFallsBackToHostAndPortWhenUnset`, `trainingTargetParsesTheConfiguredValueWhenPresent`,
+`malformedTrainingTargetIsRejectedAtConstruction`). New `CvSplitChannelWiringTest` (+4:
+`bothTheInferenceAndTrainingChannelBeansExist`, `geolocationPortsResolveToTheirGrpcImplementations`,
+`modelRegistryPortResolvesToItsGrpcImplementation`, `theTwoQualifiedChannelBeansAreDistinct`) —
+`@SpringBootTest` with `vision.cv.training.target` set alongside `vision.cv.enabled`/
+`vision.training.enabled`/`vision.geo.visual.enabled`, proving both channel beans exist, are distinct,
+and every consumer resolves — its mere green run is the proof the two breaks above are genuinely fixed
+(a regression here means a context that fails to start, not a subtle wrong assertion). The pre-existing
+single-channel suites (`CvWiringTest`, `CvEnabledWiringTest`, `CvAndTrainingSharedChannelWiringTest`)
+were **not modified** and stayed green, proving the default (still exactly one `ManagedChannel` bean)
+path is unchanged.
+
+**Before/after**: `station/vision-app` **248 → 258** (+10: the two new test classes above), measured via
+a foreground `./mvnw -B -pl station/vision-app -am test -DskipWeb` (Docker reachable, every
+`@SpringBootTest` ran against a real Postgres Testcontainer, none skipped): `BUILD SUCCESS`,
+`Tests run: 258, Failures: 0, Errors: 0, Skipped: 0`.
+
+**Also investigated this wave, per a coordinator instruction, not this wave's own scope**: the
+`PublishWiringTest` "pre-existing failure" R7 reported (see the "Correction" paragraph inserted into
+the R7 section above, "Auth / session security") — could not be reproduced, in isolation or in this
+wave's full 258-test run; no `SecurityConfig.java`/`application.properties` change was made, since
+nothing reproducibly broke.
+
+**Deferred, out of this wave's scope**: a second `CvChannelSupervisor` for the training channel (an
+honest limitation, not a bug — documented above and in `VisualGeoWiringConfiguration`'s own javadoc);
+any UI surface for choosing/displaying which channel a given RPC used (none exists today for the
+single-channel case either); `contexts/`, `ApplicationServiceWiring.java`, `station/vision-api/**` main
+sources, `storage/persistence/**`, `core/**` — held by other agents' concurrent waves of this same audit.
