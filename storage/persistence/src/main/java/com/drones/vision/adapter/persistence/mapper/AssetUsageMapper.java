@@ -16,10 +16,10 @@ import com.drones.vision.kernel.UsageOrigin;
  * <p>{@code phase} (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O5/O7) always round-trips
  * on the way in: {@link AssetUsage#phase()} is non-null by the domain record's own compact
  * constructor, so {@link #toEntity} always writes a real value. On the way back, a {@code null}
- * entity column (a row saved before this column existed) is honestly mapped through {@link
- * AssetUsage}'s own pre-O7 8-arg convenience constructor, which defaults to {@link
- * UsagePhase#PREFLIGHT} — see {@code AssetUsageEntity}'s own javadoc for why this is the correct
- * "unknown, not fabricated" fallback rather than a bug.
+ * entity column (a row saved before this column existed) is honestly defaulted here to {@link
+ * UsagePhase#PREFLIGHT} before being passed to {@link AssetUsage}'s single canonical constructor
+ * ({@code .claude/skills/java-clean-code/SKILL.md} §3) — see {@code AssetUsageEntity}'s own javadoc
+ * for why this is the correct "unknown, not fabricated" fallback rather than a bug.
  *
  * <p>{@code origin} (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) always
  * round-trips in both directions, unlike {@code phase}: {@link AssetUsage#origin()} is non-null by

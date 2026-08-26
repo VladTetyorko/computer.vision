@@ -11,6 +11,8 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,12 +53,14 @@ class DefaultUsageServiceTest {
     }
 
     private static AssetUsage usage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt) {
-        return new AssetUsage(id, assetId, startedAt, endedAt, null, null, 7);
+        return new AssetUsage(id, assetId, startedAt, endedAt, null, null, 7, null, UsagePhase.PREFLIGHT,
+                UsageOrigin.STREAM);
     }
 
     private static AssetUsage usageOfStream(AssetId assetId, StreamId streamId) {
         Instant start = Instant.parse("2026-08-04T10:00:00Z");
-        return new AssetUsage(UsageId.random(), assetId, start, start.plusSeconds(90), null, null, 7, streamId);
+        return new AssetUsage(UsageId.random(), assetId, start, start.plusSeconds(90), null, null, 7, streamId,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
     }
 
     @Test

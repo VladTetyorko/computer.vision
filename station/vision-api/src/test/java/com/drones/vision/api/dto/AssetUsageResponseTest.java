@@ -43,11 +43,11 @@ class AssetUsageResponseTest {
     @Test
     void aUsageOpenedByAStreamReportsStreamRatherThanNothing() {
         assertEquals("STREAM", AssetUsageResponse.from(usage()).origin(),
-                "the legacy AssetUsage constructor this fixture uses defaults origin to STREAM");
+                "this fixture's origin is explicitly STREAM");
     }
 
     private static AssetUsage usage() {
         return new AssetUsage(UsageId.random(), AssetId.random(), Instant.parse("2026-08-18T12:00:00Z"),
-                null, null, null, 0L);
+                null, null, null, 0L, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
     }
 }

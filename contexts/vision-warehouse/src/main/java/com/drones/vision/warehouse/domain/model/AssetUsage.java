@@ -76,42 +76,6 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
     }
 
     /**
-     * Convenience constructor for the pre-R2 shape — defaults {@link #origin()} to {@link
-     * UsageOrigin#STREAM}, keeping every pre-existing call site (including the two convenience
-     * overloads below, which route through this one) compiling unchanged. Every call site within
-     * this wave's file scope passes {@code origin} explicitly instead; this overload exists only
-     * because callers in vision-flight/vision-events/vision-learning (outside this wave's scope)
-     * still construct an {@code AssetUsage} through it directly — see this class's MODULE.md entry
-     * for the precedent ({@code phase}'s own pre-O7 default) this follows.
-     */
-    public AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
-                       GeoPosition lastPosition, long sampleCount, StreamId streamId, UsagePhase phase) {
-        this(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId, phase,
-                UsageOrigin.STREAM);
-    }
-
-    /**
-     * Convenience constructor for the pre-O7 shape — defaults {@link #phase()} to {@link
-     * UsagePhase#PREFLIGHT} (and, as of wave R2, {@link #origin()} to {@link UsageOrigin#STREAM}),
-     * keeping every pre-existing call site (including the streamless 7-arg overload below, which
-     * routes through this one) compiling unchanged.
-     */
-    public AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
-                       GeoPosition lastPosition, long sampleCount, StreamId streamId) {
-        this(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
-                UsagePhase.PREFLIGHT);
-    }
-
-    /**
-     * Convenience constructor for a usage with no recorded stream (legacy rows, or callers that
-     * predate {@code streamId} — see the class javadoc).
-     */
-    public AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
-                       GeoPosition lastPosition, long sampleCount) {
-        this(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, null);
-    }
-
-    /**
      * Returns a copy of this usage closed at the given instant.
      *
      * @param endedAt when the usage was closed; must not be before {@code startedAt}

@@ -29,6 +29,8 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
@@ -265,7 +267,7 @@ class DefaultLabelingServiceTest {
 
     private AssetUsage openUsage(AssetId assetId, StreamId onStream) {
         AssetUsage usage = new AssetUsage(UsageId.random(), assetId, USAGE_STARTED_AT, USAGE_ENDED_AT, null, null, 0,
-                onStream);
+                onStream, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         return usageRepository.save(usage);
     }
 
@@ -342,7 +344,7 @@ class DefaultLabelingServiceTest {
         Dataset dataset = dataset(ownership, List.of("building"));
         Asset owningAsset = asset(AssetId.random(), group);
         AssetUsage usage = new AssetUsage(UsageId.random(), owningAsset.id(), USAGE_STARTED_AT, USAGE_ENDED_AT,
-                null, null, 0); // 7-arg convenience ctor -> streamId null
+                null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM); // streamId null
         usageRepository.save(usage);
 
         assertThrows(NoSuchElementException.class, () -> service.captureFromReplay(

@@ -18,7 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class AssetUsageTest {
 
     private static AssetUsage openUsage() {
-        return new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0);
+        return new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0, null,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
     }
 
     @Test
@@ -37,13 +38,17 @@ class AssetUsageTest {
         Instant startedAt = Instant.now();
 
         assertThrows(IllegalArgumentException.class,
-                () -> new AssetUsage(null, assetId, startedAt, null, null, null, 0));
+                () -> new AssetUsage(null, assetId, startedAt, null, null, null, 0, null, UsagePhase.PREFLIGHT,
+                        UsageOrigin.STREAM));
         assertThrows(IllegalArgumentException.class,
-                () -> new AssetUsage(id, null, startedAt, null, null, null, 0));
+                () -> new AssetUsage(id, null, startedAt, null, null, null, 0, null, UsagePhase.PREFLIGHT,
+                        UsageOrigin.STREAM));
         assertThrows(IllegalArgumentException.class,
-                () -> new AssetUsage(id, assetId, null, null, null, null, 0));
+                () -> new AssetUsage(id, assetId, null, null, null, null, 0, null, UsagePhase.PREFLIGHT,
+                        UsageOrigin.STREAM));
         assertThrows(IllegalArgumentException.class,
-                () -> new AssetUsage(id, assetId, startedAt, null, null, null, -1));
+                () -> new AssetUsage(id, assetId, startedAt, null, null, null, -1, null, UsagePhase.PREFLIGHT,
+                        UsageOrigin.STREAM));
     }
 
     @Test
@@ -52,14 +57,16 @@ class AssetUsageTest {
         Instant beforeStart = startedAt.minus(1, ChronoUnit.SECONDS);
 
         assertThrows(IllegalArgumentException.class,
-                () -> new AssetUsage(UsageId.random(), AssetId.random(), startedAt, beforeStart, null, null, 0));
+                () -> new AssetUsage(UsageId.random(), AssetId.random(), startedAt, beforeStart, null, null, 0, null,
+                        UsagePhase.PREFLIGHT, UsageOrigin.STREAM));
     }
 
     @Test
     void acceptsEndedAtEqualToStartedAt() {
         Instant startedAt = Instant.now();
 
-        AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), startedAt, startedAt, null, null, 0);
+        AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), startedAt, startedAt, null, null, 0,
+                null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
         assertEquals(startedAt, usage.endedAt());
     }
@@ -111,7 +118,7 @@ class AssetUsageTest {
         StreamId streamId = StreamId.random();
 
         AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0,
-                streamId);
+                streamId, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
         assertEquals(streamId, usage.streamId());
     }
@@ -120,7 +127,7 @@ class AssetUsageTest {
     void closedWithPositionsAndWithSampleCountAllPreserveStreamId() {
         StreamId streamId = StreamId.random();
         AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0,
-                streamId);
+                streamId, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
         AssetUsage closed = usage.closed(usage.startedAt().plusSeconds(30));
         AssetUsage repositioned = usage.withPositions(new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null));
@@ -137,8 +144,10 @@ class AssetUsageTest {
         AssetId assetId = AssetId.random();
         Instant startedAt = Instant.now();
 
-        AssetUsage withoutStream = new AssetUsage(id, assetId, startedAt, null, null, null, 0);
-        AssetUsage withStream = new AssetUsage(id, assetId, startedAt, null, null, null, 0, StreamId.random());
+        AssetUsage withoutStream = new AssetUsage(id, assetId, startedAt, null, null, null, 0, null,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+        AssetUsage withStream = new AssetUsage(id, assetId, startedAt, null, null, null, 0, StreamId.random(),
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
         assertNotEquals(withoutStream, withStream);
     }
@@ -149,7 +158,7 @@ class AssetUsageTest {
     void phaseDefaultsToPreflightViaEitherConvenienceConstructor() {
         AssetUsage sevenArg = openUsage();
         AssetUsage eightArg = new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0,
-                StreamId.random());
+                StreamId.random(), UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
         assertEquals(UsagePhase.PREFLIGHT, sevenArg.phase());
         assertEquals(UsagePhase.PREFLIGHT, eightArg.phase());
@@ -192,9 +201,9 @@ class AssetUsageTest {
     void originDefaultsToStreamViaEitherLegacyConstructor() {
         AssetUsage sevenArg = openUsage();
         AssetUsage eightArg = new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0,
-                StreamId.random());
+                StreamId.random(), UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         AssetUsage nineArg = new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0,
-                StreamId.random(), UsagePhase.IN_FLIGHT);
+                StreamId.random(), UsagePhase.IN_FLIGHT, UsageOrigin.STREAM);
 
         assertEquals(UsageOrigin.STREAM, sevenArg.origin());
         assertEquals(UsageOrigin.STREAM, eightArg.origin());

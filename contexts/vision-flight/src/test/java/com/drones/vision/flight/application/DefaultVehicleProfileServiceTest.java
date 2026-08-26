@@ -308,7 +308,8 @@ class DefaultVehicleProfileServiceTest {
     @Test
     void passportReturnsBothSnapshotsOnceBothPhasesAreCaptured() {
         UsageId usageId = UsageId.random();
-        AssetUsage usage = new AssetUsage(usageId, assetId, Instant.parse("2026-08-18T08:00:00Z"), null, null, null, 0);
+        AssetUsage usage = new AssetUsage(usageId, assetId, Instant.parse("2026-08-18T08:00:00Z"), null, null, null,
+                0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(usage), device);
 
         VehicleProfile preflight = completeProfile();
@@ -327,7 +328,8 @@ class DefaultVehicleProfileServiceTest {
     @Test
     void passportHasNullFieldsWhenNeitherPhaseWasCapturedYet() {
         UsageId usageId = UsageId.random();
-        AssetUsage usage = new AssetUsage(usageId, assetId, Instant.parse("2026-08-18T08:00:00Z"), null, null, null, 0);
+        AssetUsage usage = new AssetUsage(usageId, assetId, Instant.parse("2026-08-18T08:00:00Z"), null, null, null,
+                0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(usage), device);
 
         FlightPassport passport = service.passport(assetId, usageId, VisibilityScope.unbounded());
@@ -357,7 +359,7 @@ class DefaultVehicleProfileServiceTest {
         stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(), device); // empty "recent" list
         UsageId oldUsageId = UsageId.random();
         AssetUsage oldUsage = new AssetUsage(oldUsageId, assetId, Instant.parse("2020-01-01T00:00:00Z"), null, null,
-                null, 0);
+                null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         usageSessionService.seed(oldUsage); // known to the session service, but not "recent"
 
         VehicleProfile preflight = completeProfile();
@@ -380,7 +382,8 @@ class DefaultVehicleProfileServiceTest {
         AssetId otherAssetId = AssetId.random();
         UsageId otherUsageId = UsageId.random();
         AssetUsage otherAssetUsage = new AssetUsage(otherUsageId, otherAssetId,
-                Instant.parse("2026-08-18T08:00:00Z"), null, null, null, 0);
+                Instant.parse("2026-08-18T08:00:00Z"), null, null, null, 0, null, UsagePhase.PREFLIGHT,
+                UsageOrigin.STREAM);
         usageSessionService.seed(otherAssetUsage);
         profileRepository.save(device.id(), otherUsageId, FlightPhase.PREFLIGHT, completeProfile());
 
@@ -397,8 +400,10 @@ class DefaultVehicleProfileServiceTest {
         Instant currentStart = Instant.parse("2026-08-18T09:00:00Z");
         UsageId previousUsageId = UsageId.random();
         UsageId currentUsageId = UsageId.random();
-        AssetUsage previousUsage = new AssetUsage(previousUsageId, assetId, previousStart, null, null, null, 0);
-        AssetUsage currentUsage = new AssetUsage(currentUsageId, assetId, currentStart, null, null, null, 0);
+        AssetUsage previousUsage = new AssetUsage(previousUsageId, assetId, previousStart, null, null, null, 0, null,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+        AssetUsage currentUsage = new AssetUsage(currentUsageId, assetId, currentStart, null, null, null, 0, null,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         // recentUsages is newest-first.
         stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(currentUsage, previousUsage), device);
 
@@ -427,7 +432,8 @@ class DefaultVehicleProfileServiceTest {
     @Test
     void driftFromPreviousFlightIsEmptyWhenThereIsNoPreviousFlight() {
         UsageId usageId = UsageId.random();
-        AssetUsage usage = new AssetUsage(usageId, assetId, Instant.parse("2026-08-18T08:00:00Z"), null, null, null, 0);
+        AssetUsage usage = new AssetUsage(usageId, assetId, Instant.parse("2026-08-18T08:00:00Z"), null, null, null,
+                0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(usage), device);
 
         assertEquals(List.of(), service.driftFromPreviousFlight(assetId, usageId, VisibilityScope.unbounded()));
@@ -439,8 +445,10 @@ class DefaultVehicleProfileServiceTest {
         Instant currentStart = Instant.parse("2026-08-18T09:00:00Z");
         UsageId previousUsageId = UsageId.random();
         UsageId currentUsageId = UsageId.random();
-        AssetUsage previousUsage = new AssetUsage(previousUsageId, assetId, previousStart, null, null, null, 0);
-        AssetUsage currentUsage = new AssetUsage(currentUsageId, assetId, currentStart, null, null, null, 0);
+        AssetUsage previousUsage = new AssetUsage(previousUsageId, assetId, previousStart, null, null, null, 0, null,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+        AssetUsage currentUsage = new AssetUsage(currentUsageId, assetId, currentStart, null, null, null, 0, null,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         stubDetailsWithUsages(new Ownership(actor, GroupId.random()), List.of(currentUsage, previousUsage), device);
         // Neither the previous flight's POSTFLIGHT nor this flight's PREFLIGHT was ever captured.
 
