@@ -4,6 +4,7 @@ import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
+import com.drones.vision.kernel.UsageId;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -158,5 +160,36 @@ class DefaultUsageSessionServiceTest {
     @Test
     void constructorRejectsNullRepository() {
         assertThrows(NullPointerException.class, () -> new DefaultUsageSessionService(null));
+    }
+
+    // -- usageBelongsToAsset (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5) --------------
+
+    @Test
+    void usageBelongsToAssetIsTrueWhenTheUsageIsOwnedByThatAsset() {
+        AssetId assetId = AssetId.random();
+        AssetUsage usage = service.open(assetId, StreamId.random(), Instant.now());
+        when(usageRepository.findById(usage.id())).thenReturn(Optional.of(usage));
+
+        assertTrue(service.usageBelongsToAsset(usage.id(), assetId));
+    }
+
+    @Test
+    void usageBelongsToAssetIsFalseWhenTheUsageBelongsToADifferentAsset() {
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.now());
+        when(usageRepository.findById(usage.id())).thenReturn(Optional.of(usage));
+
+        assertEquals(false, service.usageBelongsToAsset(usage.id(), AssetId.random()));
+    }
+
+    @Test
+    void usageBelongsToAssetIsFalseForAnUnknownUsage() {
+        assertEquals(false, service.usageBelongsToAsset(UsageId.random(), AssetId.random()));
+    }
+
+    @Test
+    void usageBelongsToAssetRejectsNullArguments() {
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.now());
+        assertThrows(NullPointerException.class, () -> service.usageBelongsToAsset(null, AssetId.random()));
+        assertThrows(NullPointerException.class, () -> service.usageBelongsToAsset(usage.id(), null));
     }
 }

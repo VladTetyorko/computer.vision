@@ -1,6 +1,7 @@
 package com.drones.vision.warehouse.application.directory;
 
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.application.asset.AssetService;
@@ -12,6 +13,10 @@ import java.util.Optional;
  * Read-only device/asset identity lookups for a collaborator that must not depend on {@link
  * AssetService}/{@link DeviceService} (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1, wave
  * R3) — namely vision-perception's {@code UsageTracker}, the one call site this exists for today.
+ * Wave R5 (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5) added {@link #find(AssetId)} for
+ * a second kind of caller: a foreign context that has already resolved a domain object naming an
+ * {@code AssetId} (e.g. {@code vision-learning}'s {@code AssetUsage#assetId()}) and needs the
+ * {@link Asset} itself, without importing {@code AssetRepositoryPort} directly.
  *
  * <h2>Why this exists instead of reusing {@code AssetService}/{@code DeviceService}</h2>
  * The R3 brief's literal suggestion was to route these lookups through the published {@code
@@ -51,4 +56,14 @@ public interface AssetDirectoryService {
      * @return the device, or {@link Optional#empty()} if none exists
      */
     Optional<Device> findDevice(DeviceId deviceId);
+
+    /**
+     * Finds an asset by id — the plain identity lookup a foreign context reaches for once it
+     * already holds an {@link AssetId} (from its own domain object) and needs the {@link Asset}
+     * itself, without the wider {@link AssetService} surface.
+     *
+     * @param assetId the asset id
+     * @return the asset, or {@link Optional#empty()} if none exists
+     */
+    Optional<Asset> find(AssetId assetId);
 }

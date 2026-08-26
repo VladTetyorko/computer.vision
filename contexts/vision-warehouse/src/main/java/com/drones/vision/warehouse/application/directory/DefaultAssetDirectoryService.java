@@ -1,6 +1,7 @@
 package com.drones.vision.warehouse.application.directory;
 
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
@@ -35,5 +36,11 @@ public final class DefaultAssetDirectoryService implements AssetDirectoryService
     public Optional<Device> findDevice(DeviceId deviceId) {
         Objects.requireNonNull(deviceId, "deviceId must not be null");
         return deviceRepository.findById(deviceId);
+    }
+
+    @Override
+    public Optional<Asset> find(AssetId assetId) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        return assetRepository.findById(assetId);
     }
 }

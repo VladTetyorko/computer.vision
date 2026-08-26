@@ -140,7 +140,29 @@ have to re-derive it): warehouse's `UsageService` would need an unscoped
 pair), and `UsageSummary` would need a `StreamId streamId` field. Even with both, the
 `DetectionRepositoryPort`/`TelemetryRepositoryPort` reads would still have nowhere to go without a
 new bulk-query service on perception/flight respectively — so closing this module's repository-port
-reads is a three-context change, not a one-line swap.
+reads is a three-context change, not a one-line swap. **Confirmed still true by wave R5c**, which
+added exactly this kind of unscoped warehouse method for a different caller
+(`vision-flight`'s `DefaultVehicleProfileService`) and deliberately did *not* build the
+`UsageService#byId(UsageId)`/`UsageSummary.streamId` shape sketched above: `DefaultVehicleProfileService`
+only needed a yes/no membership check against a `usageId` it already held, so R5c added
+`UsageSessionService#usageBelongsToAsset(UsageId, AssetId)` — a boolean, not a data read, filed on
+`UsageSessionService` rather than `UsageService` precisely because every `UsageService` method is
+scope-checked and an unscoped one beside them would be a footgun (see that method's own javadoc in
+`vision-warehouse`). It does not carry `streamId` and cannot serve `timeline`/`recordingFor`; this
+module's actual unblock is still the `byId`/`streamId` pair above, unbuilt by either wave.
 
 No code changed in this module this wave. `./mvnw -B -pl contexts/vision-events test` — 24/24 green,
 unchanged.
+
+**ARCHITECTURE-AUDIT-2026-08-26 wave R5c — the other two of R5's eight sites fixed; this module's
+three left exactly as wave R5b decided.** R5c fixed `vision-flight`'s `DefaultVehicleProfileService`
+and `vision-learning`'s `DefaultLabelingService` (see those modules' own MODULE.md) and added the
+ArchUnit guard R5 asked for (`station/vision-app`'s `ContextArchitectureTest
+#noContextImportsAnotherContextsRepositoryPort`) — a context's application/domain code importing
+another context's `*RepositoryPort` now fails the build everywhere except a small, explicitly named
+allow-list. This module's three reads (`AssetUsageRepositoryPort`/`DetectionRepositoryPort` on
+`ReplaySources`, plus `TelemetryRepositoryPort` on `DefaultReplayService`) are that allow-list's one
+named group, cited by class and target port, with the R5b judgment call above as the reasoning — see
+`REPOSITORY_PORT_EXEMPTIONS` in `ContextArchitectureTest`. Nothing in this module changed; the guard
+now makes the R5b decision an enforced, visible exception instead of an implicit one no test could
+see.

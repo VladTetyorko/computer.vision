@@ -4,6 +4,7 @@ import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
+import com.drones.vision.kernel.UsageId;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
@@ -32,6 +33,16 @@ import java.time.Instant;
  * contrast, always persist immediately — a session boundary is not something any caller has ever
  * had reason to defer, and neither did before this wave. {@link #save} is the explicit write a
  * caller uses once it has decided a folded/phase-updated usage is ready to persist.
+ *
+ * <h2>{@link #usageBelongsToAsset} (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5)</h2>
+ * Filed here rather than on {@link UsageService} even though it is a read, not a write: every
+ * {@link UsageService} method takes a {@link com.drones.vision.platform.VisibilityScope}, and this
+ * question deliberately does not — its one caller (vision-flight's {@code
+ * DefaultVehicleProfileService#passport}/{@code #driftFromPreviousFlight}) has already scope-checked
+ * the asset itself and only needs an uncapped membership check against a {@code usageId} it was
+ * handed, not a second scoped read. Adding an unscoped method beside {@link UsageService}'s
+ * all-scoped ones would be a footgun the next reader could copy without noticing the difference;
+ * this interface's whole surface is already unscoped, so it is the honest home for one more.
  */
 public interface UsageSessionService {
 
@@ -99,4 +110,16 @@ public interface UsageSessionService {
      * @return the persisted usage
      */
     AssetUsage save(AssetUsage usage);
+
+    /**
+     * Whether a usage with {@code usageId} exists and genuinely belongs to {@code assetId} — an
+     * unscoped, uncapped membership check (see this interface's class javadoc for why it lives
+     * here) for a caller that has already resolved and scope-gated the asset itself and only needs
+     * to verify a usage id it was handed is not being used to reach another asset's data.
+     *
+     * @param usageId the usage to check
+     * @param assetId the asset it must belong to
+     * @return {@code true} if a usage with this id exists and its {@code assetId} equals the given one
+     */
+    boolean usageBelongsToAsset(UsageId usageId, AssetId assetId);
 }

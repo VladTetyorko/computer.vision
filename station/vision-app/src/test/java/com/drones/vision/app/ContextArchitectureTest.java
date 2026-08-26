@@ -93,6 +93,58 @@ class ContextArchitectureTest {
      */
     private static final Set<String> DECLARED_CYCLES = Set.of();
 
+    /**
+     * docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5: "the honest number is 15 cross-context
+     * repository reads in 8 classes" (excluding {@code UsageTracker}'s four, folded into R3 instead
+     * — see that finding's own table). {@link #noContextImportsAnotherContextsRepositoryPort} turns
+     * "a context reads another through its published application service, not its repository port"
+     * into an invariant rather than a convention. Two of the eight were paid off by wave R5c —
+     * flight's {@code DefaultVehicleProfileService} and learning's {@code DefaultLabelingService}
+     * now go through warehouse's {@code AssetDirectoryService}/{@code UsageSessionService} — and
+     * identity's {@code DefaultAssignmentService} was already paid off before this wave (it now goes
+     * through {@code AssetService}), leaving the named exceptions below: this rule's bytecode-level
+     * scan turned up two more edges than the finding's own table counted, both discovered making
+     * this test pass rather than assigned to fix — {@code DefaultLabelingService} reaches
+     * {@code AssetUsageRepositoryPort}/{@code DetectionRepositoryPort} not by importing them but
+     * through {@code ReplaySources}' bundled accessors, one hop past the finding's table, which only
+     * tracked direct imports. Unlike {@link #DECLARED_EDGES} this is not a burn-down asserted for
+     * exact equality — a shorter list here is always fine, silently — but each entry carries the
+     * reasoning for why it is not yet, or will never be, gone, so removing one without a matching fix
+     * is a visible lie, not a quiet edit.
+     */
+    private static final Set<String> REPOSITORY_PORT_EXEMPTIONS = new TreeSet<>(Set.of(
+            // --- vision-events: the pure downstream sink (see DECLARED_EDGES's own comment and
+            // contexts/vision-events/MODULE.md, "wave R5b"/"wave R5c"). Three genuinely bulk,
+            // time-windowed historical reads -- "what happened during this finished flight" -- that
+            // a per-caller application-service method would not make cleaner, only relocate. Kept
+            // deliberately; this half of the list is not expected to shrink.
+            "ReplaySources -> com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort",
+            "ReplaySources -> com.drones.vision.perception.domain.port.DetectionRepositoryPort",
+            "DefaultReplayService -> com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort",
+            "DefaultReplayService -> com.drones.vision.perception.domain.port.DetectionRepositoryPort",
+            "DefaultReplayService -> com.drones.vision.flight.domain.port.TelemetryRepositoryPort",
+
+            // --- vision-learning's DefaultLabelingService, one hop downstream of the same door:
+            // it never imports AssetUsageRepositoryPort/DetectionRepositoryPort by name, but it does
+            // hold a ReplaySources (events' own bundling record, an already-declared, legal
+            // `learning -> events` edge — DECLARED_EDGES's own comment: "capture a training frame
+            // from replay (ReplaySources)") and calls `.usages().findById(...)`/
+            // `.detections().query(...)` directly on the raw ports that record exposes. ArchUnit's
+            // bytecode scan follows the method-call return type straight through the record to the
+            // port underneath, so this is architecturally the same read as the events group above,
+            // reached one hop further along the one door events deliberately left open -- not a new
+            // or accidental coupling.
+            "DefaultLabelingService -> com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort",
+            "DefaultLabelingService -> com.drones.vision.perception.domain.port.DetectionRepositoryPort",
+
+            // --- vision-perception: NOT fixed by this wave -- contexts/vision-perception/** was
+            // explicitly out of wave R5c's file scope. Unlike the events group above this is
+            // ordinary unpaid debt from the audit's own table, not a design decision -- it should
+            // shrink to zero in a follow-up wave the way DefaultAssignmentService and wave R5c's two
+            // fixes already did, not grow.
+            "DefaultStreamService -> com.drones.vision.warehouse.domain.port.DeviceRepositoryPort",
+            "DefaultAssetStreamService -> com.drones.vision.warehouse.domain.port.AssetRepositoryPort"));
+
     private static JavaClasses classes;
 
     @BeforeAll
@@ -157,6 +209,53 @@ class ContextArchitectureTest {
                         Maven cannot express a cycle -- this must stay empty (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e).
                         """, mutual)
                 .isEqualTo(DECLARED_CYCLES);
+    }
+
+    /**
+     * docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5: a context's application/domain code may
+     * not import another context's {@code *RepositoryPort} — read the owning context through its
+     * published application service instead, the way {@code AssetLiveStatePort} already does for
+     * live state (six sites, {@link #DECLARED_EDGES}'s own comment). This is a narrower, stricter
+     * check than {@link #crossContextEdgesMatchTheDeclaredSetExactly}: that test measures *any*
+     * cross-context dependency and freezes it by exact equality (shrinking it is progress, growing
+     * it is a build break either way); this one targets the specific coupling R5 is about — a
+     * foreign repository port — and only tolerates the named entries in {@link
+     * #REPOSITORY_PORT_EXEMPTIONS}, so a *new* foreign repository-port import anywhere in the tree,
+     * including inside an already-exempted class, fails here even where the coarser edge it
+     * produces would already be declared.
+     */
+    @Test
+    void noContextImportsAnotherContextsRepositoryPort() {
+        Set<String> violations = new TreeSet<>();
+        for (JavaClass origin : classes) {
+            String from = contextOf(origin);
+            if (from == null || KERNEL.equals(from) || PLATFORM.equals(from)) {
+                continue;
+            }
+            for (Dependency dependency : origin.getDirectDependenciesFromSelf()) {
+                JavaClass target = dependency.getTargetClass();
+                String to = contextOf(target);
+                if (to == null || to.equals(from) || !target.getSimpleName().endsWith("RepositoryPort")) {
+                    continue;
+                }
+                String edge = origin.getSimpleName() + " -> " + target.getName();
+                if (!REPOSITORY_PORT_EXEMPTIONS.contains(edge)) {
+                    violations.add(edge);
+                }
+            }
+        }
+        assertThat(violations)
+                .withFailMessage("""
+                        A context imported another context's *RepositoryPort directly
+                        (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5): read it through the
+                        owning context's published application service instead -- see
+                        AssetDirectoryService/UsageSessionService (warehouse) for the wave-R5c
+                        precedent -- or, if this really is one more bulk/historical read like
+                        vision-events' three, add a named, justified entry to
+                        REPOSITORY_PORT_EXEMPTIONS instead of a blanket package skip.
+                          %s
+                        """, violations)
+                .isEmpty();
     }
 
     /**

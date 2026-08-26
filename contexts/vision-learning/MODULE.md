@@ -16,12 +16,15 @@ under one Maven module, package-rooted by context, so the extraction was a direc
 **Depends on:**
 - `vision-kernel` — every typed id, `Ownership`, `BoundingBox` (an `Annotation`'s ground-truth box)
 - `vision-platform` — `AuditTrailPort`/`Audit*` (every mutation here is audited), `VisibilityScope`/`AccessDeniedException`
-- `vision-warehouse` — `Asset`/`AssetUsage`, `AssetRepositoryPort` (resolving a captured frame's owning
-  asset; a closed usage's window for replay capture) — **flagged, not fixed, by
-  docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5b**: this is a cross-context repository-port
-  read R5 wants routed through warehouse's published `AssetService` instead; it is not, because one
-  of `DefaultLabelingService`'s three `AssetRepositoryPort` calls (`findByDeviceId`, in
-  `resolveAssetForStream`) has no equivalent on `AssetService`/`DeviceService` today — see Gotchas
+- `vision-warehouse` — `Asset`/`AssetUsage`, `application.directory.AssetDirectoryService` (resolving
+  a captured frame's owning asset; a closed usage's window for replay capture) — **fixed by
+  docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md wave R5c**: `DefaultLabelingService` used to
+  import warehouse's `AssetRepositoryPort` directly for all three lookups (R5b had flagged this and
+  left it, since `findByDeviceId` — used in `resolveAssetForStream` — had no equivalent on
+  `AssetService`/`DeviceService`). It now goes through `AssetDirectoryService#find(AssetId)`/
+  `#findByDevice(DeviceId)` instead — the same directory-lookup service `UsageTracker` already uses
+  (see warehouse's own MODULE.md, `application.directory`), so no new warehouse surface was needed —
+  see Gotchas
 - `vision-perception` — `Detection`/`DetectionResult`/`DetectionQuery`/`VideoFrame`,
   `perception.application.stream.StreamService`/`ActiveStream` (capture a frame from a **live** stream —
   `LabelingService#capture` reads `StreamService#latestRawFrame`/`#latestDetections`)
@@ -142,7 +145,7 @@ com.drones.vision.learning.application     — every service, command/read-model
   bundled into one constructor parameter for `DefaultLabelingService` per
   `.claude/skills/java-clean-code/SKILL.md` §3 ("bundle collaborators rather than sprawl") — each port
   is genuinely independently substitutable, but `DefaultLabelingService` also needs `StreamService`,
-  `AssetRepositoryPort`, `ReplaySources` and `AuditTrailPort`, which would push its constructor past
+  `AssetDirectoryService`, `ReplaySources` and `AuditTrailPort`, which would push its constructor past
   the five-parameter ceiling if all seven were listed individually. `DefaultDatasetService` does
   **not** take this bundle — it only ever touches `datasets()`, so it takes a plain
   `DatasetRepositoryPort` directly.
@@ -167,15 +170,17 @@ com.drones.vision.learning.application     — every service, command/read-model
     samples/images) and audits `DELETED`.
 - **`LabelingService`** (interface) → **`DefaultLabelingService`** — capture (live + replay),
   correction/labeling and YOLO upload of `TrainingSample`s, the operator-in-the-loop half of the loop.
-  - `DefaultLabelingService(TrainingStores, ReplaySources, StreamService, AssetRepositoryPort, AuditTrailPort)`
+  - `DefaultLabelingService(TrainingStores, ReplaySources, StreamService, AssetDirectoryService, AuditTrailPort)`
     — 5-arg production ctor, exactly at the ceiling (`ReplaySources` is what keeps it there instead of
     growing to seven); a 6th public overload adds an explicit `float jpegQuality`
     (`vision.application.training.jpeg-quality`, docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3,
     threaded into `TrainingFrameEncoder`); a package-private 6-arg test seam instead adds an explicit
-    `Supplier<Instant> clock`.
+    `Supplier<Instant> clock`. The 4th parameter was warehouse's `AssetRepositoryPort` until wave R5c
+    (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md) swapped it for `AssetDirectoryService` — a
+    same-shape collaborator swap, not a new parameter (see Depends-on and Gotchas).
   - `TrainingSample capture(CaptureSpec, UserId actor, VisibilityScope scope)` — resolves+scope-gates
     the dataset first, then resolves the stream's source asset (via `streamService.streams()`'s live
-    snapshot for the device, then `AssetRepositoryPort#findByDeviceId`), gates it too if resolved
+    snapshot for the device, then `AssetDirectoryService#findByDevice`), gates it too if resolved
     (an **unresolved** asset — stream not running, or its device owns no asset — leaves `assetId`
     `null` and is silently permitted). Reads `streamService.latestRawFrame(streamId)`
     (`NoSuchElementException` if absent) and `streamService.latestDetections(streamId)`, maps every
@@ -309,25 +314,22 @@ com.drones.vision.learning.application     — every service, command/read-model
   precedent.
 
 ## Gotchas
-- **`DefaultLabelingService` still imports warehouse's `AssetRepositoryPort` directly, unfixed by
-  docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5b** — two of its three calls
-  (`assetRepository.findById`, at `capture`'s replay-asset resolution and
-  `requireAssetVisibleIfKnown`) could be swapped for warehouse's published `AssetService#details(AssetId)`
-  the same way `vision-identity`'s `DefaultAssignmentService` was this wave, but the third,
-  `resolveAssetForStream`'s `assetRepository.findByDeviceId(DeviceId)`, has **no equivalent on
-  `AssetService` or `DeviceService`** — neither publishes a "find the asset that owns this device"
-  read. Doing the two-thirds swap anyway would add `AssetService` as a *sixth* constructor
-  collaborator alongside the retained `AssetRepositoryPort` (this class's constructor is already
-  documented above as "5-arg production ctor, exactly at the ceiling"), which the java-clean-code
-  five-parameter ceiling forbids — and leaves the foreign-port import in place regardless, so nothing
-  would actually be won. Left as one atomic unit rather than partially migrated.
-  **Needed on `AssetService` to unblock this**: `Optional<AssetDetails> byDevice(DeviceId deviceId)`
-  (or a lighter `Optional<AssetSummary>`/`Optional<Asset>` — any shape carrying `id()`/`ownership()`
-  suffices for this class's own scope gates), mirroring `AssetRepositoryPort#findByDeviceId`'s
-  contract: empty when the device belongs to no asset, never a distinguishing error. Once that
-  exists, `DefaultLabelingService`'s constructor can drop `AssetRepositoryPort` for `AssetService`
-  in one swap (net-zero parameters, matching the `DefaultAssignmentService`/`DefaultSimulationService`
-  precedent) and all three call sites move together.
+- **`DefaultLabelingService` no longer imports warehouse's `AssetRepositoryPort` — fixed by
+  docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md wave R5c.** R5b had left this in place: two of
+  the class's three calls could move to warehouse's published `AssetService#details(AssetId)` (the
+  same move `vision-identity`'s `DefaultAssignmentService` made in an earlier wave), but the third,
+  `resolveAssetForStream`'s `findByDeviceId(DeviceId)`, had no equivalent on `AssetService` or
+  `DeviceService` — neither publishes a "find the asset that owns this device" read — and adding
+  `AssetService` as a sixth collaborator alongside the retained `AssetRepositoryPort` would both
+  break the five-parameter ceiling and leave the foreign-port import in place regardless. R5c's fix
+  was not to route through `AssetService` (that would reintroduce the Spring bean cycle
+  `UsageTracker -> AssetService -> AssetLiveStatePort -> UsageTracker` that warehouse's
+  `AssetDirectoryService` exists specifically to avoid — see that class's own javadoc) but through
+  `AssetDirectoryService`, which already published both shapes this class needs
+  (`findByDevice(DeviceId)`, added for `UsageTracker`) plus one it did not yet
+  (`find(AssetId)`, added by this wave). The swap is net-zero on the constructor: `AssetRepositoryPort`
+  → `AssetDirectoryService`, same position, same parameter count, all three call sites moved together
+  in one atomic change.
 - **`DefaultLabelingService` is the only place any context reads back out of `vision-events`** — its
   `ReplaySources` collaborator (`AssetUsageRepositoryPort`/`DetectionRepositoryPort`/
   `ReplayFrameExtractionPort`, bundled in `vision-events`) is a single, deliberate edge:
@@ -454,3 +456,17 @@ SKILL.md §3) forbids. `vision-warehouse` is a different agent's file scope this
 method could not be added here either. See Gotchas for the exact method needed
 (`AssetService#byDevice(DeviceId)`) to unblock a future pass. No code changed in this class; 160/160
 tests green, unchanged (`./mvnw -B -pl contexts/vision-learning test`).
+
+**ARCHITECTURE-AUDIT-2026-08-26 wave R5c — fixed.** R5b's blocker is resolved: a wave that landed on
+warehouse an hour before this one published `application.directory.AssetDirectoryService` —
+deliberately bypassing `AssetService`/`DeviceService` to avoid the Spring bean cycle
+`UsageTracker -> AssetService -> AssetLiveStatePort -> UsageTracker`, wrapping the raw repository
+ports directly instead — already carrying `findByDevice(DeviceId)` for `UsageTracker`'s own use. This
+wave added the one method it was still missing, `find(AssetId)`, and swapped
+`DefaultLabelingService`'s constructor collaborator from `AssetRepositoryPort` to
+`AssetDirectoryService` in place (net-zero parameter count; see the constructor entry above and
+Gotchas). All three call sites (`captureFromReplay`'s `findById(usage.assetId())`,
+`requireAssetVisibleIfKnown`'s `findById(assetId)`, `resolveAssetForStream`'s `findByDeviceId`) moved
+together. `DefaultLabelingService` no longer imports any `*RepositoryPort` from another context.
+160/160 tests green (`./mvnw -B -pl contexts/vision-learning test`), test double renamed
+`FakeAssetRepositoryPort` → `FakeAssetDirectoryService`.

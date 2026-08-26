@@ -10,7 +10,7 @@ import com.drones.vision.learning.domain.port.ModelRegistryPort;
 import com.drones.vision.learning.domain.port.SampleImageStorePort;
 import com.drones.vision.learning.domain.port.TrainingPort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
-import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import com.drones.vision.adapter.cvgrpc.GrpcCvSettings;
 import com.drones.vision.adapter.cvgrpc.GrpcDatasetUploadPort;
 import com.drones.vision.adapter.cvgrpc.GrpcModelRegistryPort;
@@ -163,19 +163,20 @@ public class TrainingWiringConfiguration {
     /**
      * Capture/label/upload (docs/plans/done/CV-TRAINING-PLAN.md §2, as delta'd by docs/plans/done/CV-TRAINING-V2-PLAN.md
      * §4) behind {@code LabelingController} (vision-api, component-scanned). {@code
-     * streamService}/{@code assetRepositoryPort} resolve a live capture's source stream/asset;
-     * {@code replaySources} resolves a replay capture's usage/detections/frame (see {@code
-     * DefaultLabelingService}'s own javadoc for both). All four are already-wired, unconditional
-     * beans in {@code ApplicationServiceWiring}/{@link PersistenceWiringConfiguration}, or {@link
-     * #replaySources} above.
+     * streamService}/{@code assetDirectoryService} resolve a live capture's source stream/asset —
+     * {@link AssetDirectoryService} rather than warehouse's raw {@code AssetRepositoryPort} since
+     * docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5; {@code replaySources} resolves a replay
+     * capture's usage/detections/frame (see {@code DefaultLabelingService}'s own javadoc for both).
+     * All four are already-wired, unconditional beans in {@code ApplicationServiceWiring}/{@link
+     * PersistenceWiringConfiguration}, or {@link #replaySources} above.
      */
     @Bean
     @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
     public LabelingService labelingService(TrainingStores trainingStores, ReplaySources replaySources,
-                                            StreamService streamService, AssetRepositoryPort assetRepositoryPort,
+                                            StreamService streamService, AssetDirectoryService assetDirectoryService,
                                             AuditTrailPort auditTrailPort,
                                             VisionApplicationProperties applicationProperties) {
-        return new DefaultLabelingService(trainingStores, replaySources, streamService, assetRepositoryPort,
+        return new DefaultLabelingService(trainingStores, replaySources, streamService, assetDirectoryService,
                 auditTrailPort, applicationProperties.training().jpegQuality());
     }
 

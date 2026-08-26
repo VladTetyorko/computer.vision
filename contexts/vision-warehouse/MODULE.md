@@ -92,6 +92,11 @@ being real (see the dependency table in docs/plans/active/DOMAIN-SEPARATION-W1.m
 - `AssetDirectoryService` (interface) → `DefaultAssetDirectoryService(AssetRepositoryPort, DeviceRepositoryPort)` — a deliberately narrow read-only seam so perception's `UsageTracker` can resolve "which asset/device does this stream/telemetry source belong to" **without** depending on `AssetService`/`DeviceService`. Those two already depend on `AssetLiveStatePort`, whose only implementation (`StreamBackedAssetLiveState`) depends on `UsageTracker` — so `UsageTracker -> AssetService -> AssetLiveStatePort -> UsageTracker` would be a Spring bean cycle. `AssetDirectoryService` is backed only by the two raw repository ports, breaking the cycle while still keeping perception off `AssetRepositoryPort`/`DeviceRepositoryPort` directly (its own `*RepositoryPort` imports from this module dropped to zero — see this context's and perception's Gotchas)
   - `Optional<Asset> findByDevice(DeviceId)` — the asset that owns a device, if any (`assetRepository.findByDeviceId`)
   - `Optional<Device> findDevice(DeviceId)` — a device by id (`deviceRepository.findById`)
+  - `Optional<Asset> find(AssetId)` — an asset by id (`assetRepository.findById`), added wave R5c
+    (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md) for `vision-learning`'s `DefaultLabelingService`,
+    which held an `AssetId` from its own domain objects (a replay usage's `assetId()`, or one already
+    resolved via `findByDevice`) and needed an unscoped lookup by that id — the same cycle-avoidance
+    reasoning above applies unchanged; this is one more read on the same narrow seam, not a new one
 
 ### `application.device` (package `warehouse.application.device` — disambiguated from perception's own `device` leaf, W1.6d)
 - `DeviceService` (interface) → `DefaultDeviceService(DeviceRepositoryPort, AssetLiveStatePort, AuditTrailPort, EventPublisherPort)` — stops a device's stream via `assetLiveStatePort.stopStreamsForDevices(Set.of(deviceId))`, never by iterating `StreamService` itself
@@ -131,7 +136,7 @@ being real (see the dependency table in docs/plans/active/DOMAIN-SEPARATION-W1.m
 - **Constructor injection only**; collaborators wrapped in `Objects.requireNonNull`.
 - **Soft-delete, not hard-delete**: `Asset#delete`/`Device#delete` mark `LifecycleState.DELETED` and keep every row (usages, telemetry) — nothing here ever issues a real `DELETE`.
 - **Virtual threads**: `DefaultDiscoveryService` starts one `Thread.ofVirtual()` per requested discovery port per scan call; a hung adapter's thread is never tracked or interrupted (cheap + daemon).
-- **N-1-arg convenience constructor idiom, capped at one overload**: e.g. `Asset`'s 6-arg ctor defaulting `state=ACTIVE`, `AssetUsage`'s 8-arg ctor defaulting `phase=PREFLIGHT` (itself routing through the streamless 7-arg one), `Device`'s 5-arg ctor defaulting `state=ACTIVE, origin=LIVE` — a field a wave adds gets **at most one** convenience ctor, and only when it demonstrably saves many out-of-scope call sites (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R1/R4); `DeviceEdit` deliberately got no overload for its new `origin` field — every call site was already in this module, so there was nothing a convenience ctor would have saved.
+- **One public constructor per class**: a new field means updating call sites, or bundling optional data into a settings/collaborators record with a `defaults()` factory — never one more constructor overload (`.claude/skills/java-clean-code/SKILL.md` §3, `CLAUDE.md` rule 10; the old "N-1-arg convenience constructor" idiom this replaces is withdrawn, docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R1). `Asset`'s 6-arg ctor (defaulting `state=ACTIVE`), `AssetUsage`'s 8-arg ctor (defaulting `phase=PREFLIGHT`, itself routing through the streamless 7-arg one), and `Device`'s 5-arg ctor (defaulting `state=ACTIVE, origin=LIVE`) each still keep one such legacy overload from before the rule changed — pre-existing, not a template to extend. `DeviceEdit`'s new `origin` field got no overload under the current rule — every call site was already in this module, so there was nothing a convenience ctor would have saved.
 
 ## Gotchas
 - **`AssetLiveStatePort#stopStreamsForDevices` is synchronous by design, not an oversight** — warehouse still decides, in the same request, that a device's stream must stop before the device/asset is retired or deleted. W2 is where this becomes an event warehouse publishes and perception reacts to asynchronously; this port is a staging post, not the destination.
@@ -175,6 +180,35 @@ surface entries above for the exact ctor shapes and `contexts/vision-simulation`
 on a `simulated`-category asset) and `station/vision-api`'s device/asset-create DTOs carry `origin`
 end to end — see those modules' own MODULE.mds. **181 → 191 tests**
 (`./mvnw -B -pl contexts/vision-warehouse test`, green).
+
+**ARCHITECTURE-AUDIT-2026-08-26 wave R5c done** (the two cross-context repository-port reads R5b
+flagged but could not fix — see `vision-flight`'s and `vision-learning`'s own MODULE.md Status
+entries for each consumer's side): `AssetDirectoryService`/`DefaultAssetDirectoryService` gained
+`Optional<Asset> find(AssetId)` — `vision-learning`'s `DefaultLabelingService` needed an unscoped
+lookup by an `AssetId` it already held (from a replay usage, or from a prior `findByDevice` call),
+and this is the same narrow cycle-avoidance seam `findByDevice`/`findDevice` already serve, not a new
+one (see `application.directory`'s own entry above for why this bypasses `AssetService`, unchanged
+reasoning). `UsageSessionService`/`DefaultUsageSessionService` gained
+`boolean usageBelongsToAsset(UsageId, AssetId)` — `vision-flight`'s `DefaultVehicleProfileService`
+needed an uncapped membership check, not a data read, for a `usageId` it was handed after already
+scope-gating the asset itself. Filed on `UsageSessionService` rather than on `UsageService`
+deliberately: every `UsageService` method takes a `VisibilityScope`, and this one method genuinely
+should not (see this interface's own javadoc for the full reasoning) — adding it there would be an
+unscoped method sitting beside an all-scoped surface, exactly the footgun the task's own instructions
+warned against; `UsageSessionService`'s whole surface is already unscoped, so it is the honest home.
+Both are collaborator swaps at each caller (`AssetRepositoryPort`→`AssetDirectoryService`,
+`AssetUsageRepositoryPort`→`UsageSessionService`), net-zero on constructor parameter counts. Also
+added this wave: `station/vision-app`'s `ContextArchitectureTest` gained
+`noContextImportsAnotherContextsRepositoryPort` — an ArchUnit rule that fails the build if any
+context's application/domain code imports (or, via a bundling record's accessor, reaches) another
+context's `*RepositoryPort`, with a small, explicitly named allow-list (`REPOSITORY_PORT_EXEMPTIONS`)
+for `vision-events`' three deliberate reads (see that module's own MODULE.md), two reads
+`vision-learning`'s `DefaultLabelingService` makes one hop through `vision-events`' `ReplaySources`
+bundling record (same shape as the `events` exemptions, discovered by this rule, not assigned to
+fix), and `vision-perception`'s `DefaultStreamService`/`DefaultAssetStreamService` (pre-existing,
+unpaid debt from the audit's own table, out of this wave's file scope, not this module's to fix).
+216/216 tests green (`./mvnw -B -pl contexts/vision-warehouse test`); 333/333 `vision-flight`,
+160/160 `vision-learning`, unchanged counts, all rewired in place.
 
 **W1.7b/c** (docs/plans/active/DOMAIN-SEPARATION-W1.md §16): `vision-domain`/`vision-application` dissolved; warehouse's `.domain`/`.application` packages became this one module, a directory move with the ArchUnit layer boundary preserved. No behavior change; 170/170 tests green.
 

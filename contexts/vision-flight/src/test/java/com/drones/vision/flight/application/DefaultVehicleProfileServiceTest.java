@@ -28,10 +28,12 @@ import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
+import com.drones.vision.warehouse.application.usage.UsageSessionService;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.warehouse.domain.model.Device;
-import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
+import com.drones.vision.kernel.GeoPosition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -55,8 +57,10 @@ import static org.mockito.Mockito.when;
 /**
  * {@code assetService} is a Mockito mock (mirrors {@code DefaultFlightCommandServiceTest} -- a large
  * warehouse interface this service only ever calls {@code details} on); {@link VehicleConfigPort},
- * {@link AssetUsageRepositoryPort} and {@link AuditTrailPort} are hand-rolled in-memory fakes,
- * matching {@code DefaultManualControlServiceTest}'s own convention.
+ * {@link UsageSessionService} and {@link AuditTrailPort} are hand-rolled in-memory fakes,
+ * matching {@code DefaultManualControlServiceTest}'s own convention. {@code usageSessionService}
+ * only ever needs {@code usageBelongsToAsset} exercised for real (docs/plans/active/
+ * ARCHITECTURE-AUDIT-2026-08-26.md R5); its other methods throw {@link UnsupportedOperationException}.
  */
 class DefaultVehicleProfileServiceTest {
 
@@ -66,7 +70,7 @@ class DefaultVehicleProfileServiceTest {
     private AssetService assetService;
     private FakeVehicleConfigPort vehicleConfigPort;
     private FakeVehicleProfileRepositoryPort profileRepository;
-    private FakeAssetUsageRepositoryPort assetUsageRepository;
+    private FakeUsageSessionService usageSessionService;
     private FakeAuditTrailPort auditTrail;
     private DefaultVehicleProfileService service;
 
@@ -79,10 +83,10 @@ class DefaultVehicleProfileServiceTest {
         assetService = mock(AssetService.class);
         vehicleConfigPort = new FakeVehicleConfigPort();
         profileRepository = new FakeVehicleProfileRepositoryPort();
-        assetUsageRepository = new FakeAssetUsageRepositoryPort();
+        usageSessionService = new FakeUsageSessionService();
         auditTrail = new FakeAuditTrailPort();
         service = new DefaultVehicleProfileService(assetService, vehicleConfigPort, profileRepository,
-                assetUsageRepository, auditTrail);
+                usageSessionService, auditTrail);
 
         Map<String, String> options = new HashMap<>();
         options.put("sysid", "7");
@@ -101,11 +105,11 @@ class DefaultVehicleProfileServiceTest {
     /**
      * Seeds both {@code AssetDetails#recentUsages()} (the capped list {@code
      * driftFromPreviousFlight}'s own "find the previous flight" traversal reads) and {@link
-     * #assetUsageRepository} (the uncapped {@code findById} lookup {@code
+     * #usageSessionService} (the uncapped {@code usageBelongsToAsset} check {@code
      * requireUsageBelongsToAsset} now reads) from the same {@code usages} list -- correct for every
      * existing test here, since none of them exercises the two lists diverging. Tests that need a
-     * usage known to {@code assetUsageRepository} but absent from the capped list (the whole point
-     * of this wave's fix) seed {@link #assetUsageRepository} directly instead.
+     * usage known to {@code usageSessionService} but absent from the capped list (the whole point
+     * of this wave's fix) seed {@link #usageSessionService} directly instead.
      */
     private void stubDetailsWithUsages(Ownership ownership, List<AssetUsage> usages, Device... devices) {
         Asset asset = new Asset(assetId, "Drone 1", DRONE, ownership, Set.of(devices[0].id()), Map.of());
@@ -114,7 +118,7 @@ class DefaultVehicleProfileServiceTest {
         when(assetService.details(assetId)).thenReturn(details);
         when(assetService.details(org.mockito.ArgumentMatchers.any(VisibilityScope.class),
                 org.mockito.ArgumentMatchers.eq(assetId))).thenReturn(details);
-        usages.forEach(assetUsageRepository::save);
+        usages.forEach(usageSessionService::seed);
     }
 
     private static VehicleProfile completeProfile() {
@@ -342,10 +346,10 @@ class DefaultVehicleProfileServiceTest {
      * The bug this wave's fix closes: the old membership check went through {@code
      * AssetDetails#recentUsages()}, capped to the 20 most recent -- a passport for the 21st-oldest
      * flight 404'd even though it genuinely belonged to the asset. {@code requireUsageBelongsToAsset}
-     * now resolves {@code usageId} via {@code AssetUsageRepositoryPort#findById} directly, which has
-     * no such cap; this usage is deliberately absent from the {@code recentUsages()} list {@link
-     * #stubDetailsWithUsages} seeds, and present only in {@link #assetUsageRepository} directly, to
-     * prove the lookup no longer goes through the capped list at all.
+     * now resolves {@code usageId} via {@link UsageSessionService#usageBelongsToAsset} directly,
+     * which has no such cap; this usage is deliberately absent from the {@code recentUsages()} list
+     * {@link #stubDetailsWithUsages} seeds, and present only in {@link #usageSessionService}
+     * directly, to prove the lookup no longer goes through the capped list at all.
      */
     @Test
     void passportResolvesAUsageOlderThanTheRecentUsagesWindow() {
@@ -353,7 +357,7 @@ class DefaultVehicleProfileServiceTest {
         UsageId oldUsageId = UsageId.random();
         AssetUsage oldUsage = new AssetUsage(oldUsageId, assetId, Instant.parse("2020-01-01T00:00:00Z"), null, null,
                 null, 0);
-        assetUsageRepository.save(oldUsage); // known to the port, but not "recent"
+        usageSessionService.seed(oldUsage); // known to the session service, but not "recent"
 
         VehicleProfile preflight = completeProfile();
         profileRepository.save(device.id(), oldUsageId, FlightPhase.PREFLIGHT, preflight);
@@ -367,7 +371,7 @@ class DefaultVehicleProfileServiceTest {
      * The property the fix must not weaken: {@code VehicleProfileRepositoryPort} keys purely by
      * {@code usageId}, not by asset, so a caller scoped to {@code assetId} must not be able to read
      * another asset's passport by guessing/reusing a {@code usageId} that happens to be known to
-     * {@code assetUsageRepository}.
+     * {@code usageSessionService}.
      */
     @Test
     void passportThrowsNoSuchElementWhenUsageBelongsToADifferentAsset() {
@@ -376,7 +380,7 @@ class DefaultVehicleProfileServiceTest {
         UsageId otherUsageId = UsageId.random();
         AssetUsage otherAssetUsage = new AssetUsage(otherUsageId, otherAssetId,
                 Instant.parse("2026-08-18T08:00:00Z"), null, null, null, 0);
-        assetUsageRepository.save(otherAssetUsage);
+        usageSessionService.seed(otherAssetUsage);
         profileRepository.save(device.id(), otherUsageId, FlightPhase.PREFLIGHT, completeProfile());
 
         assertThrows(NoSuchElementException.class,
@@ -510,37 +514,47 @@ class DefaultVehicleProfileServiceTest {
         }
     }
 
-    private static final class FakeAssetUsageRepositoryPort implements AssetUsageRepositoryPort {
-        private final Map<UsageId, AssetUsage> byId = new HashMap<>();
+    /**
+     * Hand-fake of {@link UsageSessionService} (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md
+     * R5): this test only ever exercises {@link #usageBelongsToAsset}, so every other method throws
+     * {@link UnsupportedOperationException} -- mirrors the pre-R5 {@code FakeAssetUsageRepositoryPort}
+     * this replaced, which likewise only implemented {@code findById} for real.
+     */
+    private static final class FakeUsageSessionService implements UsageSessionService {
+        private final Map<UsageId, AssetId> assetIdByUsage = new HashMap<>();
+
+        /** Test seed: records {@code usage}'s membership for a later {@link #usageBelongsToAsset} check. */
+        void seed(AssetUsage usage) {
+            assetIdByUsage.put(usage.id(), usage.assetId());
+        }
+
+        @Override
+        public boolean usageBelongsToAsset(UsageId usageId, AssetId assetId) {
+            return assetId.equals(assetIdByUsage.get(usageId));
+        }
+
+        @Override
+        public AssetUsage open(AssetId assetId, StreamId streamIdOrNull, Instant startedAt) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AssetUsage fold(AssetUsage usage, GeoPosition position, UsagePhase phase) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AssetUsage updatePhase(AssetUsage usage, UsagePhase phase) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AssetUsage close(AssetUsage usage, UsagePhase phase, Instant endedAt) {
+            throw new UnsupportedOperationException();
+        }
 
         @Override
         public AssetUsage save(AssetUsage usage) {
-            byId.put(usage.id(), usage);
-            return usage;
-        }
-
-        @Override
-        public Optional<AssetUsage> findById(UsageId id) {
-            return Optional.ofNullable(byId.get(id));
-        }
-
-        @Override
-        public List<AssetUsage> findRecentByAsset(AssetId assetId, int limit) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public List<AssetUsage> findRecent(int limit) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Optional<AssetUsage> findOpenByAsset(AssetId assetId) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Optional<AssetUsage> findByStream(StreamId streamId) {
             throw new UnsupportedOperationException();
         }
     }
