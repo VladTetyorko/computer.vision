@@ -17,13 +17,21 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
+import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
+import com.drones.vision.warehouse.application.directory.DefaultAssetDirectoryService;
+import com.drones.vision.warehouse.application.usage.UsageSessionService;
+import com.drones.vision.warehouse.application.usage.DefaultUsageSessionService;
+import com.drones.vision.flight.application.telemetry.TelemetryService;
+import com.drones.vision.flight.application.telemetry.DefaultTelemetryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -65,6 +73,16 @@ class UsageTrackerTest {
     private TelemetryRepositoryPort telemetryRepository;
     private Ownership ownership;
 
+    // docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3: UsageTracker no longer holds the
+    // four repository ports above directly -- it holds these three application services instead.
+    // Each is the REAL Default* implementation wrapping the very same mocked repository ports this
+    // test already stubs/verifies against, so every existing `verify(usageRepository, times(n))`
+    // assertion keeps proving the same thing it always did (the service is a direct pass-through),
+    // while UsageTracker itself now only ever sees the service interfaces.
+    private AssetDirectoryService assetDirectoryService;
+    private UsageSessionService usageSessionService;
+    private TelemetryService telemetryService;
+
     @BeforeEach
     void setUp() {
         assetRepository = mock(AssetRepositoryPort.class);
@@ -74,15 +92,23 @@ class UsageTrackerTest {
         ownership = new Ownership(UserId.random(), GroupId.random());
 
         when(usageRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assetDirectoryService = new DefaultAssetDirectoryService(assetRepository, deviceRepository);
+        usageSessionService = new DefaultUsageSessionService(usageRepository);
+        telemetryService = new DefaultTelemetryService(telemetryRepository);
     }
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources) {
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources);
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
+                UsageTrackerSettings.defaults());
     }
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources, TelemetryLiveUpdatePort liveUpdatePublisherPort) {
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                liveUpdatePublisherPort);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
+                new UsageTrackerSettings(Optional.of(liveUpdatePublisherPort), defaults.telemetryObserver(),
+                        defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
+                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
     }
 
     /**
@@ -92,43 +118,52 @@ class UsageTrackerTest {
      * tracker no longer names that type (docs/plans/active/DOMAIN-SEPARATION-W1.md §5, C2).
      */
     private UsageTracker tracker(List<TelemetrySourcePort> sources, GeofenceMonitor geofenceMonitor) {
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, geofenceMonitor::evaluate);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
+                new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), Optional.of(geofenceMonitor::evaluate),
+                        defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
+                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
     }
 
     /**
      * docs/plans/done/MVP2-PLAN.md §S, S-a: same as {@link #tracker}, but with a tiny (20ms) source reopen
-     * backoff instead of production's real 1s-30s one, via the package-private test-seam
-     * constructor -- so supervision tests complete quickly and deterministically.
+     * backoff instead of production's real 1s-30s one -- so supervision tests complete quickly and
+     * deterministically.
      */
     private UsageTracker trackerWithFastRetry(List<TelemetrySourcePort> sources) {
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, null, TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
+                new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
+                        TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20),
+                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
     }
 
     /**
      * docs/plans/done/SCALE-100-PLAN.md S4: same as {@link #tracker}, but with explicit {@link
-     * UsageSummaryBatchSettings} via the package-private test-seam constructor, so coalescing tests
-     * can use a tiny batch window instead of waiting out production's default.
+     * UsageSummaryBatchSettings}, so coalescing tests can use a tiny batch window instead of waiting
+     * out production's default.
      */
     private UsageTracker trackerWithSummaryBatching(List<TelemetrySourcePort> sources,
                                                      UsageSummaryBatchSettings summaryBatchSettings) {
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, null, SupervisedPublisher.INITIAL_BACKOFF_NANOS, SupervisedPublisher.MAX_BACKOFF_NANOS,
-                summaryBatchSettings);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
+                new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
+                        defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(), summaryBatchSettings,
+                        defaults.phaseSettings(), defaults.usagePhaseObserver()));
     }
 
     /**
      * docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O7: same as {@link #tracker}, but with
-     * explicit {@link UsagePhaseSettings} via the package-private test-seam constructor, so
-     * phase-transition tests can use a fixed/steppable clock and short silence/abandon windows
-     * instead of waiting out production's real ones.
+     * explicit {@link UsagePhaseSettings}, so phase-transition tests can use a fixed/steppable clock
+     * and short silence/abandon windows instead of waiting out production's real ones.
      */
     private UsageTracker trackerWithPhaseSettings(List<TelemetrySourcePort> sources,
                                                    UsagePhaseSettings phaseSettings) {
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, null, SupervisedPublisher.INITIAL_BACKOFF_NANOS, SupervisedPublisher.MAX_BACKOFF_NANOS,
-                UsageSummaryBatchSettings.immediate(), phaseSettings);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
+                new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
+                        defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
+                        UsageSummaryBatchSettings.immediate(), phaseSettings, defaults.usagePhaseObserver()));
     }
 
     /**
@@ -138,14 +173,17 @@ class UsageTrackerTest {
      */
     /**
      * docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4, Wave O11: same as {@link
-     * #trackerWithPhaseSettings}, plus an explicit {@link UsagePhaseObserver} via the public
-     * canonical constructor -- lets the phase-observer firing tests below reuse the same
-     * fixed/steppable-clock plumbing as the phase-transition tests above.
+     * #trackerWithPhaseSettings}, plus an explicit {@link UsagePhaseObserver} -- lets the
+     * phase-observer firing tests below reuse the same fixed/steppable-clock plumbing as the
+     * phase-transition tests above.
      */
     private UsageTracker trackerWithPhaseObserver(List<TelemetrySourcePort> sources, UsagePhaseSettings phaseSettings,
                                                    UsagePhaseObserver usagePhaseObserver) {
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, null, UsageSummaryBatchSettings.immediate(), phaseSettings, usagePhaseObserver);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
+                new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
+                        defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
+                        UsageSummaryBatchSettings.immediate(), phaseSettings, usagePhaseObserver));
     }
 
     private static UsagePhaseSettings phaseSettings(AtomicReference<Instant> clock) {
@@ -797,83 +835,195 @@ class UsageTrackerTest {
     private record Captured(AssetId assetId, UsageId usageId, UsagePhase previous, UsagePhase next) {
     }
 
+    // --- engage/disengage (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) -----
+
     @Test
-    void telemetryOnlyAssetWithNoVideoStreamStillGetsAUsageRecord() {
-        // docs/plans/active/DRONE-ONBOARDING-PLAN.md §7, Wave O7: "a session opens on first
-        // telemetry, not only on first stream" -- an aircraft with no video device at all.
+    void engageOpensAnOperatorOwnedUsageWithNoStreamAndNoDeviceTraffic() {
+        // "no video stream and no device traffic involved" -- the task brief's own words for what
+        // #engage must do, unlike the deleted onTelemetryDeviceDiscovered it replaces.
         Device telemetryDevice = telemetryDevice("tel-1");
         Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+
+        AssetUsage opened = tracker.engage(asset.id());
+
+        assertEquals(asset.id(), opened.assetId());
+        assertNull(opened.streamId(), "an operator-engaged usage has no video stream to stamp");
+        assertEquals(UsageOrigin.OPERATOR, opened.origin());
+        assertEquals(UsagePhase.PREFLIGHT, opened.phase());
+        assertNull(opened.endedAt());
+        verify(usageRepository, times(1)).save(opened);
+        assertTrue(source.openedDevices.isEmpty(), "engage must never open a telemetry subscription");
+    }
+
+    @Test
+    void engageIsIdempotentForAnAlreadyEngagedAsset() {
+        Asset asset = asset(Set.of(telemetryDevice("tel-1").id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        UsageTracker tracker = tracker(List.of());
+
+        AssetUsage first = tracker.engage(asset.id());
+        AssetUsage second = tracker.engage(asset.id());
+
+        assertEquals(first.id(), second.id());
+        assertEquals(UsageOrigin.OPERATOR, second.origin());
+        verify(usageRepository, times(1)).save(any()); // the second call is a pure no-op, no re-save
+    }
+
+    @Test
+    void engageOnAnUnknownAssetThrowsNotFound() {
+        AssetId unknown = AssetId.random();
+        when(assetRepository.findById(unknown)).thenReturn(Optional.empty());
+        UsageTracker tracker = tracker(List.of());
+
+        org.junit.jupiter.api.Assertions.assertThrows(java.util.NoSuchElementException.class,
+                () -> tracker.engage(unknown));
+        verify(usageRepository, never()).save(any());
+    }
+
+    @Test
+    void engageOnADeactivatedAssetThrowsIllegalState() {
+        DeviceId deviceId = telemetryDevice("tel-1").id();
+        Asset asset = new Asset(AssetId.random(), "my drone", DRONE, ownership, Set.of(deviceId), Map.of(),
+                LifecycleState.DEACTIVATED);
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        UsageTracker tracker = tracker(List.of());
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> tracker.engage(asset.id()));
+        verify(usageRepository, never()).save(any());
+    }
+
+    @Test
+    void disengageClosesAPurelyOperatorEngagedUsageWhenNoDeviceIsActive() {
+        Asset asset = asset(Set.of(telemetryDevice("tel-1").id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        UsageTracker tracker = tracker(List.of());
+        AssetUsage opened = tracker.engage(asset.id());
+
+        Optional<AssetUsage> result = tracker.disengage(asset.id());
+
+        assertTrue(result.isPresent());
+        assertEquals(opened.id(), result.get().id());
+        assertTrue(result.get().endedAt() != null, "no device was ever active -- disengage must close outright");
+        assertEquals(UsagePhase.CLOSED, result.get().phase());
+        ArgumentCaptor<AssetUsage> captor = ArgumentCaptor.forClass(AssetUsage.class);
+        verify(usageRepository, times(2)).save(captor.capture()); // 1 open (engage) + 1 close (disengage)
+    }
+
+    @Test
+    void disengageIsANoOpWhenNothingIsEngagedAtAll() {
+        Asset asset = asset(Set.of(telemetryDevice("tel-1").id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        UsageTracker tracker = tracker(List.of());
+
+        Optional<AssetUsage> result = tracker.disengage(asset.id());
+
+        assertEquals(Optional.empty(), result);
+        verify(usageRepository, never()).save(any());
+    }
+
+    @Test
+    void disengageIsANoOpOnAStreamOnlyUsageTheOperatorNeverTouched() {
+        Device cam = videoDevice("cam-1");
+        Asset asset = asset(Set.of(cam.id()));
+        when(assetRepository.findByDeviceId(cam.id())).thenReturn(Optional.of(asset));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        UsageTracker tracker = tracker(List.of());
+        tracker.onStreamStarted(cam.id(), StreamId.random());
+
+        Optional<AssetUsage> result = tracker.disengage(asset.id());
+
+        assertEquals(Optional.empty(), result, "an ordinary STREAM-origin usage is not disengage's concern");
+        // the STREAM-origin usage must still be open and untouched -- only the one open() save so far
+        verify(usageRepository, times(1)).save(any());
+    }
+
+    @Test
+    void disengageOnAnUnknownAssetThrowsNotFound() {
+        AssetId unknown = AssetId.random();
+        when(assetRepository.findById(unknown)).thenReturn(Optional.empty());
+        UsageTracker tracker = tracker(List.of());
+
+        org.junit.jupiter.api.Assertions.assertThrows(java.util.NoSuchElementException.class,
+                () -> tracker.disengage(unknown));
+    }
+
+    // -- the three named collision rules (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2/R2) --
+
+    @Test
+    void collisionRule1_streamStoppingNeverClosesAnOperatorEngagedUsage() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
         when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
         when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
 
-        tracker.onTelemetryDeviceDiscovered(telemetryDevice.id());
+        AssetUsage engaged = tracker.engage(asset.id()); // opens the OPERATOR-origin usage first
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random()); // a stream starts on top of it
+        verify(usageRepository, times(1)).save(any()); // starting the stream must NOT open a second usage
 
-        ArgumentCaptor<AssetUsage> openCaptor = ArgumentCaptor.forClass(AssetUsage.class);
-        verify(usageRepository, times(1)).save(openCaptor.capture());
-        AssetUsage opened = openCaptor.getValue();
-        assertEquals(asset.id(), opened.assetId());
-        assertNull(opened.streamId(), "a telemetry-only usage has no video stream to stamp");
-        assertEquals(UsagePhase.PREFLIGHT, opened.phase());
-        assertNull(opened.endedAt());
+        tracker.onStreamStopped(telemetryDevice.id()); // ...and stopping it must not close the first one
 
-        // Telemetry actually flows into the SAME usage, not just an open record with nothing behind it.
-        source.emit(telemetryDevice.id(), telemetry(telemetryDevice.id(), 50.0, 30.0, 90.0));
-        ArgumentCaptor<AssetUsage> afterSample = ArgumentCaptor.forClass(AssetUsage.class);
-        verify(usageRepository, times(2)).save(afterSample.capture());
-        assertEquals(1, afterSample.getValue().sampleCount());
-        assertEquals(opened.id(), afterSample.getValue().id());
+        verify(usageRepository, times(1)).save(any()); // still just the one save -- no close() write happened
+        // The only way to observe "still open, still OPERATOR" without a repository read is through a
+        // second disengage(), which must now find and close exactly the usage engage() opened:
+        Optional<AssetUsage> disengaged = tracker.disengage(asset.id());
+        assertTrue(disengaged.isPresent());
+        assertEquals(engaged.id(), disengaged.get().id());
+        assertTrue(disengaged.get().endedAt() != null);
     }
 
     @Test
-    void telemetryOnlyPreflightSessionClosesWhenNeverArmedAndGoesSilent() {
-        // Regression guard for the streamCount split: FlightPhaseRule's PREFLIGHT->CLOSED branch
-        // only fires when streamCount == 0 -- a telemetry-only asset must report exactly that, not
-        // the count of "active devices" (which does include it), or this would never close.
+    void collisionRule2_engagingAnAlreadyStreamingAssetPromotesRatherThanOpensASecondUsage() {
         Device telemetryDevice = telemetryDevice("tel-1");
         Asset asset = asset(Set.of(telemetryDevice.id()));
-        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
-        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
-        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
-        Instant base = Instant.parse("2026-01-01T00:00:00Z");
-        AtomicReference<Instant> clock = new AtomicReference<>(base);
-        UsageTracker tracker = trackerWithPhaseSettings(List.of(source), phaseSettings(clock));
-        tracker.onTelemetryDeviceDiscovered(telemetryDevice.id());
-        source.emit(telemetryDevice.id(), armedSample(telemetryDevice.id(), base, null)); // never armed
-        verify(usageRepository, times(2)).save(any());
-
-        clock.set(base.plusSeconds(15)); // past the 10s silence window
-        tracker.evaluateLinkHealth(asset.id());
-
-        ArgumentCaptor<AssetUsage> captor = ArgumentCaptor.forClass(AssetUsage.class);
-        verify(usageRepository, times(3)).save(captor.capture());
-        assertEquals(UsagePhase.CLOSED, captor.getValue().phase());
-    }
-
-    @Test
-    void onTelemetryDeviceDiscoveredIsIdempotentPerDevice() {
-        Device telemetryDevice = telemetryDevice("tel-1");
-        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
         when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
         when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
         UsageTracker tracker = tracker(List.of(new ScriptedTelemetrySource(d -> true)));
+        StreamId streamId = StreamId.random();
+        tracker.onStreamStarted(telemetryDevice.id(), streamId); // opens a STREAM-origin usage first
 
-        tracker.onTelemetryDeviceDiscovered(telemetryDevice.id());
-        tracker.onTelemetryDeviceDiscovered(telemetryDevice.id());
+        AssetUsage promoted = tracker.engage(asset.id());
 
-        verify(usageRepository, times(1)).save(any()); // only the first call opens a usage
+        verify(usageRepository, times(2)).save(any()); // 1 open (stream) + 1 promote (engage) -- never a 2nd open
+        assertEquals(UsageOrigin.OPERATOR, promoted.origin());
+        assertEquals(streamId, promoted.streamId(), "promotion must not touch the stream that genuinely opened it");
+
+        // Now stopping the stream must not close the promoted usage (this is also collision rule 1):
+        tracker.onStreamStopped(telemetryDevice.id());
+        verify(usageRepository, times(2)).save(any());
     }
 
     @Test
-    void onTelemetryDeviceDiscoveredIsANoOpForAnUnownedDevice() {
-        DeviceId deviceId = DeviceId.random();
-        when(assetRepository.findByDeviceId(deviceId)).thenReturn(Optional.empty());
-        UsageTracker tracker = tracker(List.of());
+    void collisionRule3_disengagingWhileAStreamIsStillRunningDemotesInsteadOfClosing() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        UsageTracker tracker = tracker(List.of(new ScriptedTelemetrySource(d -> true)));
+        AssetUsage engaged = tracker.engage(asset.id());
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random()); // device is still active
 
-        tracker.onTelemetryDeviceDiscovered(deviceId);
+        Optional<AssetUsage> result = tracker.disengage(asset.id());
 
-        verify(usageRepository, never()).save(any());
+        assertTrue(result.isPresent());
+        assertEquals(engaged.id(), result.get().id());
+        assertNull(result.get().endedAt(), "a still-running stream means demote, not close");
+        assertEquals(UsageOrigin.STREAM, result.get().origin());
+
+        // Nothing must be left that will never close: the ordinary stream-driven close now applies.
+        tracker.onStreamStopped(telemetryDevice.id());
+        ArgumentCaptor<AssetUsage> captor = ArgumentCaptor.forClass(AssetUsage.class);
+        verify(usageRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        AssetUsage last = captor.getValue();
+        assertEquals(engaged.id(), last.id());
+        assertTrue(last.endedAt() != null, "the demoted usage must still be closeable by the ordinary stream stop");
     }
 
     private static Telemetry telemetry(DeviceId deviceId, double lat, double lon, double battery) {

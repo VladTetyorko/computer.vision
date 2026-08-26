@@ -5,6 +5,11 @@
 not against the plan's own status line. Several plans still claim "unbuilt" while their work is merged;
 this file, not the plan header, is the status authority.
 
+**Spot-reconciled 2026-08-26** against `master` @ `212311e0`: the two control rows in §2 read
+"built, not merged" and both branches are in fact ancestors of `master`. Corrected in place — see
+[`ARCHITECTURE-AUDIT-2026-08-26.md`](active/ARCHITECTURE-AUDIT-2026-08-26.md) §7 finding P2. No
+other row was re-checked in that pass.
+
 Row-level *capability* backlog lives in [`docs/main/MASTER-MATRIX.md`](../main/MASTER-MATRIX.md).
 This file is one level up: the state of each **plan document**.
 
@@ -66,8 +71,8 @@ Retired 2026-08-22 (merged session scratchpads, zero code citations): `AFTER-ACT
 | MAVLINK-CORE-PLAN | W0–W4 (`7e80746d`) — `drone-link/mavlink-core`, adapter rewired, SITL green | **W5** message-rate + link health (the first user-visible payoff) · **W6** Parameter/Mission | 22 |
 | TRACKING-V3-PLAN + BAND1-CONTEXT | V1–V7 and band 1 (`331a6a77`) — levelled L1–L4 ladder wired end to end | §6b **O1–O5** — all need real aerial footage with frames to resolve | 6 / 25 |
 | RC-CONTROL-PLAN | Phase 0 (`c1cf9fe`) + Phase 1 (`2b65ceb`) — SITL only | **Phase 2** (real airframe) — gated on explicit user go | 6 |
-| VEHICLE-CONTROL-PROFILES-CONTEXT | P1–P6 **built, not merged** — branch `feat/vehicle-control-profiles`: per-airframe stick layouts (a copter's throttle rests at idle, a rover's at stop) + on-screen control, so a browser no longer needs a USB gamepad | live drive of a real vehicle — operator-gated | 35 |
-| CONTROLLER-SETUP-CONTEXT | C1–C8 **built, not merged** — branch `feat/controller-setup`, on top of VEHICLE-CONTROL-PROFILES: the operator binds every stick, button and switch themselves (`/manage/controller`), switches fire real MAVLink commands, and `/fly`'s mode + arm/disarm moved into the Controller drawer | live-fly verification — operator-gated · **calibration (C12)** deliberately deferred · TX modes 1/3/4 and expo out of scope | 63 |
+| VEHICLE-CONTROL-PROFILES-CONTEXT | P1–P6 **merged to master** (re-checked 2026-08-26: `feat/vehicle-control-profiles` is an ancestor of `master`; the row previously read "built, not merged"): per-airframe stick layouts (a copter's throttle rests at idle, a rover's at stop) + on-screen control, so a browser no longer needs a USB gamepad | live drive of a real vehicle — operator-gated | 35 |
+| CONTROLLER-SETUP-CONTEXT | C1–C8 **merged to master** (re-checked 2026-08-26: `feat/controller-setup` is an ancestor of `master`; the row previously read "built, not merged"), on top of VEHICLE-CONTROL-PROFILES: the operator binds every stick, button and switch themselves (`/manage/controller`), switches fire real MAVLink commands, and `/fly`'s mode + arm/disarm moved into the Controller drawer | live-fly verification — operator-gated · **calibration (C12)** deliberately deferred · TX modes 1/3/4 and expo out of scope | 63 |
 | CV-SCALE-PLAN | goals 1–4 shipped via CV-CONTROL / CV-MODELS / CV-DEMAND / MEDIA-SOT | **goal 5** — a pool of 2–5 CV workers with failover. No pool exists; `GrpcCvSettings` is single-target | 0 |
 | LAYERING-REFACTOR-PLAN | conventions in force repo-wide (`f13d1ebf`) | **matrix K3** — the class decompositions. `StreamPipeline` is now **1530 lines** (927 when the row was written); `DefaultSimulationService` 765 | 103 |
 | CV-RECONNECT-PLAN | R1/R2 (`58fddf10`) — `CvChannelSupervisor` bounds recovery to ~20 s | **R3** — `GET /api/cv/status` + live badge | 20 |
@@ -77,11 +82,21 @@ Retired 2026-08-22 (merged session scratchpads, zero code citations): `AFTER-ACT
 
 ## 3. OPEN — specced, nothing built
 
-Ranked by [`PLATFORM-AUDIT-FINDINGS.md`](active/PLATFORM-AUDIT-FINDINGS.md), the newest survey
+Ranked by [`PLATFORM-AUDIT-FINDINGS.md`](active/PLATFORM-AUDIT-FINDINGS.md), the *capability* survey
 (2026-08-21). Its actions **1–4 are now closed by LIVE-SCOPE**; 5–12 are the live queue.
+
+**A newer, structural survey sits beside it:**
+[`ARCHITECTURE-AUDIT-2026-08-26.md`](active/ARCHITECTURE-AUDIT-2026-08-26.md) — domain, module
+structure, user↔asset access, session flow and service topology, with recommendations R1–R10. It
+ranks *how the system is built*, where PLATFORM-AUDIT ranks *what it can do*; the two queues are
+independent. Its R1 (delete the N-1 constructor convention), R2 (`engage`/`disengage` — the same
+work as row **S** below, **DONE 2026-08-26**, wave R2, see the R2 row in that doc's own §9 table and
+`SOURCE-ONBOARDING-CONTEXT.md` §12) and R5 (no cross-context repository-port reads, a precondition
+for DOMAIN-SEPARATION W2) are the three that gate other work.
 
 | # | Work | Plan doc | Effort | Why now |
 |---|---|---|---|---|
+| S | **One generic way to add a vehicle**, with either half simulatable — the five Connect tiles are already two ways plus three address-finders; `engage`/`disengage` replaces "a session is a video stream" (**S1 DONE 2026-08-26** — `POST`/`DELETE /api/assets/{id}/session`; `onTelemetryDeviceDiscovered` was **deleted**, not wired, see §12 of the plan doc) | [SOURCE-ONBOARDING-CONTEXT](active/SOURCE-ONBOARDING-CONTEXT.md) | M | S2-S5 (device origin, fit-out table UI, delete `simulated` category) remain open |
 | 5 | Retention + partitioning on the detection/telemetry firehoses; unwire the accidental `db_audit_log` amplification | PLATFORM-AUDIT-DB §2 | M | ~222 GB/yr per 10 assets, nothing is ever deleted. **Free today because the tables are empty**; a maintenance window after the first month of flying |
 | 6 | `AssetUsage.pilot` + a geo column on detections | PLATFORM-AUDIT-DB | S | Two columns make "who flew this" and "every detection of class X near Y" answerable |
 | 7 | OpenAPI contract + machine API tokens | — (unwritten) | S | `ARCHITECTURE.md` §2 cites an `openapi.yaml` **that does not exist**; prerequisite for 8/9/11 |

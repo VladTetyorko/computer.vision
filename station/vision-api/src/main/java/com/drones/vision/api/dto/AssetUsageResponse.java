@@ -25,11 +25,16 @@ import java.time.Instant;
  *                      phase computed and stored but never served is one nothing can act on; §8.1
  *                      also names {@code firstArmedAt}/{@code lastDisarmedAt}, which do not exist on
  *                      the domain record yet (their columns do — see storage/persistence)
+ * @param origin        which verb opened this session — {@code STREAM} or {@code OPERATOR}, the
+ *                      only two values (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2,
+ *                      wave R2). Exposed for the same reason {@code phase} is: a future UI wave
+ *                      needs to tell an operator-engaged session apart from a stream-opened one to
+ *                      render {@code AssetSessionController#disengage} only where it applies
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AssetUsageResponse(String usageId, Instant startedAt, Instant endedAt,
                                   GeoPositionResponse startPosition, GeoPositionResponse lastPosition,
-                                  long sampleCount, String phase) {
+                                  long sampleCount, String phase, String origin) {
 
     /**
      * Maps a domain {@link AssetUsage} to its wire representation.
@@ -45,6 +50,7 @@ public record AssetUsageResponse(String usageId, Instant startedAt, Instant ende
                 GeoPositionResponse.from(usage.startPosition()),
                 GeoPositionResponse.from(usage.lastPosition()),
                 usage.sampleCount(),
-                usage.phase() == null ? null : usage.phase().name());
+                usage.phase() == null ? null : usage.phase().name(),
+                usage.origin() == null ? null : usage.origin().name());
     }
 }

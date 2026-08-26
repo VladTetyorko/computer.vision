@@ -8,6 +8,8 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
@@ -69,19 +71,23 @@ class DefaultReplayServiceTest {
     }
 
     private AssetUsage closedUsage(Instant startedAt, Instant endedAt) {
-        return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 0);
+        return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 0, null, UsagePhase.PREFLIGHT,
+                UsageOrigin.STREAM);
     }
 
     private AssetUsage openUsage(Instant startedAt) {
-        return new AssetUsage(usageId, assetId, startedAt, null, null, null, 0);
+        return new AssetUsage(usageId, assetId, startedAt, null, null, null, 0, null, UsagePhase.PREFLIGHT,
+                UsageOrigin.STREAM);
     }
 
     private AssetUsage closedUsageWithStream(Instant startedAt, Instant endedAt) {
-        return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 0, STREAM_ID);
+        return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 0, STREAM_ID, UsagePhase.PREFLIGHT,
+                UsageOrigin.STREAM);
     }
 
     private AssetUsage openUsageWithStream(Instant startedAt) {
-        return new AssetUsage(usageId, assetId, startedAt, null, null, null, 0, STREAM_ID);
+        return new AssetUsage(usageId, assetId, startedAt, null, null, null, 0, STREAM_ID, UsagePhase.PREFLIGHT,
+                UsageOrigin.STREAM);
     }
 
     @Test

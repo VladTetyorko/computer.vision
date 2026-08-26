@@ -133,17 +133,23 @@ vision:
     #   batch-size: 100
     #   batch-window: 200ms
 
-  # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3) ---
+  # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3; default flipped by
+  # docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7) ---
   auth:
-    # false (default): NOTHING is secured -- the Spring Security filter chain is
-    # permit-all + CSRF-off, so every existing test and the running SPA behave
-    # exactly as before auth existed; CurrentUser returns the fixed dev principal
-    # (auto-admin) and /api/auth/* report that dev admin with authEnabled=false.
-    # true: a session is required for /api/** except /api/auth/login|logout and
-    # static/SPA routes -- but a session only has someone to log in as if
-    # vision.persistence.seed-dev-users is also true (see above), or real users
-    # were created through UserService.
-    enabled: false
+    # true (default, set explicitly): a session is required for /api/** and /ws/**
+    # except /api/auth/login|logout and static/SPA routes -- but a session only has
+    # someone to log in as if vision.persistence.seed-dev-users is also true (see
+    # above), or real users were created through UserService. This is the safe
+    # default for a platform deployed onto operator-controlled servers (CLAUDE.md,
+    # "Deployment maintenance") -- a deployment that never touches this key still
+    # gets access control.
+    # false: the dev/demo escape hatch. NOTHING is secured -- the Spring Security
+    # filter chain becomes permit-all + CSRF-off, CurrentUser returns the fixed dev
+    # principal (auto-admin, unbounded VisibilityScope) for every request, and
+    # /api/auth/* report that dev admin with authEnabled=false. Turn this on for a
+    # local run or a demo stack with no login flow set up -- never for anything
+    # reachable by someone who isn't already trusted with the whole fleet.
+    enabled: true
 
   # --- adapter-publish-hls: stream egress (Phase 1, see docs/plans/done/PHASE1-PLAN.md Task U5) ---
   publish:
@@ -278,6 +284,27 @@ vision:
     # box is off, the backend degrades gracefully (no boxes, video unaffected).
     endpoint: localhost:50051
     # endpoint: 192.168.0.106:50051
+    # Split-deployment channel routing (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6) --
+    # both keys below are unset by default, so `endpoint` above stays the single source of truth for
+    # a one-process deployment: CvWiring builds one channel, shared by Inference/DetectStream AND
+    # every Training/*+Geolocation/* RPC, exactly as today. Point these at the `cv-split` Compose
+    # profile's two services (docker-compose.yml, `docker compose up -d --scale cv-service=0
+    # --profile cv-split cv-service-inference cv-service-training`) to split inference (the ~50ms
+    # per-frame hot path) from training/geolocation (long-running fine-tune jobs, occasional region
+    # ingest) onto two separate processes/hosts:
+    #   inference:
+    #     Ordered failover target list for the inference channel (Inference/DetectStream), tried in
+    #     order by grpc-java's own pick_first policy on connection failure. A single entry behaves
+    #     byte-identically to `endpoint` above -- host-mapped to 50061 by cv-split.
+    #     targets: [localhost:50061]
+    #   training:
+    #     Single target for the training/geolocation channel (Training/*, Geolocation/*) -- host-mapped
+    #     to 50062 by cv-split. Setting this to the SAME host:port as `endpoint`/`inference.targets`
+    #     opens a second, redundant TCP connection to the same process -- only meaningful pointed at a
+    #     genuinely separate host. Known limitation: CvChannelSupervisor still watches only the
+    #     inference channel, so the geolocation gate reflects the inference host's reachability, not
+    #     this one's.
+    #     target: localhost:50062
     # Widest a raw BGR24 frame may be before GrpcDetectionPort downscales +
     # JPEG-encodes it before sending (docs/plans/done/REMOTE-CV-PLAN.md P1 item 5); lower
     # this over a slow/metered link (e.g. 480 over VPN) to shrink the per-frame

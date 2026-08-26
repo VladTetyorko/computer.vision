@@ -13,6 +13,8 @@ import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.kernel.VisualFix;
 import com.drones.vision.kernel.VisualFixEvidence;
@@ -152,7 +154,8 @@ class VisualGeoRunnerTest {
 
             AssetUsageRepositoryPort usages = mock(AssetUsageRepositoryPort.class);
             when(usages.findOpenByAsset(assetId)).thenReturn(Optional.of(
-                    new AssetUsage(usageId, assetId, Instant.now().minusSeconds(60), null, null, null, 0)));
+                    new AssetUsage(usageId, assetId, Instant.now().minusSeconds(60), null, null, null, 0, null,
+                            UsagePhase.PREFLIGHT, UsageOrigin.STREAM)));
 
             StreamService streamService = mock(StreamService.class);
             when(streamService.streams()).thenReturn(List.of(new ActiveStream(streamId, deviceId, Instant.now())));

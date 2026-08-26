@@ -18,10 +18,10 @@ import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.usage.UsageSessionService;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.warehouse.domain.model.Device;
-import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -65,17 +65,17 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
     private final AssetService assetService;
     private final VehicleConfigPort vehicleConfigPort;
     private final VehicleProfileRepositoryPort profileRepository;
-    private final AssetUsageRepositoryPort assetUsageRepository;
+    private final UsageSessionService usageSessionService;
     private final AuditTrailPort auditTrail;
 
     public DefaultVehicleProfileService(AssetService assetService, VehicleConfigPort vehicleConfigPort,
                                          VehicleProfileRepositoryPort profileRepository,
-                                         AssetUsageRepositoryPort assetUsageRepository, AuditTrailPort auditTrail) {
+                                         UsageSessionService usageSessionService, AuditTrailPort auditTrail) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.vehicleConfigPort = Objects.requireNonNull(vehicleConfigPort, "vehicleConfigPort must not be null");
         this.profileRepository = Objects.requireNonNull(profileRepository, "profileRepository must not be null");
-        this.assetUsageRepository =
-                Objects.requireNonNull(assetUsageRepository, "assetUsageRepository must not be null");
+        this.usageSessionService =
+                Objects.requireNonNull(usageSessionService, "usageSessionService must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
     }
 
@@ -182,14 +182,21 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
         Objects.requireNonNull(scope, "scope must not be null");
 
         AssetDetails details = assetService.details(scope, assetId); // 404 unknown/out-of-scope
-        AssetUsage current = requireUsageBelongsToAsset(assetId, usageId);
+        requireUsageBelongsToAsset(assetId, usageId);
 
-        // recentUsages() is newest-first (AssetService#details) and capped -- fine here, unlike
-        // requireUsageBelongsToAsset below: two flights being compared are by definition adjacent,
-        // so "the previous one" is always well inside any reasonable recent-window cap.
-        Optional<AssetUsage> previous = details.recentUsages().stream()
-                .filter(usage -> usage.startedAt().isBefore(current.startedAt()))
+        // current is looked up in the capped recentUsages() list, not the uncapped membership
+        // check above -- deliberately: if usageId is old enough to be outside this cap, then by
+        // definition every entry in this same capped list is newer than it, so the "previous"
+        // filter below (usage.startedAt().isBefore(current.startedAt())) would find nothing
+        // anyway. Resolving current from the uncapped store would not change that outcome, so
+        // there is no reason to hold the full AssetUsage the uncapped check doesn't return
+        // (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5 -- see requireUsageBelongsToAsset).
+        Optional<AssetUsage> current = details.recentUsages().stream()
+                .filter(usage -> usage.id().equals(usageId))
                 .findFirst();
+        Optional<AssetUsage> previous = current.flatMap(c -> details.recentUsages().stream()
+                .filter(usage -> usage.startedAt().isBefore(c.startedAt()))
+                .findFirst());
         if (previous.isEmpty()) {
             return List.of();
         }
@@ -209,22 +216,25 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
      * caller who only has scope over this one, since {@code VehicleProfileRepositoryPort} keys
      * purely by {@code usageId}, not by asset.
      *
-     * <p>Looks the usage up directly via {@link AssetUsageRepositoryPort#findById}, deliberately
+     * <p>Delegates to {@link UsageSessionService#usageBelongsToAsset}, deliberately
      * <b>not</b> {@code AssetDetails#recentUsages()} (capped to the 20 most recent, per {@code
      * DefaultAssetService}): a passport's whole purpose is answering "what was this aircraft's
      * configuration on that flight", and the flight in question is routinely not one of the last
      * 20 -- an asset flying five sorties a day would otherwise lose passport access after four
-     * days. {@code findById} has no such cap, so this check now works for a flight of any age.
+     * days. {@code usageBelongsToAsset} has no such cap, so this check now works for a flight of
+     * any age (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5 -- this class no longer holds
+     * warehouse's {@code AssetUsageRepositoryPort} directly; the predicate is the one fact this
+     * class needs from it, not the full {@code AssetUsage}).
      *
      * <p>"Unknown usage" and "usage belongs to a different asset" collapse to the identical {@link
      * NoSuchElementException} -- a scoped caller must not learn which case it was, same info-hiding
      * rule every other scoped read in this module follows.
      */
-    private AssetUsage requireUsageBelongsToAsset(AssetId assetId, UsageId usageId) {
-        return assetUsageRepository.findById(usageId)
-                .filter(usage -> usage.assetId().equals(assetId))
-                .orElseThrow(() -> new NoSuchElementException(
-                        "Usage " + usageId.value() + " is not a usage of asset " + assetId.value()));
+    private void requireUsageBelongsToAsset(AssetId assetId, UsageId usageId) {
+        if (!usageSessionService.usageBelongsToAsset(usageId, assetId)) {
+            throw new NoSuchElementException(
+                    "Usage " + usageId.value() + " is not a usage of asset " + assetId.value());
+        }
     }
 
     private Optional<Device> firstSupportedDevice(List<Device> devices) {

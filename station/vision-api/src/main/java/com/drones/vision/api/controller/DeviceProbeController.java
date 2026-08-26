@@ -3,6 +3,7 @@ package com.drones.vision.api.controller;
 import com.drones.vision.api.dto.ProbeDeviceRequest;
 import com.drones.vision.api.dto.ProbeDeviceResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.OpenByDesign;
 import com.drones.vision.perception.application.device.ProbeResult;
 import com.drones.vision.perception.application.device.ProbeService;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -61,6 +62,12 @@ public class DeviceProbeController {
      * @return the probe's result
      */
     @PostMapping("/api/devices/probe")
+    @OpenByDesign(reason = "operates on a caller-supplied connection descriptor (protocol+uri) that "
+            + "names no existing device or asset -- nothing is created, and nothing already in "
+            + "anyone's fleet is read (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, finding "
+            + "A2). There is no Ownership/AssetId anywhere in the request or ProbeDeviceResponse to "
+            + "scope against; a caller still needs its own credentials to reach whatever protocol+uri "
+            + "it names, exactly as OnboardingController#probeCandidate's identical shape does.")
     public ProbeDeviceResponse probe(@RequestBody ProbeDeviceRequest request) {
         ProbeResult result = probeService.probe(request.toDescriptor());
         // A telemetry-only link has no frame to encode -- see ProbeDeviceResponse's "two legal shapes".

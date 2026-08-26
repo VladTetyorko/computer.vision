@@ -5,6 +5,7 @@ import com.drones.vision.learning.domain.model.AnnotationSource;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
@@ -28,9 +29,11 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.VideoFrame;
-import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
@@ -74,7 +77,7 @@ class DefaultLabelingServiceTest {
     private FakeTrainingSampleRepositoryPort sampleRepository;
     private FakeSampleImageStorePort imageStore;
     private FakeDatasetUploadPort uploadPort;
-    private FakeAssetRepositoryPort assetRepository;
+    private FakeAssetDirectoryService assetDirectory;
     private FakeAssetUsageRepositoryPort usageRepository;
     private FakeDetectionRepositoryPort detectionRepository;
     private FakeReplayFrameExtractionPort frameExtractor;
@@ -95,7 +98,7 @@ class DefaultLabelingServiceTest {
         sampleRepository = new FakeTrainingSampleRepositoryPort();
         imageStore = new FakeSampleImageStorePort();
         uploadPort = new FakeDatasetUploadPort();
-        assetRepository = new FakeAssetRepositoryPort();
+        assetDirectory = new FakeAssetDirectoryService();
         usageRepository = new FakeAssetUsageRepositoryPort();
         detectionRepository = new FakeDetectionRepositoryPort();
         frameExtractor = new FakeReplayFrameExtractionPort();
@@ -103,7 +106,7 @@ class DefaultLabelingServiceTest {
         streamService = mock(StreamService.class);
         TrainingStores stores = new TrainingStores(datasetRepository, sampleRepository, imageStore, uploadPort);
         ReplaySources replay = new ReplaySources(usageRepository, detectionRepository, frameExtractor);
-        service = new DefaultLabelingService(stores, replay, streamService, assetRepository, auditTrail,
+        service = new DefaultLabelingService(stores, replay, streamService, assetDirectory, auditTrail,
                 () -> fixedNow);
 
         when(streamService.streams()).thenReturn(List.of());
@@ -128,7 +131,7 @@ class DefaultLabelingServiceTest {
     private Asset asset(AssetId assetId, GroupId owningGroup) {
         Asset asset = new Asset(assetId, "Drone 1", new CategoryId("drone"), new Ownership(actor, owningGroup),
                 Set.of(DeviceId.random()), Map.of());
-        assetRepository.save(asset);
+        assetDirectory.save(asset);
         return asset;
     }
 
@@ -143,7 +146,7 @@ class DefaultLabelingServiceTest {
         Dataset dataset = dataset(ownership, List.of("building"));
         stubActiveStream(deviceId);
         Asset owningAsset = asset(AssetId.random(), group);
-        assetRepository.byDevice.put(deviceId, owningAsset.id());
+        assetDirectory.byDevice.put(deviceId, owningAsset.id());
         VideoFrame frame = jpegFrame(new byte[]{1, 2, 3});
         when(streamService.latestRawFrame(streamId)).thenReturn(Optional.of(frame));
         Detection detection = new Detection("building", 0.8, new BoundingBox(0.1, 0.2, 0.3, 0.4),
@@ -227,7 +230,7 @@ class DefaultLabelingServiceTest {
         Dataset dataset = dataset(ownership, List.of("building"));
         stubActiveStream(deviceId);
         Asset owningAsset = asset(AssetId.random(), GroupId.random()); // different group
-        assetRepository.byDevice.put(deviceId, owningAsset.id());
+        assetDirectory.byDevice.put(deviceId, owningAsset.id());
 
         assertThrows(AccessDeniedException.class, () -> service.capture(new CaptureSpec(streamId, dataset.id()),
                 actor, VisibilityScope.groups(Set.of(group))));
@@ -245,7 +248,7 @@ class DefaultLabelingServiceTest {
         Dataset dataset = dataset(new Ownership(actor, GroupId.random()), List.of("building"));
         stubActiveStream(deviceId);
         Asset owningAsset = asset(AssetId.random(), GroupId.random());
-        assetRepository.byDevice.put(deviceId, owningAsset.id());
+        assetDirectory.byDevice.put(deviceId, owningAsset.id());
         when(streamService.latestRawFrame(streamId)).thenReturn(Optional.of(jpegFrame(new byte[]{1})));
         when(streamService.latestDetections(streamId)).thenReturn(List.of());
 
@@ -264,7 +267,7 @@ class DefaultLabelingServiceTest {
 
     private AssetUsage openUsage(AssetId assetId, StreamId onStream) {
         AssetUsage usage = new AssetUsage(UsageId.random(), assetId, USAGE_STARTED_AT, USAGE_ENDED_AT, null, null, 0,
-                onStream);
+                onStream, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         return usageRepository.save(usage);
     }
 
@@ -341,7 +344,7 @@ class DefaultLabelingServiceTest {
         Dataset dataset = dataset(ownership, List.of("building"));
         Asset owningAsset = asset(AssetId.random(), group);
         AssetUsage usage = new AssetUsage(UsageId.random(), owningAsset.id(), USAGE_STARTED_AT, USAGE_ENDED_AT,
-                null, null, 0); // 7-arg convenience ctor -> streamId null
+                null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM); // streamId null
         usageRepository.save(usage);
 
         assertThrows(NoSuchElementException.class, () -> service.captureFromReplay(
@@ -701,35 +704,35 @@ class DefaultLabelingServiceTest {
         }
     }
 
-    private static final class FakeAssetRepositoryPort implements AssetRepositoryPort {
+    /**
+     * Hand-fake of {@link AssetDirectoryService} (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md
+     * R5): {@code findDevice} is never exercised by {@link DefaultLabelingService}, so it throws
+     * {@link UnsupportedOperationException} -- mirrors the pre-R5 {@code FakeAssetRepositoryPort}
+     * this replaced, which likewise implemented only the two methods this class actually calls.
+     */
+    private static final class FakeAssetDirectoryService implements AssetDirectoryService {
         private final Map<AssetId, Asset> store = new LinkedHashMap<>();
         private final Map<DeviceId, AssetId> byDevice = new LinkedHashMap<>();
 
-        @Override
-        public Asset save(Asset asset) {
+        /** Test seed: registers an asset for a later {@link #find}/{@link #findByDevice} lookup. */
+        void save(Asset asset) {
             store.put(asset.id(), asset);
-            return asset;
         }
 
         @Override
-        public Optional<Asset> findById(AssetId id) {
-            return Optional.ofNullable(store.get(id));
+        public Optional<Asset> find(AssetId assetId) {
+            return Optional.ofNullable(store.get(assetId));
         }
 
         @Override
-        public List<Asset> findAll() {
-            return List.copyOf(store.values());
-        }
-
-        @Override
-        public Optional<Asset> findByDeviceId(DeviceId deviceId) {
+        public Optional<Asset> findByDevice(DeviceId deviceId) {
             AssetId assetId = byDevice.get(deviceId);
-            return assetId == null ? Optional.empty() : findById(assetId);
+            return assetId == null ? Optional.empty() : find(assetId);
         }
 
         @Override
-        public void deleteById(AssetId id) {
-            store.remove(id);
+        public Optional<Device> findDevice(DeviceId deviceId) {
+            throw new UnsupportedOperationException();
         }
     }
 

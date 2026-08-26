@@ -25,6 +25,8 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
@@ -715,9 +717,11 @@ class AssetControllerTest {
 
         AssetUsage closedUsage = new AssetUsage(UsageId.random(), asset.id(),
                 Instant.parse("2026-07-20T10:00:00Z"), Instant.parse("2026-07-20T10:05:00Z"),
-                new GeoPosition(50.45, 30.52, null), new GeoPosition(50.46, 30.53, null), 42);
+                new GeoPosition(50.45, 30.52, null), new GeoPosition(50.46, 30.53, null), 42, null,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         AssetUsage openUsage = new AssetUsage(UsageId.random(), asset.id(),
-                Instant.parse("2026-07-21T09:00:00Z"), null, null, null, 0);
+                Instant.parse("2026-07-21T09:00:00Z"), null, null, null, 0, null, UsagePhase.PREFLIGHT,
+                UsageOrigin.STREAM);
 
         AssetDetails details = new AssetDetails(summary,
                 List.of(device), List.of(openUsage, closedUsage));

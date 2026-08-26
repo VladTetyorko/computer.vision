@@ -21,9 +21,11 @@ import java.util.Map;
  * @param uri          the stream's resource locator, as a string
  * @param options      adapter-specific stream parameters
  * @param state        {@code ACTIVE} or {@code DEACTIVATED}; a deactivated device refuses to stream
+ * @param origin       {@code LIVE} or {@code SIMULATED} — whether this device's data is real or
+ *                     synthetic (docs/plans/active/SOURCE-ONBOARDING-CONTEXT.md §5)
  */
 public record DeviceResponse(String id, String name, List<String> capabilities, String protocol,
-                              String uri, Map<String, String> options, String state) {
+                              String uri, Map<String, String> options, String state, String origin) {
 
     /**
      * Maps a domain {@link Device} to its wire representation.
@@ -39,6 +41,7 @@ public record DeviceResponse(String id, String name, List<String> capabilities, 
                 device.stream().protocol(),
                 device.stream().uri().toString(),
                 device.stream().options(),
-                device.state().name());
+                device.state().name(),
+                device.origin().name());
     }
 }

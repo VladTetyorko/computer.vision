@@ -4,9 +4,8 @@ import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
-import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.warehouse.application.asset.AssetService;
 
-import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 import com.drones.vision.platform.AccessDeniedException;
@@ -15,10 +14,16 @@ import com.drones.vision.platform.VisibilityScope;
 /**
  * The one implementation of {@link AssignmentService}.
  *
- * <p>Reaches the {@link AssetRepositoryPort} directly (rather than through {@link com.drones.vision.warehouse.application.asset.AssetService}) for
- * the single fact it needs — does the asset exist, and what group owns it — so the grant check
- * ({@link VisibilityScope#canManage(com.drones.vision.kernel.Ownership)}) can run without pulling in
- * the full asset-detail assembly. Two dependencies, well under the cap.
+ * <p>Reaches {@link AssetService#details(AssetId)} for the single fact it needs — does the asset
+ * exist, and what group owns it — so the grant check ({@link
+ * VisibilityScope#canManage(com.drones.vision.kernel.Ownership)}) can run against the published
+ * application service rather than warehouse's {@code AssetRepositoryPort} directly
+ * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5 — a cross-context read goes through the
+ * owning context's service, not its repository port). {@code details(AssetId)} does more work than
+ * the old direct repository lookup (it also resolves devices and recent usages), but assign/revoke
+ * is roster management, not a hot path, and this is the only published, per-id read
+ * {@code AssetService} offers — see this module's MODULE.md Gotchas. Two dependencies, well under
+ * the cap.
  *
  * <h2>Authority, not visibility (docs/plans/done/OPS-UX-PLAN.md §1)</h2>
  * A grant/revoke changes who may fly an asset — that is a management action on the asset, not a
@@ -35,13 +40,12 @@ import com.drones.vision.platform.VisibilityScope;
 public final class DefaultAssignmentService implements AssignmentService {
 
     private final AssignmentRepositoryPort assignmentRepository;
-    private final AssetRepositoryPort assetRepository;
+    private final AssetService assetService;
 
-    public DefaultAssignmentService(AssignmentRepositoryPort assignmentRepository,
-                                     AssetRepositoryPort assetRepository) {
+    public DefaultAssignmentService(AssignmentRepositoryPort assignmentRepository, AssetService assetService) {
         this.assignmentRepository =
                 Objects.requireNonNull(assignmentRepository, "assignmentRepository must not be null");
-        this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");
+        this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
     }
 
     @Override
@@ -67,8 +71,7 @@ public final class DefaultAssignmentService implements AssignmentService {
         Objects.requireNonNull(pilot, "pilot must not be null");
         Objects.requireNonNull(assetId, "asset must not be null");
         Objects.requireNonNull(granterScope, "granterScope must not be null");
-        Asset asset = assetRepository.findById(assetId)
-                .orElseThrow(() -> new NoSuchElementException("Unknown asset: " + assetId.value()));
+        Asset asset = assetService.details(assetId).summary().asset(); // NoSuchElementException -> unknown asset
         if (!granterScope.canManage(asset.ownership())) {
             throw new AccessDeniedException(
                     "Asset " + assetId.value() + " is outside your management authority; you may not change its pilots");

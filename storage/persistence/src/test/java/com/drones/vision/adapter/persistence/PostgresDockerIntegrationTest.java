@@ -90,6 +90,7 @@ import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
+import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.flight.domain.model.VehicleProfile;
@@ -364,13 +365,30 @@ class PostgresDockerIntegrationTest {
                     new StreamDescriptor("sim", URI.create("sim://x"), Map.of()));
             repository.save(original);
             Device renamed = original.withDetails("renamed", Set.of(Capability.VIDEO, Capability.AUDIO),
-                    original.stream());
+                    original.stream(), original.origin());
             repository.save(renamed);
 
             Optional<Device> found = repository.findById(id);
             assertTrue(found.isPresent());
             assertEquals("renamed", found.get().name());
             assertEquals(Set.of(Capability.VIDEO, Capability.AUDIO), found.get().capabilities());
+        }
+
+        @Test
+        void savedDeviceRoundTripsOriginAndDefaultsExistingCallersToLive() {
+            Device live = new Device(DeviceId.random(), "camera-live", Set.of(Capability.VIDEO),
+                    new StreamDescriptor("rtsp", URI.create("rtsp://example/live"), Map.of()));
+            Device simulated = new Device(DeviceId.random(), "camera-sim", Set.of(Capability.VIDEO),
+                    new StreamDescriptor("sim", URI.create("sim://cam"), Map.of()),
+                    LifecycleState.ACTIVE, com.drones.vision.kernel.DeviceOrigin.SIMULATED);
+
+            repository.save(live);
+            repository.save(simulated);
+
+            assertEquals(com.drones.vision.kernel.DeviceOrigin.LIVE,
+                    repository.findById(live.id()).orElseThrow().origin());
+            assertEquals(com.drones.vision.kernel.DeviceOrigin.SIMULATED,
+                    repository.findById(simulated.id()).orElseThrow().origin());
         }
 
         @Test
@@ -497,7 +515,8 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void savedOpenUsageWithNoPositionsYetRoundTrips() {
-            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0);
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -511,7 +530,7 @@ class PostgresDockerIntegrationTest {
             GeoPosition start = new GeoPosition(50.45, 30.52, 120.0);
             GeoPosition last = new GeoPosition(50.46, 30.53, null);
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW,
-                    NOW.plusSeconds(60), start, last, 42);
+                    NOW.plusSeconds(60), start, last, 42, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -522,7 +541,8 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void savedUsageWithNoStreamIdRoundTripsAsNull() {
-            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0);
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -535,7 +555,8 @@ class PostgresDockerIntegrationTest {
         void savedUsageWithAStreamIdRoundTrips() {
             StreamId streamId = StreamId.random();
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, NOW.plusSeconds(60),
-                    new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null), 7, streamId);
+                    new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null), 7, streamId,
+                    UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -550,7 +571,8 @@ class PostgresDockerIntegrationTest {
             UsageId id = UsageId.random();
             AssetId assetId = AssetId.random();
             StreamId streamId = StreamId.random();
-            AssetUsage open = new AssetUsage(id, assetId, NOW, null, null, null, 0, streamId);
+            AssetUsage open = new AssetUsage(id, assetId, NOW, null, null, null, 0, streamId, UsagePhase.PREFLIGHT,
+                    UsageOrigin.STREAM);
             repository.save(open);
 
             AssetUsage closed = open.withPositions(new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null))
@@ -567,11 +589,12 @@ class PostgresDockerIntegrationTest {
         @Test
         void findRecentByAssetReturnsNewestFirstBoundedByLimit() {
             AssetId assetId = AssetId.random();
-            AssetUsage oldest = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0);
+            AssetUsage oldest = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             AssetUsage middle = new AssetUsage(UsageId.random(), assetId, NOW.plusSeconds(10),
-                    NOW.plusSeconds(11), null, null, 0);
+                    NOW.plusSeconds(11), null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             AssetUsage newest = new AssetUsage(UsageId.random(), assetId, NOW.plusSeconds(20),
-                    NOW.plusSeconds(21), null, null, 0);
+                    NOW.plusSeconds(21), null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             repository.save(oldest);
             repository.save(newest);
             repository.save(middle);
@@ -589,11 +612,12 @@ class PostgresDockerIntegrationTest {
             // only/topmost rows in the whole suite.
             AssetId assetA = AssetId.random();
             AssetId assetB = AssetId.random();
-            AssetUsage oldest = new AssetUsage(UsageId.random(), assetA, NOW, NOW.plusSeconds(1), null, null, 0);
+            AssetUsage oldest = new AssetUsage(UsageId.random(), assetA, NOW, NOW.plusSeconds(1), null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             AssetUsage middle = new AssetUsage(UsageId.random(), assetB, NOW.plusSeconds(10),
-                    NOW.plusSeconds(11), null, null, 0);
+                    NOW.plusSeconds(11), null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             AssetUsage newest = new AssetUsage(UsageId.random(), assetA, NOW.plusSeconds(20),
-                    NOW.plusSeconds(21), null, null, 0);
+                    NOW.plusSeconds(21), null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             repository.save(oldest);
             repository.save(newest);
             repository.save(middle);
@@ -612,7 +636,7 @@ class PostgresDockerIntegrationTest {
         void findByStreamFindsTheUsageThatStreamOpened() {
             StreamId streamId = StreamId.random();
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, NOW.plusSeconds(60),
-                    null, null, 3, streamId);
+                    null, null, 3, streamId, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             repository.save(usage);
 
             Optional<AssetUsage> found = repository.findByStream(streamId);
@@ -624,7 +648,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void findByStreamIsEmptyForAnUnknownStreamAndForStreamlessRows() {
             repository.save(new AssetUsage(UsageId.random(), AssetId.random(), NOW, NOW.plusSeconds(1),
-                    null, null, 0));
+                    null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM));
 
             assertTrue(repository.findByStream(StreamId.random()).isEmpty(),
                     "a stream nothing recorded is an absence, and a stream_id=NULL row must never match it");
@@ -633,8 +657,10 @@ class PostgresDockerIntegrationTest {
         @Test
         void findOpenByAssetReturnsOnlyTheCurrentlyOpenUsage() {
             AssetId assetId = AssetId.random();
-            AssetUsage closed = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0);
-            AssetUsage open = new AssetUsage(UsageId.random(), assetId, NOW.plusSeconds(10), null, null, null, 0);
+            AssetUsage closed = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+            AssetUsage open = new AssetUsage(UsageId.random(), assetId, NOW.plusSeconds(10), null, null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             repository.save(closed);
             repository.save(open);
 
@@ -646,7 +672,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void findOpenByAssetReturnsEmptyWhenEveryUsageIsClosed() {
             AssetId assetId = AssetId.random();
-            repository.save(new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0));
+            repository.save(new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.STREAM));
 
             assertTrue(repository.findOpenByAsset(assetId).isEmpty());
         }
@@ -662,7 +689,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void savedUsageWithANonDefaultPhaseRoundTripsExactly() {
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
-                    UsagePhase.IN_FLIGHT);
+                    UsagePhase.IN_FLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -672,13 +699,35 @@ class PostgresDockerIntegrationTest {
             assertEquals(usage, found.get());
         }
 
+        /**
+         * The origin twin of {@link #savedUsageWithANonDefaultPhaseRoundTripsExactly} — proves
+         * {@code V26__asset_usage_origin.sql} plus {@code AssetUsageMapper} round-trip a
+         * non-default {@link UsageOrigin} (not {@code STREAM}, the column's own database default,
+         * so a mapper that always wrote/read the default could not accidentally pass this test)
+         * exactly (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2).
+         */
+        @Test
+        void savedUsageWithANonDefaultOriginRoundTripsExactly() {
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.OPERATOR);
+
+            repository.save(usage);
+
+            Optional<AssetUsage> found = repository.findById(usage.id());
+            assertTrue(found.isPresent());
+            assertEquals(UsageOrigin.OPERATOR, found.get().origin());
+            assertEquals(usage, found.get());
+        }
+
         @Test
         void saveIsAnUpsertThatCanTransitionPhase() {
             UsageId id = UsageId.random();
             AssetId assetId = AssetId.random();
-            repository.save(new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.PREFLIGHT));
+            repository.save(
+                    new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM));
 
-            repository.save(new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.IN_FLIGHT));
+            repository.save(
+                    new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.IN_FLIGHT, UsageOrigin.STREAM));
 
             Optional<AssetUsage> found = repository.findById(id);
             assertTrue(found.isPresent());
@@ -691,13 +740,14 @@ class PostgresDockerIntegrationTest {
          * {@code phase} is {@code NULL} on disk) by nulling the column directly after a normal save,
          * bypassing the mapper (which never writes {@code null} itself, since {@link
          * AssetUsage#phase()} is non-null by construction) -- proves {@code AssetUsageMapper#toDomain}
-         * honestly defaults a legacy {@code NULL} column to {@link UsagePhase#PREFLIGHT} via {@link
-         * AssetUsage}'s own pre-O7 convenience constructor, per {@code AssetUsageEntity}'s javadoc.
+         * honestly defaults a legacy {@code NULL} column to {@link UsagePhase#PREFLIGHT} before
+         * passing it to {@link AssetUsage}'s single canonical constructor, per {@code
+         * AssetUsageEntity}'s javadoc.
          */
         @Test
         void legacyRowWithNullPhaseColumnMapsToPreflightDefault() {
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
-                    UsagePhase.LINK_LOST);
+                    UsagePhase.LINK_LOST, UsageOrigin.STREAM);
             repository.save(usage);
             EntityManager em = entityManagerFactory.createEntityManager();
             try {
@@ -1811,7 +1861,8 @@ class PostgresDockerIntegrationTest {
         StreamId streamId = StreamId.random();
 
         AssetUsage usage = new AssetUsage(usageId, assetId, NOW, NOW.plusSeconds(120),
-                new GeoPosition(50.45, 30.52, 100.0), new GeoPosition(50.50, 30.60, 110.0), 2, streamId);
+                new GeoPosition(50.45, 30.52, 100.0), new GeoPosition(50.50, 30.60, 110.0), 2, streamId,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         new JpaAssetUsageRepository(entityManagerFactory).save(usage);
 
         Telemetry sample = new Telemetry(deviceId, NOW, 50.45, 30.52, 100.0, 0.0, 95.0, Map.of());

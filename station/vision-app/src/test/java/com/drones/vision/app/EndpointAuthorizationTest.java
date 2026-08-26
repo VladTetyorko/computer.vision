@@ -39,17 +39,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class EndpointAuthorizationTest {
 
-    /** Handlers known to be unscoped when LIVE-SCOPE W1 landed. Waves W2-W5 empty this. */
+    /**
+     * Handlers known to be unscoped when LIVE-SCOPE W1 landed. Waves W2-W5 empty this.
+     *
+     * <p>docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7 (finding A2) resolved the three
+     * remaining live-surface entries: {@code HlsProxyController#proxy} now gates on {@code
+     * StreamAccess.requireVisible} (a genuine scope check); {@code DeviceProbeController#probe} was
+     * annotated {@code @OpenByDesign} (a caller-supplied connection descriptor names no existing
+     * asset, so there is nothing to scope); {@code EventController#forStream}/{@code #recent} now
+     * gate on {@code StreamAccess}/{@code CurrentUser.scope()}. All four are removed below rather
+     * than left as redundant entries.
+     */
     private static final Set<String> TEMPORARY_UNSCOPED = new TreeSet<>(Set.of(
-            // W4 — HLS/mediamtx (this plan)
-            "HlsProxyController#proxy",
             // NOT in LIVE-SCOPE — the other T1 holes, still unowned (see PLATFORM-AUDIT-SCOPE.md)
             "AssetController#telemetry",
             "DemoController#status",
-            "DeviceProbeController#probe",
             "DiscoveryController#scan",
-            "EventController#forStream",
-            "EventController#recent",
             "GeoRegionController#list",
             "GeoRegionController#progress",
             "ModelRegistryController#models",

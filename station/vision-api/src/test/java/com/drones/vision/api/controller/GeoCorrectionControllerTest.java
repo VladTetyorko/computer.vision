@@ -14,6 +14,7 @@ import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.kernel.VisualFixEvidence;
 import com.drones.vision.platform.VisibilityScope;
@@ -87,7 +88,7 @@ class GeoCorrectionControllerTest {
 
     private static AssetUsage usage(UsageId usageId, AssetId assetId) {
         return new AssetUsage(usageId, assetId, Instant.parse("2026-08-19T09:00:00Z"), null, null, null, 0L, null,
-                UsagePhase.IN_FLIGHT);
+                UsagePhase.IN_FLIGHT, UsageOrigin.STREAM);
     }
 
     private static TrackCorrection noFix(AssetId assetId, UsageId usageId, Instant frameAt) {

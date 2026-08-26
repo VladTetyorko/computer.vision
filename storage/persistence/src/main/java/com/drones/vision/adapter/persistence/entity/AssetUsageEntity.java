@@ -1,6 +1,7 @@
 package com.drones.vision.adapter.persistence.entity;
 
 import com.drones.vision.warehouse.domain.model.UsagePhase;
+import com.drones.vision.kernel.UsageOrigin;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -40,6 +41,15 @@ import java.util.UUID;
  * (the migration's other two additive columns) stay unmapped here — {@link
  * com.drones.vision.warehouse.domain.model.AssetUsage} does not carry those two fields as of Wave
  * O7, only {@code phase}; wiring them is deferred to whoever adds them to the domain record.
+ *
+ * <p>{@code origin} (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2, {@code
+ * V26__asset_usage_origin.sql}) reuses the domain {@link com.drones.vision.kernel.UsageOrigin} enum
+ * directly, same {@code @Enumerated(EnumType.STRING)} convention as {@code phase}. Unlike {@code
+ * phase}, this column is {@code NOT NULL} with a {@code 'STREAM'} database default — every row
+ * predating this column was, by construction, opened by a video stream (the migration's own SQL
+ * comment explains why) — so there is no honest {@code null} case for
+ * {@link com.drones.vision.adapter.persistence.mapper.AssetUsageMapper} to handle here the way it
+ * does for {@code phase}.
  *
  * <p>{@link com.drones.vision.adapter.persistence.mapper.AssetUsageMapper} owns the mapping in
  * both directions. No FK to {@code assets} — same no-cross-entity-FK convention as the P-a schema
@@ -91,6 +101,10 @@ public class AssetUsageEntity {
     @Column(name = "phase")
     private UsagePhase phase;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "origin", nullable = false)
+    private UsageOrigin origin;
+
     /** JPA only. */
     protected AssetUsageEntity() {
     }
@@ -98,7 +112,7 @@ public class AssetUsageEntity {
     public AssetUsageEntity(UUID id, UUID assetId, Instant startedAt, Instant endedAt, Double startLatitude,
                              Double startLongitude, Double startAltitudeMeters, Double lastLatitude,
                              Double lastLongitude, Double lastAltitudeMeters, long sampleCount, UUID streamId,
-                             UsagePhase phase) {
+                             UsagePhase phase, UsageOrigin origin) {
         this.id = id;
         this.assetId = assetId;
         this.startedAt = startedAt;
@@ -112,6 +126,7 @@ public class AssetUsageEntity {
         this.sampleCount = sampleCount;
         this.streamId = streamId;
         this.phase = phase;
+        this.origin = origin;
     }
 
     public UUID id() {
@@ -164,5 +179,9 @@ public class AssetUsageEntity {
 
     public UsagePhase phase() {
         return phase;
+    }
+
+    public UsageOrigin origin() {
+        return origin;
     }
 }

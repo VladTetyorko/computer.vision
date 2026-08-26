@@ -61,6 +61,8 @@ import com.drones.vision.events.application.*;
 import com.drones.vision.simulation.application.*;
 import com.drones.vision.perception.application.stream.*;
 import com.drones.vision.warehouse.application.usage.*;
+import com.drones.vision.warehouse.application.directory.*;
+import com.drones.vision.flight.application.telemetry.*;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -74,6 +76,7 @@ import jakarta.persistence.EntityManagerFactory;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -324,9 +327,48 @@ public class ApplicationServiceWiring {
     }
 
     /**
+     * Read-only device/asset identity lookups for {@link #usageTracker}
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3) — see {@link AssetDirectoryService}'s
+     * own javadoc for why this is a narrower seam than {@link #assetService}/{@link #deviceService}
+     * rather than a reuse of either: routing {@code usageTracker} through {@code AssetService} would
+     * close a Spring bean cycle ({@code usageTracker -> assetService -> assetLiveStatePort ->
+     * usageTracker}, since {@link #assetLiveStatePort} itself depends on {@code usageTracker}).
+     */
+    @Bean
+    public AssetDirectoryService assetDirectoryService(AssetRepositoryPort assetRepositoryPort,
+                                                         DeviceRepositoryPort deviceRepositoryPort) {
+        return new DefaultAssetDirectoryService(assetRepositoryPort, deviceRepositoryPort);
+    }
+
+    /**
+     * Owns the {@code AssetUsage} session lifecycle for {@link #usageTracker}
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3) — see {@link UsageSessionService}'s
+     * own javadoc for why warehouse, not perception, is the only module that constructs/persists an
+     * {@code AssetUsage}.
+     */
+    @Bean
+    public UsageSessionService usageSessionService(AssetUsageRepositoryPort assetUsageRepositoryPort) {
+        return new DefaultUsageSessionService(assetUsageRepositoryPort);
+    }
+
+    /**
+     * Owns telemetry-sample persistence for {@link #usageTracker}
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3) — see {@link TelemetryService}'s own
+     * javadoc; a thin ownership seam, not a feature.
+     */
+    @Bean
+    public TelemetryService telemetryService(TelemetryRepositoryPort telemetryRepositoryPort) {
+        return new DefaultTelemetryService(telemetryRepositoryPort);
+    }
+
+    /**
      * Drives {@link com.drones.vision.warehouse.domain.model.AssetUsage} lifecycle and telemetry sampling
-     * from {@link StreamService}'s start/stop notifications. {@code telemetryLiveUpdatePort} and
-     * {@code geofenceMonitor} are threaded through unconditionally — both are always real beans.
+     * from {@link StreamService}'s start/stop notifications, delegating what a session <em>is</em> —
+     * construction, persistence — to {@link #assetDirectoryService}/{@link #usageSessionService}/{@link
+     * #telemetryService} (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3: {@code
+     * UsageTracker} used to hold four repository ports across warehouse and flight directly; it now
+     * holds none). {@code telemetryLiveUpdatePort} and {@code geofenceMonitor} are threaded through
+     * unconditionally — both are always real beans.
      *
      * <p>Takes its summary-coalescing window from {@code vision.persistence.telemetry} — the same
      * block {@code telemetryRepositoryPort} reads (docs/plans/done/SCALE-100-PLAN.md S4). The two
@@ -343,10 +385,9 @@ public class ApplicationServiceWiring {
      * bean took an observer at all — nothing in this module binds {@code vision.flight.phase.*} yet.
      */
     @Bean
-    public UsageTracker usageTracker(AssetRepositoryPort assetRepositoryPort,
-                                      DeviceRepositoryPort deviceRepositoryPort,
-                                      AssetUsageRepositoryPort assetUsageRepositoryPort,
-                                      TelemetryRepositoryPort telemetryRepositoryPort,
+    public UsageTracker usageTracker(AssetDirectoryService assetDirectoryService,
+                                      UsageSessionService usageSessionService,
+                                      TelemetryService telemetryService,
                                       List<TelemetrySourcePort> telemetrySources,
                                       TelemetryLiveUpdatePort telemetryLiveUpdatePort,
                                       GeofenceMonitor geofenceMonitor,
@@ -354,10 +395,12 @@ public class ApplicationServiceWiring {
                                       ObjectProvider<UsagePhaseObserver> usagePhaseObserver) {
         // geofenceMonitor::evaluate, not the monitor itself: UsageTracker (perception) takes a
         // BiConsumer seam so it never depends on the flight context — docs/plans/active/DOMAIN-SEPARATION-W1.md §5 C2
-        return new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort,
-                telemetryRepositoryPort, telemetrySources, telemetryLiveUpdatePort, geofenceMonitor::evaluate,
-                persistenceProperties.telemetry().toSummarySettings(), UsagePhaseSettings.defaults(),
-                usagePhaseObserver.getIfAvailable(() -> UsagePhaseObserver.NOOP));
+        UsageTrackerSettings defaultSettings = UsageTrackerSettings.defaults();
+        return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, telemetrySources,
+                new UsageTrackerSettings(Optional.of(telemetryLiveUpdatePort), Optional.of(geofenceMonitor::evaluate),
+                        defaultSettings.sourceInitialBackoffNanos(), defaultSettings.sourceMaxBackoffNanos(),
+                        persistenceProperties.telemetry().toSummarySettings(), UsagePhaseSettings.defaults(),
+                        usagePhaseObserver.getIfAvailable(() -> UsagePhaseObserver.NOOP)));
     }
 
     /**
@@ -435,9 +478,9 @@ public class ApplicationServiceWiring {
      * {@code pullDetectionSettings} is built here, not injected, because it is a composite of two
      * things this method already has separate access to: {@link VisionCvProperties#pull()}'s {@code
      * rtsp-base} (the address the <b>worker</b> dials, D5) and {@code CvWiring}'s conditionally-present
-     * {@code pulledDetectionPort} bean (absent unless {@link VisionCvProperties#pullEnabled()}). {@code
-     * null} (the default, {@code frame-transport=push}) reproduces the pre-wave-M5 11-arg constructor's
-     * behaviour exactly — see {@code DefaultStreamService}'s own javadoc on that parameter.
+     * {@code pulledDetectionPort} bean (absent unless {@link VisionCvProperties#pullEnabled()}). {@link
+     * Optional#empty()} (the default, {@code frame-transport=push}) reproduces the pre-wave-M5 6-argument
+     * constructor's behaviour exactly — see {@code DefaultStreamServiceSettings}'s own javadoc on that field.
      *
      * <p>The returned {@link StreamService} is wrapped in {@code
      * com.drones.vision.app.stream.LiveFrameFallbackStreamService} only when {@link
@@ -449,12 +492,12 @@ public class ApplicationServiceWiring {
      *
      * <p>{@code detectionDemandPort} (docs/plans/done/CV-DEMAND-PLAN.md §3.3) is an {@link
      * ObjectProvider} because {@code CvWiring#detectionDemandPort} is itself conditionally present
-     * on {@code vision.cv.demand.enabled} (default {@code true}) — resolving to {@code null} when
-     * that flag is {@code false} reproduces {@code DefaultStreamService}'s pre-wave-D2 constructor
+     * on {@code vision.cv.demand.enabled} (default {@code true}) — resolving to {@link Optional#empty()}
+     * when that flag is {@code false} reproduces {@code DefaultStreamService}'s pre-wave-D2 constructor
      * exactly: the demand-poll task is never scheduled, and every stream stays fail-open on demand.
      */
     @Bean
-    public StreamService streamService(DeviceRepositoryPort deviceRepositoryPort,
+    public StreamService streamService(AssetDirectoryService assetDirectoryService,
                                         VideoSourceRegistry videoSourceRegistry,
                                         DetectionPort detectionPort,
                                         StreamPublisherPort streamPublisherPort,
@@ -470,14 +513,15 @@ public class ApplicationServiceWiring {
                                         ObjectProvider<PulledDetectionPort> pulledDetectionPort,
                                         MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber,
                                         ObjectProvider<DetectionDemandPort> detectionDemandPort) {
-        PullDetectionSettings pullDetectionSettings = cvProperties.pullEnabled()
-                ? new PullDetectionSettings(pulledDetectionPort.getObject(), cvProperties.pull().rtspBase())
-                : null;
-        StreamService defaultStreamService = new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker,
-                detectionEventRepositoryPort, detectionLiveUpdatePort,
-                streamPipelineSettings(applicationProperties, trackingProperties, cvProperties), pullDetectionSettings,
-                detectionDemandPort.getIfAvailable());
+        Optional<PullDetectionSettings> pullDetectionSettings = cvProperties.pullEnabled()
+                ? Optional.of(new PullDetectionSettings(pulledDetectionPort.getObject(), cvProperties.pull().rtspBase()))
+                : Optional.empty();
+        StreamService defaultStreamService = new DefaultStreamService(assetDirectoryService, videoSourceRegistry,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort,
+                new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.of(detectionEventRepositoryPort),
+                        Optional.of(detectionLiveUpdatePort),
+                        streamPipelineSettings(applicationProperties, trackingProperties, cvProperties),
+                        pullDetectionSettings, Optional.ofNullable(detectionDemandPort.getIfAvailable())));
         if (publishProperties.sourceProxy().enabled()) {
             return new LiveFrameFallbackStreamService(defaultStreamService, mediamtxLiveFrameGrabber);
         }
@@ -566,10 +610,10 @@ public class ApplicationServiceWiring {
      * resolves the asset itself rather than calling back into {@link AssetService}.
      */
     @Bean
-    public AssetStreamService assetStreamService(AssetRepositoryPort assetRepositoryPort,
+    public AssetStreamService assetStreamService(AssetDirectoryService assetDirectoryService,
                                                   DeviceService deviceService,
                                                   StreamService streamService) {
-        return new DefaultAssetStreamService(assetRepositoryPort, deviceService, streamService);
+        return new DefaultAssetStreamService(assetDirectoryService, deviceService, streamService);
     }
 
     /**
@@ -686,12 +730,12 @@ public class ApplicationServiceWiring {
     @Bean
     public SimulationService simulationService(AssetService assetService,
                                                 AssetStreamService assetStreamService,
-                                                CategoryRepositoryPort categoryRepositoryPort,
+                                                DeviceService deviceService,
                                                 FeedTransmitterRegistry feedTransmitterRegistry,
                                                 VisionPublishProperties properties,
                                                 VisionApplicationProperties applicationProperties) {
         VisionApplicationProperties.Simulation simulation = applicationProperties.simulation();
-        return new DefaultSimulationService(assetService, assetStreamService, categoryRepositoryPort,
+        return new DefaultSimulationService(assetService, assetStreamService, deviceService,
                 feedTransmitterRegistry, properties.mediamtx().rtspBase(),
                 new SimulationServiceSettings(simulation.mavlinkLoopbackHost(), simulation.fallbackLatitude(),
                         simulation.fallbackLongitude()));
