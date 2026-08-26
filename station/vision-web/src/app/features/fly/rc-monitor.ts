@@ -1,32 +1,27 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, input, output } from '@angular/core';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Notice } from '../../shared/ui/notice';
+import { TransmitterView } from '../../shared/ui/transmitter-view/transmitter-view';
 import { RcInputService } from '../../core/rc/rc-input.service';
 import { VirtualRcInputService } from '../../core/rc/virtual-rc-input.service';
 import { RcSource, type RcSourceKind } from '../../core/rc/rc-source.service';
 import { ManualControlClient } from '../../core/rc/manual-control-client';
 import { ControlActionDispatcher } from '../../core/rc/control-action-dispatcher';
 import { ControlProfileStore } from '../../core/rc/control-profile-store';
-import { actionLabel, activeProfileFor, controlLabel } from '../../core/rc/control-action-logic';
-import { VirtualControlSurface } from './virtual-control-surface';
+import { activeProfileFor } from '../../core/rc/control-action-logic';
 import { FlightCommandPanel } from './flight-command-panel';
-import {
-  axisToPercent,
-  barLeftPercent,
-  barWidthPercent,
-  defaultAxisLabel,
-  defaultButtonLabel,
-  isButtonOn,
-} from '../../core/rc/rc-input-logic';
-import { channelBindingLabel, engageDisabledReason, latencyLabel } from './rc-monitor-logic';
-import type { FlightCapability } from '../../core/api/models';
+import { armedChip, armAlsoOnHint, engageDisabledReason, latencyLabel, modeAlsoOnHint } from './rc-monitor-logic';
+import type { ChannelMapLike } from '../../core/rc/transmitter-view-logic';
+import type { FlightCapability, VehicleKind } from '../../core/api/models';
 
 /**
- * `vision-rc-monitor` — the cockpit's RC transmitter drawer. Phase 0 (docs/plans/active/RC-CONTROL-PLAN.md) added
- * the read-only monitor at the top: a plugged-in RadioMaster's live sticks (axes) and switches
- * (buttons), so an operator can confirm the platform sees the controller and check its update rate.
- * R5 (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md) adds **Take control** below it — the SITL relay engage/
- * release gesture, additive, the monitor above is unchanged.
+ * `vision-rc-monitor` — the Fly cockpit's Controller drawer, rebuilt around `vision-transmitter-view`
+ * (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2, wave X2 — superseding the raw axis-bar/switch-pill
+ * monitor Phase 0 (docs/plans/active/RC-CONTROL-PLAN.md) and R5 (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md)
+ * originally shipped). Anatomy, top to bottom: a chips-only state strip, the transmitter picture
+ * (before *and* during a session — decision U1), `<vision-flight-command-panel>`'s mode/arm/disarm
+ * rows with "also on <switch>" hints (U3), and a sticky footer carrying the input-source picker and
+ * engage/release (U6, via `SidePanel`'s existing `[footer]` slot).
  *
  * Provides the whole RC stack — `RcInputService`, `VirtualRcInputService`, `RcSource` and
  * `ManualControlClient` — and drives `RcInputService`'s lifecycle (reading starts when this drawer
@@ -35,6 +30,16 @@ import type { FlightCapability } from '../../core/api/models';
  * panel closing) is one of them. The cockpit mounts this component via `@if (isPanelOpen('rc'))`,
  * so both the Gamepad rAF loop and any live relay session only exist while the drawer is open.
  *
+ * <h2>One picture, mirror or interactive</h2>
+ * `vision-transmitter-view` draws whatever `channelMap`/`actionMap` this operator is bound to, fed
+ * live `axes`/`buttons` from whichever `RcSource` is selected — a plugged transmitter or the
+ * on-screen surface. It renders **before** engage so the operator sees their own sticks/switches
+ * move immediately (decision U1); once engaged it becomes interactive only for the on-screen source
+ * (decision U2) — a mirrored transmitter is never draggable, dragging a mirror of hardware sticks
+ * would be meaningless. `transmitterChannelMap` prefers the server's own `engaged.channelMap` once a
+ * session exists ("it's what the server is really applying"), falling back to this operator's own
+ * resolved layout for the vehicle kind before/without one.
+ *
  * <h2>A transmitter is no longer required</h2>
  * Control can come from a plugged-in gamepad or from the on-screen surface
  * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P10) — `RcSource` picks, and prefers a
@@ -42,15 +47,14 @@ import type { FlightCapability } from '../../core/api/models';
  * steer/drive pad and an aircraft two, without this component knowing the difference.
  *
  * <h2>One drawer, not two</h2>
- * Mode and arm/disarm live at the top of this drawer as of
- * docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decision C10 — `<vision-flight-command-panel>` is
- * body-only now and this is its shell. They were a separate `flight` tool-rail drawer, which meant
- * closing the controller to arm and reopening it to fly; they are the same job. This component
- * only passes `capabilities`/`armed` through — it owns none of that panel's commands or confirms.
+ * Mode and arm/disarm live inside this drawer as of docs/plans/active/CONTROLLER-SETUP-CONTEXT.md
+ * decision C10 — `<vision-flight-command-panel>` is body-only now and this is its shell. This
+ * component only passes `capabilities`/`armed`/the "also on" hints through — it owns none of that
+ * panel's commands or confirms.
  */
 @Component({
   selector: 'vision-rc-monitor',
-  imports: [SidePanel, Notice, VirtualControlSurface, FlightCommandPanel],
+  imports: [SidePanel, Notice, TransmitterView, FlightCommandPanel],
   providers: [RcInputService, VirtualRcInputService, RcSource, ManualControlClient, ControlActionDispatcher],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './rc-monitor.html',
@@ -61,11 +65,11 @@ export class RcMonitor implements OnInit {
   protected readonly source = inject(RcSource);
   protected readonly client = inject(ManualControlClient);
   protected readonly dispatcher = inject(ControlActionDispatcher);
-  private readonly virtual = inject(VirtualRcInputService);
-  private readonly profiles = inject(ControlProfileStore);
+  protected readonly virtual = inject(VirtualRcInputService);
+  protected readonly profiles = inject(ControlProfileStore);
 
   /** The currently-flown asset — mirrors `flight-command-panel.ts`'s own `assetId`/
-   * `assetDisplayName` inputs (`fly.html` renders both components inside the same
+   * `assetDisplayName` inputs (`cockpit.html` renders both components inside the same
    * `@else if (facade.asset(); as a)` branch, so `a.assetId`/`a.displayName` are always defined
    * wherever either is actually mounted). */
   readonly assetId = input.required<string>();
@@ -80,20 +84,17 @@ export class RcMonitor implements OnInit {
   /** Passed straight through to `<vision-flight-command-panel>` — `undefined` while the capability
    * fetch is in flight or failed, which hides the mode/arm section and nothing else. */
   readonly capabilities = input<FlightCapability | undefined>(undefined);
-  /** Latest telemetry's `flightState.armed` — the flight section's disarm copy reads it. */
+  /** Latest telemetry's `flightState.armed` — the state strip's armed chip and the flight
+   * section's disarm copy both read it. */
   readonly armed = input<boolean | undefined>(undefined);
+  /** Latest telemetry's `flightState.mode` — the state strip's mode chip. `undefined` omits the
+   * chip entirely (CLAUDE.md's "degrade honestly": no signal, no fabricated reading) rather than
+   * guessing from `capabilities().selectableModes`, which names what the vehicle *could* be set to,
+   * not what it is actually in right now. */
+  readonly mode = input<string | undefined>(undefined);
   readonly close = output<void>();
 
-  protected readonly axisToPercent = axisToPercent;
-  protected readonly barLeftPercent = barLeftPercent;
-  protected readonly barWidthPercent = barWidthPercent;
-  protected readonly axisLabel = defaultAxisLabel;
-  protected readonly buttonLabel = defaultButtonLabel;
-  protected readonly isOn = isButtonOn;
   protected readonly latencyLabel = latencyLabel;
-  protected readonly channelBindingLabel = channelBindingLabel;
-  protected readonly actionLabel = actionLabel;
-  protected readonly controlLabel = controlLabel;
 
   /**
    * The layout this operator's switches currently fire through — resolved in the browser from the
@@ -104,8 +105,28 @@ export class RcMonitor implements OnInit {
   protected readonly activeProfile = computed(() =>
     activeProfileFor(this.profiles.profiles(), this.capabilities()?.vehicleKind),
   );
-  /** Only the action-bound controls — the channel-bound ones are the sticks, listed separately. */
+  /** Only the action-bound controls — passed to the transmitter view's switch-gauge rows. */
   protected readonly actionBindings = computed(() => this.activeProfile()?.actionMap ?? []);
+  protected readonly modeAlsoOn = computed(() => modeAlsoOnHint(this.actionBindings()));
+  protected readonly armAlsoOn = computed(() => armAlsoOnHint(this.actionBindings()));
+
+  protected readonly armedChipView = computed(() => armedChip(this.armed()));
+
+  /** Whichever `ChannelMapLike` the transmitter view draws (docs/plans/active/CONTROLLER-UX-PLAN.md
+   * §2.2's own instruction: prefer the engaged frame's own map once one exists, "it's what the
+   * server is really applying"); falls back to this operator's own resolved layout so the picture
+   * is live before/without a session too (decision U1). */
+  protected readonly transmitterChannelMap = computed<ChannelMapLike>(
+    () => this.client.channelMap() ?? this.activeProfile()?.channelMap ?? [],
+  );
+  protected readonly vehicleKind = computed<VehicleKind>(
+    () => this.client.vehicleKind() ?? this.capabilities()?.vehicleKind ?? 'UNKNOWN',
+  );
+  /** Engaged + the on-screen surface selected → the same picture becomes draggable (decision U2). A
+   * plugged transmitter always stays a mirror, engaged or not. */
+  protected readonly interactive = computed(
+    () => this.client.state() === 'engaged' && this.source.kind() === 'virtual',
+  );
 
   protected readonly disabledReason = computed(() =>
     engageDisabledReason({
@@ -163,5 +184,12 @@ export class RcMonitor implements OnInit {
 
   protected release(): void {
     this.client.release();
+  }
+
+  /** `vision-transmitter-view`'s `valuesChange` — absorbs `virtual-control-surface.ts`'s own
+   * pointer/keyboard math verbatim (it now lives inside the shared component), forwarding straight
+   * to the service that owns the on-screen surface's actual values. */
+  protected onValuesChange(event: { axisIndex: number; value: number }): void {
+    this.virtual.set(event.axisIndex, event.value);
   }
 }

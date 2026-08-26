@@ -20,6 +20,9 @@
           >
             {{ modeBusy() ? 'Setting…' : 'Set' }}
           </button>
+          @if (modeAlsoOn(); as hint) {
+            <span class="also-on muted">also on {{ hint }}</span>
+          }
         </div>
       }
 
@@ -43,6 +46,9 @@
           >
             Disarm
           </button>
+          @if (armAlsoOn(); as hint) {
+            <span class="also-on muted">also on {{ hint }}</span>
+          }
         </div>
       }
     </div>

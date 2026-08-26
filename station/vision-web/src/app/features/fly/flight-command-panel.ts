@@ -76,6 +76,16 @@ export class FlightCommandPanel {
   readonly canCommand = input<boolean>(false);
   /** Latest telemetry's `flightState.armed` — gates Disarm's crash-warning copy, nothing else. */
   readonly armed = input<boolean | undefined>(undefined);
+  /**
+   * The switch, if any, whose action map fires the same command as the Set-mode button
+   * (`rc-monitor.ts#modeAlsoOn`, docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 decision U3) —
+   * rendered as a faint "also on <switch>" line beside the row it pairs with. `undefined` (no
+   * active profile, or none of its bindings fire this command) omits the hint entirely, never a
+   * fabricated pairing.
+   */
+  readonly modeAlsoOn = input<string | undefined>(undefined);
+  /** Same idea for the Arm/Disarm row — the switch whose action map fires `ARM`/`TOGGLE_ARM`. */
+  readonly armAlsoOn = input<string | undefined>(undefined);
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
 

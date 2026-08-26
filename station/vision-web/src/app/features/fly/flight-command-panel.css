@@ -56,3 +56,14 @@
 .arm-btn {
   border-width: 2px;
 }
+
+/* "Also on <switch>" (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 decision U3) — pairs a clicked
+   control with the physical switch that fires the identical command, so the switch is discoverable
+   without a separate "bound switches" list. Right of the row's own buttons when there is room;
+   `.command-row`'s existing `flex-wrap: wrap` drops it to its own line on a narrow drawer rather
+   than a second, dedicated responsive rule. */
+.also-on {
+  margin-left: auto;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
