@@ -27,6 +27,13 @@ full incident writeup before adding anything here.
 (`DetectionRepositoryPort`/`DetectionQuery`/`DetectionResult`/`VideoFrame`/`StreamPublisherPort` —
 the detection series, the frame-extraction contract's payload type, and the recording/playback URL
 source)
+
+**These three repository-port reads are a deliberate exception to
+docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5** ("cross-context reads go through the owning
+context's application service, not its repository port") — see Status, wave R5b, for the full
+judgment call and why forcing them onto a service would make this module's read genuinely worse,
+not just differently shaped.
+
 **Used by:** `vision-learning` only (`ReplaySources`, for `DefaultLabelingService#captureFromReplay`
 — see the rule above), `vision-api`, `vision-app`
 **Build/test:** `./mvnw -B -pl contexts/vision-events test`
@@ -86,3 +93,54 @@ com.drones.vision.events.application    — ReplayService + DefaultReplayService
 **docs/plans/done/CV-TRAINING-V2-PLAN.md §3/§4, Waves W1/W5 — a net loss for this context, not a gain**: W1 added `ReplayFrameExtractionPort` here (the frame-extraction contract this context still owns). W5 then built `LabelingService#captureFromReplay`/`ReplaySources` — but both live in **`vision-learning`**, not here: `ReplaySources` merely *bundles* two of this context's neighbors' ports (`AssetUsageRepositoryPort` from warehouse, `DetectionRepositoryPort` from perception) plus this context's own `ReplayFrameExtractionPort`, for `learning`'s constructor-size benefit — it is filed in this module's package only because doing so keeps the "one door out" rule enforceable as a single reviewable type. No behavior in this module changed for either wave.
 
 **docs/plans/active/LAYERING-REFACTOR-PLAN.md Wave A done** (config extraction): `ReplayServiceSettings` added — `defaultMaxPoints`/`maxPointsCeiling`/`fetchLimit`, the last **one key shared by both** the telemetry and detection fetch calls (the frozen `vision.application.replay.fetch-limit` singular, not two separate keys) where the pre-extraction code had used two separately-named constants (`TELEMETRY_FETCH_LIMIT`/`DETECTION_FETCH_LIMIT`) for what was always the same tuning value. `DefaultReplayService` gained a 5-arg canonical constructor taking an explicit `ReplayServiceSettings`; the 4-arg constructor now delegates to it with `ReplayServiceSettings.defaults()`. Package moved from the flat `com.drones.vision.application.replay` to `com.drones.vision.events.application` in the later W1.5a/b context-first reorganization — this wave's own file split is superseded by that move; only the settings-record outcome (and the fetch-limit key unification) survives as current fact.
+
+**ARCHITECTURE-AUDIT-2026-08-26 wave R5b — judgment call: this module's three cross-context
+repository-port reads are kept, deliberately, not converted.** R5's rule ("a context reads another
+through its published application service, not its repository port") was applied everywhere else
+in this wave (`vision-identity`'s `DefaultAssignmentService` swapped `AssetRepositoryPort` for
+`AssetService`, net-zero parameters). This module is the one place the audit itself flagged as
+possibly deserving an exception ("if routing makes it materially worse... say so and leave those
+specific reads alone"), and, having actually tried the swap for all three, that is the honest
+conclusion:
+
+- **`AssetUsageRepositoryPort#findById(UsageId)`** (`DefaultReplayService#timeline`/`#recordingFor`,
+  `ReplaySources#usages`) — no published warehouse service exposes an unscoped, uncapped read of one
+  usage by id. `UsageService` (the closest fit) only offers `recent(scope, assetIdOrNull, limit)`
+  and `byStream(scope, streamId)`, both scoped and both returning `UsageSummary`, which additionally
+  **lacks `streamId`** — the one field `timeline`/`recordingFor` need most (it is the join key into
+  `DetectionRepositoryPort` and `StreamPublisherPort`). Routing through `UsageService` would require
+  both a new by-id method and a new field on its read model, and would force `timeline`/`recordingFor`
+  to take a `VisibilityScope` they deliberately don't have today — `UsageTimelineController`'s own
+  javadoc documents that gap as a known, out-of-scope-to-close limitation, not an oversight this wave
+  should silently paper over by threading `VisibilityScope.unbounded()` through. See "Needed if this
+  is ever revisited" below.
+- **`DetectionRepositoryPort#query(DetectionQuery)`** (`DefaultReplayService`'s `detectionsFor`,
+  `ReplaySources#detections`, and `DefaultLabelingService#captureFromReplay`'s nearest-detection
+  lookup, `vision-learning`) — perception publishes no time-windowed, bulk detection-history read
+  service; its `StreamService` is about the *live* stream registry, not historical query. A service
+  method here would exist for exactly one caller (this module), the anti-pattern the task's own
+  instructions call out by name ("a service method that exists only for events").
+- **`TelemetryRepositoryPort#findByUsage(UsageId, int)`** (`DefaultReplayService`'s telemetry fetch)
+  — same shape of gap on the flight side: no published flight service reads a raw telemetry series.
+  This read is already a documented workaround (fetch-then-filter, no true time-bounded query — see
+  Gotchas above); wrapping it in a new flight service method would still carry the same limitation,
+  one layer further from the port that actually needs fixing.
+
+All three are genuinely bulk, historical, time-windowed reads — the shape a repository port exists
+for — not "one fact" lookups the way `DefaultAssignmentService`'s old `AssetRepositoryPort#findById`
+was. Forcing them onto an application service would mean: inventing service methods whose only
+caller is this module, widening a warehouse read-model record for one downstream reader, or quietly
+adding scope-checking to two endpoints whose unscoped contract is deliberately frozen elsewhere.
+None of that is "the code gets cleaner"; all of it is "the number goes down." Declining, per the R5b
+task's own explicit invitation to make this call.
+
+**Needed if this is ever revisited** (not requested this wave — recorded so a future wave doesn't
+have to re-derive it): warehouse's `UsageService` would need an unscoped
+`Optional<UsageSummary> byId(UsageId)` (mirroring `AssetService#details(AssetId)`'s unscoped/scoped
+pair), and `UsageSummary` would need a `StreamId streamId` field. Even with both, the
+`DetectionRepositoryPort`/`TelemetryRepositoryPort` reads would still have nowhere to go without a
+new bulk-query service on perception/flight respectively — so closing this module's repository-port
+reads is a three-context change, not a one-line swap.
+
+No code changed in this module this wave. `./mvnw -B -pl contexts/vision-events test` — 24/24 green,
+unchanged.

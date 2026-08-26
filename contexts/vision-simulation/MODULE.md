@@ -218,6 +218,13 @@ same rule `events`/`flight` follow (no `simulation.application.simulation`).
 
 ## Status
 
+**ARCHITECTURE-AUDIT-2026-08-26 wave R5b — re-verified, already done**: R5b's brief listed this
+module's `DefaultSimulationService` as one of six classes reading a foreign context's repository
+port directly (`warehouse`'s `CategoryRepositoryPort`). Re-checked against this worktree: R4 (below)
+already made this swap — `DefaultSimulationService` imports no `*RepositoryPort` from any other
+context (only `perception`'s `FeedTransmitterPort`, a legal driven port). No code changed this wave;
+72/72 tests green, unchanged (`./mvnw -B -pl contexts/vision-simulation test`).
+
 **ARCHITECTURE-AUDIT-2026-08-26 wave R4 done, with one deliberate judgment call**: added
 `SimulationService#fitSimulatedDevice(AssetId, Capability, UserId)` (see API surface above) and
 swapped `resumeAll()`'s asset selection from "active asset with category `simulated`" to "active
