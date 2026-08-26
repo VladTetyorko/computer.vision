@@ -21,8 +21,18 @@ reference `HikariConfig`/`HikariDataSource` directly), `org.postgresql:postgresq
 (Jackson 3, for jsonb columns — see Conventions) · **Used by:** vision-app
 (`PersistenceWiringConfiguration` — unconditional since docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b;
 the `vision.persistence.enabled` flag is gone, Postgres is the only store)
-**Build/test:** `./mvnw -B -pl storage/persistence -am test` — **223 tests** (up from 214,
-docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md wave R4: `devices` gained an `origin` column
+**Build/test:** `./mvnw -B -pl storage/persistence -am test` — **224 tests** (up from 223,
+docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md wave R2: `asset_usages` gained an `origin` column
+(`V26__asset_usage_origin.sql`, `NOT NULL DEFAULT 'STREAM'`, single-statement — no follow-up `UPDATE`
+needed, unlike V25, since every existing row's correct backfill value is the same one) —
+`AssetUsageEntity#origin` (`@Enumerated(EnumType.STRING)`, same convention as `#phase`, but `NOT
+NULL` with no legacy-`null` case to handle, unlike `#phase`), `AssetUsageMapper` updated both
+directions, +1 `PostgresDockerIntegrationTest` round-tripping an explicit `OPERATOR` value (the
+`STREAM` default is exercised by every pre-existing usage round-trip test, which all pass a usage
+built through `AssetUsage`'s legacy convenience ctors); `Skipped: 0`, docker reachable — the
+`AssetUsageRepositoryTests`/`UpgradePathMigrationTest` nested classes both ran and passed, confirming
+V26 applies cleanly on both a fresh schema and the full upgrade-path migration chain) — **223 tests**
+(up from 214, docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md wave R4: `devices` gained an `origin` column
 (`V25__device_origin.sql`, `NOT NULL DEFAULT 'LIVE'`, backfilling `SIMULATED` for devices already on
 a `simulated`-category asset) — `DeviceEntity#origin` (`@Enumerated(EnumType.STRING)`, same
 convention as `#state`), `DeviceMapper` updated both directions, +1 `PostgresDockerIntegrationTest`
@@ -209,6 +219,7 @@ creating. Flagged here rather than silently decided, per this wave's brief.
 - `TelemetrySampleEntity#flightState` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b, `V6__telemetry_flight_state.sql`) is a nullable `FlightState` field, `@JdbcTypeCode(SqlTypes.JSON)`/`columnDefinition = "jsonb"` — the domain record stored **directly**, exactly the `DetectionResultEntity#detections` precedent noted in Conventions below (a plain immutable record tree, no persistence-local wrapper type needed). `null` covers both "sample pre-dates this column" and "device reported no flight-controller state at all"; both round-trip as `Telemetry#flightState() == null`, the same nullable-9th-component contract the domain record itself defines — there is no way to tell the two cases apart from this column alone, and nothing needs to.
 - `AssetUsageEntity#streamId` (docs/plans/done/MVP2-PLAN.md R-a2, `V4__usage_stream_id.sql`) is a nullable `UUID` column, mapped straight through by `JpaAssetUsageRepository` (`streamId == null ? null : streamId.value()` / `new StreamId(...)`) exactly like every other nullable field on this entity — no special-casing beyond the null check.
 - `AssetUsageEntity#phase` (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O5/O7, `V19__asset_usage_phase.sql`) reuses the domain `UsagePhase` enum directly in an `@Enumerated(EnumType.STRING)` field, same convention `GeofenceZoneEntity#kind`/`MarkEntity#kind` follow. `AssetUsageMapper` always writes a real value on `toEntity` (`AssetUsage#phase()` is non-null by construction) and, on `toDomain`, maps a `null` column (a row saved before this column existed) onto `AssetUsage`'s own pre-O7 8-arg convenience constructor, which defaults to `UsagePhase.PREFLIGHT` — the same "unknown, not fabricated" honesty `streamId` above already practices. **Fixed a real bug during this wave**: the column shipped schema-only in V19 with no entity field at all, so a phase `UsageTracker` (vision-perception) had actually computed and saved was silently discarded on every reload, always reading back `PREFLIGHT` regardless of what was saved — caught before merge by a cross-wave report from O7, not by this wave's own original test suite (see `AssetUsageRepositoryTests#savedUsageWithANonDefaultPhaseRoundTripsExactly`/`#saveIsAnUpsertThatCanTransitionPhase`/`#legacyRowWithNullPhaseColumnMapsToPreflightDefault`, Tests below). `first_armed_at`/`last_disarmed_at` (V19's other two additive columns) stay unmapped — `AssetUsage` does not carry those two fields as of Wave O7, only `phase`.
+- `AssetUsageEntity#origin` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2, `V26__asset_usage_origin.sql`) reuses the domain `UsageOrigin` enum (`kernel`) directly, same `@Enumerated(EnumType.STRING)` convention as `#phase` — but unlike `#phase`, the column is `NOT NULL` with a database-level `'STREAM'` default, so `AssetUsageMapper#toDomain` has no legacy-`null` case to fall back through: every row, old or new, always carries a real value straight off the entity.
 - `AssetImageEntity` (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, `V5__asset_images.sql`) is keyed by `assetId` itself, **not** a synthetic id like `TelemetrySampleEntity`/`DetectionResultEntity` above — there is at most one image per asset and `save` is always an upsert, so the primary key doubles as the "one row per asset" constraint with no separate unique index needed. `data` is a plain `byte[]` field (Hibernate's default mapping to Postgres `bytea`, no `@Lob`/converter needed) — the first non-jsonb, non-text binary column in this module's schema.
 - `GeofenceZoneEntity` (docs/plans/done/OPS-CORE-PLAN.md §G, G-b, `V7__geofence_zones.sql`) mirrors `GeofenceZone` field-for-field: `id` is the domain's own `ZoneId` (not synthetic — a zone has real identity, unlike `Telemetry`/`DetectionResult`), `kind` reuses the domain `ZoneKind` enum directly in an `@Enumerated(EnumType.STRING)` field (same "domain enums reused directly" convention `Capability`/`LifecycleState` already follow), `polygon` stores the whole `List<GeoPosition>` as one jsonb column (same mechanism/rationale as `DetectionResultEntity#detections` — a plain immutable record list Jackson serializes natively, only ever read back whole), `maxAltitudeMeters` a nullable `Double`, `enabled` a plain `boolean`. No FK to any other table — zones are global reference data with no relationship to assets/devices.
 - `AssignmentEntity` (docs/plans/done/U-SCOPE-PLAN.md slice 2, `V9__pilot_assignments.sql`) is a plain join row — a pilot→asset link with **no synthetic id**: its primary key is the composite (`pilot_user_id`, `asset_id`) via `@IdClass(AssignmentId.class)`. `AssignmentId` is a plain mutable class with a public no-arg ctor + matching field names (JPA's `@IdClass` contract — a record cannot satisfy it). The composite PK doubles as the uniqueness constraint that makes `assign` an idempotent upsert with no duplicate rows. The table also has an unmapped `assigned_at` bookkeeping column (Hibernate `validate` tolerates DB columns the entity does not map). No FK to `users`/`assets`, same convention as every other table here.
@@ -335,6 +346,18 @@ creating. Flagged here rather than silently decided, per this wave's brief.
   orphan any pre-existing simulated device (the column default alone would have left them all reading
   `LIVE`, which is wrong for a device that was, in fact, synthetic). Not audited — `devices` was never
   in the `db_audit_log` trigger list, and adding a column changes no table's audit membership.
+- `V26__asset_usage_origin.sql` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) —
+  one column added to the existing `asset_usages` table, purely additive over V1-V25, no new table.
+  `ALTER TABLE asset_usages ADD COLUMN origin VARCHAR(32) NOT NULL DEFAULT 'STREAM'`
+  (`UsageOrigin{STREAM,TELEMETRY,OPERATOR}`, `@Enumerated(EnumType.STRING)`, same convention as
+  `asset_usages.phase`). **Single statement, no follow-up `UPDATE`** — unlike V25's category→origin
+  backfill, which needed a join to retag a *subset* of rows, every `asset_usage` row that existed
+  before this column did was, by construction, opened as a side effect of a video stream starting
+  (`UsageTracker#onStreamStarted` was the only code in the whole codebase that ever opened a usage
+  before this wave — see the migration's own SQL comment and `vision-perception`'s MODULE.md for the
+  `onTelemetryDeviceDiscovered` dead-code finding this is downstream of) — so the column default
+  alone is the correct backfill for literally every existing row, not a guess. Not audited —
+  `asset_usages` was never in the `db_audit_log` trigger list, same reasoning as V25.
 
 ### `src/main/resources/db/seed/dev` — a second, conditional Flyway location
 
@@ -2026,3 +2049,25 @@ covers both the `LIVE` default (a `Device` saved via the pre-R4 5-arg convenienc
 explicit `SIMULATED` value round-tripping through a real Postgres 16 container; `UpgradePathMigrationTest`
 (4/4) confirms V25 applies cleanly on top of an already-migrated schema. Docker was reachable and
 used for real — not skipped.
+
+## docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R2 done (usage origin, persistence half)
+
+`V26__asset_usage_origin.sql`, `AssetUsageEntity#origin`, `AssetUsageMapper` both directions — see
+the Schema entry above for the exact migration shape (additive `NOT NULL DEFAULT 'STREAM'` column,
+no follow-up backfill `UPDATE` needed — unlike V25, every existing row's correct value is the same
+one). No new table, no new port, no new repository — `AssetUsageRepositoryPort#save`/`findById`/
+`findRecentByAsset`/`findOpenByAsset`/`findByStream` are all unchanged signatures, `AssetUsage` just
+carries one more field now (`contexts/vision-warehouse`'s and `contexts/vision-perception`'s own
+MODULE.mds have the full domain/application-side R2 writeup — the operator `engage`/`disengage`
+verb, the three stream/operator collision rules, and the `onTelemetryDeviceDiscovered` deletion
+decision all live there, not here). `DbAuditLogCoverageTests` needed no change: `asset_usages` was
+already `EXCLUDED` before this column existed, and adding a column changes no table's audit
+membership.
+
+`./mvnw -B -pl storage/persistence -am test`: **224/224 green** (up from 223) — new
+`savedUsageWithANonDefaultOriginRoundTripsExactly` in `PostgresDockerIntegrationTest` covers an
+explicit `OPERATOR` value round-tripping through a real Postgres 16 container (the `STREAM` default
+is already exercised by every pre-existing usage round-trip test, since every one of them builds its
+fixture through `AssetUsage`'s legacy convenience constructors, which now default `origin=STREAM`
+internally); `UpgradePathMigrationTest` (4/4) confirms V26 applies cleanly on top of an
+already-migrated schema. Docker was reachable and used for real — not skipped.

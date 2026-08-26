@@ -5,6 +5,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
@@ -48,17 +49,19 @@ public interface UsageSessionService {
 
     /**
      * Opens a new usage for {@code assetId}, stamped with the given {@code streamId} (or {@code
-     * null} for a telemetry-only session with no video stream — see {@link AssetUsage#streamId()}),
-     * persists it, and returns the persisted usage. The opened usage always starts in {@link
-     * UsagePhase#PREFLIGHT} — nothing "transitions into" a session's first phase, it is simply
-     * what every session starts as.
+     * null} for a telemetry-only session with no video stream — see {@link AssetUsage#streamId()})
+     * and attributed to the verb that opened it, persists it, and returns the persisted usage. The
+     * opened usage always starts in {@link UsagePhase#PREFLIGHT} — nothing "transitions into" a
+     * session's first phase, it is simply what every session starts as.
      *
      * @param assetId   the asset this usage belongs to
      * @param streamIdOrNull the stream whose start opened this usage, or {@code null}
+     * @param origin    which verb opened this session (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md
+     *                  D2, wave R2 — see {@link UsageOrigin})
      * @param startedAt when the usage was opened
      * @return the persisted, newly opened usage
      */
-    AssetUsage open(AssetId assetId, StreamId streamIdOrNull, Instant startedAt);
+    AssetUsage open(AssetId assetId, StreamId streamIdOrNull, UsageOrigin origin, Instant startedAt);
 
     /**
      * Folds one telemetry sample's position and the caller-computed phase into {@code usage},

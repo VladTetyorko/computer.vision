@@ -90,12 +90,13 @@ Ranked by [`PLATFORM-AUDIT-FINDINGS.md`](active/PLATFORM-AUDIT-FINDINGS.md), the
 structure, user↔asset access, session flow and service topology, with recommendations R1–R10. It
 ranks *how the system is built*, where PLATFORM-AUDIT ranks *what it can do*; the two queues are
 independent. Its R1 (delete the N-1 constructor convention), R2 (`engage`/`disengage` — the same
-work as row **S** below) and R5 (no cross-context repository-port reads, a precondition for
-DOMAIN-SEPARATION W2) are the three that gate other work.
+work as row **S** below, **DONE 2026-08-26**, wave R2, see the R2 row in that doc's own §9 table and
+`SOURCE-ONBOARDING-CONTEXT.md` §12) and R5 (no cross-context repository-port reads, a precondition
+for DOMAIN-SEPARATION W2) are the three that gate other work.
 
 | # | Work | Plan doc | Effort | Why now |
 |---|---|---|---|---|
-| S | **One generic way to add a vehicle**, with either half simulatable — the five Connect tiles are already two ways plus three address-finders; `engage`/`disengage` replaces "a session is a video stream" | [SOURCE-ONBOARDING-CONTEXT](active/SOURCE-ONBOARDING-CONTEXT.md) | M | An operator cannot add video without telemetry or telemetry without video. Wave S1 alone fixes that, and half of it is wiring a method that already exists with **zero callers** (`UsageTracker#onTelemetryDeviceDiscovered`) |
+| S | **One generic way to add a vehicle**, with either half simulatable — the five Connect tiles are already two ways plus three address-finders; `engage`/`disengage` replaces "a session is a video stream" (**S1 DONE 2026-08-26** — `POST`/`DELETE /api/assets/{id}/session`; `onTelemetryDeviceDiscovered` was **deleted**, not wired, see §12 of the plan doc) | [SOURCE-ONBOARDING-CONTEXT](active/SOURCE-ONBOARDING-CONTEXT.md) | M | S2-S5 (device origin, fit-out table UI, delete `simulated` category) remain open |
 | 5 | Retention + partitioning on the detection/telemetry firehoses; unwire the accidental `db_audit_log` amplification | PLATFORM-AUDIT-DB §2 | M | ~222 GB/yr per 10 assets, nothing is ever deleted. **Free today because the tables are empty**; a maintenance window after the first month of flying |
 | 6 | `AssetUsage.pilot` + a geo column on detections | PLATFORM-AUDIT-DB | S | Two columns make "who flew this" and "every detection of class X near Y" answerable |
 | 7 | OpenAPI contract + machine API tokens | — (unwritten) | S | `ARCHITECTURE.md` §2 cites an `openapi.yaml` **that does not exist**; prerequisite for 8/9/11 |

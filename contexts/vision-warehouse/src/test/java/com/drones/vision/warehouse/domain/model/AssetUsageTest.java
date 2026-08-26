@@ -4,6 +4,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -158,7 +159,7 @@ class AssetUsageTest {
     void rejectsNullPhase() {
         assertThrows(IllegalArgumentException.class,
                 () -> new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0, null,
-                        null));
+                        null, UsageOrigin.STREAM));
     }
 
     @Test
@@ -183,5 +184,51 @@ class AssetUsageTest {
         assertEquals(UsagePhase.LINK_LOST, closed.phase());
         assertEquals(UsagePhase.LINK_LOST, repositioned.phase());
         assertEquals(UsagePhase.LINK_LOST, resampled.phase());
+    }
+
+    // --- Origin (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) --------------
+
+    @Test
+    void originDefaultsToStreamViaEitherLegacyConstructor() {
+        AssetUsage sevenArg = openUsage();
+        AssetUsage eightArg = new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0,
+                StreamId.random());
+        AssetUsage nineArg = new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0,
+                StreamId.random(), UsagePhase.IN_FLIGHT);
+
+        assertEquals(UsageOrigin.STREAM, sevenArg.origin());
+        assertEquals(UsageOrigin.STREAM, eightArg.origin());
+        assertEquals(UsageOrigin.STREAM, nineArg.origin());
+    }
+
+    @Test
+    void rejectsNullOrigin() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0, null,
+                        UsagePhase.PREFLIGHT, null));
+    }
+
+    @Test
+    void withOriginReturnsNewInstanceWithOriginSet() {
+        AssetUsage usage = openUsage();
+
+        AssetUsage updated = usage.withOrigin(UsageOrigin.OPERATOR);
+
+        assertEquals(UsageOrigin.OPERATOR, updated.origin());
+        assertEquals(UsageOrigin.STREAM, usage.origin(), "original instance must be unchanged");
+    }
+
+    @Test
+    void closedWithPositionsAndWithSampleCountAllPreserveOrigin() {
+        AssetUsage usage = openUsage().withOrigin(UsageOrigin.OPERATOR);
+
+        AssetUsage closed = usage.closed(usage.startedAt().plusSeconds(30));
+        AssetUsage repositioned =
+                usage.withPositions(new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null));
+        AssetUsage resampled = usage.withSampleCount(7);
+
+        assertEquals(UsageOrigin.OPERATOR, closed.origin());
+        assertEquals(UsageOrigin.OPERATOR, repositioned.origin());
+        assertEquals(UsageOrigin.OPERATOR, resampled.origin());
     }
 }

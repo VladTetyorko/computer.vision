@@ -1,6 +1,6 @@
 # Source onboarding — one generic way to add a vehicle, with simulatable halves
 
-**Opened:** 2026-08-25 · **Status:** diagnosis + design, nothing built · **Branch:** none yet
+**Opened:** 2026-08-25 · **Status:** diagnosis + design; **S1 done as of wave R2, 2026-08-26** (shape changed from this doc's own S1 spec — see §12), S2-S5 nothing built · **Branch:** none yet
 
 **Ask (verbatim):** *"I have an issue of telemetry and video. I can't add the video without telemetry
 and vice versa. But sometimes it can be that the drone has no camera yet, or it has a camera and I
@@ -230,14 +230,14 @@ path — an explicit stop signal that O7 had no verb to hang on.
 | Piece | State | Work |
 |---|---|---|
 | N devices in one create call | `CreateAssetRequest.devices` is already an array | none |
-| Telemetry-only usage open | `onTelemetryDeviceDiscovered`, 7 tests, **0 callers** | wire it |
+| Telemetry-only usage open | **DONE, wave R2 (2026-08-26) — differently than this row assumed.** `onTelemetryDeviceDiscovered` was **deleted**, not wired; see §12 | none, superseded |
 | Protocol-aware probe (no frame needed) | shipped, TELEMETRY-ONLY W1/W2 | none |
 | Capabilities defaulted per protocol | shipped, W3 | none |
 | Synthetic video + telemetry sources | shipped, `adapter-simulation`, 30 tests | none |
 | Attach a device to an existing asset | `POST /api/assets/{id}/devices` + asset-detail UI | none |
 | `DeviceOrigin` on `Device` | — | new: kernel enum, JPA column + Flyway, `CreateAssetDeviceSpec` field |
 | Simulated device on an **existing** asset | — | `SimulationService` can only create a whole asset |
-| `engage`/`disengage` verb | — | new controller + `AssetSessionService`; `resolveSingleVideoDevice` becomes "start all, zero is fine" |
+| `engage`/`disengage` verb | **DONE, wave R2 (2026-08-26).** `AssetSessionController` + `UsageTracker#engage/disengage`; no `AssetSessionService` was created (one interface, one impl, one caller does not earn a port — see §12) | none, superseded |
 | Fit-out table UI | — | rewrite of the Connect step; finders reused verbatim |
 | Delete the `simulated` category | — | 2 sites, both in `DefaultSimulationService` |
 
@@ -272,7 +272,7 @@ offer a wired transport as a permanent fitting before that exists.
 
 | Wave | Content | Risk | Independent? |
 |---|---|---|---|
-| **S1** | `engage`/`disengage` + wire `onTelemetryDeviceDiscovered`; video-less session legal | medium — touches the session model | yes |
+| **S1** | ~~`engage`/`disengage` + wire `onTelemetryDeviceDiscovered`~~ — **DONE, wave R2 (2026-08-26), shape changed; see §12** | medium — touches the session model | yes |
 | **S2** | `DeviceOrigin` enum + persistence + API field; badge it in the cockpit | low | yes |
 | **S3** | `SimulationService` can fit a simulated device onto an **existing** asset | low | needs S2 |
 | **S4** | Fit-out table replaces the Connect step; finders reused | medium — pure frontend | needs S3 |
@@ -308,3 +308,45 @@ resume exclusions.
 
 **Not verified:** none of this has been run. §7's "work" column is a reading of the code, not an
 estimate anyone has tested against a build.
+
+---
+
+## 12. Update — S1 shipped as part of ARCHITECTURE-AUDIT-2026-08-26 wave R2 (2026-08-26)
+
+R2's task brief (independent of this document, written before this doc's §6/§7/§9 were read by that
+wave) specified `engage`/`disengage` with **no video stream and no device traffic involved on
+either verb**, and required a written decision on `onTelemetryDeviceDiscovered`'s fate — wire it, or
+delete it. That is a materially different shape from this doc's §6 ("`engage` starts a video
+pipeline per `VIDEO` device… and calls `onTelemetryDeviceDiscovered` per `TELEMETRY` device") and
+§7/§9 (which assumed *wiring*, not deleting, the dead method). Recorded here so a reader of §6/§7/§9
+does not take that text as still-current:
+
+**What actually shipped** (`storage/persistence`, `station/vision-api`, `contexts/vision-warehouse`,
+`contexts/vision-perception`, `core/vision-kernel`):
+
+- `POST /api/assets/{id}/session` (engage) and `DELETE /api/assets/{id}/session` (disengage) —
+  same paths this doc proposed in §6. `AssetSessionController`, thin, scoped via
+  `assetService.details(scope, id)` (404 not 403 out-of-scope, matching this repo's convention).
+- `engage`/`disengage` live directly on `UsageTracker` — **no new `AssetSessionService`
+  interface**, contra §7's row. One implementation, one caller: doesn't earn a port
+  (`java-clean-code` §1).
+- `UsageOrigin{STREAM,TELEMETRY,OPERATOR}` kernel enum (mirrors `DeviceOrigin`), persisted on
+  `AssetUsage` (V26 migration, backfills existing rows to `STREAM`).
+- Three collisions settled and each has a named test: operator-engaged sessions survive
+  `onStreamStopped`; a running STREAM-origin usage is **promoted** to OPERATOR on `engage` rather
+  than rejected or duplicated; `disengage` closes the usage even while a stream is still running
+  (and the stream itself is left running — only the usage closes).
+- **`onTelemetryDeviceDiscovered` was deleted**, along with its 7 tests — not wired. Reasoning: it
+  duplicated what `engage` now does explicitly and on-demand; keeping both would have been a second,
+  disagreeing session-opening path (auto-open-on-first-telemetry-packet vs. explicit operator
+  verb), which is exactly the kind of implicit magic this audit's own R2 finding was written
+  against. `engage` is the one verb that opens a session with no stream involved now; nothing
+  auto-opens one from a telemetry packet arriving. Full reasoning also recorded in
+  `contexts/vision-perception/MODULE.md` and `docs/plans/active/DRONE-ONBOARDING-PLAN.md`'s O7 row.
+- **Not built, deliberately out of this wave's file scope:** no UI. No `DeviceOrigin` enum
+  (§7/S2). No fit-out table (S4). No `simulated`-category deletion (S5). §2-§5 and §8's
+  infrastructure discussion are entirely unaffected and still apply as written.
+
+**Net effect on this doc's own plan:** S1 is done, but S2 ("`DeviceOrigin` enum + persistence + API
+field") no longer needs to route through a wired `onTelemetryDeviceDiscovered` — it can build
+directly against `engage`. S3/S4/S5 are otherwise unaffected and remain open as specced.

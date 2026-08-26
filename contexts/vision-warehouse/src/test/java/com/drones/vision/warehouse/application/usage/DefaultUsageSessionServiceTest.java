@@ -5,6 +5,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +48,7 @@ class DefaultUsageSessionServiceTest {
         StreamId streamId = StreamId.random();
         Instant startedAt = Instant.parse("2026-01-01T00:00:00Z");
 
-        AssetUsage opened = service.open(assetId, streamId, startedAt);
+        AssetUsage opened = service.open(assetId, streamId, UsageOrigin.STREAM, startedAt);
 
         assertEquals(assetId, opened.assetId());
         assertEquals(streamId, opened.streamId());
@@ -60,14 +61,43 @@ class DefaultUsageSessionServiceTest {
 
     @Test
     void openWithNoStreamOpensATelemetryOnlyUsage() {
-        AssetUsage opened = service.open(AssetId.random(), null, Instant.now());
+        AssetUsage opened = service.open(AssetId.random(), null, UsageOrigin.STREAM, Instant.now());
 
         assertNull(opened.streamId());
     }
 
+    // -- origin (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) ------------------
+
+    @Test
+    void openWithoutAnExplicitOriginAlwaysAttributesStream() {
+        AssetUsage opened = service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, Instant.now());
+
+        assertEquals(UsageOrigin.STREAM, opened.origin());
+    }
+
+    @Test
+    void openWithAnExplicitOriginAttributesTheGivenOrigin() {
+        AssetId assetId = AssetId.random();
+        Instant startedAt = Instant.parse("2026-01-01T00:00:00Z");
+
+        AssetUsage opened = service.open(assetId, null, UsageOrigin.OPERATOR, startedAt);
+
+        assertEquals(assetId, opened.assetId());
+        assertNull(opened.streamId(), "an operator-engaged usage has no video stream to stamp");
+        assertEquals(UsageOrigin.OPERATOR, opened.origin());
+        assertEquals(UsagePhase.PREFLIGHT, opened.phase());
+        verify(usageRepository).save(opened);
+    }
+
+    @Test
+    void openWithAnExplicitOriginRejectsNullOrigin() {
+        assertThrows(NullPointerException.class,
+                () -> service.open(AssetId.random(), StreamId.random(), null, Instant.now()));
+    }
+
     @Test
     void foldPinsStartPositionOnTheFirstPositionedSampleAndNeverPersists() {
-        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.now());
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, Instant.now());
         GeoPosition first = new GeoPosition(50.0, 30.0, null);
 
         AssetUsage folded = service.fold(usage, first, UsagePhase.IN_FLIGHT);
@@ -81,7 +111,7 @@ class DefaultUsageSessionServiceTest {
 
     @Test
     void foldKeepsStartPositionPinnedOnceSetButAdvancesLastPosition() {
-        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.now());
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, Instant.now());
         GeoPosition first = new GeoPosition(50.0, 30.0, null);
         GeoPosition second = new GeoPosition(50.001, 30.001, null);
         AssetUsage afterFirst = service.fold(usage, first, UsagePhase.IN_FLIGHT);
@@ -95,7 +125,7 @@ class DefaultUsageSessionServiceTest {
 
     @Test
     void foldWithNoPositionStillIncrementsSampleCountButLeavesPositionsUntouched() {
-        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.now());
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, Instant.now());
 
         AssetUsage folded = service.fold(usage, null, UsagePhase.PREFLIGHT);
 
@@ -106,7 +136,7 @@ class DefaultUsageSessionServiceTest {
 
     @Test
     void updatePhaseReplacesOnlyThePhaseAndNeverPersists() {
-        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.now());
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, Instant.now());
 
         AssetUsage updated = service.updatePhase(usage, UsagePhase.LINK_LOST);
 
@@ -118,7 +148,7 @@ class DefaultUsageSessionServiceTest {
 
     @Test
     void closeTransformsAndPersistsTheFinalUsage() {
-        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.parse("2026-01-01T00:00:00Z"));
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, Instant.parse("2026-01-01T00:00:00Z"));
         Instant endedAt = Instant.parse("2026-01-01T00:05:00Z");
         org.mockito.Mockito.clearInvocations(usageRepository); // open() already persisted once; isolate close()'s save
 
@@ -134,7 +164,7 @@ class DefaultUsageSessionServiceTest {
 
     @Test
     void savePersistsTheGivenUsageAsIs() {
-        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.now());
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, Instant.now());
 
         AssetUsage saved = service.save(usage);
 
@@ -144,9 +174,9 @@ class DefaultUsageSessionServiceTest {
 
     @Test
     void rejectsNullArguments() {
-        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.now());
-        assertThrows(NullPointerException.class, () -> service.open(null, StreamId.random(), Instant.now()));
-        assertThrows(NullPointerException.class, () -> service.open(AssetId.random(), StreamId.random(), null));
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, Instant.now());
+        assertThrows(NullPointerException.class, () -> service.open(null, StreamId.random(), UsageOrigin.STREAM, Instant.now()));
+        assertThrows(NullPointerException.class, () -> service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, null));
         assertThrows(NullPointerException.class, () -> service.fold(null, null, UsagePhase.PREFLIGHT));
         assertThrows(NullPointerException.class, () -> service.fold(usage, null, null));
         assertThrows(NullPointerException.class, () -> service.updatePhase(null, UsagePhase.PREFLIGHT));
@@ -167,7 +197,7 @@ class DefaultUsageSessionServiceTest {
     @Test
     void usageBelongsToAssetIsTrueWhenTheUsageIsOwnedByThatAsset() {
         AssetId assetId = AssetId.random();
-        AssetUsage usage = service.open(assetId, StreamId.random(), Instant.now());
+        AssetUsage usage = service.open(assetId, StreamId.random(), UsageOrigin.STREAM, Instant.now());
         when(usageRepository.findById(usage.id())).thenReturn(Optional.of(usage));
 
         assertTrue(service.usageBelongsToAsset(usage.id(), assetId));
@@ -175,7 +205,7 @@ class DefaultUsageSessionServiceTest {
 
     @Test
     void usageBelongsToAssetIsFalseWhenTheUsageBelongsToADifferentAsset() {
-        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.now());
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, Instant.now());
         when(usageRepository.findById(usage.id())).thenReturn(Optional.of(usage));
 
         assertEquals(false, service.usageBelongsToAsset(usage.id(), AssetId.random()));
@@ -188,7 +218,7 @@ class DefaultUsageSessionServiceTest {
 
     @Test
     void usageBelongsToAssetRejectsNullArguments() {
-        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), Instant.now());
+        AssetUsage usage = service.open(AssetId.random(), StreamId.random(), UsageOrigin.STREAM, Instant.now());
         assertThrows(NullPointerException.class, () -> service.usageBelongsToAsset(null, AssetId.random()));
         assertThrows(NullPointerException.class, () -> service.usageBelongsToAsset(usage.id(), null));
     }

@@ -43,6 +43,7 @@ same rule structural — it has no internal dependency to declare.
 - `record StreamDescriptor(String protocol, URI uri, Map<String,String> options)` — **protocol must be lower-case** (ctor throws otherwise); a protocol+URI+options value object produced by warehouse and consumed by perception, with no behavior of its own — the textbook shared-kernel shape
 - `record StreamId(UUID value)` — `static random()`, `static of(String)`
 - `record Telemetry(DeviceId deviceId, Instant at, Double latitude, Double longitude, Double altitudeMeters, Double headingDegrees, Double batteryPercent, Map<String,Double> extra, FlightState flightState, Double aglMeters, Attitude attitude, Long deviceBootMillis)` — a telemetry sample from a device: position, attitude, battery state, flight-controller-reported state; all `Double`/`Attitude`/`Long` fields nullable. **`altitudeMeters` is AMSL** (above mean sea level — `GeoPosition` and every other consumer already read it that way; docs/plans/done/GEO-POSE-PLAN.md G1); `aglMeters` is the separate height-above-ground field a projection actually wants. `deviceBootMillis` is the device's own free-running boot clock, not wall-clock time and not comparable across devices — carried for a future wave to align a frame to a pose, nothing consumes it yet. Two convenience ctors preserve every pre-existing call site: the 9-arg ctor (the full arity before wave V1) defaults `aglMeters`/`attitude`/`deviceBootMillis` to `null`; the 8-arg ctor additionally defaults `flightState=null`. Compact ctor validates `aglMeters` finite if present and `deviceBootMillis` non-negative if present, each throwing `IllegalArgumentException`. Read by five contexts: flight, perception's OSD, warehouse's stats, events' replay, map
+- `enum UsageOrigin` — STREAM, TELEMETRY, OPERATOR. Which verb opened an `AssetUsage` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) — mirrors `DeviceOrigin`'s shape. `STREAM`: a device's video stream starting (`UsageTracker#onStreamStarted`, the only opener before this wave). `TELEMETRY`: reserved — no production code ever sets it as of this wave, see `contexts/vision-perception/MODULE.md`'s R2 entry for why `onTelemetryDeviceDiscovered` was deleted rather than wired to produce it. `OPERATOR`: the explicit `UsageTracker#engage`/`#disengage` verb — opens/closes a usage directly, no video stream, no device traffic
 - `record UsageId(UUID value)` — `static random()`, `static of(String)`
 - `record UserId(UUID value)` — `static random()`, `static of(String)`
 - `record VisualFix(Instant frameAt, GeoPosition position, Double yawDegrees, Double radiusMeters, Double impliedAglMeters, String regionId, String tileId, String refusal, VisualFixEvidence evidence, long telemetryAgeMillis, long latencyMillis)` (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.2, H2a) — the pure output of the HEAVY-A visual-localization pipeline (`cv-service`'s rectify→retrieve→re-rank→sequence-fuse→pose chain), consumed by `contexts/vision-flight`'s `DefaultTrackCorrectionService`. **Mutual exclusivity, enforced in the compact ctor**: exactly one of `position` (a believed fix) or a non-empty `refusal` (Python declined, e.g. `"LOW_TEXTURE"`) — never both, never neither. `position.altitudeMeters()` must be `null` — this is a 2-D fix only, matching `GeoProjection.project`'s own convention. `regionId`/`tileId`/`refusal` are non-null (empty string, not `null`, for "absent"). `radiusMeters` non-negative if present; `yawDegrees`/`impliedAglMeters` finite if present. `evidence` always required (even on a refusal, carrying whatever partial evidence Python gathered before declining). `telemetryAgeMillis`/`latencyMillis` are pipeline-timing diagnostics, not gated on
@@ -66,6 +67,18 @@ same rule structural — it has no internal dependency to declare.
 - `FixedCameraPose` is intentionally not `contexts/vision-map`'s `CameraPose` (D4) — same five geometric fields, no assetId/audit/persistence shape. Do not add those concerns here; they belong in the context module that owns audit and CRUD for a camera's pose.
 
 ## Status
+
+ARCHITECTURE-AUDIT-2026-08-26 wave **R2** added `UsageOrigin` — a plain three-value enum, no
+dependencies, same shape as `DeviceOrigin`. `contexts/vision-warehouse`'s `AssetUsage` gained an
+`origin` field of this type (a required 10th component, not a defaulting overload — see that
+module's `MODULE.md` for the two legacy convenience constructors kept for out-of-scope callers) and
+`contexts/vision-perception`'s `UsageTracker` gained the `engage`/`disengage` operator verb that
+produces `OPERATOR`; `storage/persistence` gained `V26__asset_usage_origin.sql` and
+`station/vision-api` gained `AssetSessionController` (`POST`/`DELETE /api/assets/{id}/session`) —
+see each module's own `MODULE.md` for the full follow-through. **205 → 205 tests** (the enum itself
+needs no new kernel-level test, same precedent `DeviceOrigin` set — its call sites are exercised in
+`vision-warehouse`/`vision-perception`/`storage/persistence`; `./mvnw -B -pl core/vision-kernel
+-am test`, green).
 
 ARCHITECTURE-AUDIT-2026-08-26 wave **R4** added `DeviceOrigin` — a plain two-value enum, no
 dependencies, same shape as `Capability`/`LifecycleState`. `contexts/vision-warehouse`'s `Device`
