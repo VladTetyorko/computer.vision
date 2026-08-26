@@ -77,12 +77,16 @@ class UsageTrackerTest {
     }
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources) {
-        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources);
+        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+                UsageTrackerSettings.defaults());
     }
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources, TelemetryLiveUpdatePort liveUpdatePublisherPort) {
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                liveUpdatePublisherPort);
+                new UsageTrackerSettings(Optional.of(liveUpdatePublisherPort), defaults.telemetryObserver(),
+                        defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
+                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
     }
 
     /**
@@ -92,43 +96,52 @@ class UsageTrackerTest {
      * tracker no longer names that type (docs/plans/active/DOMAIN-SEPARATION-W1.md §5, C2).
      */
     private UsageTracker tracker(List<TelemetrySourcePort> sources, GeofenceMonitor geofenceMonitor) {
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, geofenceMonitor::evaluate);
+                new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), Optional.of(geofenceMonitor::evaluate),
+                        defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
+                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
     }
 
     /**
      * docs/plans/done/MVP2-PLAN.md §S, S-a: same as {@link #tracker}, but with a tiny (20ms) source reopen
-     * backoff instead of production's real 1s-30s one, via the package-private test-seam
-     * constructor -- so supervision tests complete quickly and deterministically.
+     * backoff instead of production's real 1s-30s one -- so supervision tests complete quickly and
+     * deterministically.
      */
     private UsageTracker trackerWithFastRetry(List<TelemetrySourcePort> sources) {
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, null, TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
+                new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
+                        TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20),
+                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
     }
 
     /**
      * docs/plans/done/SCALE-100-PLAN.md S4: same as {@link #tracker}, but with explicit {@link
-     * UsageSummaryBatchSettings} via the package-private test-seam constructor, so coalescing tests
-     * can use a tiny batch window instead of waiting out production's default.
+     * UsageSummaryBatchSettings}, so coalescing tests can use a tiny batch window instead of waiting
+     * out production's default.
      */
     private UsageTracker trackerWithSummaryBatching(List<TelemetrySourcePort> sources,
                                                      UsageSummaryBatchSettings summaryBatchSettings) {
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, null, SupervisedPublisher.INITIAL_BACKOFF_NANOS, SupervisedPublisher.MAX_BACKOFF_NANOS,
-                summaryBatchSettings);
+                new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
+                        defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(), summaryBatchSettings,
+                        defaults.phaseSettings(), defaults.usagePhaseObserver()));
     }
 
     /**
      * docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O7: same as {@link #tracker}, but with
-     * explicit {@link UsagePhaseSettings} via the package-private test-seam constructor, so
-     * phase-transition tests can use a fixed/steppable clock and short silence/abandon windows
-     * instead of waiting out production's real ones.
+     * explicit {@link UsagePhaseSettings}, so phase-transition tests can use a fixed/steppable clock
+     * and short silence/abandon windows instead of waiting out production's real ones.
      */
     private UsageTracker trackerWithPhaseSettings(List<TelemetrySourcePort> sources,
                                                    UsagePhaseSettings phaseSettings) {
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, null, SupervisedPublisher.INITIAL_BACKOFF_NANOS, SupervisedPublisher.MAX_BACKOFF_NANOS,
-                UsageSummaryBatchSettings.immediate(), phaseSettings);
+                new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
+                        defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
+                        UsageSummaryBatchSettings.immediate(), phaseSettings, defaults.usagePhaseObserver()));
     }
 
     /**
@@ -138,14 +151,17 @@ class UsageTrackerTest {
      */
     /**
      * docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4, Wave O11: same as {@link
-     * #trackerWithPhaseSettings}, plus an explicit {@link UsagePhaseObserver} via the public
-     * canonical constructor -- lets the phase-observer firing tests below reuse the same
-     * fixed/steppable-clock plumbing as the phase-transition tests above.
+     * #trackerWithPhaseSettings}, plus an explicit {@link UsagePhaseObserver} -- lets the
+     * phase-observer firing tests below reuse the same fixed/steppable-clock plumbing as the
+     * phase-transition tests above.
      */
     private UsageTracker trackerWithPhaseObserver(List<TelemetrySourcePort> sources, UsagePhaseSettings phaseSettings,
                                                    UsagePhaseObserver usagePhaseObserver) {
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, null, UsageSummaryBatchSettings.immediate(), phaseSettings, usagePhaseObserver);
+                new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
+                        defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
+                        UsageSummaryBatchSettings.immediate(), phaseSettings, usagePhaseObserver));
     }
 
     private static UsagePhaseSettings phaseSettings(AtomicReference<Instant> clock) {

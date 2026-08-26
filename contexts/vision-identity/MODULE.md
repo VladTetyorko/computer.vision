@@ -17,10 +17,9 @@ may proceed against a specific asset/device (that's each consuming context's own
 **Depends on:** `vision-kernel` (`UserId`, `GroupId`, `AssetId`…) · `vision-platform`
 (`VisibilityScope`, `AccessDeniedException`, `AuditTrailPort`/`AuditEntry`) ·
 **`vision-warehouse`** — assignment reads assets: `DefaultAssignmentService` reaches
-`AssetRepositoryPort` directly (not through any warehouse service) for the one fact it needs per
-call — does the asset exist, what group does it belong to — so the ≤-own-scope grant check runs
-without pulling in a full `AssetDetails` assembly. This is the same "reach a repository port
-directly for one fact" precedent `perception`'s own cross-context reads follow. No other context.
+`AssetService#details(AssetId)` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5, replacing a
+direct `AssetRepositoryPort` read — see Gotchas) for the one fact it needs per call — does the
+asset exist, what group does it belong to — so the ≤-own-scope grant check can run. No other context.
 **Used by:** `vision-map` (viewer resolution), `vision-app`, `vision-api`, adapter-persistence.
 **Build/test:** `./mvnw -B -pl contexts/vision-identity test` — 91 tests green.
 
@@ -56,7 +55,10 @@ directly for one fact" precedent `perception`'s own cross-context reads follow. 
 ### `application.scope`
 - `ScopeResolver` (interface) → `DefaultScopeResolver(GroupRepositoryPort, AssignmentRepositoryPort)` — turns a `User` into a `VisibilityScope`; the single place role + group tree + assignments become "what may you see"
   - `VisibilityScope scopeFor(User)` — precedence: any **ADMIN** membership → `unbounded()`; else any **MANAGER** membership → `groups(union of each manager group's subtree)`; else (PILOT-only or no membership at all) → `assignedAssets(assignmentRepo.assetsForPilot(user.id()))` (empty set for an unassigned user). Subtree = self + descendants via `Group.parentGroupId`, built once as a parent→children map, walked BFS per manager root; a `visited` `LinkedHashSet` both dedupes overlapping subtrees and **breaks any malformed cycle** in the stored tree
-- `AssignmentService` (interface) → `DefaultAssignmentService(AssignmentRepositoryPort, AssetRepositoryPort)` — the pilot→asset roster
+- `AssignmentService` (interface) → `DefaultAssignmentService(AssignmentRepositoryPort, AssetService)` — the pilot→asset roster
+  (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5 — the second constructor argument was
+  warehouse's `AssetRepositoryPort` until this wave; it is now warehouse's published
+  `AssetService`, see Gotchas)
   - `void assign(UserId pilot, AssetId, VisibilityScope granterScope)` / `unassign(...)` — both validate the asset exists (404) then enforce the grant rule: `granterScope.canManage(asset.ownership())` or 403 (docs/plans/done/OPS-UX-PLAN.md §1/C3 — was `includes(asset)`, a visibility check; a PILOT could see-and-therefore-grant their own assigned asset, which conflated "may see" with "may reassign pilots." `canManage` is `false` for `ASSIGNED_ASSETS` regardless of the asset, so a pilot can no longer grant/revoke even their own assignment). Idempotent; an `unbounded()` granter may assign anything; a `groups()` (MANAGER) granter may assign within their own subtree, same as before
   - `Set<AssetId> assignmentsFor(UserId pilot)` — thin pass-through, not scope-checked (a pilot reading their own roster); backs `GET /api/me/assignments`
 - `ActivityService` (interface) → `DefaultActivityService(AuditTrailPort)` — a user's own activity feed
@@ -73,11 +75,23 @@ directly for one fact" precedent `perception`'s own cross-context reads follow. 
 - **`VisibilityScope`, `AccessDeniedException`, and the whole `AuditEntry` family live in `vision-platform`, not here** (moved **W1.6a**) — every context filters by the scope and throws the exception; it is the authorization *value*, not this context's aggregate. Do not add a new field to `VisibilityScope` here — that module owns it now. See `core/vision-platform/MODULE.md` for its full shape, including `includes(AssetId, Ownership)` (narrowed from `includes(Asset)` so the type could leave the application layer without dragging warehouse's `Asset` behind it).
 - **`maxGrantableRole` intentionally does not live on `VisibilityScope` any more** — it moved to `DefaultUserService` (its only caller) precisely because granting a role is user-administration policy, not a fact about what a scope can see. A future second caller of "what's the ceiling role this scope may grant" should call this class, not resurrect the method on the value type.
 - **`ScopeResolver`'s cycle guard is a real safety net, not defensive paranoia** — `DefaultScopeResolverTest` proves a malformed cyclic group tree still terminates (`assertTimeoutPreemptively`), because nothing in `GroupRepositoryPort`/`Group` itself prevents one from being stored.
-- **`DefaultAssignmentService` reaches `AssetRepositoryPort` directly, not through `AssetService`** — deliberately, to avoid pulling in a full `AssetDetails` assembly just to check existence + ownership group for one grant call. If a second identity-side caller ever needs richer asset data, reconsider whether a warehouse-side read model belongs there instead of widening this one further.
+- **`DefaultAssignmentService` reaches `AssetService#details(AssetId)`, not `AssetRepositoryPort`** (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5) — until this wave it reached warehouse's `AssetRepositoryPort` directly ("one fact, avoid a full assembly"); the audit's finding T1 is that a cross-context read through another context's repository port is a shared-database coupling wearing an interface, so it now goes through the published service instead, even though `details(AssetId)` assembles more than this call needs (it also resolves the asset's devices and recent usages). A net-zero-parameter swap — `AssignmentRepositoryPort, AssetRepositoryPort` became `AssignmentRepositoryPort, AssetService` — and grant/revoke is roster management, not a hot path, so the extra assembly work is accepted rather than requesting a narrower `AssetService` method for this one caller. If a future narrower read (e.g. `AssetService#ownershipOf(AssetId)`) is added for another caller, reconsider swapping this one onto it too.
 - **`AuthService#authenticate`'s "never distinguish the failure reason" behavior is a security requirement, not an incomplete implementation** — do not add a more specific exception or return type here to help a caller show a friendlier error message; that is exactly the information leak this method exists to prevent.
 - **`GroupService` has no `tree()` read model** — the flat, name-sorted `list()` is deliberately the only read slice 1 shipped; a manager UI wanting a nested tree view has to build it client-side from the flat list's `parentGroupId` links, or a later wave adds one.
 
 ## Status
+
+**ARCHITECTURE-AUDIT-2026-08-26 wave R5b done**: `DefaultAssignmentService`'s second constructor
+parameter swapped from warehouse's `AssetRepositoryPort` to warehouse's published `AssetService`
+(`requireGrantable` now calls `assetService.details(assetId).summary().asset()` instead of
+`assetRepository.findById(assetId)` — same `NoSuchElementException` message/behavior for an unknown
+asset). Net-zero parameter count. This module no longer imports any foreign context's
+`*RepositoryPort` — see Gotchas for the "why `details(AssetId)` and not a narrower method" call.
+93/93 tests green (`./mvnw -B -pl contexts/vision-identity test`), unchanged count — a pure
+collaborator swap, no behavior change for any test. **Wiring not applied here** (`vision-app`'s
+`AuthWiringConfiguration#assignmentService` bean method still passes an `AssetRepositoryPort` and
+must be updated to take/pass an `AssetService` instead — see the R5b task's own final report for the
+exact edit; `contexts/**` cannot touch `station/vision-app`).
 
 **W1.7b/c** (docs/plans/active/DOMAIN-SEPARATION-W1.md §16): `vision-domain`/`vision-application` dissolved; identity's `.domain`/`.application` packages became this one module, a directory move with the ArchUnit layer boundary preserved. `VisibilityScope`/`AccessDeniedException`/the audit family had already left for `vision-platform` in W1.6a, so this module's own dependency graph shrank to kernel+platform+warehouse only. 91/91 tests green.
 

@@ -2,6 +2,7 @@ package com.drones.vision.warehouse.domain.model;
 
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.DeviceOrigin;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.StreamDescriptor;
 import java.util.Set;
@@ -19,9 +20,13 @@ import java.util.Set;
  * @param capabilities features this device exposes; defensively copied to an immutable set
  * @param stream       how to obtain this device's video stream
  * @param state        whether the device is in service; a deactivated device refuses to stream
+ * @param origin       whether this device's data is real or synthetic (docs/plans/active/
+ *                     SOURCE-ONBOARDING-CONTEXT.md §5) — independent of {@code state}/{@code
+ *                     capabilities}: a simulated camera can sit on an asset that is otherwise all
+ *                     real hardware
  */
 public record Device(DeviceId id, String name, Set<Capability> capabilities, StreamDescriptor stream,
-                      LifecycleState state) {
+                      LifecycleState state, DeviceOrigin origin) {
 
     public Device {
         if (id == null) {
@@ -39,7 +44,22 @@ public record Device(DeviceId id, String name, Set<Capability> capabilities, Str
         if (state == null) {
             throw new IllegalArgumentException("Device state must not be null");
         }
+        if (origin == null) {
+            throw new IllegalArgumentException("Device origin must not be null");
+        }
         capabilities = Set.copyOf(capabilities);
+    }
+
+    /**
+     * Convenience constructor defaulting {@link #origin()} to {@link DeviceOrigin#LIVE} — kept so
+     * every pre-existing call site across the tree (a real device is overwhelmingly the common
+     * case) still compiles without threading an origin through call sites that never cared about
+     * simulation. Not the start of a chain: a new field earns at most this one overload
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R1/R4), never another one on top of it.
+     */
+    public Device(DeviceId id, String name, Set<Capability> capabilities, StreamDescriptor stream,
+                  LifecycleState state) {
+        this(id, name, capabilities, stream, state, DeviceOrigin.LIVE);
     }
 
     /**
@@ -79,10 +99,12 @@ public record Device(DeviceId id, String name, Set<Capability> capabilities, Str
      * @param name         the replacement name; must not be blank
      * @param capabilities the replacement capability set; defensively copied
      * @param stream       the replacement stream descriptor
+     * @param origin       the replacement origin
      * @return a new {@code Device} with those fields replaced
      */
-    public Device withDetails(String name, Set<Capability> capabilities, StreamDescriptor stream) {
-        return new Device(id, name, capabilities, stream, state);
+    public Device withDetails(String name, Set<Capability> capabilities, StreamDescriptor stream,
+                               DeviceOrigin origin) {
+        return new Device(id, name, capabilities, stream, state, origin);
     }
 
     /**

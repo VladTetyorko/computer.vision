@@ -1,6 +1,7 @@
 package com.drones.vision.warehouse.application.device;
 
 import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.DeviceOrigin;
 import com.drones.vision.kernel.StreamDescriptor;
 
 import java.util.Set;
@@ -14,11 +15,14 @@ import java.util.Set;
  * @param name         replacement name, or {@code null} to keep the current one
  * @param capabilities replacement capabilities, or {@code null} to keep the current set
  * @param stream       replacement stream descriptor, or {@code null} to keep the current one
+ * @param origin       replacement origin, or {@code null} to keep the current one — an operator
+ *                     re-declaring a bench-tested simulated camera as the real thing once it is
+ *                     swapped in, or vice versa
  */
-public record DeviceEdit(String name, Set<Capability> capabilities, StreamDescriptor stream) {
+public record DeviceEdit(String name, Set<Capability> capabilities, StreamDescriptor stream, DeviceOrigin origin) {
 
     /** An edit that changes nothing — the identity of this operation. */
-    public static final DeviceEdit NOTHING = new DeviceEdit(null, null, null);
+    public static final DeviceEdit NOTHING = new DeviceEdit(null, null, null, null);
 
     public DeviceEdit {
         if (name != null && name.isBlank()) {

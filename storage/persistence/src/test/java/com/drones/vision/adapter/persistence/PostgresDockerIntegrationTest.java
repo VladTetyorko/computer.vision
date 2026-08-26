@@ -364,13 +364,30 @@ class PostgresDockerIntegrationTest {
                     new StreamDescriptor("sim", URI.create("sim://x"), Map.of()));
             repository.save(original);
             Device renamed = original.withDetails("renamed", Set.of(Capability.VIDEO, Capability.AUDIO),
-                    original.stream());
+                    original.stream(), original.origin());
             repository.save(renamed);
 
             Optional<Device> found = repository.findById(id);
             assertTrue(found.isPresent());
             assertEquals("renamed", found.get().name());
             assertEquals(Set.of(Capability.VIDEO, Capability.AUDIO), found.get().capabilities());
+        }
+
+        @Test
+        void savedDeviceRoundTripsOriginAndDefaultsExistingCallersToLive() {
+            Device live = new Device(DeviceId.random(), "camera-live", Set.of(Capability.VIDEO),
+                    new StreamDescriptor("rtsp", URI.create("rtsp://example/live"), Map.of()));
+            Device simulated = new Device(DeviceId.random(), "camera-sim", Set.of(Capability.VIDEO),
+                    new StreamDescriptor("sim", URI.create("sim://cam"), Map.of()),
+                    LifecycleState.ACTIVE, com.drones.vision.kernel.DeviceOrigin.SIMULATED);
+
+            repository.save(live);
+            repository.save(simulated);
+
+            assertEquals(com.drones.vision.kernel.DeviceOrigin.LIVE,
+                    repository.findById(live.id()).orElseThrow().origin());
+            assertEquals(com.drones.vision.kernel.DeviceOrigin.SIMULATED,
+                    repository.findById(simulated.id()).orElseThrow().origin());
         }
 
         @Test

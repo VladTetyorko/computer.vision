@@ -2,6 +2,8 @@ package com.drones.vision.warehouse.domain.model;
 
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.DeviceOrigin;
+import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.StreamDescriptor;
 import org.junit.jupiter.api.Test;
 
@@ -43,5 +45,33 @@ class DeviceTest {
         assertThrows(IllegalArgumentException.class, () -> new Device(id, "", caps, stream));
         assertThrows(IllegalArgumentException.class, () -> new Device(id, "cam", null, stream));
         assertThrows(IllegalArgumentException.class, () -> new Device(id, "cam", caps, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Device(id, "cam", caps, stream, LifecycleState.ACTIVE, null));
+    }
+
+    @Test
+    void defaultsOriginToLiveWhenOmitted() {
+        Device device = new Device(DeviceId.random(), "cam-1", Set.of(Capability.VIDEO), descriptor());
+
+        assertEquals(DeviceOrigin.LIVE, device.origin());
+    }
+
+    @Test
+    void canBeConstructedWithASimulatedOrigin() {
+        Device device = new Device(DeviceId.random(), "cam-1", Set.of(Capability.VIDEO), descriptor(),
+                LifecycleState.ACTIVE, DeviceOrigin.SIMULATED);
+
+        assertEquals(DeviceOrigin.SIMULATED, device.origin());
+    }
+
+    @Test
+    void withDetailsReplacesOrigin() {
+        Device device = new Device(DeviceId.random(), "cam-1", Set.of(Capability.VIDEO), descriptor());
+
+        Device updated = device.withDetails("cam-1", Set.of(Capability.VIDEO), descriptor(), DeviceOrigin.SIMULATED);
+
+        assertEquals(DeviceOrigin.SIMULATED, updated.origin());
+        assertEquals(device.id(), updated.id());
+        assertEquals(device.state(), updated.state());
     }
 }

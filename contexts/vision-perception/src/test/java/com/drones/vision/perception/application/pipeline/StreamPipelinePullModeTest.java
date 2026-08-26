@@ -33,6 +33,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
@@ -106,15 +107,18 @@ class StreamPipelinePullModeTest {
 
     private StreamPipeline pullPipeline(PipelineConfig config, PullDetectionBinding binding) {
         return new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, null, System::nanoTime,
-                StreamPipelineSettings.defaults(), binding);
+                detectionRepositoryPort, eventPublisher,
+                new StreamPipelineCollaborators(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                        System::nanoTime, StreamPipelineSettings.defaults(), System::nanoTime, Optional.of(binding)));
     }
 
     private StreamPipeline pullPipeline(PipelineConfig config, PullDetectionBinding binding, AssetId assetId,
                                          DetectionLiveUpdatePort liveUpdatePublisherPort) {
         return new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, assetId, liveUpdatePublisherPort, null,
-                System::nanoTime, StreamPipelineSettings.defaults(), binding);
+                detectionRepositoryPort, eventPublisher,
+                new StreamPipelineCollaborators(Optional.empty(), Optional.of(assetId),
+                        Optional.of(liveUpdatePublisherPort), Optional.empty(), System::nanoTime,
+                        StreamPipelineSettings.defaults(), System::nanoTime, Optional.of(binding)));
     }
 
     private DetectionResult resultWithPullTelemetry(long sequence, Instant capturedAt, PullTelemetry telemetry) {
@@ -195,7 +199,7 @@ class StreamPipelinePullModeTest {
     @Test
     void pushModeStillReportsTransportPushAndZeroDecodeMillis() {
         StreamPipeline pipeline = new StreamPipeline(streamId, device, config(), NO_OP_SOURCE, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, StreamPipelineCollaborators.defaults());
 
         DetectionRate rate = pipeline.detectionRate();
         assertEquals(DetectionRate.TRANSPORT_PUSH, rate.transport());
@@ -238,7 +242,7 @@ class StreamPipelinePullModeTest {
         // pullDetection defaults to null for every existing constructor/caller -- updateConfig's new
         // "if (pullDetection != null) reconfigure(...)" branch must be a true no-op in that case.
         StreamPipeline pipeline = new StreamPipeline(streamId, device, config(), NO_OP_SOURCE, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, StreamPipelineCollaborators.defaults());
 
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> pipeline.updateConfig(
                 new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.6, 15, 2, Set.of())));

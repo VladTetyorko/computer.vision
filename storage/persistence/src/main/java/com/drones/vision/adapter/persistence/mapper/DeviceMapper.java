@@ -19,12 +19,13 @@ public final class DeviceMapper {
     public static DeviceEntity toEntity(Device device) {
         StreamDescriptor stream = device.stream();
         return new DeviceEntity(device.id().value(), device.name(), device.capabilities(),
-                stream.protocol(), stream.uri().toString(), stream.options(), device.state());
+                stream.protocol(), stream.uri().toString(), stream.options(), device.state(), device.origin());
     }
 
     public static Device toDomain(DeviceEntity entity) {
         StreamDescriptor stream = new StreamDescriptor(entity.streamProtocol(), URI.create(entity.streamUri()),
                 entity.streamOptions());
-        return new Device(new DeviceId(entity.id()), entity.name(), entity.capabilities(), stream, entity.state());
+        return new Device(new DeviceId(entity.id()), entity.name(), entity.capabilities(), stream, entity.state(),
+                entity.origin());
     }
 }
