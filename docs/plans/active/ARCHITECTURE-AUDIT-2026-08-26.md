@@ -391,13 +391,29 @@ section records what actually landed, including where the audit's own text was w
 | Rec | State | What landed |
 |---|---|---|
 | R1 | **merged** | The N-1-arg convenience-constructor convention is **withdrawn** — rule text in `.claude/skills/java-clean-code/SKILL.md` §3 + `CLAUDE.md` rule 10, then the classes: `UsageTracker` 10 → **1** public ctor (936 → 778 lines), `StreamPipeline` 9 → **1** (1530 → 1373), `DefaultStreamService` 8 → **1**. Optional collaborators became `Optional<T>` fields on three new settings/collaborator records; zero "pass `null` to skip that feature" javadoc survives in the three files. `vision-perception` 564/564, `vision-app` 248/248, behaviour byte-identical. |
-| R6 | **merged** | `cv-service` splits by `CV_SERVICE_ROLE` into `inference` vs `training`+`geolocation` processes (`cv-split` Compose profile, host ports 50061/50062); Java side gained `CvTarget`/`CvChannels`/`StaticTargetsNameResolver` — ordered failover on one channel via grpc's own `pick_first`, no load-balancer logic invented. |
+| R6 | **merged** | `cv-service` splits by `CV_SERVICE_ROLE` into `inference` vs `training`+`geolocation` processes (`cv-split` Compose profile, host ports 50061/50062); Java side gained `CvTarget`/`CvChannels`/`StaticTargetsNameResolver` — ordered failover on one channel via grpc's own `pick_first`, no load-balancer logic invented. Then wired: `vision.cv.inference.targets` / `vision.cv.training.target`, both empty by default so a one-process deployment is byte-identical. Routing the control-plane RPCs at the training channel also closed a latent `NoUniqueBeanDefinitionException` — the visual-geo wiring injected `ObjectProvider<ManagedChannel>` unqualified, so it would have thrown the moment a second channel bean existed. `vision-app` 248 → 258. |
 | R7 | **merged** | **Secure by default.** The permit-all filter chain used to be selected when `vision.auth.enabled` was simply absent, so the shipped default was `anyRequest().permitAll()` with CSRF off and the whole `VisibilityScope` apparatus unexercised. Secured is now the default and permit-all cannot win a tie. The three controllers §4 ledgered as unscoped were each decided: `HlsProxyController` **scoped** (it was a real leak — any caller, any stream, out-of-scope now 404s before the upstream is contacted), `EventController` **scoped**, `DeviceProbeController` **`@OpenByDesign`** (its request and response carry no `AssetId` or `Ownership` to scope against). |
 
-Open at the time of writing: R4, R2, R3, R5, R8, R9.
+| R4 | **merged** | `Device.origin{LIVE,SIMULATED}` (kernel enum, `V25` migration, on the device DTOs, `LIVE` on create and unchanged on `PATCH`). `resumeAll()` now selects on device origin instead of the asset's category, and new `fitSimulatedDevice` fits a simulated camera onto a real asset over an in-process `sim://` stream — the actual answer to D4's "the drone exists but has no camera yet". **Deliberately incomplete**: the `simulated` category row survives as an unenforced label; only its seeded-precondition guard went. One behaviour change falls out — an unseeded category is now a 400 from `requireCategory`, not a 409. |
+| R5b | **partly merged** | `DefaultAssignmentService` takes `AssetService` instead of `AssetRepositoryPort` (net-zero parameters), so `vision-identity` imports no foreign repository port at all. `vision-simulation`'s read was already gone as a side effect of R4. **Four classes remain, for two different reasons.** `vision-events` keeps its three reads *by design* — they are bulk, time-windowed historical queries, not one-fact lookups, and no owning context publishes a service shaped for them; inventing one would create a method whose only caller is this downstream sink. `vision-learning` and `vision-flight` are **blocked, not excused**: each needs one read method on warehouse (`AssetService#byDevice(DeviceId)`, `UsageService#byId(UsageId)`) that a parallel wave was holding at the time. Recorded in the respective `MODULE.md`. |
 
-**One process lesson worth keeping.** R7 reported one failing test as "pre-existing, reproduced on a
-clean stash." It was not: a later wave's worktree, branched from `master` with none of R7's changes,
-ran the same module **248/248 green**. A `git stash` that leaves an untracked file behind does not
-produce a clean tree, and "pre-existing" is a claim that has to be measured on a tree you have
-actually verified is clean — not on one you assume is.
+Open at the time of writing: R2, R3, R5c, R8, R9.
+
+The R5b split is worth naming as a **process cost, not a discovery**: running R3 and R5b concurrently
+required giving one of them exclusive hold on `vision-warehouse`, and that is precisely the module the
+other one needed a read method from. Parallelism bought wall-clock and spent it on a follow-up wave.
+
+**One process lesson worth keeping, with an ending I did not expect.** R7 reported one failing test
+as "pre-existing, reproduced on a clean stash." That claim was unfounded — a later wave's worktree,
+branched from `master` with none of R7's changes, ran the same module **248/248 green**, and dropping
+R7's new test-resources `application.properties` into that clean tree on its own left the test green
+too (8/8). But the failure is not R7's either: the next wave ran the full suite on the merged tree and
+got **258/258 with `PublishWiringTest` 8/8**, and could not reproduce the failure under any condition.
+The most likely explanation is that R7 measured during its own aborted first attempt — the
+`application.yaml` it briefly placed in test resources, which really does shadow the main one — and
+carried that number forward after switching approaches.
+
+So the lesson is not "R7 broke something." It is that **"pre-existing" and "unrelated" are claims,
+and a claim measured on a tree you have not verified is clean is worth nothing.** The cost of the
+wrong claim was real: it propagated into the next wave's brief as an instruction to ignore a failure,
+which — had the failure been real — is exactly how a regression ships.
