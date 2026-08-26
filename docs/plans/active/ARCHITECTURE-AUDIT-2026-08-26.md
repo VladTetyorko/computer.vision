@@ -400,6 +400,17 @@ section records what actually landed, including where the audit's own text was w
 | R6 | **merged** | `cv-service` splits by `CV_SERVICE_ROLE` into `inference` vs `training`+`geolocation` processes (`cv-split` Compose profile, host ports 50061/50062); Java side gained `CvTarget`/`CvChannels`/`StaticTargetsNameResolver` — ordered failover on one channel via grpc's own `pick_first`, no load-balancer logic invented. Then wired: `vision.cv.inference.targets` / `vision.cv.training.target`, both empty by default so a one-process deployment is byte-identical. Routing the control-plane RPCs at the training channel also closed a latent `NoUniqueBeanDefinitionException` — the visual-geo wiring injected `ObjectProvider<ManagedChannel>` unqualified, so it would have thrown the moment a second channel bean existed. `vision-app` 248 → 258. |
 | R7 | **merged** | **Secure by default.** The permit-all filter chain used to be selected when `vision.auth.enabled` was simply absent, so the shipped default was `anyRequest().permitAll()` with CSRF off and the whole `VisibilityScope` apparatus unexercised. Secured is now the default and permit-all cannot win a tie. The three controllers §4 ledgered as unscoped were each decided: `HlsProxyController` **scoped** (it was a real leak — any caller, any stream, out-of-scope now 404s before the upstream is contacted), `EventController` **scoped**, `DeviceProbeController` **`@OpenByDesign`** (its request and response carry no `AssetId` or `Ownership` to scope against). |
 
+**Found while trimming the docs, not by the audit: a MAVLink link that dies mid-stream tells nobody.**
+`adapter-mavlink` never emits `onError` or `onComplete` on the telemetry publisher it hands out — the
+only mentions of either in its production sources are javadoc explaining that *bind* failure is
+raised synchronously from `open(Device)` instead. A link that comes up cleanly and then stops
+carrying frames therefore looks, to every subscriber, exactly like an aircraft that has gone quiet.
+`UsageTracker#evaluateLinkHealth` does eventually reach `LINK_LOST`/`ABANDONED` on silence, so the
+session state is not wrong — but it takes the silence timeout to get there, and nothing distinguishes
+"the aircraft stopped talking" from "our socket died." Against `CLAUDE.md`'s own rule 9 (failsafe and
+newest-data are priorities) that is a gap worth naming. Recorded, not fixed — it wants a decision
+about what the adapter should signal and how the tracker should react.
+
 **Thirteen endpoints still have no authorization check at all, and R7 did not close them.** R7's row
 is accurate about the three controllers §4 named — `HlsProxyController` now gates on
 `StreamAccess.requireVisible`, `EventController` on `StreamAccess`/`CurrentUser.scope()`, and
