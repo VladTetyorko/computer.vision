@@ -185,8 +185,12 @@ touched specs; do not run the Maven reactor.
 
 | Wave | State |
 |---|---|
-| X1 | open |
-| X2 | open |
-| X3 | open |
-| X4 | open |
-| X5 | open |
+| X1 | **built** 101fdb67 — `shared/ui/transmitter-view` + `switch-gauge`, `core/rc/transmitter-view-logic.ts`; unmapped line duck-types `{source,sourceIndex}` instead of `boundControlKeys(profile)` because the engaged frame's bindings are not a `ControlProfile` |
+| X2 | **built** f9e500c9 — drawer rebuilt; `virtual-control-surface.*` deleted; `flight-command-panel` gained `modeAlsoOn`/`armAlsoOn`; footer uses `vision-side-panel`'s already-existing `[footer]` slot; `cockpit.html` passes `[mode]` |
+| X3 | **built** fd60b9a7 — `core/rc/controller-wizard-logic.ts`, 38 specs; SWITCH_3 vs SWITCH_2 is a bipolar-vs-unipolar guess (no dwell-at-centre field), operator corrects under Advanced |
+| X4 | **built** 584d92d5 — `step-rail`, `wizard-step`, `all-controls`, orchestrating `controller-setup`; the one facade addition is `replaceDraft(draft)` (the pure apply functions enforce invariants per-field setters cannot); Mode step's datalist has no real mode-name source yet — free text |
+| X5 | **done** — this table, `docs/plans/README.md`, `station/vision-web/MODULE.md` (updated per wave) |
+
+Verified 2026-08-26 on `feat/controller-ux`: `npm run test:ci` 145 files / 2649 tests green; `ng build --configuration production` green with only the two pre-existing budget warnings (initial 410.19 kB, `tactical-map.css`); `controller-setup` lazy chunk 27.58 → 60.75 kB.
+
+**Open:** live check on a real radio (operator's step); drawer screenshots in both themes inside `.surface-dark` were not captured by the agent.
