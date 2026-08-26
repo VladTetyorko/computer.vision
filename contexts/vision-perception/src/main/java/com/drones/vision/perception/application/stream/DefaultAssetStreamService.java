@@ -6,8 +6,8 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.warehouse.application.device.DeviceService;
+import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import com.drones.vision.warehouse.domain.model.Asset;
-import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -16,27 +16,29 @@ import java.util.Objects;
 /**
  * The one implementation of {@link AssetStreamService}.
  *
- * <p>Resolves the asset directly against {@link AssetRepositoryPort} rather than through {@code
- * AssetService} — {@code perception -> warehouse} is the legal direction
- * (docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e), and reaching the repository port
- * mirrors how {@code UsageTracker} already resolves assets/devices from this same context. Devices
- * are still reached through {@link DeviceService}, not {@code DeviceRepositoryPort}, matching
- * warehouse's own convention (moved here unchanged from {@code DefaultAssetService}'s prior
- * javadoc): a plain lookup carries no rule to duplicate either way, so there was no reason to
- * diverge from the existing idiom.
+ * <p>Resolves the asset through warehouse's {@link AssetDirectoryService} rather than {@code
+ * AssetService} or its raw {@code AssetRepositoryPort} directly
+ * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5) — see that type's own javadoc for why a
+ * caller that must not cycle back through {@code AssetService}'s {@code AssetLiveStatePort}
+ * dependency reaches for this narrower seam instead; {@code perception -> warehouse} is the legal
+ * direction (docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e). Devices are still reached
+ * through {@link DeviceService}, not the directory service's device lookup, matching warehouse's
+ * own convention (moved here unchanged from {@code DefaultAssetService}'s prior javadoc): a plain
+ * lookup carries no rule to duplicate either way, so there was no reason to diverge from the
+ * existing idiom.
  *
  * <h2>Threading</h2>
  * Holds no mutable state — all shared state is reached through the injected collaborators.
  */
 public final class DefaultAssetStreamService implements AssetStreamService {
 
-    private final AssetRepositoryPort assetRepository;
+    private final AssetDirectoryService assetDirectory;
     private final DeviceService deviceService;
     private final StreamService streamService;
 
-    public DefaultAssetStreamService(AssetRepositoryPort assetRepository, DeviceService deviceService,
+    public DefaultAssetStreamService(AssetDirectoryService assetDirectory, DeviceService deviceService,
                                       StreamService streamService) {
-        this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");
+        this.assetDirectory = Objects.requireNonNull(assetDirectory, "assetDirectory must not be null");
         this.deviceService = Objects.requireNonNull(deviceService, "deviceService must not be null");
         this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
     }
@@ -86,7 +88,7 @@ public final class DefaultAssetStreamService implements AssetStreamService {
 
     private Asset require(AssetId id) {
         Objects.requireNonNull(id, "id must not be null");
-        return assetRepository.findById(id)
+        return assetDirectory.find(id)
                 .orElseThrow(() -> new NoSuchElementException("Unknown asset: " + id.value()));
     }
 }

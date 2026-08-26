@@ -497,7 +497,7 @@ public class ApplicationServiceWiring {
      * exactly: the demand-poll task is never scheduled, and every stream stays fail-open on demand.
      */
     @Bean
-    public StreamService streamService(DeviceRepositoryPort deviceRepositoryPort,
+    public StreamService streamService(AssetDirectoryService assetDirectoryService,
                                         VideoSourceRegistry videoSourceRegistry,
                                         DetectionPort detectionPort,
                                         StreamPublisherPort streamPublisherPort,
@@ -516,7 +516,7 @@ public class ApplicationServiceWiring {
         Optional<PullDetectionSettings> pullDetectionSettings = cvProperties.pullEnabled()
                 ? Optional.of(new PullDetectionSettings(pulledDetectionPort.getObject(), cvProperties.pull().rtspBase()))
                 : Optional.empty();
-        StreamService defaultStreamService = new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry,
+        StreamService defaultStreamService = new DefaultStreamService(assetDirectoryService, videoSourceRegistry,
                 detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort,
                 new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.of(detectionEventRepositoryPort),
                         Optional.of(detectionLiveUpdatePort),
@@ -610,10 +610,10 @@ public class ApplicationServiceWiring {
      * resolves the asset itself rather than calling back into {@link AssetService}.
      */
     @Bean
-    public AssetStreamService assetStreamService(AssetRepositoryPort assetRepositoryPort,
+    public AssetStreamService assetStreamService(AssetDirectoryService assetDirectoryService,
                                                   DeviceService deviceService,
                                                   StreamService streamService) {
-        return new DefaultAssetStreamService(assetRepositoryPort, deviceService, streamService);
+        return new DefaultAssetStreamService(assetDirectoryService, deviceService, streamService);
     }
 
     /**

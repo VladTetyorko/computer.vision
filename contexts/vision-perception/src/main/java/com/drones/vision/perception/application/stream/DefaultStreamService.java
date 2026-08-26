@@ -21,7 +21,7 @@ import com.drones.vision.perception.domain.port.DetectionDemandPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
-import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
+import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
@@ -95,7 +95,7 @@ public final class DefaultStreamService implements StreamService {
 
     private static final System.Logger LOG = System.getLogger(DefaultStreamService.class.getName());
 
-    private final DeviceRepositoryPort deviceRepository;
+    private final AssetDirectoryService assetDirectory;
     private final VideoSourceRegistry videoSourceRegistry;
     private final DetectionPort detectionPort;
     private final StreamPublisherPort streamPublisherPort;
@@ -167,16 +167,20 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * The single canonical constructor (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md Finding
-     * R1) — every collaborator beyond the six mandatory ports is bundled into {@code
+     * R1) — every collaborator beyond the six mandatory ports/services is bundled into {@code
      * serviceSettings}; see {@link DefaultStreamServiceSettings} for what each field controls and
      * {@link DefaultStreamServiceSettings#defaults()} for the behavior every pre-R1 shortest
-     * constructor used to default to.
+     * constructor used to default to. {@code assetDirectory} (warehouse) replaces the {@code
+     * DeviceRepositoryPort} this class used to hold directly
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5) — see {@link AssetDirectoryService}'s
+     * own javadoc for why this reads the narrower directory seam rather than warehouse's {@code
+     * DeviceService}.
      */
-    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
+    public DefaultStreamService(AssetDirectoryService assetDirectory, VideoSourceRegistry videoSourceRegistry,
                                  DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
                                  DetectionRepositoryPort detectionRepositoryPort, EventPublisherPort eventPublisher,
                                  DefaultStreamServiceSettings serviceSettings) {
-        this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
+        this.assetDirectory = Objects.requireNonNull(assetDirectory, "assetDirectory must not be null");
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
         this.detectionPort = Objects.requireNonNull(detectionPort, "detectionPort must not be null");
         this.streamPublisherPort = Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
@@ -220,7 +224,7 @@ public final class DefaultStreamService implements StreamService {
         Objects.requireNonNull(requestedConfig, "config must not be null");
         Objects.requireNonNull(requestedTracking, "tracking must not be null");
 
-        Device device = deviceRepository.findById(deviceId)
+        Device device = assetDirectory.findDevice(deviceId)
                 .orElseThrow(() -> new NoSuchElementException("Unknown device: " + deviceId.value()));
         if (!device.isActive()) {
             throw new IllegalStateException("Device is not in service: " + device.name());
