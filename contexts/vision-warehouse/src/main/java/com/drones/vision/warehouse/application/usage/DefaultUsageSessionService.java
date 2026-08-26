@@ -66,4 +66,13 @@ public final class DefaultUsageSessionService implements UsageSessionService {
         Objects.requireNonNull(usage, "usage must not be null");
         return usageRepository.save(usage);
     }
+
+    @Override
+    public boolean usageBelongsToAsset(UsageId usageId, AssetId assetId) {
+        Objects.requireNonNull(usageId, "usageId must not be null");
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        return usageRepository.findById(usageId)
+                .map(usage -> usage.assetId().equals(assetId))
+                .orElse(false);
+    }
 }

@@ -74,9 +74,27 @@ class DefaultAssetDirectoryServiceTest {
     }
 
     @Test
+    void findDelegatesToAssetRepository() {
+        Asset asset = new Asset(AssetId.random(), "drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(DeviceId.random()), Map.of());
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+
+        assertEquals(Optional.of(asset), service.find(asset.id()));
+    }
+
+    @Test
+    void findIsEmptyForAnUnknownAsset() {
+        AssetId assetId = AssetId.random();
+        when(assetRepository.findById(assetId)).thenReturn(Optional.empty());
+
+        assertEquals(Optional.empty(), service.find(assetId));
+    }
+
+    @Test
     void rejectsNullDeviceId() {
         assertThrows(NullPointerException.class, () -> service.findByDevice(null));
         assertThrows(NullPointerException.class, () -> service.findDevice(null));
+        assertThrows(NullPointerException.class, () -> service.find(null));
     }
 
     @Test

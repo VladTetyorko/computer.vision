@@ -22,7 +22,7 @@ import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.VideoFrame;
-import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.learning.domain.port.DatasetUploadPort;
 
@@ -49,11 +49,15 @@ import com.drones.vision.perception.application.stream.StreamService;
  * {@link CaptureSpec} carries only a {@link StreamId}, not an {@link
  * com.drones.vision.kernel.AssetId} — {@link #capture} resolves the owning asset itself by
  * matching {@code streamId} against {@link StreamService#streams()}'s live snapshot to find the
- * device, then {@link AssetRepositoryPort#findByDeviceId}, exactly the device→asset resolution
+ * device, then {@link AssetDirectoryService#findByDevice}, exactly the device→asset resolution
  * {@code UsageTracker}/{@code DefaultStreamService} already perform internally when a stream
- * starts. Reaching {@link AssetRepositoryPort} directly (rather than through {@link com.drones.vision.warehouse.application.asset.AssetService})
- * mirrors {@code DefaultAssignmentService}'s own precedent — reaching a repository port directly
- * for the one fact this class needs, without pulling in a service's larger surface. A device with
+ * starts. Reaching {@link AssetDirectoryService} rather than the wider {@link
+ * com.drones.vision.warehouse.application.asset.AssetService} (docs/plans/active/
+ * ARCHITECTURE-AUDIT-2026-08-26.md R5) keeps this class off warehouse's raw {@code
+ * AssetRepositoryPort} without pulling in a service surface (live state, scope-checked reads) this
+ * class never needed — {@link AssetDirectoryService#find(com.drones.vision.kernel.AssetId)}
+ * answers the other two lookups ({@link #captureFromReplay}, {@link
+ * #requireAssetVisibleIfKnown}) the same way. A device with
  * no owning asset (or a stream not currently running) leaves the captured sample's {@code assetId}
  * {@code null} — see {@link TrainingSample}'s own javadoc for why that is a legitimate, expected
  * case, not an error. {@link #captureFromReplay} has no such gap — a {@link AssetUsage#assetId()}
@@ -97,14 +101,14 @@ public final class DefaultLabelingService implements LabelingService {
     private final TrainingStores stores;
     private final ReplaySources replay;
     private final StreamService streamService;
-    private final AssetRepositoryPort assetRepository;
+    private final AssetDirectoryService assetDirectory;
     private final AuditTrailPort auditTrail;
     private final Supplier<Instant> clock;
     private final TrainingFrameEncoder frameEncoder;
 
     public DefaultLabelingService(TrainingStores stores, ReplaySources replay, StreamService streamService,
-                                   AssetRepositoryPort assetRepository, AuditTrailPort auditTrail) {
-        this(stores, replay, streamService, assetRepository, auditTrail, Instant::now, new TrainingFrameEncoder());
+                                   AssetDirectoryService assetDirectory, AuditTrailPort auditTrail) {
+        this(stores, replay, streamService, assetDirectory, auditTrail, Instant::now, new TrainingFrameEncoder());
     }
 
     /**
@@ -113,9 +117,9 @@ public final class DefaultLabelingService implements LabelingService {
      * training frames, instead of {@link TrainingFrameEncoder}'s own default.
      */
     public DefaultLabelingService(TrainingStores stores, ReplaySources replay, StreamService streamService,
-                                   AssetRepositoryPort assetRepository, AuditTrailPort auditTrail,
+                                   AssetDirectoryService assetDirectory, AuditTrailPort auditTrail,
                                    float jpegQuality) {
-        this(stores, replay, streamService, assetRepository, auditTrail, Instant::now,
+        this(stores, replay, streamService, assetDirectory, auditTrail, Instant::now,
                 new TrainingFrameEncoder(jpegQuality));
     }
 
@@ -125,17 +129,17 @@ public final class DefaultLabelingService implements LabelingService {
      * in tests instead of depending on wall-clock time.
      */
     DefaultLabelingService(TrainingStores stores, ReplaySources replay, StreamService streamService,
-                            AssetRepositoryPort assetRepository, AuditTrailPort auditTrail, Supplier<Instant> clock) {
-        this(stores, replay, streamService, assetRepository, auditTrail, clock, new TrainingFrameEncoder());
+                            AssetDirectoryService assetDirectory, AuditTrailPort auditTrail, Supplier<Instant> clock) {
+        this(stores, replay, streamService, assetDirectory, auditTrail, clock, new TrainingFrameEncoder());
     }
 
     private DefaultLabelingService(TrainingStores stores, ReplaySources replay, StreamService streamService,
-                                    AssetRepositoryPort assetRepository, AuditTrailPort auditTrail,
+                                    AssetDirectoryService assetDirectory, AuditTrailPort auditTrail,
                                     Supplier<Instant> clock, TrainingFrameEncoder frameEncoder) {
         this.stores = Objects.requireNonNull(stores, "stores must not be null");
         this.replay = Objects.requireNonNull(replay, "replay must not be null");
         this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
-        this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");
+        this.assetDirectory = Objects.requireNonNull(assetDirectory, "assetDirectory must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.frameEncoder = frameEncoder;
@@ -181,7 +185,7 @@ public final class DefaultLabelingService implements LabelingService {
             throw new NoSuchElementException("Usage " + spec.usageId().value() + " has no recorded video stream");
         }
 
-        Asset asset = assetRepository.findById(usage.assetId()).orElse(null);
+        Asset asset = assetDirectory.find(usage.assetId()).orElse(null);
         requireAssetVisible(asset, actor, scope, dataset.id(), ACTION_CAPTURE_REPLAY);
 
         Instant at = usage.startedAt().plusMillis(Math.round(spec.atSeconds() * 1000));
@@ -381,7 +385,7 @@ public final class DefaultLabelingService implements LabelingService {
         if (assetId == null) {
             return;
         }
-        Asset asset = assetRepository.findById(assetId).orElse(null);
+        Asset asset = assetDirectory.find(assetId).orElse(null);
         if (asset != null && !scope.includes(asset.id(), asset.ownership())) {
             auditDenied(actor, datasetId, action,
                     "Denied " + action + " on dataset " + datasetId.value() + ": asset " + assetId.value()
@@ -401,7 +405,7 @@ public final class DefaultLabelingService implements LabelingService {
                 .filter(active -> active.streamId().equals(streamId))
                 .map(ActiveStream::deviceId)
                 .findFirst();
-        return deviceId.flatMap(assetRepository::findByDeviceId);
+        return deviceId.flatMap(assetDirectory::findByDevice);
     }
 
     private void auditDenied(UserId actor, DatasetId datasetId, String action, String summary) {
