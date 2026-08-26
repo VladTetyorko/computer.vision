@@ -45,8 +45,10 @@ const MIN_MICROS = 1000;
 const CENTER_MICROS = 1500;
 const MAX_MICROS = 2000;
 
-/** Highest RC channel the domain accepts (`ControlBinding`'s own `[1,18]`). */
-const MAX_RC_CHANNEL = 18;
+/** Highest RC channel the domain accepts (`ControlBinding`'s own `[1,18]`). Exported so a second
+ * consumer (the setup wizard's Advanced channel picker and the all-controls editor, wave X4) builds
+ * the same `1..18` list from one source rather than restating the domain's own range. */
+export const MAX_RC_CHANNEL = 18;
 
 /** What one control does: stream into a channel, or fire commands from its positions. */
 export type ControlRole = 'CHANNEL' | 'ACTIONS';
@@ -242,16 +244,27 @@ export function parameterKindOf(catalog: ControlCatalog | undefined, action: Con
   return catalog?.actions.find((a) => a.name === action)?.parameter ?? 'NONE';
 }
 
+/**
+ * The pulse-width envelope one `CHANNEL` row's travel derives, in this file's own protocol
+ * constants — exported so a second consumer (the setup wizard's Advanced disclosure, wave X4) can
+ * show an operator the same derived µs {@link toChannelBinding} sends, without a second file
+ * restating 1000/1500/2000 as its own copy of the same protocol constants.
+ */
+export function microsFor(travel: ControlTravel): { readonly min: number; readonly center: number; readonly max: number } {
+  return { min: MIN_MICROS, center: travel === 'CENTERED' ? CENTER_MICROS : MIN_MICROS, max: MAX_MICROS };
+}
+
 function toChannelBinding(control: ControlDraft): ControlBinding {
+  const micros = microsFor(control.travel);
   return {
     source: control.source,
     kind: control.kind,
     function: control.function,
     sourceIndex: control.sourceIndex,
     rcChannel: control.rcChannel,
-    minMicros: MIN_MICROS,
-    centerMicros: control.travel === 'CENTERED' ? CENTER_MICROS : MIN_MICROS,
-    maxMicros: MAX_MICROS,
+    minMicros: micros.min,
+    centerMicros: micros.center,
+    maxMicros: micros.max,
     deadband: 0,
     reversed: control.reversed,
   };

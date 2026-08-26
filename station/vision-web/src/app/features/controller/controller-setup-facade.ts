@@ -167,6 +167,24 @@ export class ControllerSetupFacade {
     );
   }
 
+  /**
+   * Replaces the whole draft in one shot — the setup wizard's own write path
+   * (docs/plans/active/CONTROLLER-UX-PLAN.md §2.3, wave X4), which computes a new draft with
+   * `controller-wizard-logic.ts`'s pure `applyChannelStep`/`applyActionStep` rather than driving the
+   * per-field setters above one at a time.
+   *
+   * Not a workaround: those two functions keep invariants chaining the setters cannot reproduce —
+   * `applyChannelStep` *drops* a different control's now-superseded binding of the same function
+   * entirely (there is no "unbind this other control" setter), and both functions replace a
+   * re-roled control's `positions` outright, where `setRole` leaves whatever the row's previous role
+   * had there. Reaching the same end state through the setters would mean, for every wizard step,
+   * first finding and removing the stale binding by hand and then re-deriving `positions: []`
+   * separately — strictly more code to keep in sync with the same two pure functions, not less.
+   */
+  replaceDraft(draft: ProfileDraft): void {
+    this.draftSignal.set(draft);
+  }
+
   setPositionParameter(key: string, position: SwitchPosition, parameter: string): void {
     this.patchControl(key, (control) => {
       const current = control.positions.find((p) => p.position === position);

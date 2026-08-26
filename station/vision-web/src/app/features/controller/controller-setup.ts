@@ -2,53 +2,41 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, s
 import { FormsModule } from '@angular/forms';
 import { SectionHeader } from '../../shared/ui/section-header';
 import { EmptyState } from '../../shared/ui/empty-state';
-import { Notice } from '../../shared/ui/notice';
 import { IconButton } from '../../shared/ui/icon-button';
+import { Icon } from '../../shared/ui/icon';
 import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import { UiStore } from '../../core/ui/ui-store';
 import { RcInputService } from '../../core/rc/rc-input.service';
-import { axisToPercent, defaultAxisLabel, defaultButtonLabel, isButtonOn } from '../../core/rc/rc-input-logic';
-import { actionLabel, controlKey, controlLabel, positionOf } from '../../core/rc/control-action-logic';
-import {
-  actionAt,
-  draftKey,
-  draftLabel,
-  kindsFor,
-  movedControl,
-  parameterKindOf,
-  positionsOf,
-  type ControlDraft,
-} from '../../core/rc/controller-setup-logic';
+import { wizardSteps, type WizardStep as WizardStepModel } from '../../core/rc/controller-wizard-logic';
 import { ControllerSetupFacade } from './controller-setup-facade';
-import type { ControlAction, SwitchPosition, VehicleKind } from '../../core/api/models';
-
-/** RC channels a control may be bound to — the domain's own `[1,18]`, as a list a picker can render. */
-const RC_CHANNELS = Array.from({ length: 18 }, (_, i) => i + 1);
+import { StepRail } from './step-rail';
+import { WizardStep as WizardStepComponent } from './wizard-step';
+import { AllControls } from './all-controls';
+import type { ControlProfile, VehicleKind } from '../../core/api/models';
 
 /**
- * `/manage/controller` (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C11) — where an operator says
- * what each stick, switch and button on their transmitter does.
+ * `/manage/controller` (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C11,
+ * docs/plans/active/CONTROLLER-UX-PLAN.md §2.3 wave X4) — where an operator says what each stick,
+ * switch and button on their transmitter does.
  *
- * <h2>The page is the transmitter, not a form</h2>
- * Every row reads live: flick a switch and its own row lights up with the position it is in, using
- * the same quantizer the command that fires from it will use (`control-action-logic.ts#positionOf`).
- * That is the whole reason this is a page and not a settings dialog — "which one is Sw 5" is a
- * question no dropdown can answer, and **Detect** answers it by watching for the control that
- * actually moved.
+ * <h2>A wizard first, a flat editor underneath</h2>
+ * The page is two views over the same draft: `vision-step-rail` + `vision-wizard-step` walk a fresh
+ * layout through one control at a time — the on-ramp an operator who has never done this before
+ * needs. `vision-all-controls`, collapsed by default behind "All controls", is the original flat
+ * editor unchanged — everything at once, for an operator who already knows their transmitter or
+ * needs to reach a control the fixed step list does not visit. Neither view owns the draft; both
+ * read and write `ControllerSetupFacade` the same way, so switching between them mid-edit never
+ * loses anything.
  *
  * <h2>Nothing here commands anything</h2>
  * Editing writes to a local draft; `PUT` happens on Save, and even then a saved layout does nothing
- * until it is activated. A control this page is in the middle of describing is a control the
- * operator has not finished thinking about, and a live-saving editor would hand it to a session
- * anyway.
- *
- * Every picker is filled from `GET /api/control-profiles/catalog` (decision C8) — this component
- * hardcodes no action, no function and no switch level, so it cannot offer something the server
- * would then refuse.
+ * until it is activated. Every picker is filled from `GET /api/control-profiles/catalog` (decision
+ * C8) — this page hardcodes no action, no function and no switch level, so it cannot offer something
+ * the server would then refuse.
  */
 @Component({
   selector: 'vision-controller-setup-page',
-  imports: [FormsModule, SectionHeader, EmptyState, Notice, IconButton, ConfirmDialog],
+  imports: [FormsModule, SectionHeader, EmptyState, IconButton, Icon, ConfirmDialog, StepRail, WizardStepComponent, AllControls],
   templateUrl: './controller-setup.html',
   styleUrl: './controller-setup.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -58,38 +46,51 @@ export class ControllerSetupPage implements OnInit {
   protected readonly facade = inject(ControllerSetupFacade);
   protected readonly rc = inject(RcInputService);
 
-  protected readonly axisLabel = defaultAxisLabel;
-  protected readonly buttonLabel = defaultButtonLabel;
-  protected readonly axisToPercent = axisToPercent;
-  protected readonly isOn = isButtonOn;
-  protected readonly actionLabel = actionLabel;
-  protected readonly controlLabel = controlLabel;
-  protected readonly draftKey = draftKey;
-  protected readonly draftLabel = draftLabel;
-  protected readonly actionAt = actionAt;
-  protected readonly channels = RC_CHANNELS;
-
   /** The delete confirm — one overlay group, per this app's own `UiStore` rule. */
   private readonly dialog = new UiStore();
   protected isConfirming(id: string): boolean {
     return this.dialog.isOpen(id);
   }
 
-  /** The "flick the control you mean" gesture: the readings when it started, or `undefined` when off. */
-  private readonly learnBaseline = signal<{ axes: readonly number[]; buttons: readonly number[] } | undefined>(
-    undefined,
-  );
-  protected readonly learning = computed(() => this.learnBaseline() !== undefined);
+  /** The layout bar's own two disclosures ('new-layout' popover, 'all-controls' editor) — a second,
+   * separate `UiStore` group from `dialog` (a delete confirm may legitimately be open at the same
+   * time as one of these; `UiStore`'s own doc comment: "overlays that may legitimately overlap get
+   * separate instances"). Within this group the two stay mutually exclusive — collapsed by default
+   * (item 6): the wizard is the on-ramp, the flat editor is the escape hatch. */
+  private readonly panels = new UiStore();
+  protected isPanelOpen(id: 'new-layout' | 'all-controls'): boolean {
+    return this.panels.isOpen(id);
+  }
+  protected togglePanel(id: 'new-layout' | 'all-controls'): void {
+    this.panels.toggle(id);
+  }
+  protected closePanel(id: 'new-layout' | 'all-controls'): void {
+    this.panels.close(id);
+  }
 
-  // --- New-layout form -------------------------------------------------------------------------
+  // --- New-layout form ---------------------------------------------------------------------------
   protected readonly newKind = signal<VehicleKind>('ROVER');
   protected readonly newName = signal('');
 
+  /** The built-in for the selected profile's own kind — {@link wizardSteps}' totality source, so a
+   * rover only ever gets rover steps and a copter only ever gets copter steps. */
+  protected readonly builtInForKind = computed<ControlProfile | undefined>(() => {
+    const kind = this.facade.selected()?.kind;
+    return kind ? this.facade.profiles().find((p) => p.kind === kind && p.source === 'BUILT_IN') : undefined;
+  });
+
+  protected readonly steps = computed<readonly WizardStepModel[]>(() => {
+    const profile = this.facade.selected();
+    return profile ? wizardSteps(profile.kind, this.builtInForKind(), this.facade.catalog()) : [];
+  });
+
+  protected readonly currentStepIndex = signal(0);
+
   constructor() {
+    // A freshly opened (or newly created) layout always starts its wizard at step one.
     effect(() => {
-      const axes = this.rc.axes();
-      const buttons = this.rc.buttons();
-      untracked(() => this.captureLearned(axes, buttons));
+      this.facade.selected()?.id;
+      untracked(() => this.currentStepIndex.set(0));
     });
   }
 
@@ -98,72 +99,26 @@ export class ControllerSetupPage implements OnInit {
     void this.facade.load();
   }
 
-  // --- Live readouts ---------------------------------------------------------------------------
-
-  /** One control's current position, quantized exactly as the dispatcher will quantize it. */
-  protected positionNow(control: ControlDraft): SwitchPosition {
-    const values = control.source === 'AXIS' ? this.rc.axes() : this.rc.buttons();
-    return positionOf(control.source, control.kind, values[control.sourceIndex] ?? 0);
+  protected goNext(): void {
+    this.currentStepIndex.update((i) => Math.min(i + 1, Math.max(this.steps().length - 1, 0)));
   }
 
-  /** Whether a physical control already has a row, so the inventory can say so rather than duplicate it. */
-  protected isBound(source: 'AXIS' | 'BUTTON', index: number): boolean {
-    const key = controlKey(source, index);
-    return (this.facade.draft()?.controls ?? []).some((c) => draftKey(c) === key);
+  protected goBack(): void {
+    this.currentStepIndex.update((i) => Math.max(i - 1, 0));
   }
 
-  // --- Editing ---------------------------------------------------------------------------------
-
-  protected kinds(control: ControlDraft) {
-    return kindsFor(this.facade.catalog(), control.source);
-  }
-
-  protected positions(control: ControlDraft) {
-    return positionsOf(this.facade.catalog(), control.kind);
-  }
-
-  protected parameterKind(action: ControlAction | undefined) {
-    return parameterKindOf(this.facade.catalog(), action);
-  }
-
-  /**
-   * The aux-function menu, with the bound number prepended when it is not on it — a layout
-   * configured against a different `vision.control.aux-functions` menu still shows what it is set
-   * to, rather than silently reading as the first entry.
-   */
-  protected auxOptions(current: string | null | undefined) {
-    const menu = this.facade.catalog()?.auxFunctions ?? [];
-    if (!current || menu.some((f) => String(f.number) === current)) {
-      return menu;
-    }
-    return [{ number: Number(current), label: `Function ${current}` }, ...menu];
-  }
-
-  protected onActionChange(key: string, position: SwitchPosition, value: string): void {
-    this.facade.setPositionAction(key, position, value === '' ? undefined : (value as ControlAction));
-  }
-
-  // --- Detect ----------------------------------------------------------------------------------
-
-  protected toggleLearn(): void {
-    this.learnBaseline.set(
-      this.learning() ? undefined : { axes: [...this.rc.axes()], buttons: [...this.rc.buttons()] },
-    );
-  }
-
-  private captureLearned(axes: readonly number[], buttons: readonly number[]): void {
-    const baseline = this.learnBaseline();
-    if (!baseline) {
-      return;
-    }
-    const moved = movedControl(axes, buttons, baseline);
-    if (moved) {
-      this.learnBaseline.set(undefined);
-      this.facade.addControl(moved.source, moved.sourceIndex);
+  /** Save, then activate only once the save actually landed — a failed save already told the
+   * operator why (`ControllerSetupFacade#save`'s own toast); activating a layout that is still
+   * dirty would engage something that was never persisted. */
+  protected async onSaveAndActivate(): Promise<void> {
+    await this.facade.save();
+    const profile = this.facade.selected();
+    if (profile && !this.facade.dirty()) {
+      await this.facade.activate(profile.id);
     }
   }
 
-  // --- Profile actions -------------------------------------------------------------------------
+  // --- Profile actions -----------------------------------------------------------------------
 
   protected async create(): Promise<void> {
     const name = this.newName().trim();
@@ -172,6 +127,7 @@ export class ControllerSetupPage implements OnInit {
     }
     await this.facade.createFrom(this.newKind(), name);
     this.newName.set('');
+    this.panels.close('new-layout');
   }
 
   protected async copySelected(): Promise<void> {

@@ -2,6 +2,7 @@ import { controlKey } from './control-action-logic';
 import { blankControlDraft, draftKey, positionsOf, type ControlDraft, type ProfileDraft } from './controller-setup-logic';
 import type {
   ControlAction,
+  ControlActionParameter,
   ControlBinding,
   ControlCatalog,
   ControlFunction,
@@ -220,9 +221,67 @@ const ARM_ACTIONS: ReadonlySet<ControlAction> = new Set(['ARM', 'TOGGLE_ARM']);
 const MODE_ACTIONS: ReadonlySet<ControlAction> = new Set(['SET_MODE']);
 const EXTRAS_ACTIONS: ReadonlySet<ControlAction> = new Set(['EMERGENCY_STOP', 'RETURN_TO_HOME', 'AUX_FUNCTION']);
 
+/** {@link ARM_ACTIONS} widened with `DISARM` — the family {@link actionsForStep} offers the `ARM`
+ * step's per-position selects. Kept distinct from {@link ARM_ACTIONS}: a step counts as *done*
+ * ({@link stepStatus}) only once something actually arms, but the editor offering the Arm step must
+ * still let the operator choose Disarm for the position that is not Arm — {@link ARM_STEP_DEFAULTS}
+ * itself defaults `LOW → DISARM` alongside `HIGH → ARM`. */
+const ARM_STEP_ACTIONS: ReadonlySet<ControlAction> = new Set(['ARM', 'DISARM', 'TOGGLE_ARM']);
+
 /** Whether any `ACTIONS` control in the draft fires one of `actions` from any of its positions. */
 function firesAny(draft: ProfileDraft, actions: ReadonlySet<ControlAction>): boolean {
   return draft.controls.some((c) => c.role === 'ACTIONS' && c.positions.some((p) => actions.has(p.action)));
+}
+
+/**
+ * Which non-`CHANNEL` step kind a bound `ACTIONS` control belongs to, read off what its positions
+ * actually fire — used by the `EXTRAS` step's "anything else on the radio" list, so it shows only
+ * controls nothing has claimed yet rather than re-offering the Arm or Mode step's own control as if
+ * it were still unbound. `undefined` for a `CHANNEL` control, or an `ACTIONS` control with nothing
+ * chosen on any position yet.
+ */
+export function actionStepKindOf(control: ControlDraft): 'ARM' | 'MODE' | 'EXTRAS' | undefined {
+  if (control.role !== 'ACTIONS') {
+    return undefined;
+  }
+  if (control.positions.some((p) => ARM_ACTIONS.has(p.action))) {
+    return 'ARM';
+  }
+  if (control.positions.some((p) => MODE_ACTIONS.has(p.action))) {
+    return 'MODE';
+  }
+  if (control.positions.some((p) => EXTRAS_ACTIONS.has(p.action))) {
+    return 'EXTRAS';
+  }
+  return undefined;
+}
+
+/**
+ * The catalogue actions one `ARM`/`MODE`/`EXTRAS` step's per-position selects should offer —
+ * narrowed to the family that step is actually asking about (Arm/Disarm/Toggle arm, Set mode, or
+ * the Extras trio) rather than the old flat editor's single list of every action regardless of
+ * which step opened it. A `CHANNEL`/`REVIEW` step (or an absent catalogue) yields every action the
+ * catalogue has, unfiltered — there is no narrower family to apply.
+ */
+export function actionsForStep(
+  step: WizardStep,
+  catalog: ControlCatalog | undefined,
+): readonly {
+  readonly name: ControlAction;
+  readonly label: string;
+  readonly parameter: ControlActionParameter;
+  readonly dangerous: boolean;
+}[] {
+  const all = catalog?.actions ?? [];
+  const family: ReadonlySet<ControlAction> | undefined =
+    step.kind === 'ARM'
+      ? ARM_STEP_ACTIONS
+      : step.kind === 'MODE'
+        ? MODE_ACTIONS
+        : step.kind === 'EXTRAS'
+          ? EXTRAS_ACTIONS
+          : undefined;
+  return family ? all.filter((a) => family.has(a.name)) : all;
 }
 
 /**

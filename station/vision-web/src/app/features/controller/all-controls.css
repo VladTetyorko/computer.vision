@@ -1,0 +1,146 @@
+/* Moved verbatim from the old `/manage/controller` page's own editor card (wave X4 —
+   docs/plans/active/CONTROLLER-UX-PLAN.md §2.3 item 6) — same rules, same rows, just reachable from
+   under the wizard's "All controls ▾" toggle instead of being the only view. */
+
+:host {
+  display: block;
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.editor-actions {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.name-field {
+  display: flex;
+  flex-direction: column;
+  max-width: 32ch;
+}
+
+/* ---- Live transmitter inventory ------------------------------------------------------------ */
+
+.inventory {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.inventory-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.inventory-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* One physical control, offered as something to map. A bound one stays visible but inert — it is
+   still part of the transmitter, it just already has a row below. */
+.input-chip {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.input-chip:disabled {
+  cursor: default;
+}
+
+.input-chip.bound {
+  color: var(--text-muted);
+}
+
+.input-chip.on {
+  border-color: var(--color-info);
+}
+
+/* ---- Control rows ---------------------------------------------------------------------------- */
+
+.control-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.control-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.control-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.control-head-spacer {
+  flex: 1;
+}
+
+.control-name {
+  font-weight: 600;
+}
+
+.control-row {
+  display: flex;
+  gap: var(--space-16);
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.control-row label {
+  display: flex;
+  flex-direction: column;
+}
+
+.control-row label.grow {
+  flex: 1;
+  min-width: 12ch;
+}
+
+.control-row label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.position-row {
+  align-items: flex-end;
+  padding-left: var(--space-8);
+  border-left: 2px solid var(--border);
+}
+
+.position-name {
+  min-width: 5ch;
+  padding-bottom: var(--space-8);
+  color: var(--text-muted);
+}
+
+.issue-list {
+  margin: 0;
+  padding-left: var(--space-16);
+}

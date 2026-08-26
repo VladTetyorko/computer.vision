@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   actionStepDefaults,
+  actionStepKindOf,
+  actionsForStep,
   applyActionStep,
   applyChannelStep,
   channelStepDefaults,
@@ -574,5 +576,66 @@ describe('reviewChecks', () => {
 
     expect(checks.find((c) => c.label === 'Arm is on a switch')?.ok).toBe(true);
     expect(checks.find((c) => c.label === 'Mode is on a switch')?.ok).toBe(false);
+  });
+});
+
+describe('actionStepKindOf', () => {
+  it('is undefined for a CHANNEL control', () => {
+    const control: ControlDraft = { ...blankControlDraft('AXIS', 0, draft([])), role: 'CHANNEL' };
+    expect(actionStepKindOf(control)).toBeUndefined();
+  });
+
+  it('is undefined for an ACTIONS control with nothing chosen yet', () => {
+    expect(actionStepKindOf(blankControlDraft('BUTTON', 0, draft([])))).toBeUndefined();
+  });
+
+  it('reads ARM off an ARM/DISARM/TOGGLE_ARM position', () => {
+    const control: ControlDraft = {
+      ...blankControlDraft('BUTTON', 0, draft([])),
+      positions: [{ position: 'HIGH', action: 'TOGGLE_ARM', parameter: null }],
+    };
+    expect(actionStepKindOf(control)).toBe('ARM');
+  });
+
+  it('reads MODE off a SET_MODE position', () => {
+    const control: ControlDraft = {
+      ...blankControlDraft('BUTTON', 0, draft([])),
+      positions: [{ position: 'HIGH', action: 'SET_MODE', parameter: 'HOLD' }],
+    };
+    expect(actionStepKindOf(control)).toBe('MODE');
+  });
+
+  it('reads EXTRAS off emergency stop, return home, or aux function', () => {
+    const control: ControlDraft = {
+      ...blankControlDraft('BUTTON', 0, draft([])),
+      positions: [{ position: 'HIGH', action: 'AUX_FUNCTION', parameter: '19' }],
+    };
+    expect(actionStepKindOf(control)).toBe('EXTRAS');
+  });
+});
+
+describe('actionsForStep', () => {
+  const armStep: WizardStep = { id: 'arm', kind: 'ARM', title: 'Arm', instruction: '' };
+  const modeStep: WizardStep = { id: 'mode', kind: 'MODE', title: 'Mode', instruction: '' };
+  const extrasStep: WizardStep = { id: 'extras', kind: 'EXTRAS', title: 'Extras', instruction: '' };
+  const reviewStep: WizardStep = { id: 'review', kind: 'REVIEW', title: 'Review', instruction: '' };
+
+  it('narrows the ARM step to arm/disarm/toggle', () => {
+    expect(actionsForStep(armStep, CATALOG).map((a) => a.name).sort()).toEqual(['ARM', 'DISARM', 'TOGGLE_ARM'].sort());
+  });
+
+  it('narrows the MODE step to SET_MODE only', () => {
+    expect(actionsForStep(modeStep, CATALOG).map((a) => a.name)).toEqual(['SET_MODE']);
+  });
+
+  it('narrows the EXTRAS step to the extras trio', () => {
+    expect(actionsForStep(extrasStep, CATALOG).map((a) => a.name).sort()).toEqual(
+      ['EMERGENCY_STOP', 'RETURN_TO_HOME', 'AUX_FUNCTION'].sort(),
+    );
+  });
+
+  it('does not narrow a step with no action family (e.g. REVIEW), or an absent catalogue', () => {
+    expect(actionsForStep(reviewStep, CATALOG)).toEqual(CATALOG.actions);
+    expect(actionsForStep(armStep, undefined)).toEqual([]);
   });
 });

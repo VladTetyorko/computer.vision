@@ -1,0 +1,251 @@
+@if (facade.selected(); as profile) {
+  <section class="card editor">
+    <vision-section-header [title]="profile.name" [subtitle]="'For ' + profile.kind">
+      <span actions class="editor-actions">
+        @if (facade.editable()) {
+          <button type="button" class="btn secondary" [disabled]="!facade.dirty()" (click)="facade.discard()">
+            Discard
+          </button>
+          <button type="button" class="btn" [disabled]="!facade.canSave() || facade.saving()" (click)="facade.save()">
+            {{ facade.saving() ? 'Saving…' : 'Save' }}
+          </button>
+        } @else {
+          <button type="button" class="btn secondary" (click)="copyRequested.emit()">Make a copy</button>
+        }
+      </span>
+    </vision-section-header>
+
+    @if (!facade.editable()) {
+      <vision-notice variant="neutral">
+        Built-in layouts can't be edited — they're the fallback every vehicle keeps.
+      </vision-notice>
+    }
+
+    @if (facade.draft(); as draft) {
+      @if (facade.editable()) {
+        <label class="name-field">
+          <span class="label">Name</span>
+          <input type="text" aria-label="Layout name" [ngModel]="draft.name" (ngModelChange)="facade.rename($event)" />
+        </label>
+      }
+
+      <!-- Live transmitter inventory — the answer to "which one is Sw 5". -->
+      <div class="inventory">
+        <div class="inventory-head">
+          <span class="label">Your transmitter</span>
+          @if (rc.connected()) {
+            <span class="chip ok"><span class="dot ok"></span>{{ rc.deviceLabel() }}</span>
+            @if (facade.editable()) {
+              <button type="button" class="btn small" [class.active]="learning()" (click)="toggleLearn()">
+                {{ learning() ? 'Move a control…' : 'Detect' }}
+              </button>
+            }
+          }
+        </div>
+
+        @if (!rc.connected()) {
+          <p class="muted hint">
+            Plug your transmitter in over USB in <strong>USB Joystick</strong> mode and move a stick — the browser
+            only reveals a controller after its first input. You can still edit this layout without one; the
+            positions below just won't light up.
+          </p>
+        } @else {
+          <div class="inventory-grid">
+            @for (v of rc.axes(); track $index) {
+              <button
+                type="button"
+                class="input-chip"
+                [class.bound]="isBound('AXIS', $index)"
+                [disabled]="!facade.editable() || isBound('AXIS', $index)"
+                (click)="facade.addControl('AXIS', $index)"
+              >
+                <span>{{ axisLabel($index) }}</span>
+                <span class="mono">{{ axisToPercent(v) }}</span>
+              </button>
+            }
+            @for (b of rc.buttons(); track $index) {
+              <button
+                type="button"
+                class="input-chip"
+                [class.bound]="isBound('BUTTON', $index)"
+                [class.on]="isOn(b)"
+                [disabled]="!facade.editable() || isBound('BUTTON', $index)"
+                (click)="facade.addControl('BUTTON', $index)"
+              >
+                <span>{{ buttonLabel($index) }}</span>
+              </button>
+            }
+          </div>
+        }
+      </div>
+
+      <!-- ---- The rows ------------------------------------------------------------------------ -->
+      @if (draft.controls.length === 0) {
+        <vision-empty
+          icon="gamepad"
+          title="Nothing is mapped yet"
+          message="Pick a control above, or use Detect and move the one you mean."
+        />
+      } @else {
+        <ul class="control-list">
+          @for (control of draft.controls; track draftKey(control)) {
+            <li class="control-card">
+              <header class="control-head">
+                <span class="control-name">{{ draftLabel(control) }}</span>
+                @if (rc.connected() && control.kind !== 'AXIS') {
+                  <span class="chip">{{ positionNow(control) }}</span>
+                }
+                <span class="control-head-spacer"></span>
+                @if (facade.editable()) {
+                  <vision-icon-button
+                    icon="trash"
+                    label="Unmap this control"
+                    (activated)="facade.removeControl(draftKey(control))"
+                  />
+                }
+              </header>
+
+              <div class="control-row">
+                <label>
+                  <span class="label">This is a</span>
+                  <select
+                    [disabled]="!facade.editable()"
+                    [ngModel]="control.kind"
+                    (ngModelChange)="facade.setKind(draftKey(control), $event)"
+                  >
+                    @for (kind of kinds(control); track kind) {
+                      <option [value]="kind">{{ kind }}</option>
+                    }
+                  </select>
+                </label>
+                <label>
+                  <span class="label">and it</span>
+                  <select
+                    [disabled]="!facade.editable()"
+                    [ngModel]="control.role"
+                    (ngModelChange)="facade.setRole(draftKey(control), $event)"
+                  >
+                    <option value="CHANNEL">drives a channel</option>
+                    <option value="ACTIONS">fires commands</option>
+                  </select>
+                </label>
+              </div>
+
+              @if (control.role === 'CHANNEL') {
+                <div class="control-row">
+                  <label>
+                    <span class="label">Function</span>
+                    <select
+                      [disabled]="!facade.editable()"
+                      [ngModel]="control.function"
+                      (ngModelChange)="facade.setFunction(draftKey(control), $event)"
+                    >
+                      @for (fn of facade.catalog()?.functions ?? []; track fn.name) {
+                        <option [value]="fn.name">{{ fn.label }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label>
+                    <span class="label">Channel</span>
+                    <select
+                      [disabled]="!facade.editable()"
+                      [ngModel]="control.rcChannel"
+                      (ngModelChange)="facade.setChannel(draftKey(control), +$event)"
+                    >
+                      @for (channel of channels; track channel) {
+                        <option [value]="channel">CH{{ channel }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label>
+                    <span class="label">Rests at</span>
+                    <select
+                      [disabled]="!facade.editable() || control.kind === 'BUTTON'"
+                      [ngModel]="control.travel"
+                      (ngModelChange)="facade.setTravel(draftKey(control), $event)"
+                    >
+                      <option value="CENTERED">centre — travels both ways</option>
+                      <option value="UNIDIRECTIONAL">minimum — travels one way</option>
+                    </select>
+                  </label>
+                  <label class="checkbox">
+                    <input
+                      type="checkbox"
+                      [disabled]="!facade.editable()"
+                      [ngModel]="control.reversed"
+                      (ngModelChange)="facade.setReversed(draftKey(control), $event)"
+                    />
+                    <span>Reversed</span>
+                  </label>
+                </div>
+              } @else {
+                @if (positions(control).length === 0) {
+                  <vision-notice variant="warn">
+                    A continuous axis has no positions to fire from. Call it a 2- or 3-position switch above.
+                  </vision-notice>
+                }
+                @for (position of positions(control); track position) {
+                  <div class="control-row position-row">
+                    <span class="position-name">{{ position }}</span>
+                    <label class="grow">
+                      <span class="label">fires</span>
+                      <select
+                        [disabled]="!facade.editable()"
+                        [ngModel]="actionAt(control, position)?.action ?? ''"
+                        (ngModelChange)="onActionChange(draftKey(control), position, $event)"
+                      >
+                        <option value="">— nothing —</option>
+                        @for (action of facade.catalog()?.actions ?? []; track action.name) {
+                          <option [value]="action.name">{{ action.label }}</option>
+                        }
+                      </select>
+                    </label>
+
+                    @if (actionAt(control, position); as bound) {
+                      @if (parameterKind(bound.action) === 'MODE_NAME') {
+                        <label class="grow">
+                          <span class="label">mode</span>
+                          <input
+                            type="text"
+                            placeholder="e.g. HOLD"
+                            [disabled]="!facade.editable()"
+                            [ngModel]="bound.parameter ?? ''"
+                            (ngModelChange)="facade.setPositionParameter(draftKey(control), position, $event)"
+                          />
+                        </label>
+                      } @else if (parameterKind(bound.action) === 'AUX_FUNCTION') {
+                        <label class="grow">
+                          <span class="label">function</span>
+                          <select
+                            [disabled]="!facade.editable()"
+                            [ngModel]="bound.parameter ?? ''"
+                            (ngModelChange)="facade.setPositionParameter(draftKey(control), position, $event)"
+                          >
+                            <option value="">— pick one —</option>
+                            @for (fn of auxOptions(bound.parameter); track fn.number) {
+                              <option [value]="fn.number">{{ fn.number }} · {{ fn.label }}</option>
+                            }
+                          </select>
+                        </label>
+                      }
+                    }
+                  </div>
+                }
+              }
+            </li>
+          }
+        </ul>
+      }
+
+      @if (facade.issues().length > 0) {
+        <vision-notice variant="warn">
+          <ul class="issue-list">
+            @for (issue of facade.issues(); track issue) {
+              <li>{{ issue }}</li>
+            }
+          </ul>
+        </vision-notice>
+      }
+    }
+  </section>
+}
