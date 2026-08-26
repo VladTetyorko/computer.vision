@@ -400,6 +400,31 @@ section records what actually landed, including where the audit's own text was w
 | R6 | **merged** | `cv-service` splits by `CV_SERVICE_ROLE` into `inference` vs `training`+`geolocation` processes (`cv-split` Compose profile, host ports 50061/50062); Java side gained `CvTarget`/`CvChannels`/`StaticTargetsNameResolver` — ordered failover on one channel via grpc's own `pick_first`, no load-balancer logic invented. Then wired: `vision.cv.inference.targets` / `vision.cv.training.target`, both empty by default so a one-process deployment is byte-identical. Routing the control-plane RPCs at the training channel also closed a latent `NoUniqueBeanDefinitionException` — the visual-geo wiring injected `ObjectProvider<ManagedChannel>` unqualified, so it would have thrown the moment a second channel bean existed. `vision-app` 248 → 258. |
 | R7 | **merged** | **Secure by default.** The permit-all filter chain used to be selected when `vision.auth.enabled` was simply absent, so the shipped default was `anyRequest().permitAll()` with CSRF off and the whole `VisibilityScope` apparatus unexercised. Secured is now the default and permit-all cannot win a tie. The three controllers §4 ledgered as unscoped were each decided: `HlsProxyController` **scoped** (it was a real leak — any caller, any stream, out-of-scope now 404s before the upstream is contacted), `EventController` **scoped**, `DeviceProbeController` **`@OpenByDesign`** (its request and response carry no `AssetId` or `Ownership` to scope against). |
 
+**Thirteen endpoints still have no authorization check at all, and R7 did not close them.** R7's row
+is accurate about the three controllers §4 named — `HlsProxyController` now gates on
+`StreamAccess.requireVisible`, `EventController` on `StreamAccess`/`CurrentUser.scope()`, and
+`DeviceProbeController` is `@OpenByDesign`. What §4 did not count is `EndpointAuthorizationTest`'s
+own `TEMPORARY_UNSCOPED` ledger, which R7 shrank by four and left at **13**:
+
+`AssetController#telemetry` · `DemoController#status` · `DiscoveryController#scan` ·
+`GeoRegionController#list` · `GeoRegionController#progress` · `ModelRegistryController#models` ·
+`OnboardingController#probeCandidate` · `SystemNetworkController#network` ·
+`SystemStatusController#status` · `TrainingJobController#job` · `TrainingJobController#jobs` ·
+`UsageTimelineController#recording` · `UsageTimelineController#timeline`
+
+These are not scoped and not `@OpenByDesign` — they are neither, which is why they need a ledger to
+pass the build at all. `AssetController#telemetry` and the two `UsageTimelineController` handlers are
+the ones that matter most: they answer with another operator's flight data. The ledger's own javadoc
+says "waves W2-W5 empty this" and points at `PLATFORM-AUDIT-SCOPE.md`; those waves have not run, and
+the entries are marked "still unowned."
+
+Left open deliberately. Each one needs a decision — genuinely public (`SystemStatusController#status`,
+`DemoController#status` plausibly are) versus a real hole to scope — and that is thirteen product
+decisions, not a refactor. But the audit's §4 should have counted them, and did not: it read the
+controllers it had listed rather than the test that already knew the true number. **A ledger that
+exists to record known holes is the first place an audit should look, and the last place this one
+did.**
+
 **R1 withdrew the rule; it did not retire the idiom, and the gap is two orders of magnitude.**
 R1's row above is accurate about what it did — the convention is withdrawn in `CLAUDE.md` and the
 skill file, and the three classes the audit named by name were collapsed. What neither the
