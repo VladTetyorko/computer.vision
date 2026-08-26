@@ -441,10 +441,11 @@ construction paths: `MjpegVideoSource()` → `this(MjpegSettings.defaults())`,
 OPEN_EVENTS_SCAN_LIMIT)`, `DefaultTrainingJobService(...)` → `this(..., defaultExecutor(),
 Instant::now, MAX_FINISHED_JOBS)`. `SimulationSpec` alone chains three of them.
 
-So the honest status is **4 of ~56 converted** (R1's three, plus `AssetUsage` in R1b) — the rule is in
-force for new code and the worst-named offenders are gone, but the existing surface is essentially
-untouched. Retrofitting the remaining ~52 is a real project with real regression risk, not a
-cleanup, and it is **deliberately not attempted here**: the audit recommended withdrawing the
+The census above was taken **after** R1b had already collapsed `AssetUsage`, so those 59 are the ones
+still carrying it, not a total. Four classes have been converted — R1's three plus `AssetUsage` — and
+**56 still chain**. The rule is in force for new code and the worst-named offenders are gone, but the
+existing surface is essentially untouched. Retrofitting those 56 is a real project with real
+regression risk, not a cleanup, and it is **deliberately not attempted here**: the audit recommended withdrawing the
 convention and named three classes, and quietly expanding that into a 52-class sweep would be
 invented scope. It is the obvious next task, and it wants its own plan doc and its own waves.
 
