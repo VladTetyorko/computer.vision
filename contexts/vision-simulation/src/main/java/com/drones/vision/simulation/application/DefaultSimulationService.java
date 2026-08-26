@@ -4,6 +4,7 @@ import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.DeviceOrigin;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.perception.domain.model.FeedId;
 import com.drones.vision.perception.domain.model.FeedSpec;
@@ -12,9 +13,10 @@ import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.perception.domain.port.FeedTransmitterPort;
+import com.drones.vision.warehouse.application.asset.AssetDetails;
+import com.drones.vision.warehouse.application.device.DeviceService;
 
 import java.io.IOException;
 import java.net.DatagramSocket;
@@ -56,9 +58,10 @@ import com.drones.vision.perception.application.pipeline.FeedTransmitterRegistry
  * validation, audit, device registration) applies here too instead of being duplicated.
  *
  * <p>{@link #resumeAll} (the simulated-feed resume-on-boot mechanism) is the read side of the same
- * bookkeeping: given a persisted, {@code ACTIVE}, {@code simulated}-category asset whose {@code
- * rtsp} video device structurally looks like one of this app's own TX-fed feeds, it rebuilds the
- * {@link FeedSpec} that would have produced it and restarts the transmit side — see that method's
+ * bookkeeping: given a persisted, {@code ACTIVE} asset whose {@code rtsp} video device is {@link
+ * com.drones.vision.kernel.DeviceOrigin#SIMULATED} and structurally looks like one of this app's
+ * own TX-fed feeds, it rebuilds the {@link FeedSpec} that would have produced it and restarts the
+ * transmit side — see that method's
  * own javadoc for the full "frozen video after a restart" story this closes. <b>A MAVLink telemetry
  * feed is never a candidate</b> — {@link #telemetryFeedByAsset} is never consulted by {@link
  * #resumeAll} at all, and its own device-matching (video-capability, {@code rtsp}-protocol) can
@@ -185,7 +188,7 @@ public final class DefaultSimulationService implements SimulationService {
 
     private final AssetService assetService;
     private final AssetStreamService assetStreamService;
-    private final CategoryRepositoryPort categoryRepository;
+    private final DeviceService deviceService;
     private final FeedTransmitterRegistry feedTransmitters;
     private final URI mediamtxRtspBase;
     private final SimulationServiceSettings settings;
@@ -204,16 +207,22 @@ public final class DefaultSimulationService implements SimulationService {
     private final Map<AssetId, TrackedFeed> telemetryFeedByAsset = new ConcurrentHashMap<>();
 
     /**
-     * @param mediamtxRtspBase this app's own configured mediamtx RTSP push target (the same {@code
-     *                         URI} {@code vision-app} already hands {@code RtspFeedTransmitter}) —
-     *                         used only by {@link #resumeAll} to recognize which persisted {@code
-     *                         rtsp} devices are this app's own TX-fed simulation feeds, structurally
-     *                         (host:port match), rather than a real external camera
+     * @param deviceService     registers the standalone device {@link #fitSimulatedDevice} fits onto
+     *                          an existing asset — replaces the {@code CategoryRepositoryPort} this
+     *                          constructor used to take, which became dead weight once {@link
+     *                          #simulate} stopped requiring the {@code simulated} category to be
+     *                          seeded (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R4): net
+     *                          zero parameters, not an addition
+     * @param mediamtxRtspBase  this app's own configured mediamtx RTSP push target (the same {@code
+     *                          URI} {@code vision-app} already hands {@code RtspFeedTransmitter}) —
+     *                          used only by {@link #resumeAll} to recognize which persisted {@code
+     *                          rtsp} devices are this app's own TX-fed simulation feeds, structurally
+     *                          (host:port match), rather than a real external camera
      */
     public DefaultSimulationService(AssetService assetService, AssetStreamService assetStreamService,
-                                     CategoryRepositoryPort categoryRepository,
+                                     DeviceService deviceService,
                                      FeedTransmitterRegistry feedTransmitters, URI mediamtxRtspBase) {
-        this(assetService, assetStreamService, categoryRepository, feedTransmitters, mediamtxRtspBase,
+        this(assetService, assetStreamService, deviceService, feedTransmitters, mediamtxRtspBase,
                 SimulationServiceSettings.defaults());
     }
 
@@ -223,12 +232,12 @@ public final class DefaultSimulationService implements SimulationService {
      * vision.application.simulation.*}) instead of {@link SimulationServiceSettings#defaults()}.
      */
     public DefaultSimulationService(AssetService assetService, AssetStreamService assetStreamService,
-                                     CategoryRepositoryPort categoryRepository,
+                                     DeviceService deviceService,
                                      FeedTransmitterRegistry feedTransmitters, URI mediamtxRtspBase,
                                      SimulationServiceSettings settings) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.assetStreamService = Objects.requireNonNull(assetStreamService, "assetStreamService must not be null");
-        this.categoryRepository = Objects.requireNonNull(categoryRepository, "categoryRepository must not be null");
+        this.deviceService = Objects.requireNonNull(deviceService, "deviceService must not be null");
         this.feedTransmitters = Objects.requireNonNull(feedTransmitters, "feedTransmitters must not be null");
         this.mediamtxRtspBase = Objects.requireNonNull(mediamtxRtspBase, "mediamtxRtspBase must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
@@ -241,7 +250,6 @@ public final class DefaultSimulationService implements SimulationService {
         Objects.requireNonNull(actor, "actor must not be null");
 
         Path videoPath = spec.videoPath() == null ? null : validateVideoPath(spec.videoPath());
-        requireSimulatedCategorySeeded();
 
         String displayName = resolveDisplayName(spec.displayName(), videoPath);
 
@@ -364,6 +372,26 @@ public final class DefaultSimulationService implements SimulationService {
         }
     }
 
+    @Override
+    public Device fitSimulatedDevice(AssetId assetId, Capability capability, UserId actor) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        Objects.requireNonNull(capability, "capability must not be null");
+        Objects.requireNonNull(actor, "actor must not be null");
+
+        // Throws NoSuchElementException for an unknown asset -- the same 404 assignDevice below
+        // would give anyway, surfaced earlier so the device is never registered for nothing.
+        AssetDetails details = assetService.details(assetId);
+        String displayName = details.summary().asset().displayName();
+        String label = capability.name().toLowerCase(Locale.ROOT);
+
+        URI uri = URI.create(SIM_PROTOCOL + "://" + slug(displayName) + "-" + label);
+        DeviceRegistration registration = new DeviceRegistration(displayName + " · " + label, Set.of(capability),
+                new StreamDescriptor(SIM_PROTOCOL, uri, Map.of()), DeviceOrigin.SIMULATED);
+        Device device = deviceService.register(registration, actor);
+        assetService.assignDevice(assetId, device.id(), actor);
+        return device;
+    }
+
     // --- Simulated-feed resume-on-boot ----------------------------------------
 
     @Override
@@ -372,15 +400,19 @@ public final class DefaultSimulationService implements SimulationService {
         int candidateCount = 0;
         for (AssetSummary summary : assetService.assets()) {
             Asset asset = summary.asset();
-            if (!SIMULATED_CATEGORY.equals(asset.category()) || !asset.isActive()) {
-                continue; // not our concern, or deliberately out of service -- never spring back on its own
+            if (!asset.isActive()) {
+                continue; // deliberately out of service -- never spring back on its own
             }
             if (feedByAsset.containsKey(asset.id())) {
                 continue; // already resumed earlier in this same process run, or currently simulated -- idempotent
             }
+            // Every asset is a candidate, not just simulated-category ones: origin lives on the
+            // device now, so a real vehicle with one fitted simulated device (see fitSimulatedDevice)
+            // is just as eligible as a fully synthetic asset (docs/plans/active/
+            // ARCHITECTURE-AUDIT-2026-08-26.md R4).
             Optional<Device> ownFeedDevice = findOwnRtspFeedDevice(asset.id());
             if (ownFeedDevice.isEmpty()) {
-                continue; // e.g. transport=DIRECT/MJPEG, or a real (not ours) rtsp camera -- nothing to resume, not an error
+                continue; // e.g. transport=DIRECT/MJPEG, no simulated video device, or a real (not ours) rtsp camera -- nothing to resume, not an error
             }
             candidateCount++;
             resumeOne(asset, ownFeedDevice.get()).ifPresent(resumed::add);
@@ -428,16 +460,19 @@ public final class DefaultSimulationService implements SimulationService {
     }
 
     /**
-     * The asset's own currently-active, {@code VIDEO}-capable device whose {@code rtsp} URI's
-     * host:port matches {@link #mediamtxRtspBase} — this app's own TX-fed simulation feed, not a
-     * real external camera (structurally indistinguishable from one in what's actually persisted;
-     * see {@link #resumeAll}'s own javadoc). At most one is expected in practice (every {@code
-     * simulate()}-created asset has exactly one video device); the first match wins if somehow more
-     * than one qualifies.
+     * The asset's own currently-active, {@link DeviceOrigin#SIMULATED}, {@code VIDEO}-capable
+     * device whose {@code rtsp} URI's host:port matches {@link #mediamtxRtspBase} — this app's own
+     * TX-fed simulation feed, not a real external camera. The origin check is what makes this safe
+     * to run over every asset regardless of category (see {@link #resumeAll}'s own javadoc): a real
+     * camera's {@code rtsp} URI could otherwise coincidentally share this app's mediamtx host:port
+     * (e.g. a camera pointed at the same box), which {@link DeviceOrigin} — not the URI shape alone —
+     * is what rules out. At most one is expected in practice (every {@code simulate()}-created asset
+     * has exactly one video device); the first match wins if somehow more than one qualifies.
      */
     private Optional<Device> findOwnRtspFeedDevice(AssetId assetId) {
         return assetService.details(assetId).devices().stream()
                 .filter(Device::isActive)
+                .filter(device -> device.origin() == DeviceOrigin.SIMULATED)
                 .filter(device -> device.capabilities().contains(Capability.VIDEO))
                 .filter(device -> isOwnRtspFeedUri(device.stream()))
                 .findFirst();
@@ -496,11 +531,6 @@ public final class DefaultSimulationService implements SimulationService {
         return path;
     }
 
-    private void requireSimulatedCategorySeeded() {
-        categoryRepository.findById(SIMULATED_CATEGORY)
-                .orElseThrow(() -> new IllegalStateException("category 'simulated' is not seeded"));
-    }
-
     /**
      * Derives a display name from the file name (extension stripped) when none was supplied, or —
      * for a fully synthetic spec (docs/main/CYCLES-PLAN.md §9, CU-a — {@code videoPath == null}) —
@@ -520,7 +550,7 @@ public final class DefaultSimulationService implements SimulationService {
 
     private static DeviceRegistration videoDevice(String displayName, Path videoPath) {
         return new DeviceRegistration(displayName + " · video", Set.of(Capability.VIDEO),
-                new StreamDescriptor("file", videoPath.toUri(), Map.of("loop", "true")));
+                new StreamDescriptor("file", videoPath.toUri(), Map.of("loop", "true")), DeviceOrigin.SIMULATED);
     }
 
     /**
@@ -534,7 +564,7 @@ public final class DefaultSimulationService implements SimulationService {
     private static DeviceRegistration syntheticVideoDevice(String displayName) {
         URI syntheticUri = URI.create(SIM_PROTOCOL + "://" + slug(displayName));
         return new DeviceRegistration(displayName + " · video", Set.of(Capability.VIDEO),
-                new StreamDescriptor(SIM_PROTOCOL, syntheticUri, Map.of()));
+                new StreamDescriptor(SIM_PROTOCOL, syntheticUri, Map.of()), DeviceOrigin.SIMULATED);
     }
 
     /**
@@ -555,8 +585,8 @@ public final class DefaultSimulationService implements SimulationService {
         FeedTransmitterPort transmitter = feedTransmitters.transmitterFor(feedSpec);
         StreamDescriptor started = transmitter.start(feedId, feedSpec);
         StreamDescriptor descriptor = transport == SimulationTransport.RTSP ? withRxTimeout(started) : started;
-        DeviceRegistration device =
-                new DeviceRegistration(displayName + " · video", Set.of(Capability.VIDEO), descriptor);
+        DeviceRegistration device = new DeviceRegistration(displayName + " · video", Set.of(Capability.VIDEO),
+                descriptor, DeviceOrigin.SIMULATED);
         return new WiredVideoDevice(device, transmitter);
     }
 
@@ -605,7 +635,7 @@ public final class DefaultSimulationService implements SimulationService {
 
         Map<String, String> deviceOptions = Map.of(MAVLINK_OPTION_SYSID, String.valueOf(MAVLINK_TELEMETRY_SYSID));
         DeviceRegistration device = new DeviceRegistration(displayName + " · telemetry", Set.of(Capability.TELEMETRY),
-                new StreamDescriptor(TELEMETRY_PROTOCOL_MAVLINK, destination, deviceOptions));
+                new StreamDescriptor(TELEMETRY_PROTOCOL_MAVLINK, destination, deviceOptions), DeviceOrigin.SIMULATED);
 
         FeedSpec feedSpec = new FeedSpec(TELEMETRY_PROTOCOL_MAVLINK, destination, mavlinkFeedOptions(spec));
         FeedTransmitterPort transmitter = feedTransmitters.transmitterFor(feedSpec);
@@ -729,7 +759,7 @@ public final class DefaultSimulationService implements SimulationService {
         }
         URI telemetryUri = URI.create(SIM_PROTOCOL + "://" + slug(displayName) + "-telemetry");
         return new DeviceRegistration(displayName + " · telemetry", Set.of(Capability.TELEMETRY),
-                new StreamDescriptor(SIM_PROTOCOL, telemetryUri, options));
+                new StreamDescriptor(SIM_PROTOCOL, telemetryUri, options), DeviceOrigin.SIMULATED);
     }
 
     /** {@code lat,lon[,altM];lat,lon[,altM];…} — the format {@code RoutePlan} (adapter-simulation) parses. */

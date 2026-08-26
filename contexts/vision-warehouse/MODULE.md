@@ -23,7 +23,7 @@ accept one as a filter).
 `Capability`, `StreamDescriptor`, `Telemetry`…) · `vision-platform` (`AuditTrailPort`/`AuditEntry` —
 every mutation writes one; `VisibilityScope` — every scoped read filters by it) · nothing else.
 **Used by:** every other context, every adapter, `vision-app`, `vision-api`.
-**Build/test:** `./mvnw -B -pl contexts/vision-warehouse test` — 181 tests green.
+**Build/test:** `./mvnw -B -pl contexts/vision-warehouse test` — 191 tests green.
 
 **Warehouse is the pure leaf of the whole context graph** (docs/plans/active/DOMAIN-SEPARATION-W1.md
 §16's measured edge list: `warehouse -> (nothing)`) — nothing it owns reads any other context, and
@@ -52,7 +52,7 @@ being real (see the dependency table in docs/plans/active/DOMAIN-SEPARATION-W1.m
 - `record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition, GeoPosition lastPosition, long sampleCount, StreamId streamId, UsagePhase phase)` (flight → warehouse in **W1.6c**, C9 — the record was flight's but all four readers, `AssetDetails`/`DefaultAssetService`/`DefaultAssetStatsService`/`DefaultUsageService`, were already here) — a "flight"/session for an `Asset`: opened when the asset starts streaming, closed on stop; `endedAt`/`startPosition`/`lastPosition`/`streamId` nullable, `endedAt>=startedAt` if present, `phase` never null; 8-arg convenience ctor defaults `phase=PREFLIGHT` (which itself routes through the streamless 7-arg one, `streamId=null`); `closed(Instant)`, `withPositions(GeoPosition,GeoPosition)`, `withSampleCount(long)`, `withPhase(UsagePhase)` all preserve every other field unchanged. `streamId` (docs/plans/done/MVP2-PLAN.md §R, R-a2) is the stream whose start opened this usage, recorded once by `UsageTracker` (perception) so `ReplayService` (events) can join a finished usage back to its detections; `null` for a legacy/streamless usage. `phase` (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O7) is this usage's aircraft-state phase, driven entirely by perception's `UsageTracker` — see `UsagePhase` below and this context's Gotchas for why the field lives here but the state machine does not
 - `enum UsagePhase { PREFLIGHT, IN_FLIGHT, LINK_LOST, POSTFLIGHT, ABANDONED, CLOSED }` (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O7) — `AssetUsage#phase`'s type; name-parallel to `vision-flight`'s `FlightPhase` on purpose (see Gotchas) but a wholly independent type with zero dependency on flight
 - `record DeviceCategory(CategoryId id, String name, CategoryId parent, List<String> attributeHints)` — `parent` nullable (top-level)
-- `record Device(DeviceId id, String name, Set<Capability> capabilities, StreamDescriptor stream, LifecycleState state)` — 4-arg convenience ctor defaults `state=ACTIVE`; `isActive()`, `isDeleted()`, `withDetails(...)`, `withState(...)`
+- `record Device(DeviceId id, String name, Set<Capability> capabilities, StreamDescriptor stream, LifecycleState state, DeviceOrigin origin)` — `origin` (`kernel.DeviceOrigin`, docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R4) added as the 6th component; 5-arg convenience ctor defaults `state=ACTIVE, origin=LIVE` (kept — many out-of-scope call sites); `isActive()`, `isDeleted()`, `withDetails(name, capabilities, stream, origin)` (4-arg, `origin` now explicit — no defaulting overload, every call site is in this module), `withState(...)`
 - `record DiscoveredDevice(String method, String name, URI address, CategoryId suggestedCategory, StreamDescriptor suggestedStream, Map<String,String> details)` — `suggestedCategory`/`suggestedStream` nullable
 
 ### `com.drones.vision.warehouse.domain.port` (driven — implemented by adapters, or by perception for `AssetLiveStatePort`)
@@ -91,7 +91,7 @@ being real (see the dependency table in docs/plans/active/DOMAIN-SEPARATION-W1.m
 ### `application.device` (package `warehouse.application.device` — disambiguated from perception's own `device` leaf, W1.6d)
 - `DeviceService` (interface) → `DefaultDeviceService(DeviceRepositoryPort, AssetLiveStatePort, AuditTrailPort, EventPublisherPort)` — stops a device's stream via `assetLiveStatePort.stopStreamsForDevices(Set.of(deviceId))`, never by iterating `StreamService` itself
   - `Device register(DeviceRegistration, UserId)` — publishes `DEVICE_ONLINE`, audits `CREATED`; `List<Device> devices()` / `devices(includeDeleted)`; `Optional<Device> find(DeviceId)`; `Device update(DeviceId, DeviceEdit, UserId)` partial; `Device setState(...)` idempotent, stops the stream leaving service; `Device delete(...)` **soft**, stays a member of its asset
-- `DeviceRegistration(name, capabilities, stream)`, `DeviceEdit(name, capabilities, stream)` (all-nullable partial edit, `NOTHING`)
+- `DeviceRegistration(name, capabilities, stream, origin)` — 3-arg convenience ctor defaults `origin=LIVE` (kept — many out-of-scope call sites); `DeviceEdit(name, capabilities, stream, origin)` (all-nullable partial edit, `NOTHING`; no convenience overload — every call site is in this module)
 
 ### `application.discovery`
 - `DiscoveryService` (interface) → `DefaultDiscoveryService(List<DeviceDiscoveryPort>)` — indexed by `port.method()`
@@ -120,7 +120,7 @@ being real (see the dependency table in docs/plans/active/DOMAIN-SEPARATION-W1.m
 - **Constructor injection only**; collaborators wrapped in `Objects.requireNonNull`.
 - **Soft-delete, not hard-delete**: `Asset#delete`/`Device#delete` mark `LifecycleState.DELETED` and keep every row (usages, telemetry) — nothing here ever issues a real `DELETE`.
 - **Virtual threads**: `DefaultDiscoveryService` starts one `Thread.ofVirtual()` per requested discovery port per scan call; a hung adapter's thread is never tracked or interrupted (cheap + daemon).
-- **N-1-arg convenience constructor idiom**: e.g. `Asset`'s 6-arg ctor defaulting `state=ACTIVE`, `AssetUsage`'s 8-arg ctor defaulting `phase=PREFLIGHT` (itself routing through the streamless 7-arg one) — every field a wave adds gets one more convenience ctor layer so every pre-existing call site keeps compiling.
+- **N-1-arg convenience constructor idiom, capped at one overload**: e.g. `Asset`'s 6-arg ctor defaulting `state=ACTIVE`, `AssetUsage`'s 8-arg ctor defaulting `phase=PREFLIGHT` (itself routing through the streamless 7-arg one), `Device`'s 5-arg ctor defaulting `state=ACTIVE, origin=LIVE` — a field a wave adds gets **at most one** convenience ctor, and only when it demonstrably saves many out-of-scope call sites (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R1/R4); `DeviceEdit` deliberately got no overload for its new `origin` field — every call site was already in this module, so there was nothing a convenience ctor would have saved.
 
 ## Gotchas
 - **`AssetLiveStatePort#stopStreamsForDevices` is synchronous by design, not an oversight** — warehouse still decides, in the same request, that a device's stream must stop before the device/asset is retired or deleted. W2 is where this becomes an event warehouse publishes and perception reacts to asynchronously; this port is a staging post, not the destination.
@@ -135,6 +135,17 @@ being real (see the dependency table in docs/plans/active/DOMAIN-SEPARATION-W1.m
 - **`createFromCandidate`'s duplicate check only ever compares `spec.devices()` (new registrations)** — it does not re-check `existingDeviceIds` entries, which already go through `#assignDevice`'s own eligibility rule (must exist, not deleted, not owned elsewhere). A candidate spec mixing both lists gets both checks, just via two different code paths.
 
 ## Status
+
+**ARCHITECTURE-AUDIT-2026-08-26 wave R4 done** (this module's half — "the drone has no camera yet"):
+`Device`/`DeviceRegistration`/`DeviceEdit` gained `origin` (`kernel.DeviceOrigin{LIVE,SIMULATED}`),
+so "simulated" is now a property of one device instead of a whole asset's category. See the API
+surface entries above for the exact ctor shapes and `contexts/vision-simulation`'s MODULE.md for
+`SimulationService#fitSimulatedDevice` — the new entry point that fits a synthetic device onto an
+*existing* asset (`simulate()` still only ever creates a brand-new one). `storage/persistence`'s
+`V25__device_origin.sql` backfills existing rows (`LIVE` default; `SIMULATED` for devices already
+on a `simulated`-category asset) and `station/vision-api`'s device/asset-create DTOs carry `origin`
+end to end — see those modules' own MODULE.mds. **181 → 191 tests**
+(`./mvnw -B -pl contexts/vision-warehouse test`, green).
 
 **W1.7b/c** (docs/plans/active/DOMAIN-SEPARATION-W1.md §16): `vision-domain`/`vision-application` dissolved; warehouse's `.domain`/`.application` packages became this one module, a directory move with the ArchUnit layer boundary preserved. No behavior change; 170/170 tests green.
 

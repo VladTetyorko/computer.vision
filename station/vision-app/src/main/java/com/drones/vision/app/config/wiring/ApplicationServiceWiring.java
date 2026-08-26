@@ -691,12 +691,12 @@ public class ApplicationServiceWiring {
     @Bean
     public SimulationService simulationService(AssetService assetService,
                                                 AssetStreamService assetStreamService,
-                                                CategoryRepositoryPort categoryRepositoryPort,
+                                                DeviceService deviceService,
                                                 FeedTransmitterRegistry feedTransmitterRegistry,
                                                 VisionPublishProperties properties,
                                                 VisionApplicationProperties applicationProperties) {
         VisionApplicationProperties.Simulation simulation = applicationProperties.simulation();
-        return new DefaultSimulationService(assetService, assetStreamService, categoryRepositoryPort,
+        return new DefaultSimulationService(assetService, assetStreamService, deviceService,
                 feedTransmitterRegistry, properties.mediamtx().rtspBase(),
                 new SimulationServiceSettings(simulation.mavlinkLoopbackHost(), simulation.fallbackLatitude(),
                         simulation.fallbackLongitude()));

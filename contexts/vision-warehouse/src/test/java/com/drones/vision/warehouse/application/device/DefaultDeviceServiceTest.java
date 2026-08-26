@@ -112,12 +112,24 @@ class DefaultDeviceServiceTest {
         Device device = stored("old-name", LifecycleState.ACTIVE);
 
         Device updated = service.update(device.id(),
-                new DeviceEdit("new-name", null, null), actingUser);
+                new DeviceEdit("new-name", null, null, null), actingUser);
 
         assertEquals("new-name", updated.name());
         assertEquals(device.capabilities(), updated.capabilities());
         assertEquals(device.stream(), updated.stream());
         assertEquals(device.state(), updated.state());
+        assertEquals(device.origin(), updated.origin());
+    }
+
+    @Test
+    void updateAppliesAReplacementOrigin() {
+        Device device = stored("cam", LifecycleState.ACTIVE);
+
+        Device updated = service.update(device.id(),
+                new DeviceEdit(null, null, null, com.drones.vision.kernel.DeviceOrigin.SIMULATED), actingUser);
+
+        assertEquals(com.drones.vision.kernel.DeviceOrigin.SIMULATED, updated.origin());
+        assertTrue(recordedAudit().details().get("origin").contains("SIMULATED"));
     }
 
     @Test
@@ -125,7 +137,7 @@ class DefaultDeviceServiceTest {
         Device device = stored("old-name", LifecycleState.ACTIVE);
         StreamDescriptor moved = new StreamDescriptor("rtsp", URI.create("rtsp://10.0.0.9/s"), Map.of());
 
-        service.update(device.id(), new DeviceEdit("new-name", null, moved), actingUser);
+        service.update(device.id(), new DeviceEdit("new-name", null, moved, null), actingUser);
 
         AuditEntry entry = recordedAudit();
         assertEquals(AuditAction.UPDATED, entry.action());

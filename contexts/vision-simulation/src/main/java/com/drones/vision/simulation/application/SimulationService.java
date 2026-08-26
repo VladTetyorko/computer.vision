@@ -1,8 +1,10 @@
 package com.drones.vision.simulation.application;
 
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.warehouse.domain.model.Device;
 
 import java.util.List;
 
@@ -32,9 +34,30 @@ public interface SimulationService {
      *                                   regular file, or is not readable, or if {@code
      *                                   spec.transport()} is {@link SimulationTransport#RTSP} and
      *                                   no registered {@code FeedTransmitterPort} supports it
-     * @throws IllegalStateException    if the {@code simulated} category is not seeded
      */
     SimulatedAsset simulate(SimulationSpec spec, Ownership ownership, UserId actor);
+
+    /**
+     * Fits a synthetic device onto an <em>existing</em> asset — the "the drone has no camera yet"
+     * case {@link #simulate} cannot cover, since that always creates a whole new asset
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R4). The device is registered with {@link
+     * com.drones.vision.kernel.DeviceOrigin#SIMULATED} and immediately assigned to {@code assetId},
+     * so a real vehicle with a missing sensor can be exercised end-to-end before the real one
+     * arrives, without pretending the whole vehicle is synthetic.
+     *
+     * <p>Always an in-process {@code "sim"}-protocol device — never a wired transport ({@link
+     * SimulationTransport#RTSP}/{@link SimulationTransport#MJPEG}): those are demo-grade (ephemeral
+     * ports that do not survive a restart, see {@link #resumeAll}'s own "MJPEG is never a candidate"
+     * paragraph), which makes them a poor fit for a fitting meant to sit on an otherwise-permanent
+     * asset indefinitely.
+     *
+     * @param assetId    the existing asset to fit the device onto
+     * @param capability what the fitted device exposes (e.g. {@link Capability#VIDEO})
+     * @param actor      the user performing the fitting
+     * @return the newly registered, now-assigned device
+     * @throws java.util.NoSuchElementException if no asset has {@code assetId}
+     */
+    Device fitSimulatedDevice(AssetId assetId, Capability capability, UserId actor);
 
     /**
      * Stops a simulated asset's stream and, if it was created with {@link
@@ -51,11 +74,14 @@ public interface SimulationService {
     void stop(AssetId assetId);
 
     /**
-     * Restarts the TX feed for every persisted, {@code ACTIVE}, {@code simulated}-category asset
-     * whose video device is one of this app's own {@link SimulationTransport#RTSP} feeds —
-     * recognized structurally (its {@code rtsp} device URI's host:port matches this app's own
-     * configured mediamtx push target), since nothing persisted distinguishes "one of our own
-     * TX-fed simulation feeds" from "a real external RTSP camera" any other way.
+     * Restarts the TX feed for every persisted, {@code ACTIVE} asset with a {@link
+     * com.drones.vision.kernel.DeviceOrigin#SIMULATED} video device that is one of this app's own
+     * {@link SimulationTransport#RTSP} feeds — recognized structurally (its {@code rtsp} device
+     * URI's host:port matches this app's own configured mediamtx push target). Checked over every
+     * asset regardless of category, not only ones created by {@link #simulate}: {@link
+     * #fitSimulatedDevice} can fit a simulated device onto any real asset, so origin — not category
+     * — is what distinguishes "one of our own TX-fed simulation feeds" from "a real external RTSP
+     * camera".
      *
      * <p>A feed's TX side (the transmit thread pushing a local file to mediamtx) is pure in-process
      * runtime state — nothing durable backs it, so it never survives a JVM restart on its own: the
@@ -76,9 +102,9 @@ public interface SimulationService {
      * supporting the rebuilt feed is logged and skipped, so one broken asset never stops the rest of
      * the fleet from resuming.
      *
-     * @return the ids of the assets whose feed was actually restarted (a subset of every {@code
-     *         simulated}-category asset present — most are skipped, ordinarily for the entirely
-     *         unremarkable reason that they were never an RTSP feed in the first place)
+     * @return the ids of the assets whose feed was actually restarted (a subset of every asset
+     *         present — most are skipped, ordinarily for the entirely unremarkable reason that they
+     *         were never a simulated RTSP feed in the first place)
      */
     List<AssetId> resumeAll();
 }
