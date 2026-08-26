@@ -74,6 +74,7 @@ import jakarta.persistence.EntityManagerFactory;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -354,10 +355,13 @@ public class ApplicationServiceWiring {
                                       ObjectProvider<UsagePhaseObserver> usagePhaseObserver) {
         // geofenceMonitor::evaluate, not the monitor itself: UsageTracker (perception) takes a
         // BiConsumer seam so it never depends on the flight context — docs/plans/active/DOMAIN-SEPARATION-W1.md §5 C2
+        UsageTrackerSettings defaultSettings = UsageTrackerSettings.defaults();
         return new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort,
-                telemetryRepositoryPort, telemetrySources, telemetryLiveUpdatePort, geofenceMonitor::evaluate,
-                persistenceProperties.telemetry().toSummarySettings(), UsagePhaseSettings.defaults(),
-                usagePhaseObserver.getIfAvailable(() -> UsagePhaseObserver.NOOP));
+                telemetryRepositoryPort, telemetrySources,
+                new UsageTrackerSettings(Optional.of(telemetryLiveUpdatePort), Optional.of(geofenceMonitor::evaluate),
+                        defaultSettings.sourceInitialBackoffNanos(), defaultSettings.sourceMaxBackoffNanos(),
+                        persistenceProperties.telemetry().toSummarySettings(), UsagePhaseSettings.defaults(),
+                        usagePhaseObserver.getIfAvailable(() -> UsagePhaseObserver.NOOP)));
     }
 
     /**
@@ -435,9 +439,9 @@ public class ApplicationServiceWiring {
      * {@code pullDetectionSettings} is built here, not injected, because it is a composite of two
      * things this method already has separate access to: {@link VisionCvProperties#pull()}'s {@code
      * rtsp-base} (the address the <b>worker</b> dials, D5) and {@code CvWiring}'s conditionally-present
-     * {@code pulledDetectionPort} bean (absent unless {@link VisionCvProperties#pullEnabled()}). {@code
-     * null} (the default, {@code frame-transport=push}) reproduces the pre-wave-M5 11-arg constructor's
-     * behaviour exactly — see {@code DefaultStreamService}'s own javadoc on that parameter.
+     * {@code pulledDetectionPort} bean (absent unless {@link VisionCvProperties#pullEnabled()}). {@link
+     * Optional#empty()} (the default, {@code frame-transport=push}) reproduces the pre-wave-M5 6-argument
+     * constructor's behaviour exactly — see {@code DefaultStreamServiceSettings}'s own javadoc on that field.
      *
      * <p>The returned {@link StreamService} is wrapped in {@code
      * com.drones.vision.app.stream.LiveFrameFallbackStreamService} only when {@link
@@ -449,8 +453,8 @@ public class ApplicationServiceWiring {
      *
      * <p>{@code detectionDemandPort} (docs/plans/done/CV-DEMAND-PLAN.md §3.3) is an {@link
      * ObjectProvider} because {@code CvWiring#detectionDemandPort} is itself conditionally present
-     * on {@code vision.cv.demand.enabled} (default {@code true}) — resolving to {@code null} when
-     * that flag is {@code false} reproduces {@code DefaultStreamService}'s pre-wave-D2 constructor
+     * on {@code vision.cv.demand.enabled} (default {@code true}) — resolving to {@link Optional#empty()}
+     * when that flag is {@code false} reproduces {@code DefaultStreamService}'s pre-wave-D2 constructor
      * exactly: the demand-poll task is never scheduled, and every stream stays fail-open on demand.
      */
     @Bean
@@ -470,14 +474,15 @@ public class ApplicationServiceWiring {
                                         ObjectProvider<PulledDetectionPort> pulledDetectionPort,
                                         MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber,
                                         ObjectProvider<DetectionDemandPort> detectionDemandPort) {
-        PullDetectionSettings pullDetectionSettings = cvProperties.pullEnabled()
-                ? new PullDetectionSettings(pulledDetectionPort.getObject(), cvProperties.pull().rtspBase())
-                : null;
+        Optional<PullDetectionSettings> pullDetectionSettings = cvProperties.pullEnabled()
+                ? Optional.of(new PullDetectionSettings(pulledDetectionPort.getObject(), cvProperties.pull().rtspBase()))
+                : Optional.empty();
         StreamService defaultStreamService = new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker,
-                detectionEventRepositoryPort, detectionLiveUpdatePort,
-                streamPipelineSettings(applicationProperties, trackingProperties, cvProperties), pullDetectionSettings,
-                detectionDemandPort.getIfAvailable());
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort,
+                new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.of(detectionEventRepositoryPort),
+                        Optional.of(detectionLiveUpdatePort),
+                        streamPipelineSettings(applicationProperties, trackingProperties, cvProperties),
+                        pullDetectionSettings, Optional.ofNullable(detectionDemandPort.getIfAvailable())));
         if (publishProperties.sourceProxy().enabled()) {
             return new LiveFrameFallbackStreamService(defaultStreamService, mediamtxLiveFrameGrabber);
         }

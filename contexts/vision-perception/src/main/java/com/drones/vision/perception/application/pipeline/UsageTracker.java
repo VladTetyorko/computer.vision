@@ -157,188 +157,30 @@ public final class UsageTracker {
 
     private final ConcurrentHashMap<AssetId, Tracking> trackingByAsset = new ConcurrentHashMap<>();
 
-    public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
-                         AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                         List<TelemetrySourcePort> telemetrySources) {
-        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources, null);
-    }
-
     /**
-     * Same as the 5-argument constructor, plus a {@link TelemetryLiveUpdatePort} collaborator
-     * (docs/plans/done/REALTIME-PLAN.md §4): every telemetry sample folded via {@link #applySample} is
-     * announced through it.
-     *
-     * @param liveUpdatePublisherPort nullable, following the same convention as {@code
-     *                                 DefaultStreamService}'s own collaborator of the same type:
-     *                                 {@code null} means no live-update announcements.
+     * The single canonical constructor (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md Finding
+     * R1) — every collaborator beyond the mandatory ports and telemetry sources is bundled into
+     * {@code settings}; see {@link UsageTrackerSettings} for what each field controls and {@link
+     * UsageTrackerSettings#defaults()} for the behavior every pre-R1 shortest constructor used to
+     * default to.
      */
     public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
                          AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                         List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort) {
-        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
-                liveUpdatePublisherPort, null);
-    }
-
-    /**
-     * Same as the 6-argument constructor, plus an observer of every telemetry sample folded via
-     * {@link #applySample}, invoked right alongside the existing persist/live-update steps.
-     *
-     * <p>Deliberately a {@link BiConsumer} rather than the geofence collaborator this was written
-     * for (docs/plans/done/OPS-CORE-PLAN.md §G): breach evaluation belongs to the flight context,
-     * and a direct call from here made perception depend on it, closing the context cycle that
-     * blocks module extraction (docs/plans/active/DOMAIN-SEPARATION-W1.md §5, C2). Perception now
-     * declares the seam and {@code vision-app} wires {@code GeofenceMonitor::evaluate} into it —
-     * the same functional-seam convention {@link SupervisedPublisher}'s {@code onOutageBegan}
-     * already follows.
-     *
-     * @param telemetryObserver nullable, following the same convention as {@code
-     *                          liveUpdatePublisherPort}: {@code null} means samples are only
-     *                          persisted and announced, never observed. Must be cheap and must not
-     *                          throw — it runs on the telemetry path.
-     */
-    public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
-                         AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                         List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
-                         BiConsumer<AssetId, Telemetry> telemetryObserver) {
-        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
-                liveUpdatePublisherPort, telemetryObserver, UsageSummaryBatchSettings.immediate());
-    }
-
-    /**
-     * Same as the 7-argument constructor, plus how {@link #applySample} coalesces its usage-summary
-     * write — see {@link UsageSummaryBatchSettings}'s own javadoc (docs/plans/done/SCALE-100-PLAN.md
-     * S4). {@link UsageSummaryBatchSettings#immediate()} reproduces the 7-argument constructor's own
-     * one-save-per-sample behavior exactly (what every pre-S4 caller, and this class's own tests,
-     * still get); production wiring is meant to move to {@link UsageSummaryBatchSettings#defaults()}
-     * once {@code vision-app} binds {@code vision.persistence.telemetry.*} to it.
-     *
-     * @param summaryBatchSettings how {@link #applySample} coalesces the summary write; never
-     *                             {@code null}
-     */
-    public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
-                         AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                         List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
-                         BiConsumer<AssetId, Telemetry> telemetryObserver,
-                         UsageSummaryBatchSettings summaryBatchSettings) {
-        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
-                liveUpdatePublisherPort, telemetryObserver, summaryBatchSettings, UsagePhaseSettings.defaults());
-    }
-
-    /**
-     * Same as the 8-argument constructor, plus explicit {@link UsagePhaseSettings}
-     * (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O7) — the deterministic clock and
-     * {@code FlightPhaseRule} {@link #applySample}, {@link #deviceStreamStopped} and {@link
-     * #evaluateLinkHealth(AssetId)} run to fold {@code AssetUsage.phase}. Every shorter public
-     * constructor defaults this to {@link UsagePhaseSettings#defaults()}; {@code vision-app} is
-     * meant to use this one once it binds {@code vision.flight.phase.*}.
-     */
-    public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
-                         AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                         List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
-                         BiConsumer<AssetId, Telemetry> telemetryObserver,
-                         UsageSummaryBatchSettings summaryBatchSettings, UsagePhaseSettings phaseSettings) {
-        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
-                liveUpdatePublisherPort, telemetryObserver, summaryBatchSettings, phaseSettings,
-                UsagePhaseObserver.NOOP);
-    }
-
-    /**
-     * Same as the 9-argument constructor, plus a {@link UsagePhaseObserver} notified whenever an
-     * open usage's phase is set for the first time or changes (docs/plans/active/DRONE-ONBOARDING-PLAN.md
-     * §2.4, Wave O11 -- the flight passport). This is the constructor {@code vision-app} is meant to
-     * use once it wires a real observer (e.g. one that calls {@code
-     * VehicleProfileService#captureSnapshot} at PREFLIGHT/POSTFLIGHT); every shorter public
-     * constructor still defaults this collaborator to {@link UsagePhaseObserver#NOOP}, so behavior
-     * is unchanged for every pre-O11 call site.
-     *
-     * @param usagePhaseObserver never {@code null} -- pass {@link UsagePhaseObserver#NOOP} for "do
-     *                           nothing", the same explicit-no-op idiom {@link UsagePhaseSettings}
-     *                           and every other collaborator added since Wave O7 already follows in
-     *                           this class
-     */
-    public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
-                         AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                         List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
-                         BiConsumer<AssetId, Telemetry> telemetryObserver,
-                         UsageSummaryBatchSettings summaryBatchSettings, UsagePhaseSettings phaseSettings,
-                         UsagePhaseObserver usagePhaseObserver) {
-        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
-                liveUpdatePublisherPort, telemetryObserver, SupervisedPublisher.INITIAL_BACKOFF_NANOS,
-                SupervisedPublisher.MAX_BACKOFF_NANOS, summaryBatchSettings, phaseSettings, usagePhaseObserver);
-    }
-
-    /**
-     * Test seam: same as the 7-argument constructor, with explicit (typically much smaller)
-     * telemetry-source reopen backoff bounds so supervision-related tests don't have to wait out a
-     * real 1s-30s backoff. Production always uses the 7-argument constructor's defaults.
-     */
-    UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
-                 AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                 List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
-                 BiConsumer<AssetId, Telemetry> telemetryObserver, long sourceInitialBackoffNanos,
-                 long sourceMaxBackoffNanos) {
-        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
-                liveUpdatePublisherPort, telemetryObserver, sourceInitialBackoffNanos, sourceMaxBackoffNanos,
-                UsageSummaryBatchSettings.immediate());
-    }
-
-    /**
-     * Test seam: same as the 9-argument (backoff) constructor, plus explicit {@link
-     * UsageSummaryBatchSettings}. Delegates to the true canonical constructor with {@link
-     * UsagePhaseSettings#defaults()} — summary-coalescing tests don't need to know phase tracking
-     * exists at all.
-     */
-    UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
-                 AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                 List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
-                 BiConsumer<AssetId, Telemetry> telemetryObserver, long sourceInitialBackoffNanos,
-                 long sourceMaxBackoffNanos, UsageSummaryBatchSettings summaryBatchSettings) {
-        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
-                liveUpdatePublisherPort, telemetryObserver, sourceInitialBackoffNanos, sourceMaxBackoffNanos,
-                summaryBatchSettings, UsagePhaseSettings.defaults());
-    }
-
-    /**
-     * Test seam: same as the 10-argument constructor, plus explicit {@link UsagePhaseSettings} —
-     * defaults {@link UsagePhaseObserver} to {@link UsagePhaseObserver#NOOP}, delegating to the true
-     * canonical constructor below. Lets phase-transition tests use a fixed/steppable clock and small
-     * silence/abandon windows instead of production's real ones, without needing to know the
-     * phase-observer seam exists.
-     */
-    UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
-                 AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                 List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
-                 BiConsumer<AssetId, Telemetry> telemetryObserver, long sourceInitialBackoffNanos,
-                 long sourceMaxBackoffNanos, UsageSummaryBatchSettings summaryBatchSettings,
-                 UsagePhaseSettings phaseSettings) {
-        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
-                liveUpdatePublisherPort, telemetryObserver, sourceInitialBackoffNanos, sourceMaxBackoffNanos,
-                summaryBatchSettings, phaseSettings, UsagePhaseObserver.NOOP);
-    }
-
-    /**
-     * The true canonical constructor every other one ultimately delegates to
-     * (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.4, Wave O11 added {@code usagePhaseObserver}).
-     */
-    UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
-                 AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                 List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
-                 BiConsumer<AssetId, Telemetry> telemetryObserver, long sourceInitialBackoffNanos,
-                 long sourceMaxBackoffNanos, UsageSummaryBatchSettings summaryBatchSettings,
-                 UsagePhaseSettings phaseSettings, UsagePhaseObserver usagePhaseObserver) {
+                         List<TelemetrySourcePort> telemetrySources, UsageTrackerSettings settings) {
         this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.usageRepository = Objects.requireNonNull(usageRepository, "usageRepository must not be null");
         this.telemetryRepository = Objects.requireNonNull(telemetryRepository, "telemetryRepository must not be null");
         Objects.requireNonNull(telemetrySources, "telemetrySources must not be null");
         this.telemetrySources = List.copyOf(telemetrySources);
-        this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
-        this.telemetryObserver = telemetryObserver; // nullable: samples are merely persisted/announced when absent
-        this.sourceInitialBackoffNanos = sourceInitialBackoffNanos;
-        this.sourceMaxBackoffNanos = sourceMaxBackoffNanos;
-        this.summaryBatchSettings = Objects.requireNonNull(summaryBatchSettings, "summaryBatchSettings must not be null");
-        this.phaseSettings = Objects.requireNonNull(phaseSettings, "phaseSettings must not be null");
-        this.usagePhaseObserver = Objects.requireNonNull(usagePhaseObserver, "usagePhaseObserver must not be null");
+        Objects.requireNonNull(settings, "settings must not be null");
+        this.liveUpdatePublisherPort = settings.liveUpdatePublisherPort().orElse(null); // nullable: no live-update announcements when absent
+        this.telemetryObserver = settings.telemetryObserver().orElse(null); // nullable: samples are merely persisted/announced when absent
+        this.sourceInitialBackoffNanos = settings.sourceInitialBackoffNanos();
+        this.sourceMaxBackoffNanos = settings.sourceMaxBackoffNanos();
+        this.summaryBatchSettings = settings.summaryBatchSettings();
+        this.phaseSettings = settings.phaseSettings();
+        this.usagePhaseObserver = settings.usagePhaseObserver();
     }
 
     /**

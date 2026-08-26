@@ -107,7 +107,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
     void proxiedDeviceOpensNoVideoSourceButStillSignalsStreamStarted() {
         when(streamPublisherPort.proxiesSource(device)).thenReturn(true);
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
 
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
@@ -120,7 +120,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
     void proxiedDeviceStopsWithoutTouchingAVideoSourcePort() {
         when(streamPublisherPort.proxiesSource(device)).thenReturn(true);
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
         // must not throw: RunningStream#source/#supervisedSource are null for a proxied stream, and
@@ -134,7 +134,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
     @Test
     void nonProxiedDeviceStillOpensAVideoSourceExactlyAsBefore() {
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
 
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
@@ -157,7 +157,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
         // arrive, and STARTING would be a state that never resolves.
         when(streamPublisherPort.proxiesSource(device)).thenReturn(true);
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
         assertEquals(Optional.of(StreamState.UNOBSERVED), service.streamState(streamId));
@@ -167,7 +167,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
     void nonProxiedStreamWithNoFrameYetReportsStarting() {
         // noOpVideoPublisher() subscribes but never delivers, which is exactly the just-started window.
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
         assertEquals(Optional.of(StreamState.STARTING), service.streamState(streamId));
@@ -176,7 +176,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
     @Test
     void unknownStreamHasNoStateRatherThanAGuessedOne() {
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
 
         assertEquals(Optional.empty(), service.streamState(StreamId.random()));
     }
@@ -186,7 +186,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
         // Pins the deliberate absence of a STOPPED member: lifecycle is AssetUsage's axis, not this
         // enum's, so a stopped stream answers empty exactly like an unknown one.
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
         service.stop(streamId);
 
@@ -198,7 +198,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
         // The field that ends the localStorage guess: GET /api/streams is built from this record, and
         // detectionEnabled had no read surface at all before this plan.
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
         service.start(device.id(), detectionOn());
 
         ActiveStream listed = service.streams().getFirst();
@@ -211,7 +211,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
         // PipelineConfig.defaults() is detection-off since CV-DEMAND-PLAN wave D1; the listing must
         // report that rather than the optimistic default a convenience ctor would supply.
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
         service.start(device.id(), PipelineConfig.defaults());
 
         assertFalse(service.streams().getFirst().detectionEnabled());
@@ -226,8 +226,9 @@ class DefaultStreamServiceProxyAndPullModeTest {
         PullDetectionSettings pullDetectionSettings =
                 new PullDetectionSettings(pulledDetectionPort, URI.create("rtsp://worker-host:8554"));
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
-                StreamPipelineSettings.defaults(), pullDetectionSettings);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(),
+                        StreamPipelineSettings.defaults(), Optional.of(pullDetectionSettings), Optional.empty()));
 
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
@@ -242,8 +243,9 @@ class DefaultStreamServiceProxyAndPullModeTest {
         PullDetectionSettings pullDetectionSettings =
                 new PullDetectionSettings(pulledDetectionPort, URI.create("rtsp://worker-host:8554"));
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
-                StreamPipelineSettings.defaults(), pullDetectionSettings);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(),
+                        StreamPipelineSettings.defaults(), Optional.of(pullDetectionSettings), Optional.empty()));
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
         service.stop(streamId);
@@ -256,7 +258,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
         // pullDetectionSettings defaults to null on every pre-existing constructor -- this pins that
         // a push-mode start/stop cycle is byte-identical (no NPE, no stray pull-port call).
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
 
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
         service.stop(streamId);

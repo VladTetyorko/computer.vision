@@ -51,6 +51,7 @@ import com.drones.vision.perception.application.pipeline.DetectionEventEngine;
 import com.drones.vision.perception.application.pipeline.PullDetectionBinding;
 import com.drones.vision.perception.application.pipeline.PullDetectionSettings;
 import com.drones.vision.perception.application.pipeline.StreamPipeline;
+import com.drones.vision.perception.application.pipeline.StreamPipelineCollaborators;
 import com.drones.vision.perception.application.pipeline.StreamPipelineSettings;
 import com.drones.vision.perception.application.pipeline.SupervisedPublisher;
 import com.drones.vision.perception.application.pipeline.DetectionRate;
@@ -164,152 +165,17 @@ public final class DefaultStreamService implements StreamService {
     private final ConcurrentHashMap<StreamId, RunningStream> activeStreams = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<DeviceId, StreamId> streamByDevice = new ConcurrentHashMap<>();
 
-    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
-                                 DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
-                                 DetectionRepositoryPort detectionRepositoryPort,
-                                 EventPublisherPort eventPublisher) {
-        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, null, null);
-    }
-
-    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
-                                 DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
-                                 DetectionRepositoryPort detectionRepositoryPort,
-                                 EventPublisherPort eventPublisher, UsageTracker usageTracker) {
-        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, null);
-    }
-
     /**
-     * Same as the 7-argument constructor, plus a {@link DetectionEventRepositoryPort} collaborator
-     * (docs/plans/done/MVP2-PLAN.md §E, E-a): when present, every {@link StreamPipeline} this service starts
-     * is given a fresh, per-stream {@link DetectionEventEngine} built from {@code config}'s {@link
-     * com.drones.vision.perception.domain.model.PipelineConfig#eventRule()}, {@code usageTracker} (for
-     * asset/position resolution), and this port.
-     *
-     * @param detectionEventRepositoryPort nullable, following the same convention as {@code
-     *                                      usageTracker}: {@code null} means no debounced {@code
-     *                                      DetectionEvent} tracking on any stream this service
-     *                                      starts. Deliberately the only new constructor parameter
-     *                                      for this feature rather than duplicating {@code
-     *                                      AssetRepositoryPort}/{@code AssetUsageRepositoryPort}
-     *                                      here — {@code usageTracker} already holds both and now
-     *                                      exposes the two read methods {@link DetectionEventEngine}
-     *                                      needs.
+     * The single canonical constructor (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md Finding
+     * R1) — every collaborator beyond the six mandatory ports is bundled into {@code
+     * serviceSettings}; see {@link DefaultStreamServiceSettings} for what each field controls and
+     * {@link DefaultStreamServiceSettings#defaults()} for the behavior every pre-R1 shortest
+     * constructor used to default to.
      */
     public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
                                  DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
-                                 DetectionRepositoryPort detectionRepositoryPort,
-                                 EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                                 DetectionEventRepositoryPort detectionEventRepositoryPort) {
-        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, detectionEventRepositoryPort, null);
-    }
-
-    /**
-     * Same as the 8-argument constructor, plus a {@link DetectionLiveUpdatePort} collaborator
-     * (docs/plans/done/REALTIME-PLAN.md §4): threaded into every {@link StreamPipeline} this service starts,
-     * alongside the owning asset id resolved once at {@link #start} via {@code usageTracker}, so
-     * completed detection results are announced as live updates.
-     *
-     * @param liveUpdatePublisherPort nullable, following the same convention as {@code
-     *                                 detectionEventRepositoryPort}: {@code null} means no
-     *                                 live-update announcements from any stream this service starts.
-     */
-    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
-                                 DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
-                                 DetectionRepositoryPort detectionRepositoryPort,
-                                 EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                                 DetectionEventRepositoryPort detectionEventRepositoryPort,
-                                 DetectionLiveUpdatePort liveUpdatePublisherPort) {
-        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, detectionEventRepositoryPort, liveUpdatePublisherPort,
-                StreamPipelineSettings.defaults());
-    }
-
-    /**
-     * Test seam: same as the 9-argument constructor, with explicit (typically much smaller)
-     * source reopen backoff bounds so supervision-related tests don't have to wait out a real
-     * 1s-30s backoff, folded onto {@link StreamPipelineSettings#defaults()}'s other tuning.
-     * Production always uses the 9-argument constructor's {@link StreamPipelineSettings#defaults()}.
-     */
-    DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
-                          DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
-                          DetectionRepositoryPort detectionRepositoryPort,
-                          EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                          DetectionEventRepositoryPort detectionEventRepositoryPort,
-                          DetectionLiveUpdatePort liveUpdatePublisherPort,
-                          long sourceInitialBackoffNanos, long sourceMaxBackoffNanos) {
-        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, detectionEventRepositoryPort, liveUpdatePublisherPort,
-                withSourceReopenBackoff(StreamPipelineSettings.defaults(), sourceInitialBackoffNanos,
-                        sourceMaxBackoffNanos));
-    }
-
-    /**
-     * Wiring/test seam: same as the 9-argument constructor, plus an explicit {@link
-     * StreamPipelineSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction) —
-     * {@code vision-app} supplies a {@code vision.application.pipeline.*}-bound settings record
-     * here instead of this class hardcoding one, and it is threaded into both this service's own
-     * {@link SupervisedPublisher} source-reopen backoff and every {@link StreamPipeline} it starts.
-     * Public — unlike the other test seams here — because {@code vision-app}'s wiring calls this
-     * constructor directly with its own {@code VisionApplicationProperties}-bound settings.
-     */
-    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
-                          DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
-                          DetectionRepositoryPort detectionRepositoryPort,
-                          EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                          DetectionEventRepositoryPort detectionEventRepositoryPort,
-                          DetectionLiveUpdatePort liveUpdatePublisherPort,
-                          StreamPipelineSettings settings) {
-        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, detectionEventRepositoryPort, liveUpdatePublisherPort,
-                settings, null);
-    }
-
-    /**
-     * Same as the 10-argument constructor, plus deployment-wide pull-mode wiring (docs/plans/done/MEDIA-SOT-PLAN.md
-     * wave M5, switch B) threaded into every {@link StreamPipeline} this service starts.
-     *
-     * @param pullDetectionSettings nullable, following the same convention as {@code
-     *                              liveUpdatePublisherPort}: {@code null} (the 10-argument
-     *                              constructor's default) means every stream this service starts uses
-     *                              push detection, exactly as before this capability existed.
-     */
-    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
-                          DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
-                          DetectionRepositoryPort detectionRepositoryPort,
-                          EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                          DetectionEventRepositoryPort detectionEventRepositoryPort,
-                          DetectionLiveUpdatePort liveUpdatePublisherPort,
-                          StreamPipelineSettings settings, PullDetectionSettings pullDetectionSettings) {
-        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, detectionEventRepositoryPort, liveUpdatePublisherPort,
-                settings, pullDetectionSettings, null);
-    }
-
-    /**
-     * Same as the 11-argument constructor, plus a {@link DetectionDemandPort} collaborator
-     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3): when present, this constructor schedules {@link
-     * #pollDetectionDemand} on {@link #retryScheduler} at {@link
-     * StreamPipelineSettings#detectionDemandPollInterval()}, re-evaluating every running stream's
-     * demand on each tick.
-     *
-     * @param detectionDemandPort nullable, following the same convention as {@code
-     *                             pullDetectionSettings}: {@code null} (the 11-argument
-     *                             constructor's default) means the demand-poll task is never
-     *                             scheduled at all, so every stream this service starts is fail-open
-     *                             on demand — gated on {@code detectionEnabled} alone, exactly as
-     *                             before this capability existed.
-     */
-    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
-                          DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
-                          DetectionRepositoryPort detectionRepositoryPort,
-                          EventPublisherPort eventPublisher, UsageTracker usageTracker,
-                          DetectionEventRepositoryPort detectionEventRepositoryPort,
-                          DetectionLiveUpdatePort liveUpdatePublisherPort,
-                          StreamPipelineSettings settings, PullDetectionSettings pullDetectionSettings,
-                          DetectionDemandPort detectionDemandPort) {
+                                 DetectionRepositoryPort detectionRepositoryPort, EventPublisherPort eventPublisher,
+                                 DefaultStreamServiceSettings serviceSettings) {
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
         this.detectionPort = Objects.requireNonNull(detectionPort, "detectionPort must not be null");
@@ -317,27 +183,22 @@ public final class DefaultStreamService implements StreamService {
         this.detectionRepositoryPort =
                 Objects.requireNonNull(detectionRepositoryPort, "detectionRepositoryPort must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
-        this.usageTracker = usageTracker; // nullable: no-op usage tracking when absent
-        this.detectionEventRepositoryPort = detectionEventRepositoryPort; // nullable: no event tracking when absent
-        this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
-        this.settings = Objects.requireNonNull(settings, "settings must not be null");
-        this.pullDetectionSettings = pullDetectionSettings; // nullable: every stream uses push detection when absent
-        this.detectionDemandPort = detectionDemandPort; // nullable: demand-poll task never scheduled when absent
-        if (detectionDemandPort != null) {
-            long intervalNanos = settings.detectionDemandPollInterval().toNanos();
+        Objects.requireNonNull(serviceSettings, "serviceSettings must not be null");
+        this.usageTracker = serviceSettings.usageTracker().orElse(null); // nullable: no-op usage tracking when absent
+        this.detectionEventRepositoryPort =
+                serviceSettings.detectionEventRepositoryPort().orElse(null); // nullable: no event tracking when absent
+        this.liveUpdatePublisherPort =
+                serviceSettings.liveUpdatePublisherPort().orElse(null); // nullable: no live-update announcements when absent
+        this.settings = serviceSettings.pipelineSettings();
+        this.pullDetectionSettings =
+                serviceSettings.pullDetectionSettings().orElse(null); // nullable: every stream uses push detection when absent
+        this.detectionDemandPort =
+                serviceSettings.detectionDemandPort().orElse(null); // nullable: demand-poll task never scheduled when absent
+        if (this.detectionDemandPort != null) {
+            long intervalNanos = this.settings.detectionDemandPollInterval().toNanos();
             retryScheduler.scheduleAtFixedRate(this::pollDetectionDemand, intervalNanos, intervalNanos,
                     TimeUnit.NANOSECONDS);
         }
-    }
-
-    /** Copies {@code base} with its source-reopen backoff bounds replaced. */
-    private static StreamPipelineSettings withSourceReopenBackoff(StreamPipelineSettings base, long initialNanos,
-                                                                   long maxNanos) {
-        return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(), base.warmupFrames(),
-                base.minMeasuredFps(), base.maxMeasuredFps(), base.detectionBackoffInitialNanos(),
-                base.detectionBackoffMaxNanos(), initialNanos, maxNanos, base.extrapolationMaxMillis(),
-                base.extrapolationMatchGate(), base.trackingStatsWindow(), base.trackRetention(),
-                base.trackingSeed());
     }
 
     @Override
@@ -452,9 +313,10 @@ public final class DefaultStreamService implements StreamService {
                             ? () -> usageTracker.latestTelemetry(ownerAssetId).orElse(null)
                             : null;
             StreamPipeline pipeline = new StreamPipeline(streamId, device, config, videoPublisher, detectionPort,
-                    streamPublisherPort, detectionRepositoryPort, eventPublisher, eventEngine,
-                    ownerAssetId, liveUpdatePublisherPort, telemetrySupplier, System::nanoTime, settings,
-                    pullDetection);
+                    streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                    new StreamPipelineCollaborators(Optional.ofNullable(eventEngine), Optional.ofNullable(ownerAssetId),
+                            Optional.ofNullable(liveUpdatePublisherPort), Optional.ofNullable(telemetrySupplier),
+                            System::nanoTime, settings, System::nanoTime, Optional.ofNullable(pullDetection)));
             // docs/plans/done/CV-DEMAND-PLAN.md §1: seeded to Instant.EPOCH, not Instant.now() -- demand must
             // be observed, never assumed. StreamPipeline#detectionDemand's own fail-open true default
             // already covers a just-started stream until the first poll tick (at most

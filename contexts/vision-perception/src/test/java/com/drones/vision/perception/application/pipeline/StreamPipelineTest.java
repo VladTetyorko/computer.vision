@@ -131,19 +131,25 @@ class StreamPipelineTest {
 
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher);
+                detectionRepositoryPort, eventPublisher, StreamPipelineCollaborators.defaults());
     }
 
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
                                      DetectionEventEngine eventEngine) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, eventEngine);
+                detectionRepositoryPort, eventPublisher, collaborators(Optional.of(eventEngine), Optional.empty(),
+                        Optional.empty(), Optional.empty(), System::nanoTime));
     }
 
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, AssetId assetId,
                                      DetectionLiveUpdatePort liveUpdatePublisherPort) {
+        // ofNullable, not of(): neverAnnouncesLiveUpdatesWhenTheDeviceHasNoOwningAsset and
+        // neverTouchesLiveUpdatePublisherWhenNoneIsConfigured deliberately pass a literal null here
+        // to exercise StreamPipeline's own "collaborator absent" handling.
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, assetId, liveUpdatePublisherPort);
+                detectionRepositoryPort, eventPublisher, collaborators(Optional.empty(),
+                        Optional.ofNullable(assetId), Optional.ofNullable(liveUpdatePublisherPort), Optional.empty(),
+                        System::nanoTime));
     }
 
     /**
@@ -155,35 +161,37 @@ class StreamPipelineTest {
      */
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, double sourceFps) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, null,
-                fixedFpsClock(sourceFps));
+                detectionRepositoryPort, eventPublisher, collaborators(Optional.empty(), Optional.empty(),
+                        Optional.empty(), Optional.empty(), fixedFpsClock(sourceFps)));
     }
 
     /** @see #pipeline(ScriptedVideoPublisher, PipelineConfig, double) */
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
                                      DetectionEventEngine eventEngine, double sourceFps) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, eventEngine, null, null, null,
-                fixedFpsClock(sourceFps));
+                detectionRepositoryPort, eventPublisher, collaborators(Optional.of(eventEngine), Optional.empty(),
+                        Optional.empty(), Optional.empty(), fixedFpsClock(sourceFps)));
     }
 
     /** @see #pipeline(ScriptedVideoPublisher, PipelineConfig, double) */
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, AssetId assetId,
                                      DetectionLiveUpdatePort liveUpdatePublisherPort, double sourceFps) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, assetId, liveUpdatePublisherPort, null,
-                fixedFpsClock(sourceFps));
+                detectionRepositoryPort, eventPublisher, collaborators(Optional.empty(), Optional.of(assetId),
+                        Optional.of(liveUpdatePublisherPort), Optional.empty(), fixedFpsClock(sourceFps)));
     }
 
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, LongSupplier clock) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, null, clock);
+                detectionRepositoryPort, eventPublisher, collaborators(Optional.empty(), Optional.empty(),
+                        Optional.empty(), Optional.empty(), clock));
     }
 
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
                                      Supplier<Telemetry> telemetrySupplier) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, telemetrySupplier);
+                detectionRepositoryPort, eventPublisher, collaborators(Optional.empty(), Optional.empty(),
+                        Optional.empty(), Optional.of(telemetrySupplier), System::nanoTime));
     }
 
     /**
@@ -199,7 +207,8 @@ class StreamPipelineTest {
      */
     private StreamPipeline manualPipeline(PipelineConfig config, LongSupplier clock) {
         StreamPipeline pipeline = new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null, clock);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, collaborators(Optional.empty(),
+                        Optional.empty(), Optional.empty(), Optional.empty(), clock));
         pipeline.onSubscribe(NOOP_SUBSCRIPTION);
         return pipeline;
     }
@@ -211,8 +220,25 @@ class StreamPipelineTest {
     private StreamPipeline latencyPipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
                                             LongSupplier latencyClock) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, null,
-                fixedFpsClock(30), StreamPipelineSettings.defaults(), latencyClock);
+                detectionRepositoryPort, eventPublisher,
+                new StreamPipelineCollaborators(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                        fixedFpsClock(30), StreamPipelineSettings.defaults(), latencyClock, Optional.empty()));
+    }
+
+    /**
+     * Shared builder for this file's many {@code pipeline(...)} overloads — every one differs only
+     * in which of {@link StreamPipelineCollaborators}'s optional fields is populated and what {@code
+     * nanoTimeSource} to use; {@code settings}/{@code latencyNanoSource}/{@code pullDetection} stay
+     * at {@link StreamPipelineCollaborators#defaults()}'s values throughout this file except in
+     * {@link #latencyPipeline}/{@link #attitudePipeline}, which build their own directly.
+     */
+    private static StreamPipelineCollaborators collaborators(Optional<DetectionEventEngine> eventEngine,
+                                                               Optional<AssetId> assetId,
+                                                               Optional<DetectionLiveUpdatePort> liveUpdatePublisherPort,
+                                                               Optional<Supplier<Telemetry>> telemetrySupplier,
+                                                               LongSupplier nanoTimeSource) {
+        return new StreamPipelineCollaborators(eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
+                nanoTimeSource, StreamPipelineSettings.defaults(), System::nanoTime, Optional.empty());
     }
 
     // --- camera attitude (docs/conclusions/CV-RATE-BUDGET.md §5, gap 3) ----------------------
@@ -231,8 +257,10 @@ class StreamPipelineTest {
                                              Supplier<Telemetry> telemetrySupplier,
                                              StreamPipelineSettings settings) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, telemetrySupplier,
-                fixedFpsClock(30), settings, System::nanoTime);
+                detectionRepositoryPort, eventPublisher,
+                new StreamPipelineCollaborators(Optional.empty(), Optional.empty(), Optional.empty(),
+                        Optional.of(telemetrySupplier), fixedFpsClock(30), settings, System::nanoTime,
+                        Optional.empty()));
     }
 
     private static Telemetry telemetryWithHeading(Double headingDegrees) {
@@ -1301,8 +1329,9 @@ class StreamPipelineTest {
                 EventRuleConfig.defaults(), true);
 
         StreamPipeline pipeline = new StreamPipeline(streamId, device, config, publisher, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, eventEngine, assetId,
-                liveUpdatePublisherPort);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, collaborators(Optional.of(eventEngine),
+                        Optional.of(assetId), Optional.of(liveUpdatePublisherPort), Optional.empty(),
+                        System::nanoTime));
         pipeline.start();
 
         assertEquals(List.of("person"), pipeline.latestDetections().stream().map(Detection::label).toList());
@@ -1380,8 +1409,10 @@ class StreamPipelineTest {
                 .thenAnswer(invocation -> CompletableFuture.completedFuture(escapingTargetResult(0)));
 
         new StreamPipeline(streamId, device, trackingConfig(10, TrackingConfig.defaults()), publisher,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
-                null, fixedFpsClock(60), settingsWithAdaptiveRate(adaptiveRate), System::nanoTime).start();
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new StreamPipelineCollaborators(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                        fixedFpsClock(60), settingsWithAdaptiveRate(adaptiveRate), System::nanoTime,
+                        Optional.empty())).start();
 
         return mockingDetails(detectionPort).getInvocations().size();
     }
@@ -1455,8 +1486,9 @@ class StreamPipelineTest {
         DetectionPort port = mock(DetectionPort.class);
         when(port.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
         StreamPipeline pipeline = new StreamPipeline(streamId, device, trackingConfig(10, mode(trackingMode, 15)),
-                NO_OP_SOURCE, port, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
-                null, thirtyFpsClock());
+                NO_OP_SOURCE, port, streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                collaborators(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                        thirtyFpsClock()));
         pipeline.onSubscribe(NOOP_SUBSCRIPTION);
         for (int i = 0; i < 30; i++) {
             pipeline.onNext(frame(i));
