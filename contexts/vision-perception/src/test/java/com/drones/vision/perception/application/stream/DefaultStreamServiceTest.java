@@ -133,7 +133,7 @@ class DefaultStreamServiceTest {
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(noOpPublisher());
 
         service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher);
+                detectionRepositoryPort, eventPublisher, DefaultStreamServiceSettings.defaults());
     }
 
     @Test
@@ -267,8 +267,10 @@ class DefaultStreamServiceTest {
         // immediately -- a tiny backoff window (20ms) plus a generous wait afterwards proves no
         // further open() call ever arrives, without waiting out the real 1s-30s production backoff.
         StreamService fastRetryService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
-                TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(),
+                        settingsWithSourceReopenBackoff(TimeUnit.MILLISECONDS.toNanos(20),
+                                TimeUnit.MILLISECONDS.toNanos(20)), Optional.empty(), Optional.empty()));
         ErroringThenSilentPublisher publisher = new ErroringThenSilentPublisher();
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
 
@@ -474,8 +476,10 @@ class DefaultStreamServiceTest {
         when(usageTracker.resolveAsset(device.id())).thenReturn(Optional.of(assetId));
         DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
         StreamService withLiveUpdates = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker, null,
-                liveUpdatePublisherPort);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(),
+                        Optional.of(liveUpdatePublisherPort), StreamPipelineSettings.defaults(), Optional.empty(),
+                        Optional.empty()));
         VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
@@ -495,7 +499,9 @@ class DefaultStreamServiceTest {
         // (see the telemetry-supplier tests below).
         UsageTracker usageTracker = mock(UsageTracker.class);
         StreamService withTracker = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(), Optional.empty(),
+                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty()));
 
         withTracker.start(device.id(), PipelineConfig.defaults());
 
@@ -518,7 +524,9 @@ class DefaultStreamServiceTest {
                 new Telemetry(device.id(), Instant.now(), 50.0, 30.0, 120.0, 137.5, 80.0, Map.of())));
         StreamPipelineSettings withFov = settingsWithCameraHfov(62.0);
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker, null, null, withFov);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(), Optional.empty(),
+                        withFov, Optional.empty(), Optional.empty()));
         VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
@@ -538,7 +546,9 @@ class DefaultStreamServiceTest {
         // The cost gate the fix had to preserve: nothing reads telemetry, so nothing resolves it.
         UsageTracker usageTracker = mock(UsageTracker.class);
         StreamService service = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(), Optional.empty(),
+                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty()));
 
         service.start(device.id(), PipelineConfig.defaults());
 
@@ -554,6 +564,20 @@ class DefaultStreamServiceTest {
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
                 base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
                 base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees);
+    }
+
+    /**
+     * docs/plans/done/MVP2-PLAN.md §S, S-a: {@link StreamPipelineSettings#defaults()} with a tiny
+     * (typically 20ms) source reopen backoff instead of production's real 1s-30s one, so
+     * supervision-related tests don't have to wait it out.
+     */
+    private static StreamPipelineSettings settingsWithSourceReopenBackoff(long initialNanos, long maxNanos) {
+        StreamPipelineSettings base = StreamPipelineSettings.defaults();
+        return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(), base.warmupFrames(),
+                base.minMeasuredFps(), base.maxMeasuredFps(), base.detectionBackoffInitialNanos(),
+                base.detectionBackoffMaxNanos(), initialNanos, maxNanos, base.extrapolationMaxMillis(),
+                base.extrapolationMatchGate(), base.trackingStatsWindow(), base.trackRetention(),
+                base.trackingSeed());
     }
 
     /** A {@link Flow.Publisher} that delivers exactly one frame on its first {@code request()} call. */
@@ -580,7 +604,9 @@ class DefaultStreamServiceTest {
     void startNotifiesUsageTrackerWhenOneIsConfigured() {
         UsageTracker usageTracker = mock(UsageTracker.class);
         StreamService withTracker = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(), Optional.empty(),
+                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty()));
 
         StreamId streamId = withTracker.start(device.id(), PipelineConfig.defaults());
 
@@ -591,7 +617,9 @@ class DefaultStreamServiceTest {
     void stopNotifiesUsageTrackerWhenOneIsConfigured() {
         UsageTracker usageTracker = mock(UsageTracker.class);
         StreamService withTracker = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(), Optional.empty(),
+                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty()));
         StreamId streamId = withTracker.start(device.id(), PipelineConfig.defaults());
 
         withTracker.stop(streamId);
@@ -617,8 +645,9 @@ class DefaultStreamServiceTest {
         // opposite (configured) direction.
         DetectionEventRepositoryPort detectionEventRepositoryPort = mock(DetectionEventRepositoryPort.class);
         StreamService withEvents = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null,
-                detectionEventRepositoryPort);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.empty(), Optional.of(detectionEventRepositoryPort),
+                        Optional.empty(), StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty()));
 
         StreamId streamId = withEvents.start(device.id(), PipelineConfig.defaults());
 
@@ -1067,13 +1096,16 @@ class DefaultStreamServiceTest {
     /** A service whose {@link StreamPipelineSettings#trackingSeed()} is {@code seed}. */
     private StreamService serviceSeededWith(TrackingConfigPatch seed) {
         StreamPipelineSettings base = StreamPipelineSettings.defaults();
+        StreamPipelineSettings seeded = new StreamPipelineSettings(base.assumedSourceFps(),
+                base.measuredFpsEwmaAlpha(), base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
+                base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
+                base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
+                base.extrapolationMaxMillis(), base.extrapolationMatchGate(), base.trackingStatsWindow(),
+                base.trackRetention(), seed);
         return new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null,
-                new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(), base.warmupFrames(),
-                        base.minMeasuredFps(), base.maxMeasuredFps(), base.detectionBackoffInitialNanos(),
-                        base.detectionBackoffMaxNanos(), base.sourceReopenBackoffInitialNanos(),
-                        base.sourceReopenBackoffMaxNanos(), base.extrapolationMaxMillis(),
-                        base.extrapolationMatchGate(), base.trackingStatsWindow(), base.trackRetention(), seed));
+                detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), seeded,
+                        Optional.empty(), Optional.empty()));
     }
 
     @Test
@@ -1118,8 +1150,9 @@ class DefaultStreamServiceTest {
         // evaluateDetectionDemand's package-private Instant seam, never by waiting out a real cadence.
         StreamPipelineSettings settings = settingsWithDetectionDemand(Duration.ofMinutes(1), grace);
         DefaultStreamService demandService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
-                settings, null, demandPort);
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), settings,
+                        Optional.empty(), Optional.of(demandPort)));
         // inferenceFps=100 (10ms sample interval) plus the 15ms real sleeps below reliably clear the
         // pipeline's own real-nanoTime sample deadline between pushes -- unrelated to (and much
         // shorter than) the synthetic Instants driving the grace computation itself below, which
@@ -1163,8 +1196,9 @@ class DefaultStreamServiceTest {
         StreamPipelineSettings settings = settingsWithDetectionDemand(Duration.ofMillis(20),
                 StreamPipelineSettings.defaults().detectionDemandGrace());
         DefaultStreamService demandService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
-                settings, null, throwingPort);
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), settings,
+                        Optional.empty(), Optional.of(throwingPort)));
 
         demandService.start(device.id(), PipelineConfig.defaults());
 
@@ -1185,8 +1219,9 @@ class DefaultStreamServiceTest {
         // this test drives evaluateDetectionDemand explicitly, through its package-private Instant seam.
         StreamPipelineSettings settings = settingsWithDetectionDemand(Duration.ofMinutes(1), Duration.ofSeconds(30));
         DefaultStreamService demandService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
-                settings, null, demandPort);
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), settings,
+                        Optional.empty(), Optional.of(demandPort)));
         StreamId streamId = demandService.start(device.id(), detectingDefaults());
 
         // Before any evaluation at all: StreamPipeline#detectionDemand's own fail-open true default
