@@ -4,6 +4,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
 import java.time.Instant;
 
 /**
@@ -27,6 +28,12 @@ import java.time.Instant;
  * before this field existed, or opened by an asset with no video device,
  * carries {@code null} here — honestly, not as an error.
  *
+ * <p>{@code origin} (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) records
+ * <em>which verb</em> opened this session — see {@link UsageOrigin} for the three values and
+ * {@code UsageTracker#engage}/{@code #disengage} for the collision rules it governs once a stream
+ * and an operator both touch the same session. Persisted (not just an in-memory fact) so
+ * engagement survives a process restart.
+ *
  * @param id            typed usage identity
  * @param assetId       the asset this usage belongs to
  * @param startedAt     when the usage was opened
@@ -37,9 +44,11 @@ import java.time.Instant;
  * @param streamId      the stream whose start opened this usage, or {@code null} for a legacy/streamless usage
  * @param phase         this usage's aircraft-state phase (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3,
  *                      Wave O7); driven by {@code UsageTracker} in vision-perception, see {@link UsagePhase}
+ * @param origin        which verb opened this session — see {@link UsageOrigin}
  */
 public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
-                          GeoPosition lastPosition, long sampleCount, StreamId streamId, UsagePhase phase) {
+                          GeoPosition lastPosition, long sampleCount, StreamId streamId, UsagePhase phase,
+                          UsageOrigin origin) {
 
     public AssetUsage {
         if (id == null) {
@@ -61,12 +70,31 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
         if (phase == null) {
             throw new IllegalArgumentException("AssetUsage phase must not be null");
         }
+        if (origin == null) {
+            throw new IllegalArgumentException("AssetUsage origin must not be null");
+        }
+    }
+
+    /**
+     * Convenience constructor for the pre-R2 shape — defaults {@link #origin()} to {@link
+     * UsageOrigin#STREAM}, keeping every pre-existing call site (including the two convenience
+     * overloads below, which route through this one) compiling unchanged. Every call site within
+     * this wave's file scope passes {@code origin} explicitly instead; this overload exists only
+     * because callers in vision-flight/vision-events/vision-learning (outside this wave's scope)
+     * still construct an {@code AssetUsage} through it directly — see this class's MODULE.md entry
+     * for the precedent ({@code phase}'s own pre-O7 default) this follows.
+     */
+    public AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
+                       GeoPosition lastPosition, long sampleCount, StreamId streamId, UsagePhase phase) {
+        this(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId, phase,
+                UsageOrigin.STREAM);
     }
 
     /**
      * Convenience constructor for the pre-O7 shape — defaults {@link #phase()} to {@link
-     * UsagePhase#PREFLIGHT}, keeping every pre-existing call site (including the streamless 7-arg
-     * overload below, which routes through this one) compiling unchanged.
+     * UsagePhase#PREFLIGHT} (and, as of wave R2, {@link #origin()} to {@link UsageOrigin#STREAM}),
+     * keeping every pre-existing call site (including the streamless 7-arg overload below, which
+     * routes through this one) compiling unchanged.
      */
     public AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
                        GeoPosition lastPosition, long sampleCount, StreamId streamId) {
@@ -91,7 +119,7 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      */
     public AssetUsage closed(Instant endedAt) {
         return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
-                phase);
+                phase, origin);
     }
 
     /**
@@ -103,7 +131,7 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      */
     public AssetUsage withPositions(GeoPosition startPosition, GeoPosition lastPosition) {
         return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
-                phase);
+                phase, origin);
     }
 
     /**
@@ -114,7 +142,7 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      */
     public AssetUsage withSampleCount(long sampleCount) {
         return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
-                phase);
+                phase, origin);
     }
 
     /**
@@ -125,6 +153,20 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      */
     public AssetUsage withPhase(UsagePhase phase) {
         return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
-                phase);
+                phase, origin);
+    }
+
+    /**
+     * Returns a copy of this usage with a different origin — used to <em>promote</em> a
+     * stream-opened session to operator-owned once an operator engages an already-streaming asset
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2; see {@code
+     * UsageTracker#engage}'s javadoc for the collision rule this exists for).
+     *
+     * @param origin the replacement origin
+     * @return a new {@code AssetUsage} with {@code origin} replaced
+     */
+    public AssetUsage withOrigin(UsageOrigin origin) {
+        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
+                phase, origin);
     }
 }

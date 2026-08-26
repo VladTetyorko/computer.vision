@@ -90,6 +90,7 @@ import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
+import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.flight.domain.model.VehicleProfile;
@@ -679,7 +680,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void savedUsageWithANonDefaultPhaseRoundTripsExactly() {
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
-                    UsagePhase.IN_FLIGHT);
+                    UsagePhase.IN_FLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -689,13 +690,35 @@ class PostgresDockerIntegrationTest {
             assertEquals(usage, found.get());
         }
 
+        /**
+         * The origin twin of {@link #savedUsageWithANonDefaultPhaseRoundTripsExactly} — proves
+         * {@code V26__asset_usage_origin.sql} plus {@code AssetUsageMapper} round-trip a
+         * non-default {@link UsageOrigin} (not {@code STREAM}, the column's own database default,
+         * so a mapper that always wrote/read the default could not accidentally pass this test)
+         * exactly (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2).
+         */
+        @Test
+        void savedUsageWithANonDefaultOriginRoundTripsExactly() {
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.OPERATOR);
+
+            repository.save(usage);
+
+            Optional<AssetUsage> found = repository.findById(usage.id());
+            assertTrue(found.isPresent());
+            assertEquals(UsageOrigin.OPERATOR, found.get().origin());
+            assertEquals(usage, found.get());
+        }
+
         @Test
         void saveIsAnUpsertThatCanTransitionPhase() {
             UsageId id = UsageId.random();
             AssetId assetId = AssetId.random();
-            repository.save(new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.PREFLIGHT));
+            repository.save(
+                    new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM));
 
-            repository.save(new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.IN_FLIGHT));
+            repository.save(
+                    new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.IN_FLIGHT, UsageOrigin.STREAM));
 
             Optional<AssetUsage> found = repository.findById(id);
             assertTrue(found.isPresent());
@@ -714,7 +737,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void legacyRowWithNullPhaseColumnMapsToPreflightDefault() {
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
-                    UsagePhase.LINK_LOST);
+                    UsagePhase.LINK_LOST, UsageOrigin.STREAM);
             repository.save(usage);
             EntityManager em = entityManagerFactory.createEntityManager();
             try {

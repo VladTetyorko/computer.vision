@@ -1,0 +1,11 @@
+-- Gives an asset_usage row an origin: which verb opened the session -- STREAM (a video stream
+-- starting) or OPERATOR (the explicit
+-- engage/disengage act introduced by this same wave) -- docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md
+-- finding D2, wave R2. See UsageOrigin (vision-kernel) for what each value means.
+--
+-- Every row written before this column existed was, by construction, opened as a side effect of a
+-- video stream starting -- UsageTracker#onStreamStarted was the only code in the whole codebase
+-- that ever opened a usage before this wave (see that wave's report for the onTelemetryDeviceDiscovered
+-- dead-code finding this migration is downstream of). Backfilling every existing row to STREAM is
+-- therefore not a guess, it is simply naming the one thing every one of them already was.
+ALTER TABLE asset_usages ADD COLUMN origin VARCHAR(32) NOT NULL DEFAULT 'STREAM';

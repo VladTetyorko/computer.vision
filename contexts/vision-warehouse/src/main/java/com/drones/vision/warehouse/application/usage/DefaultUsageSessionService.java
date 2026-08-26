@@ -5,6 +5,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
@@ -26,11 +27,12 @@ public final class DefaultUsageSessionService implements UsageSessionService {
     }
 
     @Override
-    public AssetUsage open(AssetId assetId, StreamId streamIdOrNull, Instant startedAt) {
+    public AssetUsage open(AssetId assetId, StreamId streamIdOrNull, UsageOrigin origin, Instant startedAt) {
         Objects.requireNonNull(assetId, "assetId must not be null");
+        Objects.requireNonNull(origin, "origin must not be null");
         Objects.requireNonNull(startedAt, "startedAt must not be null");
         AssetUsage usage = new AssetUsage(UsageId.random(), assetId, startedAt, null, null, null, 0L, streamIdOrNull,
-                UsagePhase.PREFLIGHT);
+                UsagePhase.PREFLIGHT, origin);
         return usageRepository.save(usage);
     }
 

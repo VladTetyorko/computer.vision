@@ -12,6 +12,7 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import com.drones.vision.warehouse.application.usage.UsageSessionService;
 import com.drones.vision.flight.application.telemetry.TelemetryService;
@@ -21,11 +22,10 @@ import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
@@ -82,14 +82,29 @@ import com.drones.vision.perception.application.stream.StreamService;
  *   <li>{@link #onStreamStopped(DeviceId)} — if this was the asset's
  *       <b>last</b> currently-active device, closes the open usage (via {@link
  *       UsageSessionService#close}) and unsubscribes/closes every telemetry
- *       subscription opened for it.</li>
- *   <li>{@link #onTelemetryDeviceDiscovered(DeviceId)} — the same "asset's first active device
- *       opens a usage" accounting as {@link #onStreamStarted}, for a telemetry-capable device with
- *       no video stream of its own (docs/plans/active/DRONE-ONBOARDING-PLAN.md §7, Wave O7): a
- *       telemetry-only aircraft must still get an {@link AssetUsage}, opened on its first sample
- *       rather than a video start that will never come.</li>
+ *       subscription opened for it — <b>unless</b> the open usage is {@link UsageOrigin#OPERATOR},
+ *       in which case it stays open (see {@link #engage}'s collision-rule note) and only the
+ *       telemetry subscriptions tear down.</li>
+ *   <li>{@link #engage(AssetId)} / {@link #disengage(AssetId)} — the explicit operator verb
+ *       (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) that opens/closes a usage
+ *       directly, with <b>no video stream and no device traffic involved</b> — for a telemetry-only
+ *       aircraft, or one being prepared before streaming, that an operator wants to mark "in use."
+ *       See each method's own javadoc for how they resolve colliding with a stream that is already
+ *       (or still) running.</li>
  * </ul>
  *
+ * <h2>{@code onTelemetryDeviceDiscovered} — deleted, not wired (wave R2)</h2>
+ * A prior wave (docs/plans/active/DRONE-ONBOARDING-PLAN.md §7, Wave O7) added {@code
+ * onTelemetryDeviceDiscovered(DeviceId)} — the same "first active device opens a usage" accounting
+ * as {@link #onStreamStarted}, meant to open a usage for a telemetry-capable device with no video
+ * stream. It was fully tested but never called from production code (measured
+ * docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md finding D2). Wave R2 deletes it rather than
+ * wiring it up: {@link #engage} now covers the same need (a telemetry-only aircraft an operator
+ * wants marked "in use") more generally — an explicit, restartable, operator-driven verb rather
+ * than an automatic one keyed off the mere existence of a telemetry-capable device, which would
+ * open a usage the moment any telemetry-capable device were merely <em>registered</em>/probed, not
+ * only once an operator actually meant to fly it. Keeping both would also have left two
+ * independent, disagreeing ways to open a usage with no stream — this class settles on one.
  * <h2>Phase (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3, Wave O7)</h2>
  * Every {@link AssetUsage} this class opens, folds a sample into, or closes also carries an
  * {@link UsagePhase}, computed by running {@code FlightPhaseRule}
@@ -104,7 +119,7 @@ import com.drones.vision.perception.application.stream.StreamService;
  * arrive on a sample by definition — nothing in this wave wires it to a live scheduler (that is
  * left to whichever wave wires {@code vision.flight.phase.*}), but the method exists so the
  * transition itself is directly testable. Every one of those three fold sites, plus the two places
- * a usage opens ({@link #deviceStreamStarted}/{@link #deviceTelemetryDiscovered}), notifies the
+ * a usage opens ({@link #deviceStreamStarted}/{@link #engage}), notifies the
  * configured {@link UsagePhaseObserver} exactly once whenever the phase actually changed (or, at
  * open, once for the usage's initial {@link UsagePhase#PREFLIGHT}) — see {@link
  * #notifyPhaseObserver} and {@link UsagePhaseObserver}'s own javadoc
@@ -216,22 +231,164 @@ public final class UsageTracker {
     }
 
     /**
-     * Notifies the tracker that a {@link Capability#TELEMETRY}-capable device has begun reporting,
-     * independent of any video stream (docs/plans/active/DRONE-ONBOARDING-PLAN.md §7, Wave O7: "a
-     * session opens on first telemetry, not only on first stream") — a telemetry-only aircraft (no
-     * video device at all) must still get an {@link AssetUsage}. Applies the same "asset's first
-     * active device opens a usage" accounting {@link #onStreamStarted} uses, just with no {@code
-     * streamId} to stamp — see {@link AssetUsage#streamId()}'s own "or {@code null} for a
-     * legacy/streamless usage" contract; this is the other honest reason for a {@code null} one.
+     * Opens (or promotes) a usage for {@code assetId} directly, with no video stream and no device
+     * traffic involved — the explicit operator verb
+     * docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2/R2 introduces for a telemetry-only
+     * aircraft, or one being prepared before streaming, that an operator wants to mark "in use"
+     * without a stream ever starting. Stamped with {@link UsageOrigin#OPERATOR} and no {@code
+     * streamId} (same "or {@code null} for a legacy/streamless usage" honesty {@link
+     * AssetUsage#streamId()} already documents).
      *
-     * <p>Idempotent per device: a repeated call for a device already counted active is a no-op, so
-     * a caller need not track whether it has already announced a given device.
+     * <h2>Collision: a stream is already running</h2>
+     * If the asset already has an open usage whose origin is not already {@link
+     * UsageOrigin#OPERATOR} (i.e. a video stream opened it), this call <b>promotes</b> that usage
+     * to {@link UsageOrigin#OPERATOR} rather than opening a second one or rejecting the call — an
+     * operator explicitly asserting "I am using this asset" is a stronger, more specific signal
+     * than the side effect that happened to open the session first, and promoting is what makes
+     * {@link #onStreamStopped}'s later no-op-on-OPERATOR guard the correct behavior instead of a
+     * bug: without promotion, a stream stopping while the operator considers the asset engaged
+     * would silently end the session out from under them. The pre-existing {@code streamId} is
+     * left untouched either way — {@link AssetUsage#streamId()} is recorded once, at genuine open
+     * time, and never changed afterward (see that field's own javadoc); a promoted usage keeps
+     * whichever stream opened it as an honest historical fact.
      *
-     * @param deviceId the telemetry-capable device that has begun reporting
+     * <p>Idempotent: engaging an asset that is already {@link UsageOrigin#OPERATOR}-engaged returns
+     * the existing usage unchanged.
+     *
+     * @param assetId the asset to engage
+     * @return the open usage, now attributed to {@link UsageOrigin#OPERATOR} (newly opened,
+     *         promoted, or already engaged)
+     * @throws NullPointerException     if {@code assetId} is {@code null}
+     * @throws NoSuchElementException   if no asset has that id
+     * @throws IllegalStateException    if the asset is not in service
      */
-    public void onTelemetryDeviceDiscovered(DeviceId deviceId) {
-        Objects.requireNonNull(deviceId, "deviceId must not be null");
-        assetDirectory.findByDevice(deviceId).ifPresent(asset -> deviceTelemetryDiscovered(asset, deviceId));
+    public AssetUsage engage(AssetId assetId) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        requireActiveAsset(assetId); // no device traffic is ever opened here -- see class javadoc
+        Tracking tracking = trackingByAsset.computeIfAbsent(assetId, id -> new Tracking());
+        AssetUsage result;
+        UsageId openedUsageId = null;
+        UsagePhase openedPhase = null;
+        boolean openedNow = false;
+        AssetUsage toPersist = null;
+        synchronized (tracking) {
+            if (tracking.usage == null) {
+                tracking.usage = usageSessionService.open(assetId, null, UsageOrigin.OPERATOR,
+                        phaseSettings.clock().get());
+                openedUsageId = tracking.usage.id();
+                openedPhase = tracking.usage.phase();
+                openedNow = true;
+                result = tracking.usage;
+            } else if (tracking.usage.origin() != UsageOrigin.OPERATOR) {
+                tracking.usage = tracking.usage.withOrigin(UsageOrigin.OPERATOR);
+                toPersist = tracking.usage;
+                result = tracking.usage;
+            } else {
+                result = tracking.usage; // already engaged: idempotent no-op
+            }
+        }
+        if (toPersist != null) {
+            result = usageSessionService.save(toPersist);
+        }
+        if (openedNow) {
+            notifyPhaseObserver(assetId, openedUsageId, null, openedPhase);
+        }
+        return result;
+    }
+
+    /**
+     * Ends {@code assetId}'s operator-engaged usage — the inverse of {@link #engage}
+     * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2/R2).
+     *
+     * <h2>Collision: a stream is still running</h2>
+     * If a device/stream is still active for the asset when the operator disengages, this does
+     * <b>not</b> close the usage: doing so would leave the still-running stream's telemetry with no
+     * usage to fold into, and leave nothing to ever close it once the stream eventually does stop.
+     * Instead it <b>demotes</b> the usage back to {@link UsageOrigin#STREAM} — the operator's claim
+     * on the session is withdrawn, but the session itself lives on exactly as if the stream had
+     * opened it, which (from the runtime's point of view) is now the whole truth: nothing but the
+     * stream is still watching it. The ordinary stream-driven close in {@link #onStreamStopped}
+     * takes over from there once the last device actually stops. Only when no device is currently
+     * active does this method close the usage outright, via the same {@code
+     * FlightPhaseRule#onSessionClosed} transform {@link #onStreamStopped} uses.
+     *
+     * <p>A no-op — returns {@link Optional#empty()} — if the asset has no currently open usage, or
+     * its open usage was not opened/promoted by {@link #engage} in the first place (an ordinary
+     * STREAM-origin usage the operator never touched is simply not this method's concern); a caller
+     * need not check {@link #engage} was ever called before calling this.
+     *
+     * @param assetId the asset to disengage
+     * @return the usage as left by this call — closed, or demoted and still open — or {@link
+     *         Optional#empty()} if there was no operator-engaged usage to act on
+     * @throws NullPointerException   if {@code assetId} is {@code null}
+     * @throws NoSuchElementException if no asset has that id
+     */
+    public Optional<AssetUsage> disengage(AssetId assetId) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        assetDirectory.find(assetId).orElseThrow(() -> new NoSuchElementException("Unknown asset: " + assetId.value()));
+        Tracking tracking = trackingByAsset.get(assetId);
+        if (tracking == null) {
+            return Optional.empty();
+        }
+        AssetUsage demoted = null;
+        AssetUsage usageToClose = null;
+        UsageId closedUsageId = null;
+        UsagePhase closedPhase = null;
+        UsagePhase previousPhase = null;
+        UsagePhase closedPhaseFired = null;
+        Instant endedAt = null;
+        AssetUsage result = null;
+        boolean nothingToDisengage = false;
+        synchronized (tracking) {
+            if (tracking.usage == null || tracking.usage.origin() != UsageOrigin.OPERATOR) {
+                nothingToDisengage = true;
+            } else if (tracking.activeDevices > 0) {
+                tracking.usage = tracking.usage.withOrigin(UsageOrigin.STREAM);
+                demoted = tracking.usage;
+            } else {
+                UsagePhase priorPhase = tracking.usage.phase();
+                closedPhase = toUsagePhase(phaseSettings.rule().onSessionClosed(toFlightPhase(priorPhase)));
+                closedUsageId = tracking.usage.id();
+                usageToClose = tracking.usage;
+                endedAt = phaseSettings.clock().get();
+                tracking.usage = null;
+                tracking.unflushedSummaryUpdates = 0;
+                cancelPendingSummaryFlush(tracking);
+                if (closedPhase != priorPhase) {
+                    previousPhase = priorPhase;
+                    closedPhaseFired = closedPhase;
+                }
+            }
+        }
+        if (nothingToDisengage) {
+            return Optional.empty();
+        }
+        if (demoted != null) {
+            result = usageSessionService.save(demoted);
+        }
+        if (usageToClose != null) {
+            unsubscribeTelemetry(tracking);
+            result = usageSessionService.close(usageToClose, closedPhase, endedAt);
+            if (closedPhaseFired != null) {
+                notifyPhaseObserver(assetId, closedUsageId, previousPhase, closedPhaseFired);
+            }
+        }
+        return Optional.ofNullable(result);
+    }
+
+    /**
+     * Resolves {@code assetId}, rejecting an unknown or deactivated asset — the same "asset must
+     * exist and be in service" guard {@code DefaultAssetStreamService#require}/{@code #startStream}
+     * apply before starting a stream, reused here so {@link #engage} refuses exactly the same way a
+     * stream start would.
+     */
+    private Asset requireActiveAsset(AssetId assetId) {
+        Asset asset = assetDirectory.find(assetId)
+                .orElseThrow(() -> new NoSuchElementException("Unknown asset: " + assetId.value()));
+        if (!asset.isActive()) {
+            throw new IllegalStateException("Asset is not in service: " + asset.displayName());
+        }
+        return asset;
     }
 
     /**
@@ -350,55 +507,30 @@ public final class UsageTracker {
 
     private void deviceStreamStarted(Asset asset, StreamId streamId) {
         Tracking tracking = trackingByAsset.computeIfAbsent(asset.id(), id -> new Tracking());
-        boolean openedNow;
+        boolean usageOpenedNow;
+        boolean firstActiveDevice;
         UsageId openedUsageId = null;
         UsagePhase openedPhase = null;
         synchronized (tracking) {
             tracking.activeDevices++;
             tracking.activeVideoStreams++;
-            openedNow = tracking.activeDevices == 1;
-            if (openedNow) {
-                tracking.usage = usageSessionService.open(asset.id(), streamId, phaseSettings.clock().get());
+            firstActiveDevice = tracking.activeDevices == 1;
+            // docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2/R2: a usage may already be open
+            // because the operator engaged before any device went active (see #engage) -- opening a
+            // usage and a device becoming the asset's first active one are no longer the same event,
+            // so each gets its own boolean rather than reusing "first active device" for both.
+            usageOpenedNow = tracking.usage == null;
+            if (usageOpenedNow) {
+                tracking.usage =
+                        usageSessionService.open(asset.id(), streamId, UsageOrigin.STREAM, phaseSettings.clock().get());
                 openedUsageId = tracking.usage.id();
                 openedPhase = tracking.usage.phase();
             }
         }
-        if (openedNow) {
+        if (firstActiveDevice) {
             subscribeTelemetry(asset, tracking);
-            notifyPhaseObserver(asset.id(), openedUsageId, null, openedPhase);
         }
-    }
-
-    /**
-     * The telemetry-only counterpart to {@link #deviceStreamStarted}: same "first active device
-     * opens a usage" accounting, driven by {@link #onTelemetryDeviceDiscovered} instead of a video
-     * stream start, and deliberately never touches {@link Tracking#activeVideoStreams} — a
-     * telemetry-only asset must keep {@code streamCount == 0} for {@code FlightPhaseRule}
-     * throughout (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3), never mistaken for "nothing
-     * happening" just because it opened a usage.
-     */
-    private void deviceTelemetryDiscovered(Asset asset, DeviceId deviceId) {
-        Tracking tracking = trackingByAsset.computeIfAbsent(asset.id(), id -> new Tracking());
-        boolean openedNow = false;
-        boolean firstTimeForDevice;
-        UsageId openedUsageId = null;
-        UsagePhase openedPhase = null;
-        synchronized (tracking) {
-            firstTimeForDevice = tracking.activeTelemetryOnlyDevices.add(deviceId);
-            if (firstTimeForDevice) {
-                tracking.activeDevices++;
-                openedNow = tracking.activeDevices == 1;
-                if (openedNow) {
-                    tracking.usage = usageSessionService.open(asset.id(), null, phaseSettings.clock().get());
-                    openedUsageId = tracking.usage.id();
-                    openedPhase = tracking.usage.phase();
-                }
-            }
-        }
-        if (openedNow) {
-            // Covers every telemetry-capable device the asset has right now, not just this one --
-            // see subscribeTelemetry's own loop over asset.devices(), same as deviceStreamStarted.
-            subscribeTelemetry(asset, tracking);
+        if (usageOpenedNow) {
             notifyPhaseObserver(asset.id(), openedUsageId, null, openedPhase);
         }
     }
@@ -408,6 +540,7 @@ public final class UsageTracker {
         if (tracking == null) {
             return;
         }
+        boolean allDevicesStopped;
         AssetUsage usageToClose = null;
         UsageId closedUsageId = null;
         UsagePhase closedPhase = null;
@@ -421,31 +554,41 @@ public final class UsageTracker {
             if (tracking.activeVideoStreams > 0) {
                 tracking.activeVideoStreams--;
             }
-            if (tracking.activeDevices == 0 && tracking.usage != null) {
-                // docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3: the explicit-close half of the
-                // state machine -- IN_FLIGHT/LINK_LOST both close to ABANDONED (the platform stopped
-                // watching while the aircraft was, so far as it knew, airborne), everything else to
-                // CLOSED. The transform + persist itself is warehouse's job (UsageSessionService#close,
-                // docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3); this class only decides
-                // *which* phase to close to.
-                UsagePhase priorPhase = tracking.usage.phase();
-                closedPhase = toUsagePhase(phaseSettings.rule().onSessionClosed(toFlightPhase(priorPhase)));
-                closedUsageId = tracking.usage.id();
-                usageToClose = tracking.usage;
-                endedAt = phaseSettings.clock().get();
-                tracking.usage = null;
-                // the close below is written synchronously; nothing scheduled for the coalesced
-                // summary write should still fire against a now-null tracking.usage afterwards.
-                tracking.unflushedSummaryUpdates = 0;
-                cancelPendingSummaryFlush(tracking);
-                if (closedPhase != priorPhase) {
-                    previousPhase = priorPhase;
-                    closedPhaseFired = closedPhase;
+            allDevicesStopped = tracking.activeDevices == 0;
+            if (allDevicesStopped && tracking.usage != null) {
+                if (tracking.usage.origin() == UsageOrigin.OPERATOR) {
+                    // docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2/R2 collision rule: an
+                    // operator-engaged usage survives every device going inactive -- only #disengage
+                    // closes it. Telemetry subscriptions still tear down below (there is nothing
+                    // left for them to read from), the usage itself just stays open.
+                } else {
+                    // docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3: the explicit-close half of the
+                    // state machine -- IN_FLIGHT/LINK_LOST both close to ABANDONED (the platform stopped
+                    // watching while the aircraft was, so far as it knew, airborne), everything else to
+                    // CLOSED. The transform + persist itself is warehouse's job (UsageSessionService#close,
+                    // docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3); this class only decides
+                    // *which* phase to close to.
+                    UsagePhase priorPhase = tracking.usage.phase();
+                    closedPhase = toUsagePhase(phaseSettings.rule().onSessionClosed(toFlightPhase(priorPhase)));
+                    closedUsageId = tracking.usage.id();
+                    usageToClose = tracking.usage;
+                    endedAt = phaseSettings.clock().get();
+                    tracking.usage = null;
+                    // the close below is written synchronously; nothing scheduled for the coalesced
+                    // summary write should still fire against a now-null tracking.usage afterwards.
+                    tracking.unflushedSummaryUpdates = 0;
+                    cancelPendingSummaryFlush(tracking);
+                    if (closedPhase != priorPhase) {
+                        previousPhase = priorPhase;
+                        closedPhaseFired = closedPhase;
+                    }
                 }
             }
         }
-        if (usageToClose != null) {
+        if (allDevicesStopped) {
             unsubscribeTelemetry(tracking);
+        }
+        if (usageToClose != null) {
             usageSessionService.close(usageToClose, closedPhase, endedAt);
             if (closedPhaseFired != null) {
                 notifyPhaseObserver(asset.id(), closedUsageId, previousPhase, closedPhaseFired);
@@ -533,8 +676,9 @@ public final class UsageTracker {
             GeoPosition position = toPosition(sample);
             // docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3: the sample-driven half of the state
             // machine -- zero link age (a sample just arrived), streamCount scoped to genuine video
-            // streams only (never activeDevices, which also counts telemetry-only devices -- see
-            // deviceTelemetryDiscovered).
+            // streams only (never activeDevices, which also counts a device active with no video
+            // stream of its own, and is untouched entirely by an operator #engage -- see
+            // Tracking#activeVideoStreams' own note).
             UsagePhase priorPhase = tracking.usage.phase();
             FlightPhase nextPhase = phaseSettings.rule().nextPhase(toFlightPhase(priorPhase), sample.flightState(),
                     Duration.ZERO, tracking.activeVideoStreams);
@@ -705,8 +849,6 @@ public final class UsageTracker {
         /** docs/plans/done/MVP3-PLAN.md C-a: the freshest sample ever seen, kept even once {@link #usage} closes — see {@link #latestTelemetry(AssetId)}. */
         private Telemetry lastSample;
         private final List<TelemetrySubscription> telemetrySubscriptions = new ArrayList<>();
-        /** docs/plans/active/DRONE-ONBOARDING-PLAN.md §7, Wave O7: telemetry-only devices already counted toward {@link #activeDevices} via {@code UsageTracker#deviceTelemetryDiscovered} -- guards a repeated {@link UsageTracker#onTelemetryDeviceDiscovered} call for the same device from inflating the count. */
-        private final Set<DeviceId> activeTelemetryOnlyDevices = new LinkedHashSet<>();
         /** docs/plans/done/SCALE-100-PLAN.md S4: folds into {@link #usage} not yet written via {@code usageSessionService.save}. */
         private int unflushedSummaryUpdates;
         /** docs/plans/done/SCALE-100-PLAN.md S4: the armed time-bound summary flush, if any — see {@code UsageTracker#registerSummaryUpdate}. */
