@@ -50,6 +50,23 @@ DEFAULT_IMGSZ = 416
 DEFAULT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
 DEFAULT_GRPC_WORKERS = 10
 DEFAULT_SHUTDOWN_GRACE_SECONDS = 5
+
+# --- process role (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6) ---
+#
+# Which servicer(s) `cv_service.grpc.server.serve()` registers on this
+# process's gRPC server -- see that module's docstring for the split this
+# closes (a `Training`/`Geolocation` job sharing one GIL with the `Inference`
+# hot path). `all` (the default) is byte-identical to every deployment that
+# predates this knob: one process, all three servicers, one shared model
+# registry. `inference`/`training` are the two halves of a split deployment
+# (`cv_service.grpc.server_inference`/`server_training`, same image), never
+# both -- see MODULE.md "Split deployment" for the one behavior change the
+# split causes (a `PromoteModel` on the training process does not update an
+# already-running inference process's in-memory registry).
+DEFAULT_ROLE = "all"
+ROLE_INFERENCE = "inference"
+ROLE_TRAINING = "training"
+_ROLE_CHOICES = (DEFAULT_ROLE, ROLE_INFERENCE, ROLE_TRAINING)
 _DATASET_DIRNAME = "datasets"
 
 # --- tracking (docs/plans/done/TRACKING-PLAN.md §4.A / TRACKING-ORCHESTRATION §4.3) ----
@@ -1083,6 +1100,7 @@ class Settings:
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
     grpc_workers: int = DEFAULT_GRPC_WORKERS
     shutdown_grace_seconds: int = DEFAULT_SHUTDOWN_GRACE_SECONDS
+    role: str = DEFAULT_ROLE
     track_associate_engine: str = DEFAULT_TRACK_ASSOCIATE_ENGINE
     track_follow_engine: str = DEFAULT_TRACK_FOLLOW_ENGINE
     track_reacquire_millis: int = DEFAULT_TRACK_REACQUIRE_MILLIS
@@ -1190,6 +1208,7 @@ class Settings:
                 DEFAULT_SHUTDOWN_GRACE_SECONDS,
                 "CV_SHUTDOWN_GRACE",
             ),
+            role=_parse_choice(os.environ.get("CV_SERVICE_ROLE"), DEFAULT_ROLE, _ROLE_CHOICES, "CV_SERVICE_ROLE"),
             track_associate_engine=_parse_engine_id(
                 os.environ.get("CV_TRACK_ASSOCIATE_ENGINE"), DEFAULT_TRACK_ASSOCIATE_ENGINE
             ),
