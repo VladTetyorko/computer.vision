@@ -17,7 +17,8 @@ import {
   LINK_LABELS,
   type ConfigBlock,
 } from './drone-config-logic';
-import type { DiscoveredDevice } from '../../core/api/models';
+import { outcomeLabel, outcomeTone } from '../../core/readiness/readiness-logic';
+import type { DiscoveredDevice, ParameterWriteResponse } from '../../core/api/models';
 
 interface StepDescriptor {
   readonly step: WizardStep;
@@ -30,6 +31,7 @@ const STEP_LABELS: Record<WizardStep, string> = {
   test: 'Test',
   verify: 'Verify',
   create: 'Create',
+  sysid: 'Sysid',
   assign: 'Pilots',
 };
 
@@ -180,5 +182,19 @@ export class OnboardingFacade {
     link.download = block.filename;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  // --- Step 4.5: fix a sysid collision (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) -----------------
+  // Reuses `core/readiness/readiness-logic.ts#outcomeLabel`/`outcomeTone` — the same
+  // `ParameterWriteOutcome`-shaped `'ACCEPTED'|'DENIED'|'NO_ACK'|'UNSUPPORTED'` union
+  // `RemediationAction#outcome` already carries, `features/readiness/readiness.html`'s own second
+  // consumer of both.
+
+  readonly outcomeLabel = outcomeLabel;
+
+  /** {@link outcomeTone} maps to a `vision-notice` variant — `'muted'` (UNSUPPORTED) has no notice-variant equivalent, so it renders as `'neutral'`, mirroring `readiness.ts#remediationVariant`'s own precedent. */
+  sysidOutcomeVariant(outcome: ParameterWriteResponse['outcome']): 'neutral' | 'warn' | 'danger' | 'ok' {
+    const tone = outcomeTone(outcome);
+    return tone === 'muted' ? 'neutral' : tone;
   }
 }

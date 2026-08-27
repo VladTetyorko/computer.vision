@@ -481,7 +481,7 @@ as two distinct facts, within the grace window rather than the silence timeout.
   own javadoc and this module's MODULE.md, so a later wave giving it a real runtime meaning isn't surprised
   by finding it already "wired" to nothing.
 
-### R5 — set the vehicle's sysid *(depends on nothing; unblocks the fleet)*
+### R5 — set the vehicle's sysid *(depends on nothing; unblocks the fleet)* — **DONE, 2026-08-27**
 **Scope:** `station/vision-api/.../controller/**` (new parameter-write endpoint + DTO),
 `station/vision-web/src/app/features/onboarding/**`.
 
@@ -495,6 +495,106 @@ as two distinct facts, within the grace window rather than the silence timeout.
 
 **Expected result:** DRONE-ONBOARDING **O9's** write half becomes reachable; a second rover on one port
 stops being invisible. Ships behind `vision.onboarding.probe.enabled`, still default `false`.
+
+**What shipped (backend half).** New `AssetParameterController`
+(`station/vision-api/.../controller/AssetParameterController.java`) — `POST /api/assets/{id}/parameters`,
+`dto.ParameterWriteRequest{name,value,consent}` → `dto.ParameterWriteResponse` (mirrors
+`ParameterWriteOutcome` field-for-field). No service, adapter, or wiring change: `RemediationService`/
+`VehicleProfileService` are already unconditional beans (`OnboardingWiringConfiguration`), so the
+endpoint inherits the existing `VehicleConfigPort` flag-swap (`NoopVehicleConfigPort` when
+`vision.onboarding.probe.enabled=false`) with zero new gating code. `RemediationOrchestrator.java`
+untouched — `git diff` empty, verified.
+
+- **Authorization** mirrors `FlightCommandController` exactly: `CurrentUser#scope()` flows straight
+  into `RemediationService#writeParameter`, which enforces `canManage`/`canAdminister` per-tier and
+  audits a denial as `AccessDeniedException` → 403. An out-of-scope caller is refused the same
+  honest, audited way as every other command endpoint — asserted by
+  `AssetParameterControllerTest#writeParameterReturns403WhenTheAssetIsOutsideManagementScope`.
+- **`consent` is a real interlock, not a decoration.** `ParameterWriteRequest#requireConsent()`
+  refuses any request where `consent` is not exactly `true` — 400, before the asset is even resolved
+  — for **every** write this controller dispatches, Tier A included. This is *stricter* than
+  `RemediationService#writeParameter`'s own `explicitConsent` parameter, which only actually gates
+  Tier B internally; Tier A (the tier `SYSID_THISMAV`/`MAV_SYSID` belongs to) would otherwise accept
+  a write with no consent field at all. Tested: `consent:false` and `consent` absent both refused,
+  `remediationService` never invoked (`verifyNoInteractions`).
+- **Spelling resolution (F0)** is a private controller method, `resolveSpelling`, not a new
+  `vision-flight` service (this wave's scope line does not permit a fourth application-service
+  method, and `RemediationOrchestrator`'s own javadoc already flags exactly this hazard). It consults
+  `VehicleProfileService#latestProfile` only when `ParameterAliases#spellingsOf(name)` names more
+  than one spelling, searches the profile's `parameters` for a reading under any known alias, and
+  falls back to the requested name on any lookup failure (never probed, unknown asset, out of scope,
+  or an unaliased name to begin with) — a resolution failure is never surfaced as anything but "use
+  the name as given"; the authoritative status always comes from the subsequent
+  `RemediationService#writeParameter` call. Tested against both a 4.7-style vehicle (answers under
+  `MAV_SYSID`) and a legacy vehicle (answers under `SYSID_THISMAV`), plus the never-probed fallback.
+- **Flag-off unavailability** proven end-to-end, not just unit-tested: `station/vision-app`'s new
+  `AssetParameterFlagGatingTest` starts a real `sim` stream, waits for the first live telemetry
+  sample (guaranteed `armed=false` by `SyntheticFlightState`'s startup-disarmed ticks), then calls the
+  real, fully-wired `AssetParameterController` bean and asserts the refusal names "no active device
+  this platform can configure" specifically — ruling out "arming state unknown" as a false-positive
+  cause, so the 409 is unambiguously the flag-off `NoopVehicleConfigPort` refusal, not a coincidence
+  of a freshly-created asset never having reported telemetry at all.
+- **Tests:** `./mvnw -B -o -pl contexts/vision-flight,station/vision-api,station/vision-app test` —
+  `vision-flight` **351** (unchanged, no source touched), `vision-api` **874** (+13 — new
+  `AssetParameterControllerTest`, was 861), `vision-app` **271** (+1 — new
+  `AssetParameterFlagGatingTest`, was 270), all green. Docker was available and used (vision-app's
+  Postgres-backed `@SpringBootTest`s ran, not skipped).
+
+**Plan defect found: O9 is not fully built by this wave, and the plan's own §8 O9 row already said
+so correctly — this wave narrows, not completes, O9.** DRONE-ONBOARDING-PLAN.md §8's O9 row describes
+a fuller pipeline (snapshot/confirm/read-back/restore/audit UI, "gated on OQ2"). This wave does not
+answer OQ2 ("are Tier-A parameter writes authorized?") at the plan level — it sidesteps it by
+requiring **per-call, explicit operator consent** instead of any blanket authorization rule, which is
+a narrower and more conservative answer than OQ2 asks for, not an implementation of whatever OQ2's
+eventual answer turns out to be. Read this wave as "O9's write half is now *reachable* through one
+explicit-consent endpoint", exactly the plan's own "Expected result" wording — not as OQ2 resolved or
+O9 shipped in full.
+
+**What shipped (frontend half).** `station/vision-web`'s onboarding wizard gains a seventh step,
+`'sysid'`, inserted between `'create'` and `'assign'` — new files
+`features/onboarding/sysid-collision-logic.ts` (+ spec) hold the pure logic; `onboarding-logic.ts`,
+`onboarding-store.ts`, `onboarding-facade.ts`, `onboarding.html`, `core/api/models.ts`,
+`core/api/vision-api.ts` and `MODULE.md` are all extended, no other module touched.
+
+- **Appears only on an actual collision, verified.** `'sysid'`/`'assign'` share the exact same
+  "never reached via `next()`/`prevStep()`, entered explicitly by `finishCreate` after
+  `POST /api/assets` succeeds" shape `'assign'` already established — `nextStep`/`prevStep` gained
+  terminal cases for `'sysid'` purely for switch totality, matching `'assign'`'s own existing pattern
+  byte-for-byte. `finishCreate` branches: `connectMethod() === 'register' && sysidCollision() !== null`
+  → `enterSysidStep`; every other case (no collision, or any Connect method other than `register`,
+  which is the only path that ever calls `verify()` at all) → `enterAssignStep` directly, and that
+  branch's code is provably unchanged (`git diff` shows the `else` line is byte-identical to the
+  pre-wave call). Collision detection (`detectSysidCollision`) runs inside the existing `verify()`
+  method against the fleet's current device list (`VisionApi#listDevices`), comparing the probed
+  `VehicleProfile#sysid` to every already-registered device's `options['sysid']` — silent-degrade on a
+  failed device-list fetch (leaves `sysidCollision` at `null`, the same value "no collision" already
+  has, never blocking or misleading `verify()`), and reset to `null` at the top of every `verify()`
+  call so a stale collision from an earlier attempt can never survive an edited retry.
+- **Spelling resolution done client-side, not server-side, and this is a real, load-bearing plan
+  correction, not a stylistic choice.** The backend's own `AssetParameterController#resolveSpelling`
+  cannot help here: it consults `VehicleProfileService#latestProfile`, which is keyed by an existing
+  `AssetId` — but the wizard's Verify-step probe (`POST /api/onboarding/probe`) runs *before* the
+  asset exists and is never persisted (DRONE-ONBOARDING-PLAN.md D7), so a freshly-created asset has no
+  server-side profile yet at the moment this step calls `POST /api/assets/{id}/parameters`. The one
+  place that already observed which spelling this specific vehicle answers under is the wizard's own
+  captured `VehicleProfile` from Verify — `sysid-collision-logic.ts#sysidParameterName` reads that
+  profile's own `parameters` list directly (mirroring the backend function's logic, independently,
+  client-side) and sends whichever name the write should use; the backend still authoritatively
+  executes the write, but is not asked to re-resolve a spelling it has no data to resolve.
+- **`consent: true` is sent from exactly one place** — `OnboardingStore#writeSysid`, itself only ever
+  invoked by the step's own "Write sysid" button click. No default, no automatic call.
+- **Advisory, never a hard block** (matching `canAdvanceFromVerify`'s existing philosophy): "Continue"
+  proceeds into Assign regardless of whether a write was attempted or its outcome — a collision is
+  informative, and the operator can always fix it later from the asset's readiness page.
+- **Flag-off degrades honestly with no client-side flag check at all**: with
+  `vision.onboarding.probe.enabled=false` the write attempt's `409` (the same
+  `NoopVehicleConfigPort` refusal the backend section above proved) renders verbatim through the
+  existing `describeHttpError` path, exactly like every other onboarding error banner in this wizard.
+- **Tests:** `npm run test:ci` — **139 spec files / 2559 tests**, all green (was 138/2545; +1 file,
+  +14 tests — 12 in `sysid-collision-logic.spec.ts`, 2 new `nextStep`/`prevStep` cases in
+  `onboarding-logic.spec.ts`). `npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`.
+  Production build succeeds; the onboarding lazy chunk grew accordingly (+3.54 kB raw), no new budget
+  violations beyond the pre-existing initial-bundle warning.
 
 ### R4b — a rover is not a falling copter *(independent; rover safety)* — **DONE (Java half), 2026-08-27**
 **Shipped scope:** `drone-link/mavlink/.../MavlinkFlightCommander.java` (+ its test),

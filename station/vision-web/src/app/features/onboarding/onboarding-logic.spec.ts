@@ -62,6 +62,10 @@ describe('nextStep', () => {
   it('is a no-op past assign — the wizard reaches it only via a successful create, never via next()', () => {
     expect(nextStep('assign', 'register')).toBe('assign');
   });
+
+  it('is a no-op past sysid — the wizard reaches it only via OnboardingStore#finishCreate, never via next()', () => {
+    expect(nextStep('sysid', 'register')).toBe('sysid');
+  });
 });
 
 describe('prevStep', () => {
@@ -93,6 +97,11 @@ describe('prevStep', () => {
   it('goes assign -> create — its own immediate predecessor, never further (onboarding.html never renders a Back button here regardless)', () => {
     expect(prevStep('assign', 'register')).toBe('create');
     expect(prevStep('assign', 'simulate')).toBe('create');
+  });
+
+  it('goes sysid -> create — its own immediate predecessor, never further (onboarding.html never renders a Back button here regardless)', () => {
+    expect(prevStep('sysid', 'register')).toBe('create');
+    expect(prevStep('sysid', 'simulate')).toBe('create');
   });
 
   it('round-trips with nextStep for every method', () => {

@@ -53,6 +53,8 @@ import type {
   MapMark,
   MapTracksResponse,
   MeResponse,
+  ParameterWriteRequest,
+  ParameterWriteResponse,
   PatchDrawingRequest,
   PatchMarkRequest,
   PromoteMarkRequest,
@@ -997,6 +999,23 @@ export class VisionApi {
   remediateAsset(assetId: string, request: RemediationRequest): Promise<RemediationResult> {
     return firstValueFrom(
       this.http.post<RemediationResult>(`/api/assets/${encodeURIComponent(assetId)}/remediate`, request),
+    );
+  }
+
+  /**
+   * Writes one Tier-A/B vehicle parameter (`AssetParameterController#writeParameter`,
+   * docs/plans/active/FLEET-RADIO-PLAN.md R5) — the explicit, operator-initiated act
+   * `RemediationOrchestrator` deliberately refuses to synthesise (D6). `consent: true` must come only
+   * from the operator's own explicit click on this call's triggering action — never defaulted, never
+   * sent from an automatic/background call. `400` blank name / missing value / `consent` not exactly
+   * `true` / not on the writable allowlist; `403` out of the caller's management scope, audited;
+   * `404` unknown asset; `409` armed, arming unknown, or no configurable device on this deployment
+   * (the same shared-status-code case every onboarding endpoint gives when
+   * `vision.onboarding.probe.enabled` is at its default `false`).
+   */
+  writeAssetParameter(assetId: string, request: ParameterWriteRequest): Promise<ParameterWriteResponse> {
+    return firstValueFrom(
+      this.http.post<ParameterWriteResponse>(`/api/assets/${encodeURIComponent(assetId)}/parameters`, request),
     );
   }
 

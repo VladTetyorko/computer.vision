@@ -2259,6 +2259,35 @@ export interface RemediationResult {
   readonly reprobe: ReadinessReport | null;
 }
 
+/**
+ * Request body for `POST /api/assets/{id}/parameters` (docs/plans/active/FLEET-RADIO-PLAN.md R5) —
+ * mirrors `ParameterWriteRequest`. `consent` must be exactly `true`, sent only because the operator's
+ * own explicit click on this write action *is* that consent — never defaulted, never sent from an
+ * automatic/background call (mirrors `RemediationOrchestrator`'s own refusal to synthesise this shape,
+ * D6). A `consent` other than `true`, a blank `name`, or a missing `value` all 400 before the asset is
+ * even resolved — see `AssetParameterController#writeParameter`'s own javadoc.
+ */
+export interface ParameterWriteRequest {
+  readonly name: string;
+  readonly value: number;
+  readonly consent: boolean;
+}
+
+/**
+ * Mirrors `ParameterWriteResponse` — the body of `POST /api/assets/{id}/parameters`. No
+ * `NON_NULL` on the Java side (verified against source, same convention as `VehicleProfile`/
+ * `RemediationResult` above): every field is always present, literal `null` where nothing was read.
+ * `parameterName` is the spelling actually sent to the vehicle (`AssetParameterController`'s own
+ * spelling resolution, F0), not necessarily the one the request named.
+ */
+export interface ParameterWriteResponse {
+  readonly parameterName: string;
+  readonly outcome: 'ACCEPTED' | 'DENIED' | 'NO_ACK' | 'UNSUPPORTED';
+  readonly previousValue: number | null;
+  readonly newValue: number | null;
+  readonly detail: string | null;
+}
+
 // --- System status (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.1/§4.3's frozen wire contract, S3) -----------
 // `GET /api/system/status` — the platform's own honest "is it working right now" surface
 // (`SubsystemStatusPort`/`SystemStatusController`, station/vision-api). Backs `core/system-status/**`

@@ -22,7 +22,7 @@ import { withRegistrationNumber } from '../../core/fleet/asset-attributes';
  */
 
 /**
- * The wizard's six steps, always in this order — `nextStep`/`prevStep` are the only way to move
+ * The wizard's seven steps, always in this order — `nextStep`/`prevStep` are the only way to move
  * through the first five. **`assign`** (docs/plans/done/OPS-UX-PLAN.md §2 A3, "Who flies this?") is the
  * exception: the wizard never reaches it via `next()` (the `create` step's own action button is
  * what gets there, only after `POST /api/assets` actually succeeds — see `OnboardingStore#finishCreate`)
@@ -43,10 +43,30 @@ import { withRegistrationNumber } from '../../core/fleet/asset-attributes';
  * advisory-only pending an operator's own answer, and separately, `vision.onboarding.probe.enabled`
  * defaults `false` (D17) so a probe attempt commonly 409s outright; neither case may strand an
  * operator mid-wizard over a read this platform cannot promise will succeed.
+ *
+ * **`sysid`** (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0, inserted between `create` and `assign`) is
+ * the same kind of exception `assign` already is, one step earlier: the wizard never reaches it via
+ * `next()` either — it is entered only by an explicit call from `OnboardingStore#finishCreate`, and
+ * only when the just-created asset's own Verify-step profile collided with a sysid an
+ * already-registered device claims (`OnboardingStore#sysidCollision`/`sysid-collision-logic.ts#detectSysidCollision`).
+ * Every other path (no collision, or a Connect method other than `register`) skips straight to
+ * `assign`, byte-identical to the wizard's behavior before this step existed. Like `assign`, it is
+ * never back-navigable into `create` (the asset already exists by the time it renders) —
+ * `nextStep`/`prevStep` define total, terminal-style cases for it purely so both functions stay total
+ * over the whole `WizardStep` union; `onboarding.html`'s own footer withholds the generic Back/Next
+ * buttons on this step too, in favor of its own explicit "Write sysid"/"Continue" actions.
  */
-export type WizardStep = 'profile' | 'connect' | 'test' | 'verify' | 'create' | 'assign';
+export type WizardStep = 'profile' | 'connect' | 'test' | 'verify' | 'create' | 'sysid' | 'assign';
 
-export const WIZARD_STEPS: readonly WizardStep[] = ['profile', 'connect', 'test', 'verify', 'create', 'assign'];
+export const WIZARD_STEPS: readonly WizardStep[] = [
+  'profile',
+  'connect',
+  'test',
+  'verify',
+  'create',
+  'sysid',
+  'assign',
+];
 
 /**
  * The Connect step's entry points (docs/plans/done/UX-REWORK-PLAN.md §U-d — "the existing 3-choice connect
@@ -94,6 +114,8 @@ export function nextStep(current: WizardStep, method: ConnectMethod | null): Wiz
     case 'verify':
     case 'create':
       return 'create';
+    case 'sysid':
+      return 'sysid'; // terminal, like 'create'/'assign' above — see this type's own doc comment.
     case 'assign':
       return 'assign'; // terminal, like 'create' above — see this type's own doc comment.
   }
@@ -105,6 +127,11 @@ export function prevStep(current: WizardStep, method: ConnectMethod | null): Wiz
     // `assign`'s own immediate predecessor is `create`, kept only for totality — see this type's
     // own doc comment for why `onboarding.html` never actually renders a Back button here.
     case 'assign':
+      return 'create';
+    // `sysid`'s own immediate predecessor is conceptually `create` too (see this type's own doc
+    // comment) — kept only for totality, same as `assign` above; `onboarding.html` never renders a
+    // Back button on this step either.
+    case 'sysid':
       return 'create';
     case 'create':
       return method === 'simulate' ? 'connect' : 'verify';

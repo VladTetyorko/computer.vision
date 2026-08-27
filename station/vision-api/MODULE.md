@@ -13,7 +13,7 @@ vision-app depends on — see Gotchas)
 
 ## Package layout
 
-`controller/` (every `@RestController`) · `dto/` (wire records only, ~158 — house rule "zero DTO
+`controller/` (every `@RestController`) · `dto/` (wire records only, ~160 — house rule "zero DTO
 leakage": no domain type is ever serialized directly) · `security/` (`CurrentUser`/
 `PrincipalResolver`/`StreamAccess`/`OpenByDesign` — the authorization seam, see Conventions) ·
 `live/` (SSE connection registry, per-topic ring buffers, per-connection visibility filtering) ·
@@ -120,6 +120,7 @@ the full mechanism.
 | OnboardingController | POST | `/api/assets/{assetId}/remediate` | Dispatch remediation actions | manage (audited) |
 | OnboardingController | GET | `/api/assets/{assetId}/usages/{usageId}/passport` | Flight passport | scope |
 | OnboardingController | GET | `/api/assets/{assetId}/usages/{usageId}/drift` | Parameter drift vs. previous flight | scope |
+| AssetParameterController | POST | `/api/assets/{id}/parameters` | Write one Tier-A/B vehicle parameter, explicit value + consent (FLEET-RADIO R5) | manage (Tier A)/administer (Tier B), audited |
 | CameraPoseController | GET | `/api/assets/{assetId}/camera-pose` | Stored fixed-camera pose | scope |
 | CameraPoseController | PUT | `/api/assets/{assetId}/camera-pose` | Set (create/replace) pose | manage |
 | CameraPoseController | DELETE | `/api/assets/{assetId}/camera-pose` | Remove pose (idempotent) | manage |
@@ -346,7 +347,8 @@ uniform error body every `ApiExceptionHandler` mapping returns.
 Feature flags gating whole controllers/packages off by default: `vision.training.enabled` (false —
 `DatasetController`/`LabelingController`/`ModelRegistryController`/`TrainingJobController` all 404
 like unmapped routes when off), `vision.onboarding.probe.enabled` (false — `POST /api/onboarding/probe`
-answers 409), `vision.geo.fixed-camera.enabled` (false — `CameraPoseController`/`MapTracksController`
+answers 409, and so does `AssetParameterController#writeParameter` — see FLEET-RADIO R5 note below),
+`vision.geo.fixed-camera.enabled` (false — `CameraPoseController`/`MapTracksController`
 answer 409), `vision.api.rate-limit.enabled` (false, see "Rate limiting" above), `vision.auth.enabled`
 (false — every `CurrentUser` call resolves a fixed unbounded dev principal). On by default:
 `vision.live.enabled`, `vision.demo.enabled`.
@@ -361,3 +363,27 @@ mapping to a new, additive `denied` code `VEHICLE_UNIDENTIFIED` — see "Live up
 above. `./mvnw -B -pl station/vision-api test` — **861 tests**, all green (2026-08-27; +2 from before
 this wave: `ManualControlWebSocketHandlerTest`'s new cases asserting the code is distinct and not
 message-sniffed into one of the other `denied` causes).
+
+**`docs/plans/active/FLEET-RADIO-PLAN.md` R5 done (2026-08-27).** New `AssetParameterController`
+(`POST /api/assets/{id}/parameters`, `dto.ParameterWriteRequest`/`ParameterWriteResponse`) — the one
+caller of `vision-flight`'s already-built `RemediationService#writeParameter` anywhere in
+`vision-api`; `RemediationOrchestrator`'s own `PARAM_WRITE` refusal is untouched (`git diff` empty).
+Adds no service/adapter/wiring — `RemediationService`/`VehicleProfileService` are already wired
+unconditionally (`OnboardingWiringConfiguration`), so this endpoint inherits the existing
+`VehicleConfigPort` flag-swap for free: with `vision.onboarding.probe.enabled` at its default
+(`false`) every write 409s from the same `NoopVehicleConfigPort`-caused "no active device this
+platform can configure" refusal every other onboarding endpoint already gives, proven by
+`AssetParameterFlagGatingTest` (`station/vision-app`) against a real, known-disarmed sim asset (not
+merely an asset with no telemetry at all — see that test's own javadoc for why the distinction
+matters). `consent` is enforced by `dto.ParameterWriteRequest#requireConsent` as a hard requirement
+for **every** write this controller dispatches — stricter than `RemediationService#writeParameter`'s
+own `explicitConsent` parameter, which only actually gates Tier B internally; Tier A (including
+`SYSID_THISMAV`/`MAV_SYSID`) would otherwise need no consent at all, and this endpoint's whole reason
+to exist is carrying an explicit operator act. Spelling resolution (F0 — ArduPilot 4.7 renamed
+`SYSID_THISMAV` to `MAV_SYSID`, and MAVLink has no "no such parameter" reply) is a private controller
+method, `resolveSpelling`, consulting `VehicleProfileService#latestProfile` only for names with more
+than one known alias (`ParameterAliases#spellingsOf`), falling back to the requested spelling on any
+lookup failure. `./mvnw -B -o -pl contexts/vision-flight,station/vision-api,station/vision-app test`
+— `vision-flight` **351** (unchanged — no source touched), `vision-api` **874** (+13,
+`AssetParameterControllerTest`), `vision-app` **271** (+1, `AssetParameterFlagGatingTest`), all
+green.
