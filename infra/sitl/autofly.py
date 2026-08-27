@@ -3,14 +3,24 @@
 
 Internal test-harness "GCS": connects to the SITL vehicle's own local
 control port (never touches the udpclient link entrypoint.sh points at the
-vision platform), arms it, takes off in GUIDED mode, then switches to
-CIRCLE so it flies a small default circuit near its home location -- the
-fleet-in-a-box requirement of "flying a small default circuit near a
-configurable home location" (docs/plans/active/DRONE-INFRA-PLAN.md I-c).
+vision platform) and puts it into a useful resting state.
+
+copter -- arms in GUIDED, takes off, then switches to CIRCLE so it flies a
+small default circuit near its home location: the fleet-in-a-box requirement
+of "flying a small default circuit near a configurable home location"
+(docs/plans/active/DRONE-INFRA-PLAN.md I-c).
+
+rover -- arms in MANUAL and stops there, on purpose
+(docs/plans/active/FLEET-RADIO-PLAN.md R7). A rover exists in this fleet to be
+*driven*: R3's RC override and R1's rover mode table are what the tests
+exercise, and a vehicle already executing its own guided mission would fight
+the stick inputs they send. MANUAL is also the mode a rover legitimately
+operates in with no GPS fix at all, which is the case R4c exists to stop the
+preflight checklist calling a hard failure.
 
 Failure here is non-fatal by design (see entrypoint.sh's `|| echo ...`)
--- worst case the vehicle sits armed or disarmed on the ground, but SITL
-keeps pushing telemetry to the platform either way.
+-- worst case the vehicle sits armed or disarmed, but SITL keeps pushing
+telemetry to the platform either way.
 """
 import argparse
 import sys
@@ -104,8 +114,40 @@ def takeoff(conn, alt_m: float) -> bool:
     return False
 
 
+def fly_copter(conn, takeoff_alt: float) -> int:
+    if not set_mode(conn, "GUIDED"):
+        print("[autofly] failed to enter GUIDED mode, giving up", file=sys.stderr)
+        return 1
+    if not arm(conn):
+        print("[autofly] failed to arm, giving up", file=sys.stderr)
+        return 1
+    print("[autofly] armed, taking off", flush=True)
+    if not takeoff(conn, takeoff_alt):
+        print("[autofly] takeoff did not reach target altitude in time, continuing anyway", file=sys.stderr)
+    if not set_mode(conn, "CIRCLE"):
+        print("[autofly] failed to enter CIRCLE mode", file=sys.stderr)
+        return 1
+    print("[autofly] flying default circuit in CIRCLE mode", flush=True)
+    return 0
+
+
+def ready_rover(conn) -> int:
+    # MANUAL, not GUIDED: nothing here should drive the vehicle. See module
+    # docstring -- an autonomous rover would fight the RC overrides the tests
+    # send it, which is the one thing this vehicle is in the fleet to receive.
+    if not set_mode(conn, "MANUAL"):
+        print("[autofly] failed to enter MANUAL mode, giving up", file=sys.stderr)
+        return 1
+    if not arm(conn):
+        print("[autofly] failed to arm, giving up", file=sys.stderr)
+        return 1
+    print("[autofly] armed in MANUAL -- waiting to be driven", flush=True)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--vehicle", choices=("copter", "rover"), default="copter")
     parser.add_argument("--instance", type=int, default=0)
     parser.add_argument("--takeoff-alt", type=float, default=20.0)
     parser.add_argument("--port", type=int, default=None, help="override the local SITL control port")
@@ -123,20 +165,9 @@ def main() -> int:
     print("[autofly] heartbeat received, waiting for EKF/GPS to settle", flush=True)
     time.sleep(EKF_SETTLE_S)
 
-    if not set_mode(conn, "GUIDED"):
-        print("[autofly] failed to enter GUIDED mode, giving up", file=sys.stderr)
-        return 1
-    if not arm(conn):
-        print("[autofly] failed to arm, giving up", file=sys.stderr)
-        return 1
-    print("[autofly] armed, taking off", flush=True)
-    if not takeoff(conn, args.takeoff_alt):
-        print("[autofly] takeoff did not reach target altitude in time, continuing anyway", file=sys.stderr)
-    if not set_mode(conn, "CIRCLE"):
-        print("[autofly] failed to enter CIRCLE mode", file=sys.stderr)
-        return 1
-    print("[autofly] flying default circuit in CIRCLE mode", flush=True)
-    return 0
+    if args.vehicle == "rover":
+        return ready_rover(conn)
+    return fly_copter(conn, args.takeoff_alt)
 
 
 if __name__ == "__main__":

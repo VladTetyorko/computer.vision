@@ -1,6 +1,6 @@
 # FLEET-RADIO-PLAN — one radio layer for a mixed fleet
 
-**Status:** authoritative spec. **R0 done**; R1–R7 open. Opened 2026-08-26, branch `feat/fleet-radio`.
+**Status:** authoritative spec. **R0 done**, **R7 infra half done**; R1–R6 and R7's test open. Opened 2026-08-26, branch `feat/fleet-radio`.
 **Scope:** the link and control layer for the vehicles we actually fly and drive — **copter and rover
 (rover first)**. Rover covers the surface boat, which shares ArduRover's firmware, mode table and control
 shape. Plane stays working where it already works; it is not a target of this plan.
@@ -263,16 +263,39 @@ are about to buy, instead of the one it was written for.
 **Expected result:** F5 closed. The one configuration that silently voids all manual control is
 diagnosed before flight instead of discovered in the air.
 
-### R7 — a rover on real ArduPilot firmware *(independent)*
-**Scope:** `infra/sitl/**`.
+### R7 — a rover on real ArduPilot firmware — **infra half DONE, test half open**
+**Shipped scope:** `infra/sitl/Dockerfile`, `entrypoint.sh`, `autofly.py`, `docker-compose.yml`,
+`up.sh`, `README.md`.
 
-- Parameterise the SITL entrypoint by vehicle (`ArduCopter` | `ArduRover`), defaulting to copter so nothing
-  that exists today changes behaviour.
-- Add a rover instance to the compose fleet, and one docker-gated integration test that drives a rover
-  through arm → mode → RC override and asserts the **rover** mode table resolved, Dock included.
+- One image, both official ArduPilot 4.7.0 SITL binaries (`arducopter` + `ardurover`, both pulled from
+  the project's own pinned `stable-4.7.0` release paths), selected at run time by `VEHICLE`. Not one
+  image per vehicle: `up.sh` fans a fleet out of a single build, and a mixed copter+rover fleet is the
+  whole point.
+- `VEHICLE` defaults to `copter`, so every existing invocation is byte-identical. The rover sits behind
+  a compose profile (`docker compose --profile rover up -d`) for the same reason.
+- Per-vehicle default parameters, each copied verbatim from ArduPilot's own
+  `Tools/autotest/default_params/<vehicle>.parm`. The rover block has **no `FRAME_CLASS`/`FRAME_TYPE`** —
+  ArduRover has no frame class, which is precisely the copter-only assumption this plan exists to stop
+  making.
+- A rover **arms in MANUAL and holds**, deliberately, rather than driving an autonomous circuit: it is
+  here to be *driven*, and a vehicle running its own guided mission would fight the RC overrides R3's
+  tests send it. MANUAL is also the mode a rover legitimately runs in with no GPS fix — the case R4c
+  addresses.
+- `up.sh` takes a vehicle argument and a `SYSID_BASE`, so two calls compose into one mixed fleet without
+  colliding on sysid or on SITL's `10 × instance` port offset.
 
-**Expected result:** F11 closed. Every rover claim in R0–R4c is verified against ArduPilot itself,
-not only against `infra/rover-sim` (which runs our own ESP32 firmware, not ArduPilot's).
+**Unplanned finding — a dead line in the copter defaults.** `entrypoint.sh` was writing `SYSID_THISMAV`
+into its defaults file for a **4.7.0** binary, which no longer has that parameter (R0/F0). It was silently
+doing nothing; `--sysid` on the command line was what actually set the id, and still is. Now `MAV_SYSID`,
+and the running rover's own log confirms the binary accepts it: `Setting MAV_SYSID=7`.
+
+**Verified by running it, not by reading it.** Rover: `Starting sketch 'Rover'`, defaults loaded,
+`armed in MANUAL -- waiting to be driven`. Copter with no `VEHICLE` set: armed, took off, reached
+`CIRCLE` — the pre-R7 behaviour unchanged.
+
+**Still open:** the docker-gated integration test that drives a rover through arm → mode → RC override and
+asserts the **rover** mode table resolved, Dock included. It depends on R1 (the taxonomy it asserts) and
+R3 (the override path it exercises), so it lands after both. F11 is not closed until it does.
 
 ---
 
@@ -306,7 +329,7 @@ both R0 (done — the parameter-name fix) and R5 (the remedy endpoint).
 | 6 | **R4c** | Cheap, web-only, removes a false "not ready" on every rover |
 | 7 | **R5** → **R6** | What makes a *second* rover on one port possible, then what stops its sticks being silently ignored |
 | 8 | **R2** | Depends on R1; a behaviour break, so it lands once the taxonomy beneath it is settled |
-| 9 | **R7** | Verifies 1–8 against ArduPilot instead of against our own simulator |
+| 9 | **R7** | Verifies 1–8 against ArduPilot instead of against our own simulator. **Infra half already landed** (a rover boots today); the asserting test waits on R1+R3 |
 
 **Note on migrations:** master is at `V26`, and unmerged `feat/controller-setup-c15` also claims `V25`.
 R6 adds a migration and must take the next free number. R0 shipped without one (see its wave), so the
