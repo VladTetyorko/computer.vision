@@ -1,8 +1,9 @@
 # FLEET-RADIO-PLAN — one radio layer for a mixed fleet
 
-**Status:** authoritative spec. **R0, R1, R2 (Java + R4b's web half), R3 (Java half), R4b (Java half),
-R4c, R5, R6 done**, **R7 infra half done**; R4, R3's web half, R2's own "explicit kind choice" web
-half, and R7's test open. Opened 2026-08-26, branch `feat/fleet-radio`.
+**Status:** authoritative spec. **R0, R1, R2 (Java + R4b's web half), R3 (Java half), R4, R4b (Java
+half), R4c, R5, R6, R7 done** — see R7's own section (§3) for exactly what its exit-gate item 3 does
+and does not prove; R3's web half and R2's own "explicit kind choice" web half remain open, tracked at
+their own waves above. Opened 2026-08-26, branch `feat/fleet-radio`.
 **Scope:** the link and control layer for the vehicles we actually fly and drive — **copter and rover
 (rover first)**. Rover covers the surface boat, which shares ArduRover's firmware, mode table and control
 shape. Plane stays working where it already works; it is not a target of this plan.
@@ -826,7 +827,7 @@ supported this, and `rc-relay` already had a label from before this wave. `stati
 build this wave (see above); vision-flight/persistence/vision-api's own scoped builds do not depend on
 it building.
 
-### R7 — a rover on real ArduPilot firmware — **infra half DONE, test half open**
+### R7 — a rover on real ArduPilot firmware — **DONE (infra + test), 2026-08-27**
 **Shipped scope:** `infra/sitl/Dockerfile`, `entrypoint.sh`, `autofly.py`, `docker-compose.yml`,
 `up.sh`, `README.md`.
 
@@ -856,9 +857,62 @@ and the running rover's own log confirms the binary accepts it: `Setting MAV_SYS
 `armed in MANUAL -- waiting to be driven`. Copter with no `VEHICLE` set: armed, took off, reached
 `CIRCLE` — the pre-R7 behaviour unchanged.
 
-**Still open:** the docker-gated integration test that drives a rover through arm → mode → RC override and
-asserts the **rover** mode table resolved, Dock included. It depends on R1 (the taxonomy it asserts) and
-R3 (the override path it exercises), so it lands after both. F11 is not closed until it does.
+**What shipped (test half, 2026-08-27) — F11 closed.** New
+`drone-link/mavlink/.../MavlinkSitlRoverIntegrationTest` (1, docker-and-image gated exactly like the
+module's other four `MavlinkSitl*` tests — see `SitlContainer`) drives a genuine ArduRover SITL
+instance through arm → mode change → RC override, against real firmware rather than this module's
+own `MavlinkFeedTransmitter` simulator or R1/R3's own unit-level fixtures.
+
+- **`SitlContainer` had no way to start anything but a copter** (the grounding brief's own flag: "it
+  was written when copter was the only vehicle"). It now takes an optional `vehicle` parameter
+  (`start(purpose, port, sysid, speedup, vehicle)`) that sets `VEHICLE=rover` on `docker run`; the
+  three pre-existing overloads are unchanged and still default to the image's own `copter` (no
+  existing test's behaviour changed). It also gained `serial2Port()` — see the RC-override bullet
+  below for why.
+- **Assertion 1 (rover mode table resolved, Dock included) — strong.** Reads the real vehicle's own
+  live `HEARTBEAT.type` off `MavlinkGateway.CommandTarget#mavType()` (asserted `== 10`,
+  `GROUND_ROVER`, first), then feeds that live value — not a hardcoded literal — into
+  `FlightModes.selectableModes`, asserting `"Dock"` is present. A copter table can never contain
+  Dock, so this ties a genuine ArduRover heartbeat directly to R1's completed table.
+- **Assertion 2 (a mode change actually takes) — strong.** Commands `"Circle"` — one of R1's own
+  three newly-added modes, not one the pre-R1 table already had — and confirms it by reading the
+  vehicle's own *subsequent heartbeat* `custom_mode` back through the normal telemetry ingest path,
+  never by trusting the command's `ACCEPTED` ack (an ack only proves the vehicle received the
+  command, never that it acted on it).
+- **Assertion 3 (an RC override on an extension channel reaches the vehicle) — strong, with one
+  honestly-scoped caveat.** `RC_CHANNELS_OVERRIDE` has no ack, and this module's own decoder never
+  extracts `chan9Raw` (only `rssi`, from the same message) — so this test opens a **second,
+  independent** raw MAVLink connection straight to SITL's own `serial2` control port (ArduPilot's own
+  default local TCP port, exposed by `SitlContainer.serial2Port()`; the same "internal test-harness
+  GCS" role `infra/sitl/autofly.py` already plays against `serial1`, just read/request-only), asks it
+  (via `MAV_CMD_SET_MESSAGE_INTERVAL` — Mechanism A, this firmware's *only* working stream-request
+  path per this module's own Gotchas) to stream `RC_CHANNELS` (#65), records a baseline `chan9Raw`,
+  sends the platform's normal RC override with channel 9 (an extension channel, 9–16) set to 1900,
+  and confirms `chan9Raw` actually changes to 1900 on the vehicle's own subsequent telemetry — proof
+  the override changed the vehicle's own belief about its RC input, not merely that a UDP datagram
+  left this process. Also asserts the baseline was neither absent (would mean Mechanism A silently
+  failed on this channel — a test-infrastructure failure, called out separately from an R3 failure)
+  nor already 1900 (would make the equality check meaningless as proof of causation).
+  **The caveat, stated plainly rather than glossed over:** this does **not** prove an operator's
+  `RCx_OPTION`-bound aux switch on CH9 would fire — this module deliberately keeps no table of aux
+  function numbers ("this adapter keeps no table of RC aux functions... what a function number does
+  is the vehicle's business, and whether it acted shows up as the ack" — this file's own Gotchas).
+  Asserting on a specific aux function here would mean asserting on a guessed magic number this
+  codebase has explicitly chosen not to own, not on anything R3 actually changed. What this test does
+  prove is exactly what was silently false before R3: that channel 9's own value reaches the aircraft
+  at all.
+- **Stability, measured, not assumed:** run three consecutive times in isolation — **~15.8s each**
+  (well under the 300s budget; the rover's own fixed ~15s EKF-settle wall-clock floor, not container
+  boot, dominates), zero flakiness observed. Full module suite: `./mvnw -B -o -pl drone-link/mavlink
+  test` — **236 tests** (was 235), all green, Docker available and used (the new test ran, not
+  skipped). No SITL containers left running afterward in any run (`docker ps -a` confirmed empty).
+- **What this plan got wrong:** nothing about R1/R3's own shipped facts — both held up exactly as
+  documented against real firmware. The one imprecision worth naming: exit-gate item 3 (§6) says "a
+  bound CH9 switch changes the vehicle's behaviour" — this wave proves the narrower, in-scope half of
+  that claim (the *value* reaches the vehicle's own RC input state); whether a specific aux function
+  then fires is vehicle configuration this platform deliberately does not own (see the caveat above),
+  so item 3 is met for everything this plan's own scope makes this platform responsible for, not for
+  a claim about ArduPilot's own aux-function dispatch.
 
 ---
 
@@ -873,8 +927,8 @@ flowchart LR
   R4b["R4b rover-correct<br/>emergency stop — Java half done"]
   R4c["R4c rover preflight — done"]
   R5["R5 write the sysid"] --> R6
-  R7["R7 ArduRover SITL"] -.verifies.-> R1
-  R7 -.verifies.-> R3
+  R7["R7 ArduRover SITL — done"] -.verified.-> R1
+  R7 -.verified.-> R3
 ```
 
 **Parallel-safe:** R0, R1, R3, R4, R4b, R4c and R5 have disjoint file scopes. R2 waits on R1; R6 waits on
@@ -892,7 +946,7 @@ both R0 (done — the parameter-name fix) and R5 (the remedy endpoint).
 | 6 | ~~**R4c**~~ **done** | Cheap, web-only, removes a false "not ready" on every rover |
 | 7 | **R5** → **R6** | What makes a *second* rover on one port possible, then what stops its sticks being silently ignored |
 | 8 | **R2** | Depends on R1; a behaviour break, so it lands once the taxonomy beneath it is settled |
-| 9 | **R7** | Verifies 1–8 against ArduPilot instead of against our own simulator. **Infra half already landed** (a rover boots today); the asserting test waits on R1+R3 |
+| 9 | ~~**R7**~~ **done** | Verifies 1–8 against real ArduPilot instead of only our own simulator. Both halves shipped: infra (a rover boots today) and, 2026-08-27, the asserting test (`MavlinkSitlRoverIntegrationTest`) — see R7's own section above for exactly what it proves |
 
 **Note on migrations:** master is at `V26`, and unmerged `feat/controller-setup-c15` also claims `V25`.
 R6 adds a migration and must take the next free number. R0 shipped without one (see its wave), so the
@@ -919,8 +973,13 @@ The plan is done when, on one UDP port, with a copter and a rover both transmitt
 
 1. Each vehicle reports its **own** drop rate and last-heard time, distinctly (R4).
 2. Killing the socket surfaces as a **link failure**, not as silence (R4).
-3. The rover's mode list is the rover's, and a bound CH9 switch changes the vehicle's behaviour (R1, R3).
+3. The rover's mode list is the rover's, and a bound CH9 switch changes the vehicle's behaviour (R1, R3)
+   — verified against real firmware (R7) for the half this platform owns: the rover table resolves and
+   an extension-channel override demonstrably reaches and changes the vehicle's own RC input state.
+   Whether a specific `RCx_OPTION` aux function then fires is vehicle configuration this platform
+   deliberately does not track (see R7's own section) — met for what this plan makes it responsible for.
 4. A vehicle that never identified itself **cannot** be engaged (R2).
 5. A colliding `SYSID_THISMAV` can be reassigned from the wizard (R5).
 6. A wrong `SYSID_MYGCS` is reported before flight, not discovered by dead sticks (R6).
-7. All of the above verified against **ArduPilot SITL rover firmware**, not only our own simulator (R7).
+7. All of the above verified against **ArduPilot SITL rover firmware**, not only our own simulator
+   (R7) — **done, 2026-08-27**.

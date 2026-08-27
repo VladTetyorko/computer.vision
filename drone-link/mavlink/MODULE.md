@@ -615,3 +615,26 @@ promptness thresholds are `vision.mavlink.drop-rate-warn-percent`/`drop-rate-ala
 Gotchas above for the `MavlinkGateway` test-seam constructor and the wiring-placement rationale.
 `./mvnw -B -o -pl drone-link/mavlink test` — **235 tests**, all green (2026-08-27; +8 from R2's 227:
 6 new `MavlinkLinkStatusProviderTest`, 2 new `MavlinkGatewayLinkFailureTest`).
+
+**`docs/plans/active/FLEET-RADIO-PLAN.md` R7 test half done — F11 closed.** New
+`MavlinkSitlRoverIntegrationTest` (1, docker-and-image gated exactly like the other four `MavlinkSitl*`
+tests — see `SitlContainer`) drives a genuine ArduRover SITL instance through arm → mode change → RC
+override and asserts all three of R7's own claims against real firmware: (1) the vehicle's own live
+`HEARTBEAT.type` (10, GROUND_ROVER) fed into `FlightModes.selectableModes` resolves the rover table
+with `"Dock"` present — a copter table can never contain it; (2) commanding `"Circle"` (one of R1's
+own three newly-added modes, not a mode the pre-R1 table already had) is confirmed by the vehicle's
+own *subsequent heartbeat* reporting `mode=Circle`, not merely by an `ACCEPTED` ack; (3) an RC
+override on **extension channel 9** (R3/F4's exact bug) is confirmed by reading the vehicle's own
+`RC_CHANNELS` (#65) telemetry back over a **second, independent** MAVLink connection opened straight
+to SITL's own `serial2` control port (see `SitlContainer.serial2Port()`) — a channel this
+module's production code never opens or reads — proving `chan9Raw` actually changes from its
+pre-override baseline to the exact value the override placed there. See this test's own class javadoc
+for the one honestly-scoped caveat: it proves the override changed the vehicle's belief about its RC
+input, not that an `RCx_OPTION` aux function bound to CH9 would fire (this module deliberately keeps
+no table of aux function numbers — see this file's own Gotchas on `MavlinkFlightCommander.auxFunction`
+— so asserting on one here would mean asserting on a guessed magic number, not on anything R3 changed).
+`SitlContainer` gained a `vehicle` parameter (`start(purpose, port, sysid, speedup, vehicle)`, the
+three pre-existing overloads unchanged and still default to the image's own `copter`) and a
+`serial2Port()` accessor for exactly this second-connection use case. Measured stable across three
+consecutive runs: **~15.8s each**, no flakiness observed. `./mvnw -B -o -pl drone-link/mavlink test` —
+**236 tests**, all green (2026-08-27, Docker available and used, not skipped).
