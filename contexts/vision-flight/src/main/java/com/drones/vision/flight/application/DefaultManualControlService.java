@@ -263,9 +263,20 @@ public final class DefaultManualControlService implements ManualControlService {
                 // opened and then deliberately refused -- that is security/safety-relevant the same
                 // way DENIED:out of scope is.
                 UnidentifiedReason reason = link.unidentifiedReason().orElse(UnidentifiedReason.NEVER_IDENTIFIED);
-                manualControlPort.release(link);
+                VehicleUnidentifiedException refusal =
+                        new VehicleUnidentifiedException(reason, refusalMessage(reason, assetId));
+                try {
+                    manualControlPort.release(link);
+                } catch (RuntimeException e) {
+                    // A failed release must not become the exception the operator sees: the refusal
+                    // is why control was never granted, and the release is only the cleanup after
+                    // that decision. Swallowing it here would hide a broken port, so it rides along
+                    // as a suppressed cause -- and the audit below still runs, which it would not if
+                    // this propagated.
+                    refusal.addSuppressed(e);
+                }
                 audit(actor, assetId, RESULT_REFUSED_PREFIX + reason);
-                throw new VehicleUnidentifiedException(reason, refusalMessage(reason, assetId));
+                throw refusal;
             }
 
             DefaultManualControlSession session =

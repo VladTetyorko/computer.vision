@@ -298,6 +298,29 @@ class DefaultManualControlServiceTest {
     }
 
     /**
+     * The refusal is the operator's answer; the release is only the cleanup that follows it. A port
+     * that throws on the way out must not replace "this vehicle is unidentified" with its own
+     * transport error -- nor swallow the refusal's audit record, which is the only trace that a real
+     * relay was opened and deliberately refused.
+     */
+    @Test
+    void aReleaseThatFailsDoesNotMaskTheRefusalOrItsAuditRecord() {
+        stubDetails(device);
+        manualControlPort.kindToEngageAs = VehicleKind.UNKNOWN;
+        manualControlPort.unidentifiedReasonToReport = UnidentifiedReason.NOT_A_VEHICLE;
+        manualControlPort.releaseFailure = new IllegalStateException("socket already closed");
+
+        VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertEquals(UnidentifiedReason.NOT_A_VEHICLE, ex.reason());
+        assertEquals(1, ex.getSuppressed().length, "the release failure must survive as a suppressed cause");
+        assertEquals("socket already closed", ex.getSuppressed()[0].getMessage());
+        assertEquals(1, auditTrail.recorded.size(), "the refusal must still be audited");
+        assertEquals("REFUSED:unidentified-vehicle:NOT_A_VEHICLE", auditTrail.recorded.get(0).details().get("result"));
+    }
+
+    /**
      * The central design question, proven directly: refusing to engage is correct for all three
      * causes, but a refusal that reads the same for all three tells the operator nothing. Each of
      * the three must produce a genuinely different message.
@@ -635,6 +658,10 @@ class DefaultManualControlServiceTest {
          * three original {@link ManualControlLink} methods, to exercise the interface's own default). */
         Supplier<ManualControlLink> linkFactory;
 
+        /** When set, {@link #release} throws it -- the shape of a port whose socket died between
+         * engage and release. */
+        RuntimeException releaseFailure;
+
         final List<Device> engagedDevices = new ArrayList<>();
         final List<RcChannels> sentChannels = new ArrayList<>();
         final List<ManualControlLink> releasedLinks = new ArrayList<>();
@@ -664,6 +691,9 @@ class DefaultManualControlServiceTest {
                 fakeLink.active = false;
             }
             releasedLinks.add(link);
+            if (releaseFailure != null) {
+                throw releaseFailure;
+            }
         }
 
         private static final class FakeLink implements ManualControlLink {

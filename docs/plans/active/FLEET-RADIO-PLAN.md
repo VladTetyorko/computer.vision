@@ -1,9 +1,10 @@
 # FLEET-RADIO-PLAN — one radio layer for a mixed fleet
 
-**Status:** authoritative spec. **R0, R1, R2 (Java + R4b's web half), R3 (Java half), R4, R4b (Java
-half), R4c, R5, R6, R7 done** — see R7's own section (§3) for exactly what its exit-gate item 3 does
-and does not prove; R3's web half and R2's own "explicit kind choice" web half remain open, tracked at
-their own waves above. Opened 2026-08-26, branch `feat/fleet-radio`.
+**Status:** authoritative spec. **R0–R7 done, both halves each** — see R7's own section (§3) for
+exactly what its exit-gate item 3 does and does not prove. R3's web half (the channel ceiling) closed
+2026-08-27. The one thing still open is R2's "explicit kind choice" web control, which needs a new
+parameter on `ManualControlClient.engage` and so waits on `feat/controller-ux` merging; tracked at R2's
+own wave above. Opened 2026-08-26, branch `feat/fleet-radio`.
 **Scope:** the link and control layer for the vehicles we actually fly and drive — **copter and rover
 (rover first)**. Rover covers the surface boat, which shares ArduRover's firmware, mode table and control
 shape. Plane stays working where it already works; it is not a target of this plan.
@@ -939,13 +940,13 @@ both R0 (done — the parameter-name fix) and R5 (the remedy endpoint).
 | Order | Wave | Why here |
 |---|---|---|
 | 1 | ~~**R0**~~ **done** | Readiness was a constant `NO_GO`. Nothing downstream that reads a verdict could be trusted until this was true |
-| 2 | ~~**R3**~~ **Java half done, web half open** | Shipped, silent, user-visible. A rover's aux channels are its mode switch and its lights |
+| 2 | ~~**R3**~~ **done** | Shipped, silent, user-visible. A rover's aux channels are its mode switch and its lights. Web half (the setup page's channel ceiling, 18 → 16) closed 2026-08-27 |
 | 3 | ~~**R1**~~ **done** | Three tables is how the next rover defect gets introduced; Dock/Circle/Initialising are missing today |
-| 4 | ~~**R4b**~~ **Java half done, web half open** | Safety, and actively wrong on the vehicle being bought |
-| 5 | **R4** | The number an operator driving a rover past the tree line actually needs |
+| 4 | ~~**R4b**~~ **done** | Safety, and actively wrong on the vehicle being bought. Web half (the rover's "Emergency stop (Hold)" label) shipped inside R2's commit |
+| 5 | ~~**R4**~~ **done** | The number an operator driving a rover past the tree line actually needs |
 | 6 | ~~**R4c**~~ **done** | Cheap, web-only, removes a false "not ready" on every rover |
-| 7 | **R5** → **R6** | What makes a *second* rover on one port possible, then what stops its sticks being silently ignored |
-| 8 | **R2** | Depends on R1; a behaviour break, so it lands once the taxonomy beneath it is settled |
+| 7 | ~~**R5**~~ → ~~**R6**~~ **done** | What makes a *second* rover on one port possible, then what stops its sticks being silently ignored |
+| 8 | ~~**R2**~~ **done, bar its optional web kind-override** | Depends on R1; a behaviour break, so it lands once the taxonomy beneath it is settled |
 | 9 | ~~**R7**~~ **done** | Verifies 1–8 against real ArduPilot instead of only our own simulator. Both halves shipped: infra (a rover boots today) and, 2026-08-27, the asserting test (`MavlinkSitlRoverIntegrationTest`) — see R7's own section above for exactly what it proves |
 
 **Note on migrations:** master is at `V26`, and unmerged `feat/controller-setup-c15` also claims `V25`.
