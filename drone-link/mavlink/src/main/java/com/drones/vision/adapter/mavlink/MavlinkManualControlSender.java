@@ -56,10 +56,16 @@ import java.util.Objects;
  * module cannot import a context type; duplicating the tiny value type there was the deliberate
  * alternative to a shared jar for one record).
  *
- * <h2>v1 scope: channels 1..8 only</h2>
- * {@code mavlink-core}'s {@code ManualControlService} already fixes channels 9..18 to {@code
- * IGNORE} unconditionally and pads a shorter-than-8 frame the same way (docs/plans/done/
- * RC-CONTROL-PHASE1-PLAN.md §5) — unchanged wire behaviour, now enforced one level down.
+ * <h2>Channel range and sentinel translation live one level down (docs/plans/active/FLEET-RADIO-PLAN.md R3)</h2>
+ * This class does no channel-range or sentinel work of its own: {@link #toCoreChannels} copies
+ * {@code vision-flight}'s {@link RcChannels#microsByChannel()} verbatim into {@code mavlink-core}'s
+ * structurally-identical {@link com.drones.mavlink.service.RcChannels}, whose own compact constructor
+ * enforces the accepted range (1..16 — {@code mavlink-core}'s own F17 fix; ArduPilot reads no RC-override
+ * channel past 16) and whose {@code wireValue(int)} resolves the release sentinel that differs between
+ * channels 1..8 and 9..16 (F4). Before FLEET-RADIO R3, {@code ManualControlService.buildFrame} hardcoded
+ * channels 9..18 to {@code IGNORE} regardless of what this class sent — every channel above 8 a caller of
+ * this port bound was silently dropped (F3). That is fixed now: whatever this class forwards on channels
+ * 1..16 reaches the wire.
  *
  * <h2>Cadence settings (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2)</h2>
  * {@code ManualControlService} only exposes a public constructor over {@code
@@ -79,9 +85,6 @@ import java.util.Objects;
 public final class MavlinkManualControlSender implements ManualControlPort {
 
     private static final System.Logger LOG = System.getLogger(MavlinkManualControlSender.class.getName());
-
-    /** v1 scope: {@code RC_CHANNELS_OVERRIDE} channels 1..8 only (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §5). */
-    static final int CHANNEL_COUNT = 8;
 
     private static final Duration SCHEDULER_CLOSE_JOIN_TIMEOUT = Duration.ofSeconds(5);
 

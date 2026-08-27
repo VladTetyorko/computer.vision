@@ -178,7 +178,7 @@ a dodecarotor gets "RTL", not "Mode 6". A test asserts all three former tables n
 **Expected result:** no vehicle that never said what it is receives a ~50 %-throttle stick map.
 The existing `denied` frame carries the new reason; no wire break.
 
-### R3 — every channel the operator bound reaches the wire *(independent)*
+### R3 — every channel the operator bound reaches the wire *(independent)* — **DONE (Java half), 2026-08-27**
 **Scope:** `drone-link/mavlink-core/.../RcChannels.java`, `ManualControlService.java`.
 
 Also in scope: `contexts/vision-flight/.../RcChannels.java`, `ControlBinding.java`,
@@ -196,6 +196,56 @@ Also in scope: `contexts/vision-flight/.../RcChannels.java`, `ControlBinding.jav
 
 **Expected result:** F3, F4 and F17 closed together. `/manage/controller`'s aux channels stop being a lie —
 which is what a rover actually needs them for (mode switch, lights, winch, a camera trigger).
+
+**What shipped (Java half only, on `feat/fleet-radio`):**
+- `mavlink-core`'s `RcChannels` gained `MAX_CHANNELS=16`, `BASE_CHANNEL_COUNT=8`, `EXTENSION_RELEASE=0xFFFE`,
+  and a `wireValue(int oneBased)` method (renamed from `channelOrIgnore`) that is the **one** place a
+  domain `RELEASE` is re-encoded as `EXTENSION_RELEASE` for channel 9 and above — F4's fix, isolated to a
+  single call site by design rather than repeated at every place a frame is built.
+- `ManualControlService.buildFrame` now calls `channels.wireValue(n)` for every `n` in `1..16` (was:
+  chan1..8 from the mailbox, chan9..18 hardcoded `IGNORE`) — F3's fix. `release()` also had to widen its
+  own release mailbox from 8 to 16 channels (`RcChannels.released(MAX_CHANNELS)`); without that a bound
+  CH9+ would never actually be released on session end, because `wireValue` would have nothing but
+  padding-`IGNORE` to translate. chan17Raw/chan18Raw stay hardcoded `IGNORE` — `RcChannels` itself now
+  refuses to carry a value past 16, so there is nothing else they could carry.
+- `RcChannels` (both copies — `mavlink-core` and `vision-flight`) and `ControlBinding` narrowed their
+  accepted range to `[1,16]` — F17. `vision-flight`'s `RcChannels` deliberately did **not** grow a
+  `wireValue`-equivalent method: nothing in that module's own call chain needs wire-level encoding
+  (`MavlinkManualControlSender.toCoreChannels` copies the raw list verbatim into `mavlink-core`'s own
+  `RcChannels`, where the real translation lives) — adding one would be unused, speculative API surface
+  per `.claude/skills/java-clean-code/SKILL.md`.
+- A stored `ControlProfile` already binding CH17/18 fails loudly on load with **no code change needed** in
+  `storage/persistence`: `ControlProfileEntity` stores `List<ControlBinding>` as JSON, Hibernate's
+  deserialization re-invokes the record's own compact constructor, `JpaOperations.read` has no catch
+  block, and `vision-api`'s global `ApiExceptionHandler` maps the resulting `IllegalArgumentException` to
+  HTTP 400. This was already the entity's own documented design intent; F17 just gives it a real case.
+- `drone-link/mavlink`'s `MavlinkManualControlSender` had stale javadoc ("v1 scope: channels 1..8 only")
+  and a dead, unused `CHANNEL_COUNT=8` constant left over from before this fix — both corrected/removed as
+  part of this wave, since leaving factually-wrong documentation next to the fixed defect would be worse
+  than the file being technically out of the original scope list.
+- Tests: `mavlink-core` gained a new `RcChannelsTest` (9 tests) covering range and `wireValue`; the
+  critical regression test is `ManualControlServiceTest`'s renamed
+  `framesCarryAllSentChannelValuesIncludingExtensionChannelsNineThroughSixteen` — **before the fix**, sending
+  16 channels and asserting `chan9Raw == 1150` (an arbitrary bound value) failed with
+  `expected: <1150> but was: <65535>` (the old hardcoded-`IGNORE` constant), proving F3 was real and is now
+  closed. `releaseEmitsAReleaseBurstThenGoesSilentAndIsIdempotent` was extended to assert `chan9Raw`/
+  `chan16Raw == 65534` on release (F4) and `chan17Raw`/`chan18Raw` stay `65535`. `ControlBindingTest` and
+  both `RcChannelsTest`s gained explicit CH17/18-rejection cases (F17). All four in-scope modules green:
+  `mavlink-core` 137, `vision-flight` 346, `drone-link/mavlink` 198, `vision-api` 859 — measured via
+  `./mvnw -B -o -pl drone-link/mavlink-core,contexts/vision-flight,drone-link/mavlink,station/vision-api test`.
+- **Deferred, on purpose:** the web half (narrowing `controller-setup.ts`'s channel picker) is owned by
+  branch `feat/controller-ux`, which already centralizes the range as `export const MAX_RC_CHANNEL = 18`
+  in `station/vision-web/src/app/core/rc/controller-setup-logic.ts`. Nothing under `station/vision-web/`
+  was touched by this wave. **Follow-up, after `feat/controller-ux` merges:** change
+  `MAX_RC_CHANNEL = 18` to `MAX_RC_CHANNEL = 16` in that one file.
+- **What this plan got wrong:** the R3 test description above says "asserted against pymavlink-built
+  fixtures" — `infra/rover-sim`'s pymavlink fixtures (`session_fixture.py`, `wire_fixture.py`) were read
+  (not modified, per this wave's own hard constraint — another session had uncommitted changes there) and
+  turned out to exercise only base channels 1–8 with the `IGN` sentinel; neither fixture builds or asserts
+  on an extension-channel (9–16) frame at all, so there was nothing there to assert F4's sentinel against.
+  The Java-side tests above (`RcChannelsTest`, `ManualControlServiceTest`) cover the same facts directly
+  instead. No contradiction of F3/F4/F17's own factual claims was found anywhere — those three findings
+  held up exactly as written.
 
 ### R4 — the link has a name, and says when it dies *(independent)*
 **Scope:** `drone-link/mavlink-core/.../LinkHealth.java`, `DefaultLinkHealth.java`, `MavlinkSession.java`,

@@ -33,7 +33,10 @@ package com.drones.vision.flight.domain.model;
  *                     alone does not carry (RC1 is roll on a copter, steering on a rover)
  * @param sourceIndex  index into the Gamepad API's {@code axes}/{@code buttons} array this
  *                     binding reads from; must not be negative
- * @param rcChannel    the 1-based RC channel this binding drives; must be within {@code [1,18]}
+ * @param rcChannel    the 1-based RC channel this binding drives; must be within {@code [1,16]} —
+ *                     ArduPilot itself reads no higher channel (docs/plans/active/
+ *                     FLEET-RADIO-PLAN.md F17); channels 17/18 exist on the wire but not for any
+ *                     firmware this platform targets, so offering them would be a lie
  * @param minMicros    output at the control's minimum; within {@code [RcChannels.MIN_MICROS,
  *                     RcChannels.MAX_MICROS]}
  * @param centerMicros output at rest ({@link Source#AXIS} only — see {@link #toMicros(double)});
@@ -85,8 +88,8 @@ public record ControlBinding(Source source, ControlInputKind kind, ControlFuncti
         if (sourceIndex < 0) {
             throw new IllegalArgumentException("ControlBinding sourceIndex must not be negative: " + sourceIndex);
         }
-        if (rcChannel < 1 || rcChannel > 18) {
-            throw new IllegalArgumentException("ControlBinding rcChannel must be within [1,18]: " + rcChannel);
+        if (rcChannel < 1 || rcChannel > 16) {
+            throw new IllegalArgumentException("ControlBinding rcChannel must be within [1,16]: " + rcChannel);
         }
         requireMicros("minMicros", minMicros);
         requireMicros("centerMicros", centerMicros);
