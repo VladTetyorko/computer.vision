@@ -13,9 +13,11 @@ import { derivePreflight } from './flight-state-logic';
  * own source-scanning technique (`import.meta.glob(..., '?raw')`, no `TestBed`; this suite runs in
  * the Angular unit-test builder's browser-like bundle, where Node `fs`/`path` are unavailable):
  *
- * 1. **Structural** — `derivePreflight`'s own signature (`TelemetrySample | undefined, hasVideo,
- *    streaming, nowMs`) and `<vision-preflight-checklist>` (`shared/ui/preflight-checklist.ts`) never
- *    named a readiness type/service to begin with, so there is nothing for wave O6 to have broken —
+ * 1. **Structural** — `derivePreflight`'s own signature (`TelemetrySample | undefined, VehicleKind |
+ *    undefined, hasVideo, streaming, nowMs` — `vehicleKind` added by FLEET-RADIO-PLAN.md's R4c wave,
+ *    itself sourced from `FlightCapability`, never from readiness) and `<vision-preflight-checklist>`
+ *    (`shared/ui/preflight-checklist.ts`) never named a readiness type/service to begin with, so
+ *    there is nothing for wave O6 to have broken —
  *    but a signature change is exactly the kind of drift a future edit could introduce silently.
  *    Scans `flight-state-logic.ts`, `preflight-checklist.ts` and `features/fly/cockpit-facade.ts`
  *    (the checklist's one live consumer, via its `preflightItems` computed) for any reference to the
@@ -63,7 +65,7 @@ describe('cockpit preflight checklist stays independent of the readiness API (dr
   );
 
   it('derivePreflight still renders its full 5-row checklist from telemetry alone, with no readiness input to even withhold', () => {
-    const rows = derivePreflight(undefined, true, true, Date.now());
+    const rows = derivePreflight(undefined, undefined, true, true, Date.now());
 
     expect(rows).toHaveLength(5);
     expect(rows.map((row) => row.label)).toEqual(['Video feed', 'Telemetry link', 'GPS fix', 'Battery', 'Armable']);

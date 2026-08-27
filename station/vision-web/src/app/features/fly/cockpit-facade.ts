@@ -257,9 +257,18 @@ export class CockpitFacade {
   /** Re-derives whenever the tracked sample/primary-device/live state changes — a ground-check
    * glance, not a live-ticking instrument (the OSD's own age chip is that); see
    * `flight-state-logic.ts#derivePreflight`'s own doc comment for why `Date.now()` is read here,
-   * at the call site, rather than inside that pure function. */
+   * at the call site, rather than inside that pure function. `this.capabilities()?.vehicleKind` is
+   * the same read `rc-monitor.ts#activeProfile` already makes — legitimately `undefined` before the
+   * capability fetch resolves or when it fails (`capabilities`'s own doc comment below), which
+   * `derivePreflight`'s GPS/Battery rows treat as "don't soften", not as "assume rover". */
   readonly preflightItems = computed(() =>
-    derivePreflight(this.telemetry.latest(), this.primaryDevice() !== undefined, this.live(), Date.now()),
+    derivePreflight(
+      this.telemetry.latest(),
+      this.capabilities()?.vehicleKind,
+      this.primaryDevice() !== undefined,
+      this.live(),
+      Date.now(),
+    ),
   );
 
   /** Pre-arm ground check — hidden once watch-mode drops the controls entirely, or once the FC

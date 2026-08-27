@@ -1,6 +1,6 @@
 # FLEET-RADIO-PLAN — one radio layer for a mixed fleet
 
-**Status:** authoritative spec. **R0 done**, **R7 infra half done**; R1–R6 and R7's test open. Opened 2026-08-26, branch `feat/fleet-radio`.
+**Status:** authoritative spec. **R0, R4c done**, **R7 infra half done**; R1–R4, R4b, R5, R6 and R7's test open. Opened 2026-08-26, branch `feat/fleet-radio`.
 **Scope:** the link and control layer for the vehicles we actually fly and drive — **copter and rover
 (rover first)**. Rover covers the surface boat, which shares ArduRover's firmware, mode table and control
 shape. Plane stays working where it already works; it is not a target of this plan.
@@ -238,15 +238,65 @@ stops being invisible. Ships behind `vision.onboarding.probe.enabled`, still def
 **Expected result:** the one irreversible command in the product does the right thing on the vehicle we
 are about to buy, instead of the one it was written for.
 
-### R4c — the preflight checklist asks a rover rover questions *(independent, web-only)*
-**Scope:** `station/vision-web/src/app/core/telemetry/flight-state-logic.ts` (+ its spec).
+### R4c — the preflight checklist asks a rover rover questions *(independent, web-only)* — **DONE**
+**Shipped scope:** `station/vision-web/src/app/core/telemetry/flight-state-logic.ts` + its spec,
+`station/vision-web/src/app/core/telemetry/preflight-readiness-independence.spec.ts` (an existing
+signature-guard spec elsewhere in `core/telemetry/` that also calls `derivePreflight`, not named in
+the plan's original scope — see "what the plan got wrong" below), and the one call site,
+`station/vision-web/src/app/features/fly/cockpit-facade.ts`.
 
-- The `fixType >= 3` hard fail becomes conditional on vehicle kind (F14): a rover or boat in `Manual`/`Acro`
-  needs no GPS fix and must not be reported "not ready".
-- The 45 % battery bar likewise stops being a universal constant; thresholds come from configuration,
-  not from a literal in a `.ts` file (D7).
+- `gpsFixItem` takes a new `vehicleKind: VehicleKind | undefined` parameter. `vehicleKind === 'ROVER'`
+  (D2 folds the surface boat into `ROVER`) is the *only* carve-out: a `fixType < 3` reading now
+  returns `{ state: 'ok', detail: '<label> — GPS not required to drive.' }` instead of `'fail'`.
+  Every other kind — `'COPTER'`, `'PLANE'` (out of this plan's scope, unchanged), the literal
+  `'UNKNOWN'` a vehicle earns by heartbeating something unrecognized, and plain `undefined`
+  (capabilities not loaded yet, or the fetch failed) — all keep the original strict rule. `undefined`
+  deliberately does **not** get the rover's laxer treatment, so an unresolved kind can never silently
+  look GPS-optional.
+- `batteryItem` takes the same `vehicleKind` parameter and resolves its low-battery bar from a new
+  named table, `BATTERY_LOW_PERCENT_BY_KIND` (`flight-state-logic.ts`), instead of the universal
+  `telemetry-logic.ts#BATTERY_LOW_PERCENT` (45%) literal. `ROVER` gets **25%** — see "on the
+  threshold value" below for the reasoning, written as a comment at the constant's definition, not
+  presented as measured. Every other kind (including `undefined`) falls through to the unchanged 45%.
+- `derivePreflight` gained the parameter (`sample, vehicleKind, hasVideo, streaming, nowMs`);
+  `cockpit-facade.ts#preflightItems` passes `this.capabilities()?.vehicleKind` — the same
+  `FlightCapability` read `rc-monitor.ts#activeProfile` already makes, legitimately `undefined` while
+  that fetch is in flight or on any failure.
 
-**Expected result:** a working rover reports ready. Today it reports a hard fail on a sensor it does not need.
+**What the plan got wrong.**
+- **The scope line named only `flight-state-logic.ts` + its spec.** A second spec file,
+  `preflight-readiness-independence.spec.ts`, also calls `derivePreflight` directly (a signature-drift
+  guard for DRONE-ONBOARDING wave O6) and needed its call site and its doc comment's own quoted
+  signature updated too. Any future signature change to `derivePreflight` will hit this file as well
+  as `flight-state-logic.spec.ts` — worth naming explicitly in scope next time.
+- **The bullet's own wording ("a rover or boat in `Manual`/`Acro` needs no GPS fix") reads as
+  mode-conditional, but the fix implemented is kind-conditional only**, per the wave's own header
+  ("becomes conditional on **vehicle kind**"). Gating on the *current* mode as well would need a
+  per-firmware "which modes need GPS" table this app does not have — that table is ArduPilot's own
+  `FlightModes.java` decode, a Java module explicitly out of scope for this vision-web-only wave — so
+  gating stays unconditional on mode, matching every other row in this checklist ("is the sensor
+  healthy", never "is the sensor needed for what you're about to do"). If mode-conditional gating is
+  wanted later, it is a new, larger wave that also touches `contexts/vision-flight`.
+- **D7 ("thresholds come from configuration, not a literal in a `.ts` file") is only half satisfied,
+  and could not be fully satisfied without new scope.** There is no client-config endpoint anywhere
+  in this codebase — nothing serves UI thresholds from `application.yaml` today. Building one needs
+  new Spring `@ConfigurationProperties`, a new REST endpoint, and a new `VisionApi`/store read on the
+  client — three modules, its own wave. What shipped instead is the part of D7 achievable inside this
+  wave: **one named per-vehicle-kind table** (`BATTERY_LOW_PERCENT_BY_KIND`) in the logic layer,
+  replacing the single universal literal at the point of use — the shape a later wave can feed from
+  the server without a second refactor. **Recorded here as the deferral**, not silently dropped: a
+  follow-on wave (unscheduled) would add `vision.ui.preflight.battery-low-percent-by-kind` (or
+  similar) under `vision.*`, a controller exposing it, and a client-side config store; until then the
+  table in `flight-state-logic.ts` is the single place to retune it.
+- **On the threshold value.** 25% for `ROVER` is a reasoned placeholder, not a measured one:
+  comfortably above `BATTERY_CRITICAL_PERCENT` (20%, the under-voltage/brownout floor every vehicle
+  shares regardless of kind) so a rover still gets a real margin against a sagging pack, while nowhere
+  near a copter's 45% flight-reserve bar, which a ground/surface vehicle structurally cannot need
+  (it stops moving, it doesn't fall). Written as a comment at the constant, not presented as derived.
+
+**Result:** a rover with `fixType 0` and a copter with `fixType 0` diverge for the first time — `ok`
+vs `fail` — and a rover's battery bar no longer inherits a fall-risk margin it doesn't need. Tests:
+`npx vitest run src/app/core/telemetry` and the full suite both green (see build log below).
 
 ### R6 — `SYSID_MYGCS` and `RC_OPTIONS` become readiness rows *(depends on R5's endpoint for the remedy)*
 **Scope:** `contexts/vision-flight/.../FeatureRequirement.java` seed + `DefaultReadinessService`,
@@ -308,7 +358,7 @@ flowchart LR
   R3["R3 CH9-16 reach<br/>the wire"]
   R4["R4 link identity<br/>+ death signal"]
   R4b["R4b rover-correct<br/>emergency stop"]
-  R4c["R4c rover preflight"]
+  R4c["R4c rover preflight — done"]
   R5["R5 write the sysid"] --> R6
   R7["R7 ArduRover SITL"] -.verifies.-> R1
   R7 -.verifies.-> R3
@@ -326,7 +376,7 @@ both R0 (done — the parameter-name fix) and R5 (the remedy endpoint).
 | 3 | **R1** | Three tables is how the next rover defect gets introduced; Dock/Circle/Initialising are missing today |
 | 4 | **R4b** | Safety, and actively wrong on the vehicle being bought |
 | 5 | **R4** | The number an operator driving a rover past the tree line actually needs |
-| 6 | **R4c** | Cheap, web-only, removes a false "not ready" on every rover |
+| 6 | ~~**R4c**~~ **done** | Cheap, web-only, removes a false "not ready" on every rover |
 | 7 | **R5** → **R6** | What makes a *second* rover on one port possible, then what stops its sticks being silently ignored |
 | 8 | **R2** | Depends on R1; a behaviour break, so it lands once the taxonomy beneath it is settled |
 | 9 | **R7** | Verifies 1–8 against ArduPilot instead of against our own simulator. **Infra half already landed** (a rover boots today); the asserting test waits on R1+R3 |
