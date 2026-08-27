@@ -43,17 +43,18 @@ merely "chose not to".
 - `public final class MavlinkTelemetrySource implements TelemetrySourcePort` — RX. Protocol
   `"mavlink"`, `udp://host:port` `StreamDescriptor.uri()` (**listens**, never connects). `Capability.TELEMETRY`.
   `supports(Device)`, `open(Device): Flow.Publisher<Telemetry>`, `close(DeviceId)`,
-  `public List<LinkHealth.Health> claimedVehicleHealth()` (the one public accessor besides the port
-  methods — `vision-app`'s `SystemStatusWiring` takes it as a method reference for
-  `MavlinkLinkStatusProvider`). Package-private: `static bindKey(host, port)`, `bindKeyFor(Device)`,
+  `public Map<DeviceId, LinkHealth.Health> claimedVehicleHealth()` (**FLEET-RADIO R4/D4** — was
+  `List<LinkHealth.Health>`; the one public accessor besides the port methods — `vision-app`'s
+  `SystemStatusWiring` takes it as a method reference for `MavlinkLinkStatusProvider`, which now
+  aggregates per-vehicle instead of averaging a fleet-wide list). Package-private: `static bindKey(host, port)`, `bindKeyFor(Device)`,
   `hasActiveHub(bindKey)`, `unclaimedVehicles(bindKey)`, `claimedVehicles(bindKey)`,
   `commandTarget(bindKey, DeviceId)`, `gateway(bindKey)`. `StreamDescriptor.options["sysid"]`
   (lenient int 1–255) pins a device to one sysid; missing/invalid → unpinned. Constructors: `()`,
   `(MavlinkSettings)`; package-private `(long silenceWindowMillis)` test seam. One `MavlinkGateway`
   per distinct bind address, reference-counted across every device sharing it.
 - `final class MavlinkGateway` (package-private) — one per bind address (`host:port`). Owns a
-  `UdpListenLink` (binds in its own constructor, throws `IOException` on conflict), a
-  `MavlinkSession` built with `MavlinkNode.groundStation()` (sysid 255/compid 190), a
+  `MavlinkLink` (production: a `UdpListenLink`, binds in its own constructor, throws `IOException`
+  on conflict), a `MavlinkSession` built with `MavlinkNode.groundStation()` (sysid 255/compid 190), a
   `VehicleClaimPolicy`, a `MavlinkMessageInventory`, and optionally a `MavlinkConnectRemediator`
   (only when `settings.onboarding().requestMessagesOnConnect()` is `true`). Demultiplexes every
   dispatched frame by sysid only (never source address — a companion computer relaying several
@@ -61,16 +62,33 @@ merely "chose not to".
   SubmissionPublisher<Telemetry>): VehicleRegistration`, `unregister(...): boolean` (true once
   empty — caller evicts it), `isClosed()`, `unclaimedVehicles()`, `claimedVehicles()`,
   `commandTarget(DeviceId)`, `sink()`/`correlator()`/`peers()` (session collaborators for a TX class
-  to build a mavlink-core service on), `messageInventory()`, `claimedVehicleHealth()`, `close()`
-  (package-private — besides `unregister`, only `MavlinkVehicleConfigurator` calls it, for a
-  self-bound probe gateway it opened itself). Nested records `UnclaimedVehicle(int sysid, String
+  to build a mavlink-core service on), `messageInventory()`, `Map<DeviceId, LinkHealth.Health>
+  claimedVehicleHealth()` (**FLEET-RADIO R4/D4** — was `List<LinkHealth.Health>`; keyed by the
+  claiming device, resolving each `ClaimedVehicle`'s `PeerId` and querying `session.health().of(...)`
+  per vehicle rather than returning one undifferentiated list), `close()` (package-private —
+  besides `unregister`, only `MavlinkVehicleConfigurator` calls it, for a self-bound probe gateway
+  it opened itself). Constructors: `(String bindHost, int port, MavlinkSettings)` (production,
+  delegates to the one below via `new UdpListenLink(bindHost, port)`) and package-private
+  `(MavlinkLink, MavlinkSettings)` — a **FLEET-RADIO R4 test seam** (java-clean-code §3's sanctioned
+  single-seam exception): widening the field type from `UdpListenLink` to `MavlinkLink` cost nothing
+  (the field was already used only through methods `MavlinkLink` itself declares) and let
+  `MavlinkGatewayLinkFailureTest` exercise the real `MavlinkGateway`→`VehicleClaimPolicy`→
+  `SubmissionPublisher` chain end-to-end against a hand-built failing link, instead of sabotaging a
+  real `DatagramSocket` via reflection. **(FLEET-RADIO R4/F7)** wires
+  `session.onLinkFailure((linkId, cause) -> handleLinkFailure(cause))` in this constructor;
+  `handleLinkFailure` logs a WARNING, calls `claimPolicy.closeAllPublishersExceptionally(cause)`
+  (**D5**), then `close()`s the gateway itself. Nested records `UnclaimedVehicle(int sysid, String
   firmware, Integer mavType, Instant lastHeard)`, `ClaimedVehicle(int sysid, DeviceId deviceId,
   String firmware, Integer mavType, Instant lastHeard)`, `CommandTarget(int sysid, String firmware,
   Integer mavType, InetSocketAddress sourceAddress)`.
 - `final class VehicleClaimPolicy` (package-private) — project policy: which `Device` owns which
   sysid (pinned/unpinned claim + re-election — see Gotchas). `add`/`remove(VehicleRegistration):
   boolean`, `unclaimedVehicles()`, `claimedVehicles()`, `commandTarget(DeviceId)`,
-  `resolve(int sysid): VehicleRegistration` (called once per dispatched frame). One private monitor.
+  `resolve(int sysid): VehicleRegistration` (called once per dispatched frame),
+  `closeAllPublishersExceptionally(Throwable)` (**FLEET-RADIO R4/D5**, package-private — called only
+  by `MavlinkGateway.handleLinkFailure`; closes every currently-registered device's
+  `SubmissionPublisher` via `closeExceptionally`, under the same lock `add`/`remove` use). One
+  private monitor.
 - `final class VehicleRegistration` (package-private) — mutable struct: `deviceId`, `pinnedSysid`,
   `publisher` (final), mutable `claimedSysid`/`decoder`. No accessors — two collaborators only,
   both in-package.
@@ -146,11 +164,19 @@ merely "chose not to".
   genuinely unrecognized `MAV_TYPE`, never for a recognized-but-unsupported or not-a-vehicle one (both
   get a real label). Constructors `(MavlinkTelemetrySource)`, `(MavlinkTelemetrySource, MavlinkSettings)`.
 - `public final class MavlinkLinkStatusProvider implements SubsystemStatusPort` — `mavlink-link`'s
-  health self-report for `GET /api/system/status`. Constructor takes `Supplier<List<LinkHealth.Health>>`
-  (`vision-app` passes `mavlinkTelemetrySource::claimedVehicleHealth`). No vehicle claimed →
-  `Health.UNKNOWN`; all connected → `OK`; any vehicle never heard from → `DOWN` (worst case); every
-  vehicle heard at least once but some stale → `DEGRADED`. `LinkHealth.Health` carries no per-vehicle
-  identity, so this is a rollup across every claimed vehicle, not a per-vehicle report.
+  health self-report for `GET /api/system/status`. **(FLEET-RADIO R4/D4, rewritten)** Constructor is
+  `(Supplier<Map<DeviceId, LinkHealth.Health>> claimedVehicleHealth, MavlinkSettings.LinkStatus
+  thresholds)` (`vision-app`'s `SystemStatusWiring` passes `mavlinkTelemetrySource::claimedVehicleHealth`
+  and a `LinkStatus` built from `VisionMavlinkProperties`). No vehicle claimed → `Health.UNKNOWN`; a
+  vehicle never heard from, or a connected vehicle whose drop rate is at/above
+  `thresholds.dropRateAlarmPercent()` → `DOWN` (worst case, named); a connected-but-stale vehicle, or
+  one at/above `thresholds.dropRateWarnPercent()`, → `DEGRADED`; otherwise `OK`. `detail` **now names
+  the specific worst `DeviceId`** (ties broken deterministically by the device id's own `UUID`
+  ordering) alongside the fleet-wide connected-count and average drop rate — before this wave,
+  `LinkHealth.Health` carried no per-vehicle identity at all, so this class could only ever report a
+  fleet average ("at least one vehicle is bad") and never say *which* one. Drop-rate severity is no
+  longer hardcoded (**D7**) — both thresholds, plus the unrelated `linkFailureGrace` bound, come from
+  the constructor's `MavlinkSettings.LinkStatus`.
 - `final class MavlinkTelemetryDecoder` (package-private) — stateful, one instance per claim/
   re-election (never shared); merges a stream of MAVLink messages from one system into `Telemetry`
   samples. `Telemetry accept(MavlinkMessage<?>)` (adapts onto the overload below) / `Telemetry
@@ -198,9 +224,24 @@ merely "chose not to".
   `Position positionAt(double metersAlongRoute)`.
 - `public record MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
   Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc, Inventory
-  inventory, Onboarding onboarding)` — this module's tunables, `vision-app` maps `vision.mavlink.*`/
-  `vision.rc.*` onto one. `static defaults()`, `withSilenceWindow`/`withInventory`/`withOnboarding`.
-  Back-compat 8-arg and 9-arg constructors default the fields added after them. Nested:
+  inventory, Onboarding onboarding, LinkStatus linkStatus)` — this module's tunables, `vision-app` maps
+  `vision.mavlink.*`/`vision.rc.*` onto one. `static defaults()`, `withSilenceWindow`/`withInventory`/
+  `withOnboarding`/`withLinkStatus`. Back-compat 8-arg and 9-arg constructors default every field
+  added after them, **including `linkStatus`** (`LinkStatus.defaults()` — FLEET-RADIO R4 kept both
+  overloads' arity unchanged per CLAUDE.md rule 10 / java-clean-code §3: a new collaborator updates
+  call sites and back-compat delegation targets, never a new overload). Nested:
+  - `record LinkStatus(double dropRateWarnPercent, double dropRateAlarmPercent, Duration
+    failureGrace)` (**FLEET-RADIO R4/D7**, new) — `MavlinkLinkStatusProvider`'s per-vehicle drop-rate
+    severity thresholds (`dropRateAlarmPercent >= dropRateWarnPercent` enforced in the compact
+    constructor, both range-checked 0..100) and the promptness bound this wave's own regression test
+    (`MavlinkGatewayLinkFailureTest`) holds a link-failure notification to. `static defaults()` →
+    5.0 / 20.0 / 2s, byte-identical to `VisionMavlinkProperties`'s own `DEFAULT_*` constants that map
+    onto it. **`failureGrace` has no production runtime branch** — `MavlinkSession`'s link-failure
+    listener is fully synchronous with no retry/backoff, so nothing in this module currently reads
+    this field for a decision; it exists as a configured, documented value (CLAUDE.md rule 1: no
+    magic numbers even in a test's own promptness assertion) rather than a bare literal in a test
+    file, and is wired through `vision.mavlink.link-failure-grace` so it is visible and changeable in
+    one place if a future wave gives it a real runtime meaning.
   - `record Scan(int activeHubPollCount, Duration activeHubMinPollInterval, Duration
     selfBindMinReadTimeout, Duration selfBindMaxReadTimeout)` — `MavlinkHeartbeatScanner` budgets.
   - `record Transmit(Duration tick, Duration heartbeatPeriod, double defaultSpeedMps, double
@@ -294,11 +335,19 @@ one `FlightState`-contributing row above has fired at least once.
   `IOException`, wrapped as `UncheckedIOException` and propagated synchronously from `open(Device)`
   itself — a caller checking for a bind conflict must catch it around `open()`, not subscribe and
   wait for the publisher's `onError`.
-- **A genuine mid-stream link failure raises no `onError`/`onComplete` on any registered
-  publisher.** `MavlinkSession`'s reader thread catches the read failure internally, logs a WARNING,
-  and just stops. A device whose gateway dies unexpectedly (not via `close()`) goes silent with no
-  signal ever firing — a real production-robustness gap, not covered by any existing test, that
-  would need a link-failure callback added to `mavlink-core`'s `MavlinkSession` to close.
+- **(FLEET-RADIO R4/F7/D5 — fixed) A genuine mid-stream link failure now raises `onError` on every
+  registered publisher, promptly.** Before this wave, `MavlinkSession`'s reader thread caught the
+  read failure internally, logged a WARNING, and just stopped — a device whose gateway died
+  unexpectedly (not via `close()`) went silent with no signal ever firing, indistinguishable from a
+  vehicle that had merely gone quiet. Fixed via `mavlink-core`'s new `MavlinkSession.onLinkFailure`
+  listener (see that module's own MODULE.md/API.md): `MavlinkGateway`'s constructor wires it to
+  `handleLinkFailure`, which calls `VehicleClaimPolicy.closeAllPublishersExceptionally(cause)` — every
+  currently-registered device's `SubmissionPublisher` closes exceptionally with the real
+  `IOException`, then the gateway itself closes. An ordinary, intentional `unregister()`/`close()`
+  never triggers this path (the listener never fires for a shutdown racing with a poll failure — see
+  `mavlink-core`'s own contract). Proven end-to-end by `MavlinkGatewayLinkFailureTest` (2, real
+  `MavlinkGateway` + a hand-built failing `MavlinkLink`, injected via the new
+  `MavlinkGateway(MavlinkLink, MavlinkSettings)` test seam).
 - **`MavlinkMessageInventory.bytesPerSecond()` is an upper-bound estimate, not a wire
   measurement.** `MavFrame` carries no raw wire byte length (`mavlink-core`'s `FrameReader` reads it
   only transiently, then discards it). This class estimates each frame's size as fixed protocol
@@ -427,6 +476,46 @@ one `FlightState`-contributing row above has fired at least once.
   mode change it does not actually honor — is a firmware-honesty problem, not something a
   client-side mode-name table can fix.
 
+### FLEET-RADIO R4 Gotchas
+
+- **`MavlinkGateway`'s field was widened from `UdpListenLink` to the `MavlinkLink` interface purely
+  to get a clean test seam — this cost nothing in production.** Every use of the field
+  (`close()`, `id()`, passing it to `session.addLink(link)`) was already declared on `MavlinkLink`
+  itself; nothing about production behavior changed. The alternative considered and rejected was
+  reflection-based sabotage of a real `DatagramSocket` (closing it out from under `UdpSocketIo`/
+  `UdpListenLink` via two or more private-field hops) to force a genuine `IOException` for
+  `MavlinkGatewayLinkFailureTest` — rejected as fragile and invasive compared to a one-parameter
+  package-private constructor overload injecting a hand-built `MavlinkLink` double.
+- **`VehicleClaimPolicy.closeAllPublishersExceptionally` closes *every* currently-registered
+  publisher on the gateway, not just one device's.** This is correct for what F7 actually models: a
+  `MavlinkSession`'s reader thread failing means the one shared UDP socket for that bind address is
+  gone, which affects every vehicle claimed through it, not a single device. A multi-vehicle gateway
+  (several sysids sharing one `bindHost:port`) therefore reports every one of its claimed devices as
+  failed, together, on one socket death — this is accurate, not over-broad.
+- **An ordinary `unregister()`/gateway `close()` still never calls `publisher.close()` (normal
+  completion) on the departing device's `SubmissionPublisher` — this is a pre-existing fact, outside
+  R4's scope, not something this wave fixed for symmetry.** `MavlinkGatewayLinkFailureTest`'s ordinary-
+  teardown test therefore asserts the *absence* of `onError`, not the presence of `onComplete` — the
+  correct, narrow claim for "shutdown must not masquerade as a link failure" (Expected Result #4),
+  without depending on unrelated pre-existing behavior (publishers being simply abandoned on the
+  normal path today) that this wave was not asked to change.
+- **`SystemStatusWiring` now declares `@EnableConfigurationProperties(VisionMavlinkProperties.class)`
+  alongside `TelemetryWiring`'s and `DiscoveryWiringConfiguration`'s own identical declarations of the
+  same properties class — not a mistake, matching existing precedent.** Spring tolerates the same
+  `@ConfigurationProperties` class being enabled from more than one `@Configuration` class; this wiring
+  needed `VisionMavlinkProperties` for its three new D7 thresholds and pulling `TelemetryWiring`'s full
+  `MavlinkSettings` object in just to read three scalars would have been a heavier, unnecessary coupling.
+- **`failureGrace`/D7's threshold plumbing was placed in `SystemStatusWiring.mavlinkLinkStatus`, not
+  threaded through `TelemetryWiring.toMavlinkSettings()`'s `MavlinkSettings` object, even though
+  `MavlinkSettings.LinkStatus` is a field on that very record.** Both wiring classes now independently
+  construct a `MavlinkSettings.LinkStatus` from the same `VisionMavlinkProperties` fields — `TelemetryWiring`
+  because `MavlinkGateway`/`MavlinkTelemetrySource` never read `linkStatus` off `MavlinkSettings` today
+  (nothing at that layer consumes drop-rate severity), and `SystemStatusWiring` because that is the one
+  bean that actually needs the thresholds. `MavlinkSettings.linkStatus` exists so the field has a home
+  on the settings record precedent (`Scan`/`Transmit`/`Rc`/`Inventory`/`Onboarding` are all consumer-
+  grouped nested records) even though `SystemStatusWiring`'s own bean method takes `VisionMavlinkProperties`
+  directly rather than reading it back off a `MavlinkSettings` instance.
+
 ### FLEET-RADIO R4b Gotchas
 
 - **`emergencyStop` now branches on `FlightModes.vehicleKind(target.mavType())`, resolved from the
@@ -512,6 +601,17 @@ Gotchas above for the full rationale; its web half has since shipped, in R2's ow
 maps a `MAV_TYPE` to *why* it is `VehicleKind.UNKNOWN`, not merely that it is; `MavlinkManualControlSender`'s
 `AdapterLink` now overrides `ManualControlLink#unidentifiedReason()` with it, resolved once at
 `engage` alongside `vehicleKind()`. See the FLEET-RADIO R2 Gotchas above for the `SUBMARINE`→
-`UNSUPPORTED_VEHICLE` folding decision. `./mvnw -B -o -pl drone-link/mavlink test` — **227 tests**,
-all green (2026-08-27; +7 from R4b's 220: 5 new `FlightModesTest#unidentifiedReason*` cases, 2 new
-`MavlinkManualControlSenderTest` integration cases).
+`UNSUPPORTED_VEHICLE` folding decision.
+
+**`docs/plans/active/FLEET-RADIO-PLAN.md` R4 done** — "the link has a name, and says when it dies."
+`LinkHealth.Health` gained `PeerId` (D4, in `mavlink-core`); `MavlinkGateway`/`MavlinkTelemetrySource`'s
+`claimedVehicleHealth()` both now return `Map<DeviceId, LinkHealth.Health>`; `MavlinkLinkStatusProvider`
+was rewritten to aggregate per-vehicle at the consumer and name the specific worst device rather than
+averaging a fleet-wide list. `MavlinkSession` gained `onLinkFailure` (F7, in `mavlink-core`) and
+`MavlinkGateway` wires it to close every registered publisher exceptionally via
+`VehicleClaimPolicy.closeAllPublishersExceptionally` (D5) before closing itself. The three severity/
+promptness thresholds are `vision.mavlink.drop-rate-warn-percent`/`drop-rate-alarm-percent`/
+`link-failure-grace` (D7), documented with defaults in `application.yaml`. See the FLEET-RADIO R4
+Gotchas above for the `MavlinkGateway` test-seam constructor and the wiring-placement rationale.
+`./mvnw -B -o -pl drone-link/mavlink test` — **235 tests**, all green (2026-08-27; +8 from R2's 227:
+6 new `MavlinkLinkStatusProviderTest`, 2 new `MavlinkGatewayLinkFailureTest`).

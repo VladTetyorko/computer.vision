@@ -103,6 +103,24 @@ final class VehicleClaimPolicy {
         }
     }
 
+    /**
+     * Closes every registered device's publisher <b>exceptionally</b> with {@code cause}
+     * (FLEET-RADIO-PLAN.md D5) rather than leaving them to be abandoned by a later {@code
+     * unregister} — used only when the underlying socket itself has failed ({@link
+     * MavlinkGateway#handleLinkFailure}), so every device sharing this gateway sees a genuine
+     * failure on its {@code Flow.Subscriber}, not an unexplained silence or an orderly
+     * end-of-stream. Does not itself touch {@link #registrations}/{@link #claimsBySysid} — the
+     * caller closes the gateway (and, above it, {@code MavlinkTelemetrySource} evicts it from its
+     * gateway map) immediately afterward, at which point this policy's own bookkeeping is moot.
+     */
+    void closeAllPublishersExceptionally(Throwable cause) {
+        synchronized (lock) {
+            for (VehicleRegistration r : registrations) {
+                r.publisher.closeExceptionally(cause);
+            }
+        }
+    }
+
     /** Vehicles heard on this gateway's socket that no registration currently claims (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */
     List<MavlinkGateway.UnclaimedVehicle> unclaimedVehicles() {
         synchronized (lock) {

@@ -52,12 +52,12 @@ public final class DefaultLinkHealth implements LinkHealth {
         Objects.requireNonNull(id, "id");
         Window window = windows.get(id);
         if (window == null) {
-            return new Health(false, null, 0, 0, 0.0);
+            return new Health(id, false, null, 0, 0, 0.0);
         }
         boolean connected = Duration.between(window.lastHeard, Instant.now()).compareTo(peerTimeout) <= 0;
         double dropRate = (window.received + window.lost) == 0 ? 0.0
                 : (double) window.lost / (window.received + window.lost);
-        return new Health(connected, window.lastHeard, window.received, window.lost, dropRate);
+        return new Health(id, connected, window.lastHeard, window.received, window.lost, dropRate);
     }
 
     /**

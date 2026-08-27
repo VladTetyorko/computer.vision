@@ -397,7 +397,7 @@ which is what a rover actually needs them for (mode switch, lights, winch, a cam
   instead. No contradiction of F3/F4/F17's own factual claims was found anywhere — those three findings
   held up exactly as written.
 
-### R4 — the link has a name, and says when it dies *(independent)*
+### R4 — the link has a name, and says when it dies *(independent)* — **DONE, 2026-08-27**
 **Scope:** `drone-link/mavlink-core/.../LinkHealth.java`, `DefaultLinkHealth.java`, `MavlinkSession.java`,
 `drone-link/mavlink/.../MavlinkGateway.java`, `MavlinkTelemetrySource.java`, `MavlinkLinkStatusProvider.java`.
 
@@ -409,6 +409,77 @@ which is what a rover actually needs them for (mode switch, lights, winch, a cam
 
 **Expected result:** the platform can say *which* vehicle's radio is bad and *that our socket died*,
 as two distinct facts, within the grace window rather than the silence timeout.
+
+**What shipped, exactly as scoped, plus one additive constructor split:**
+- `mavlink-core`'s `LinkHealth.Health` gained `PeerId peerId` as its first field; `DefaultLinkHealth.of`'s
+  two construction sites thread it through. `MavlinkSession` gained
+  `onLinkFailure(BiConsumer<LinkId, IOException> listener)`: the `catch (IOException e)` branch in
+  `LinkRuntime.runLoop` now calls it (guarded by the pre-existing `running` flag, so a shutdown racing a
+  poll failure never fires it) instead of just logging and returning; a separate `catch (RuntimeException
+  e)` branch (unexpected frame-processing errors) deliberately does **not** notify — see below.
+- `adapter-mavlink`'s `MavlinkGateway.claimedVehicleHealth()`/`MavlinkTelemetrySource.claimedVehicleHealth()`
+  both now return `Map<DeviceId, LinkHealth.Health>` (were `List<LinkHealth.Health>`). `MavlinkGateway`'s
+  constructor wires `session.onLinkFailure((linkId, cause) -> handleLinkFailure(cause))`, which logs a
+  WARNING, calls a new `VehicleClaimPolicy.closeAllPublishersExceptionally(cause)` (D5 — every currently-
+  registered device's `SubmissionPublisher` closes exceptionally with the real `IOException`), then closes
+  the gateway itself. `MavlinkLinkStatusProvider` was rewritten: its constructor now takes
+  `Supplier<Map<DeviceId, LinkHealth.Health>>` plus a new `MavlinkSettings.LinkStatus` thresholds record,
+  and `status()` names the single worst-offending `DeviceId` in `detail` (deterministic tie-break by the
+  device id's own `UUID` ordering) instead of only ever reporting a fleet-wide average.
+- **One constructor split not named in the plan's own scope list, done to make F7/D5 testable against real
+  production code paths rather than a fake:** `MavlinkGateway`'s `link` field was widened from
+  `UdpListenLink` to the `MavlinkLink` interface, and its constructor was split into the production one
+  (`(String bindHost, int port, MavlinkSettings)`, unchanged signature) delegating to a new package-private
+  test-seam constructor (`(MavlinkLink, MavlinkSettings)`). This is the java-clean-code skill's own
+  sanctioned exception ("a package-private test seam is fine when a test genuinely needs to inject a...";
+  §3) — it cost nothing in production (the field was already used only through methods `MavlinkLink` itself
+  declares) and let `MavlinkGatewayLinkFailureTest` exercise the real `MavlinkGateway`→`VehicleClaimPolicy`→
+  `SubmissionPublisher` chain against a hand-built failing link, instead of the fragile alternative
+  (reflection-based sabotage of a real `DatagramSocket`).
+- D7's three thresholds landed as new fields on `station/vision-app`'s `VisionMavlinkProperties`
+  (`dropRateWarnPercent`/`dropRateAlarmPercent`/`linkFailureGrace`, defaults 5.0/20.0/2s, `@DefaultValue`-
+  annotated, compact-constructor validated: both percents 0..100, alarm ≥ warn, grace positive) and a new
+  `MavlinkSettings.LinkStatus` nested record in `adapter-mavlink` mirroring the same three fields.
+  `SystemStatusWiring#mavlinkLinkStatus` (now `@EnableConfigurationProperties(VisionMavlinkProperties.class)`,
+  matching the same class's existing declarations in `TelemetryWiring`/`DiscoveryWiringConfiguration`)
+  builds the `LinkStatus` record from the properties and passes it to `MavlinkLinkStatusProvider`'s
+  constructor. Documented with defaults in `application.yaml`'s commented `vision.mavlink.*` block.
+- **The `RuntimeException` branch decision:** `LinkRuntime.runLoop`'s `catch (RuntimeException e)` (an
+  already-received frame misbehaving during processing — a `Dispatcher` handler throwing, a decode bug)
+  does **not** call `onLinkFailure`. The two branches answer different questions: `IOException` from
+  `poll()` means the transport itself is gone and the reader thread is about to stop for good — exactly
+  what F7 exists to report. A `RuntimeException` while processing one frame means the *link is still
+  alive* and the loop continues to the next `poll()`; reporting a link failure here would be a false
+  positive, the mirror image of F7's own "report nothing when something failed" bug. This is documented in
+  both `mavlink-core`'s MODULE.md/API.md and the method's own javadoc, in case a later wave wants "N
+  consecutive frame errors" to become a *new*, deliberately separate signal.
+- Tests (17 new, all passing; see the per-module counts below): `mavlink-core`'s `MavlinkSessionLinkFailureTest`
+  (2) — a genuine `poll()` `IOException` fires the listener with the correct `LinkId`/cause; a poll failure
+  racing with `removeLink()`-driven shutdown never fires it (this second test fails against the pre-R4
+  code — before this wave nothing distinguished a failure from a shutdown, both just returned silently).
+  `adapter-mavlink`'s `MavlinkLinkStatusProviderTest` (6, pure unit) — including
+  `namesTheOneBadDeviceAmongTwoWithoutAveragingItAway`, the exact two-peer/one-degraded scenario the plan's
+  own expected result names, and `dropRateThresholdsAreConfiguredNotHardcoded` proving the same 10% drop
+  rate reports `OK` under a lenient threshold pair and `DOWN` under a strict one. `adapter-mavlink`'s
+  `MavlinkGatewayLinkFailureTest` (2, real `MavlinkGateway` + a hand-built failing `MavlinkLink`) — a
+  genuine failure closes every registered publisher exceptionally with the real `IOException`, promptly
+  (asserted under 5s); an ordinary `unregister()` never closes a publisher exceptionally.
+  `station/vision-app`'s new `VisionMavlinkPropertiesTest` (7) — valid carry-through, alarm<warn rejection
+  (exact message), out-of-range rejection, zero/negative grace rejection, warn==alarm boundary acceptance,
+  and defaults matching `application.yaml`'s documented values.
+- Scoped builds green (2026-08-27, Docker available — `station/vision-app`'s Testcontainers-Postgres and
+  SITL-gated tests ran, not skipped): `mavlink-core` **147** (145 pre-R4 + 2 new), `adapter-mavlink` **235**
+  (227 pre-R4 + 6 + 2 new), `vision-app` **270** total — measured via
+  `./mvnw -B -o -pl drone-link/mavlink-core,drone-link/mavlink,station/vision-app test`.
+- **What this plan got wrong:** nothing factual — F7 and D4 were both confirmed exactly as described by
+  reading the pre-fix source before writing any code. The one thing the plan's own bullet list left
+  implicit is `failureGrace`'s actual production meaning: `MavlinkSession`'s link-failure listener is fully
+  synchronous with no retry/backoff mechanism, so there is **no production runtime branch point** this
+  value feeds today — it exists as a configured, documented value backing this wave's own test-promptness
+  assertion (CLAUDE.md rule 1: no magic numbers, even in a test) rather than a hardcoded literal, not
+  because production code makes a decision based on it. Documented as such in `MavlinkSettings.LinkStatus`'s
+  own javadoc and this module's MODULE.md, so a later wave giving it a real runtime meaning isn't surprised
+  by finding it already "wired" to nothing.
 
 ### R5 — set the vehicle's sysid *(depends on nothing; unblocks the fleet)*
 **Scope:** `station/vision-api/.../controller/**` (new parameter-write endpoint + DTO),

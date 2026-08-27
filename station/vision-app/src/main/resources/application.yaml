@@ -980,6 +980,13 @@ vision:
     #   max-unclaimed-vehicles: 32
     #   close-join-timeout: 5s
     #   ack-timeout: 2s
+    #   MavlinkLinkStatusProvider's per-vehicle drop-rate severity thresholds and the promptness bound
+    #   this wave's own link-failure regression test holds a notification to (FLEET-RADIO-PLAN.md D7).
+    #   A connected vehicle's drop rate at/above drop-rate-warn-percent reports DEGRADED; at/above
+    #   drop-rate-alarm-percent it reports DOWN instead (alarm must be >= warn).
+    #   drop-rate-warn-percent: 5.0
+    #   drop-rate-alarm-percent: 20.0
+    #   link-failure-grace: 2s
     #   MavlinkHeartbeatScanner's poll/self-bind-timeout budget.
     #   scan:
     #     active-hub-poll-count: 5

@@ -36,7 +36,8 @@ public record MavlinkSettings(
         Transmit transmit,
         Rc rc,
         Inventory inventory,
-        Onboarding onboarding) {
+        Onboarding onboarding,
+        LinkStatus linkStatus) {
 
     public MavlinkSettings {
         Objects.requireNonNull(bindHost, "bindHost must not be null");
@@ -54,6 +55,7 @@ public record MavlinkSettings(
         Objects.requireNonNull(rc, "rc must not be null");
         Objects.requireNonNull(inventory, "inventory must not be null");
         Objects.requireNonNull(onboarding, "onboarding must not be null");
+        Objects.requireNonNull(linkStatus, "linkStatus must not be null");
     }
 
     /**
@@ -66,7 +68,7 @@ public record MavlinkSettings(
     public MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
                             Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc) {
         this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, scan, transmit, rc,
-                Inventory.defaults(), Onboarding.defaults());
+                Inventory.defaults(), Onboarding.defaults(), LinkStatus.defaults());
     }
 
     /**
@@ -77,7 +79,7 @@ public record MavlinkSettings(
                             Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc,
                             Inventory inventory) {
         this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, scan, transmit, rc,
-                inventory, Onboarding.defaults());
+                inventory, Onboarding.defaults(), LinkStatus.defaults());
     }
 
     /** Reproduces every literal this module's classes hardcode today. */
@@ -92,7 +94,8 @@ public record MavlinkSettings(
                 Transmit.defaults(),
                 Rc.defaults(),
                 Inventory.defaults(),
-                Onboarding.defaults());
+                Onboarding.defaults(),
+                LinkStatus.defaults());
     }
 
     /**
@@ -102,7 +105,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withSilenceWindow(Duration newSilenceWindow) {
         return new MavlinkSettings(bindHost, newSilenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, inventory, onboarding);
+                scan, transmit, rc, inventory, onboarding, linkStatus);
     }
 
     /**
@@ -112,7 +115,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withInventory(Inventory newInventory) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, newInventory, onboarding);
+                scan, transmit, rc, newInventory, onboarding, linkStatus);
     }
 
     /**
@@ -121,7 +124,18 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withOnboarding(Onboarding newOnboarding) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, inventory, newOnboarding);
+                scan, transmit, rc, inventory, newOnboarding, linkStatus);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #linkStatus()} replaced — same test/tuning
+     * convenience as {@link #withInventory}; lets a test shrink {@link LinkStatus#failureGrace()}
+     * far below the production default so a link-failure regression test can assert promptly instead
+     * of waiting out a multi-second bound.
+     */
+    public MavlinkSettings withLinkStatus(LinkStatus newLinkStatus) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
+                scan, transmit, rc, inventory, onboarding, newLinkStatus);
     }
 
     /** {@code MavlinkHeartbeatScanner}'s hub-poll/self-bind-timeout budgets. */
@@ -437,6 +451,67 @@ public record MavlinkSettings(
                     throw new IllegalArgumentException("interval must not be negative: " + interval);
                 }
             }
+        }
+    }
+
+    /**
+     * {@code MavlinkLinkStatusProvider}'s per-vehicle drop-rate severity thresholds, plus how
+     * promptly a genuine link failure must be surfaced (FLEET-RADIO-PLAN.md D7) — the three values
+     * that used to be either implicit (drop rate was displayed but never escalated anything) or
+     * simply absent (nothing bounded how fast a failure had to be reported) before R4.
+     *
+     * @param dropRateWarnPercent  a connected vehicle whose {@link
+     *                             com.drones.mavlink.session.LinkHealth.Health#dropRate()} (as a
+     *                             percent, {@code 0-100}) is at or above this is reported {@code
+     *                             DEGRADED} rather than {@code OK}; default {@value
+     *                             #DEFAULT_DROP_RATE_WARN_PERCENT}
+     * @param dropRateAlarmPercent at or above this, a connected vehicle is reported {@code DOWN} —
+     *                             its socket is technically still receiving, but losing this much of
+     *                             the expected stream is operationally no better than silence;
+     *                             default {@value #DEFAULT_DROP_RATE_ALARM_PERCENT}. Must be {@code
+     *                             >= dropRateWarnPercent}, or every degraded vehicle would jump
+     *                             straight past {@code DEGRADED} to {@code DOWN} the instant it
+     *                             crossed the (higher) warn line, which is not what "warn" means.
+     * @param failureGrace         the bound this wave's own regression test holds {@link
+     *                             com.drones.mavlink.session.MavlinkSession#onLinkFailure}'s
+     *                             notification to — proving a dead socket is reported within this
+     *                             window rather than only surfacing once an unpinned claim's silence
+     *                             window lapses (FLEET-RADIO-PLAN.md F7's "the silence timeout"). The
+     *                             listener is synchronous (see its own javadoc), so nothing in this adapter's
+     *                             production code branches on this value today — it exists so the
+     *                             promptness guarantee this wave ships is a configured, documented
+     *                             number rather than a magic constant buried in a test (CLAUDE.md
+     *                             rule 1), and so a future retry/backoff mechanism has an obvious
+     *                             home for its own timing budget. Default {@value
+     *                             #DEFAULT_FAILURE_GRACE}.
+     */
+    public record LinkStatus(double dropRateWarnPercent, double dropRateAlarmPercent, Duration failureGrace) {
+
+        static final double DEFAULT_DROP_RATE_WARN_PERCENT = 5.0;
+        static final double DEFAULT_DROP_RATE_ALARM_PERCENT = 20.0;
+        static final String DEFAULT_FAILURE_GRACE = "2s";
+        private static final Duration DEFAULT_FAILURE_GRACE_DURATION = Duration.ofSeconds(2);
+
+        public LinkStatus {
+            if (dropRateWarnPercent < 0 || dropRateWarnPercent > 100) {
+                throw new IllegalArgumentException("dropRateWarnPercent must be in [0,100]: " + dropRateWarnPercent);
+            }
+            if (dropRateAlarmPercent < 0 || dropRateAlarmPercent > 100) {
+                throw new IllegalArgumentException("dropRateAlarmPercent must be in [0,100]: " + dropRateAlarmPercent);
+            }
+            if (dropRateAlarmPercent < dropRateWarnPercent) {
+                throw new IllegalArgumentException("dropRateAlarmPercent must be >= dropRateWarnPercent: "
+                        + dropRateAlarmPercent + " < " + dropRateWarnPercent);
+            }
+            Objects.requireNonNull(failureGrace, "failureGrace must not be null");
+            if (failureGrace.isZero() || failureGrace.isNegative()) {
+                throw new IllegalArgumentException("failureGrace must be positive: " + failureGrace);
+            }
+        }
+
+        public static LinkStatus defaults() {
+            return new LinkStatus(DEFAULT_DROP_RATE_WARN_PERCENT, DEFAULT_DROP_RATE_ALARM_PERCENT,
+                    DEFAULT_FAILURE_GRACE_DURATION);
         }
     }
 }

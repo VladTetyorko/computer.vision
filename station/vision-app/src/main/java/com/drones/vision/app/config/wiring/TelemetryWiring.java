@@ -82,7 +82,9 @@ public class TelemetryWiring {
                         transmit.defaultSysid()),
                 new MavlinkSettings.Rc(rcProperties.overrideHz(), rcProperties.minOverrideHz(),
                         rcProperties.maxOverrideHz(), rcProperties.releaseFrames()))
-                .withOnboarding(toOnboarding(onboardingProperties));
+                .withOnboarding(toOnboarding(onboardingProperties))
+                .withLinkStatus(new MavlinkSettings.LinkStatus(properties.dropRateWarnPercent(),
+                        properties.dropRateAlarmPercent(), properties.linkFailureGrace()));
     }
 
     /**
