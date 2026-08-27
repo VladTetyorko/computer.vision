@@ -5,6 +5,7 @@ import com.drones.vision.flight.domain.model.FeatureRequirement;
 import com.drones.vision.flight.domain.model.FeatureStatus;
 import com.drones.vision.flight.domain.model.MessageObservation;
 import com.drones.vision.flight.domain.model.ParameterAliases;
+import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.flight.domain.model.ReadinessReport;
 import com.drones.vision.flight.domain.model.ReadinessVerdict;
 import com.drones.vision.flight.domain.model.RemedyKind;
@@ -24,6 +25,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * The one implementation of {@link ReadinessService}.
@@ -43,6 +45,18 @@ import java.util.function.Supplier;
  * <h2>Scope</h2>
  * See this class's own module Status entry and the interface javadoc: only the configuration-derived
  * half (profile vs. requirement table) is evaluated here.
+ *
+ * <h2>Value/bit-aware parameter checks (FLEET-RADIO-PLAN.md R6)</h2>
+ * A {@link FeatureRequirement} row's {@code requiredParameterName} was, before this wave, a
+ * presence-only check ("was this parameter ever read"). {@link FeatureRequirement#requiredParameterValue()}
+ * (must equal exactly) and {@link FeatureRequirement#forbiddenParameterBits()} (must have none of
+ * these bits set) let a row assert what the parameter's value actually has to be -- needed because
+ * two ArduPilot settings silently discard every MAVLink RC override with no error and no wire
+ * response: the vehicle's GCS-sysid parameter not matching the sysid this platform transmits as
+ * (255), and {@code RC_OPTIONS} bit 1 ({@code IGNORE_OVERRIDES}) being set. Both are seeded as two
+ * independent rows under the existing {@code rc-relay} key (not two new frozen keys — see {@link
+ * #combine} and this wave's own report/plan entry for why) and folded into one {@link
+ * FeatureReadiness} by {@link #combine}.
  */
 public final class DefaultReadinessService implements ReadinessService {
 
@@ -109,7 +123,7 @@ public final class DefaultReadinessService implements ReadinessService {
     }
 
     private FeatureReadiness evaluateFeature(String featureKey, VehicleProfile profile,
-                                              List<FeatureRequirement> requirements) {
+                                              List<FeatureRequirement> allRequirements) {
         String label = defaultLabel(featureKey);
         if (profile == null) {
             return new FeatureReadiness(featureKey, label, FeatureStatus.UNKNOWN, "Never probed.", null);
@@ -118,17 +132,69 @@ public final class DefaultReadinessService implements ReadinessService {
             return new FeatureReadiness(featureKey, label, FeatureStatus.UNKNOWN,
                     "The most recent probe was incomplete: " + profile.incompleteReason(), null);
         }
-        Optional<FeatureRequirement> requirement =
-                requirements.stream().filter(r -> r.featureKey().equals(featureKey)).findFirst();
-        if (requirement.isEmpty()) {
+        List<FeatureRequirement> requirements =
+                allRequirements.stream().filter(r -> r.featureKey().equals(featureKey)).toList();
+        if (requirements.isEmpty()) {
             String firmware = profile.firmware();
             String detail = firmware == null
                     ? "This vehicle never answered which firmware it runs."
                     : "This platform has no requirement known for firmware '" + firmware + "'.";
             return new FeatureReadiness(featureKey, label, FeatureStatus.UNKNOWN, detail, null);
         }
-        return evaluateAgainstRequirement(requirement.get(), label, profile);
+        List<FeatureReadiness> evaluated = requirements.stream()
+                .map(requirement -> evaluateAgainstRequirement(requirement, label, profile))
+                .toList();
+        return combine(featureKey, label, evaluated);
     }
+
+    /**
+     * Folds every {@link FeatureRequirement} row seeded for one feature key into the single {@link
+     * FeatureReadiness} the wire contract allows per key -- a fleet-board row is a {@code
+     * {featureKey: status}} map ({@code ReadinessRowResponse}, vision-api), which structurally cannot
+     * hold two statuses under one key ({@code V18__feature_requirements.sql}'s own note on this). The
+     * common case is exactly one row, and this is then a pass-through. {@code rc-relay} (FLEET-RADIO-PLAN.md
+     * R6) is the first feature ever seeded with more than one row -- GCS sysid and {@code RC_OPTIONS}
+     * are two independent facts, either one alone enough to silently discard every stick input, so
+     * both are seeded as separate rows and combined here rather than repurposing {@link
+     * FeatureRequirement}'s single {@code requiredParameterName} slot to check two parameters at
+     * once. Worst status wins ({@link #worseOf}); a non-{@code READY} result's detail is every
+     * failing row's own detail, joined (so a vehicle failing both checks at once reads both
+     * sentences, not just one); the remedy is the first non-null remedy among the rows at the worst
+     * status (both of {@code rc-relay}'s R6 rows resolve to {@link RemedyKind#PARAM_WRITE}, so there
+     * is no ambiguity to resolve in practice today).
+     */
+    private static FeatureReadiness combine(String featureKey, String label, List<FeatureReadiness> evaluated) {
+        if (evaluated.size() == 1) {
+            return evaluated.get(0);
+        }
+        FeatureStatus status = FeatureStatus.READY;
+        for (FeatureReadiness readiness : evaluated) {
+            status = worseOf(status, readiness.status());
+        }
+        if (status == FeatureStatus.READY) {
+            return new FeatureReadiness(featureKey, label, FeatureStatus.READY, "Ready.", null);
+        }
+        FeatureStatus worst = status;
+        String detail = evaluated.stream()
+                .filter(r -> r.status() != FeatureStatus.READY)
+                .map(FeatureReadiness::detail)
+                .collect(Collectors.joining(" "));
+        RemedyKind remedy = evaluated.stream()
+                .filter(r -> r.status() == worst)
+                .map(FeatureReadiness::remedy)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
+        return new FeatureReadiness(featureKey, label, status, detail, remedy);
+    }
+
+    /**
+     * A tiny floating-point tolerance for {@link FeatureRequirement#requiredParameterValue()}
+     * comparisons -- MAVLink parameters always wire as float32 regardless of their declared type, so
+     * an integer value like {@code 255} round-trips exactly, but this stays defensive against any
+     * future non-integer threshold.
+     */
+    private static final double PARAMETER_VALUE_TOLERANCE = 1e-6;
 
     private FeatureReadiness evaluateAgainstRequirement(FeatureRequirement req, String label, VehicleProfile profile) {
         FeatureStatus messageStatus = FeatureStatus.READY;
@@ -151,11 +217,29 @@ public final class DefaultReadinessService implements ReadinessService {
         String paramDetail = null;
         if (req.requiredParameterName() != null) {
             // Alias-aware: a firmware rename must not read as a missing parameter (ParameterAliases).
-            boolean present = profile.parameters().stream()
-                    .anyMatch(p -> ParameterAliases.sameParameter(p.name(), req.requiredParameterName()));
-            if (!present) {
+            Optional<ParameterReading> observed = profile.parameters().stream()
+                    .filter(p -> ParameterAliases.sameParameter(p.name(), req.requiredParameterName()))
+                    .findFirst();
+            if (observed.isEmpty()) {
                 paramStatus = FeatureStatus.MISSING;
                 paramDetail = "Parameter " + req.requiredParameterName() + " was not read from this vehicle.";
+            } else if (req.requiredParameterValue() != null
+                    && Math.abs(observed.get().value() - req.requiredParameterValue()) > PARAMETER_VALUE_TOLERANCE) {
+                // FLEET-RADIO-PLAN.md R6 -- e.g. the vehicle's GCS-sysid parameter must equal exactly
+                // the sysid this platform transmits as (255), or every MAVLink RC override it sends
+                // is silently discarded by the vehicle, with no error and no wire response at all.
+                paramStatus = FeatureStatus.MISSING;
+                paramDetail = req.requiredParameterName() + " is " + formatValue(observed.get().value())
+                        + ", not the required " + formatValue(req.requiredParameterValue()) + ".";
+            } else if (req.forbiddenParameterBits() != null
+                    && (Math.round(observed.get().value()) & req.forbiddenParameterBits()) != 0) {
+                // FLEET-RADIO-PLAN.md R6 -- e.g. ArduPilot's RC_OPTIONS bit 1 (IGNORE_OVERRIDES) SET
+                // means the vehicle ignores MAVLink RC overrides, so the requirement is that the bit
+                // be CLEAR. Getting this polarity backwards would report NO_GO for every correctly
+                // configured vehicle and GO for every misconfigured one.
+                paramStatus = FeatureStatus.MISSING;
+                paramDetail = req.requiredParameterName() + " forbids bit(s) " + req.forbiddenParameterBits()
+                        + ", but its value is " + formatValue(observed.get().value()) + ".";
             }
         }
 
@@ -163,8 +247,21 @@ public final class DefaultReadinessService implements ReadinessService {
         String detail = status == FeatureStatus.READY
                 ? "Ready."
                 : messageStatus != FeatureStatus.READY ? messageDetail : paramDetail;
-        RemedyKind remedy = messageStatus != FeatureStatus.READY ? RemedyKind.MESSAGE_INTERVAL : null;
+        // A param-only failure must recommend PARAM_WRITE, not silently carry no remedy at all --
+        // before FLEET-RADIO-PLAN.md R6 this branch always fell through to null (untested; no
+        // existing row's MISSING case had ever asserted its remedy).
+        RemedyKind remedy = messageStatus != FeatureStatus.READY
+                ? RemedyKind.MESSAGE_INTERVAL
+                : paramStatus != FeatureStatus.READY ? RemedyKind.PARAM_WRITE : null;
         return new FeatureReadiness(req.featureKey(), label, status, detail, remedy);
+    }
+
+    /** Whole numbers render without a trailing {@code .0} -- every value this method sees today
+     * (sysid, a bitmask) is conceptually an integer. */
+    private static String formatValue(double value) {
+        return value == Math.rint(value) && !Double.isInfinite(value)
+                ? Long.toString((long) value)
+                : Double.toString(value);
     }
 
     /** {@code MISSING} is worse than {@code DEGRADED} is worse than {@code READY}. */

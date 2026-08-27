@@ -8,6 +8,12 @@ import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.flight.domain.model.ControlProfileId;
+import com.drones.vision.flight.domain.model.FeatureReadiness;
+import com.drones.vision.flight.domain.model.FeatureRequirement;
+import com.drones.vision.flight.domain.model.FeatureStatus;
+import com.drones.vision.flight.domain.model.ReadinessReport;
+import com.drones.vision.flight.domain.model.ReadinessVerdict;
+import com.drones.vision.flight.domain.model.RemedyKind;
 import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.warehouse.domain.model.Device;
@@ -77,6 +83,7 @@ class DefaultManualControlServiceTest {
     private AssetService assetService;
     private FakeManualControlPort manualControlPort;
     private FakeAuditTrailPort auditTrail;
+    private FakeReadinessService readinessService;
     private MutableClock clock;
     private RecordingScheduler scheduler;
     private DefaultManualControlService service;
@@ -90,9 +97,11 @@ class DefaultManualControlServiceTest {
         assetService = mock(AssetService.class);
         manualControlPort = new FakeManualControlPort();
         auditTrail = new FakeAuditTrailPort();
+        readinessService = new FakeReadinessService();
         clock = new MutableClock(Instant.parse("2026-07-31T00:00:00Z"));
         scheduler = new RecordingScheduler();
-        service = new DefaultManualControlService(assetService, manualControlPort, auditTrail, clock, scheduler);
+        service = new DefaultManualControlService(assetService, manualControlPort, auditTrail, readinessService,
+                clock, scheduler);
 
         device = new Device(DeviceId.random(), "FC", Set.of(Capability.TELEMETRY),
                 new StreamDescriptor("mavlink", URI.create("udp://127.0.0.1:14550"), Map.of()));
@@ -139,7 +148,7 @@ class DefaultManualControlServiceTest {
         List<UserId> askedFor = new ArrayList<>();
         List<VehicleKind> askedAbout = new ArrayList<>();
         DefaultManualControlService withProfiles = new DefaultManualControlService(assetService, manualControlPort,
-                auditTrail, clock, scheduler, 300L, (owner, kind) -> {
+                auditTrail, readinessService, clock, scheduler, 300L, (owner, kind) -> {
                     askedFor.add(owner);
                     askedAbout.add(kind);
                     return saved;
@@ -160,7 +169,7 @@ class DefaultManualControlServiceTest {
     void engageFallsBackToTheBuiltInWhenTheSelectorResolvesNothing() {
         stubDetails(device);
         DefaultManualControlService withProfiles = new DefaultManualControlService(assetService, manualControlPort,
-                auditTrail, clock, scheduler, 300L, (owner, kind) -> null);
+                auditTrail, readinessService, clock, scheduler, 300L, (owner, kind) -> null);
 
         ManualControlSession session = withProfiles.engage(assetId, actor, VisibilityScope.unbounded(), () -> { });
 
@@ -302,7 +311,8 @@ class DefaultManualControlServiceTest {
             port.kindToEngageAs = VehicleKind.UNKNOWN;
             port.unidentifiedReasonToReport = reason;
             DefaultManualControlService serviceForReason =
-                    new DefaultManualControlService(assetService, port, new FakeAuditTrailPort(), clock, scheduler);
+                    new DefaultManualControlService(assetService, port, new FakeAuditTrailPort(), readinessService,
+                            clock, scheduler);
 
             VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
                     () -> serviceForReason.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
@@ -473,15 +483,89 @@ class DefaultManualControlServiceTest {
     @Test
     void constructorsRejectNullCollaborators() {
         assertThrows(NullPointerException.class,
-                () -> new DefaultManualControlService(null, manualControlPort, auditTrail));
+                () -> new DefaultManualControlService(null, manualControlPort, auditTrail, readinessService));
         assertThrows(NullPointerException.class,
-                () -> new DefaultManualControlService(assetService, null, auditTrail));
+                () -> new DefaultManualControlService(assetService, null, auditTrail, readinessService));
         assertThrows(NullPointerException.class,
-                () -> new DefaultManualControlService(assetService, manualControlPort, null));
+                () -> new DefaultManualControlService(assetService, manualControlPort, null, readinessService));
         assertThrows(NullPointerException.class,
-                () -> new DefaultManualControlService(assetService, manualControlPort, auditTrail, null, scheduler));
+                () -> new DefaultManualControlService(assetService, manualControlPort, auditTrail, null));
         assertThrows(NullPointerException.class,
-                () -> new DefaultManualControlService(assetService, manualControlPort, auditTrail, clock, null));
+                () -> new DefaultManualControlService(assetService, manualControlPort, auditTrail, readinessService,
+                        null, scheduler));
+        assertThrows(NullPointerException.class,
+                () -> new DefaultManualControlService(assetService, manualControlPort, auditTrail, readinessService,
+                        clock, null));
+    }
+
+    // -- engage: a silently misconfigured vehicle is refused too (FLEET-RADIO R6) ----------
+
+    /**
+     * Required result 3: the {@code rc-relay} check runs at {@code engage}, not only at
+     * probe/preflight -- a MISSING verdict must refuse before any device is resolved or any link
+     * opened, and must audit the refusal distinctly from the R2 unidentified-vehicle refusal.
+     */
+    @Test
+    void engageRefusesWhenRcRelayIsMissingWithoutTouchingTheDeviceOrPort() {
+        stubDetails(device);
+        readinessService.features = List.of(new FeatureReadiness("rc-relay", "RC relay", FeatureStatus.MISSING,
+                "SYSID_MYGCS is 1, not the required 255.", RemedyKind.PARAM_WRITE));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertTrue(ex.getMessage().contains("SYSID_MYGCS"), "got: " + ex.getMessage());
+        assertTrue(manualControlPort.engagedDevices.isEmpty(), "no link should be opened when not-ready");
+        assertEquals(1, auditTrail.recorded.size());
+        assertEquals("REFUSED:not-ready:rc-relay", auditTrail.recorded.get(0).details().get("result"));
+    }
+
+    @Test
+    void engageProceedsWhenRcRelayIsReady() {
+        stubDetails(device);
+        readinessService.features = List.of(
+                new FeatureReadiness("rc-relay", "RC relay", FeatureStatus.READY, "Ready.", null));
+
+        ManualControlSession session = service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { });
+
+        assertTrue(session.active());
+        assertEquals(1, readinessService.evaluatedFor.size());
+        assertEquals(assetId, readinessService.evaluatedFor.get(0));
+    }
+
+    /**
+     * "Absence of evidence is not evidence of readiness" (this service's own javadoc, mirroring
+     * {@code ReadinessService}'s rule): a never-probed vehicle must still be able to engage, exactly
+     * as it could before this wave.
+     */
+    @Test
+    void engageProceedsWhenRcRelayIsUnknown() {
+        stubDetails(device);
+        readinessService.features = List.of(
+                new FeatureReadiness("rc-relay", "RC relay", FeatureStatus.UNKNOWN, "Never probed.", null));
+
+        assertTrue(service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }).active());
+    }
+
+    /** Only MISSING refuses -- a merely DEGRADED rc-relay row must not block engage. */
+    @Test
+    void engageProceedsWhenRcRelayIsDegraded() {
+        stubDetails(device);
+        readinessService.features = List.of(
+                new FeatureReadiness("rc-relay", "RC relay", FeatureStatus.DEGRADED, "Below threshold.", null));
+
+        assertTrue(service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }).active());
+    }
+
+    /** The scope gate runs first: an out-of-scope engage must never even query readiness. */
+    @Test
+    void engageDeniedForOutOfScopeNeverEvaluatesReadiness() {
+        stubDetails(device);
+
+        assertThrows(AccessDeniedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.groups(Set.of()), () -> { }));
+
+        assertTrue(readinessService.evaluatedFor.isEmpty());
     }
 
     // -- thread-safety smoke --------------------------------------------------
@@ -649,6 +733,26 @@ class DefaultManualControlServiceTest {
         @Override
         public List<AuditEntry> findByActor(UserId actor, int limit) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    /**
+     * In-memory {@link ReadinessService}: defaults to every frozen feature key {@code READY}, the
+     * common case where this collaborator must never interfere with an engage a test is not
+     * specifically exercising. A test that cares about the {@code rc-relay} gate overwrites {@link
+     * #features} directly, mirroring {@code FakeFeatureRequirementRepositoryPort}'s own style in
+     * {@code DefaultReadinessServiceTest}.
+     */
+    private static final class FakeReadinessService implements ReadinessService {
+        List<FeatureReadiness> features = FeatureRequirement.FEATURE_KEYS.stream()
+                .map(key -> new FeatureReadiness(key, key, FeatureStatus.READY, "Ready.", null))
+                .toList();
+        final List<AssetId> evaluatedFor = new ArrayList<>();
+
+        @Override
+        public ReadinessReport evaluate(AssetId assetId, VisibilityScope scope) {
+            evaluatedFor.add(assetId);
+            return new ReadinessReport(assetId, ReadinessVerdict.GO, Instant.EPOCH, Instant.EPOCH, features, List.of());
         }
     }
 

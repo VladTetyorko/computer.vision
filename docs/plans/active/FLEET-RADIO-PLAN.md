@@ -1,7 +1,7 @@
 # FLEET-RADIO-PLAN — one radio layer for a mixed fleet
 
 **Status:** authoritative spec. **R0, R1, R2 (Java + R4b's web half), R3 (Java half), R4b (Java half),
-R4c done**, **R7 infra half done**; R4, R5, R6, R3's web half, R2's own "explicit kind choice" web
+R4c, R5, R6 done**, **R7 infra half done**; R4, R3's web half, R2's own "explicit kind choice" web
 half, and R7's test open. Opened 2026-08-26, branch `feat/fleet-radio`.
 **Scope:** the link and control layer for the vehicles we actually fly and drive — **copter and rover
 (rover first)**. Rover covers the surface boat, which shares ArduRover's firmware, mode table and control
@@ -745,7 +745,7 @@ the plan's original scope — see "what the plan got wrong" below), and the one 
 vs `fail` — and a rover's battery bar no longer inherits a fall-risk margin it doesn't need. Tests:
 `npx vitest run src/app/core/telemetry` and the full suite both green (see build log below).
 
-### R6 — `SYSID_MYGCS` and `RC_OPTIONS` become readiness rows *(depends on R5's endpoint for the remedy)*
+### R6 — `SYSID_MYGCS` and `RC_OPTIONS` become readiness rows *(depends on R5's endpoint for the remedy)* — **DONE, 2026-08-27**
 **Scope:** `contexts/vision-flight/.../FeatureRequirement.java` seed + `DefaultReadinessService`,
 `storage/persistence` (a seed migration), `station/vision-web/.../readiness/**`.
 
@@ -759,6 +759,72 @@ vs `fail` — and a rover's battery bar no longer inherits a fall-risk margin it
 
 **Expected result:** F5 closed. The one configuration that silently voids all manual control is
 diagnosed before flight instead of discovered in the air.
+
+**Shipped, vs. this section's own plan.** Both rows exist and both are checked at `engage`, exactly as
+specified. `FeatureRequirement` gained two nullable fields, `requiredParameterValue` (exact-equality,
+small float tolerance) and `forbiddenParameterBits` (must-be-clear mask, value rounded to a `long`) —
+generalizing the pre-existing presence-only `requiredParameterName` check to a value-aware one, needed
+because neither of these two facts is "is a parameter present", both are "does it hold a specific
+value". Seeded by `V27__rc_relay_readiness.sql`, which retires V18's single, always-trivially-satisfied
+`rc-relay` placeholder row and replaces it with the two real ones. `DefaultManualControlService#engage`
+gained a required `ReadinessService` collaborator and refuses (audited `REFUSED:not-ready:rc-relay`)
+on a `MISSING` verdict, before any device is resolved or link opened — `UNKNOWN`/`DEGRADED`/`READY` all
+proceed. `ParameterTier` gained `RC_OPTIONS` as Tier B, so the row's `PARAM_WRITE` remedy is actually
+reachable through R5's endpoint rather than a remedy the system recommends and then refuses to perform.
+
+**The frozen-key question, examined and answered: kept frozen, not extended.**
+`FeatureRequirement.FEATURE_KEYS` stays the eleven keys. Both new facts are independent ways a MAVLink
+RC override fails to reach the servos — exactly what `rc-relay`'s own label already means — so both are
+seeded as two rows sharing that one key, and `DefaultReadinessService` gained a `combine()` step that
+folds every row sharing a key into the single `FeatureReadiness` the wire contract allows before either
+one ever reaches `vision-api` (worst status wins; a failing detail joins every failing row's own
+sentence; the remedy is the first non-null one at the worst status). The deciding fact: `V18`'s own
+migration header had already hit this exact wire-shape limit once, for `preflight-checks`
+(`GPS_RAW_INT`+`STATUSTEXT`) — `ReadinessRowResponse` (`vision-api`'s fleet-board tile) is a
+`{featureKey: status}` map that structurally cannot carry two independent statuses under one key
+*regardless* of how many keys exist in the frozen set. Extending `FEATURE_KEYS` with e.g.
+`rc-relay-sysid`/`rc-relay-options` would not have avoided that constraint — a fleet-board tile is one
+cell per feature — it would only have moved the same fold-into-one-row step to the `vision-api`
+boundary while breaking every existing `FEATURE_KEYS.size() == 11` assumption already written into this
+module's own tests. Reusing the key and folding server-side keeps the wire contract, and every existing
+consumer of it, byte-identical.
+
+**`CLEAR_OVERRIDES_BY_RC` (bit 14), examined and left as a documented gap, not a blocker.** With it
+set, an operator touching the physical transmitter sticks silently ends manual control mid-session —
+adjacent to R6's bit 1, but a different kind of fact: the vehicle's *designed* pilot-override behavior,
+not a link misconfiguration. This table only ever holds a vehicle's static parameter values, never live
+telemetry, and there is no way to check "is the pilot's own RC currently moving a stick" from a stored
+`VehicleProfile`. Judgment call, stated explicitly per this wave's brief: surfacing it usefully needs a
+telemetry-derived signal `ReadinessService` does not have today (the same gap already documented for the
+video/GPS/battery/armable preflight rows) — modeling it as a false blocker would be worse than leaving
+it undocumented-but-absent, so it stays a fact recorded in `V27`'s own migration header and this
+module's `MODULE.md` Gotchas, for whoever next extends this table with that telemetry-derived half.
+
+**Plan defect found: the Scope line was incomplete.** This section's own "Scope" line never names
+`DefaultManualControlService`/`ManualControlService`, yet "Expected result" 3 ("checked at `engage`,
+not only at preflight") can only be satisfied by changing exactly those two files — `engage` is where
+manual control actually starts, and it lives nowhere else. Read literally, the Scope line would have
+left the central requirement of this wave unbuildable within its own stated file list. Treated as
+incomplete rather than authoritative (both files are `contexts/vision-flight`, the same context module
+the Scope line already covers for `FeatureRequirement`/`DefaultReadinessService`), not as a signal to
+skip the engage-time check.
+
+**Out of this wave's scope, flagged rather than fixed:** `DefaultManualControlService` gaining a
+required constructor parameter broke `station/vision-app`'s `ApplicationServiceWiring#manualControlService`
+compile (`java.time.Clock cannot be converted to ReadinessService` — a positional-argument mismatch
+after the new parameter shifted everything after it). The fix is one new `ReadinessService` parameter
+on that `@Bean` method, wired from the bean `OnboardingWiringConfiguration#readinessService` already
+produces — see `contexts/vision-flight/MODULE.md`'s own Gotchas entry for the exact call site.
+
+**Verification:** `./mvnw -B -pl contexts/vision-flight test` — 371/371 green (was 351 before this
+wave). `./mvnw -B -pl storage/persistence test` — 225/225 green (Docker available this run), including
+a renamed migration-count test (11 → 12 rows for `firmware='ardupilot'`, since V27 nets +1: -1
+placeholder, +2 real rows) and a new test asserting both V27 rows' shape. `./mvnw -B -pl station/vision-api test`
+— 874/874 green, no source changes needed there. `npm run test:ci` (`station/vision-web`) — 2559/2559
+green across 139 files, confirmed with **no edits** — the wire shape (`{featureKey: status}`) already
+supported this, and `rc-relay` already had a label from before this wave. `station/vision-app` did not
+build this wave (see above); vision-flight/persistence/vision-api's own scoped builds do not depend on
+it building.
 
 ### R7 — a rover on real ArduPilot firmware — **infra half DONE, test half open**
 **Shipped scope:** `infra/sitl/Dockerfile`, `entrypoint.sh`, `autofly.py`, `docker-compose.yml`,

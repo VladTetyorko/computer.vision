@@ -46,6 +46,12 @@ public enum ParameterTier {
             new TierPattern(B, Pattern.compile("FS_SHORT_TIMEOUT")),
             new TierPattern(B, Pattern.compile("RC_FS_TIMEOUT")),
             new TierPattern(B, Pattern.compile("RC\\d*_OVERRIDE_.*")),
+            // RC_OPTIONS bit 1 (IGNORE_OVERRIDES) silently discards every MAVLink RC override when
+            // set (docs/plans/active/FLEET-RADIO-PLAN.md R6) -- the same "link and failsafe
+            // behaviour" class as the RC_FS_TIMEOUT/RC*_OVERRIDE_* rows just above, so the readiness
+            // row's PARAM_WRITE remedy (DefaultReadinessService) is one this platform can actually
+            // dispatch through POST /api/assets/{id}/parameters, not just advisory text.
+            new TierPattern(B, Pattern.compile("RC_OPTIONS")),
             // Tier C -- flight-critical, never written (docs/plans/active/DRONE-ONBOARDING-PLAN.md §4a).
             new TierPattern(C, Pattern.compile("ARMING_CHECK")),
             new TierPattern(C, Pattern.compile("FRAME_CLASS")),

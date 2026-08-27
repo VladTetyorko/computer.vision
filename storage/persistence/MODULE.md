@@ -101,7 +101,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
   only for a genuinely `null` column (a pre-`V19` row); **`AssetUsageEntity#origin`** (`V26`) is
   `NOT NULL` with a database default, so `AssetUsageMapper` has no legacy-null case for it at all.
 
-## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V26
+## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V27
 
 | Migration | What it does |
 |---|---|
@@ -131,6 +131,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `V24__control_profiles.sql` | `control_profiles` table (audited) + partial unique index enforcing at most one active profile per owner+vehicle-kind |
 | `V25__device_origin.sql` | `devices.origin` (`LIVE`/`SIMULATED`, `NOT NULL DEFAULT 'LIVE'`), backfilling `SIMULATED` for devices already on a `simulated`-category asset |
 | `V26__asset_usage_origin.sql` | `asset_usages.origin` (`STREAM`/`TELEMETRY`/`OPERATOR`, `NOT NULL DEFAULT 'STREAM'`) — single statement, no follow-up `UPDATE` needed since every pre-existing row's correct value is the same one |
+| `V27__rc_relay_readiness.sql` | `feature_requirements.required_parameter_value`/`forbidden_parameter_bits` (nullable); retires the single always-trivially-satisfied `id='ardupilot:rc-relay'` placeholder row V18 seeded and replaces it with two independent, value-aware rows under the same `rc-relay` feature key — a GCS-sysid value check (`SYSID_MYGCS` must equal `255`) and an `RC_OPTIONS` forbidden-bits check (bit 1 must be clear) — net row count for `firmware='ardupilot'` goes from 11 to 12 (FLEET-RADIO-PLAN.md R6) |
 
 A second, conditional Flyway location, `src/main/resources/db/seed/dev`, holds
 `V90001__dev_accounts.sql` (the `admin`/`manager`/`pilot` DEV-ONLY accounts) — it only joins Flyway's

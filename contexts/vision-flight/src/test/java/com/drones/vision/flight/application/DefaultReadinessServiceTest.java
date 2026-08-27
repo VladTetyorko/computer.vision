@@ -98,7 +98,19 @@ class DefaultReadinessServiceTest {
     /** The seeded {@code fleet-identity} row: a parameter requirement, no message requirement. */
     private static FeatureRequirement fleetIdentityRequiring(String parameterName) {
         return new FeatureRequirement("fleet-identity", "Fleet identity", "ardupilot",
-                null, null, null, parameterName);
+                null, null, null, parameterName, null, null);
+    }
+
+    /** V27's GCS-sysid row: {@code rc-relay} requires this platform's own sysid, 255. */
+    private static FeatureRequirement rcRelayGcsSysidRequiring(String parameterName) {
+        return new FeatureRequirement("rc-relay", "RC relay (GCS sysid)", "ardupilot",
+                null, null, null, parameterName, 255.0, null);
+    }
+
+    /** V27's RC_OPTIONS row: {@code rc-relay} forbids bit 1 (IGNORE_OVERRIDES). */
+    private static FeatureRequirement rcRelayRcOptionsForbidding(long bits) {
+        return new FeatureRequirement("rc-relay", "RC relay (RC_OPTIONS)", "ardupilot",
+                null, null, null, "RC_OPTIONS", null, bits);
     }
 
     /** Required behavior: an incomplete profile yields UNKNOWN, never GO. */
@@ -124,7 +136,7 @@ class DefaultReadinessServiceTest {
     @Test
     void completeProfileMeetingEveryRequirementIsGo() {
         requirementRepository.rows.add(new FeatureRequirement("ground-speed", "Ground speed", "ardupilot",
-                VFR_HUD, "VFR_HUD", 2.0, null));
+                VFR_HUD, "VFR_HUD", 2.0, null, null, null));
         profileRepository.save(device.id(),
                 profile(true, null, List.of(new MessageObservation(VFR_HUD, "VFR_HUD", 5.0, 50))));
 
@@ -140,7 +152,7 @@ class DefaultReadinessServiceTest {
     @Test
     void missingRequiredMessageForcesNoGoAndBecomesABlocker() {
         requirementRepository.rows.add(new FeatureRequirement("ground-speed", "Ground speed", "ardupilot",
-                VFR_HUD, "VFR_HUD", 2.0, null));
+                VFR_HUD, "VFR_HUD", 2.0, null, null, null));
         profileRepository.save(device.id(), profile(true, null, List.of())); // VFR_HUD never arrived
 
         ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
@@ -152,7 +164,7 @@ class DefaultReadinessServiceTest {
     @Test
     void messageBelowMinimumHzIsDegradedNotMissingAndDoesNotForceNoGoByItself() {
         requirementRepository.rows.add(new FeatureRequirement("ground-speed", "Ground speed", "ardupilot",
-                VFR_HUD, "VFR_HUD", 2.0, null));
+                VFR_HUD, "VFR_HUD", 2.0, null, null, null));
         profileRepository.save(device.id(),
                 profile(true, null, List.of(new MessageObservation(VFR_HUD, "VFR_HUD", 0.5, 5))));
 
@@ -244,6 +256,154 @@ class DefaultReadinessServiceTest {
     private static FeatureStatus statusOf(ReadinessReport report, String featureKey) {
         return report.features().stream()
                 .filter(f -> f.featureKey().equals(featureKey)).findFirst().orElseThrow().status();
+    }
+
+    private static com.drones.vision.flight.domain.model.FeatureReadiness readinessOf(ReadinessReport report,
+                                                                                        String featureKey) {
+        return report.features().stream().filter(f -> f.featureKey().equals(featureKey)).findFirst().orElseThrow();
+    }
+
+    // -- FLEET-RADIO-PLAN R6: value/bit-aware rc-relay checks --------------------
+
+    /**
+     * Required result 1: a GCS-sysid mismatch is MISSING with a PARAM_WRITE remedy -- this is also
+     * the fix for the pre-existing bug where a parameter-only MISSING row never carried a remedy at
+     * all (no prior test asserted remedy for a parameter row).
+     */
+    @Test
+    void gcsSysidMismatchIsMissingWithParamWriteRemedy() {
+        requirementRepository.rows.add(rcRelayGcsSysidRequiring("SYSID_MYGCS"));
+        profileRepository.save(device.id(), profile(true, null, List.of(),
+                List.of(new ParameterReading("SYSID_MYGCS", 1.0, "UINT8"))));
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        var readiness = readinessOf(report, "rc-relay");
+        assertEquals(FeatureStatus.MISSING, readiness.status());
+        assertEquals(com.drones.vision.flight.domain.model.RemedyKind.PARAM_WRITE, readiness.remedy());
+        assertEquals(ReadinessVerdict.NO_GO, report.verdict());
+    }
+
+    @Test
+    void gcsSysidMatchingThisPlatformsSysidIsReady() {
+        requirementRepository.rows.add(rcRelayGcsSysidRequiring("SYSID_MYGCS"));
+        profileRepository.save(device.id(), profile(true, null, List.of(),
+                List.of(new ParameterReading("SYSID_MYGCS", 255.0, "UINT8"))));
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(FeatureStatus.READY, statusOf(report, "rc-relay"));
+        assertEquals(ReadinessVerdict.GO, report.verdict());
+    }
+
+    /** F0's alias handling must also cover the value-aware path, not just presence. */
+    @Test
+    void gcsSysidCheckIsAliasAwareForTheFirmwareRenamedSpelling() {
+        requirementRepository.rows.add(rcRelayGcsSysidRequiring("SYSID_MYGCS"));
+        profileRepository.save(device.id(), profile(true, null, List.of(),
+                List.of(new ParameterReading("MAV_GCS_SYSID", 255.0, "UINT8"))));
+
+        assertEquals(FeatureStatus.READY, statusOf(service.evaluate(assetId, VisibilityScope.unbounded()), "rc-relay"));
+    }
+
+    /**
+     * Required result 2: RC_OPTIONS bit 1 polarity, asserted by value in both directions -- not by
+     * reading the constant's name, exactly as V27's migration comment demands.
+     */
+    @Test
+    void rcOptionsBitOneSetIsMissing() {
+        requirementRepository.rows.add(rcRelayRcOptionsForbidding(2L));
+        profileRepository.save(device.id(), profile(true, null, List.of(),
+                List.of(new ParameterReading("RC_OPTIONS", 2.0, "INT32")))); // bit 1 set
+
+        var readiness = readinessOf(service.evaluate(assetId, VisibilityScope.unbounded()), "rc-relay");
+        assertEquals(FeatureStatus.MISSING, readiness.status());
+        assertEquals(com.drones.vision.flight.domain.model.RemedyKind.PARAM_WRITE, readiness.remedy());
+    }
+
+    @Test
+    void rcOptionsBitOneClearIsReady() {
+        requirementRepository.rows.add(rcRelayRcOptionsForbidding(2L));
+        profileRepository.save(device.id(), profile(true, null, List.of(),
+                List.of(new ParameterReading("RC_OPTIONS", 5.0, "INT32")))); // bits 0+2 set, bit 1 clear
+
+        assertEquals(FeatureStatus.READY,
+                statusOf(service.evaluate(assetId, VisibilityScope.unbounded()), "rc-relay"));
+    }
+
+    @Test
+    void rcOptionsAtZeroIsReady() {
+        requirementRepository.rows.add(rcRelayRcOptionsForbidding(2L));
+        profileRepository.save(device.id(), profile(true, null, List.of(),
+                List.of(new ParameterReading("RC_OPTIONS", 0.0, "INT32"))));
+
+        assertEquals(FeatureStatus.READY,
+                statusOf(service.evaluate(assetId, VisibilityScope.unbounded()), "rc-relay"));
+    }
+
+    /** A parameter never read at all is MISSING, same as the presence-only path. */
+    @Test
+    void rcOptionsNeverReadIsMissing() {
+        requirementRepository.rows.add(rcRelayRcOptionsForbidding(2L));
+        profileRepository.save(device.id(), profile(true, null, List.of(), List.of()));
+
+        var readiness = readinessOf(service.evaluate(assetId, VisibilityScope.unbounded()), "rc-relay");
+        assertEquals(FeatureStatus.MISSING, readiness.status());
+        assertEquals(com.drones.vision.flight.domain.model.RemedyKind.PARAM_WRITE, readiness.remedy());
+    }
+
+    // -- combine(): two rows under one key must fold into one wire row ----------
+
+    /** Both V27 rows satisfied -- the frozen-key decision must still yield exactly one row. */
+    @Test
+    void bothRcRelayRowsReadyCombineIntoOneReadyRow() {
+        requirementRepository.rows.add(rcRelayGcsSysidRequiring("SYSID_MYGCS"));
+        requirementRepository.rows.add(rcRelayRcOptionsForbidding(2L));
+        profileRepository.save(device.id(), profile(true, null, List.of(), List.of(
+                new ParameterReading("SYSID_MYGCS", 255.0, "UINT8"),
+                new ParameterReading("RC_OPTIONS", 0.0, "INT32"))));
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(1, report.features().stream().filter(f -> f.featureKey().equals("rc-relay")).count());
+        assertEquals(FeatureStatus.READY, statusOf(report, "rc-relay"));
+        assertEquals(ReadinessVerdict.GO, report.verdict());
+    }
+
+    /** One row MISSING, the other READY: the combined row is MISSING, still exactly one row. */
+    @Test
+    void oneRcRelayRowMissingMakesTheCombinedRowMissing() {
+        requirementRepository.rows.add(rcRelayGcsSysidRequiring("SYSID_MYGCS"));
+        requirementRepository.rows.add(rcRelayRcOptionsForbidding(2L));
+        profileRepository.save(device.id(), profile(true, null, List.of(), List.of(
+                new ParameterReading("SYSID_MYGCS", 1.0, "UINT8"), // wrong -- MISSING
+                new ParameterReading("RC_OPTIONS", 0.0, "INT32")))); // clear -- READY
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(1, report.features().stream().filter(f -> f.featureKey().equals("rc-relay")).count());
+        var readiness = readinessOf(report, "rc-relay");
+        assertEquals(FeatureStatus.MISSING, readiness.status());
+        assertEquals(com.drones.vision.flight.domain.model.RemedyKind.PARAM_WRITE, readiness.remedy());
+        assertTrue(readiness.detail().contains("SYSID_MYGCS"));
+        assertEquals(List.of("rc-relay"), report.blockers());
+    }
+
+    /** Both rows MISSING: the combined detail joins both independent diagnoses. */
+    @Test
+    void bothRcRelayRowsMissingJoinsBothDetailsInOneRow() {
+        requirementRepository.rows.add(rcRelayGcsSysidRequiring("SYSID_MYGCS"));
+        requirementRepository.rows.add(rcRelayRcOptionsForbidding(2L));
+        profileRepository.save(device.id(), profile(true, null, List.of(), List.of(
+                new ParameterReading("SYSID_MYGCS", 1.0, "UINT8"),
+                new ParameterReading("RC_OPTIONS", 2.0, "INT32"))));
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        var readiness = readinessOf(report, "rc-relay");
+        assertEquals(FeatureStatus.MISSING, readiness.status());
+        assertTrue(readiness.detail().contains("SYSID_MYGCS"));
+        assertTrue(readiness.detail().contains("RC_OPTIONS"));
     }
 
     // -- test doubles -----------------------------------------------------------

@@ -36,6 +36,16 @@ class ParameterTierTest {
         assertEquals(Optional.of(ParameterTier.B), ParameterTier.classify("RC_FS_TIMEOUT"));
     }
 
+    /**
+     * FLEET-RADIO-PLAN R6: RC_OPTIONS bit 1 (IGNORE_OVERRIDES) silently discards every MAVLink RC
+     * override this platform sends -- the readiness remedy for that row is only honest if the
+     * parameter is actually writable through the existing R5 endpoint.
+     */
+    @Test
+    void classifiesRcOptionsAsTierB() {
+        assertEquals(Optional.of(ParameterTier.B), ParameterTier.classify("RC_OPTIONS"));
+    }
+
     /** Required behavior: a Tier-C parameter name is rejected by the allowlist. */
     @Test
     void classifiesTierCFlightCriticalParametersAndTheyAreNeverWritable() {

@@ -2983,7 +2983,7 @@ class PostgresDockerIntegrationTest {
             // collide with a seeded row or another run of this same test.
             String firmware = "test-" + UUID.randomUUID().toString().substring(0, 8);
             FeatureRequirement custom =
-                    new FeatureRequirement("battery", "Battery", firmware, 1, "SYS_STATUS", 1.0, null);
+                    new FeatureRequirement("battery", "Battery", firmware, 1, "SYS_STATUS", 1.0, null, null, null);
 
             EntityManager em = entityManagerFactory.createEntityManager();
             try {
@@ -3487,18 +3487,54 @@ class PostgresDockerIntegrationTest {
      * actually seeded one row per frozen v1 feature key (SS8.1) for {@code firmware = 'ardupilot'},
      * on top of V1-V17; {@link FeatureRequirementRepositoryTests} exercises the same data through the
      * port, this asserts the raw row count landed at all.
+     *
+     * <p>V27 (FLEET-RADIO-PLAN.md R6) retired the single placeholder {@code rc-relay} row V18 seeded
+     * and replaced it with two independent, value-aware rows under that same key — see {@link
+     * #v27MigrationRetiresThePlaceholderRcRelayRowAndSeedsTwoValueAwareRowsUnderTheSameKey} — so the
+     * raw row count is now twelve, one more than the eleven frozen feature keys, not equal to them.
      */
     @Test
-    void v18MigrationSeedsElevenArdupilotFeatureRequirementRows() {
+    void v18MigrationSeedsTwelveArdupilotFeatureRequirementRows() {
         EntityManager em = entityManagerFactory.createEntityManager();
         try {
             long count = ((Number) em.createNativeQuery(
                             "select count(*) from feature_requirements where firmware = 'ardupilot'")
                     .getSingleResult()).longValue();
-            assertEquals(11, count, "one seeded row per frozen v1 feature key (SS8.1)");
+            assertEquals(12, count,
+                    "eleven frozen v1 feature keys (SS8.1), plus one extra row from V27's two-rows-under-rc-relay");
         } finally {
             em.close();
         }
+    }
+
+    /**
+     * docs/plans/active/FLEET-RADIO-PLAN.md R6 — V27 must apply cleanly on top of V1-V26, retire the
+     * V18 placeholder {@code rc-relay} row, and seed the two new value-aware rows this wave's
+     * readiness checks depend on: a GCS-sysid value requirement and an RC_OPTIONS forbidden-bits
+     * requirement, both reachable through {@link FeatureRequirementRepositoryPort} exactly like every
+     * other seeded row.
+     */
+    @Test
+    void v27MigrationRetiresThePlaceholderRcRelayRowAndSeedsTwoValueAwareRowsUnderTheSameKey() {
+        FeatureRequirementRepositoryPort repository = new JpaFeatureRequirementRepository(entityManagerFactory);
+
+        List<FeatureRequirement> rcRelayRows = repository.findByFirmware("ardupilot").stream()
+                .filter(r -> r.featureKey().equals("rc-relay"))
+                .toList();
+
+        assertEquals(2, rcRelayRows.size(), "two independent rows under the one frozen rc-relay key");
+
+        FeatureRequirement gcsSysid = rcRelayRows.stream()
+                .filter(r -> "SYSID_MYGCS".equals(r.requiredParameterName()))
+                .findFirst().orElseThrow();
+        assertEquals(255.0, gcsSysid.requiredParameterValue());
+        assertNull(gcsSysid.forbiddenParameterBits());
+
+        FeatureRequirement rcOptions = rcRelayRows.stream()
+                .filter(r -> "RC_OPTIONS".equals(r.requiredParameterName()))
+                .findFirst().orElseThrow();
+        assertNull(rcOptions.requiredParameterValue());
+        assertEquals(2L, rcOptions.forbiddenParameterBits());
     }
 
     /**

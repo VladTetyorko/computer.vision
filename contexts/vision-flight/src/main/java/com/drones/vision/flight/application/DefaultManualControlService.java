@@ -6,6 +6,8 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.flight.domain.model.ControlProfile;
+import com.drones.vision.flight.domain.model.FeatureStatus;
+import com.drones.vision.flight.domain.model.ReadinessReport;
 import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.flight.domain.model.RcChannels;
@@ -99,12 +101,26 @@ import com.drones.vision.platform.VisibilityScope;
  * vision.rc.watchdog-timeout-ms} property (default 300) when it wants that property to actually
  * take effect — the 3-/5-arg constructors always use the hard-coded default.
  *
+ * <h2>A silently misconfigured vehicle is refused too (FLEET-RADIO R6)</h2>
+ * Unlike the R2 guard above, this one needs no live link at all: {@code RC_OPTIONS} ignoring
+ * overrides and a GCS-sysid mismatch are both facts the vehicle's last-probed {@link
+ * com.drones.vision.flight.domain.model.VehicleProfile} already carries (or does not — an
+ * unprobed/incomplete vehicle is {@code UNKNOWN}, not a blocker, matching this module's "absence of
+ * evidence is not evidence of readiness" rule everywhere else). {@link #engage} re-evaluates the
+ * {@code rc-relay} {@link com.drones.vision.flight.domain.model.FeatureReadiness} row via {@link
+ * ReadinessService} right after the scope gate and before any device is resolved or any port is
+ * touched — a parameter can change between a preflight display and this engage, so the check is
+ * re-run here rather than trusted from an earlier read. A {@link FeatureStatus#MISSING} verdict
+ * throws a plain {@link IllegalStateException} carrying the row's own honest detail sentence and
+ * audits {@code REFUSED:not-ready:rc-relay}; {@code DEGRADED}/{@code READY}/{@code UNKNOWN} all let
+ * {@code engage} proceed.
+ *
  * <h2>Audit</h2>
  * Mirrors {@link DefaultFlightCommandService#audit}: one {@link AuditEntry} per {@code
  * ENGAGE}/{@code RELEASE}/{@code WATCHDOG}/{@code DENIED:out of scope}/{@code
- * REFUSED:unidentified-vehicle:<reason>} — {@link AuditAction#UPDATED} (no dedicated "commanded"
- * value exists), {@link AuditTargetType#ASSET}, attributes {@code {assetId, command:"MANUAL_CONTROL",
- * result}}.
+ * REFUSED:unidentified-vehicle:<reason>}/{@code REFUSED:not-ready:<featureKey>} — {@link
+ * AuditAction#UPDATED} (no dedicated "commanded" value exists), {@link AuditTargetType#ASSET},
+ * attributes {@code {assetId, command:"MANUAL_CONTROL", result}}.
  */
 public final class DefaultManualControlService implements ManualControlService {
 
@@ -118,6 +134,8 @@ public final class DefaultManualControlService implements ManualControlService {
     private static final String RESULT_WATCHDOG = "WATCHDOG";
     private static final String RESULT_DENIED = "DENIED:out of scope";
     private static final String RESULT_REFUSED_PREFIX = "REFUSED:unidentified-vehicle:";
+    private static final String RESULT_REFUSED_NOT_READY_PREFIX = "REFUSED:not-ready:";
+    private static final String RC_RELAY_FEATURE_KEY = "rc-relay";
     private static final String ATTR_ASSET_ID = "assetId";
     private static final String ATTR_COMMAND = "command";
     private static final String ATTR_RESULT = "result";
@@ -125,6 +143,7 @@ public final class DefaultManualControlService implements ManualControlService {
     private final AssetService assetService;
     private final ManualControlPort manualControlPort;
     private final AuditTrailPort auditTrail;
+    private final ReadinessService readinessService;
     private final Clock clock;
     private final ScheduledExecutorService watchdogScheduler;
     private final long watchdogTimeoutMs;
@@ -135,26 +154,28 @@ public final class DefaultManualControlService implements ManualControlService {
 
     /** Production convenience ctor: {@link Clock#systemUTC()}, a fresh daemon watchdog scheduler, the default timeout. */
     public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
-                                        AuditTrailPort auditTrail) {
-        this(assetService, manualControlPort, auditTrail, Clock.systemUTC(), defaultWatchdogScheduler());
+                                        AuditTrailPort auditTrail, ReadinessService readinessService) {
+        this(assetService, manualControlPort, auditTrail, readinessService, Clock.systemUTC(),
+                defaultWatchdogScheduler());
     }
 
     /** Test/wiring seam: explicit {@link Clock} + {@link ScheduledExecutorService}, default timeout. */
     public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
-                                        AuditTrailPort auditTrail, Clock clock,
+                                        AuditTrailPort auditTrail, ReadinessService readinessService, Clock clock,
                                         ScheduledExecutorService watchdogScheduler) {
-        this(assetService, manualControlPort, auditTrail, clock, watchdogScheduler, DEFAULT_WATCHDOG_TIMEOUT_MS);
+        this(assetService, manualControlPort, auditTrail, readinessService, clock, watchdogScheduler,
+                DEFAULT_WATCHDOG_TIMEOUT_MS);
     }
 
     /**
-     * As the 5-arg ctor, with an explicit watchdog timeout (e.g. {@code vision.rc.watchdog-timeout-ms}).
-     * Resolves built-in profiles only — see the canonical 7-arg ctor.
+     * As the 6-arg ctor, with an explicit watchdog timeout (e.g. {@code vision.rc.watchdog-timeout-ms}).
+     * Resolves built-in profiles only — see the canonical 8-arg ctor.
      */
     public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
-                                        AuditTrailPort auditTrail, Clock clock,
+                                        AuditTrailPort auditTrail, ReadinessService readinessService, Clock clock,
                                         ScheduledExecutorService watchdogScheduler, long watchdogTimeoutMs) {
-        this(assetService, manualControlPort, auditTrail, clock, watchdogScheduler, watchdogTimeoutMs,
-                ControlProfileSelector.builtInOnly());
+        this(assetService, manualControlPort, auditTrail, readinessService, clock, watchdogScheduler,
+                watchdogTimeoutMs, ControlProfileSelector.builtInOnly());
     }
 
     /**
@@ -163,15 +184,22 @@ public final class DefaultManualControlService implements ManualControlService {
      * constructor here defaults it to {@link ControlProfileSelector#builtInOnly()}, which is exactly
      * the behaviour this service had before operators could save profiles — a caller that does not
      * pass one gets the platform's own layout, never a null map.
+     *
+     * <p>{@code readinessService} has no such default anywhere: unlike {@code profileSelector}
+     * (whose omission falls back to identical, safe, pre-existing behaviour), skipping the {@code
+     * rc-relay} readiness gate has no safe equivalent — a no-op implementation would silently
+     * reintroduce the exact failure mode this collaborator exists to close (docs/plans/active/FLEET-RADIO-PLAN.md
+     * R6). Every constructor below therefore requires it explicitly.
      */
     public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
-                                        AuditTrailPort auditTrail, Clock clock,
+                                        AuditTrailPort auditTrail, ReadinessService readinessService, Clock clock,
                                         ScheduledExecutorService watchdogScheduler, long watchdogTimeoutMs,
                                         ControlProfileSelector profileSelector) {
         this.profileSelector = Objects.requireNonNull(profileSelector, "profileSelector must not be null");
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.manualControlPort = Objects.requireNonNull(manualControlPort, "manualControlPort must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
+        this.readinessService = Objects.requireNonNull(readinessService, "readinessService must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.watchdogScheduler = Objects.requireNonNull(watchdogScheduler, "watchdogScheduler must not be null");
         if (watchdogTimeoutMs <= 0) {
@@ -211,6 +239,8 @@ public final class DefaultManualControlService implements ManualControlService {
                 throw new AccessDeniedException(
                         "Asset " + assetId.value() + " is outside your scope; you may not take manual control of it");
             }
+
+            requireRcRelayReady(assetId, actor, scope);
 
             Device device = firstCommandableDevice(details.devices())
                     .orElseThrow(() -> new IllegalStateException(
@@ -253,6 +283,34 @@ public final class DefaultManualControlService implements ManualControlService {
                 activeSession = null;
             }
         }
+    }
+
+    /**
+     * FLEET-RADIO R6: re-checks the {@code rc-relay} feature (GCS-sysid mismatch, {@code RC_OPTIONS}
+     * ignoring overrides) from the vehicle's own last-probed profile, right before this engage —
+     * never cached from an earlier preflight read, since either fact can change in between. No live
+     * link is needed for this: both facts live in the stored {@link
+     * com.drones.vision.flight.domain.model.VehicleProfile}, so this runs before any device is
+     * resolved or any port is touched, unlike the R2 {@code vehicleKind() == UNKNOWN} guard below,
+     * which by necessity needs a link already open.
+     *
+     * <p>Only {@link FeatureStatus#MISSING} refuses — {@code UNKNOWN} (never probed, or an
+     * incomplete profile) is "no evidence either way", not a blocker, matching {@code
+     * ReadinessService}'s own "absence of evidence is not evidence of readiness" rule; a vehicle that
+     * has simply never been probed must still be able to engage manual control, exactly as it could
+     * before this wave.
+     */
+    private void requireRcRelayReady(AssetId assetId, UserId actor, VisibilityScope scope) {
+        ReadinessReport report = readinessService.evaluate(assetId, scope);
+        report.features().stream()
+                .filter(feature -> feature.featureKey().equals(RC_RELAY_FEATURE_KEY))
+                .filter(feature -> feature.status() == FeatureStatus.MISSING)
+                .findFirst()
+                .ifPresent(feature -> {
+                    audit(actor, assetId, RESULT_REFUSED_NOT_READY_PREFIX + RC_RELAY_FEATURE_KEY);
+                    throw new IllegalStateException("Asset " + assetId.value()
+                            + " is not ready for manual control: " + feature.detail());
+                });
     }
 
     private Optional<Device> firstCommandableDevice(List<Device> devices) {
