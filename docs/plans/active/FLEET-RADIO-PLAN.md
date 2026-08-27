@@ -1,6 +1,6 @@
 # FLEET-RADIO-PLAN — one radio layer for a mixed fleet
 
-**Status:** authoritative spec, waves R0–R7 open. Opened 2026-08-26, branch `feat/fleet-radio`.
+**Status:** authoritative spec. **R0 done**; R1–R7 open. Opened 2026-08-26, branch `feat/fleet-radio`.
 **Scope:** the link and control layer for the vehicles we actually fly and drive — **copter and rover
 (rover first)**. Rover covers the surface boat, which shares ArduRover's firmware, mode table and control
 shape. Plane stays working where it already works; it is not a target of this plan.
@@ -113,24 +113,36 @@ status claim.** Where a prior document was wrong, that is noted.
 Disjoint file scopes; each ends with its scoped build green and its `MODULE.md` updated.
 Agent roles per CLAUDE.md.
 
-### R0 — readiness stops being a constant *(independent, highest severity)*
-**Scope:** `storage/persistence/src/main/resources/db/migration/V27__*.sql`,
-`contexts/vision-flight/.../ParameterTier.java`, `drone-link/mavlink/.../MavlinkSettings.java`,
-`station/vision-app/.../VisionOnboardingProperties.java` + `TelemetryWiring.java`.
+### R0 — readiness stops being a constant *(independent, highest severity)* — **DONE**
+**Shipped scope:** `contexts/vision-flight/.../ParameterAliases.java` (new) +
+`DefaultReadinessService.java` + `ParameterTier.java`, `drone-link/mavlink/.../MavlinkSettings.java` +
+`MavlinkVehicleConfigurator.java`, `station/vision-app/.../VisionOnboardingProperties.java` +
+`TelemetryWiring.java` + `application.yaml`.
 
-- Fix the `fleet-identity` requirement to name the parameter the probe actually reads (F0).
-  ArduPilot renamed `SYSID_THISMAV` → `MAV_SYSID` in 4.7; **both** spellings must be accepted, because we
-  onboard vehicles of both generations. Express this as two requirement rows or one alternation — not by
-  picking a winner.
-- `ParameterTier` classifies **both** spellings as Tier A. An unclassified name is a 400, so the remedy is
-  dead without this.
-- Make the probe parameter list genuinely configurable (F12) and drop `FENCE_ALT_MAX` from the default set
-  for non-copter vehicles.
-- **Note the migration number:** master is at `V26`. `feat/controller-setup-c15` also claims `V25` and must
-  renumber; coordinate so this wave takes the next free number and does not collide again.
+- F0 closed **without a migration**. The `V18` `fleet-identity` row still reads `SYSID_THISMAV`; a new
+  `ParameterAliases` value class makes `SYSID_THISMAV` and `MAV_SYSID` (and `SYSID_MYGCS` /
+  `MAV_GCS_SYSID`) the same parameter at every comparison, so either spelling satisfies the row.
+- **Why not the planned `V27` migration.** A rename is recurring, not a one-off — the next one would be
+  another migration and another set of divergent rows. It also sidesteps the numbering collision with
+  `feat/controller-setup-c15` entirely, so that coordination note is moot. Normalising at probe time was
+  considered and rejected: it would make `ParameterReading` claim a name the vehicle never answered under.
+- `ParameterTier.classify` canonicalises before matching, so both spellings are Tier A and the remedy stays
+  reachable.
+- `vision.onboarding.probe.parameters` is now bound *and read* (F12) — empty keeps the firmware-verified
+  defaults. `FENCE_ALT_MAX` is gone from the default list (it does not exist on ArduRover).
 
-**Expected result:** a correctly configured ArduPilot vehicle can reach `GO`. Today none can, of any kind.
-A test asserts a probed profile carrying `MAV_SYSID` satisfies `fleet-identity`.
+**Unplanned finding — the probe cost of an alias.** Listing both spellings in the probe list, which is what
+this wave first did, regressed every probe by the full `parameterTimeout × parameterRetries` budget:
+`ParameterService.readAll` fans out concurrently, and a firmware carries exactly one spelling, so the other
+holds the whole batch open. The live SITL test caught it (~8 s added; one-shot messages fell out of the
+inventory's rate window). Fixed properly rather than absorbed: `MavlinkVehicleConfigurator.readInto` now
+reads the configured list, then re-asks *only* unanswered names under their other spellings. Current
+firmware never reaches the second pass and pays nothing.
+
+**Result:** a correctly configured ArduPilot vehicle can reach `GO`; before this, none could, of any kind.
+Proven by tests that fail without the fix with exactly the F0 symptom (`expected: <GO> but was: <NO_GO>`)
+for a profile carrying `MAV_SYSID` against a row naming `SYSID_THISMAV`, and symmetrically. Scoped builds
+green: vision-flight 345, adapter-mavlink 198 (live SITL included), persistence + vision-app 263.
 
 ### R1 — one vehicle taxonomy, complete for rover
 **Scope:** `drone-link/mavlink-core/**` (new `VehicleClass`), `drone-link/mavlink/FlightModes.java`,
@@ -280,13 +292,13 @@ flowchart LR
 ```
 
 **Parallel-safe:** R0, R1, R3, R4, R4b, R4c and R5 have disjoint file scopes. R2 waits on R1; R6 waits on
-both R0 (the parameter-name fix) and R5 (the remedy endpoint).
+both R0 (done — the parameter-name fix) and R5 (the remedy endpoint).
 
 **Serial order by value, rover first:**
 
 | Order | Wave | Why here |
 |---|---|---|
-| 1 | **R0** | Readiness is a constant `NO_GO` today. Nothing downstream that reads a verdict can be trusted until this is true |
+| 1 | ~~**R0**~~ **done** | Readiness was a constant `NO_GO`. Nothing downstream that reads a verdict could be trusted until this was true |
 | 2 | **R3** | Shipped, silent, user-visible. A rover's aux channels are its mode switch and its lights |
 | 3 | **R1** | Three tables is how the next rover defect gets introduced; Dock/Circle/Initialising are missing today |
 | 4 | **R4b** | Safety, and actively wrong on the vehicle being bought |
@@ -297,7 +309,8 @@ both R0 (the parameter-name fix) and R5 (the remedy endpoint).
 | 9 | **R7** | Verifies 1–8 against ArduPilot instead of against our own simulator |
 
 **Note on migrations:** master is at `V26`, and unmerged `feat/controller-setup-c15` also claims `V25`.
-R0 and R6 both add migrations — they must take distinct, next-free numbers and that branch must renumber.
+R6 adds a migration and must take the next free number. R0 shipped without one (see its wave), so the
+`feat/controller-setup-c15` `V25` collision no longer involves this plan.
 
 ## 5. What this plan deliberately does not do
 

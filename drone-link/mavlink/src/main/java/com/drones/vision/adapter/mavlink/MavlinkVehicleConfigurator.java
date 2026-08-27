@@ -13,6 +13,7 @@ import com.drones.mavlink.session.HeartbeatInfo;
 import com.drones.mavlink.session.Peer;
 import com.drones.vision.flight.domain.model.MessageIntervalOutcome;
 import com.drones.vision.flight.domain.model.MessageObservation;
+import com.drones.vision.flight.domain.model.ParameterAliases;
 import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.flight.domain.model.ParameterWriteOutcome;
 import com.drones.vision.flight.domain.model.RemediationResultCode;
@@ -325,15 +326,38 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
                 .toList();
     }
 
+    /**
+     * Reads the configured parameter list, then re-asks under older spellings for whatever the first
+     * pass left unanswered (docs/plans/active/FLEET-RADIO-PLAN.md F0).
+     *
+     * <p>Two passes rather than one, because the two are not equally likely. A firmware carries
+     * exactly one spelling of a renamed parameter, so putting both in a single batch guarantees one
+     * entry nobody can answer — and since {@link ParameterService#readAll} fans out concurrently, one
+     * unanswerable entry holds the whole batch open for the full retry budget. Every probe of every
+     * vehicle would pay that, forever, once per rename. Asking the alternates only on miss inverts
+     * it: current firmware answers in pass one and never reaches pass two, and only a vehicle old
+     * enough to need the fallback waits for it.
+     */
     private List<ParameterReading> readInto(LinkLease lease, LinkTarget target, List<String> names) {
         if (names.isEmpty()) {
             return List.of();
         }
         ParameterService parameters = parameterService(lease);
-        // All in flight at once, deliberately: an absent name costs a full timeout (MAVLink gives an
-        // autopilot no way to say "no such parameter"), and batching would serialise those waits
-        // instead of overlapping them. Measured against ArduPilot 4.7, twenty concurrent
-        // PARAM_REQUEST_READs lose nothing -- every name that exists comes back.
+        List<ParameterReading> readings = new ArrayList<>(readBatch(parameters, target, names));
+        List<String> fallbacks = unansweredSpellings(names, readings);
+        if (!fallbacks.isEmpty()) {
+            readings.addAll(readBatch(parameters, target, fallbacks));
+        }
+        return readings.stream().sorted(Comparator.comparing(ParameterReading::name)).toList();
+    }
+
+    /**
+     * All in flight at once, deliberately: an absent name costs a full timeout (MAVLink gives an
+     * autopilot no way to say "no such parameter"), and batching would serialise those waits instead
+     * of overlapping them. Measured against ArduPilot 4.7, twenty concurrent PARAM_REQUEST_READs lose
+     * nothing -- every name that exists comes back.
+     */
+    private List<ParameterReading> readBatch(ParameterService parameters, LinkTarget target, List<String> names) {
         Map<String, ParameterOutcome> answered = await(parameters.readAll(target.peerId(), names),
                 budget(settings.onboarding().parameterTimeout(), settings.onboarding().parameterRetries()));
         if (answered == null) {
@@ -346,7 +370,21 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
                 .filter(outcome -> Float.isFinite(outcome.value().value()))
                 .map(outcome -> new ParameterReading(outcome.value().name(), outcome.value().value(),
                         typeTagOf(outcome.value().type())))
-                .sorted(Comparator.comparing(ParameterReading::name))
+                .toList();
+    }
+
+    /**
+     * The other spellings of every requested name no reading yet accounts for; empty is the norm.
+     * Package-private as a test seam: this is the whole decision the two-pass read turns on, and the
+     * path it guards (a vehicle old enough to answer only the previous spelling) is one no SITL image
+     * this repo ships can produce.
+     */
+    static List<String> unansweredSpellings(List<String> requested, List<ParameterReading> readings) {
+        return requested.stream()
+                .filter(name -> readings.stream().noneMatch(r -> ParameterAliases.sameParameter(r.name(), name)))
+                .flatMap(name -> ParameterAliases.spellingsOf(name).stream())
+                .filter(spelling -> !requested.contains(spelling))
+                .distinct()
                 .toList();
     }
 

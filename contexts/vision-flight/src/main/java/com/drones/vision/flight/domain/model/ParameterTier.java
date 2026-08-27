@@ -38,6 +38,7 @@ public enum ParameterTier {
             // Tier A -- reporting (docs/plans/active/DRONE-ONBOARDING-PLAN.md §4a).
             new TierPattern(A, Pattern.compile("SR\\d_.*")),
             new TierPattern(A, Pattern.compile("SYSID_THISMAV")),
+            new TierPattern(A, Pattern.compile("SYSID_MYGCS")),
             new TierPattern(A, Pattern.compile("SERIAL\\d_PROTOCOL")),
             // Tier B -- link & failsafe behaviour.
             new TierPattern(B, Pattern.compile("FS_GCS_ENABLE")),
@@ -67,8 +68,12 @@ public enum ParameterTier {
         if (parameterName == null || parameterName.isBlank()) {
             throw new IllegalArgumentException("parameterName must not be blank");
         }
+        // Classify by canonical spelling, so a firmware rename cannot make a known parameter
+        // unclassified -- an unclassified name is refused outright, which would silently take the
+        // remedy away from exactly the parameters that were renamed (ParameterAliases).
+        String canonical = ParameterAliases.canonical(parameterName);
         return PATTERNS.stream()
-                .filter(p -> p.pattern.matcher(parameterName).matches())
+                .filter(p -> p.pattern.matcher(canonical).matches())
                 .map(p -> p.tier)
                 .findFirst();
     }

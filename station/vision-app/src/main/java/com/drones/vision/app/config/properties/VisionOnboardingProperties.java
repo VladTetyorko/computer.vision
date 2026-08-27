@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
  * Configuration for the vehicle-onboarding pipeline's PROBE stage ({@code vision.onboarding.*}),
@@ -38,12 +39,27 @@ public record VisionOnboardingProperties(@DefaultValue Probe probe, @DefaultValu
      *                        module (O4's {@code MavlinkVehicleConfigurator} is the expected reader
      *                        once it exists) but bound here now so §8.1's full property surface has
      *                        somewhere to land; default {@value #DEFAULT_REQUEST_TIMEOUT}
+     * @param parameters      the vehicle parameters a PROBE reads, overriding the adapter's
+     *                        firmware-verified default list. <b>Empty (the default) keeps that
+     *                        list</b> — this exists because parameter names are firmware-version and
+     *                        vehicle-type state ({@code FENCE_ALT_MAX} exists on Copter, not on
+     *                        Rover; the system id is spelled differently either side of ArduPilot
+     *                        4.7), not because the default is expected to be wrong
+     *                        (docs/plans/active/FLEET-RADIO-PLAN.md F12). A stale override degrades
+     *                        a probe silently rather than failing, since MAVLink cannot report an
+     *                        unknown parameter name — so override deliberately or not at all
      */
     public record Probe(@DefaultValue("false") boolean enabled,
                          @DefaultValue(VisionOnboardingProperties.DEFAULT_INVENTORY_WINDOW) Duration inventoryWindow,
-                         @DefaultValue(VisionOnboardingProperties.DEFAULT_REQUEST_TIMEOUT) Duration requestTimeout) {
+                         @DefaultValue(VisionOnboardingProperties.DEFAULT_REQUEST_TIMEOUT) Duration requestTimeout,
+                         List<String> parameters) {
 
         public Probe {
+            parameters = parameters == null ? List.of() : List.copyOf(parameters);
+            if (parameters.stream().anyMatch(name -> name == null || name.isBlank())) {
+                throw new IllegalArgumentException(
+                        "vision.onboarding.probe.parameters must not contain a blank name: " + parameters);
+            }
             if (inventoryWindow == null || inventoryWindow.isNegative() || inventoryWindow.isZero()) {
                 throw new IllegalArgumentException(
                         "vision.onboarding.probe.inventory-window must be positive: " + inventoryWindow);

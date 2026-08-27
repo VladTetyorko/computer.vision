@@ -184,8 +184,10 @@ merely "chose not to".
     requestMessagesOnConnect, List<MessageRequest> onConnectMessageRequests)` — rejects a
     probe-parameter name over MAVLink's 16-char `param_id` at construction. Nested `record
     MessageRequest(int messageId, Duration interval)` (wire id, not a name; negative interval
-    rejected, `Duration.ZERO` legal = "resume default rate"). `defaults()`'s 20 probe parameters and
+    rejected, `Duration.ZERO` legal = "resume default rate"). `defaults()`'s 19 probe parameters and
     9 on-connect message requests are firmware-verified against ArduPilot Copter 4.7 — see Gotchas.
+    `probeParameters` is overridable through `vision.onboarding.probe.parameters`; empty (the
+    default) keeps `defaults()`'s list rather than probing nothing.
 - `final class SimulatedVehicleMessages` (package-private) — the MAVLink message builders
   `MavlinkFeedTransmitter` calls (`heartbeat`, `sysStatus`, `gpsRawInt`, `globalPositionInt`).
 
@@ -289,10 +291,22 @@ one `FlightState`-contributing row above has fired at least once.
 - **Parameter names are firmware-version state, not constants.** Copter 4.7 renamed
   `SYSID_THISMAV`→`MAV_SYSID`, `FS_BATT_ENABLE`→`BATT_FS_LOW_ACT`, `GPS_TYPE`→`GPS1_TYPE`; several
   `RTL_ALT`/`WPNAV_SPEED`/`ARMING_CHECK`-style names are absent entirely on that firmware.
-  `Onboarding.defaults()`'s 20 names were verified against a live instance. MAVLink gives an
+  `Onboarding.defaults()`'s 19 names were verified against a live instance. MAVLink gives an
   autopilot no way to report an unknown parameter name — it just says nothing — so a stale list
   degrades into a slow probe that quietly reads less than it claims. Anyone changing the list must
   re-verify it against real firmware, not reason about it.
+- **A renamed parameter is probed in two passes, and the second one is normally empty.**
+  `MavlinkVehicleConfigurator.readInto` reads the configured list, then re-asks only the names that
+  went unanswered, under their other `ParameterAliases` spellings. The probe list therefore carries
+  the *current* spelling only. Listing both would look harmless and is not: `ParameterService.readAll`
+  fans out concurrently, a firmware carries exactly one spelling of a renamed parameter, and one
+  entry nobody can answer holds the whole batch open for the full `parameterTimeout × parameterRetries`
+  budget — on every probe of every vehicle, once per rename. Measured: adding one such name cost
+  ~8 s and pushed one-shot messages out of the inventory's rate window
+  (docs/plans/active/FLEET-RADIO-PLAN.md F0).
+- **`FENCE_ALT_MAX` is deliberately not in the probe list** — it does not exist on ArduRover, so on a
+  rover it was a guaranteed timeout for nothing. The list is copter-verified but must not be
+  copter-only; a fleet that wants it back adds it through the property.
 - **Never close a borrowed `MavlinkGateway`.** `MavlinkVehicleConfigurator`'s probe path may either
   borrow the gateway a registered device is already streaming through, or open a temporary one of
   its own. The invariant that must hold absolutely: close only what you opened. A borrowed gateway

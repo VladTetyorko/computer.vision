@@ -4,6 +4,7 @@ import com.drones.vision.flight.domain.model.FeatureReadiness;
 import com.drones.vision.flight.domain.model.FeatureRequirement;
 import com.drones.vision.flight.domain.model.FeatureStatus;
 import com.drones.vision.flight.domain.model.MessageObservation;
+import com.drones.vision.flight.domain.model.ParameterAliases;
 import com.drones.vision.flight.domain.model.ReadinessReport;
 import com.drones.vision.flight.domain.model.ReadinessVerdict;
 import com.drones.vision.flight.domain.model.RemedyKind;
@@ -149,8 +150,9 @@ public final class DefaultReadinessService implements ReadinessService {
         FeatureStatus paramStatus = FeatureStatus.READY;
         String paramDetail = null;
         if (req.requiredParameterName() != null) {
+            // Alias-aware: a firmware rename must not read as a missing parameter (ParameterAliases).
             boolean present = profile.parameters().stream()
-                    .anyMatch(p -> p.name().equals(req.requiredParameterName()));
+                    .anyMatch(p -> ParameterAliases.sameParameter(p.name(), req.requiredParameterName()));
             if (!present) {
                 paramStatus = FeatureStatus.MISSING;
                 paramDetail = "Parameter " + req.requiredParameterName() + " was not read from this vehicle.";

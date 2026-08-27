@@ -341,8 +341,9 @@ public record MavlinkSettings(
         }
 
         /**
-         * Twenty ArduPilot parameters — identity, airframe, battery, failsafe, GPS/EKF, geofence and
-         * the telemetry link itself. Timeouts follow the MAVLink parameter-protocol page's own advice
+         * Nineteen ArduPilot parameters — identity, airframe, battery, failsafe, GPS/EKF, geofence and
+         * the telemetry link itself. Overridable via {@code vision.onboarding.probe.parameters}.
+         * Timeouts follow the MAVLink parameter-protocol page's own advice
          * (~1 s, retried a few times), widened once for {@code AUTOPILOT_VERSION} because a vehicle
          * assembles that message from several subsystems.
          *
@@ -357,6 +358,21 @@ public record MavlinkSettings(
          * That is the whole reason this is configuration: parameter names are firmware-version state,
          * and no default compiled in today stays true for every airframe a fleet will fly.
          *
+         * <p><b>Renamed parameters are named here in their current spelling only</b> ({@code
+         * MAV_SYSID}, not {@code SYSID_THISMAV}). Older spellings are not listed because listing them
+         * would make every probe of every vehicle wait out the full retry budget for the one spelling
+         * that cannot exist: {@code readAll} fans out concurrently, so an entry nothing will ever
+         * answer sets the floor for the whole batch. {@code MavlinkVehicleConfigurator} instead asks
+         * the other spellings of {@link com.drones.vision.flight.domain.model.ParameterAliases} as a
+         * second pass, and only for names this pass left unanswered — so current firmware pays
+         * nothing and only an older vehicle pays the extra round. Reading neither spelling is what
+         * made the {@code fleet-identity} readiness row a permanent {@code MISSING}
+         * (docs/plans/active/FLEET-RADIO-PLAN.md F0).
+         *
+         * <p><b>{@code FENCE_ALT_MAX} is deliberately absent</b>: it does not exist on ArduRover, so
+         * on the rover this plan targets it was pure timeout — the copter-only assumption this list
+         * used to carry (F12). A fleet that wants it on copters adds it back through the property.
+         *
          * <p>{@link #requestMessagesOnConnect()} defaults {@code false} — this wave's guardrail — but
          * {@link #onConnectMessageRequests()} is still populated with a real, firmware-verified
          * default, on the same reasoning as {@link #probeParameters()}: an operator who later flips
@@ -370,7 +386,7 @@ public record MavlinkSettings(
                             "BATT_CAPACITY", "BATT_MONITOR", "BATT_LOW_VOLT", "BATT_CRT_VOLT", "BATT_ARM_VOLT",
                             "BATT_FS_LOW_ACT", "FS_GCS_ENABLE", "FS_THR_ENABLE", "FS_OPTIONS",
                             "GPS1_TYPE", "GPS_AUTO_SWITCH", "AHRS_EKF_TYPE", "EK3_ENABLE",
-                            "FENCE_ENABLE", "FENCE_ALT_MAX"),
+                            "FENCE_ENABLE"),
                     Duration.ofSeconds(3), 2,
                     Duration.ofSeconds(1), 2,
                     false, defaultOnConnectMessageRequests());

@@ -4,6 +4,7 @@ import com.drones.vision.flight.domain.model.FeatureRequirement;
 import com.drones.vision.flight.domain.model.FeatureStatus;
 import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.flight.domain.model.MessageObservation;
+import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.flight.domain.model.ReadinessReport;
 import com.drones.vision.flight.domain.model.ReadinessVerdict;
 import com.drones.vision.flight.domain.model.VehicleProfile;
@@ -83,9 +84,21 @@ class DefaultReadinessServiceTest {
 
     private static VehicleProfile profile(boolean complete, String incompleteReason,
                                            List<MessageObservation> messages) {
+        return profile(complete, incompleteReason, messages, List.of());
+    }
+
+    private static VehicleProfile profile(boolean complete, String incompleteReason,
+                                           List<MessageObservation> messages,
+                                           List<ParameterReading> parameters) {
         return new VehicleProfile("udp://127.0.0.1:14550#7", Instant.parse("2026-08-18T11:00:00Z"), 7,
-                "ardupilot", "4.5.7", "quadcopter", 0L, List.of(), messages, List.of(), 2300L, complete,
+                "ardupilot", "4.5.7", "quadcopter", 0L, List.of(), messages, parameters, 2300L, complete,
                 incompleteReason);
+    }
+
+    /** The seeded {@code fleet-identity} row: a parameter requirement, no message requirement. */
+    private static FeatureRequirement fleetIdentityRequiring(String parameterName) {
+        return new FeatureRequirement("fleet-identity", "Fleet identity", "ardupilot",
+                null, null, null, parameterName);
     }
 
     /** Required behavior: an incomplete profile yields UNKNOWN, never GO. */
@@ -169,6 +182,68 @@ class DefaultReadinessServiceTest {
                 .thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
 
         assertThrows(NoSuchElementException.class, () -> service.evaluate(assetId, VisibilityScope.groups(Set.of())));
+    }
+
+    // -- FLEET-RADIO-PLAN F0: a firmware rename must not read as a missing parameter ---------
+
+    /**
+     * Required behavior: ArduPilot 4.7+ answers {@code MAV_SYSID}, the seeded requirement row asks
+     * for {@code SYSID_THISMAV}. Before alias-awareness this was a permanent {@code NO_GO} blocker
+     * on every vehicle running current firmware.
+     */
+    @Test
+    void currentFirmwareSpellingSatisfiesTheRequirementWrittenInTheOldSpelling() {
+        requirementRepository.rows.add(fleetIdentityRequiring("SYSID_THISMAV"));
+        profileRepository.save(device.id(), profile(true, null, List.of(),
+                List.of(new ParameterReading("MAV_SYSID", 7.0, "INT32"))));
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(ReadinessVerdict.GO, report.verdict());
+        assertTrue(report.blockers().isEmpty());
+        assertEquals(FeatureStatus.READY, statusOf(report, "fleet-identity"));
+    }
+
+    /** The same row must keep passing for a vehicle on pre-4.7 firmware -- the fix is symmetric. */
+    @Test
+    void legacyFirmwareSpellingStillSatisfiesTheSameRequirement() {
+        requirementRepository.rows.add(fleetIdentityRequiring("SYSID_THISMAV"));
+        profileRepository.save(device.id(), profile(true, null, List.of(),
+                List.of(new ParameterReading("SYSID_THISMAV", 7.0, "INT32"))));
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(ReadinessVerdict.GO, report.verdict());
+        assertEquals(FeatureStatus.READY, statusOf(report, "fleet-identity"));
+    }
+
+    /** And symmetrically, were the row ever reseeded to the new spelling. */
+    @Test
+    void aRequirementWrittenInTheNewSpellingAcceptsTheOldReading() {
+        requirementRepository.rows.add(fleetIdentityRequiring("MAV_SYSID"));
+        profileRepository.save(device.id(), profile(true, null, List.of(),
+                List.of(new ParameterReading("SYSID_THISMAV", 7.0, "INT32"))));
+
+        assertEquals(ReadinessVerdict.GO, service.evaluate(assetId, VisibilityScope.unbounded()).verdict());
+    }
+
+    /** Alias-awareness must not make every parameter satisfy every requirement. */
+    @Test
+    void aGenuinelyAbsentParameterIsStillMissingAndStillBlocks() {
+        requirementRepository.rows.add(fleetIdentityRequiring("SYSID_THISMAV"));
+        profileRepository.save(device.id(), profile(true, null, List.of(),
+                List.of(new ParameterReading("FRAME_CLASS", 1.0, "INT8"))));
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(ReadinessVerdict.NO_GO, report.verdict());
+        assertEquals(List.of("fleet-identity"), report.blockers());
+        assertEquals(FeatureStatus.MISSING, statusOf(report, "fleet-identity"));
+    }
+
+    private static FeatureStatus statusOf(ReadinessReport report, String featureKey) {
+        return report.features().stream()
+                .filter(f -> f.featureKey().equals(featureKey)).findFirst().orElseThrow().status();
     }
 
     // -- test doubles -----------------------------------------------------------

@@ -746,6 +746,13 @@ vision:
       # parameter name costs a full timeout: MAVLink gives an autopilot no way to say "I don't have
       # that", so it simply says nothing.
       # request-timeout: 3s
+      # The parameter names a probe asks each vehicle for. Empty (default) means the verified list in
+      # MavlinkSettings.Onboarding.defaults() -- every name there was checked against live firmware,
+      # and it deliberately asks for both spellings of the renamed system id (ArduPilot 4.7 renamed
+      # SYSID_THISMAV to MAV_SYSID; docs/plans/active/FLEET-RADIO-PLAN.md F0). Setting this REPLACES
+      # that list outright rather than adding to it -- a short list is the way to cut probe time on a
+      # fleet whose firmware you already know, at the cost of readiness rows going UNKNOWN.
+      # parameters: [MAV_SYSID, SYSID_THISMAV, BATT_MONITOR]
     remediate:
       message-interval:
         # false (default): no MAV_CMD_SET_MESSAGE_INTERVAL is ever sent. true: every gateway asks
