@@ -1,6 +1,7 @@
 # FLEET-RADIO-PLAN — one radio layer for a mixed fleet
 
-**Status:** authoritative spec. **R0, R4c done**, **R7 infra half done**; R1–R4, R4b, R5, R6 and R7's test open. Opened 2026-08-26, branch `feat/fleet-radio`.
+**Status:** authoritative spec. **R0, R1, R3 (Java half), R4b (Java half), R4c done**, **R7 infra half done**;
+R2, R4, R5, R6, R3's web half, R4b's web half, and R7's test open. Opened 2026-08-26, branch `feat/fleet-radio`.
 **Scope:** the link and control layer for the vehicles we actually fly and drive — **copter and rover
 (rover first)**. Rover covers the surface boat, which shares ArduRover's firmware, mode table and control
 shape. Plane stays working where it already works; it is not a target of this plan.
@@ -351,9 +352,9 @@ as two distinct facts, within the grace window rather than the silence timeout.
 **Expected result:** DRONE-ONBOARDING **O9's** write half becomes reachable; a second rover on one port
 stops being invisible. Ships behind `vision.onboarding.probe.enabled`, still default `false`.
 
-### R4b — a rover is not a falling copter *(independent; rover safety)*
-**Scope:** `drone-link/mavlink/.../MavlinkFlightCommander.java`,
-`contexts/vision-flight/.../DefaultFlightCommandService.java`, `station/vision-web/.../fly/**`.
+### R4b — a rover is not a falling copter *(independent; rover safety)* — **DONE (Java half), 2026-08-27**
+**Shipped scope:** `drone-link/mavlink/.../MavlinkFlightCommander.java` (+ its test),
+`contexts/vision-flight/.../FlightCommandPort.java` (javadoc only — see below).
 
 - `emergencyStop` consults `FlightCapability.vehicleKind` (F13). On a **rover** the safe stop is
   `HOLD` (or a zero-throttle disarm on the ground), never the unconditional forced disarm that on a boat
@@ -363,6 +364,73 @@ stops being invisible. Ships behind `vision.onboarding.probe.enabled`, still def
 
 **Expected result:** the one irreversible command in the product does the right thing on the vehicle we
 are about to buy, instead of the one it was written for.
+
+**What shipped:**
+- `MavlinkFlightCommander.emergencyStop` now resolves the target once (`resolveReachableTarget` +
+  `requireCommandableFirmware`, exactly the calls `armOrDisarm` already made) and branches on
+  `FlightModes.vehicleKind(target.mavType())`: `COPTER`/`PLANE` fall through to the unchanged
+  `armOrDisarm(device, DISARM, true, "emergency stop")` — byte-identical COMMAND_LONG on the wire to
+  before this wave, proven by a test. `ROVER` calls a new private `emergencyStopRover`, which sends
+  `MAV_CMD_DO_SET_MODE` resolving `"Hold"` (ArduRover custom_mode 4, always present in
+  `ARDUPILOT_ROVER`'s table — R1 already completed it) rather than a disarm.
+- **No disarm follows a successful rover `Hold`** — decided and documented in `emergencyStop`'s own
+  javadoc, not left implicit: ArduRover's active brake in `Hold` depends on the motor controller
+  staying armed to apply reverse/holding torque, so disarming immediately after would release the
+  very brake the stop just applied — worse than not stopping at all on a slope. An operator wanting
+  the vehicle fully powered down once it is confirmed stationary issues a separate, deliberate
+  `disarm` call; it is never bundled into the panic-stop path.
+- **`UNKNOWN` stays on the forced-disarm path** — the plan asked for a defensible decision, not a
+  default. `VehicleKind.UNKNOWN` covers a genuinely unrecognized `MAV_TYPE` *and* every
+  `VehicleClass.SUBMARINE`/`UNSUPPORTED_VEHICLE`/`NOT_A_VEHICLE` (R1's own four-outcome table) — none
+  of those has a rover-shaped mode table `"Hold"` could resolve against, so a `Hold` attempt on one of
+  them would either throw before anything is sent (no such mode name) or require inventing a table
+  entry that does not exist, exactly the guess `VehicleKind.UNKNOWN`'s own "no safe default" contract
+  forbids. `MAV_CMD_COMPONENT_ARM_DISARM` needs no vehicle-family mode table at all, so it is the one
+  stop command guaranteed to actually reach an unidentified aircraft and report a real, honest
+  outcome — the constraint "never silently do nothing" ruled this decision as much as the "no
+  guessing" one did. It is also the platform's pre-existing, well-understood meaning of "Emergency
+  Stop" for exactly this class of vehicle, unchanged.
+- **Never silently does nothing, on either path** — both branches end in the same `send()` every
+  other command in this class already uses (`ACCEPTED`/`NO_ACK`/thrown `IllegalStateException` naming
+  the refusal). Nothing new catches or downgrades a rover `Hold` failure; `DefaultFlightCommandService
+  .sendAndAudit` audits and rethrows it exactly as it already does for every other command.
+- **`FlightCommandPort.emergencyStop`'s javadoc rewritten** (in `contexts/vision-flight`, outside the
+  plan's own scope line, matching R3's own precedent for fixing stale documentation next to a fixed
+  defect) — it previously claimed unconditional equivalence to `disarm(device, true)` and "an
+  airborne vehicle will fall" for every device; both are now qualified to `COPTER`/`PLANE`/`UNKNOWN`
+  only, pointing at `MavlinkFlightCommander#emergencyStop`'s own javadoc for the per-kind rationale.
+- **Tests:** `MavlinkFlightCommanderTest` gained 7 cases, real loopback against `FakeVehicle` exactly
+  like every other test in that file (heartbeats as `MAV_TYPE_QUADROTOR`/`MAV_TYPE_GROUND_ROVER`/
+  `MAV_TYPE_SURFACE_BOAT`/`MAV_TYPE_SUBMARINE`, decodes the resulting `COMMAND_LONG`): a copter's
+  emergency stop is asserted byte-for-byte identical to `arm`/`disarm`'s own existing wire assertions
+  (`MAV_CMD_COMPONENT_ARM_DISARM`, param1=0, param2=21196); a rover's and a surface boat's both
+  assert `MAV_CMD_DO_SET_MODE` with param2=4 (`Hold`); a refused rover `Hold` throws
+  `IllegalStateException` naming the ack; a silent vehicle returns `NO_ACK`, never a false success;
+  an ArduPilot-firmware vehicle heartbeating `MAV_TYPE_SUBMARINE` (→ `VehicleKind.UNKNOWN` per R1)
+  still gets the forced disarm. `drone-link/mavlink` module total: **220 tests** (was 213), all
+  green — `./mvnw -B -o -pl contexts/vision-flight,drone-link/mavlink,station/vision-api test`.
+  `contexts/vision-flight` stays **346** (javadoc-only change, no test added there); `station/vision-api`
+  stays **859** (untouched).
+
+**What did not ship, and why — the plan's scope line named a UI change that does not exist to
+change.** The plan's "Scope" line above named `station/vision-web/.../fly/**` for "the button's
+label and confirm text". No clicked "Emergency stop" button exists anywhere in this codebase's UI —
+grepping the whole `vision-web` tree for `emergencyStop`/`EMERGENCY_STOP` finds exactly two call
+sites, both under `core/rc/`: `control-action-dispatcher.ts#command` (which calls
+`api.emergencyStop`) and `control-action-logic.ts#actionLabel` (which supplies the literal string
+`"Emergency stop"` for a bound RC switch's toast/hold-countdown text, rendered inside
+`features/fly/rc-monitor.html` but authored entirely in `core/rc/`). `EMERGENCY_STOP` is reachable
+today **only** by binding it to a switch position in a control profile and holding that switch for
+`DANGEROUS_HOLD_MS` (decision C9) — there is no clicked confirm dialog to reword, and the only place
+that could grow vehicle-kind-aware wording (`actionLabel`, and the dispatcher that calls it) lives
+outside `features/fly/**`, in `core/rc/` — a directory this wave's own hard constraint says to stop
+and report on rather than edit ("if you believe you need core/rc/, stop and report instead of
+editing"). This is exactly that case, reported rather than actioned. **Follow-up, unscheduled:**
+making the RC-switch-fired emergency stop read correctly per vehicle kind is a `core/rc/` change —
+`actionLabel(action, parameter)` would need a `vehicleKind` parameter (mirroring
+`flight-state-logic.ts#derivePreflight`'s own R4c precedent), threaded through
+`ControlActionDispatcher#send`/`bind`. A future wave should either extend this plan's scope to name
+`core/rc/` explicitly, or fold this into a UI-focused successor.
 
 ### R4c — the preflight checklist asks a rover rover questions *(independent, web-only)* — **DONE**
 **Shipped scope:** `station/vision-web/src/app/core/telemetry/flight-state-logic.ts` + its spec,
@@ -483,7 +551,7 @@ flowchart LR
   R1["R1 one taxonomy<br/>rover-complete"] --> R2["R2 UNKNOWN refuses"]
   R3["R3 CH9-16 reach<br/>the wire"]
   R4["R4 link identity<br/>+ death signal"]
-  R4b["R4b rover-correct<br/>emergency stop"]
+  R4b["R4b rover-correct<br/>emergency stop — Java half done"]
   R4c["R4c rover preflight — done"]
   R5["R5 write the sysid"] --> R6
   R7["R7 ArduRover SITL"] -.verifies.-> R1
@@ -498,9 +566,9 @@ both R0 (done — the parameter-name fix) and R5 (the remedy endpoint).
 | Order | Wave | Why here |
 |---|---|---|
 | 1 | ~~**R0**~~ **done** | Readiness was a constant `NO_GO`. Nothing downstream that reads a verdict could be trusted until this was true |
-| 2 | **R3** | Shipped, silent, user-visible. A rover's aux channels are its mode switch and its lights |
-| 3 | **R1** | Three tables is how the next rover defect gets introduced; Dock/Circle/Initialising are missing today |
-| 4 | **R4b** | Safety, and actively wrong on the vehicle being bought |
+| 2 | ~~**R3**~~ **Java half done, web half open** | Shipped, silent, user-visible. A rover's aux channels are its mode switch and its lights |
+| 3 | ~~**R1**~~ **done** | Three tables is how the next rover defect gets introduced; Dock/Circle/Initialising are missing today |
+| 4 | ~~**R4b**~~ **Java half done, web half open** | Safety, and actively wrong on the vehicle being bought |
 | 5 | **R4** | The number an operator driving a rover past the tree line actually needs |
 | 6 | ~~**R4c**~~ **done** | Cheap, web-only, removes a false "not ready" on every rover |
 | 7 | **R5** → **R6** | What makes a *second* rover on one port possible, then what stops its sticks being silently ignored |

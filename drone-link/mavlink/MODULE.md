@@ -92,8 +92,9 @@ merely "chose not to".
   **zero retries** (single-shot: `NO_ACK` on silence, never a resend). `static final int
   TARGET_COMPONENT_AUTOPILOT = 1`. Only ArduPilot/INAV (`autopilot` ARDUPILOTMEGA) is commandable;
   Betaflight (`autopilot` GENERIC) is rejected before `FlightModes` is even consulted, even though
-  its own table has an RTL-named mode. Constructors `(MavlinkTelemetrySource)`,
-  `(MavlinkTelemetrySource, Duration ackTimeout)`.
+  its own table has an RTL-named mode. **`emergencyStop` is vehicle-kind-gated (FLEET-RADIO R4b)** —
+  see its own Gotchas section below; it is no longer a single, uniform command for every device.
+  Constructors `(MavlinkTelemetrySource)`, `(MavlinkTelemetrySource, Duration ackTimeout)`.
 - `public final class MavlinkManualControlSender implements ManualControlPort` — `RC_CHANNELS_OVERRIDE`
   (#70) relay. `engage(Device): ManualControlLink` / `send(link, RcChannels)` / `release(link)`;
   its `AdapterLink` carries `vehicleKind()` (resolved from the heartbeat heard at `engage` time,
@@ -359,8 +360,11 @@ one `FlightState`-contributing row above has fired at least once.
 - **This adapter keeps no table of RC aux functions (`MavlinkFlightCommander.auxFunction`), on
   purpose.** A stale copy of the firmware's own `RCx_OPTION` list is worse than none — what a
   function number does is the vehicle's business, and whether it acted shows up as the ack.
-- **`emergencyStop` is byte-identical to `disarm(device, true)` on the wire.** Kept as a separate
-  method purely so the log line and audit trail record which of the two an operator actually meant.
+- **`emergencyStop` is byte-identical to `disarm(device, true)` on the wire — but only for `COPTER`,
+  `PLANE` and `UNKNOWN` (FLEET-RADIO R4b).** For `ROVER` it is a `MAV_CMD_DO_SET_MODE` into
+  ArduRover's `Hold`, never a disarm; see FLEET-RADIO R4b Gotchas below for the full per-kind
+  rationale. Kept as a separate method purely so the log line and audit trail record which of the
+  (now two, per kind) underlying wire commands an operator actually triggered.
 
 ### FLEET-RADIO R1 Gotchas
 
@@ -412,6 +416,49 @@ one `FlightState`-contributing row above has fired at least once.
   mode change it does not actually honor — is a firmware-honesty problem, not something a
   client-side mode-name table can fix.
 
+### FLEET-RADIO R4b Gotchas
+
+- **`emergencyStop` now branches on `FlightModes.vehicleKind(target.mavType())`, resolved from the
+  same `ResolvedTarget` every command already resolves — no new lookup, no new state.** `COPTER`/
+  `PLANE` are byte-identical to before this wave (`armOrDisarm(device, DISARM, true, "emergency
+  stop")`, unchanged). `ROVER` sends `MAV_CMD_DO_SET_MODE` into ArduRover's `Hold` (custom_mode 4)
+  instead — a ground rover or surface boat does not fall when disarmed, it *coasts* with its
+  steering dead, so a forced disarm is actively wrong for it; ArduRover's `Hold` actively brakes and
+  holds against a slope while keeping steering authority alive.
+- **No disarm follows a successful rover `Hold`, by decision, not by omission.** A rover's active
+  brake in `Hold` typically depends on the motor controller staying armed to apply reverse/holding
+  torque; disarming immediately afterward would release the very brake the stop just applied, which
+  on a slope is worse than never having stopped at all. An operator who wants the vehicle fully
+  powered down once it is confirmed stationary issues a separate, deliberate `disarm` — never
+  bundled into the panic-stop path.
+- **`VehicleKind.UNKNOWN` stays on the forced-disarm path, deliberately, not as a leftover
+  default.** `VehicleKind.UNKNOWN` is what `FlightModes.vehicleKind` returns for a genuinely
+  unrecognized `MAV_TYPE` *and* for `VehicleClass.SUBMARINE`/`UNSUPPORTED_VEHICLE`/`NOT_A_VEHICLE` —
+  none of those has a rover-shaped mode table this class could resolve `"Hold"` against, so
+  attempting one would either throw before anything is sent or require inventing a new guess, which
+  `VehicleKind.UNKNOWN`'s own contract (`contexts/vision-flight`'s own Gotchas: "no safe default")
+  forbids. A forced disarm needs no vehicle-family mode table at all — `MAV_CMD_COMPONENT_ARM_DISARM`
+  is universal across every ArduPilot vehicle kind — so it is the one stop command guaranteed to
+  actually reach the aircraft and produce a real, reportable outcome for a machine that never said
+  what it is, rather than an error in place of a stop attempt.
+- **Never silently does nothing, on either path.** Both branches end in the same `send()` every
+  other command already uses: `ACCEPTED`/`NO_ACK`, or a thrown `IllegalStateException` naming the
+  vehicle's own refusal. A refused or unacknowledged rover `Hold` propagates exactly like a refused
+  or unacknowledged forced disarm always has — nothing here catches and downgrades a failure into a
+  false success. `contexts/vision-flight`'s `DefaultFlightCommandService.sendAndAudit` audits and
+  rethrows either outcome unchanged, same as before this wave.
+- **`FlightCommandPort.emergencyStop`'s own javadoc was rewritten** (in `contexts/vision-flight`,
+  outside this module's own file boundary but factually stale otherwise) — it used to claim
+  unconditional equivalence to `disarm(device, true)` and "an airborne vehicle will fall" for every
+  device; both are now true only for `COPTER`/`PLANE`/`UNKNOWN`.
+- **No web UI change shipped for this wave**, despite the plan's own scope line naming
+  `station/vision-web/.../fly/**`. There is no clicked "Emergency stop" button anywhere in this
+  codebase's UI — `EMERGENCY_STOP` is reachable only via a bound RC switch action, dispatched by
+  `station/vision-web`'s `core/rc/control-action-dispatcher.ts`, whose "Emergency stop" wording comes
+  from `core/rc/control-action-logic.ts#actionLabel` — both under `core/rc/`, a directory this wave's
+  own hard constraint says to stop and report on rather than edit. See
+  `docs/plans/active/FLEET-RADIO-PLAN.md` R4b's own "what shipped vs. planned" note.
+
 ## Status
 
 Real and load-bearing: RX ingest + fleet-gateway claim/re-election, guarded command TX (mode/arm/
@@ -427,3 +474,10 @@ SITL: register a `mavlink` telemetry device with `uri = udp://0.0.0.0:14550` and
 `MavlinkVehicleConfigurator` all now delegate vehicle-family/naming to `mavlink-core`'s one
 `VehicleClass` table instead of three disagreeing local copies; the ArduRover mode table is
 complete (Dock/Circle/Initialising); see the FLEET-RADIO R1 Gotchas above.
+
+**`docs/plans/active/FLEET-RADIO-PLAN.md` R4b done (Java half)** — `MavlinkFlightCommander.emergencyStop`
+is now vehicle-kind-gated: unchanged forced disarm for `COPTER`/`PLANE`/`UNKNOWN`, ArduRover `Hold`
+for `ROVER`/surface boat, never a disarm following a successful `Hold`. See the FLEET-RADIO R4b
+Gotchas above for the full rationale, including why the planned web change did not ship.
+`./mvnw -B -o -pl drone-link/mavlink test` — **220 tests**, all green (2026-08-27; +7 from before
+this wave: `MavlinkFlightCommanderTest`'s new `emergencyStop*` cases).

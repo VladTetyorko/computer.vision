@@ -124,14 +124,24 @@ public interface FlightCommandPort {
     CommandResult returnToHome(Device device);
 
     /**
-     * Force-disarms the aircraft behind {@code device}, bypassing the autopilot's own checks — the
-     * kill switch every ground station calls "Emergency Stop"
-     * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md §2.4).
+     * The kill switch every ground station calls "Emergency Stop"
+     * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md §2.4) — the single irreversible command this
+     * port exposes, and the one command whose meaning is <b>vehicle-kind-dependent</b>
+     * (docs/plans/active/FLEET-RADIO-PLAN.md R4b, F13).
      *
-     * <p>Equivalent to {@code disarm(device, true)} and implemented as exactly that on MAVLink (the
-     * {@code 21196} force parameter). It exists as its own method because it is a different
-     * <em>intent</em>: {@code disarm} asks the vehicle to stop when it is safe to, this insists.
-     * <b>An airborne vehicle will fall.</b>
+     * <p>On a copter or plane, equivalent to {@code disarm(device, true)} and implemented as exactly
+     * that on MAVLink (the {@code 21196} force parameter): <b>an airborne vehicle will fall</b>, which
+     * is the intended kill-switch outcome — down, not flying away. A ground rover or surface boat does
+     * not fall, it <em>coasts</em>: a forced disarm only cuts motor output, so on a slope or in a
+     * current the vehicle keeps moving with its steering now dead. An implementation that knows a
+     * device is a rover must therefore stop it a different way — commanding ArduRover's own {@code
+     * Hold} mode, which actively brakes and holds while keeping steering authority alive, is the one
+     * real implementation's choice (see {@code drone-link/mavlink}'s {@code
+     * MavlinkFlightCommander#emergencyStop} for the full per-kind rationale, including why an
+     * unidentified vehicle kind stays on the forced-disarm path rather than guessing).
+     * {@code disarm}/{@code arm} themselves are never vehicle-kind-gated this way — only this method
+     * is, because it is the one an operator reaches for at the moment there is no time to think about
+     * which vehicle this is.
      *
      * @param device the device whose aircraft should stop immediately
      * @return {@link CommandResult#ACCEPTED} or {@link CommandResult#NO_ACK}

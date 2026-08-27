@@ -8,6 +8,7 @@ import com.drones.mavlink.service.CommandService;
 import com.drones.vision.flight.domain.model.CommandResult;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.flight.domain.model.FlightCapability;
+import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.flight.domain.port.FlightCommandPort;
 
 import io.dronefleet.mavlink.common.MavCmd;
@@ -109,6 +110,14 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     /** {@link MavlinkTelemetryDecoder#firmwareLabel}'s label for {@code autopilot} GENERIC — Betaflight, in practice. */
     private static final String FIRMWARE_GENERIC = "generic";
     private static final String RTL_MODE_NAME = "RTL";
+    /**
+     * ArduRover's own {@code Hold} mode name ({@code custom_mode} 4, {@link
+     * FlightModes#ARDUPILOT_ROVER} via {@code tableFor}) — the rover-safe emergency stop
+     * (docs/plans/active/FLEET-RADIO-PLAN.md R4b). ArduRover actively brakes and holds against a
+     * slope in {@code Hold}, unlike a forced disarm, which only cuts motor output and leaves
+     * steering dead while the vehicle coasts.
+     */
+    private static final String ROVER_HOLD_MODE_NAME = "Hold";
 
     private final MavlinkTelemetrySource telemetrySource;
     private final Duration ackTimeout;
@@ -168,13 +177,73 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
                 force ? verb + " (forced)" : verb);
     }
 
+    /**
+     * Vehicle-kind-gated emergency stop (docs/plans/active/FLEET-RADIO-PLAN.md R4b, F13). Before this
+     * wave this was an unconditional forced disarm for every vehicle kind — correct for a copter or
+     * plane (the intended kill-switch outcome is "it comes down now, not flying away"), but actively
+     * wrong for a ground rover or surface boat: disarming only cuts motor output, so on a slope or in
+     * a current the vehicle keeps moving with its steering now dead. A rover does not fall, it coasts.
+     *
+     * <h2>Per vehicle kind</h2>
+     * <ul>
+     *   <li><b>{@link VehicleKind#COPTER}/{@link VehicleKind#PLANE}</b> — unchanged: {@link
+     *       #armOrDisarm} exactly as before this wave, byte-identical on the wire.</li>
+     *   <li><b>{@link VehicleKind#ROVER}</b> — {@link #emergencyStopRover(ResolvedTarget)}: {@code
+     *       MAV_CMD_DO_SET_MODE} into ArduRover's {@code Hold} (custom_mode 4), which actively brakes
+     *       and holds against a slope while keeping steering authority alive. <b>No disarm follows a
+     *       successful {@code Hold}</b> — a rover's active brake typically depends on the motor
+     *       controller still being armed to apply reverse/holding torque; disarming immediately after
+     *       would release the very brake this stop just applied, which on a slope is worse than never
+     *       stopping at all. If an operator needs the vehicle fully powered down after it has
+     *       genuinely stopped, that is a separate, deliberate {@code disarm} call once it is confirmed
+     *       stationary — never bundled into the panic-stop path.</li>
+     *   <li><b>{@link VehicleKind#UNKNOWN}</b> — same as copter/plane: an unconditional forced disarm.
+     *       {@code VehicleKind.UNKNOWN} covers a genuinely unrecognized {@code MAV_TYPE} as well as
+     *       {@code VehicleClass.SUBMARINE}/{@code UNSUPPORTED_VEHICLE}/{@code NOT_A_VEHICLE} (see
+     *       {@link FlightModes#vehicleKind}) — none of those has a mode table this class can resolve
+     *       {@value #ROVER_HOLD_MODE_NAME} against, so a {@code Hold} attempt would either throw
+     *       before anything is even sent (no such mode) or, worse, silently resolve nothing at all.
+     *       A forced disarm needs no vehicle-family-specific mode table — {@code
+     *       MAV_CMD_COMPONENT_ARM_DISARM} is universal across every ArduPilot vehicle kind — so it is
+     *       the one stop command guaranteed to actually reach the aircraft and produce a real,
+     *       reportable outcome (see "Never silently does nothing" below) rather than an error the
+     *       operator has to interpret instead of getting a stop attempt. This is also the platform's
+     *       historical, well-understood meaning of "Emergency Stop"; changing it for a machine that
+     *       never said what it is would be inventing a new guess, which {@link VehicleKind#UNKNOWN}'s
+     *       own contract forbids.</li>
+     * </ul>
+     *
+     * <h2>Never silently does nothing</h2>
+     * Both paths end in {@link #send}, which either returns {@link CommandResult#ACCEPTED}/{@link
+     * CommandResult#NO_ACK} or throws {@link IllegalStateException} for an explicit refusal — the
+     * same three-way, honest outcome every other command in this class already reports. Nothing here
+     * catches or downgrades a rover {@code Hold} failure into a false success: a refused or
+     * unacknowledged {@code Hold} propagates exactly like a refused or unacknowledged forced disarm
+     * always has.
+     */
     @Override
     public CommandResult emergencyStop(Device device) {
-        // The kill switch is a forced disarm on the wire -- ArduPilot has no separate opcode for it,
-        // and QGroundControl's own Vehicle::emergencyStop sends exactly this. Kept a distinct method
-        // (rather than telling callers "just pass force=true") so the log line and the audit trail
-        // both record which of the two an operator actually meant.
+        ResolvedTarget resolved = resolveReachableTarget(device);
+        requireCommandableFirmware(resolved.target());
+        if (FlightModes.vehicleKind(resolved.target().mavType()) == VehicleKind.ROVER) {
+            return emergencyStopRover(resolved);
+        }
+        // COPTER, PLANE and UNKNOWN: unconditional forced disarm, unchanged from before this wave --
+        // see this method's own javadoc for why UNKNOWN stays on this path rather than guessing Hold.
         return armOrDisarm(device, DISARM, true, "emergency stop");
+    }
+
+    /**
+     * The rover-safe half of {@link #emergencyStop} (docs/plans/active/FLEET-RADIO-PLAN.md R4b) —
+     * {@code MAV_CMD_DO_SET_MODE} into ArduRover's {@code Hold}, never a forced disarm. {@code Hold}
+     * is guaranteed present in {@code ARDUPILOT_ROVER}'s table (custom_mode 4), so {@link
+     * #resolveCustomMode} cannot fail here the way an arbitrary operator-supplied mode name could.
+     */
+    private CommandResult emergencyStopRover(ResolvedTarget resolved) {
+        int holdMode = resolveCustomMode(resolved.target(), ROVER_HOLD_MODE_NAME);
+        return send(resolved, MavCmd.MAV_CMD_DO_SET_MODE,
+                MODE_FLAG_CUSTOM_MODE_ENABLED, (float) holdMode, 0f, 0f, 0f, 0f, 0f,
+                "emergency stop (Hold)");
     }
 
     @Override
