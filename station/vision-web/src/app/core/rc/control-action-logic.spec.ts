@@ -168,4 +168,29 @@ describe('actionLabel', () => {
     expect(actionLabel('AUX_FUNCTION', '46')).toBe('Aux function 46');
     expect(actionLabel('EMERGENCY_STOP')).toBe('Emergency stop');
   });
+
+  // FLEET-RADIO R4b: the backend's emergency stop is not one command with one meaning any more --
+  // a rover holds and brakes, everything else still force-disarms. The label must say so.
+  describe('EMERGENCY_STOP per vehicle kind', () => {
+    it('reads as a brake/hold on a rover, not a forced disarm', () => {
+      expect(actionLabel('EMERGENCY_STOP', undefined, 'ROVER')).toBe('Emergency stop (Hold)');
+    });
+
+    it('still reads as the historical forced disarm on a copter', () => {
+      expect(actionLabel('EMERGENCY_STOP', undefined, 'COPTER')).toBe('Emergency stop');
+    });
+
+    it('still reads as the historical forced disarm on a plane', () => {
+      expect(actionLabel('EMERGENCY_STOP', undefined, 'PLANE')).toBe('Emergency stop');
+    });
+
+    it('falls back to the historical forced-disarm wording for an unrecognized vehicle', () => {
+      expect(actionLabel('EMERGENCY_STOP', undefined, 'UNKNOWN')).toBe('Emergency stop');
+    });
+
+    it('falls back to the historical wording when the kind is not known yet', () => {
+      expect(actionLabel('EMERGENCY_STOP')).toBe('Emergency stop');
+      expect(actionLabel('EMERGENCY_STOP', undefined, undefined)).toBe('Emergency stop');
+    });
+  });
 });

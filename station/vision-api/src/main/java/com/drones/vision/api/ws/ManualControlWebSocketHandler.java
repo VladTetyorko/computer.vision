@@ -10,6 +10,7 @@ import com.drones.vision.api.dto.ManualControlWatchdogFrame;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.flight.application.ManualControlService;
 import com.drones.vision.flight.application.ManualControlSession;
+import com.drones.vision.flight.application.VehicleUnidentifiedException;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.flight.application.WatchdogListener;
 import com.drones.vision.kernel.AssetId;
@@ -48,14 +49,19 @@ import java.util.concurrent.ConcurrentHashMap;
  * #mapIllegalState}).
  *
  * <h2>Exception&rarr;{@code denied} mapping (best-effort, documented rough edge)</h2>
- * {@link ManualControlService#engage} throws exactly two types: {@link AccessDeniedException}
- * (unambiguous &rarr; {@code OUT_OF_SCOPE}) and {@link IllegalStateException} for three distinct
- * causes ("already active on this handle", "no active manual-control-capable device", or the
- * port's own "not currently reachable"/"does not support device" messages) that the application
- * layer does not distinguish by exception type — only by message text. {@link #mapIllegalState}
- * matches on message substrings in priority order; the "not currently reachable" case (a
- * commandable device that isn't currently heard) falls through to {@code NOT_COMMANDABLE} for lack
- * of a more specific frozen code — see that method's own javadoc.
+ * {@link ManualControlService#engage} throws three types: {@link AccessDeniedException}
+ * (unambiguous &rarr; {@code OUT_OF_SCOPE}); {@link VehicleUnidentifiedException} (FLEET-RADIO R2,
+ * caught <em>before</em> the plain form below since it is a subtype) &rarr; the additive {@code
+ * VEHICLE_UNIDENTIFIED} code, with the operator-facing distinction between "never identified",
+ * "a real airframe we don't support" and "not a vehicle at all" carried entirely in its own
+ * message, not in the code — see that exception's javadoc for why a dedicated exception type
+ * exists here instead of a fourth message-sniffed case; and the plain {@link IllegalStateException}
+ * for the three remaining causes ("already active on this handle", "no active manual-control-capable
+ * device", or the port's own "not currently reachable"/"does not support device" messages) that the
+ * application layer does not distinguish by exception type — only by message text. {@link
+ * #mapIllegalState} matches on message substrings in priority order; the "not currently reachable"
+ * case (a commandable device that isn't currently heard) falls through to {@code NOT_COMMANDABLE}
+ * for lack of a more specific frozen code — see that method's own javadoc.
  *
  * <h2>Per-connection send lock</h2>
  * {@link WebSocketSession#sendMessage} is not safe to call concurrently from two threads for the
@@ -92,6 +98,7 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
     private static final String CODE_NOT_COMMANDABLE = "NOT_COMMANDABLE";
     private static final String CODE_UNSUPPORTED = "UNSUPPORTED";
     private static final String CODE_ALREADY_ENGAGED = "ALREADY_ENGAGED";
+    private static final String CODE_VEHICLE_UNIDENTIFIED = "VEHICLE_UNIDENTIFIED";
     private static final String CODE_BAD_REQUEST = "BAD_REQUEST";
     private static final String CODE_MALFORMED = "MALFORMED";
     private static final String CODE_UNKNOWN_TYPE = "UNKNOWN_TYPE";
@@ -204,6 +211,12 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
                     profile.code(), profile.displayName(), toChannelMapResponse(profile)));
         } catch (AccessDeniedException e) {
             sendFrame(session, state, new ManualControlDeniedFrame(CODE_OUT_OF_SCOPE, e.getMessage()));
+        } catch (VehicleUnidentifiedException e) {
+            // A dedicated code, not message-sniffed like the generic IllegalStateException causes
+            // below -- the exception itself already carries which of the three UnidentifiedReason
+            // causes applied (FLEET-RADIO R2), so the operator-facing distinction rides entirely in
+            // this one exception's own message, composed by DefaultManualControlService per reason.
+            sendFrame(session, state, new ManualControlDeniedFrame(CODE_VEHICLE_UNIDENTIFIED, e.getMessage()));
         } catch (IllegalStateException e) {
             sendFrame(session, state, new ManualControlDeniedFrame(mapIllegalState(e), e.getMessage()));
         }

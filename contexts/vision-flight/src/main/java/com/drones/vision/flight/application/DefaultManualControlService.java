@@ -6,8 +6,10 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.flight.domain.model.ControlProfile;
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.flight.domain.model.RcChannels;
+import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.flight.domain.port.ManualControlLink;
@@ -54,6 +56,16 @@ import com.drones.vision.platform.VisibilityScope;
  * here). Neither of those two guards is audited: no attempt was ever actually sent, the same
  * "guard before an attempt" rule {@code DefaultFlightCommandService} already uses.
  *
+ * <h2>An unidentified vehicle is refused, not guessed at (FLEET-RADIO R2)</h2>
+ * Unlike the two guards above, {@link ManualControlLink#vehicleKind()} can only be read <em>after</em>
+ * the port has already opened a real relay link. If it reads {@link VehicleKind#UNKNOWN}, {@link
+ * #engage} releases that link immediately (so the aircraft's failsafe still gets its release-sentinel
+ * burst), audits {@code REFUSED:unidentified-vehicle:<reason>} — this guard is security/safety
+ * relevant, unlike the two above, precisely because a real relay was opened and then deliberately
+ * torn down — and throws {@link VehicleUnidentifiedException} carrying which of the three {@link
+ * UnidentifiedReason} causes applied. See that enum's own javadoc and {@link #refusalMessage} for why
+ * the three read differently to the operator instead of collapsing into one "cannot engage" text.
+ *
  * <h2>One session per handle</h2>
  * This instance holds at most one active {@link ManualControlSession} at a time; a second {@link
  * #engage} while one is still active throws {@link IllegalStateException} without touching the
@@ -89,9 +101,10 @@ import com.drones.vision.platform.VisibilityScope;
  *
  * <h2>Audit</h2>
  * Mirrors {@link DefaultFlightCommandService#audit}: one {@link AuditEntry} per {@code
- * ENGAGE}/{@code RELEASE}/{@code WATCHDOG}/{@code DENIED:out of scope} — {@link AuditAction#UPDATED}
- * (no dedicated "commanded" value exists), {@link AuditTargetType#ASSET}, attributes {@code
- * {assetId, command:"MANUAL_CONTROL", result}}.
+ * ENGAGE}/{@code RELEASE}/{@code WATCHDOG}/{@code DENIED:out of scope}/{@code
+ * REFUSED:unidentified-vehicle:<reason>} — {@link AuditAction#UPDATED} (no dedicated "commanded"
+ * value exists), {@link AuditTargetType#ASSET}, attributes {@code {assetId, command:"MANUAL_CONTROL",
+ * result}}.
  */
 public final class DefaultManualControlService implements ManualControlService {
 
@@ -104,6 +117,7 @@ public final class DefaultManualControlService implements ManualControlService {
     private static final String RESULT_RELEASE = "RELEASE";
     private static final String RESULT_WATCHDOG = "WATCHDOG";
     private static final String RESULT_DENIED = "DENIED:out of scope";
+    private static final String RESULT_REFUSED_PREFIX = "REFUSED:unidentified-vehicle:";
     private static final String ATTR_ASSET_ID = "assetId";
     private static final String ATTR_COMMAND = "command";
     private static final String ATTR_RESULT = "result";
@@ -211,6 +225,19 @@ public final class DefaultManualControlService implements ManualControlService {
                 throw new IllegalStateException(e.getMessage(), e);
             }
 
+            if (link.vehicleKind() == VehicleKind.UNKNOWN) {
+                // Unlike the two guards above, the port link IS already open here -- it must be
+                // released before this method returns, or the aircraft's failsafe never gets the
+                // release-sentinel burst it needs (FLEET-RADIO R2 D3). This IS audited: unlike "no
+                // supported device"/"unreachable", a real vehicle was heard and a real relay was
+                // opened and then deliberately refused -- that is security/safety-relevant the same
+                // way DENIED:out of scope is.
+                UnidentifiedReason reason = link.unidentifiedReason().orElse(UnidentifiedReason.NEVER_IDENTIFIED);
+                manualControlPort.release(link);
+                audit(actor, assetId, RESULT_REFUSED_PREFIX + reason);
+                throw new VehicleUnidentifiedException(reason, refusalMessage(reason, assetId));
+            }
+
             DefaultManualControlSession session =
                     new DefaultManualControlSession(assetId, actor, link, onWatchdog, this::onSessionEnded);
             activeSession = session;
@@ -233,6 +260,29 @@ public final class DefaultManualControlService implements ManualControlService {
                 .filter(Device::isActive)
                 .filter(manualControlPort::supports)
                 .findFirst();
+    }
+
+    /**
+     * The one place the three {@link UnidentifiedReason} causes actually diverge in wording
+     * (FLEET-RADIO R2's central design question). Each message names a different operator remedy:
+     * {@link UnidentifiedReason#NOT_A_VEHICLE} says there is nothing to fly here at all (check which
+     * device was selected); {@link UnidentifiedReason#UNSUPPORTED_VEHICLE} says the vehicle is known
+     * and simply unsupported (no amount of retrying helps); {@link UnidentifiedReason#NEVER_IDENTIFIED}
+     * is the one case where the operator's own eyes are more informative than this platform's table,
+     * and says so.
+     */
+    private static String refusalMessage(UnidentifiedReason reason, AssetId assetId) {
+        String asset = assetId.value().toString();
+        return switch (reason) {
+            case NOT_A_VEHICLE -> "Asset " + asset + " is not a vehicle: the device on this link is an "
+                    + "instrument (for example a gimbal or a ground station), not something to fly or "
+                    + "drive. Manual control refused.";
+            case UNSUPPORTED_VEHICLE -> "Asset " + asset + " reports a recognized airframe that this "
+                    + "platform does not support flying or driving. Manual control refused.";
+            case NEVER_IDENTIFIED -> "Asset " + asset + " could not be identified: this platform has "
+                    + "never seen the vehicle type it is reporting. If you can see the vehicle, choose "
+                    + "its kind explicitly to proceed. Manual control refused.";
+        };
     }
 
     private void audit(UserId actor, AssetId assetId, String result) {

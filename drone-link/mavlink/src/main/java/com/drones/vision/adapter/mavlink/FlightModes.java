@@ -1,10 +1,12 @@
 package com.drones.vision.adapter.mavlink;
 
 import com.drones.mavlink.VehicleClass;
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.flight.domain.model.VehicleKind;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Firmware/vehicle-aware flight-mode name lookup (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a). MAVLink's
@@ -202,6 +204,32 @@ final class FlightModes {
             case PLANE -> VehicleKind.PLANE;
             case ROVER -> VehicleKind.ROVER;
             case SUBMARINE, UNSUPPORTED_VEHICLE, NOT_A_VEHICLE, UNKNOWN -> VehicleKind.UNKNOWN;
+        };
+    }
+
+    /**
+     * The finer distinction {@link #vehicleKind(int)} folds away when it answers {@link
+     * VehicleKind#UNKNOWN} — the one this class' caller (see {@code
+     * MavlinkManualControlSender.AdapterLink}) rides onto {@link
+     * com.drones.vision.flight.domain.port.ManualControlLink#unidentifiedReason()} so a refused
+     * {@code engage} can tell an operator <em>why</em> (docs/plans/active/FLEET-RADIO-PLAN.md R2).
+     *
+     * <p>{@code VehicleClass.SUBMARINE} answers {@link UnidentifiedReason#UNSUPPORTED_VEHICLE} here,
+     * the same as {@code UNSUPPORTED_VEHICLE} itself: ArduSub is a real, recognized airframe this
+     * platform has simply chosen not to support (D2) — indistinguishable, from an operator's engage
+     * attempt, from an airship or a rocket. {@code VehicleClass} keeps it a separate constant only so
+     * a later wave adding real ArduSub support has a slot to start reading from; this method has no
+     * such use for the distinction.
+     *
+     * @param mavType {@code HEARTBEAT.type} raw value
+     * @return empty for a recognized {@link VehicleKind}; otherwise the specific reason it is not
+     */
+    static Optional<UnidentifiedReason> unidentifiedReason(int mavType) {
+        return switch (VehicleClass.of(mavType)) {
+            case COPTER, PLANE, ROVER -> Optional.empty();
+            case SUBMARINE, UNSUPPORTED_VEHICLE -> Optional.of(UnidentifiedReason.UNSUPPORTED_VEHICLE);
+            case NOT_A_VEHICLE -> Optional.of(UnidentifiedReason.NOT_A_VEHICLE);
+            case UNKNOWN -> Optional.of(UnidentifiedReason.NEVER_IDENTIFIED);
         };
     }
 

@@ -1,7 +1,8 @@
 # FLEET-RADIO-PLAN — one radio layer for a mixed fleet
 
-**Status:** authoritative spec. **R0, R1, R3 (Java half), R4b (Java half), R4c done**, **R7 infra half done**;
-R2, R4, R5, R6, R3's web half, R4b's web half, and R7's test open. Opened 2026-08-26, branch `feat/fleet-radio`.
+**Status:** authoritative spec. **R0, R1, R2 (Java + R4b's web half), R3 (Java half), R4b (Java half),
+R4c done**, **R7 infra half done**; R4, R5, R6, R3's web half, R2's own "explicit kind choice" web
+half, and R7's test open. Opened 2026-08-26, branch `feat/fleet-radio`.
 **Scope:** the link and control layer for the vehicles we actually fly and drive — **copter and rover
 (rover first)**. Rover covers the surface boat, which shares ArduRover's firmware, mode table and control
 shape. Plane stays working where it already works; it is not a target of this plan.
@@ -243,7 +244,7 @@ plan's claims exactly. The one overspecification: the R1 "Scope" line names two 
 that turned out to need zero changes (see above) — worth trimming in a future edit of this plan so a
 later reader doesn't go looking for a vision-flight diff that was never there.
 
-### R2 — `UNKNOWN` stops guessing *(depends on R1)*
+### R2 — `UNKNOWN` stops guessing *(depends on R1)* — **DONE (Java + partial web), 2026-08-27**
 **Scope:** `contexts/vision-flight/.../ControlProfile.java`, `DefaultManualControlService.java`,
 `station/vision-api/.../ManualControlWebSocketHandler.java`, `station/vision-web/.../rc/**`.
 
@@ -254,6 +255,78 @@ later reader doesn't go looking for a vision-flight diff that was never there.
 
 **Expected result:** no vehicle that never said what it is receives a ~50 %-throttle stick map.
 The existing `denied` frame carries the new reason; no wire break.
+
+**The central design decision — three refusal reasons, not one.** "I cannot identify this vehicle",
+"this is an airframe we don't support", and "this is not a vehicle at all" have three different
+operator remedies, and a refusal that reads the same for all three makes a bug (a gimbal sharing the
+link) indistinguishable from a correct refusal. The line drawn: **`VehicleKind` stays exactly the 4
+values it already had** (`COPTER|PLANE|ROVER|UNKNOWN` — a pure control-shape taxonomy: "what
+`ChannelMap` applies", and all three unidentified cases genuinely need the same answer, none). A new,
+orthogonal `contexts/vision-flight` domain enum, `UnidentifiedReason { UNSUPPORTED_VEHICLE,
+NOT_A_VEHICLE, NEVER_IDENTIFIED }`, carries the *why*, read only at the `engage` refusal boundary.
+`VehicleClass.SUBMARINE` folds into `UNSUPPORTED_VEHICLE` (indistinguishable, from an operator's
+engage attempt, from an airship or a rocket) — per operator instruction (2026-08-26), **no
+`SUBMARINE` constant was added to `VehicleKind`**, honored exactly.
+
+**What shipped (Java, full):**
+- `contexts/vision-flight`: new `UnidentifiedReason` enum; new `VehicleUnidentifiedException`
+  (`final`, extends `IllegalStateException`, carries `reason()` — chosen as an `IllegalStateException`
+  subtype so `engage`'s existing throws contract needs no signature change, and so the WS handler can
+  catch it ahead of the generic `IllegalStateException` clause); `ManualControlLink` gained a
+  **default** method `unidentifiedReason()` returning `Optional<UnidentifiedReason>`, defaulting to
+  `NEVER_IDENTIFIED` whenever `vehicleKind() == UNKNOWN` — a default, not an abstract addition, so
+  every pre-existing test double and the real adapter's prior shape kept compiling; only the real
+  MAVLink adapter overrides it. `ControlProfile.forKind(UNKNOWN)` now returns an **empty** `ChannelMap`
+  (code `----`, displayName `"Unidentified vehicle"`) instead of the old centred four-axis map — still
+  total/non-throwing, now genuinely unflyable rather than merely unsafe. `DefaultManualControlService
+  .engage`, after the port already opened the link (kind is only knowable live), releases it and
+  refuses with `VehicleUnidentifiedException` whenever `vehicleKind() == UNKNOWN`, auditing
+  `REFUSED:unidentified-vehicle:<reason>`; three distinct, reason-specific operator-facing messages.
+- `drone-link/mavlink`: new `FlightModes.unidentifiedReason(int mavType)`, switching on
+  `VehicleClass.of(mavType)` (`SUBMARINE`/`UNSUPPORTED_VEHICLE`→`UNSUPPORTED_VEHICLE`,
+  `NOT_A_VEHICLE`→`NOT_A_VEHICLE`, `UNKNOWN`→`NEVER_IDENTIFIED`, the three flyable kinds→empty).
+  `MavlinkManualControlSender`'s `AdapterLink` overrides `unidentifiedReason()`, resolved once at
+  `engage` from the same heartbeat `vehicleKind()` already reads.
+- `station/vision-api`: `ManualControlWebSocketHandler` gained one `catch (VehicleUnidentifiedException
+  e)` clause ahead of the existing `IllegalStateException` clause, mapping to a new, additive `denied`
+  code `CODE_VEHICLE_UNIDENTIFIED = "VEHICLE_UNIDENTIFIED"` — `ManualControlDeniedFrame.code` is a
+  plain `String`, not a closed enum, so this needed no DTO/wire-contract change at all; every existing
+  wire-contract test passed unmodified.
+- Tests, all green: `contexts/vision-flight` **351** (was 346: +5 — `ControlProfileTest`'s empty-map
+  assertion, `DefaultManualControlServiceTest`'s new refusal-path cases including one proving the
+  interface's own default refuses correctly with no override), `drone-link/mavlink` **227** (was 220:
+  +7 — `FlightModesTest#unidentifiedReason*` (5), `MavlinkManualControlSenderTest` integration cases
+  (2)), `station/vision-api` **861** (was 859: +2 — asserting the new code is distinct and not
+  message-sniffed into one of the other `denied` causes) — measured via
+  `./mvnw -B -o -pl contexts/vision-flight,drone-link/mavlink,station/vision-api test`.
+
+**What shipped (web, partial) — rendering the refusal needed zero code changes.**
+`features/fly/rc-monitor.html`'s existing `denied`-state template already renders
+`client.deniedReason() ?? 'the vehicle refused control.'` verbatim, and `manual-control-client.ts`'s
+`handleMessage` already forwards any `denied` frame's free-text `reason` regardless of `code` — the
+operator sees the new three-way-distinct refusal message the moment the backend starts sending it, no
+frontend change required. **Verified, not merely assumed**: both files were read in full before
+concluding this.
+
+**What did not ship, and why — the "explicit kind choice" UI is deferred, not built.** The plan's own
+scope line asked for the web client to "offer the operator an explicit kind choice" after a refusal.
+Building that needs a kind-override parameter added to `ManualControlClient.engage(assetId)` — and
+that method lives in `manual-control-client.ts`, a file this wave's own hard constraint named
+explicitly as another session's, with instructions to stop and report rather than edit it if reaching
+it turned out to be necessary. It did turn out to be necessary, so this is that report, not a
+workaround. Independently of the constraint: trusting an operator-supplied kind override over live
+MAVLink classification is itself an unresolved safety question (does an override persist past one
+engage? can it be wrong in a way worse than refusing?) that deserves its own designed wave, not a
+rushed addition riding on this one. **Follow-up, unscheduled:** a wave scoped to `manual-control-client.ts`
+plus a small `rc-monitor` UI addition (a kind picker shown only in the `denied` state, gated on
+`code === 'VEHICLE_UNIDENTIFIED'`) that adds an optional override parameter to `engage`, threaded to a
+new `ManualControlPort`/`ManualControlService.engage` parameter server-side.
+
+**What this plan got wrong:** none of R2's own factual claims — the `ControlProfile.forKind(UNKNOWN)`/
+refusal/WS-additive mechanics described above match exactly what the plan called for. The imprecision
+was in R4b's own note (see R4b below), which described the whole of `core/rc/` as off-limits; this
+wave's own hard constraint scoped that far more narrowly (only `manual-control-client.ts`/`.spec.ts`),
+and R4b's deferred web half shipped inside this wave's task as a result — see below.
 
 ### R3 — every channel the operator bound reaches the wire *(independent)* — **DONE (Java half), 2026-08-27**
 **Scope:** `drone-link/mavlink-core/.../RcChannels.java`, `ManualControlService.java`.
@@ -412,25 +485,34 @@ are about to buy, instead of the one it was written for.
   `contexts/vision-flight` stays **346** (javadoc-only change, no test added there); `station/vision-api`
   stays **859** (untouched).
 
-**What did not ship, and why — the plan's scope line named a UI change that does not exist to
-change.** The plan's "Scope" line above named `station/vision-web/.../fly/**` for "the button's
-label and confirm text". No clicked "Emergency stop" button exists anywhere in this codebase's UI —
-grepping the whole `vision-web` tree for `emergencyStop`/`EMERGENCY_STOP` finds exactly two call
-sites, both under `core/rc/`: `control-action-dispatcher.ts#command` (which calls
+**What did not ship in this wave's own task, and why — the plan's scope line named a UI change that
+does not exist to change.** The plan's "Scope" line above named `station/vision-web/.../fly/**` for
+"the button's label and confirm text". No clicked "Emergency stop" button exists anywhere in this
+codebase's UI — grepping the whole `vision-web` tree for `emergencyStop`/`EMERGENCY_STOP` finds
+exactly two call sites, both under `core/rc/`: `control-action-dispatcher.ts#command` (which calls
 `api.emergencyStop`) and `control-action-logic.ts#actionLabel` (which supplies the literal string
 `"Emergency stop"` for a bound RC switch's toast/hold-countdown text, rendered inside
 `features/fly/rc-monitor.html` but authored entirely in `core/rc/`). `EMERGENCY_STOP` is reachable
 today **only** by binding it to a switch position in a control profile and holding that switch for
 `DANGEROUS_HOLD_MS` (decision C9) — there is no clicked confirm dialog to reword, and the only place
 that could grow vehicle-kind-aware wording (`actionLabel`, and the dispatcher that calls it) lives
-outside `features/fly/**`, in `core/rc/` — a directory this wave's own hard constraint says to stop
-and report on rather than edit ("if you believe you need core/rc/, stop and report instead of
-editing"). This is exactly that case, reported rather than actioned. **Follow-up, unscheduled:**
-making the RC-switch-fired emergency stop read correctly per vehicle kind is a `core/rc/` change —
-`actionLabel(action, parameter)` would need a `vehicleKind` parameter (mirroring
-`flight-state-logic.ts#derivePreflight`'s own R4c precedent), threaded through
-`ControlActionDispatcher#send`/`bind`. A future wave should either extend this plan's scope to name
-`core/rc/` explicitly, or fold this into a UI-focused successor.
+outside `features/fly/**`, in `core/rc/` — a directory *this wave's own task* described its hard
+constraint as covering entirely, so it was reported rather than actioned here.
+
+**Shipped since, in R2's task (2026-08-27) — this was overstated, not blocked.** R2's own task
+statement scoped its hard constraint far more narrowly: only `manual-control-client.ts`/
+`.spec.ts` were another session's and off-limits; "the rest of `core/rc/` is yours" was explicit.
+Under that narrower, accurate constraint, `actionLabel(action, parameter, vehicleKind?)` gained
+exactly the parameter this note called for (mirroring `flight-state-logic.ts#derivePreflight`'s
+R4c precedent as predicted), returning `'Emergency stop (Hold)'` on a `ROVER` and the unchanged
+`'Emergency stop'` everywhere else including `undefined`/`UNKNOWN`; `ControlActionDispatcher#send`
+and its two call sites in `onFrame`, plus `features/fly/rc-monitor.html`'s bound-switch chip list,
+now thread `profile.kind`/`capabilities()?.vehicleKind` through. See R2's own "what shipped" note
+above for the full change list and test counts. **Lesson for future wave notes:** describe a hard
+constraint by the specific file(s) it names, not by the directory those files happen to sit in —
+this note's own "a directory this wave's own hard constraint says to stop and report on" reads
+broader than the constraint actually was, and cost one wave's worth of deferral that turned out to
+be unnecessary.
 
 ### R4c — the preflight checklist asks a rover rover questions *(independent, web-only)* — **DONE**
 **Shipped scope:** `station/vision-web/src/app/core/telemetry/flight-state-logic.ts` + its spec,

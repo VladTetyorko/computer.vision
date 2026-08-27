@@ -1,9 +1,11 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -229,6 +231,42 @@ class FlightModesTest {
         assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(12)); // MAV_TYPE_SUBMARINE -- a table slot, not a VehicleKind
         assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(0));   // MAV_TYPE_GENERIC
         assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(255));
+    }
+
+    // --- unidentifiedReason (docs/plans/active/FLEET-RADIO-PLAN.md R2) -------------------------
+
+    @Test
+    void unidentifiedReasonIsEmptyForEveryRecognizedVehicleKind() {
+        assertEquals(Optional.empty(), FlightModes.unidentifiedReason(MAV_TYPE_QUADROTOR));
+        assertEquals(Optional.empty(), FlightModes.unidentifiedReason(MAV_TYPE_FIXED_WING));
+        assertEquals(Optional.empty(), FlightModes.unidentifiedReason(MAV_TYPE_GROUND_ROVER));
+        assertEquals(Optional.empty(), FlightModes.unidentifiedReason(MAV_TYPE_SURFACE_BOAT));
+    }
+
+    @Test
+    void unidentifiedReasonNamesAGenuinelyUnseenNumberAsNeverIdentified() {
+        assertEquals(Optional.of(UnidentifiedReason.NEVER_IDENTIFIED), FlightModes.unidentifiedReason(255));
+        assertEquals(Optional.of(UnidentifiedReason.NEVER_IDENTIFIED), FlightModes.unidentifiedReason(0));
+    }
+
+    @Test
+    void unidentifiedReasonNamesAGimbalOrAGcsAsNotAVehicle() {
+        assertEquals(Optional.of(UnidentifiedReason.NOT_A_VEHICLE), FlightModes.unidentifiedReason(MAV_TYPE_GIMBAL));
+        assertEquals(Optional.of(UnidentifiedReason.NOT_A_VEHICLE), FlightModes.unidentifiedReason(MAV_TYPE_GCS));
+    }
+
+    @Test
+    void unidentifiedReasonNamesAnAirshipAndASubmarineBothAsUnsupportedVehicle() {
+        assertEquals(Optional.of(UnidentifiedReason.UNSUPPORTED_VEHICLE), FlightModes.unidentifiedReason(7)); // airship
+        assertEquals(Optional.of(UnidentifiedReason.UNSUPPORTED_VEHICLE), FlightModes.unidentifiedReason(12)); // submarine
+    }
+
+    @Test
+    void unidentifiedReasonTellsAGimbalApartFromAGenuinelyUnknownNumber() {
+        // Expected result #6: "we refused because a gimbal is on your link" must not read like "we
+        // could not identify this vehicle" -- both used to collapse into the same UNKNOWN VehicleKind.
+        assertEquals(UnidentifiedReason.NOT_A_VEHICLE, FlightModes.unidentifiedReason(MAV_TYPE_GIMBAL).orElseThrow());
+        assertEquals(UnidentifiedReason.NEVER_IDENTIFIED, FlightModes.unidentifiedReason(9001).orElseThrow());
     }
 
     @Test

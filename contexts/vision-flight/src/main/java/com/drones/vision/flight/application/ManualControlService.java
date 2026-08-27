@@ -30,6 +30,12 @@ public interface ManualControlService {
      *                                 per handle — see {@code DefaultManualControlService}'s own
      *                                 javadoc for what "handle" means when it is wired as a shared
      *                                 singleton)
+     * @throws VehicleUnidentifiedException a subtype of {@code IllegalStateException} thrown instead
+     *                                 of the plain form above when the resolved device's vehicle is
+     *                                 {@code VehicleKind.UNKNOWN} — carries which of the three
+     *                                 {@code UnidentifiedReason} causes applied, so vision-api can map
+     *                                 it to a dedicated {@code denied} code instead of message-sniffing
+     *                                 it (FLEET-RADIO R2)
      */
     ManualControlSession engage(AssetId assetId, UserId actor, VisibilityScope scope, WatchdogListener onWatchdog);
 }

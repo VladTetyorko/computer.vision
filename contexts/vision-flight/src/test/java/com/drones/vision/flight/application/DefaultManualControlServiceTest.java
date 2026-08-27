@@ -8,6 +8,7 @@ import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.flight.domain.model.ControlProfileId;
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -31,9 +32,11 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -42,6 +45,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -228,6 +232,116 @@ class DefaultManualControlServiceTest {
 
         assertTrue(second.active());
         assertEquals(2, manualControlPort.engagedDevices.size());
+    }
+
+    // -- engage: refusing an unidentified vehicle (FLEET-RADIO R2) --------------
+
+    /**
+     * The central case: a vehicle this platform has genuinely never seen. Unlike the
+     * out-of-scope/no-device guards, the port's link IS already open here (a real relay was
+     * started), so it must come back released, not just refused.
+     */
+    @Test
+    void engageRefusesAVehicleThatWasNeverIdentifiedReleasesTheOpenedLinkAndAuditsARefusal() {
+        stubDetails(device);
+        manualControlPort.kindToEngageAs = VehicleKind.UNKNOWN;
+        manualControlPort.unidentifiedReasonToReport = UnidentifiedReason.NEVER_IDENTIFIED;
+
+        VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertEquals(UnidentifiedReason.NEVER_IDENTIFIED, ex.reason());
+        assertTrue(ex.getMessage().contains("could not be identified"), "got: " + ex.getMessage());
+
+        assertEquals(1, manualControlPort.engagedDevices.size(), "the link was opened before being refused");
+        assertEquals(1, manualControlPort.releasedLinks.size(), "an opened-then-refused link must be released");
+        assertEquals(1, auditTrail.recorded.size());
+        assertEquals("REFUSED:unidentified-vehicle:NEVER_IDENTIFIED",
+                auditTrail.recorded.get(0).details().get("result"));
+    }
+
+    @Test
+    void engageRefusesAnUnsupportedAirframeWithItsOwnDistinctReason() {
+        stubDetails(device);
+        manualControlPort.kindToEngageAs = VehicleKind.UNKNOWN;
+        manualControlPort.unidentifiedReasonToReport = UnidentifiedReason.UNSUPPORTED_VEHICLE;
+
+        VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertEquals(UnidentifiedReason.UNSUPPORTED_VEHICLE, ex.reason());
+        assertTrue(ex.getMessage().contains("does not support"), "got: " + ex.getMessage());
+        assertEquals(1, manualControlPort.releasedLinks.size());
+    }
+
+    @Test
+    void engageRefusesANotAVehicleLinkWithItsOwnDistinctReason() {
+        stubDetails(device);
+        manualControlPort.kindToEngageAs = VehicleKind.UNKNOWN;
+        manualControlPort.unidentifiedReasonToReport = UnidentifiedReason.NOT_A_VEHICLE;
+
+        VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertEquals(UnidentifiedReason.NOT_A_VEHICLE, ex.reason());
+        assertTrue(ex.getMessage().contains("is not a vehicle"), "got: " + ex.getMessage());
+        assertEquals(1, manualControlPort.releasedLinks.size());
+    }
+
+    /**
+     * The central design question, proven directly: refusing to engage is correct for all three
+     * causes, but a refusal that reads the same for all three tells the operator nothing. Each of
+     * the three must produce a genuinely different message.
+     */
+    @Test
+    void theThreeUnidentifiedReasonsProduceThreeDistinctOperatorFacingMessages() {
+        Set<String> messages = new HashSet<>();
+        for (UnidentifiedReason reason : UnidentifiedReason.values()) {
+            stubDetails(device);
+            FakeManualControlPort port = new FakeManualControlPort();
+            port.kindToEngageAs = VehicleKind.UNKNOWN;
+            port.unidentifiedReasonToReport = reason;
+            DefaultManualControlService serviceForReason =
+                    new DefaultManualControlService(assetService, port, new FakeAuditTrailPort(), clock, scheduler);
+
+            VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                    () -> serviceForReason.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+            messages.add(ex.getMessage());
+        }
+        assertEquals(3, messages.size(), "each reason must read differently to the operator, got: " + messages);
+    }
+
+    /**
+     * An implementation that answers {@code UNKNOWN} without ever overriding {@code
+     * unidentifiedReason()} (the interface's own default) must still refuse -- it must not fail open
+     * just because it cannot name the finer cause. Exercised via a link that only implements the
+     * three original {@link ManualControlLink} methods, the same shape every pre-R2 implementation had.
+     */
+    @Test
+    void engageRefusesAnUnknownKindEvenFromALinkThatNeverOverridesUnidentifiedReason() {
+        stubDetails(device);
+        manualControlPort.linkFactory = () -> new ManualControlLink() {
+            @Override
+            public boolean active() {
+                return true;
+            }
+
+            @Override
+            public int rateHz() {
+                return 10;
+            }
+
+            @Override
+            public VehicleKind vehicleKind() {
+                return VehicleKind.UNKNOWN;
+            }
+        };
+
+        VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertEquals(UnidentifiedReason.NEVER_IDENTIFIED, ex.reason(),
+                "the interface's own default must answer NEVER_IDENTIFIED, never a guess at the other two");
     }
 
     // -- onChannels -------------------------------------------------------------
@@ -424,9 +538,22 @@ class DefaultManualControlServiceTest {
     private static final class FakeManualControlPort implements ManualControlPort {
         boolean supportsResult = true;
         String engageFailureMessage;
+
+        /** What {@link #engage} hands back, by default -- a plain {@link FakeLink} for this kind. */
+        VehicleKind kindToEngageAs = FakeLink.KIND;
+
+        /** Rides the returned {@link FakeLink}'s {@code unidentifiedReason()}; {@code null} lets the
+         * {@link ManualControlLink} interface's own default answer instead (FLEET-RADIO R2). */
+        UnidentifiedReason unidentifiedReasonToReport;
+
+        /** When set, overrides {@code kindToEngageAs}/{@code unidentifiedReasonToReport} entirely --
+         * lets a test hand back a link shape of its own choosing (e.g. one that implements only the
+         * three original {@link ManualControlLink} methods, to exercise the interface's own default). */
+        Supplier<ManualControlLink> linkFactory;
+
         final List<Device> engagedDevices = new ArrayList<>();
         final List<RcChannels> sentChannels = new ArrayList<>();
-        final List<FakeLink> releasedLinks = new ArrayList<>();
+        final List<ManualControlLink> releasedLinks = new ArrayList<>();
 
         @Override
         public boolean supports(Device device) {
@@ -439,7 +566,7 @@ class DefaultManualControlServiceTest {
                 throw new IllegalArgumentException(engageFailureMessage);
             }
             engagedDevices.add(device);
-            return new FakeLink();
+            return linkFactory != null ? linkFactory.get() : new FakeLink(kindToEngageAs, unidentifiedReasonToReport);
         }
 
         @Override
@@ -449,9 +576,10 @@ class DefaultManualControlServiceTest {
 
         @Override
         public void release(ManualControlLink link) {
-            FakeLink fakeLink = (FakeLink) link;
-            fakeLink.active = false;
-            releasedLinks.add(fakeLink);
+            if (link instanceof FakeLink fakeLink) {
+                fakeLink.active = false;
+            }
+            releasedLinks.add(link);
         }
 
         private static final class FakeLink implements ManualControlLink {
@@ -459,19 +587,37 @@ class DefaultManualControlServiceTest {
             /** Any positive value -- these tests assert plumbing, not a particular cadence. */
             static final int RATE_HZ = 33;
 
-            /** The kind these tests engage as. Not UNKNOWN, so a profile actually gets chosen from it. */
+            /** The kind these tests engage as by default. Not UNKNOWN, so a profile actually gets
+             * chosen from it -- the UNKNOWN-refusal tests override this explicitly. */
             static final VehicleKind KIND = VehicleKind.ROVER;
+
+            private final VehicleKind kind;
+            private final UnidentifiedReason reasonOverride;
+            private boolean active = true;
+
+            FakeLink() {
+                this(KIND, null);
+            }
+
+            FakeLink(VehicleKind kind, UnidentifiedReason reasonOverride) {
+                this.kind = kind;
+                this.reasonOverride = reasonOverride;
+            }
 
             @Override
             public VehicleKind vehicleKind() {
-                return KIND;
+                return kind;
+            }
+
+            @Override
+            public Optional<UnidentifiedReason> unidentifiedReason() {
+                return reasonOverride != null ? Optional.of(reasonOverride) : ManualControlLink.super.unidentifiedReason();
             }
 
             @Override
             public int rateHz() {
                 return RATE_HZ;
             }
-            private boolean active = true;
 
             @Override
             public boolean active() {

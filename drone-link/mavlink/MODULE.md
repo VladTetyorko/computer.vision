@@ -98,11 +98,14 @@ merely "chose not to".
 - `public final class MavlinkManualControlSender implements ManualControlPort` — `RC_CHANNELS_OVERRIDE`
   (#70) relay. `engage(Device): ManualControlLink` / `send(link, RcChannels)` / `release(link)`;
   its `AdapterLink` carries `vehicleKind()` (resolved from the heartbeat heard at `engage` time,
-  fixed for the link's life) and `rateHz()` (the real clamped keepalive rate). Translates
-  `vision-flight`'s `RcChannels` into mavlink-core's structurally-identical one at `send`. All
-  engaged links from one instance share a single `DefaultTxScheduler` (two daemon threads total).
-  v1 scope: channels 1–8 only. Constructors `(MavlinkTelemetrySource, MavlinkSettings.Rc)`;
-  package-private `(MavlinkTelemetrySource, long tickPeriodMillis, int releaseFrameCount)` test seam.
+  fixed for the link's life), `rateHz()` (the real clamped keepalive rate), and (**FLEET-RADIO R2**)
+  `unidentifiedReason()` — overrides the port's default, populated at `engage` from
+  `FlightModes.unidentifiedReason(target.mavType())` and fixed for the link's life exactly like
+  `vehicleKind()` is. Translates `vision-flight`'s `RcChannels` into mavlink-core's
+  structurally-identical one at `send`. All engaged links from one instance share a single
+  `DefaultTxScheduler` (two daemon threads total). v1 scope: channels 1–8 only. Constructors
+  `(MavlinkTelemetrySource, MavlinkSettings.Rc)`; package-private
+  `(MavlinkTelemetrySource, long tickPeriodMillis, int releaseFrameCount)` test seam.
 - `public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort` — `method()` =
   `"mavlink"`, `scan(Duration): List<DiscoveredDevice>`. Two paths: **hub-borrow** (a gateway is
   already open — polls its claimed/unclaimed registries, never binds) or **self-bind** (nothing has
@@ -171,7 +174,15 @@ merely "chose not to".
   `static List<String> selectableModes(int autopilot, int mavType)` (**ArduPilot-only** — Betaflight
   returns empty even though it has a table, since its RC link never processes `DO_SET_MODE`),
   `static VehicleKind vehicleKind(int mavType)` (**autopilot-independent** — a quadrotor is a
-  quadrotor regardless of firmware; `UNKNOWN` for anything unrecognized). **FLEET-RADIO R1:**
+  quadrotor regardless of firmware; `UNKNOWN` for anything unrecognized), `static
+  Optional<UnidentifiedReason> unidentifiedReason(int mavType)` (**FLEET-RADIO R2**) — the *why*
+  behind a `vehicleKind(mavType) == UNKNOWN` answer, switching on the same `VehicleClass.of(mavType)`:
+  `COPTER`/`PLANE`/`ROVER` → empty; `SUBMARINE` and `UNSUPPORTED_VEHICLE` both → `UNSUPPORTED_VEHICLE`
+  (a submarine is, from an operator's engage attempt, indistinguishable from an airship or a rocket —
+  "recognized airframe, not flyable here" either way); `NOT_A_VEHICLE` → `NOT_A_VEHICLE`; `UNKNOWN` →
+  `NEVER_IDENTIFIED`. Consumed by `MavlinkManualControlSender`'s `AdapterLink` below, never by
+  `vehicleKind` itself — the two methods answer different questions from the same classification.
+  **FLEET-RADIO R1:**
   the vehicle-family switch (which used to be this class's own `Set<Integer>`s per family) now
   delegates entirely to `mavlink-core`'s `VehicleClass` — `vehicleKind` and the ArduPilot-table
   selector (`tableFor`) both switch on `VehicleClass.of(mavType)`, so this class carries no
@@ -451,13 +462,30 @@ one `FlightState`-contributing row above has fired at least once.
   outside this module's own file boundary but factually stale otherwise) — it used to claim
   unconditional equivalence to `disarm(device, true)` and "an airborne vehicle will fall" for every
   device; both are now true only for `COPTER`/`PLANE`/`UNKNOWN`.
-- **No web UI change shipped for this wave**, despite the plan's own scope line naming
+- **No web UI change shipped in R4b's own task**, despite the plan's own scope line naming
   `station/vision-web/.../fly/**`. There is no clicked "Emergency stop" button anywhere in this
   codebase's UI — `EMERGENCY_STOP` is reachable only via a bound RC switch action, dispatched by
   `station/vision-web`'s `core/rc/control-action-dispatcher.ts`, whose "Emergency stop" wording comes
-  from `core/rc/control-action-logic.ts#actionLabel` — both under `core/rc/`, a directory this wave's
-  own hard constraint says to stop and report on rather than edit. See
-  `docs/plans/active/FLEET-RADIO-PLAN.md` R4b's own "what shipped vs. planned" note.
+  from `core/rc/control-action-logic.ts#actionLabel`. **This has since shipped, as part of FLEET-RADIO
+  R2's task**: `actionLabel` now takes an optional `vehicleKind` and reads `'Emergency stop (Hold)'`
+  on a `ROVER`, unchanged `'Emergency stop'` everywhere else — see `station/vision-web/MODULE.md` for
+  the shipped signature and call sites.
+
+### FLEET-RADIO R2 Gotchas
+
+- **`VehicleClass.SUBMARINE` folds into `UnidentifiedReason.UNSUPPORTED_VEHICLE`, not its own
+  reason.** `UnidentifiedReason` has three values, not one per `VehicleClass` constant — an operator
+  refused engage on a submarine and one refused on a real-but-unsupported airframe both get told
+  "this platform does not support flying or driving what's on this link", which is the true, actionable
+  fact in both cases. `VehicleClass` itself keeps `SUBMARINE` a distinct constant (R1's decision,
+  unchanged) purely so a future ArduSub wave has a slot to read from; `FlightModes.unidentifiedReason`
+  is where the two are deliberately merged back down for the operator-facing message.
+- **`unidentifiedReason()` is resolved once, at `engage`, from the same heartbeat `vehicleKind()`
+  reads — never re-resolved per `send`.** Identical freshness contract to `vehicleKind()` itself: a
+  vehicle that starts heartbeating a recognized `MAV_TYPE` mid-session does not retroactively change
+  an already-refused engage (there is no session to change — `engage` throws before one is built), and
+  does not need to, because `DefaultManualControlService#engage` re-resolves both from a fresh link on
+  every call.
 
 ## Status
 
@@ -478,6 +506,12 @@ complete (Dock/Circle/Initialising); see the FLEET-RADIO R1 Gotchas above.
 **`docs/plans/active/FLEET-RADIO-PLAN.md` R4b done (Java half)** — `MavlinkFlightCommander.emergencyStop`
 is now vehicle-kind-gated: unchanged forced disarm for `COPTER`/`PLANE`/`UNKNOWN`, ArduRover `Hold`
 for `ROVER`/surface boat, never a disarm following a successful `Hold`. See the FLEET-RADIO R4b
-Gotchas above for the full rationale, including why the planned web change did not ship.
-`./mvnw -B -o -pl drone-link/mavlink test` — **220 tests**, all green (2026-08-27; +7 from before
-this wave: `MavlinkFlightCommanderTest`'s new `emergencyStop*` cases).
+Gotchas above for the full rationale; its web half has since shipped, in R2's own task (see below).
+
+**`docs/plans/active/FLEET-RADIO-PLAN.md` R2 done.** New `FlightModes.unidentifiedReason(int mavType)`
+maps a `MAV_TYPE` to *why* it is `VehicleKind.UNKNOWN`, not merely that it is; `MavlinkManualControlSender`'s
+`AdapterLink` now overrides `ManualControlLink#unidentifiedReason()` with it, resolved once at
+`engage` alongside `vehicleKind()`. See the FLEET-RADIO R2 Gotchas above for the `SUBMARINE`→
+`UNSUPPORTED_VEHICLE` folding decision. `./mvnw -B -o -pl drone-link/mavlink test` — **227 tests**,
+all green (2026-08-27; +7 from R4b's 220: 5 new `FlightModesTest#unidentifiedReason*` cases, 2 new
+`MavlinkManualControlSenderTest` integration cases).

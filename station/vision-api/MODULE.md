@@ -185,7 +185,14 @@ the full mechanism.
 transport, outside the table above since it isn't a `@RestController` route. Its handshake resolves
 `CurrentUser` the same way every REST call does (`ManualControlHandshakeInterceptor`, 401 if it
 can't) and every `engage` frame re-derives scope from that handshake — see the class javadoc for the
-full frame protocol.
+full frame protocol. **FLEET-RADIO R2** added one additive `denied` reason code, `VEHICLE_UNIDENTIFIED`
+— no frame added/removed, no field renamed: `engage` now catches `vision-flight`'s
+`VehicleUnidentifiedException` (a subtype of, and ahead of, the existing `IllegalStateException`
+clause) and maps it straight to `new ManualControlDeniedFrame(CODE_VEHICLE_UNIDENTIFIED, e.getMessage())`
+instead of the generic `IllegalStateException` clause's own code — the message is one of three
+distinct, operator-facing sentences (`vision-flight`'s `UnidentifiedReason`-keyed text), never
+sniffed or rewritten here. `ManualControlDeniedFrame.code` is a plain `String`, not a closed enum, so
+this needed no wire-contract/DTO change at all.
 
 ### Error mapping (`ApiExceptionHandler`, body `{"error","message"}`)
 
@@ -347,3 +354,10 @@ answer 409), `vision.api.rate-limit.enabled` (false, see "Rate limiting" above),
 Multi-instance SSE fan-out is out of scope — `LiveUpdateRegistry` is explicitly process-local,
 single-instance. `RemediationOrchestrator` living in `support/` rather than as a fourth
 `vision-flight` application service is a known layering gap, not a decision (see its own javadoc).
+
+**`docs/plans/active/FLEET-RADIO-PLAN.md` R2 done.** `ws/ManualControlWebSocketHandler` gained one
+`catch (VehicleUnidentifiedException e)` clause ahead of its existing `IllegalStateException` clause,
+mapping to a new, additive `denied` code `VEHICLE_UNIDENTIFIED` — see "Live updates"/`/ws/manual-control`
+above. `./mvnw -B -pl station/vision-api test` — **861 tests**, all green (2026-08-27; +2 from before
+this wave: `ManualControlWebSocketHandlerTest`'s new cases asserting the code is distinct and not
+message-sniffed into one of the other `denied` causes).
