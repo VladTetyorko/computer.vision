@@ -107,7 +107,12 @@ merely "chose not to".
   already open — polls its claimed/unclaimed registries, never binds) or **self-bind** (nothing has
   the port open — binds a plain `UdpListenLink`+`FrameReader` for the scan's duration; a bind
   conflict is one WARN log and an empty result, never thrown). Names a vehicle `"<Firmware>
-  <kind> (sysid n)"`; `suggestedCategory()` is `"drone"` only for an airborne `mavType`.
+  <kind> (sysid n)"`, `<kind>` sourced from `mavlink-core`'s `VehicleClass.label` (**FLEET-RADIO
+  R1** — previously a local, hand-maintained string table that disagreed with
+  `MavlinkVehicleConfigurator`'s own on the same vehicles; see FlightModes below); a vehicle whose
+  `MAV_TYPE` the shared table cannot name at all falls back to `"vehicle"`. `suggestedCategory()`
+  is `"drone"` only for an airborne `VehicleClass` (`COPTER`/`PLANE`), not merely a recognized one —
+  a rover, a submarine, an unsupported airframe or a not-a-vehicle instrument all get no category.
   Constructors `(MavlinkTelemetrySource, int port)`, `(..., MavlinkSettings.Scan)`.
 - `public final class MavlinkFeedTransmitter implements FeedTransmitterPort` — synthetic MAVLink TX:
   `HEARTBEAT`+`SYS_STATUS`+`GPS_RAW_INT` at 1 Hz, `GLOBAL_POSITION_INT` at `positionRateHz`, driven
@@ -129,8 +134,13 @@ merely "chose not to".
   reports the read-back; `DENIED` whenever the read-back doesn't match what was asked for).
   Addressed by `"udp://host:port#sysid"` (probe runs *before* device registration, so no `DeviceId`
   exists yet); the `#sysid` suffix is optional for `probe` alone. Rides the `MavlinkGateway` already
-  bound to the address when there is one, opens a temporary one otherwise. Constructors
-  `(MavlinkTelemetrySource)`, `(MavlinkTelemetrySource, MavlinkSettings)`.
+  bound to the address when there is one, opens a temporary one otherwise. `VehicleProfile.vehicleKind`
+  is sourced from `mavlink-core`'s `VehicleClass.label` (**FLEET-RADIO R1** — previously its own local
+  table, which named a surface boat `"surface boat"` while `MavlinkHeartbeatScanner` said plain
+  `"boat"` for the identical vehicle; both now agree, and this configurator's own finer spellings
+  — `"surface boat"`, `"coaxial helicopter"` — are the ones the shared table kept). `null` only for a
+  genuinely unrecognized `MAV_TYPE`, never for a recognized-but-unsupported or not-a-vehicle one (both
+  get a real label). Constructors `(MavlinkTelemetrySource)`, `(MavlinkTelemetrySource, MavlinkSettings)`.
 - `public final class MavlinkLinkStatusProvider implements SubsystemStatusPort` — `mavlink-link`'s
   health self-report for `GET /api/system/status`. Constructor takes `Supplier<List<LinkHealth.Health>>`
   (`vision-app` passes `mavlinkTelemetrySource::claimedVehicleHealth`). No vehicle claimed →
@@ -160,7 +170,15 @@ merely "chose not to".
   `static List<String> selectableModes(int autopilot, int mavType)` (**ArduPilot-only** — Betaflight
   returns empty even though it has a table, since its RC link never processes `DO_SET_MODE`),
   `static VehicleKind vehicleKind(int mavType)` (**autopilot-independent** — a quadrotor is a
-  quadrotor regardless of firmware; `UNKNOWN` for anything unrecognized).
+  quadrotor regardless of firmware; `UNKNOWN` for anything unrecognized). **FLEET-RADIO R1:**
+  the vehicle-family switch (which used to be this class's own `Set<Integer>`s per family) now
+  delegates entirely to `mavlink-core`'s `VehicleClass` — `vehicleKind` and the ArduPilot-table
+  selector (`tableFor`) both switch on `VehicleClass.of(mavType)`, so this class carries no
+  `MAV_TYPE` literal any more. `ARDUPILOT_ROVER` is now complete: `8` Dock, `9` Circle and `16`
+  Initialising were added (verified against ArduPilot's `Rover/mode.h` for the `stable-4.7.0`
+  generation this project's own SITL image pins — see FLEET-RADIO R1 Gotchas below for why `Dock`
+  stays in `customModeFor`'s reverse lookup despite being an optional compile-time mode on real
+  firmware).
 - `final class MavlinkRoute` (package-private) — closed-loop route interpolation for
   `MavlinkFeedTransmitter`. Deliberate duplication of `adapter-simulation`'s `RoutePlan` (adapters
   must never depend on each other). `static MavlinkRoute parse(String routeOption)` (`null` if
@@ -344,6 +362,56 @@ one `FlightState`-contributing row above has fired at least once.
 - **`emergencyStop` is byte-identical to `disarm(device, true)` on the wire.** Kept as a separate
   method purely so the log line and audit trail record which of the two an operator actually meant.
 
+### FLEET-RADIO R1 Gotchas
+
+- **This module's three `MAV_TYPE`→name/family tables (`FlightModes.vehicleKind`/`tableFor`,
+  `MavlinkHeartbeatScanner.vehicleKind`, `MavlinkVehicleConfigurator.vehicleKind`) disagreed on the
+  same vehicles before this wave** — a surface boat was `"boat"` in discovery and `"surface boat"`
+  in the onboarding probe, `"fixed-wing"` vs `"fixed wing"`, and only the configurator knew a
+  submarine existed at all. None of the three knew a dodecarotor (`MAV_TYPE` 29), a decarotor (35)
+  or a generic multirotor (43) — all three fell through to a `"vehicle"`/`"Mode 6"`-style fallback
+  as if unrecognized. All three now delegate to `mavlink-core`'s `VehicleClass`, the one project-wide
+  table; a UI or log line that previously read `"boat"` now reads `"surface boat"` — the only
+  user-visible spelling change. `VehicleTaxonomyAgreementTest` fails immediately if any of the three
+  grows a local, hand-maintained copy again.
+- **The kept vocabulary is `MavlinkVehicleConfigurator`'s where the two disagreed** (`"surface
+  boat"` over `"boat"`, `"fixed-wing"` from the scanner over the configurator's `"fixed wing"` — the
+  one exception, kept because it matches this module's own existing hyphenation convention
+  elsewhere), plus new labels neither table had before (`"dodecacopter"`, `"decacopter"`,
+  `"multirotor"`, a label per VTOL subtype, `"submarine"`, a label per recognized-but-unsupported
+  airframe, a label per not-a-vehicle instrument). `station/vision-api`'s `OnboardingWireContractTest`
+  asserts only that `VehicleProfile.vehicleKind` is present/absent, never an exact string, so this
+  relabeling is not a frozen-wire break.
+- **`VehicleClass` gives discovery and the onboarding probe a real, distinct label for a non-vehicle
+  instrument heartbeating on the same link (a gimbal, a GCS, an ADS-B transponder, ...), rather than
+  collapsing it into the same fallback a genuinely unidentified vehicle gets.** Before this wave both
+  cases read identically (`"vehicle"` in discovery, `UNKNOWN` `VehicleKind` in `FlightModes`) — this
+  matters directly for the next wave (R2), which makes an `UNKNOWN` vehicle refuse to engage manual
+  control; without this distinction, a gimbal quietly sharing a vehicle's radio link would refuse to
+  engage for the wrong reason (looking exactly like an unidentified aircraft) instead of the right one
+  (it was never a vehicle). `FlightModes.vehicleKind` still folds both `NOT_A_VEHICLE` and `UNKNOWN`
+  into `VehicleKind.UNKNOWN` today — that enum has no finer slot yet — but the underlying
+  classification is no longer ambiguous, only `VehicleKind`'s own vocabulary is.
+- **`FlightModes.ARDUPILOT_ROVER`'s three missing modes (`8` Dock, `9` Circle, `16` Initialising)
+  were verified against ArduPilot's own `Rover/mode.h`** for the `stable-4.7.0` generation this
+  project's own `infra/rover-sim` SITL image is pinned to (`docs/plans/active/FLEET-RADIO-PLAN.md`
+  R7). `"Initialising"` (with an "s", ArduRover's own spelling) is kept exactly as upstream spells
+  it, distinct from `ARDUPILOT_PLANE`'s `"Initializing"` (with a "z") two tables below — different
+  firmware source trees, not normalized to agree with each other.
+- **`Dock` (custom_mode 8) is compiled in behind `#if MODE_DOCK_ENABLED` on real ArduPilot, so it is
+  absent from some builds — a nuance that only matters for `customModeFor`'s *reverse* lookup (name
+  → number, used to command a mode), never for the forward lookup (number → name, used to display
+  one).** A build without Dock compiled in simply never reports `custom_mode == 8`, so the forward
+  lookup's table entry is inert on that build. `customModeFor` deliberately still resolves
+  `"Dock"` → `8` on every build, including ones that lack it, because there is no live per-vehicle
+  capability signal to gate an optional compiled-in mode on, and hiding the entry would make Dock
+  permanently uncommandable even on builds that do have it. The actual safety net is one layer up:
+  `MavlinkFlightCommander.send` already throws for an explicit non-`ACCEPTED` `COMMAND_ACK`, so a
+  build that honestly rejects an unsupported mode change surfaces that rejection normally, the same
+  as any other rejected command. The one gap this cannot close — a build that ACKs `ACCEPTED` for a
+  mode change it does not actually honor — is a firmware-honesty problem, not something a
+  client-side mode-name table can fix.
+
 ## Status
 
 Real and load-bearing: RX ingest + fleet-gateway claim/re-election, guarded command TX (mode/arm/
@@ -354,3 +422,8 @@ system-status health reporting, and the TX flight-plan simulator. Out of scope, 
 `contexts/vision-map`, not this module), and PX4 mode-name tables. Try it against real ArduPilot
 SITL: register a `mavlink` telemetry device with `uri = udp://0.0.0.0:14550` and
 `sim_vehicle.py -v ArduCopter --out=udp:127.0.0.1:14550`.
+
+**`docs/plans/active/FLEET-RADIO-PLAN.md` R1 done** — `FlightModes`, `MavlinkHeartbeatScanner` and
+`MavlinkVehicleConfigurator` all now delegate vehicle-family/naming to `mavlink-core`'s one
+`VehicleClass` table instead of three disagreeing local copies; the ArduRover mode table is
+complete (Dock/Circle/Initialising); see the FLEET-RADIO R1 Gotchas above.

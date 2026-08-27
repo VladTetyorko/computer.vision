@@ -172,4 +172,11 @@ Fully implemented: flight-session telemetry writes (`TelemetryService`), geofenc
 Deferred/known gaps: `ReadinessService` evaluates only the configuration-derived half of readiness (see Gotchas); `TrackCorrectionService`'s `GROUPS`-scope reads are unenforced pending `vision-api` wiring; calibration (per-axis range learning) stays deferred — bindings are configurable, learning them is not.
 
 **docs/plans/active/FLEET-RADIO-PLAN.md R3 done**: `RcChannels`/`ControlBinding` both narrowed to `[1,16]` (F17); the CH9+ silent-drop (F3) and extension-channel release-sentinel (F4) defects are fixed on the `mavlink-core`/`adapter-mavlink` side of the module boundary (see this module's own Gotchas for why nothing changed on the wire-encoding side of *this* module). Web half (narrowing the channel picker in `station/vision-web`) deliberately deferred to `feat/controller-ux`, out of this wave's scope — see that plan's own R3 note.
-`./mvnw -B -pl contexts/vision-flight test` — **346 tests**, all green (2026-08-27, after FLEET-RADIO R3).
+**FLEET-RADIO R1 (one vehicle taxonomy) deliberately made no change here.** The plan's own scope line
+names `VehicleKind.java`/`ControlProfile.java` for R1, but nothing in either needed to change: the
+new dodecarotor/decarotor/generic-multirotor `MAV_TYPE`s all resolve onto the existing `COPTER`
+constant, and R1's own submarine slot is explicitly a `mavlink-core`-only table entry — the plan
+itself (and a direct operator instruction, 2026-08-26) forbid adding a `SUBMARINE` constant here.
+`VehicleKind` and `ControlProfile.forKind` are unchanged; `ControlProfile.forKind(UNKNOWN)` still
+returns a flyable (if unsafe) default map — closing that gap is R2's own scope, not R1's.
+`./mvnw -B -pl contexts/vision-flight test` — **346 tests**, all green (2026-08-27, after FLEET-RADIO R3; unchanged by R1 — no source in this module was touched).

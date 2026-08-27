@@ -1,10 +1,10 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.VehicleClass;
 import com.drones.vision.flight.domain.model.VehicleKind;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Firmware/vehicle-aware flight-mode name lookup (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a). MAVLink's
@@ -18,10 +18,12 @@ import java.util.Set;
  *   <li>{@code autopilot == 3} (ARDUPILOTMEGA) — ArduPilot, including INAV (which defaults to
  *       masquerading as ArduPilot and maps its own modes onto ArduPilot's numbers, so the same
  *       tables are correct for it too — see this plan's research-facts section). The table is
- *       then chosen by {@code mavType}: copter (quad/hex/octo/tri-rotor, coaxial, helicopter),
- *       plane (fixed-wing plus every VTOL vehicle variant), or rover (ground rover, surface
- *       boat). A {@code mavType} outside all three families has no table to select and falls back
- *       to {@code "Mode <n>"}.</li>
+ *       then chosen by {@code mavType}'s {@link com.drones.mavlink.VehicleClass}: copter
+ *       (quad/hex/octo/tri/deca/dodeca-rotor, coaxial, helicopter, generic multirotor), plane
+ *       (fixed-wing plus every VTOL vehicle variant), or rover (ground rover, surface boat). A
+ *       {@code mavType} outside all three families (including {@code VehicleClass.SUBMARINE} —
+ *       ArduSub is out of scope, docs/plans/active/FLEET-RADIO-PLAN.md R1) has no table to select
+ *       and falls back to {@code "Mode <n>"}.</li>
  *   <li>{@code autopilot == 0} (GENERIC) — Betaflight (BF ≥4.6's 8-entry flight-mode set);
  *       {@code mavType} is not consulted.</li>
  *   <li>{@code autopilot == 12} (PX4) — table out of scope for this phase; always falls back to
@@ -31,40 +33,19 @@ import java.util.Set;
  * A {@code customMode} not present in the selected table (a firmware version reporting a mode
  * number this table doesn't yet know) also falls back to {@code "Mode <n>"} — never a fabricated
  * name.
+ *
+ * <p><b>FLEET-RADIO R1 (F1):</b> vehicle-family membership ({@code mavType} → copter/plane/rover)
+ * used to be this class's own {@code Set<Integer>} triplet, hand-maintained separately from
+ * {@code MavlinkHeartbeatScanner}'s and {@code MavlinkVehicleConfigurator}'s own copies — the three
+ * disagreed with each other on the same vehicles and none of them knew a dodecarotor or a
+ * decarotor. All three now delegate to {@link com.drones.mavlink.VehicleClass}, the one
+ * {@code MAV_TYPE} table in {@code mavlink-core}.
  */
 final class FlightModes {
 
     static final int AUTOPILOT_GENERIC = 0;
     static final int AUTOPILOT_ARDUPILOTMEGA = 3;
     static final int AUTOPILOT_PX4 = 12;
-
-    private static final int MAV_TYPE_FIXED_WING = 1;
-    private static final int MAV_TYPE_QUADROTOR = 2;
-    private static final int MAV_TYPE_COAXIAL = 3;
-    private static final int MAV_TYPE_HELICOPTER = 4;
-    private static final int MAV_TYPE_GROUND_ROVER = 10;
-    private static final int MAV_TYPE_SURFACE_BOAT = 11;
-    private static final int MAV_TYPE_HEXAROTOR = 13;
-    private static final int MAV_TYPE_OCTOROTOR = 14;
-    private static final int MAV_TYPE_TRICOPTER = 15;
-    private static final int MAV_TYPE_VTOL_TAILSITTER_DUOROTOR = 19;
-    private static final int MAV_TYPE_VTOL_TAILSITTER_QUADROTOR = 20;
-    private static final int MAV_TYPE_VTOL_TILTROTOR = 21;
-    private static final int MAV_TYPE_VTOL_FIXEDROTOR = 22;
-    private static final int MAV_TYPE_VTOL_TAILSITTER = 23;
-    private static final int MAV_TYPE_VTOL_TILTWING = 24;
-    private static final int MAV_TYPE_VTOL_RESERVED5 = 25;
-
-    private static final Set<Integer> COPTER_MAV_TYPES = Set.of(
-            MAV_TYPE_QUADROTOR, MAV_TYPE_HEXAROTOR, MAV_TYPE_OCTOROTOR, MAV_TYPE_TRICOPTER,
-            MAV_TYPE_COAXIAL, MAV_TYPE_HELICOPTER);
-
-    private static final Set<Integer> PLANE_MAV_TYPES = Set.of(
-            MAV_TYPE_FIXED_WING, MAV_TYPE_VTOL_TAILSITTER_DUOROTOR, MAV_TYPE_VTOL_TAILSITTER_QUADROTOR,
-            MAV_TYPE_VTOL_TILTROTOR, MAV_TYPE_VTOL_FIXEDROTOR, MAV_TYPE_VTOL_TAILSITTER, MAV_TYPE_VTOL_TILTWING,
-            MAV_TYPE_VTOL_RESERVED5);
-
-    private static final Set<Integer> ROVER_MAV_TYPES = Set.of(MAV_TYPE_GROUND_ROVER, MAV_TYPE_SURFACE_BOAT);
 
     private static final Map<Integer, String> ARDUPILOT_COPTER = Map.ofEntries(
             Map.entry(0, "Stabilize"), Map.entry(1, "Acro"), Map.entry(2, "AltHold"), Map.entry(3, "Auto"),
@@ -85,10 +66,16 @@ final class FlightModes {
             Map.entry(23, "QAcro"), Map.entry(24, "Thermal"), Map.entry(25, "LoiterAltQLand"),
             Map.entry(26, "AutoLand"));
 
+    // Verified 2026-08-27 against ArduPilot's own Rover/mode.h (docs/plans/active/FLEET-RADIO-PLAN.md
+    // R1 grounding) for the stable-4.7.0 generation our SITL image targets. 8 (Dock), 9 (Circle) and
+    // 16 (Initialising) were missing before this wave. "Initialising" (with an "s") is ArduRover's
+    // own spelling, distinct from ARDUPILOT_PLANE's "Initializing" (with a "z") two tables below --
+    // two different firmware source trees, kept exactly as each one spells it, not normalized.
     private static final Map<Integer, String> ARDUPILOT_ROVER = Map.ofEntries(
             Map.entry(0, "Manual"), Map.entry(1, "Acro"), Map.entry(3, "Steering"), Map.entry(4, "Hold"),
-            Map.entry(5, "Loiter"), Map.entry(6, "Follow"), Map.entry(7, "Simple"), Map.entry(10, "Auto"),
-            Map.entry(11, "RTL"), Map.entry(12, "SmartRTL"), Map.entry(15, "Guided"));
+            Map.entry(5, "Loiter"), Map.entry(6, "Follow"), Map.entry(7, "Simple"), Map.entry(8, "Dock"),
+            Map.entry(9, "Circle"), Map.entry(10, "Auto"), Map.entry(11, "RTL"), Map.entry(12, "SmartRTL"),
+            Map.entry(15, "Guided"), Map.entry(16, "Initialising"));
 
     private static final Map<Integer, String> BETAFLIGHT = Map.of(
             0, "Acro", 1, "Angle", 2, "Horizon", 3, "AltHold", 4, "PosHold", 5, "Autopilot", 6, "RTL", 7, "Failsafe");
@@ -129,6 +116,23 @@ final class FlightModes {
      * commandable is the caller's job (see {@code MavlinkFlightCommander}), not this class's — see
      * its own class javadoc for why: this table only knows mode names, never which firmwares
      * accept remote mode-set commands.
+     *
+     * <p><b>The same limitation applies one level down, per mode, not just per firmware
+     * (docs/plans/active/FLEET-RADIO-PLAN.md R1).</b> ArduRover's {@code Dock} mode (mode 8) is
+     * compiled in only when the firmware build defines {@code MODE_DOCK_ENABLED} — some builds
+     * genuinely have no mode 8 at all. This method resolves {@code "Dock"} to {@code 8}
+     * unconditionally anyway, deliberately, for two reasons: (1) hiding it would make Dock
+     * uncommandable even on the builds that <em>do</em> have it, and this class has no live signal
+     * (no capability bit, no probed parameter) for which specific optional modes a given firmware
+     * build compiled in — the same "no such parameter" gap {@code MavlinkVehicleConfigurator}'s own
+     * parameter probing already lives with, one layer up; (2) commanding a mode a build doesn't
+     * have is not actually silent in the common case — {@code MavlinkFlightCommander#send} already
+     * throws for an explicit non-ACCEPTED {@code COMMAND_ACK}, so a firmware that honestly refuses
+     * an unrecognized {@code custom_mode} surfaces that refusal normally. The residual risk this
+     * does <em>not</em> cover — a build that ACKs {@code ACCEPTED} without actually honoring the
+     * mode change — is a firmware-honesty question no client-side table edit can fix; closing it
+     * for real needs an onboarding-stage capability probe this class deliberately does not attempt
+     * to fake by guessing.
      *
      * @param autopilot {@code HEARTBEAT.autopilot} raw value
      * @param mavType   {@code HEARTBEAT.type} raw value; consulted only to pick an ArduPilot vehicle-family table
@@ -176,44 +180,41 @@ final class FlightModes {
      * The vehicle family behind a raw {@code HEARTBEAT.type}, as the control-shape taxonomy
      * {@code vision-flight} reasons in (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §1.4).
      *
-     * <p>Reuses the very same {@code MAV_TYPE} sets this class already maintains to pick a mode
-     * table — a vehicle whose modes come from the rover table is, by construction, a rover. Before
-     * this method that classification reached {@code selectableModes} and stopped; the stick layout,
-     * which needs it just as badly, was left guessing.
+     * <p>Delegates to {@link com.drones.mavlink.VehicleClass}, the one {@code MAV_TYPE} table
+     * (docs/plans/active/FLEET-RADIO-PLAN.md R1/D1) — a vehicle whose {@code VehicleClass} is
+     * {@code COPTER} is, by construction, a rover-table candidate's opposite. Before FLEET-RADIO R1
+     * this method held its own copy of the family sets; the copy is gone, this delegates.
      *
      * <p>Deliberately <b>autopilot-independent</b>, unlike {@link #tableFor}: a quadrotor is a
      * quadrotor whether ArduPilot, PX4 or Betaflight is flying it. Only the <em>mode names</em> are
-     * firmware-specific, not the physics. An unrecognized {@code mavType} yields {@link
-     * VehicleKind#UNKNOWN} — never a guess, per that document's §2 P8.
+     * firmware-specific, not the physics. {@code VehicleClass.SUBMARINE} (ArduSub, out of scope),
+     * {@code UNSUPPORTED_VEHICLE}, {@code NOT_A_VEHICLE} and a genuinely unrecognized {@code
+     * mavType} all yield {@link VehicleKind#UNKNOWN} — {@code VehicleKind} has no room for those
+     * finer distinctions (FLEET-RADIO R1 deliberately does not add one; see that plan's D2/R2) —
+     * never a guess, per VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P8.
      *
      * @param mavType {@code HEARTBEAT.type} raw value
      * @return the control-shape family, or {@link VehicleKind#UNKNOWN} if this class knows no family for it
      */
     static VehicleKind vehicleKind(int mavType) {
-        if (COPTER_MAV_TYPES.contains(mavType)) {
-            return VehicleKind.COPTER;
-        }
-        if (PLANE_MAV_TYPES.contains(mavType)) {
-            return VehicleKind.PLANE;
-        }
-        if (ROVER_MAV_TYPES.contains(mavType)) {
-            return VehicleKind.ROVER;
-        }
-        return VehicleKind.UNKNOWN;
+        return switch (VehicleClass.of(mavType)) {
+            case COPTER -> VehicleKind.COPTER;
+            case PLANE -> VehicleKind.PLANE;
+            case ROVER -> VehicleKind.ROVER;
+            case SUBMARINE, UNSUPPORTED_VEHICLE, NOT_A_VEHICLE, UNKNOWN -> VehicleKind.UNKNOWN;
+        };
     }
 
     private static Map<Integer, String> tableFor(int autopilot, int mavType) {
         if (autopilot == AUTOPILOT_ARDUPILOTMEGA) {
-            if (COPTER_MAV_TYPES.contains(mavType)) {
-                return ARDUPILOT_COPTER;
-            }
-            if (PLANE_MAV_TYPES.contains(mavType)) {
-                return ARDUPILOT_PLANE;
-            }
-            if (ROVER_MAV_TYPES.contains(mavType)) {
-                return ARDUPILOT_ROVER;
-            }
-            return null;
+            return switch (VehicleClass.of(mavType)) {
+                case COPTER -> ARDUPILOT_COPTER;
+                case PLANE -> ARDUPILOT_PLANE;
+                case ROVER -> ARDUPILOT_ROVER;
+                // SUBMARINE (ArduSub, out of scope), an unsupported airframe, a non-vehicle
+                // instrument, or a genuinely unknown number: no table, "Mode <n>" fallback.
+                case SUBMARINE, UNSUPPORTED_VEHICLE, NOT_A_VEHICLE, UNKNOWN -> null;
+            };
         }
         if (autopilot == AUTOPILOT_GENERIC) {
             return BETAFLIGHT;

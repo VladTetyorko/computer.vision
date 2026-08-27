@@ -12,7 +12,7 @@ so the boundary is visible in every import.
 
 | Level | Package | Built in | Depends on |
 |---|---|---|---|
-| L0 kernel | `com.drones.mavlink` (root) | W1 | nothing — `SysId`, `CompId`, `PeerId` only |
+| L0 kernel | `com.drones.mavlink` (root) | W1 (+ `VehicleClass`, FLEET-RADIO R1) | nothing — `SysId`, `CompId`, `PeerId`, `VehicleClass` |
 | L1 transport | `com.drones.mavlink.transport` | W1 | L0 |
 | L2 codec | `com.drones.mavlink.codec` | W1 | L0, L1 |
 | L3 session | `com.drones.mavlink.session` | W2 | L0, L1, L2 |
@@ -28,6 +28,16 @@ Enforced by ArchUnit in W1.
 compact constructors, and `PeerId(SysId system, CompId component)`. They live in the root package rather
 than under `session` because L2's `MavHeader` and `FrameSink` need them: a message's origin is a wire-level
 fact, not a session-level one.
+
+**L0 — `VehicleClass` (added additively, FLEET-RADIO R1, following the O2 precedent below of extending this
+frozen contract with new protocol-knowledge types rather than amending it).** `enum VehicleClass { COPTER,
+PLANE, ROVER, SUBMARINE, UNSUPPORTED_VEHICLE, NOT_A_VEHICLE, UNKNOWN }` — the project's one `HEARTBEAT.type`
+(`MAV_TYPE`) → family table, `static VehicleClass of(int mavType)` and `static String label(int mavType)`.
+Belongs at L0, not `service` or `config`, for the same reason `SysId`/`PeerId` do: it is a wire-level
+protocol fact (what kind of airframe a `MAV_TYPE` number denotes) usable by any level, not session or
+service state. Zero project dependencies, same constraint as the rest of this package — a context's own
+`VehicleKind` is a different, narrower enum translated from this one at the adapter boundary
+(`drone-link/mavlink`'s `FlightModes.vehicleKind`), never imported here.
 
 ---
 

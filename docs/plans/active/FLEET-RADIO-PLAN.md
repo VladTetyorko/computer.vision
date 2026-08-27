@@ -144,7 +144,7 @@ Proven by tests that fail without the fix with exactly the F0 symptom (`expected
 for a profile carrying `MAV_SYSID` against a row naming `SYSID_THISMAV`, and symmetrically. Scoped builds
 green: vision-flight 345, adapter-mavlink 198 (live SITL included), persistence + vision-app 263.
 
-### R1 — one vehicle taxonomy, complete for rover
+### R1 — one vehicle taxonomy, complete for rover — **DONE, 2026-08-27**
 **Scope:** `drone-link/mavlink-core/**` (new `VehicleClass`), `drone-link/mavlink/FlightModes.java`,
 `MavlinkVehicleConfigurator.java`, `MavlinkHeartbeatScanner.java`,
 `contexts/vision-flight/.../VehicleKind.java`, `ControlProfile.java`.
@@ -165,6 +165,82 @@ green: vision-flight 345, adapter-mavlink 198 (live SITL included), persistence 
 `selectableModes` and renders it by name; a boat is named consistently in discovery, profile and control;
 a dodecarotor gets "RTL", not "Mode 6". A test asserts all three former tables now agree on every
 `MAV_TYPE` any one of them knew.
+
+**What shipped:**
+- `mavlink-core` gained `com.drones.mavlink.VehicleClass` — one `enum { COPTER, PLANE, ROVER, SUBMARINE,
+  UNSUPPORTED_VEHICLE, NOT_A_VEHICLE, UNKNOWN }`, `static of(int mavType)` / `static label(int mavType)`.
+  Four outcomes, not two: **not-a-vehicle** (5 ANTENNA_TRACKER, 6 GCS, 18 ONBOARD_CONTROLLER, 26 GIMBAL,
+  27 ADSB, 30 CAMERA, 31 CHARGING_STATION, 32 FLARM, 33 SERVO, 34 ODID, 36 BATTERY, 37 PARACHUTE, 38 LOG,
+  39 OSD, 40 IMU, 41 GPS, 42 WINCH, 44 ILLUMINATOR, 45 SPACECRAFT_ORBITER) is a different outcome from
+  **unsupported-but-real-airframe** (7 AIRSHIP, 8 FREE_BALLOON, 9 ROCKET, 16 FLAPPING_WING, 17 KITE,
+  28 PARAFOIL), which is a different outcome again from **UNKNOWN** (a number none of the above claims).
+  This split beyond the plan's own two-way "unsupported vs. absent" framing exists because R2 (next wave)
+  needs it: refusing to engage manual control on `UNKNOWN` is right, refusing because a gimbal is sharing
+  the link is a bug that would look identical without `NOT_A_VEHICLE` as its own constant — this exact
+  risk is flagged in this session's own grounding notes as "a finding the audit missed."
+- **All three call sites delegate, zero local tables survive.** `FlightModes.vehicleKind`/`tableFor`,
+  `MavlinkHeartbeatScanner.vehicleKind`, `MavlinkVehicleConfigurator.vehicleKind` are now one-line
+  switches/delegations onto `VehicleClass`, kept package-private (not inlined at every call site) so
+  `VehicleTaxonomyAgreementTest` — the test the plan's own "Expected result" describes — can call all
+  three independently and assert agreement. Mechanical check (`grep -rn "MAV_TYPE_QUADROTOR\|case 13
+  ->\|case 11 ->" drone-link/mavlink/src/main/java`) returns nothing except one unrelated hit in
+  `SimulatedVehicleMessages.java`, a synthetic outgoing `HEARTBEAT` builder (an emission, not a
+  classification table).
+- **Vocabulary chosen, not left to whichever table happened to run first.** `MavlinkHeartbeatScanner`
+  and `MavlinkVehicleConfigurator` disagreed on the same vehicles before this wave (see this session's
+  grounding table). Kept: the scanner's `"fixed-wing"` (matches this module's existing hyphenation
+  convention) and the configurator's `"surface boat"`/`"coaxial helicopter"` (the finer spellings).
+  Added, where neither table had anything: `"dodecacopter"`, `"decacopter"`, `"multirotor"`, one label
+  per VTOL subtype, `"submarine"`, a label per unsupported airframe, a label per not-a-vehicle
+  instrument. **User-visible consequence:** a surface boat that showed up as `"boat"` in device discovery
+  now reads `"surface boat"`, matching what the onboarding profile already called it — the only wire/UI
+  string this wave changes. `station/vision-api`'s `OnboardingWireContractTest` was checked and asserts
+  only presence/absence of `VehicleProfile.vehicleKind`, never an exact spelling, so this is not a frozen-
+  contract break.
+- **ArduRover mode table completed and verified against real source, not just added on the plan's say-so.**
+  `Rover/mode.h` for the `stable-4.7.0` generation `infra/rover-sim`'s own SITL image is pinned to (R7)
+  confirms Dock=8, Circle=9, Initialising=16 — the plan's claimed numbers were exactly right.
+  `"Initialising"` (ArduRover's own spelling, with an "s") is kept distinct from `ARDUPILOT_PLANE`'s
+  `"Initializing"` (with a "z") rather than normalized to match — two different firmware source trees.
+- **`MODE_DOCK_ENABLED` resolved by decision, not by hiding the mode.** Dock is compiled in behind a
+  feature guard on real ArduPilot, so it is absent from some builds — harmless for the forward `name()`
+  lookup (an absent build never reports `custom_mode==8`), but a real risk for the reverse `customModeFor()`
+  lookup, which is used to *command* a mode by name. Decision: keep Dock in both directions regardless,
+  because there is no live per-vehicle capability signal to gate an optional compiled-in mode on, and
+  hiding it would make Dock permanently uncommandable even on builds that do have it. The existing safety
+  net is upstream: `MavlinkFlightCommander.send` already throws for an explicit non-`ACCEPTED`
+  `COMMAND_ACK`, so a build that honestly rejects the mode change surfaces that rejection like any other.
+  The one gap this cannot close — a build that ACKs `ACCEPTED` without honoring the change — is a
+  firmware-honesty problem, not something a client-side table can fix; documented in
+  `FlightModes.customModeFor`'s own javadoc and in both modules' `MODULE.md` Gotchas.
+- **Submarine got its table slot, no `VehicleKind` constant** — `VehicleClass.of(12) == SUBMARINE`,
+  `VehicleClass.label(12) == "submarine"` (both discovery and the onboarding probe now say so, agreeing
+  with each other for the first time), but `FlightModes.vehicleKind(12)` still returns
+  `VehicleKind.UNKNOWN`, unchanged from before this wave, per the plan's own instruction and a direct
+  2026-08-26 operator instruction confirming it.
+- **Tests:** `mavlink-core` gained `VehicleClassTest` (8, new file) covering all seven outcomes including
+  the three copter numbers no prior table knew (29/35/43). `drone-link/mavlink` gained
+  `VehicleTaxonomyAgreementTest` (10, new file) — the test this plan's own "Expected result" describes,
+  proving all three former call sites now agree on the taxonomy and on exact labels, and that it fails
+  fast if a local table reappears — plus six new/extended cases in the existing `FlightModesTest`
+  (Dock/Circle/Initialising resolve both ways, a dodecarotor resolves "RTL" not "Mode 6", a gimbal and a
+  submarine are both proven still `UNKNOWN` at the `VehicleKind` level while distinct at the
+  `VehicleClass` level). All four in-scope modules green: `mavlink-core` 145 (+8), `vision-flight` 346
+  (untouched), `drone-link/mavlink` 214 (+16), `vision-api` 859 (untouched) — measured via
+  `./mvnw -B -o -pl drone-link/mavlink-core,contexts/vision-flight,drone-link/mavlink,station/vision-api
+  test`.
+- **Deliberately not touched: `contexts/vision-flight`.** The plan's own "Scope" line above names
+  `VehicleKind.java`/`ControlProfile.java`, but nothing in either needed a change — the new copter
+  `MAV_TYPE`s all resolve onto the existing `COPTER` constant, and the plan's own bullet three lines up
+  ("Submarine ... is not added as a `VehicleKind`") already forbids the one change that file's presence
+  in the scope line might have suggested. `ControlProfile.forKind(UNKNOWN)` is unchanged — it still
+  returns a flyable (if unsafe) default map; closing that is R2's job, not R1's.
+
+**What this plan got wrong:** essentially nothing factual — every number this wave's own grounding
+re-verified against upstream sources (the `MAV_TYPE` table, the ArduRover mode numbers) matched the
+plan's claims exactly. The one overspecification: the R1 "Scope" line names two `vision-flight` files
+that turned out to need zero changes (see above) — worth trimming in a future edit of this plan so a
+later reader doesn't go looking for a vision-flight diff that was never there.
 
 ### R2 — `UNKNOWN` stops guessing *(depends on R1)*
 **Scope:** `contexts/vision-flight/.../ControlProfile.java`, `DefaultManualControlService.java`,

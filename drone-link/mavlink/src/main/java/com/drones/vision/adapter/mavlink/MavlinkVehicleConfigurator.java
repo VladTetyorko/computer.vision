@@ -3,6 +3,7 @@ package com.drones.vision.adapter.mavlink;
 import com.drones.mavlink.CompId;
 import com.drones.mavlink.PeerId;
 import com.drones.mavlink.SysId;
+import com.drones.mavlink.VehicleClass;
 import com.drones.mavlink.service.CapabilityReport;
 import com.drones.mavlink.service.CapabilityService;
 import com.drones.mavlink.service.MessageIntervalService;
@@ -438,20 +439,20 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
         return name.toString();
     }
 
-    private static String vehicleKind(int mavType) {
-        return switch (mavType) {
-            case 1 -> "fixed wing";
-            case 2 -> "quadcopter";
-            case 3 -> "coaxial helicopter";
-            case 4 -> "helicopter";
-            case 10 -> "ground rover";
-            case 11 -> "surface boat";
-            case 12 -> "submarine";
-            case 13 -> "hexacopter";
-            case 14 -> "octocopter";
-            case 15 -> "tricopter";
-            default -> null;
-        };
+    /**
+     * The shared {@link VehicleClass#label} for {@code mavType} — feeds {@link
+     * VehicleProfile#vehicleKind()}, the free-text field the probe persists. {@code null} only for
+     * a genuinely unrecognized number; a recognized-but-unsupported airframe or a non-vehicle
+     * instrument still gets its own real label (e.g. {@code "gimbal"}), never {@code null}, since
+     * "we know what's on this link and it isn't flyable" is different information than "we have no
+     * idea" (FLEET-RADIO R1, F1c). Package-private so {@code VehicleTaxonomyAgreementTest} can
+     * assert it against {@code MavlinkHeartbeatScanner}'s own vehicle-kind lookup directly — before
+     * this wave the two disagreed on the very same vehicles ({@code "fixed wing"} vs. {@code
+     * "fixed-wing"}, {@code "ground rover"} vs. {@code "rover"}, {@code "surface boat"} vs. {@code
+     * "boat"}); both now read {@link VehicleClass}, the one {@code MAV_TYPE} table.
+     */
+    static String vehicleKind(int mavType) {
+        return VehicleClass.label(mavType);
     }
 
     private Integer soleObservedSysid(MavlinkGateway gateway) {
