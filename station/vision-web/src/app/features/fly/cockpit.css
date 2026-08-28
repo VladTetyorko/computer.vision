@@ -307,6 +307,54 @@
   flex: none;
 }
 
+/* ---- Not-streaming card (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) — centered, opaque,
+   `--panel-raised` rather than this cockpit's usual `--hud-*` frosted chrome: everything else
+   floating over `.stage-video` (the icon buttons, the detection-off pill above) sits over
+   unpredictable live video and needs to stay translucent so the picture still reads through it;
+   this one only ever shows while there is no picture (a static idle/black frame), so an opaque card
+   reads as a page panel, not a HUD control — the same reasoning `.hud-confirm .card` already
+   documents for its own shadow exception below, which this rule also borrows (a genuine floating
+   overlay over the stage, not a page panel we're placing a shadow on for decoration). Sits above
+   `vision-player`'s own centered "Not streaming"/"Stream stopped" caption (z-index: auto, so this
+   just needs to out-rank that): below `.main-header` (6) and `.hud-confirm` (20) so header controls
+   and the stop-stream scrim still win, above the bottom `.stage-notice` chips (5, which live lower
+   in the frame and never overlap this card's centered position anyway). */
+.not-streaming-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  width: min(90%, 22rem);
+  margin-bottom: 0;
+  text-align: center;
+  background: var(--panel-raised);
+  box-shadow: var(--shadow);
+}
+
+.not-streaming-card p {
+  margin: 0;
+}
+
+.not-streaming-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.not-streaming-card .mono {
+  font-size: 0.85rem;
+}
+
+.not-streaming-card .btn.big {
+  align-self: stretch;
+  justify-content: center;
+  margin-top: var(--space-8);
+}
+
 /* ---- Main header overlay: exit, drone switcher, "Bring home" ------------------------------ */
 /* A real 3-column safe-area grid, not a flex row relying on wrap-if-it-overflows
    (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F11, docs/extracts/design/01-fly.md — "Bring home is clipped at the right

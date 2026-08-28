@@ -22,6 +22,15 @@
   gap: var(--space-8);
 }
 
+/* Stale is not live (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) — the mode chip fades once
+   the sample backing it is stale (the armed chip's own dimming is a tone drop, not a colour
+   override — see `armedChip` in rc-monitor-logic.ts, applied via `armedChipView().tone`). Scoped
+   under `.state-strip` (three classes) so it outranks the base `.chip { color: var(--text-muted) }`
+   rule without `!important`. */
+.state-strip .chip.stale {
+  color: var(--text-faint);
+}
+
 .centre-all {
   align-self: flex-start;
 }

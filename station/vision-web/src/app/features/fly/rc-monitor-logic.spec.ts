@@ -8,6 +8,7 @@ import {
   latencyLabel,
   modeAlsoOnHint,
   rcReadinessRows,
+  sampleIsStale,
 } from './rc-monitor-logic';
 import type { ActionBinding, ManualControlChannelBinding, ReadinessReport } from '../../core/api/models';
 
@@ -75,15 +76,45 @@ describe('latencyLabel', () => {
 
 describe('armedChip', () => {
   it('renders a faint dash, toned neutral, while armed is unknown', () => {
-    expect(armedChip(undefined)).toEqual({ text: '—', tone: 'neutral' });
+    expect(armedChip(undefined, undefined)).toEqual({ text: '—', tone: 'neutral' });
   });
 
-  it('renders ARMED toned ok, mirroring the OSD chip bar\'s own convention', () => {
-    expect(armedChip(true)).toEqual({ text: 'ARMED', tone: 'ok' });
+  it('renders ARMED toned ok while the reading is live, mirroring the OSD chip bar\'s own convention', () => {
+    expect(armedChip(true, 0)).toEqual({ text: 'ARMED', tone: 'ok' });
+    expect(armedChip(true, undefined)).toEqual({ text: 'ARMED', tone: 'ok' });
   });
 
-  it('renders DISARMED toned neutral — the grounded, routine state', () => {
-    expect(armedChip(false)).toEqual({ text: 'DISARMED', tone: 'neutral' });
+  it('renders DISARMED toned neutral while the reading is live — the grounded, routine state', () => {
+    expect(armedChip(false, 0)).toEqual({ text: 'DISARMED', tone: 'neutral' });
+  });
+
+  it('stays ARMED/DISARMED while the reading is merely aging, not yet stale', () => {
+    expect(armedChip(true, 10)).toEqual({ text: 'ARMED', tone: 'ok' });
+    expect(armedChip(false, 10)).toEqual({ text: 'DISARMED', tone: 'neutral' });
+  });
+
+  it('drops the ok tone and reads as a past fact once the sample is stale (docs/plans/active/OPERATOR-UX-3-PLAN.md H1)', () => {
+    expect(armedChip(true, 353099)).toEqual({ text: 'Armed 4d 2h ago', tone: 'neutral' });
+  });
+
+  it('a stale disarmed reading reads the same way, still neutral', () => {
+    expect(armedChip(false, 353099)).toEqual({ text: 'Disarmed 4d 2h ago', tone: 'neutral' });
+  });
+});
+
+describe('sampleIsStale', () => {
+  it('is false with no age at all', () => {
+    expect(sampleIsStale(undefined)).toBe(false);
+  });
+
+  it('is false while live/aging', () => {
+    expect(sampleIsStale(0)).toBe(false);
+    expect(sampleIsStale(10)).toBe(false);
+  });
+
+  it('is true past the same red threshold armedChip itself uses', () => {
+    expect(sampleIsStale(10.01)).toBe(true);
+    expect(sampleIsStale(353099)).toBe(true);
   });
 });
 

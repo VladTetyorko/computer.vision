@@ -22,6 +22,7 @@ import {
   keyLegendLines,
   latencyLabel,
   modeAlsoOnHint,
+  sampleIsStale,
   type EngageGateInput,
 } from './rc-monitor-logic';
 import { normalizeChannelMap, type ChannelMapLike } from '../../core/rc/transmitter-view-logic';
@@ -114,9 +115,18 @@ export class RcMonitor implements OnInit {
    * guessing from `capabilities().selectableModes`, which names what the vehicle *could* be set to,
    * not what it is actually in right now. */
   readonly mode = input<string | undefined>(undefined);
+  /** `TelemetryStore.sampleAgeSeconds()` — the same age the OSD's own Link/Power groups grade
+   * staleness on (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1), threaded through so the state
+   * strip's armed chip drops its confident tone/text and the mode chip fades once the reading
+   * backing both is stale. `cockpit.html` wires this from `facade.telemetry.sampleAgeSeconds()`,
+   * the same signal source `armed`/`mode` above already read alongside. */
+  readonly sampleAgeSeconds = input<number | undefined>(undefined);
   readonly close = output<void>();
 
   protected readonly latencyLabel = latencyLabel;
+  /** Drives the mode chip's faint styling alongside the armed chip's own tone drop — see
+   * {@link sampleAgeSeconds}'s own doc comment. */
+  protected readonly staleSample = computed(() => sampleIsStale(this.sampleAgeSeconds()));
 
   /**
    * The layout this operator's switches currently fire through — resolved in the browser from the
@@ -132,7 +142,7 @@ export class RcMonitor implements OnInit {
   protected readonly modeAlsoOn = computed(() => modeAlsoOnHint(this.actionBindings()));
   protected readonly armAlsoOn = computed(() => armAlsoOnHint(this.actionBindings()));
 
-  protected readonly armedChipView = computed(() => armedChip(this.armed()));
+  protected readonly armedChipView = computed(() => armedChip(this.armed(), this.sampleAgeSeconds()));
 
   /** Whichever `ChannelMapLike` the transmitter view draws (docs/plans/active/CONTROLLER-UX-PLAN.md
    * §2.2's own instruction: prefer the engaged frame's own map once one exists, "it's what the
