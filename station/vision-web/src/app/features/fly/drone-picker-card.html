@@ -1,0 +1,32 @@
+<a class="card picker-card" [routerLink]="['/fly', asset().assetId]">
+  <div class="row spread">
+    <h3 class="truncate">{{ asset().displayName }}</h3>
+    <span class="chip" [class.ok]="asset().status === 'STREAMING'">
+      <span class="dot" [class.live]="asset().status === 'STREAMING'"></span>{{ statusLabel() }}
+    </span>
+  </div>
+  <p class="muted">{{ asset().categoryName }}</p>
+
+  <!-- Asset card rebuild (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3 — screenshot evidence: "filename
+       title + Streaming chip, nothing else"). Only facts already in the picker's own
+       `listAssets()` response render here — no per-card HTTP call backs this; battery is
+       deliberately absent (see `fly-logic.ts`'s own doc comment above `streamStateLabel`). -->
+  <dl class="picker-card-facts">
+    @if (lastSeen(); as lastSeenValue) {
+      <div class="fact">
+        <dt>Last seen</dt>
+        <dd>{{ lastSeenValue }}</dd>
+      </div>
+    }
+    @if (position(); as positionValue) {
+      <div class="fact">
+        <dt>Position</dt>
+        <dd class="mono">{{ positionValue }}</dd>
+      </div>
+    }
+  </dl>
+
+  <!-- Cards state their action (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2 rule 6) — the whole card
+       stays clickable as an accelerator, but this line spells out what pressing it does. -->
+  <span class="picker-card-cta">Enter cockpit →</span>
+</a>

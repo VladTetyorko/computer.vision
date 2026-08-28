@@ -2,8 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { DronePickerFacade } from './drone-picker-facade';
-import { lastSeenLabel, positionLabel, streamStateLabel } from './fly-logic';
-import type { AssetSummary } from '../../core/api/models';
+import { DronePickerCard } from './drone-picker-card';
 
 /**
  * `/fly` — the drone chooser (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12, docs/extracts/design/01-fly.md). Split
@@ -21,10 +20,15 @@ import type { AssetSummary } from '../../core/api/models';
  * click itself — entering a cockpit is now just a normal navigation, not an internal state flip);
  * `CockpitFacade` records the pick as "remembered" once that cockpit's own `getAsset()` actually
  * resolves, not here (see that facade's own doc comment for why).
+ *
+ * **T1 (docs/plans/active/OPERATOR-UX-3-PLAN.md finding T1, §2 T1)** grouped the grid into "Your
+ * vehicles" / "Simulated" (`facade.groups()`, a persisted `hideSimulated` toggle collapsing the
+ * second) and moved every per-card derivation onto `DronePickerCard` — this page no longer computes
+ * per-card facts itself, only which cards go in which group.
  */
 @Component({
   selector: 'vision-drone-picker',
-  imports: [RouterLink, PageBar],
+  imports: [RouterLink, PageBar, DronePickerCard],
   templateUrl: './drone-picker.html',
   styleUrl: './drone-picker.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -32,21 +36,4 @@ import type { AssetSummary } from '../../core/api/models';
 })
 export class DronePickerPage {
   protected readonly facade = inject(DronePickerFacade);
-
-  // --- Picker card facts (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3 — the asset card rebuild) -----------
-  // Pure, stateless, called from the picker's own `@for` — no facade state needed beyond the loop
-  // argument itself, same idiom as `asset-detail.ts`'s own `barLabel`/`detailPairs`, kept on the
-  // component rather than the facade for the identical reason `fly.ts` used to.
-
-  protected assetStreamState(asset: AssetSummary): 'Streaming' | 'Offline' {
-    return streamStateLabel(asset.status);
-  }
-
-  protected assetLastSeen(asset: AssetSummary): string | undefined {
-    return lastSeenLabel(asset.lastUsedAt, Date.now());
-  }
-
-  protected assetPosition(asset: AssetSummary): string | undefined {
-    return positionLabel(asset.lastKnownPosition);
-  }
 }
