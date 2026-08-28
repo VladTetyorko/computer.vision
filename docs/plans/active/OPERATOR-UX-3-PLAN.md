@@ -40,4 +40,4 @@ station is in most of the time. Style law: `.claude/skills/frontend-style/SKILL.
 | **T1** | `features/fly/drone-picker*.{ts,html,css,spec.ts}`, a pure `features/fly/drone-picker-logic.ts` (+spec) for grouping/sorting/age labels | picker specs |
 | **P1** | `features/preflight/*`, a pure `features/preflight/preflight-logic.ts` (+spec) | preflight specs |
 
-Status: H1/T1/P1 open.
+Status: H1 (`f75b08cf`), T1 (`e57f0dc9`), P1 (`f5adc7a1`) built, `humanAge` unified post-wave; **merged to master 2026-08-28**. Open: T1's simulated-detection still reads the category (device-level fact tracked by SOURCE-ONBOARDING-CONTEXT §4).
