@@ -82,6 +82,40 @@
             }
           </div>
         }
+
+        <!-- ---- Not-streaming card (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) ----------------
+             `vision-player` itself already renders a centered "Not streaming"/"Stream stopped" caption
+             for this state (`player.html`'s own `.overlay-status`, out of scope here) — this card is a
+             later sibling within the same `.stage-video` stacking context, so it renders on top and
+             replaces that bare caption with the two honest facts this app actually has for an asset
+             nothing is currently streaming from: when a sample was last seen and where it last put the
+             asset (`CockpitFacade#notStreamingLastSeen`/`notStreamingPosition`), never a fabricated
+             "live" value (CLAUDE.md rule 9 — newest data only, honest about staleness). An opaque
+             `--panel-raised` card, not one of this cockpit's `--hud-*` frosted controls: the frame
+             behind it is a static idle/black one, not unpredictable video, so the HUD-over-imagery
+             rationale (frontend-style §2) doesn't apply. Gated on `facade.primaryDevice()` so it never
+             doubles the "no camera device" notice above — that one already says everything there is to
+             say when there is no device to have ever streamed from. -->
+        @if (facade.primaryDevice() && !facade.live()) {
+          <div class="not-streaming-card card">
+            <p class="not-streaming-title">Not streaming</p>
+            <p class="muted">{{ facade.notStreamingLastSeen() }}</p>
+            @if (facade.notStreamingPosition(); as position) {
+              <p class="mono">{{ position }}</p>
+              <a class="muted hint" routerLink="/command">Open on map ›</a>
+            }
+            @if (!facade.watchMode()) {
+              <button
+                type="button"
+                class="btn big"
+                (click)="facade.start()"
+                [disabled]="facade.busy()"
+              >
+                {{ facade.busy() ? 'Starting…' : 'Start stream' }}
+              </button>
+            }
+          </div>
+        }
       </div>
 
       <!-- ---- Main header overlay: exit, map toggle, drone switcher, "Bring home" ---------------
@@ -273,6 +307,7 @@
           [capabilities]="facade.capabilities()"
           [armed]="facade.telemetry.latest()?.flightState?.armed"
           [mode]="facade.telemetry.latest()?.flightState?.mode"
+          [sampleAgeSeconds]="facade.telemetry.sampleAgeSeconds()"
           (close)="panels.close()"
         />
       }

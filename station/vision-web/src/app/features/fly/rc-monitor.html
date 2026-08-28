@@ -2,11 +2,14 @@
   <div class="rc-body">
     <!-- State strip (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 U5) — chips only, no prose above the
          sticks. Armed always renders (a faint dash while unknown); mode and the device+rate chip
-         appear only once there is a real signal to show. -->
+         appear only once there is a real signal to show. Both the armed chip's own tone/text
+         (armedChipView, see rc-monitor-logic.ts) and this mode chip's faint styling fade once the
+         sample backing them is stale (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) — a mode
+         name from 4 days ago is exactly as unearned a claim as a confident ARMED. -->
     <div class="state-strip">
       <span class="chip" [class.ok]="armedChipView().tone === 'ok'">{{ armedChipView().text }}</span>
       @if (mode(); as m) {
-        <span class="chip">{{ m }}</span>
+        <span class="chip" [class.stale]="staleSample()">{{ m }}</span>
       }
       @if (rc.connected()) {
         <span class="chip ok mono" [title]="rc.device()?.id">

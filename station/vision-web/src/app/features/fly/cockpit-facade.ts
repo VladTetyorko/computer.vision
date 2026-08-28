@@ -18,7 +18,7 @@ import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
-import { ageSeconds, telemetryDevices } from '../../core/telemetry/telemetry-logic';
+import { ageSeconds, humanAge, telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
@@ -34,6 +34,7 @@ import {
   isAllDronesOption,
   isWatchMode,
   latestFinishedUsage,
+  positionLabel,
   sortAssetsForPicker,
   trackingIdChanged,
 } from './fly-logic';
@@ -351,6 +352,27 @@ export class CockpitFacade {
    * exists" — so `<vision-marks-panel>` renders drone-only and says so, never a fabricated distance).
    */
   readonly dronePosition = this.weatherPosition;
+
+  // --- Not-streaming card (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) --------------------------
+  // `cockpit.html` renders one honest card in place of the video hero's bare "Not streaming" caption
+  // whenever `live()` is false — CLAUDE.md's "degrade honestly": say what's actually known (last
+  // seen, last position) rather than nothing.
+
+  /** `'Last seen 4d 2h ago'`, or `'Never seen'` once no sample has ever arrived for this asset —
+   * `TelemetryStore.sampleAgeSeconds()` is the same age every OSD/Controller-drawer chip already
+   * reads (H1: a stale-but-present sample still has a real answer here, even while nothing is
+   * live). */
+  readonly notStreamingLastSeen = computed(() => {
+    const age = this.telemetry.sampleAgeSeconds();
+    return age === undefined ? 'Never seen' : `Last seen ${humanAge(age)} ago`;
+  });
+
+  /** The card's "last position" line — reuses {@link dronePosition} verbatim (live fix else the
+   * asset's own last-known position) and `fly-logic.ts#positionLabel`'s identical `lat, lon`
+   * format, rather than a third rendering of "best position we have right now". `undefined` omits
+   * the line entirely (no fix has ever been reported), same poka-yoke rule as every other chip on
+   * this page. */
+  readonly notStreamingPosition = computed(() => positionLabel(this.dronePosition()));
 
   // --- Map inset (docs/plans/done/MAP-REWORK-PLAN.md §5.1 Wave D) ------------------------------------------
   // `<vision-tactical-map>` replaced the deleted `<vision-live-map>`, which read this facade's own

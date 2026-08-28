@@ -86,6 +86,24 @@
   opacity: 0.7;
 }
 
+/* Stale is not live (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) — past the Link group's own
+   red age threshold, the Power/Nav groups this modifier is applied to (`fly-osd.ts#isStale`,
+   `fly-osd.html`) read as "last known", not a live instrument: every metric's icon+value dims to
+   `--text-muted` regardless of its own severity tier (a stale "battery critical" reading is exactly
+   as unearned as a stale "ARMED" one) — the numbers themselves stay, this only mutes the confident
+   colour. The `.v`-specific rule is deliberately four classes deep (`.osd-group.stale .osd-metric
+   .v`) so it outranks the single severity-tier rules above (`.batt-low .v`, `.armed .v`,
+   `.gps-warn .v`, …) on specificity alone, with no `!important`; the plain `.osd-metric` rule dims
+   the icon (which only ever inherits `.osd-metric`'s own base `color: var(--text)`, three classes
+   ahead of that one-class rule already). */
+.osd-group.stale .osd-metric {
+  color: var(--text-muted);
+}
+
+.osd-group.stale .osd-metric .v {
+  color: var(--text-muted);
+}
+
 .wind-arrow {
   display: inline-block;
   font-size: 0.7rem;

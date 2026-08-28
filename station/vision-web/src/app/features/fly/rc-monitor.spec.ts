@@ -439,6 +439,37 @@ describe('RcMonitor — state strip (decision U5)', () => {
     expect(strip).toContain('RadioMaster TX16S');
     expect(strip).toContain('62 Hz');
   });
+
+  it('a stale sample drops the armed chip\'s confident ARMED for a past-tense fact, and fades the mode chip (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1)', () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+    fixture.componentRef.setInput('armed', true);
+    fixture.componentRef.setInput('mode', 'LOITER');
+    fixture.componentRef.setInput('sampleAgeSeconds', 353099);
+    fixture.detectChanges();
+
+    const strip = fixture.nativeElement.querySelector('.state-strip') as HTMLElement;
+    expect(strip.textContent).toContain('Armed 4d 2h ago');
+    expect(strip.textContent).not.toContain('ARMED');
+    const armedChipEl = strip.querySelector('.chip') as HTMLElement;
+    expect(armedChipEl.classList.contains('ok')).toBe(false);
+    const modeChipEl = Array.from(strip.querySelectorAll('.chip')).find((el) => el.textContent?.trim() === 'LOITER');
+    expect(modeChipEl?.classList.contains('stale')).toBe(true);
+  });
+
+  it('stays the confident ARMED/plain mode chip while the sample is merely aging, not yet stale', () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+    fixture.componentRef.setInput('armed', true);
+    fixture.componentRef.setInput('mode', 'LOITER');
+    fixture.componentRef.setInput('sampleAgeSeconds', 10);
+    fixture.detectChanges();
+
+    const strip = fixture.nativeElement.querySelector('.state-strip') as HTMLElement;
+    expect(strip.textContent).toContain('ARMED');
+    const armedChipEl = strip.querySelector('.chip') as HTMLElement;
+    expect(armedChipEl.classList.contains('ok')).toBe(true);
+    const modeChipEl = Array.from(strip.querySelectorAll('.chip')).find((el) => el.textContent?.trim() === 'LOITER');
+    expect(modeChipEl?.classList.contains('stale')).toBe(false);
+  });
 });
 
 describe('RcMonitor — the merged Controller drawer (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10)', () => {

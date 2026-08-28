@@ -3,14 +3,30 @@
        The paragraph carried genuine instruction (the remember-and-redirect behavior isn't obvious from
        the title alone — now handled a layer up by `fly-redirect-guard.ts`, but still worth stating),
        so it moves behind the bar's `?` disclosure rather than being dropped outright. Count is `null`
-       (no chip) until the first fetch resolves so the bar doesn't flash "0 drones" while in flight. -->
+       (no chip) until the first fetch resolves so the bar doesn't flash "0 drones" while in flight;
+       it counts both groups (docs/plans/active/OPERATOR-UX-3-PLAN.md T1) regardless of the
+       `hideSimulated` toggle, which only hides simulated cards from view, not from the count. -->
   <vision-page-bar
     title="Fly"
     icon="cockpit"
-    [count]="facade.pickerAssets() ? facade.orderedPickerAssets().length : null"
+    [count]="facade.pickerAssets() ? facade.totalPickerAssets() : null"
     countNoun="drone"
     hint="Pick a drone. Streaming ones show first — pick it again next time and, if it's still in the air, you land straight in the cockpit."
-  />
+  >
+    <!-- T1's own "Hide simulated" toggle (§2 T1) — only worth showing once there is at least one
+         simulated card to hide; naturally absent while loading (`groups()` is empty groups then). -->
+    @if (facade.groups().simulated.length > 0) {
+      <label class="row toggle" pageBarFilters>
+        <input
+          type="checkbox"
+          name="hideSimulated"
+          [checked]="facade.hideSimulated()"
+          (change)="facade.toggleHideSimulated()"
+        />
+        <span>Hide simulated</span>
+      </label>
+    }
+  </vision-page-bar>
 
   @if (facade.pickerError()) {
     <div class="card empty">
@@ -24,10 +40,12 @@
         <div class="card skeleton-card"></div>
       }
     </div>
-  } @else if (facade.orderedPickerAssets().length === 0) {
+  } @else if (facade.totalPickerAssets() === 0) {
     <!-- Truthful empty state (docs/plans/done/OPS-UX-PLAN.md §2 A2) — `facade.emptyState()` is the whole
          view model (title/message/CTA), resolved by role in `fly-logic.ts#pickerEmptyStateCopy`; this
-         template only ever renders it, never branches on `topRole` itself. -->
+         template only ever renders it, never branches on `topRole` itself. Only reached when *both*
+         groups are empty — one real vehicle or one simulated asset routes to the grouped view below
+         instead, whose own "Your vehicles" leg has its own, narrower empty line. -->
     <div class="card empty">
       <h3>{{ facade.emptyState().title }}</h3>
       <p>{{ facade.emptyState().message }}</p>
@@ -36,41 +54,34 @@
       }
     </div>
   } @else {
-    <div class="picker-grid">
-      @for (a of facade.orderedPickerAssets(); track a.assetId) {
-        <a class="card picker-card" [routerLink]="['/fly', a.assetId]">
-          <div class="row spread">
-            <h3 class="truncate">{{ a.displayName }}</h3>
-            <span class="chip" [class.ok]="a.status === 'STREAMING'">
-              <span class="dot" [class.live]="a.status === 'STREAMING'"></span>{{ assetStreamState(a) }}
-            </span>
-          </div>
-          <p class="muted">{{ a.categoryName }}</p>
-
-          <!-- Asset card rebuild (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3 — screenshot evidence: "filename
-               title + Streaming chip, nothing else"). Only facts already in the picker's own
-               `listAssets()` response render here — no per-card HTTP call backs this; battery is
-               deliberately absent (see `fly-logic.ts`'s own doc comment above `streamStateLabel`). -->
-          <dl class="picker-card-facts">
-            @if (assetLastSeen(a); as lastSeen) {
-              <div class="fact">
-                <dt>Last seen</dt>
-                <dd>{{ lastSeen }}</dd>
-              </div>
-            }
-            @if (assetPosition(a); as position) {
-              <div class="fact">
-                <dt>Position</dt>
-                <dd class="mono">{{ position }}</dd>
-              </div>
-            }
-          </dl>
-
-          <!-- Cards state their action (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2 rule 6) — the whole card
-               stays clickable as an accelerator, but this line spells out what pressing it does. -->
-          <span class="picker-card-cta">Enter cockpit →</span>
-        </a>
+    <!-- T1 (docs/plans/active/OPERATOR-UX-3-PLAN.md §2 T1) — two groups with quiet structural-label
+         headers instead of one flat, unordered grid mixing real and simulated vehicles. -->
+    <section class="picker-group">
+      <h2 class="picker-group-label">Your vehicles ({{ facade.groups().yours.length }})</h2>
+      @if (facade.groups().yours.length === 0) {
+        <p class="muted picker-group-empty">
+          No real vehicles yet — <a routerLink="/add-source">Add source ›</a>
+        </p>
+      } @else {
+        <div class="picker-grid">
+          @for (a of facade.groups().yours; track a.assetId) {
+            <vision-drone-picker-card [asset]="a" />
+          }
+        </div>
       }
-    </div>
+    </section>
+
+    @if (facade.groups().simulated.length > 0) {
+      <section class="picker-group">
+        <h2 class="picker-group-label">Simulated ({{ facade.groups().simulated.length }})</h2>
+        @if (!facade.hideSimulated()) {
+          <div class="picker-grid">
+            @for (a of facade.groups().simulated; track a.assetId) {
+              <vision-drone-picker-card [asset]="a" />
+            }
+          </div>
+        }
+      </section>
+    }
   }
 </div>

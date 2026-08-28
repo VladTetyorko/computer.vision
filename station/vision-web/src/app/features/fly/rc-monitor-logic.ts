@@ -4,6 +4,7 @@ import type { RcSourceKind } from '../../core/rc/rc-source.service';
 import { controlLabel } from '../../core/rc/control-action-logic';
 import { padsFrom } from '../../core/rc/control-surface-logic';
 import { featureStatusTone } from '../../core/readiness/readiness-logic';
+import { freshness, humanAge } from '../../core/telemetry/telemetry-logic';
 
 /**
  * Pure, component-adjacent logic behind `rc-monitor.ts` (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2,
@@ -71,13 +72,30 @@ export interface ArmedChip {
  * `armed`/`disarmed` deliberately mirror `fly-osd.css`'s own `.osd-metric.armed`/`.disarmed`
  * convention (armed is the notable, success-toned state; disarmed is dimmed/routine — a grounded
  * vehicle is the normal, safe one) rather than inventing a second armed/disarmed colour language
- * for this drawer.
+ * for this drawer — **while the reading is live/aging**. Once `ageSeconds` reads
+ * `freshness(…) === 'stale'` (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1 — the same tier
+ * `fly-osd-logic.ts#isStaleReading` grades the OSD's own armed chip on, one shared threshold, not a
+ * second invented one), the chip drops the success tone entirely — `tone: 'neutral'` even for
+ * `armed === true` — and its text becomes `'Armed 4d ago'`/`'Disarmed 4d ago'`: a fact about the
+ * past, not a claim about right now. `ageSeconds` is only ever `undefined` before a first sample
+ * exists, in which case `armed` itself is already `undefined` too (both come from the same
+ * `TelemetrySample`) — the stale branch is unreachable without a real age to report.
  */
-export function armedChip(armed: boolean | undefined): ArmedChip {
+export function armedChip(armed: boolean | undefined, ageSeconds: number | undefined): ArmedChip {
   if (armed === undefined) {
     return { text: '—', tone: 'neutral' };
   }
+  if (ageSeconds !== undefined && freshness(ageSeconds) === 'stale') {
+    return { text: `${armed ? 'Armed' : 'Disarmed'} ${humanAge(ageSeconds)} ago`, tone: 'neutral' };
+  }
   return armed ? { text: 'ARMED', tone: 'ok' } : { text: 'DISARMED', tone: 'neutral' };
+}
+
+/** Whether the sample age backing this drawer's chips counts as stale (H1) — the same call
+ * {@link armedChip} makes internally, exported so `rc-monitor.ts` can fade the mode chip alongside
+ * the armed chip's own tone drop, rather than each re-deriving "is this stale" separately. */
+export function sampleIsStale(ageSeconds: number | undefined): boolean {
+  return ageSeconds !== undefined && freshness(ageSeconds) === 'stale';
 }
 
 // --- "Also on <switch>" hints (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 decision U3) ------------------
