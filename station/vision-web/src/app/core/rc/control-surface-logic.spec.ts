@@ -187,8 +187,8 @@ describe('axesFrom', () => {
 });
 
 describe('profileCaveat', () => {
-  it('warns only for an unrecognised vehicle, where the throttle rests at mid-travel', () => {
-    expect(profileCaveat('UNKNOWN')).toContain('mid-travel');
+  it('warns only for an unrecognised vehicle, which binds nothing and is refused control', () => {
+    expect(profileCaveat('UNKNOWN')).toContain('refused');
     expect(profileCaveat('COPTER')).toBeUndefined();
     expect(profileCaveat('ROVER')).toBeUndefined();
     expect(profileCaveat('PLANE')).toBeUndefined();

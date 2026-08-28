@@ -172,3 +172,9 @@
 .tv-unmapped a {
   white-space: nowrap;
 }
+
+/* An empty layout says so in one quiet line rather than leaving a hole where the pads would be. */
+.tv-empty {
+  margin: 0;
+  font-size: 0.82rem;
+}

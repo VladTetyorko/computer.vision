@@ -167,12 +167,12 @@ export function axesFrom(
  *
  * Only `'UNKNOWN'` earns one, and it is stated as a fact about the vehicle rather than a scolding:
  * the platform did not recognize what it is, so it kept the historical centred map instead of
- * guessing — which means the throttle rests at mid-travel, and on a multirotor that is not idle
- * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P8).
+ * guessing — since FLEET-RADIO R2 that means it binds nothing and engage is refused, so the
+ * only honest picture is none (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P8).
  */
 export function profileCaveat(kind: VehicleKind): string | undefined {
   return kind === 'UNKNOWN'
-    ? 'This vehicle did not report what it is, so a generic centred layout is in use — the throttle rests at mid-travel, not at idle. Check it matches your machine before you drive it.'
+    ? 'This vehicle has not reported what it is, so no stick layout is bound and control is refused until it does. The picture appears here once it identifies itself.'
     : undefined;
 }
 
