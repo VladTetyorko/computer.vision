@@ -74,6 +74,10 @@
     </div>
   }
 
+  @if (!caveat() && pads().length === 0 && rows().length === 0) {
+    <p class="tv-empty faint">Nothing is bound in this layout yet.</p>
+  }
+
   @if (unmapped().length > 0) {
     <div class="tv-unmapped">
       <span class="faint">{{ unmappedLabel() }} — not mapped</span>
