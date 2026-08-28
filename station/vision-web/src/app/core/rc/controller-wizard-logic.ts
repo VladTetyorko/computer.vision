@@ -598,6 +598,70 @@ function hasMoved(sample: DetectSample | undefined): boolean {
 }
 
 /**
+ * The Mode step's known-mode-name read (CONTROLLER-UX-PLAN.md §5 wave M) — {@link modeNamesFor}'s
+ * deduplicated pool plus how many online, kind-matching assets actually contributed to it. Kept as
+ * one bundled shape (rather than two separate signals on `ControllerSetupFacade`) so the two
+ * numbers driving {@link modeSourceHint}'s copy can never independently go stale relative to each
+ * other — `names.length` and `assetCount` differ whenever one vehicle reports more than one mode,
+ * and the hint's own "Names from N online vehicles" sentence must count vehicles, not names.
+ */
+export interface KnownModeNames {
+  readonly names: readonly string[];
+  readonly assetCount: number;
+}
+
+/**
+ * The Mode step's known-mode-name pool (CONTROLLER-UX-PLAN.md §5 wave M) — the union of
+ * `selectableModes` across every capability whose `vehicleKind` equals the wizard's own selected
+ * layout `kind`, de-duplicated, in the order each name first appears (capability array order, then
+ * each capability's own `selectableModes` order — stable, so re-fetching the same set of vehicles
+ * never reshuffles the datalist under the operator).
+ *
+ * Filtered by `kind`, never by the reporting vehicle's identity: a COPTER layout's Mode step should
+ * only ever be seeded from an online COPTER's own reported modes — a ROVER's `HOLD`/`MANUAL` naming
+ * would be actively misleading offered to a copter operator (VEHICLE-CONTROL-PROFILES-CONTEXT.md
+ * §2 P1: throttle idle already means different things per kind; mode names are no different).
+ */
+export function modeNamesFor(
+  kind: VehicleKind,
+  capabilities: readonly { readonly vehicleKind?: VehicleKind; readonly selectableModes: readonly string[] }[],
+): readonly string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const capability of capabilities) {
+    if (capability.vehicleKind !== kind) {
+      continue;
+    }
+    for (const name of capability.selectableModes) {
+      if (!seen.has(name)) {
+        seen.add(name);
+        names.push(name);
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * The Mode step's honest "where did these names come from" copy (CONTROLLER-UX-PLAN.md §5 wave M).
+ *
+ * `count` (the number of distinct names {@link modeNamesFor} actually produced) is what gates the
+ * two branches — an online vehicle of the right kind that reported *zero* selectable modes is
+ * exactly as unhelpful to the operator as no online vehicle at all, so both collapse to the same
+ * "type one yourself" message rather than a technically-true but useless "Names from 1 online
+ * vehicle" that then lists nothing. `assetCount` is read only in the positive branch, to say how
+ * many vehicles the names were pooled from — deliberately never approximated from `count`, since
+ * one vehicle can report several modes and the sentence must never claim more vehicles contributed
+ * than genuinely did (this app's own "never optimistic about a claim" rule).
+ */
+export function modeSourceHint(count: number, assetCount: number): string {
+  if (count === 0) {
+    return 'No online vehicle to read mode names from — type one, e.g. LOITER';
+  }
+  return `Names from ${assetCount} online vehicle${assetCount === 1 ? '' : 's'}`;
+}
+
+/**
  * The review step's checklist (CONTROLLER-UX-PLAN.md §2.3's "Review" row) — every check is read off
  * the draft plus what has actually been observed on the transmitter during the review step, never
  * assumed from earlier steps having been completed.

@@ -26,6 +26,19 @@
   align-self: flex-start;
 }
 
+/* ---- Keyboard key legend (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave K) — one quiet line
+   per pad, `.label`'s own structural register (uppercase, tracked) rather than a second register
+   invented for this drawer. ------------------------------------------------------------------- */
+.key-legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.key-legend .label {
+  margin-bottom: 0;
+}
+
 .hint {
   font-size: 0.72rem;
   margin: 0;
@@ -56,4 +69,31 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-8);
+}
+
+/* ---- Readiness rows under the footer (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave R) — a
+   quiet dot+label list, never a chip per row (that would read as a second alert bar competing
+   with the Take-control button above it). ------------------------------------------------------- */
+.readiness-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.readiness-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.readiness-row .dot {
+  align-self: center;
+}
+
+.readiness-rows a {
+  align-self: flex-start;
+  font-size: 0.72rem;
 }

@@ -2,7 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import { describe, expect, it } from 'vitest';
 import { WizardStep } from './wizard-step';
 import type { ProfileDraft } from '../../core/rc/controller-setup-logic';
-import type { WizardStep as WizardStepModel } from '../../core/rc/controller-wizard-logic';
+import type { KnownModeNames, WizardStep as WizardStepModel } from '../../core/rc/controller-wizard-logic';
+import type { ControlCatalog } from '../../core/api/models';
 
 const THROTTLE_STEP: WizardStepModel = {
   id: 'channel-throttle',
@@ -156,5 +157,100 @@ describe('WizardStep', () => {
 
     expect(advanced).toBe(true);
     expect(applied).toBeUndefined();
+  });
+});
+
+describe('WizardStep — Mode step known names (CONTROLLER-UX-PLAN.md §5 wave M)', () => {
+  const MODE_STEP: WizardStepModel = { id: 'mode', kind: 'MODE', title: 'Mode', instruction: 'Flip your mode switch.' };
+
+  const CATALOG: ControlCatalog = {
+    vehicleKinds: [{ name: 'ROVER', label: 'Rover' }],
+    inputKinds: [{ name: 'BUTTON', label: 'Button', sources: ['BUTTON'], positions: ['LOW', 'HIGH'] }],
+    positions: [
+      { name: 'LOW', label: 'Low', level: 0 },
+      { name: 'HIGH', label: 'High', level: 2 },
+    ],
+    functions: [],
+    actions: [{ name: 'SET_MODE', label: 'Set mode', parameter: 'MODE_NAME', dangerous: false }],
+    auxFunctions: [],
+  };
+
+  function renderModeStep() {
+    const fixture = render();
+    fixture.componentRef.setInput('step', MODE_STEP);
+    fixture.componentRef.setInput('catalog', CATALOG);
+    fixture.componentRef.setInput('connected', true);
+    fixture.componentRef.setInput('editable', true);
+    // A button flicked from released to pressed — enough travel for `detectedControl` to name it.
+    fixture.componentRef.setInput('buttons', [0]);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('buttons', [1]);
+    fixture.detectChanges();
+    return fixture;
+  }
+
+  function pickSetMode(fixture: ReturnType<typeof renderModeStep>, parameter: string): void {
+    (fixture.componentInstance as unknown as { onPositionAction(p: string, v: string): void }).onPositionAction(
+      'HIGH',
+      'SET_MODE',
+    );
+    fixture.detectChanges();
+    (fixture.componentInstance as unknown as { onPositionParameter(p: string, v: string): void }).onPositionParameter(
+      'HIGH',
+      parameter,
+    );
+    fixture.detectChanges();
+  }
+
+  it('populates the datalist from knownModeNames and shows how many vehicles it came from', () => {
+    const fixture = renderModeStep();
+    const known: KnownModeNames = { names: ['LOITER', 'HOLD'], assetCount: 2 };
+    fixture.componentRef.setInput('knownModeNames', known);
+    fixture.detectChanges();
+
+    const options = Array.from(fixture.nativeElement.querySelectorAll('#wizard-mode-names option')).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    expect(options).toEqual(['LOITER', 'HOLD']);
+    expect(fixture.nativeElement.querySelector('.mode-source-hint')?.textContent?.trim()).toBe(
+      'Names from 2 online vehicles',
+    );
+  });
+
+  it('falls back to an honest type-it-yourself hint when nothing is known yet', () => {
+    const fixture = renderModeStep();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelectorAll('#wizard-mode-names option').length).toBe(0);
+    expect(fixture.nativeElement.querySelector('.mode-source-hint')?.textContent?.trim()).toBe(
+      'No online vehicle to read mode names from — type one, e.g. LOITER',
+    );
+  });
+
+  it('shows a quiet, non-blocking note when the typed mode name is not one this vehicle reported', () => {
+    const fixture = renderModeStep();
+    fixture.componentRef.setInput('knownModeNames', { names: ['LOITER', 'HOLD'], assetCount: 1 } satisfies KnownModeNames);
+    fixture.detectChanges();
+
+    pickSetMode(fixture, 'CRUISE');
+
+    expect(fixture.nativeElement.querySelector('.mode-unknown-note')?.textContent?.trim()).toBe(
+      'Not a mode this vehicle reported',
+    );
+    // Quiet, not blocking — Next is still enabled and reachable.
+    const next = Array.from(fixture.nativeElement.querySelectorAll('button')).find(
+      (b) => (b as HTMLElement).textContent?.trim() === 'Next →',
+    ) as HTMLButtonElement;
+    expect(next.disabled).toBe(false);
+  });
+
+  it('shows no note once the typed value matches a known mode name', () => {
+    const fixture = renderModeStep();
+    fixture.componentRef.setInput('knownModeNames', { names: ['LOITER', 'HOLD'], assetCount: 1 } satisfies KnownModeNames);
+    fixture.detectChanges();
+
+    pickSetMode(fixture, 'LOITER');
+
+    expect(fixture.nativeElement.querySelector('.mode-unknown-note')).toBeFalsy();
   });
 });

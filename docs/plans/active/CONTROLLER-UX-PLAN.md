@@ -196,3 +196,15 @@ Verified 2026-08-26 on `feat/controller-ux`: `npm run test:ci` 145 files / 2649 
 **Merged to master** 1fe0bb32 on 2026-08-28 (switch-row labels take `vehicleKind`, `MAX_RC_CHANNEL` 16 per FLEET-RADIO).
 
 **Open:** live check on a real radio (operator's step); drawer screenshots in both themes inside `.surface-dark` were not captured by the agent.
+
+---
+
+## 5. Cycle 2 (2026-08-28, branch `feat/controller-ux-2`) — pure frontend follow-ups
+
+| Wave | Files | Content | Because |
+|---|---|---|---|
+| **K** | `core/rc/keyboard-rc-input.service.ts` (+spec), `core/rc/rc-source.service.ts` (`RcSourceKind` gains `'keyboard'`), `features/fly/rc-monitor.*` (segmented control gains "Keyboard"; key legend under the pads) | Keyboard is a third input source: W/S = throttle (or ↑/↓), A/D = yaw/steering, arrow keys = pitch/roll on two-pad layouts; keys ramp (not snap) so a tap is a nudge and a hold is full deflection; centred controls spring back on key-up, unidirectional throttle holds; **any window blur or visibility change releases all keys** — the same deadman the gamepad has. Values render on the same transmitter view | P10: source, not client. Bench driving with nothing plugged in |
+| **R** | `features/fly/rc-monitor-logic.ts` (+spec), `features/fly/rc-monitor.*` | `disabledReason` becomes a list of readiness rows when the cause is readiness (label + outcome tone, reusing `core/readiness/readiness-logic.ts#outcomeLabel/outcomeTone`), with "Open preflight ›" to `/operate/preflight`; non-readiness reasons stay one line | FLEET-RADIO R6 made readiness real; one sentence hides which row is red |
+| **M** | `core/rc/controller-wizard-logic.ts` (mode-name helpers, +spec), `features/controller/wizard-step.*`, `features/controller/controller-setup-facade.ts` (one read-only signal) | The Mode step's `<datalist>` is fed by `selectableModes` of any online asset whose `vehicleKind` matches the layout's kind (via the existing capabilities read the cockpit uses); free text stays the fallback and the hint says where the names came from | Closes cycle 1's open honesty gap |
+
+Status: K/R **built** 9062f82d — keyboard is a third `RcSourceKind` (`core/rc/keyboard-rc-input.service.ts`), key legend under the pads, and readiness rows (`rc-relay` only, advisory, "Open preflight ›") under Take control; `RcSource#keyboard` is `{ optional: true }`-injected so the two pre-existing hand-built harnesses (`manual-control-client.spec.ts`, `control-action-dispatcher.spec.ts`) didn't need touching. M open.

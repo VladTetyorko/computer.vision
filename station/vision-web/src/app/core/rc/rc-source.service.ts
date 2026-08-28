@@ -1,9 +1,11 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { RcInputService } from './rc-input.service';
 import { VirtualRcInputService } from './virtual-rc-input.service';
+import { KeyboardRcInputService } from './keyboard-rc-input.service';
 
-/** Where stick values come from: a plugged-in transmitter/gamepad, or the on-screen surface. */
-export type RcSourceKind = 'gamepad' | 'virtual';
+/** Where stick values come from: a plugged-in transmitter/gamepad, the on-screen surface, or the
+ * keyboard (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave K). */
+export type RcSourceKind = 'gamepad' | 'virtual' | 'keyboard';
 
 /**
  * `RcSource` — the one seam `ManualControlClient` reads its stick values through
@@ -15,7 +17,8 @@ export type RcSourceKind = 'gamepad' | 'virtual';
  * watchdog, the keepalive cadence, latency, audit, the scope gate — was already input-agnostic, so
  * the right fix was a second *source*, not a second client.
  *
- * **Provided per host**, with `RcInputService`, `VirtualRcInputService` and `ManualControlClient`.
+ * **Provided per host**, with `RcInputService`, `VirtualRcInputService`, `KeyboardRcInputService` and
+ * `ManualControlClient` — `rc-monitor.ts`'s own `providers` array.
  *
  * <h2>Which source is selected</h2>
  * The on-screen surface is the floor — it is always available — and a connected gamepad is promoted
@@ -38,6 +41,14 @@ export type RcSourceKind = 'gamepad' | 'virtual';
 export class RcSource {
   private readonly gamepad = inject(RcInputService);
   private readonly virtual = inject(VirtualRcInputService);
+  /** `{ optional: true }` only so the handful of specs that build a narrower `RcSource` harness by
+   * hand (`manual-control-client.spec.ts`, `control-action-dispatcher.spec.ts` — neither exercises
+   * the keyboard source) don't also have to list a third sibling they never select; `rc-monitor.ts`,
+   * the one real caller, always provides all three (`use('keyboard')` is unreachable without it
+   * anyway, so a `null` here is never actually read). Not a "null means the feature is off" contract
+   * (CLAUDE.md) — every code path below that reads it only runs once `_kind() === 'keyboard'`, which
+   * nothing can reach without the real service present. */
+  private readonly keyboard = inject(KeyboardRcInputService, { optional: true });
 
   /** Seeded from the gamepad's state at construction, not left to the first effect flush: a host
    * that mounts with a transmitter already plugged in must read as `'gamepad'` immediately, or a
@@ -48,21 +59,37 @@ export class RcSource {
   readonly kind = this._kind.asReadonly();
 
   /** The selected source's axes — the exact array a `channels` frame carries. */
-  readonly axes = computed<readonly number[]>(() =>
-    this._kind() === 'gamepad' ? this.gamepad.axes() : this.virtual.axes(),
-  );
+  readonly axes = computed<readonly number[]>(() => {
+    switch (this._kind()) {
+      case 'gamepad':
+        return this.gamepad.axes();
+      case 'keyboard':
+        return this.keyboard?.axes() ?? [];
+      default:
+        return this.virtual.axes();
+    }
+  });
 
-  readonly buttons = computed<readonly number[]>(() =>
-    this._kind() === 'gamepad' ? this.gamepad.buttons() : this.virtual.buttons(),
-  );
+  readonly buttons = computed<readonly number[]>(() => {
+    switch (this._kind()) {
+      case 'gamepad':
+        return this.gamepad.buttons();
+      case 'keyboard':
+        return this.keyboard?.buttons() ?? [];
+      default:
+        return this.virtual.buttons();
+    }
+  });
 
   /**
    * Whether the selected source can currently produce input at all.
    *
    * `ManualControlClient` releases a live session when this goes `false`, which for the gamepad
-   * source is the unplug deadman it always had. The on-screen surface is always live — it cannot be
-   * unplugged — so its deadmen are the other four the client already wires: an explicit release, the
-   * drawer closing, the tab hiding, and the socket dropping.
+   * source is the unplug deadman it always had. The on-screen surface and the keyboard are always
+   * live — neither can be unplugged — so their deadmen are the other four the client already wires:
+   * an explicit release, the drawer closing, the tab hiding, and the socket dropping (the keyboard
+   * service also releases every held key on its own `blur`/tab-hide, same as those two, so a session
+   * left running with keys down never coasts).
    */
   readonly live = computed(() => (this._kind() === 'gamepad' ? this.gamepad.connected() : true));
 
@@ -75,6 +102,10 @@ export class RcSource {
         this._kind.set('gamepad');
       }
     });
+
+    // Only the selected source's own window listeners are ever live — an unselected keyboard source
+    // must not steal W/A/S/D from the rest of the page.
+    effect(() => this.keyboard?.setEnabled(this._kind() === 'keyboard'));
   }
 
   /**

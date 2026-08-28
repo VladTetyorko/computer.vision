@@ -14,6 +14,7 @@ import {
   applyChannelStep,
   channelStepDefaults,
   detectedControl,
+  modeSourceHint,
   observeInputs,
   questionsFor,
   reviewChecks,
@@ -21,6 +22,7 @@ import {
   type DetectedControl,
   type DetectSample,
   type DirectionTile,
+  type KnownModeNames,
   type RestsTile,
   type WizardStep as WizardStepModel,
 } from '../../core/rc/controller-wizard-logic';
@@ -111,6 +113,10 @@ export class WizardStep {
   readonly catalog = input<ControlCatalog | undefined>(undefined);
   readonly axes = input<readonly number[]>([]);
   readonly buttons = input<readonly number[]>([]);
+  /** `ControllerSetupFacade#knownModeNames` — the Mode step's `<datalist>` source, fed from the
+   * currently open layout's kind. Defaults to "nothing known yet" so this component stays a plain
+   * input/output component with no facade of its own (see this class's own doc comment). */
+  readonly knownModeNames = input<KnownModeNames>({ names: [], assetCount: 0 });
   /** Whether a transmitter/gamepad is reporting input at all — item 7's manual-picker gate. */
   readonly connected = input<boolean>(false);
   /** `false` for a built-in layout (decision U12) — every choice control is replaced by a single
@@ -152,10 +158,19 @@ export class WizardStep {
   private readonly channelChoice = signal<number | undefined>(undefined);
   private readonly positionChoices = signal<ReadonlyMap<SwitchPosition, PositionChoice>>(new Map());
 
-  /** No catalogue/capability today carries known ArduPilot mode names (see this class's own doc
-   * comment) — always empty, so the Mode step's `<datalist>` is present but inert until one does;
-   * free text keeps working exactly as it does today either way. */
-  protected readonly modeNameSuggestions = computed<readonly string[]>(() => []);
+  /** The Mode step's `<datalist>` source (CONTROLLER-UX-PLAN.md §5 wave M) — reported mode names
+   * from whichever online vehicles match this layout's own kind. Empty (never blocking) while the
+   * facade's background read is still in flight, on a read failure, or when nothing online matches
+   * — free text keeps working exactly as it always did either way. */
+  protected readonly modeNameSuggestions = computed<readonly string[]>(() => this.knownModeNames().names);
+
+  /** The honest "where did these names come from" line shown once under the Mode step's own
+   * datalist — see {@link modeSourceHint}'s own doc comment for why `names.length` and
+   * `assetCount` are kept distinct rather than one standing in for the other. */
+  protected readonly modeSourceHintText = computed<string>(() => {
+    const known = this.knownModeNames();
+    return modeSourceHint(known.names.length, known.assetCount);
+  });
 
   constructor() {
     // A step's detection state belongs to that step alone — opening a different one starts clean.
@@ -292,6 +307,31 @@ export class WizardStep {
 
   protected parameterKind(action: ControlAction | undefined) {
     return parameterKindOf(this.catalog(), action);
+  }
+
+  /** Whether this step can ask for a mode name at all — read off {@link actionsForStep}'s own
+   * narrowed action family rather than what a row has been set to *so far*, so the source hint
+   * appears the moment the Mode step's positions render, not only after the operator has already
+   * picked `SET_MODE` on some row (which is the exact information the hint is there to inform that
+   * choice). Gates the source hint under the shared `wizard-mode-names` datalist, shown once rather
+   * than once per row — the datalist itself is shared across `ARM`/`MODE`/`EXTRAS`, but in practice
+   * only `MODE` ever offers `SET_MODE` at all. */
+  protected readonly hasModeNameField = computed(() =>
+    this.stepActions().some((action) => action.parameter === 'MODE_NAME'),
+  );
+
+  /** The quiet, non-blocking note for a position whose typed mode name isn't one this vehicle
+   * actually reported (CONTROLLER-UX-PLAN.md §5 wave M) — only shown once names are actually known
+   * (an empty pool means nothing to compare against, not "unknown"), and only once the operator has
+   * typed something. Never blocks `Next` — a mode this app hasn't seen yet may still be a real one
+   * the operator's own firmware supports. */
+  protected isUnknownModeName(row: PositionRow): boolean {
+    if (this.parameterKind(row.action) !== 'MODE_NAME') {
+      return false;
+    }
+    const names = this.modeNameSuggestions();
+    const typed = (row.parameter ?? '').trim();
+    return names.length > 0 && typed.length > 0 && !names.includes(typed);
   }
 
   protected auxOptions(current: string | null) {
