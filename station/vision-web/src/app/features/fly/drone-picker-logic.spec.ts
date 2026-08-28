@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetSummary } from '../../core/api/models';
-import { groupAndSort, humanAge, isSimulated, offlineLabel } from './drone-picker-logic';
+import { groupAndSort, isSimulated, offlineLabel } from './drone-picker-logic';
 
 function asset(partial: Partial<AssetSummary>): AssetSummary {
   return {
@@ -85,32 +85,6 @@ describe('groupAndSort', () => {
   });
 });
 
-describe('humanAge', () => {
-  it('renders seconds under a minute', () => {
-    expect(humanAge(45)).toBe('45s');
-  });
-
-  it('renders whole minutes under an hour', () => {
-    expect(humanAge(12 * 60)).toBe('12m');
-  });
-
-  it('renders hours and minutes under a day', () => {
-    expect(humanAge(2 * 3600 + 29 * 60)).toBe('2h 29m');
-  });
-
-  it('omits a zero minutes remainder', () => {
-    expect(humanAge(4 * 3600)).toBe('4h');
-  });
-
-  it('renders whole days with no hours remainder', () => {
-    expect(humanAge(6 * 86_400 + 4 * 3600)).toBe('6d');
-  });
-
-  it('clamps a negative age to 0s rather than going negative', () => {
-    expect(humanAge(-5)).toBe('0s');
-  });
-});
-
 describe('offlineLabel', () => {
   it('reads "Never seen" for an asset with no lastUsedAt', () => {
     expect(offlineLabel(asset({ lastUsedAt: undefined }), NOW)).toBe('Never seen');
@@ -122,7 +96,7 @@ describe('offlineLabel', () => {
     expect(offlineLabel(a, NOW)).toBe('Offline · 2h 29m');
   });
 
-  it('reads "Offline · 6d" for an asset offline six days', () => {
+  it('reads "Offline · 6d" for an asset offline six days sharp — a zero remainder is dropped', () => {
     const sixDaysAgo = NOW - 6 * 86_400 * 1000;
     const a = asset({ lastUsedAt: new Date(sixDaysAgo).toISOString() });
     expect(offlineLabel(a, NOW)).toBe('Offline · 6d');

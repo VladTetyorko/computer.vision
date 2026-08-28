@@ -238,19 +238,19 @@ describe('humanAge', () => {
   });
 
   it('renders minutes and seconds under an hour', () => {
-    expect(humanAge(60)).toBe('1m 0s');
+    expect(humanAge(60)).toBe('1m');
     expect(humanAge(190)).toBe('3m 10s');
     expect(humanAge(3599)).toBe('59m 59s');
   });
 
   it('renders hours and minutes under a day, dropping seconds', () => {
-    expect(humanAge(3600)).toBe('1h 0m');
+    expect(humanAge(3600)).toBe('1h');
     expect(humanAge(14520)).toBe('4h 2m');
     expect(humanAge(86399)).toBe('23h 59m');
   });
 
   it('renders days and hours at and past a day, dropping minutes', () => {
-    expect(humanAge(86400)).toBe('1d 0h');
+    expect(humanAge(86400)).toBe('1d');
     expect(humanAge(352800)).toBe('4d 2h');
   });
 

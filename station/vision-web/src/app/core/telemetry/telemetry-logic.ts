@@ -184,13 +184,14 @@ const SECONDS_PER_HOUR = 3600;
 const SECONDS_PER_DAY = 86400;
 
 /**
- * A sample age as a human reads it, always the two largest units that matter — `12s`, `3m 10s`,
- * `4h 2m`, `4d 2h` — never a raw second count (H1's own finding: `353099s` on the LINK chip is a
+ * A sample age as a human reads it, the two largest units that matter with zero remainders
+ * dropped — `12s`, `3m 10s`, `4h 2m`, `4h`, `4d 2h` — never a raw second count (H1's own finding: `353099s` on the LINK chip is a
  * number nobody parses). Unlike `core/stream-info-logic.ts#formatDuration` (session durations,
  * capped at hours — a live flight is never days long), this needs a day tier: a telemetry sample
  * can legitimately be days stale (an open usage nobody closed). Deliberately unpadded (`2m`, not
  * `02m`) — `formatDuration`'s zero-padding reads right for a ticking clock digit; this is a single
- * glanced-at age, not a clock face.
+ * glanced-at age, not a clock face. Shared by the OSD, the drawer strip, the cockpit's not-streaming
+ * card and the `/fly` picker's offline chips — one age vocabulary across the app.
  */
 export function humanAge(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
@@ -198,18 +199,21 @@ export function humanAge(seconds: number): string {
     return `${total}s`;
   }
   if (total < SECONDS_PER_HOUR) {
-    const minutes = Math.floor(total / SECONDS_PER_MINUTE);
-    const remainderSeconds = total % SECONDS_PER_MINUTE;
-    return `${minutes}m ${remainderSeconds}s`;
+    return withRemainder(Math.floor(total / SECONDS_PER_MINUTE), 'm', total % SECONDS_PER_MINUTE, 's');
   }
   if (total < SECONDS_PER_DAY) {
     const hours = Math.floor(total / SECONDS_PER_HOUR);
     const remainderMinutes = Math.floor((total % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE);
-    return `${hours}h ${remainderMinutes}m`;
+    return withRemainder(hours, 'h', remainderMinutes, 'm');
   }
   const days = Math.floor(total / SECONDS_PER_DAY);
   const remainderHours = Math.floor((total % SECONDS_PER_DAY) / SECONDS_PER_HOUR);
-  return `${days}d ${remainderHours}h`;
+  return withRemainder(days, 'd', remainderHours, 'h');
+}
+
+/** `4h 2m` but `4h`, never `4h 0m` — a zero remainder is noise, not precision. */
+function withRemainder(major: number, majorUnit: string, minor: number, minorUnit: string): string {
+  return minor > 0 ? `${major}${majorUnit} ${minor}${minorUnit}` : `${major}${majorUnit}`;
 }
 
 /**

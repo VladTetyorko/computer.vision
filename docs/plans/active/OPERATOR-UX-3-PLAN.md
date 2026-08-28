@@ -24,7 +24,7 @@ station is in most of the time. Style law: `.claude/skills/frontend-style/SKILL.
 ### T1 — Fly index that triages
 - Cards sorted: streaming first, then by `lastSeen` descending, never-seen last.
 - Two groups with quiet structural-label headers: **Your vehicles** (any asset with a non-simulated device / category ≠ Simulated) and **Simulated**. Group headers carry counts. A `Hide simulated` toggle (persisted in `localStorage`) collapses the second group.
-- The status chip reads the age, not the word: `Offline · 2h 29m` / `Offline · 6d` / `Never seen`; streaming stays the live chip.
+- The status chip reads the age, not the word: `Offline · 2h 29m` / `Offline · 6d 4h` / `Never seen` (H1's `humanAge`, one vocabulary); streaming stays the live chip.
 - No new filters beyond the toggle — the page has one job.
 
 ### P1 — Pre-flight table that names the blocker

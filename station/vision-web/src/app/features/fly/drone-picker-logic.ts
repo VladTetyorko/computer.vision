@@ -1,4 +1,5 @@
 import type { AssetSummary } from '../../core/api/models';
+import { humanAge } from '../../core/telemetry/telemetry-logic';
 
 /**
  * Pure, Angular-free logic behind `DronePickerPage` (docs/plans/active/OPERATOR-UX-3-PLAN.md finding T1,
@@ -106,41 +107,8 @@ export function groupAndSort(assets: readonly AssetSummary[], nowMs: number): Pi
 // here to "the operator must be able to tell newest from oldest at a glance") ------------------
 
 /**
- * A coarse, human-scale age label: `45s`, `12m`, `2h 29m`, `6d`. Written locally for this wave
- * rather than reused from `core/telemetry/telemetry-logic.ts#humanAge` (H1's own finding) even
- * though H1 landed *during* this task (a genuine race on the shared working tree — `git log`/`grep`
- * found no `humanAge` when this wave started; `git diff` later showed H1's own uncommitted edit to
- * that file). Not reused because the two contracts actively **disagree**, not just differ in
- * precision: past a minute, H1's `humanAge` always renders both units of its tier, remainder or not
- * (`4h 0m`, `6d 4h`), while T1's own §2 spec
- * gives `offlineLabel`'s example output as bare `Offline · 6d`, no hours remainder. Reusing H1's
- * function verbatim would silently break T1's own stated contract. **Flagged for the plan author**:
- * either T1's example is loosened to accept `6d 4h`-style output (then this function should be
- * deleted and `offlineLabel` should import H1's `humanAge` instead), or H1's function gains an
- * "omit a zero/coarse remainder" mode T1 can opt into — this file does not decide that unilaterally.
- * Until resolved, this is a deliberate, documented duplication, not an oversight.
- */
-export function humanAge(ageSeconds: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ageSeconds));
-  const days = Math.floor(totalSeconds / 86_400);
-  if (days >= 1) {
-    return `${days}d`;
-  }
-  const hours = Math.floor(totalSeconds / 3600);
-  if (hours >= 1) {
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-  }
-  const minutes = Math.floor(totalSeconds / 60);
-  if (minutes >= 1) {
-    return `${minutes}m`;
-  }
-  return `${totalSeconds}s`;
-}
-
-/**
  * The picker card's status-chip text for a non-streaming asset — `Offline · 2h 29m` / `Offline ·
- * 6d`, or `Never seen` for an asset with no `lastUsedAt` at all (never a fabricated age). Replaces
+ * 6d 4h`, or `Never seen` for an asset with no `lastUsedAt` at all (never a fabricated age). Replaces
  * the bare word "Offline" every card used to show regardless of whether the asset went dark 2
  * minutes or 4 days ago (T1's own finding). Streaming assets never call this — `drone-picker-card.ts`
  * keeps the live chip for those, unchanged.
