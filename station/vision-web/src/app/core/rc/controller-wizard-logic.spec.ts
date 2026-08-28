@@ -7,6 +7,8 @@ import {
   applyChannelStep,
   channelStepDefaults,
   detectedControl,
+  modeNamesFor,
+  modeSourceHint,
   observeInputs,
   questionsFor,
   reviewChecks,
@@ -576,6 +578,42 @@ describe('reviewChecks', () => {
 
     expect(checks.find((c) => c.label === 'Arm is on a switch')?.ok).toBe(true);
     expect(checks.find((c) => c.label === 'Mode is on a switch')?.ok).toBe(false);
+  });
+});
+
+describe('modeNamesFor', () => {
+  it('unions selectableModes across capabilities matching the kind, de-duplicated, in first-seen order', () => {
+    const names = modeNamesFor('COPTER', [
+      { vehicleKind: 'COPTER', selectableModes: ['LOITER', 'HOLD'] },
+      { vehicleKind: 'COPTER', selectableModes: ['HOLD', 'AUTO'] },
+      { vehicleKind: 'ROVER', selectableModes: ['MANUAL'] },
+    ]);
+
+    expect(names).toEqual(['LOITER', 'HOLD', 'AUTO']);
+  });
+
+  it('is empty when nothing matches the kind', () => {
+    expect(modeNamesFor('PLANE', [{ vehicleKind: 'COPTER', selectableModes: ['LOITER'] }])).toEqual([]);
+    expect(modeNamesFor('PLANE', [])).toEqual([]);
+  });
+
+  it('ignores a capability with no vehicleKind at all', () => {
+    expect(modeNamesFor('COPTER', [{ selectableModes: ['LOITER'] }])).toEqual([]);
+  });
+});
+
+describe('modeSourceHint', () => {
+  it('names how many vehicles the pool came from when there are names', () => {
+    expect(modeSourceHint(3, 2)).toBe('Names from 2 online vehicles');
+  });
+
+  it('singularizes for exactly one contributing vehicle', () => {
+    expect(modeSourceHint(2, 1)).toBe('Names from 1 online vehicle');
+  });
+
+  it('falls back to a type-it-yourself message when there are no names, even if a vehicle is online', () => {
+    expect(modeSourceHint(0, 0)).toBe('No online vehicle to read mode names from — type one, e.g. LOITER');
+    expect(modeSourceHint(0, 2)).toBe('No online vehicle to read mode names from — type one, e.g. LOITER');
   });
 });
 

@@ -147,6 +147,9 @@
                       [ngModel]="row.parameter ?? ''"
                       (ngModelChange)="onPositionParameter(row.position, $event)"
                     />
+                    @if (isUnknownModeName(row)) {
+                      <span class="muted mode-unknown-note">Not a mode this vehicle reported</span>
+                    }
                   </label>
                 } @else if (parameterKind(act) === 'AUX_FUNCTION') {
                   <label class="grow">
@@ -171,6 +174,9 @@
             <option [value]="m"></option>
           }
         </datalist>
+        @if (hasModeNameField()) {
+          <p class="muted hint mode-source-hint">{{ modeSourceHintText() }}</p>
+        }
 
         @if (step().kind === 'EXTRAS') {
           <button type="button" class="btn secondary small" (click)="onAddAnother()">Add another</button>
