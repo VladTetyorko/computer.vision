@@ -193,4 +193,6 @@ touched specs; do not run the Maven reactor.
 
 Verified 2026-08-26 on `feat/controller-ux`: `npm run test:ci` 145 files / 2649 tests green; `ng build --configuration production` green with only the two pre-existing budget warnings (initial 410.19 kB, `tactical-map.css`); `controller-setup` lazy chunk 27.58 → 60.75 kB.
 
+**Merged to master** 1fe0bb32 on 2026-08-28 (switch-row labels take `vehicleKind`, `MAX_RC_CHANNEL` 16 per FLEET-RADIO).
+
 **Open:** live check on a real radio (operator's step); drawer screenshots in both themes inside `.surface-dark` were not captured by the agent.
