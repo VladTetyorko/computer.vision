@@ -19,45 +19,84 @@
     </vision-empty>
   } @else {
     <div class="kpi-tiles">
-      <vision-stat label="Go" [value]="facade.counts().go" tone="ok" />
-      <vision-stat label="No-go" [value]="facade.counts().noGo" [tone]="facade.counts().noGo > 0 ? 'danger' : 'muted'" />
-      <vision-stat label="Unknown" [value]="facade.counts().unknown" tone="muted" />
+      <button
+        type="button"
+        class="stat-filter"
+        [class.selected]="facade.verdictFilter() === 'GO'"
+        [attr.aria-pressed]="facade.verdictFilter() === 'GO'"
+        (click)="facade.toggleVerdictFilter('GO')"
+      >
+        <vision-stat label="Go" [value]="facade.counts().go" tone="ok" />
+      </button>
+      <button
+        type="button"
+        class="stat-filter"
+        [class.selected]="facade.verdictFilter() === 'NO_GO'"
+        [attr.aria-pressed]="facade.verdictFilter() === 'NO_GO'"
+        (click)="facade.toggleVerdictFilter('NO_GO')"
+      >
+        <vision-stat label="No-go" [value]="facade.counts().noGo" [tone]="facade.counts().noGo > 0 ? 'danger' : 'muted'" />
+      </button>
+      <button
+        type="button"
+        class="stat-filter"
+        [class.selected]="facade.verdictFilter() === 'UNKNOWN'"
+        [attr.aria-pressed]="facade.verdictFilter() === 'UNKNOWN'"
+        (click)="facade.toggleVerdictFilter('UNKNOWN')"
+      >
+        <vision-stat label="Unknown" [value]="facade.counts().unknown" tone="muted" />
+      </button>
     </div>
 
-    <div class="card">
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Drone</th>
-              <th>Verdict</th>
-              <th>Needs attention</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (row of facade.rows(); track row.assetId) {
+    @if (facade.filteredRows().length === 0) {
+      <vision-empty [title]="facade.filteredEmptyTitle()">
+        <button type="button" class="btn secondary" (click)="facade.clearVerdictFilter()">Clear filter</button>
+      </vision-empty>
+    } @else {
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead>
               <tr>
-                <td class="name-cell truncate" [title]="row.displayName">{{ row.displayName }}</td>
-                <td>
-                  <span class="chip" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'">
-                    <span class="dot" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'"></span>
-                    {{ facade.verdictLabel(row.verdict) }}
-                  </span>
-                </td>
-                @if (facade.attention(row); as attention) {
-                  <td class="attention-cell truncate muted" [title]="attention">{{ attention }}</td>
-                } @else {
-                  <td class="faint">—</td>
-                }
-                <td class="actions">
-                  <a class="btn secondary small" [routerLink]="['/assets', row.assetId, 'readiness']">Report ›</a>
-                </td>
+                <th>Drone</th>
+                <th>Verdict</th>
+                <th>Needs attention</th>
+                <th></th>
               </tr>
-            }
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              @for (row of facade.filteredRows(); track row.assetId) {
+                <tr>
+                  <td class="name-cell truncate" [title]="row.displayName">{{ row.displayName }}</td>
+                  <td>
+                    <span class="chip" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'">
+                      <span class="dot" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'"></span>
+                      {{ facade.verdictLabel(row.verdict) }}
+                    </span>
+                  </td>
+                  @if (facade.blocker(row); as blocker) {
+                    @if (blocker.first) {
+                      <td class="attention-cell">
+                        <span class="attention-row" [title]="blocker.first">
+                          <span class="blocker-name truncate muted">{{ blocker.first }}</span>
+                          @if (blocker.more > 0) {
+                            <span class="chip">+{{ blocker.more }}</span>
+                          }
+                        </span>
+                      </td>
+                    } @else {
+                      <td class="faint">—</td>
+                    }
+                  }
+                  <td class="actions">
+                    <a class="btn secondary small" [routerLink]="['/assets', row.assetId, 'readiness']">Report ›</a>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    }
   }
 </div>

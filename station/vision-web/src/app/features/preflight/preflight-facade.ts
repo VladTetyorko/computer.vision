@@ -1,15 +1,9 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
-import {
-  fleetRowAttention,
-  readinessCounts,
-  sortReadinessRows,
-  verdictLabel,
-  verdictTone,
-  type ReadinessCounts,
-} from '../../core/readiness/readiness-logic';
-import type { ReadinessRow } from '../../core/api/models';
+import { readinessCounts, verdictLabel, verdictTone, type ReadinessCounts } from '../../core/readiness/readiness-logic';
+import { applyVerdictFilter, blockerSummary, emptyFilterTitle, sortWorstFirst, type BlockerSummary } from './preflight-logic';
+import type { ReadinessRow, ReadinessVerdict } from '../../core/api/models';
 
 /**
  * `PreflightPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — `/operate/preflight`, the fleet
@@ -35,6 +29,15 @@ import type { ReadinessRow } from '../../core/api/models';
  * **Advisory only (OQ3, docs/plans/active/DRONE-ONBOARDING-PLAN.md §10 — unanswered by the plan, resolved
  * here pending an operator's own answer):** `NO_GO` sorts first and reads in the danger tone, but no
  * row, link, or control is ever hidden or disabled on a verdict.
+ *
+ * **P1 (docs/plans/active/OPERATOR-UX-3-PLAN.md finding P1 + §2 P1, 2026-08-28):** the three verdict
+ * stat cards are now this board's own filter — {@link verdictFilter} is page-local selection state
+ * (the same bare-signal-in-the-facade shape `alerts-facade.ts`'s `labelFilter`/`assetFilter` already
+ * use; it isn't a mutually-exclusive *overlay*, so it doesn't belong in a `UiStore` group, and
+ * `core/ui/architecture.spec.ts` only forbids an `Open`/`Menu`/`Confirm`/`Editing`-named bare signal
+ * on the routed page component itself, not facade state). {@link rows} sorts worst-first
+ * (`preflight-logic.ts#sortWorstFirst`, replacing `readiness-logic.ts#sortReadinessRows` for this
+ * page only); {@link filteredRows} applies the selected verdict on top, unsorted-again.
  */
 @Injectable()
 export class PreflightFacade {
@@ -44,18 +47,39 @@ export class PreflightFacade {
   readonly error = signal<string | null>(null);
   private readonly rowsSignal = signal<readonly ReadinessRow[]>([]);
 
-  /** `NO_GO` first, then `UNKNOWN`, then `GO` — see {@link sortReadinessRows}'s own doc comment. */
-  readonly rows = computed(() => sortReadinessRows(this.rowsSignal()));
+  /** The verdict card currently selected as a filter, or `undefined` when none is (every row shows). */
+  readonly verdictFilter = signal<ReadinessVerdict | undefined>(undefined);
+
+  /** `NO_GO` first, then `UNKNOWN` (most failing checks first within it), then `GO` — see {@link sortWorstFirst}'s own doc comment. */
+  readonly rows = computed(() => sortWorstFirst(this.rowsSignal()));
   readonly hasAnyAssets = computed(() => this.rowsSignal().length > 0);
   readonly counts = computed<ReadinessCounts>(() => readinessCounts(this.rowsSignal()));
+
+  /** {@link rows}, narrowed to the selected {@link verdictFilter} — equal to {@link rows} itself when no card is selected. */
+  readonly filteredRows = computed(() => applyVerdictFilter(this.rows(), this.verdictFilter()));
+
+  /** `vision-empty`'s title for the "this verdict filter matched nothing" state — only ever read once {@link hasAnyAssets} is already true, so this is always a *filtered*-empty message. */
+  readonly filteredEmptyTitle = computed(() => {
+    const verdict = this.verdictFilter();
+    return verdict === undefined ? '' : emptyFilterTitle(verdict);
+  });
 
   /** Thin passthroughs so `preflight.html` never re-derives a verdict/status this facade already fetched — same "expose the pure function as a bound field" idiom `onboarding-facade.ts#connectMethodLabels`/`detailsSummary` use. */
   readonly verdictLabel = verdictLabel;
   readonly verdictTone = verdictTone;
-  readonly attention = fleetRowAttention;
+  readonly blocker = (row: ReadinessRow): BlockerSummary => blockerSummary(row.features);
 
   constructor() {
     void this.refresh();
+  }
+
+  /** A stat card's own click: selecting the same verdict again clears the filter. */
+  toggleVerdictFilter(verdict: ReadinessVerdict): void {
+    this.verdictFilter.update((current) => (current === verdict ? undefined : verdict));
+  }
+
+  clearVerdictFilter(): void {
+    this.verdictFilter.set(undefined);
   }
 
   async refresh(): Promise<void> {
