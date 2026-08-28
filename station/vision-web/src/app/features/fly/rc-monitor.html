@@ -46,6 +46,13 @@
         Centre all
       </button>
     }
+    @if (source.kind() === 'keyboard' && keyLegend().length > 0) {
+      <div class="key-legend">
+        @for (line of keyLegend(); track line) {
+          <span class="label">{{ line }}</span>
+        }
+      </div>
+    }
 
     @if (dispatcher.lastFired(); as fired) {
       <p class="muted hint">{{ fired }}</p>
@@ -90,6 +97,15 @@
       >
         Transmitter
       </button>
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="source.kind() === 'keyboard'"
+        [disabled]="sourceLocked()"
+        (click)="useSource('keyboard')"
+      >
+        Keyboard
+      </button>
     </div>
 
     @switch (client.state()) {
@@ -106,9 +122,7 @@
           Control denied — {{ client.deniedReason() ?? 'the vehicle refused control.' }}
         </vision-notice>
         <button type="button" class="btn big" (click)="engage()" [disabled]="engageDisabled()">Try again</button>
-        @if (disabledReason(); as reason) {
-          <p class="disabled-reason">{{ reason }}</p>
-        }
+        <ng-container [ngTemplateOutlet]="engageBlockTpl" />
       }
       @case ('released') {
         @if (client.watchdogTripped()) {
@@ -121,18 +135,42 @@
         <button type="button" class="btn big" (click)="engage()" [disabled]="engageDisabled()">
           Take control
         </button>
-        @if (disabledReason(); as reason) {
-          <p class="disabled-reason">{{ reason }}</p>
-        }
+        <ng-container [ngTemplateOutlet]="engageBlockTpl" />
       }
       @default {
         <button type="button" class="btn big" (click)="engage()" [disabled]="engageDisabled()">
           {{ client.state() === 'engaging' ? 'Engaging…' : 'Take control' }}
         </button>
-        @if (disabledReason(); as reason) {
-          <p class="disabled-reason">{{ reason }}</p>
-        }
+        <ng-container [ngTemplateOutlet]="engageBlockTpl" />
       }
     }
   </div>
+
+  <!-- Shared under the Take-control button (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave R) — a
+       more fundamental gate's plain-text reason, or once every one of those is clear, the RC-relay
+       readiness row(s) themselves so the operator sees which row is red instead of one flattened
+       sentence. Advisory only: never changes whether the button above is clickable. -->
+  <ng-template #engageBlockTpl>
+    @if (block().reason; as reason) {
+      <p class="disabled-reason">{{ reason }}</p>
+    } @else if (block().rows; as rows) {
+      <div class="readiness-rows">
+        @for (row of rows; track row.label) {
+          <p class="readiness-row">
+            <span
+              class="dot"
+              [class.ok]="row.tone === 'ok'"
+              [class.warn]="row.tone === 'warn'"
+              [class.danger]="row.tone === 'danger'"
+            ></span>
+            <span>{{ row.label }}</span>
+            @if (row.detail; as detail) {
+              <span class="muted">{{ detail }}</span>
+            }
+          </p>
+        }
+        <a class="muted" routerLink="/operate/preflight">Open preflight ›</a>
+      </div>
+    }
+  </ng-template>
 </vision-side-panel>

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { RcMonitor } from './rc-monitor';
 import { RcInputService } from '../../core/rc/rc-input.service';
 import { VirtualRcInputService } from '../../core/rc/virtual-rc-input.service';
+import { KeyboardRcInputService } from '../../core/rc/keyboard-rc-input.service';
 import { RcSource } from '../../core/rc/rc-source.service';
 import { ManualControlClient, type ManualControlEngageState } from '../../core/rc/manual-control-client';
 import { ControlActionDispatcher } from '../../core/rc/control-action-dispatcher';
@@ -17,6 +18,7 @@ import type {
   ControlProfile,
   FlightCapability,
   ManualControlChannelBinding,
+  ReadinessReport,
   VehicleKind,
 } from '../../core/api/models';
 
@@ -47,6 +49,29 @@ class FakeRcInputService {
 
   start(): void {}
   stop(): void {}
+}
+
+/** The one `VisionApi` call this drawer makes on its own account (`assetReadiness` — wave R) —
+ * resolves to `undefined` by default (the same "still loading/failed" shape a real rejected fetch
+ * degrades to), overridable per test via {@link setReadiness}. */
+class FakeVisionApi {
+  private report: ReadinessReport | undefined;
+  private rejects = false;
+
+  setReadiness(report: ReadinessReport | undefined): void {
+    this.report = report;
+    this.rejects = false;
+  }
+
+  setRejects(): void {
+    this.rejects = true;
+  }
+
+  assetReadiness(_assetId: string): Promise<ReadinessReport> {
+    return this.rejects
+      ? Promise.reject(new Error('network error'))
+      : Promise.resolve(this.report as ReadinessReport);
+  }
 }
 
 class FakeManualControlClient {
@@ -153,25 +178,33 @@ const ROVER_CHANNEL_MAP: readonly ControlBinding[] = ROVER_MAP.map((binding) => 
 function render(
   fakeRc: FakeRcInputService,
   fakeClient: FakeManualControlClient,
-  extras: { store?: FakeControlProfileStore; dispatcher?: FakeControlActionDispatcher } = {},
+  extras: {
+    store?: FakeControlProfileStore;
+    dispatcher?: FakeControlActionDispatcher;
+    api?: FakeVisionApi;
+  } = {},
 ) {
   // `vision-transmitter-view` renders a `routerLink` "Set up ›" link whenever a control is
-  // unmapped (transmitter-view.html) — same `provideRouter([])` precedent as
-  // transmitter-view.spec.ts itself; RcMonitor doesn't route anywhere, it just hosts the child.
+  // unmapped (transmitter-view.html), and the readiness rows' own "Open preflight ›" link
+  // (wave R) needs one too — same `provideRouter([])` precedent as transmitter-view.spec.ts
+  // itself; RcMonitor doesn't route anywhere on its own, it just hosts these links.
   TestBed.configureTestingModule({ providers: [provideRouter([])] });
   const store = extras.store ?? new FakeControlProfileStore();
   const dispatcher = extras.dispatcher ?? new FakeControlActionDispatcher();
+  const api = extras.api ?? new FakeVisionApi();
   TestBed.overrideComponent(RcMonitor, {
     set: {
       providers: [
         { provide: RcInputService, useValue: fakeRc },
         VirtualRcInputService,
+        KeyboardRcInputService,
         RcSource,
         { provide: ManualControlClient, useValue: fakeClient },
         { provide: ControlProfileStore, useValue: store },
         { provide: ControlActionDispatcher, useValue: dispatcher },
-        // The merged flight section (C10) injects this; nothing in these tests clicks a command.
-        { provide: VisionApi, useValue: {} },
+        // The merged flight section (C10) injects this too; nothing in these tests clicks a
+        // command, and wave R's own `assetReadiness` read resolves to `undefined` by default.
+        { provide: VisionApi, useValue: api },
       ],
     },
   });
@@ -285,6 +318,7 @@ describe('RcMonitor — Take control (sticky footer, decision U6)', () => {
     const buttons = fixture.nativeElement.querySelectorAll('.rc-source button') as NodeListOf<HTMLButtonElement>;
     expect(buttons[0].disabled).toBe(true);
     expect(buttons[1].disabled).toBe(true);
+    expect(buttons[2].disabled).toBe(true);
   });
 
   it('the denied state shows the server-provided human reason', () => {
@@ -475,5 +509,111 @@ describe('RcMonitor — the merged Controller drawer (docs/plans/active/CONTROLL
     const text = fixture.nativeElement.querySelector('.command-cluster')?.textContent ?? '';
     expect(text).toContain('also on Sw 2 ↑');
     expect(text).toContain('also on Axis 5');
+  });
+});
+
+/** A microtask-only flush — the mocked `assetReadiness()` promise resolves/rejects immediately, so
+ * a couple of already-resolved `await`s drain its `.then()`/`.catch()` deterministically without
+ * depending on `fixture.whenStable()`'s own task-tracking (which nothing here registers this
+ * hand-written promise into). */
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+const NOT_READY_REPORT: ReadinessReport = {
+  assetId: 'asset-1',
+  verdict: 'NO_GO',
+  evaluatedAt: '2026-08-28T00:00:00Z',
+  profileObservedAt: '2026-08-28T00:00:00Z',
+  features: [
+    { feature: 'rc-relay', label: 'RC relay', status: 'MISSING', detail: 'GCS sysid not set.', remedy: 'PARAM_WRITE' },
+  ],
+  blockers: ['rc-relay'],
+};
+
+describe('RcMonitor — keyboard source (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave K)', () => {
+  it('adds a Keyboard button after Transmitter, selectable with no gamepad plugged in', () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+
+    const buttons = fixture.nativeElement.querySelectorAll('.rc-source button') as NodeListOf<HTMLButtonElement>;
+    expect(buttons.length).toBe(3);
+    expect(buttons[2].textContent?.trim()).toBe('Keyboard');
+    expect(buttons[2].disabled).toBe(false);
+
+    buttons[2].click();
+    fixture.detectChanges();
+
+    expect(buttons[2].classList.contains('active')).toBe(true);
+    expect(engageButton(fixture).disabled).toBe(false);
+  });
+
+  it('shows a quiet key-legend line once the keyboard source is selected and the layout binds axes', () => {
+    const store = new FakeControlProfileStore();
+    store.profilesSignal.set([{ ...ROVER_PROFILE, channelMap: ROVER_CHANNEL_MAP }]);
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store });
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.key-legend')).toBeNull();
+
+    const buttons = fixture.nativeElement.querySelectorAll('.rc-source button') as NodeListOf<HTMLButtonElement>;
+    buttons[2].click();
+    fixture.detectChanges();
+
+    const legend = fixture.nativeElement.querySelector('.key-legend');
+    expect(legend?.textContent?.trim().toLowerCase()).toBe('w/s throttle · a/d steering');
+  });
+});
+
+describe('RcMonitor — readiness rows under Take control (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave R)', () => {
+  it('renders nothing while the readiness read is still in flight, and the button stays enabled', async () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+    await flushMicrotasks();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.readiness-rows')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.disabled-reason')).toBeNull();
+    expect(engageButton(fixture).disabled).toBe(false);
+  });
+
+  it('surfaces the rc-relay row once the read resolves, advisory only — Take control stays enabled', async () => {
+    const api = new FakeVisionApi();
+    api.setReadiness(NOT_READY_REPORT);
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { api });
+    await flushMicrotasks();
+    fixture.detectChanges();
+
+    const rows = fixture.nativeElement.querySelector('.readiness-rows');
+    expect(rows?.textContent).toContain('RC relay');
+    expect(rows?.textContent).toContain('GCS sysid not set.');
+    expect(rows?.querySelector('.dot.danger')).not.toBeNull();
+    expect(rows?.querySelector('a[href="/operate/preflight"]')?.textContent).toContain('Open preflight');
+    expect(engageButton(fixture).disabled).toBe(false);
+  });
+
+  it('a more fundamental disabled reason takes priority over the readiness rows, and the rows are omitted', async () => {
+    const api = new FakeVisionApi();
+    api.setReadiness(NOT_READY_REPORT);
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { api });
+    fixture.componentRef.setInput('canCommand', false);
+    await flushMicrotasks();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.disabled-reason')?.textContent).toBe(
+      "This drone isn't commandable right now.",
+    );
+    expect(fixture.nativeElement.querySelector('.readiness-rows')).toBeNull();
+  });
+
+  it('degrades to nothing, never a fabricated warning, when the readiness read fails', async () => {
+    const api = new FakeVisionApi();
+    api.setRejects();
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { api });
+    await flushMicrotasks();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.readiness-rows')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.disabled-reason')).toBeNull();
   });
 });

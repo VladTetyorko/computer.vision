@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { armedChip, armAlsoOnHint, engageDisabledReason, latencyLabel, modeAlsoOnHint } from './rc-monitor-logic';
-import type { ActionBinding } from '../../core/api/models';
+import {
+  armedChip,
+  armAlsoOnHint,
+  engageBlock,
+  engageDisabledReason,
+  keyLegendLines,
+  latencyLabel,
+  modeAlsoOnHint,
+  rcReadinessRows,
+} from './rc-monitor-logic';
+import type { ActionBinding, ManualControlChannelBinding, ReadinessReport } from '../../core/api/models';
 
 const BASE = {
   hasAsset: true,
@@ -42,6 +51,10 @@ describe('engageDisabledReason', () => {
 
   it('does not require a gamepad at all when the on-screen source is selected', () => {
     expect(engageDisabledReason({ ...BASE, sourceKind: 'virtual', gamepadConnected: false })).toBeUndefined();
+  });
+
+  it('does not require a gamepad at all when the keyboard source is selected — the same rule the on-screen surface gets', () => {
+    expect(engageDisabledReason({ ...BASE, sourceKind: 'keyboard', gamepadConnected: false })).toBeUndefined();
   });
 
   it('is engaged is also enabled (a caller should not render the button in that state, but the gate itself does not special-case it)', () => {
@@ -110,5 +123,122 @@ describe('armAlsoOnHint', () => {
 
   it('also matches TOGGLE_ARM — the same physical arm sequence', () => {
     expect(armAlsoOnHint([axisSwitch(3, 'TOGGLE_ARM', 'HIGH')])).toBe('Axis 4 ↑');
+  });
+});
+
+const axis = (
+  fn: ManualControlChannelBinding['function'],
+  sourceIndex: number,
+  label: string,
+): ManualControlChannelBinding => ({
+  source: 'AXIS',
+  kind: 'AXIS',
+  function: fn,
+  travel: 'CENTERED',
+  sourceIndex,
+  rcChannel: sourceIndex + 1,
+  minMicros: 1000,
+  centerMicros: 1500,
+  maxMicros: 2000,
+  label,
+});
+
+describe('keyLegendLines', () => {
+  it('is empty for a layout with nothing this drawer maps a key to', () => {
+    expect(keyLegendLines([])).toEqual([]);
+  });
+
+  it('one line for a rover — steering shares the throttle pad, so no arrow-key line', () => {
+    const lines = keyLegendLines([axis('STEERING', 0, 'Steering'), axis('THROTTLE', 2, 'Throttle')]);
+    expect(lines).toEqual(['W/S throttle · A/D steering']);
+  });
+
+  it('two lines for an aircraft — yaw/throttle share a pad, roll/pitch get the freed-up arrow keys', () => {
+    const lines = keyLegendLines([
+      axis('YAW', 3, 'Yaw'),
+      axis('THROTTLE', 2, 'Throttle'),
+      axis('ROLL', 0, 'Roll'),
+      axis('PITCH', 1, 'Pitch'),
+    ]);
+    expect(lines).toEqual(['W/S throttle · A/D yaw', '↑↓ pitch · ←→ roll']);
+  });
+
+  it('omits a side of a line the layout does not bind, rather than naming a key with nothing behind it', () => {
+    expect(keyLegendLines([axis('THROTTLE', 2, 'Throttle')])).toEqual(['W/S throttle']);
+  });
+
+  it('reads the bound control\'s own label, never a hardcoded function name', () => {
+    expect(keyLegendLines([axis('THROTTLE', 2, 'Power')])).toEqual(['W/S power']);
+  });
+});
+
+const READY_REPORT: ReadinessReport = {
+  assetId: 'asset-1',
+  verdict: 'GO',
+  evaluatedAt: '2026-08-28T00:00:00Z',
+  profileObservedAt: '2026-08-28T00:00:00Z',
+  features: [
+    { feature: 'rc-relay', label: 'RC relay', status: 'READY', detail: '', remedy: null },
+    { feature: 'battery', label: 'Battery', status: 'MISSING', detail: 'No battery telemetry.', remedy: null },
+  ],
+  blockers: [],
+};
+
+const NOT_READY_REPORT: ReadinessReport = {
+  ...READY_REPORT,
+  verdict: 'NO_GO',
+  features: [
+    { feature: 'rc-relay', label: 'RC relay', status: 'MISSING', detail: 'GCS sysid not set.', remedy: 'PARAM_WRITE' },
+  ],
+  blockers: ['rc-relay'],
+};
+
+describe('rcReadinessRows', () => {
+  it('is empty with no report at all — still loading, or the read failed; never a fabricated warning', () => {
+    expect(rcReadinessRows(undefined)).toEqual([]);
+  });
+
+  it('is empty when the rc-relay row is READY, even if other unrelated features are not', () => {
+    expect(rcReadinessRows(READY_REPORT)).toEqual([]);
+  });
+
+  it('is empty when the report never evaluated rc-relay at all', () => {
+    expect(rcReadinessRows({ ...READY_REPORT, features: [] })).toEqual([]);
+  });
+
+  it('surfaces the rc-relay row, toned and labeled, when it is not READY', () => {
+    expect(rcReadinessRows(NOT_READY_REPORT)).toEqual([
+      { label: 'RC relay', tone: 'danger', detail: 'GCS sysid not set.' },
+    ]);
+  });
+
+  it('omits detail rather than rendering an empty string', () => {
+    const report: ReadinessReport = {
+      ...NOT_READY_REPORT,
+      features: [{ feature: 'rc-relay', label: 'RC relay', status: 'DEGRADED', detail: '', remedy: null }],
+    };
+    expect(rcReadinessRows(report)).toEqual([{ label: 'RC relay', tone: 'warn', detail: undefined }]);
+  });
+});
+
+describe('engageBlock', () => {
+  it('is a plain reason when a more fundamental gate blocks — readiness never even gets consulted', () => {
+    expect(engageBlock({ ...BASE, hasAsset: false }, NOT_READY_REPORT)).toEqual({
+      reason: 'Pick a drone first.',
+    });
+  });
+
+  it('is the readiness rows once every other gate is clear and the vehicle is not RC-ready', () => {
+    expect(engageBlock(BASE, NOT_READY_REPORT)).toEqual({
+      rows: [{ label: 'RC relay', tone: 'danger', detail: 'GCS sysid not set.' }],
+    });
+  });
+
+  it('renders nothing when every gate is clear and the vehicle is RC-ready', () => {
+    expect(engageBlock(BASE, READY_REPORT)).toEqual({});
+  });
+
+  it('renders nothing (never a fabricated warning) when no report has loaded yet, even with other gates clear', () => {
+    expect(engageBlock(BASE, undefined)).toEqual({});
   });
 });

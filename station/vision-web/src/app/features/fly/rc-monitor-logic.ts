@@ -1,7 +1,9 @@
-import type { ActionBinding, ControlAction } from '../../core/api/models';
+import type { ActionBinding, ControlAction, ManualControlChannelBinding, ReadinessReport } from '../../core/api/models';
 import type { ManualControlEngageState } from '../../core/rc/manual-control-client';
 import type { RcSourceKind } from '../../core/rc/rc-source.service';
 import { controlLabel } from '../../core/rc/control-action-logic';
+import { padsFrom } from '../../core/rc/control-surface-logic';
+import { featureStatusTone } from '../../core/readiness/readiness-logic';
 
 /**
  * Pure, component-adjacent logic behind `rc-monitor.ts` (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2,
@@ -120,4 +122,96 @@ export function modeAlsoOnHint(actionMap: readonly ActionBinding[]): string | un
  * `TOGGLE_ARM`, arrow-suffixed when arm sits on that switch's `HIGH` position. */
 export function armAlsoOnHint(actionMap: readonly ActionBinding[]): string | undefined {
   return alsoOnHint(actionMap, ARM_ACTIONS, true);
+}
+
+// --- Keyboard key legend (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave K) -----------------------
+
+/**
+ * The keyboard drawer footer's compact legend, one quiet line per pad the layout actually has
+ * (`control-surface-logic.ts#padsFrom`'s own "a rover gets one, an aircraft two" split) — built from
+ * the bound controls' own `label`s, never invented here, mirroring `padsFrom`'s own doc comment. A
+ * one-pad layout (a rover: steering shares the throttle's pad) gets one line for `W`/`S`/`A`/`D`; a
+ * two-pad layout (an aircraft) gets a second for the arrow keys once they're freed up from the
+ * one-pad throttle redundancy (`keyboard-rc-input.service.ts#resolveKey`).
+ */
+export function keyLegendLines(channelMap: readonly ManualControlChannelBinding[]): readonly string[] {
+  const axes = channelMap.filter((b) => b.source === 'AXIS');
+  const label = (fn: ManualControlChannelBinding['function']): string | undefined =>
+    axes.find((b) => b.function === fn)?.label.toLowerCase();
+  const onePad = padsFrom(channelMap).length <= 1;
+
+  const line = (parts: readonly (readonly [string, string | undefined])[]): string | undefined => {
+    const joined = parts
+      .filter((part): part is readonly [string, string] => part[1] !== undefined)
+      .map(([keys, name]) => `${keys} ${name}`);
+    return joined.length > 0 ? joined.join(' · ') : undefined;
+  };
+
+  const lines: string[] = [];
+  const primary = line([
+    ['W/S', label('THROTTLE')],
+    ['A/D', label('YAW') ?? label('STEERING')],
+  ]);
+  if (primary) {
+    lines.push(primary);
+  }
+  if (!onePad) {
+    const secondary = line([
+      ['↑↓', label('PITCH')],
+      ['←→', label('ROLL')],
+    ]);
+    if (secondary) {
+      lines.push(secondary);
+    }
+  }
+  return lines;
+}
+
+// --- Readiness rows under the footer (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave R) ------------
+
+/** The `rc-relay` feature key (FLEET-RADIO-PLAN.md R6) — the one readiness row that governs whether
+ * this vehicle's link actually satisfies what the RC relay needs (a GCS-sysid value and its
+ * `RC_OPTIONS` forbidden-bits mask, folded server-side into one row). */
+const RC_READINESS_FEATURE = 'rc-relay';
+
+/** One readiness row as this drawer renders it — tone from the same `FeatureStatus` vocabulary
+ * every other readiness surface in this app uses (`core/readiness/readiness-logic.ts#featureStatusTone`). */
+export interface ReadinessRowView {
+  readonly label: string;
+  readonly tone: 'ok' | 'warn' | 'danger' | 'muted';
+  readonly detail?: string;
+}
+
+/**
+ * The RC-relay readiness row, when it isn't `READY` — advisory only (a `NO_GO` never blocks flight,
+ * `features/readiness/readiness.html`'s own framing), so this never appears as a gate, only as
+ * context under an otherwise-enabled Take-control button (FLEET-RADIO R6: "one sentence hides which
+ * row is red"). `[]` for a `READY` row, a report that never evaluated this feature, or no report at
+ * all (still loading, or the read failed) — never a fabricated warning.
+ */
+export function rcReadinessRows(report: ReadinessReport | undefined): readonly ReadinessRowView[] {
+  const row = report?.features.find((f) => f.feature === RC_READINESS_FEATURE);
+  if (!row || row.status === 'READY') {
+    return [];
+  }
+  return [{ label: row.label, tone: featureStatusTone(row.status), detail: row.detail || undefined }];
+}
+
+/** What to render under the Take-control button — `engageDisabledReason`'s existing single-line text
+ * when one of those more fundamental gates is what's actually stopping the operator, else — once
+ * every one of those is clear — the RC-relay readiness row(s) themselves, so the operator sees which
+ * row is red instead of one flattened sentence. `{}` renders nothing, same as today's
+ * `disabledReason() === undefined`. */
+export interface EngageBlockView {
+  readonly rows?: readonly ReadinessRowView[];
+  readonly reason?: string;
+}
+
+export function engageBlock(gate: EngageGateInput, readiness: ReadinessReport | undefined): EngageBlockView {
+  const reason = engageDisabledReason(gate);
+  if (reason !== undefined) {
+    return { reason };
+  }
+  const rows = rcReadinessRows(readiness);
+  return rows.length > 0 ? { rows } : {};
 }

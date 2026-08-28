@@ -1,18 +1,31 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Notice } from '../../shared/ui/notice';
 import { TransmitterView } from '../../shared/ui/transmitter-view/transmitter-view';
 import { RcInputService } from '../../core/rc/rc-input.service';
 import { VirtualRcInputService } from '../../core/rc/virtual-rc-input.service';
+import { KeyboardRcInputService } from '../../core/rc/keyboard-rc-input.service';
 import { RcSource, type RcSourceKind } from '../../core/rc/rc-source.service';
 import { ManualControlClient } from '../../core/rc/manual-control-client';
 import { ControlActionDispatcher } from '../../core/rc/control-action-dispatcher';
 import { ControlProfileStore } from '../../core/rc/control-profile-store';
 import { activeProfileFor } from '../../core/rc/control-action-logic';
+import { VisionApi } from '../../core/api/vision-api';
 import { FlightCommandPanel } from './flight-command-panel';
-import { armedChip, armAlsoOnHint, engageDisabledReason, latencyLabel, modeAlsoOnHint } from './rc-monitor-logic';
-import type { ChannelMapLike } from '../../core/rc/transmitter-view-logic';
-import type { FlightCapability, VehicleKind } from '../../core/api/models';
+import {
+  armedChip,
+  armAlsoOnHint,
+  engageBlock,
+  engageDisabledReason,
+  keyLegendLines,
+  latencyLabel,
+  modeAlsoOnHint,
+  type EngageGateInput,
+} from './rc-monitor-logic';
+import { normalizeChannelMap, type ChannelMapLike } from '../../core/rc/transmitter-view-logic';
+import type { FlightCapability, ReadinessReport, VehicleKind } from '../../core/api/models';
 
 /**
  * `vision-rc-monitor` — the Fly cockpit's Controller drawer, rebuilt around `vision-transmitter-view`
@@ -54,8 +67,15 @@ import type { FlightCapability, VehicleKind } from '../../core/api/models';
  */
 @Component({
   selector: 'vision-rc-monitor',
-  imports: [SidePanel, Notice, TransmitterView, FlightCommandPanel],
-  providers: [RcInputService, VirtualRcInputService, RcSource, ManualControlClient, ControlActionDispatcher],
+  imports: [SidePanel, Notice, TransmitterView, FlightCommandPanel, RouterLink, NgTemplateOutlet],
+  providers: [
+    RcInputService,
+    VirtualRcInputService,
+    KeyboardRcInputService,
+    RcSource,
+    ManualControlClient,
+    ControlActionDispatcher,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './rc-monitor.html',
   styleUrl: './rc-monitor.css',
@@ -66,7 +86,9 @@ export class RcMonitor implements OnInit {
   protected readonly client = inject(ManualControlClient);
   protected readonly dispatcher = inject(ControlActionDispatcher);
   protected readonly virtual = inject(VirtualRcInputService);
+  protected readonly keyboard = inject(KeyboardRcInputService);
   protected readonly profiles = inject(ControlProfileStore);
+  private readonly api = inject(VisionApi);
 
   /** The currently-flown asset — mirrors `flight-command-panel.ts`'s own `assetId`/
    * `assetDisplayName` inputs (`cockpit.html` renders both components inside the same
@@ -119,28 +141,47 @@ export class RcMonitor implements OnInit {
   protected readonly transmitterChannelMap = computed<ChannelMapLike>(
     () => this.client.channelMap() ?? this.activeProfile()?.channelMap ?? [],
   );
+  /** {@link transmitterChannelMap} in the one shape `padsFrom`/the keyboard source both read —
+   * computed once and shared by both, rather than each normalizing its own copy. */
+  protected readonly normalizedChannelMap = computed(() =>
+    normalizeChannelMap(this.transmitterChannelMap(), this.profiles.catalog()),
+  );
+  /** The keyboard footer legend (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave K) — one quiet line
+   * per pad this layout actually has, built from the same map the transmitter picture already
+   * draws. */
+  protected readonly keyLegend = computed(() => keyLegendLines(this.normalizedChannelMap()));
   protected readonly vehicleKind = computed<VehicleKind>(
     () => this.client.vehicleKind() ?? this.capabilities()?.vehicleKind ?? 'UNKNOWN',
   );
   /** Engaged + the on-screen surface selected → the same picture becomes draggable (decision U2). A
-   * plugged transmitter always stays a mirror, engaged or not. */
+   * plugged transmitter always stays a mirror, engaged or not; the keyboard source is a mirror too —
+   * there is nothing to drag, the picture just reflects what the held keys are already driving. */
   protected readonly interactive = computed(
     () => this.client.state() === 'engaged' && this.source.kind() === 'virtual',
   );
 
-  protected readonly disabledReason = computed(() =>
-    engageDisabledReason({
-      hasAsset: this.assetId().length > 0,
-      canCommand: this.canCommand(),
-      sourceKind: this.source.kind(),
-      gamepadConnected: this.rc.connected(),
-      engageState: this.client.state(),
-    }),
-  );
+  private readonly engageGate = computed<EngageGateInput>(() => ({
+    hasAsset: this.assetId().length > 0,
+    canCommand: this.canCommand(),
+    sourceKind: this.source.kind(),
+    gamepadConnected: this.rc.connected(),
+    engageState: this.client.state(),
+  }));
+  protected readonly disabledReason = computed(() => engageDisabledReason(this.engageGate()));
   protected readonly engageDisabled = computed(() => this.disabledReason() !== undefined);
   /** The input choice is frozen for the life of a session — swapping sticks mid-flight is not a
    * gesture this platform offers, and the surface below is shaped by the engaged map anyway. */
   protected readonly sourceLocked = computed(() => this.client.state() === 'engaging' || this.client.state() === 'engaged');
+
+  /** This asset's own `rc-relay` readiness row (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave R) —
+   * read directly here rather than plumbed through `CockpitFacade`/`cockpit.html`, since nothing
+   * else in the cockpit needs it today; `undefined` while loading or on a failed read (CLAUDE.md
+   * "degrade honestly" — the footer below renders nothing for that, never a fabricated warning). */
+  private readonly _readiness = signal<ReadinessReport | undefined>(undefined);
+  /** What renders under the Take-control button: `engageDisabledReason`'s own text while a more
+   * fundamental gate blocks, else the RC-relay readiness row(s) once one is actually available —
+   * advisory only, never affecting {@link engageDisabled} itself. */
+  protected readonly block = computed(() => engageBlock(this.engageGate(), this._readiness()));
 
   constructor() {
     // Bound switches fire over the ordinary command endpoints, not the stick socket — so they are
@@ -159,6 +200,23 @@ export class RcMonitor implements OnInit {
       } else {
         this.virtual.clear();
       }
+    });
+
+    // Unlike the on-screen surface, the keyboard has no session of its own to wait for — a tap
+    // before engage should already move the transmitter picture (decision U1 extends to this third
+    // source too), so it is kept bound to the same live map continuously, not just from `engaged`.
+    effect(() => this.keyboard.bind(this.normalizedChannelMap()));
+
+    // Re-read on every asset change; a failed read degrades to `undefined` (CLAUDE.md), which the
+    // footer already renders as nothing rather than an error the operator can't act on from here —
+    // the full picture, with a retry, lives at `/operate/preflight`.
+    effect(() => {
+      const assetId = this.assetId();
+      this._readiness.set(undefined);
+      void this.api
+        .assetReadiness(assetId)
+        .then((report) => this._readiness.set(report))
+        .catch(() => this._readiness.set(undefined));
     });
   }
 
