@@ -13,15 +13,19 @@ import com.drones.mavlink.session.MavlinkSession;
 import com.drones.mavlink.session.MessageFilter;
 import com.drones.mavlink.session.PeerDirectory;
 import com.drones.mavlink.session.Subscription;
+import com.drones.mavlink.transport.MavlinkLink;
 import com.drones.mavlink.transport.UdpListenLink;
 
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.Telemetry;
 
 import java.io.IOException;
+import java.lang.System.Logger.Level;
 import java.net.InetSocketAddress;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -107,7 +111,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 final class MavlinkGateway {
 
-    private final UdpListenLink link;
+    private static final System.Logger LOG = System.getLogger(MavlinkGateway.class.getName());
+
+    private final MavlinkLink link;
     private final MavlinkSession session;
     private final VehicleClaimPolicy claimPolicy;
     private final Subscription subscription;
@@ -129,9 +135,25 @@ final class MavlinkGateway {
      *                 {@link #close()} awaits the session's reader thread)
      */
     MavlinkGateway(String bindHost, int port, MavlinkSettings settings) throws IOException {
-        this.link = new UdpListenLink(bindHost, port);
+        this(new UdpListenLink(bindHost, port), settings);
+    }
+
+    /**
+     * Test-only seam (java-clean-code skill §3's "inject a clock or a backoff bound" allowance):
+     * builds this gateway around an already-constructed {@link MavlinkLink} instead of binding a
+     * fresh {@link UdpListenLink}, so a test can simulate a genuine link failure (FLEET-RADIO-PLAN.md
+     * F7/R4) with a hand-built {@code MavlinkLink} double rather than sabotaging a real socket via
+     * reflection. The production constructor above delegates here rather than duplicating this
+     * body, so the two can never drift apart.
+     */
+    MavlinkGateway(MavlinkLink link, MavlinkSettings settings) {
+        this.link = link;
         this.session = new MavlinkSession(MavlinkNode.groundStation(), coreSettings(settings));
         session.addLink(link);
+        // FLEET-RADIO-PLAN.md R4/F7: mavlink-core used to swallow a genuine read failure into a
+        // silent reader-thread exit. Wired before any registration exists, so a failure occurring
+        // the instant after bind still reaches every registration this gateway ever accumulates.
+        session.onLinkFailure((linkId, cause) -> handleLinkFailure(cause));
         this.claimPolicy = new VehicleClaimPolicy(
                 session.peers(), settings.silenceWindow().toMillis(), settings.maxUnclaimedVehicles());
         this.subscription = session.dispatcher().subscribe(MessageFilter.any(), this::onFrame);
@@ -191,18 +213,47 @@ final class MavlinkGateway {
     }
 
     /**
-     * {@link LinkHealth.Health} for every currently-claimed vehicle on this gateway's socket —
-     * {@code mavlink-link}'s {@code SubsystemStatusPort} plumbing (docs/plans/active/
-     * SYSTEM-STATUS-PLAN.md §4.2, this session's {@link MavlinkSession#health()} first production
-     * caller; every prior call site was test-only). Same {@code (sysid, TARGET_COMPONENT_AUTOPILOT)}
-     * identity {@link #commandTarget} and {@link VehicleClaimPolicy#commandTarget} already use.
+     * {@link LinkHealth.Health} for every currently-claimed vehicle on this gateway's socket, keyed
+     * by {@link DeviceId} (FLEET-RADIO-PLAN.md D4) — {@code mavlink-link}'s {@code
+     * SubsystemStatusPort} plumbing (docs/plans/active/SYSTEM-STATUS-PLAN.md §4.2, this session's
+     * {@link MavlinkSession#health()} first production caller; every prior call site was test-only).
+     * Same {@code (sysid, TARGET_COMPONENT_AUTOPILOT)} identity {@link #commandTarget} and {@link
+     * VehicleClaimPolicy#commandTarget} already use.
+     *
+     * <p>Keyed rather than a bare {@code List} so a rollup across several gateways (see {@link
+     * MavlinkTelemetrySource#claimedVehicleHealth()}) can name <i>which</i> device a bad reading
+     * belongs to — averaging a fleet's drop rates into one number, as the pre-D4 {@code
+     * MavlinkLinkStatusProvider} did, destroys exactly the fact an operator needs to fix one radio.
      */
-    List<LinkHealth.Health> claimedVehicleHealth() {
+    Map<DeviceId, LinkHealth.Health> claimedVehicleHealth() {
         LinkHealth health = session.health();
-        return claimedVehicles().stream()
-                .map(vehicle -> health.of(
-                        new PeerId(new SysId(vehicle.sysid()), new CompId(MavlinkFlightCommander.TARGET_COMPONENT_AUTOPILOT))))
-                .toList();
+        Map<DeviceId, LinkHealth.Health> result = new HashMap<>();
+        for (ClaimedVehicle vehicle : claimedVehicles()) {
+            PeerId peerId = new PeerId(new SysId(vehicle.sysid()), new CompId(MavlinkFlightCommander.TARGET_COMPONENT_AUTOPILOT));
+            result.put(vehicle.deviceId(), health.of(peerId));
+        }
+        return result;
+    }
+
+    /**
+     * Invoked (via {@link MavlinkSession#onLinkFailure}) on the dying reader thread the instant this
+     * gateway's socket suffers a genuine I/O failure (FLEET-RADIO-PLAN.md F7/D5) — closes every
+     * registered device's publisher exceptionally with {@code cause} so downstream sees a real
+     * failure rather than a quiet end-of-stream, then tears this gateway down exactly like {@link
+     * #unregister} would once its last registration left, so {@code MavlinkTelemetrySource}'s {@code
+     * closeRuntime}/{@code open} paths still observe a consistently-closed gateway ({@link
+     * #isClosed()}) rather than one merely abandoned.
+     *
+     * <p>Must not block or throw back into the caller — the listener contract {@link
+     * MavlinkSession#onLinkFailure}'s javadoc documents. {@link
+     * VehicleClaimPolicy#closeAllPublishersExceptionally} and {@link #close()} are both fast,
+     * non-blocking, in-memory operations (no network I/O, no join of the very thread calling this),
+     * so running them inline here honors that contract without needing a hand-off to another thread.
+     */
+    private void handleLinkFailure(IOException cause) {
+        LOG.log(Level.WARNING, "MAVLink link failed for gateway on link " + link.id() + "; closing its publishers", cause);
+        claimPolicy.closeAllPublishersExceptionally(cause);
+        close();
     }
 
     /**

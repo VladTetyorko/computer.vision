@@ -866,6 +866,60 @@
         </button>
       }
 
+      <!-- ---- Step 4.5: fix a sysid collision (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) ---------------
+           Reached only from Create, only when the Verify step's probe collided with a sysid an
+           already-registered device claims — every other path skips straight to Assign. Its own
+           "Write sysid"/"Continue" actions live in the case body, not the generic footer (see that
+           footer's own template comment further down). Advisory only — Continue always proceeds. -->
+      @case ('sysid') {
+        <h2>Fix the sysid collision</h2>
+        <p class="muted hint">
+          This vehicle answers to system id <span class="mono">{{ facade.store.sysidCollision() }}</span>,
+          which another vehicle in the fleet already claims — until it gets a distinct id, one of the
+          two will be invisible or unreliable on this link. You can fix it now, or continue and fix it
+          later from the asset's readiness page.
+        </p>
+
+        <div class="field">
+          <label class="label" for="sysid-value">New system id</label>
+          <input
+            id="sysid-value"
+            name="sysidValue"
+            type="number"
+            class="field-sm"
+            min="1"
+            max="255"
+            step="1"
+            [ngModel]="facade.store.sysidValue()"
+            (ngModelChange)="facade.store.sysidValue.set($event)"
+            placeholder="e.g. 2"
+          />
+        </div>
+
+        <div class="row">
+          <button
+            type="button"
+            class="btn"
+            (click)="facade.store.writeSysid()"
+            [disabled]="facade.store.writingSysid() || facade.store.sysidValue() === null"
+          >
+            {{ facade.store.writingSysid() ? 'Writing…' : 'Write sysid' }}
+          </button>
+        </div>
+
+        @if (facade.store.sysidWriteResult(); as result) {
+          <vision-notice [variant]="facade.sysidOutcomeVariant(result.outcome)">
+            {{ facade.outcomeLabel(result.outcome) }}@if (result.detail) { — {{ result.detail }} }
+          </vision-notice>
+        } @else if (facade.store.sysidWriteError(); as error) {
+          <vision-notice variant="danger" icon="alert">{{ error }}</vision-notice>
+        }
+
+        <div class="row wizard-nav">
+          <button type="button" class="btn" (click)="facade.store.continueFromSysidStep()">Continue</button>
+        </div>
+      }
+
       <!-- ---- Step 5: Assign — "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) ------------------- -->
       @case ('assign') {
         <h2>Who flies this?</h2>
@@ -918,7 +972,10 @@
     }
 
     <!-- Assign carries its own footer (Skip/Assign-and-finish), never the generic Back/Next pair —
-         there is nothing to go "back" to (the asset already exists) and no forward step past it. -->
+         there is nothing to go "back" to (the asset already exists) and no forward step past it.
+         Sysid (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) is the same: its own "Write sysid"/
+         "Continue" actions live inline in that @case above, so it renders no footer here at all —
+         neither Back (the asset already exists) nor a generic Next. -->
     @if (facade.store.step() === 'assign') {
       <div class="row wizard-nav">
         <button type="button" class="btn secondary" (click)="facade.store.skipAssignment()" [disabled]="facade.store.assigningPilots()">
@@ -934,7 +991,7 @@
           }}
         </button>
       </div>
-    } @else {
+    } @else if (facade.store.step() !== 'sysid') {
       <div class="row wizard-nav">
         @if (facade.store.step() !== 'profile') {
           <button type="button" class="btn secondary" (click)="facade.store.back()">Back</button>

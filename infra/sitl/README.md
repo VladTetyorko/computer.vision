@@ -1,10 +1,16 @@
 # infra/sitl — fleet-in-a-box (real ArduPilot SITL)
 
-`./up.sh N` launches **N real ArduPilot Copter SITL instances** in docker, each a distinct
-MAVLink sysid, each pushing MAVLink 2 UDP to the host and flying a small default circuit
-(GUIDED takeoff → CIRCLE mode) near a configurable home location — full PreArm/EKF/failsafe
+`./up.sh N [copter|rover]` launches **N real ArduPilot SITL instances** in docker, each a
+distinct MAVLink sysid, each pushing MAVLink 2 UDP to the host — full PreArm/EKF/failsafe
 realism the platform's own synthetic simulators (`adapter-simulation`) can't produce.
-`docs/plans/active/DRONE-INFRA-PLAN.md` I-c.
+`docs/plans/active/DRONE-INFRA-PLAN.md` I-c, extended to a second vehicle by
+`docs/plans/active/FLEET-RADIO-PLAN.md` R7.
+
+A **copter** (the default) flies a small default circuit near its home location: GUIDED
+takeoff → CIRCLE. A **rover** arms in MANUAL and stops there, deliberately — it is here to be
+*driven*, and a vehicle already running its own guided mission would fight the RC overrides the
+tests send it. MANUAL is also the mode a rover legitimately operates in with **no GPS fix at
+all**, which is exactly the case that used to read as a hard preflight failure.
 
 ## Prerequisites
 
@@ -16,14 +22,31 @@ realism the platform's own synthetic simulators (`adapter-simulation`) can't pro
 ## Quick start
 
 ```
-./up.sh          # 1 instance, sysid 1 (CI-style smoke)
-./up.sh 5        # 5 instances, sysid 1..5
-docker logs -f vision-sitl-1   # watch a given instance boot/arm/fly
-./down.sh        # tear down every instance up.sh started, however many
+./up.sh                      # 1 copter, sysid 1 (CI-style smoke)
+./up.sh 5                    # 5 copters, sysid 1..5
+./up.sh 2 rover              # 2 rovers, sysid 1..2
+docker logs -f vision-sitl-copter-1    # watch a given instance boot/arm/fly
+./down.sh                    # tear down every instance up.sh started, however many
 ```
 
+A **mixed** fleet is two calls; `SYSID_BASE` keeps their sysids and their SITL port offsets
+from colliding:
+
+```
+./up.sh 2                        # copters, sysid 1..2
+SYSID_BASE=10 ./up.sh 1 rover    # rover,   sysid 10
+```
+
+One port carrying a copter *and* a rover is the `FLEET-RADIO-PLAN` exit gate itself (§6):
+per-peer drop rate, the rover's own mode table rather than the copter's, and "an unidentified
+vehicle cannot be engaged" are all claims that only mean something with a second,
+differently-shaped vehicle on the wire. Read the single-port limit below before expecting the
+platform to show you both as separate assets today.
+
 For the single-instance case, `docker compose up -d --build` (this directory's
-`docker-compose.yml`) works too — see that file's own header comment for why `up.sh` (not
+`docker-compose.yml`) works too — and `docker compose --profile rover up -d --build` brings up
+the copter *and* a rover on the same port under sysid 2. The rover sits behind a compose profile
+so the plain single-vehicle smoke case is byte-identical to what it was before R7 — see that file's own header comment for why `up.sh` (not
 `docker compose --scale`) is what generates N>1.
 
 ## Pointing the platform at it
@@ -57,7 +80,9 @@ fleet for exactly the single-vehicle-per-port case it already fully supports tod
 | `MAVLINK_TARGET_PORT` | `14550` | Target UDP port |
 | `SITL_HOME` | `-35.363261,149.165230,584,353` (CMAC, `lat,lon,alt,heading`) | Home location for every instance in this run |
 | `SITL_SPEEDUP` | `1` | ArduPilot SITL's own `--speedup` (simulation-time multiplier; raise for faster demos, keep at 1 for realistic timing) |
-| `TAKEOFF_ALT_M` | `20` | GUIDED takeoff altitude (meters) before switching to CIRCLE |
+| `TAKEOFF_ALT_M` | `20` | GUIDED takeoff altitude (meters) before switching to CIRCLE. **Copter only** — a rover ignores it |
+| `SYSID_BASE` | `1` | First sysid of this run, and the SITL instance offset. Raise it to add a second fleet without colliding with the first |
+| `VEHICLE` | `copter` | `copter` or `rover`. Set by `up.sh`'s second argument; also readable directly by `docker run`/compose |
 
 Set as shell env vars before calling `up.sh`, e.g. `MAVLINK_TARGET_PORT=15550 ./up.sh 3`.
 

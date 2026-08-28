@@ -34,7 +34,17 @@ class ControlBindingTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 0, 1000, 1500, 2000, 0.0, false));
         assertThrows(IllegalArgumentException.class,
-                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 19, 1000, 1500, 2000, 0.0, false));
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.ROLL, 0, 17, 1000, 1500, 2000, 0.0, false));
+    }
+
+    @Test
+    void rejectsChannel17And18SpecificallyBecauseArduPilotDoesNotReadThem() {
+        // F17: ArduPilot's RC_CHANNELS_OVERRIDE handling stops at channel 16 -- 17/18 exist on the
+        // wire message but no firmware this platform targets reads them.
+        assertThrows(IllegalArgumentException.class,
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.AUX_1, 0, 17, 1000, 1500, 2000, 0.0, false));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ControlBinding(ControlBinding.Source.AXIS, ControlInputKind.AXIS, ControlFunction.AUX_1, 0, 18, 1000, 1500, 2000, 0.0, false));
     }
 
     @Test

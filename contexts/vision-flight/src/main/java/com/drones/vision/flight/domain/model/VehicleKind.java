@@ -28,13 +28,20 @@ public enum VehicleKind {
     ROVER,
 
     /**
-     * The vehicle has not identified itself as anything this platform recognizes.
+     * The vehicle has not identified itself as anything this platform recognizes — or has, and the
+     * answer is "not something to fly or drive" or "a real airframe we do not support" (FLEET-RADIO
+     * R2 folds three distinct facts in here; see {@link
+     * com.drones.vision.flight.domain.port.ManualControlLink#unidentifiedReason()} and {@link
+     * UnidentifiedReason} for which one, and why {@code VehicleKind} itself does not grow a fourth
+     * constant to say so — all three share this one, nonexistent, control shape).
      *
      * <p>Deliberately <b>not</b> resolved to a guess. There is no safe default: a throttle resting
      * at its minimum is idle on a copter and <em>full reverse</em> on a rover, so either guess is
-     * dangerous on the other machine. {@link ControlProfile#forKind} answers this with the
-     * historical four-axis centred map and says so on the wire, leaving the operator — who can see
-     * the vehicle — to judge (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P8).
+     * dangerous on the other machine. {@link ControlProfile#forKind} answers this with an empty,
+     * unflyable map (no guess, no fabricated centred value either), and {@code
+     * DefaultManualControlService#engage} refuses to open a session on this kind at all, naming the
+     * specific reason on the wire so the operator — who can see the vehicle — can act on it
+     * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P8).
      */
     UNKNOWN
 }

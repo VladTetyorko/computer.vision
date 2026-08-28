@@ -59,6 +59,14 @@ final class SitlContainer implements AutoCloseable {
             + "`docker build -t " + IMAGE + " infra/sitl` or `infra/sitl/up.sh` once to enable this test; "
             + "skipping rather than building ArduPilot as part of a test run";
 
+    /**
+     * {@code infra/sitl/entrypoint.sh}'s own {@code VEHICLE=rover} value (docs/plans/active/FLEET-RADIO-PLAN.md
+     * R7) -- pass to {@link #start(String, int, int, Integer, String)} to boot ArduRover instead of
+     * the image's own {@code copter} default. ArduRover arms in MANUAL and holds rather than flying
+     * a circuit (see {@code infra/sitl/README.md}), specifically so it can be *driven*.
+     */
+    static final String VEHICLE_ROVER = "rover";
+
     /** {@code arducopter -I N} offsets every one of its own listeners by this much. */
     private static final int INSTANCE_PORT_STRIDE = 10;
 
@@ -115,7 +123,7 @@ final class SitlContainer implements AutoCloseable {
      *                               the gating above already established that it could
      */
     static SitlContainer start(String purpose, int targetPort, int sysid) throws IOException, InterruptedException {
-        return start(purpose, targetPort, sysid, null);
+        return start(purpose, targetPort, sysid, null, null);
     }
 
     /**
@@ -124,6 +132,17 @@ final class SitlContainer implements AutoCloseable {
      *                telemetry does not
      */
     static SitlContainer start(String purpose, int targetPort, int sysid, Integer speedup)
+            throws IOException, InterruptedException {
+        return start(purpose, targetPort, sysid, speedup, null);
+    }
+
+    /**
+     * @param vehicle {@code infra/sitl/entrypoint.sh}'s {@code VEHICLE} value -- {@link #VEHICLE_ROVER}
+     *                to boot ArduRover, or {@code null} to leave {@code VEHICLE} unset (the image's
+     *                own {@code copter} default, byte-identical to every call site that pre-dates
+     *                FLEET-RADIO R7)
+     */
+    static SitlContainer start(String purpose, int targetPort, int sysid, Integer speedup, String vehicle)
             throws IOException, InterruptedException {
         String name = "vision-sitl-" + purpose + "-" + UUID.randomUUID();
         int instance = claimInstance();
@@ -136,6 +155,9 @@ final class SitlContainer implements AutoCloseable {
                 "-e", "MAVLINK_TARGET_PORT=" + targetPort));
         if (speedup != null) {
             command.addAll(List.of("-e", "SITL_SPEEDUP=" + speedup));
+        }
+        if (vehicle != null) {
+            command.addAll(List.of("-e", "VEHICLE=" + vehicle));
         }
         command.add(IMAGE);
 
@@ -232,6 +254,21 @@ final class SitlContainer implements AutoCloseable {
             // instance whose ports the dying container is about to give back anyway.
             CLAIMED_INSTANCES.remove(instance);
         }
+    }
+
+    /**
+     * SITL's own default local TCP port for {@code serial2} (see the {@value #SERIAL2_BASE_PORT}
+     * class constant), offset by this container's own claimed {@link #instance}. {@code
+     * entrypoint.sh} does not point this at anything -- it is ArduPilot's own out-of-the-box
+     * default, exposed here so a test can open <b>a second, independent</b> raw MAVLink connection
+     * straight to the vehicle (exactly {@code autofly.py}'s own pattern against {@code serial1},
+     * just read-only and test-side) without touching this platform's own ingest channel at all.
+     * FLEET-RADIO R7's own RC-override assertion needs precisely this: proof that a channel this
+     * platform sent reached the aircraft, read back from the aircraft's own telemetry over a link
+     * nothing in {@code adapter-mavlink} production code ever opens or reads.
+     */
+    int serial2Port() {
+        return SERIAL2_BASE_PORT + instance * INSTANCE_PORT_STRIDE;
     }
 
     static int freePort() throws IOException {

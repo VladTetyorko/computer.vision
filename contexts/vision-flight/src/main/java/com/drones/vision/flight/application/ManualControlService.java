@@ -29,7 +29,19 @@ public interface ManualControlService {
      *                                 already active on this service handle (one engage at a time
      *                                 per handle — see {@code DefaultManualControlService}'s own
      *                                 javadoc for what "handle" means when it is wired as a shared
-     *                                 singleton)
+     *                                 singleton); also thrown (audited {@code
+     *                                 REFUSED:not-ready:rc-relay}) when the vehicle's last-probed
+     *                                 profile shows its {@code rc-relay} feature {@code MISSING} —
+     *                                 a GCS-sysid mismatch or {@code RC_OPTIONS} ignoring overrides,
+     *                                 either of which silently discards every MAVLink RC override
+     *                                 this platform sends (FLEET-RADIO R6); an {@code UNKNOWN}
+     *                                 (never-probed) profile never refuses on this basis
+     * @throws VehicleUnidentifiedException a subtype of {@code IllegalStateException} thrown instead
+     *                                 of the plain form above when the resolved device's vehicle is
+     *                                 {@code VehicleKind.UNKNOWN} — carries which of the three
+     *                                 {@code UnidentifiedReason} causes applied, so vision-api can map
+     *                                 it to a dedicated {@code denied} code instead of message-sniffing
+     *                                 it (FLEET-RADIO R2)
      */
     ManualControlSession engage(AssetId assetId, UserId actor, VisibilityScope scope, WatchdogListener onWatchdog);
 }

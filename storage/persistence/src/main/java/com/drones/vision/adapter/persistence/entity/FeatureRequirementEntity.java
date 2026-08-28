@@ -52,13 +52,22 @@ public class FeatureRequirementEntity {
     @Column(name = "required_parameter_name", length = 64)
     private String requiredParameterName;
 
+    /** {@code FeatureRequirement#requiredParameterValue()} — see V27's migration comment. */
+    @Column(name = "required_parameter_value")
+    private Double requiredParameterValue;
+
+    /** {@code FeatureRequirement#forbiddenParameterBits()} — see V27's migration comment. */
+    @Column(name = "forbidden_parameter_bits")
+    private Long forbiddenParameterBits;
+
     /** JPA only. */
     protected FeatureRequirementEntity() {
     }
 
     public FeatureRequirementEntity(String id, String featureKey, String label, String firmware,
                                      Integer requiredMessageId, String requiredMessageName, Double minimumHz,
-                                     String requiredParameterName) {
+                                     String requiredParameterName, Double requiredParameterValue,
+                                     Long forbiddenParameterBits) {
         this.id = id;
         this.featureKey = featureKey;
         this.label = label;
@@ -67,6 +76,8 @@ public class FeatureRequirementEntity {
         this.requiredMessageName = requiredMessageName;
         this.minimumHz = minimumHz;
         this.requiredParameterName = requiredParameterName;
+        this.requiredParameterValue = requiredParameterValue;
+        this.forbiddenParameterBits = forbiddenParameterBits;
     }
 
     public String id() {
@@ -99,5 +110,13 @@ public class FeatureRequirementEntity {
 
     public String requiredParameterName() {
         return requiredParameterName;
+    }
+
+    public Double requiredParameterValue() {
+        return requiredParameterValue;
+    }
+
+    public Long forbiddenParameterBits() {
+        return forbiddenParameterBits;
     }
 }

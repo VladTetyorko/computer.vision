@@ -52,16 +52,28 @@ import java.util.function.LongSupplier;
  * {@link PeerDirectory#peer} fresh; caching the target at {@link #engage} would let the sender keep
  * transmitting to a stale address after the vehicle moves. A tick that finds the target currently
  * unknown <b>pauses</b> — logged once on the transition, not fatal and not a busy-spin.
+ *
+ * <h2>Every channel 1..16 the caller populates reaches the wire</h2>
+ * Channels 9..16 (MAVLink's "extension" channels) used to be hardcoded to {@link RcChannels#IGNORE}
+ * regardless of what a caller sent — an operator's CH9 binding was silently dropped on every frame
+ * (docs/plans/active/FLEET-RADIO-PLAN.md F3). {@link RcLinkRuntime#buildFrame} now populates every
+ * channel from the mailbox via {@link RcChannels#wireValue(int)}, which also resolves the
+ * extension-channel sentinel asymmetry (F4: channels 9..16 use {@code 65534} for release, not the
+ * {@code 0} channels 1..8 use). Channels 17/18 are always {@link RcChannels#IGNORE} — ArduPilot does
+ * not read them, and {@link RcChannels} itself refuses to carry a value there (F17).
  */
 public final class ManualControlService {
 
     private static final System.Logger LOG = System.getLogger(ManualControlService.class.getName());
 
-    /** {@code RC_CHANNELS_OVERRIDE} only ever carries 18 v1+extension channels. */
-    private static final int CHANNEL_COUNT = 18;
-
-    /** This class only ever populates channels 1..8 — see the class javadoc's v1-scope note. */
-    private static final int V1_CHANNEL_COUNT = 8;
+    /**
+     * Highest RC channel this service populates from a caller-supplied {@link RcChannels} — mirrors
+     * {@link RcChannels#MAX_CHANNELS}. {@code RC_CHANNELS_OVERRIDE} itself extends to 18, but
+     * ArduPilot reads only 1..16 (docs/plans/active/FLEET-RADIO-PLAN.md F17); channels 17/18 are
+     * always sent as {@link RcChannels#IGNORE} in {@link RcLinkRuntime#buildFrame} since {@link
+     * RcChannels} itself now refuses to carry a value there.
+     */
+    private static final int MAX_CHANNELS = RcChannels.MAX_CHANNELS;
 
     private final FrameSink sink;
     private final TxScheduler scheduler;
@@ -191,7 +203,7 @@ public final class ManualControlService {
         private final long coalesceNanos = coalescePeriod.toNanos();
         private final long keepaliveNanos = keepalivePeriod.toNanos();
 
-        private RcChannels mailbox = RcChannels.allIgnore(V1_CHANNEL_COUNT); // guarded by lock
+        private RcChannels mailbox = RcChannels.allIgnore(MAX_CHANNELS); // guarded by lock
         private boolean dirty = false; // guarded by lock -- mailbox holds a value not yet transmitted
         private boolean wakePending = false; // guarded by lock -- a one-shot is already queued
         private long lastTransmitNanos; // guarded by lock -- last frame handed to the sink, or dropped unreachable
@@ -256,7 +268,7 @@ public final class ManualControlService {
                     return; // idempotent
                 }
                 releasing = true;
-                mailbox = RcChannels.released(V1_CHANNEL_COUNT);
+                mailbox = RcChannels.released(MAX_CHANNELS);
                 releaseBudgetRemaining = releaseFrames;
                 releaseFrame = mailbox;
             }
@@ -309,39 +321,40 @@ public final class ManualControlService {
             }
         }
 
+        /**
+         * Every channel the caller populated (1..{@link RcChannels#MAX_CHANNELS}) reaches the wire
+         * through {@link RcChannels#wireValue(int)} — including the extension channels 9..16, which
+         * this class used to hardcode to {@link RcChannels#IGNORE} unconditionally
+         * (docs/plans/active/FLEET-RADIO-PLAN.md F3: an operator's CH9 binding was silently dropped
+         * here). {@code wireValue} is also what re-encodes a domain {@link RcChannels#RELEASE} as
+         * {@link RcChannels#EXTENSION_RELEASE} for those same channels (F4), so this method never has
+         * to know that distinction itself. Channels 17/18 do not exist for ArduPilot (F17) and {@link
+         * RcChannels} itself now refuses to carry a value past 16 — always {@link
+         * RcChannels#IGNORE}, unconditionally, same as before.
+         */
         private RcChannelsOverride buildFrame(RcChannels channels) {
-            RcChannelsOverride.Builder builder = RcChannelsOverride.builder()
+            return RcChannelsOverride.builder()
                     .targetSystem(target.system().value())
                     .targetComponent(target.component().value())
-                    .chan1Raw(channels.channelOrIgnore(1))
-                    .chan2Raw(channels.channelOrIgnore(2))
-                    .chan3Raw(channels.channelOrIgnore(3))
-                    .chan4Raw(channels.channelOrIgnore(4))
-                    .chan5Raw(channels.channelOrIgnore(5))
-                    .chan6Raw(channels.channelOrIgnore(6))
-                    .chan7Raw(channels.channelOrIgnore(7))
-                    .chan8Raw(channels.channelOrIgnore(8));
-            // Channels 9..18 are always IGNORE -- v1 scope, see class javadoc.
-            for (int channel = V1_CHANNEL_COUNT + 1; channel <= CHANNEL_COUNT; channel++) {
-                setExtensionChannel(builder, channel);
-            }
-            return builder.build();
-        }
-
-        private void setExtensionChannel(RcChannelsOverride.Builder builder, int channel) {
-            switch (channel) {
-                case 9 -> builder.chan9Raw(RcChannels.IGNORE);
-                case 10 -> builder.chan10Raw(RcChannels.IGNORE);
-                case 11 -> builder.chan11Raw(RcChannels.IGNORE);
-                case 12 -> builder.chan12Raw(RcChannels.IGNORE);
-                case 13 -> builder.chan13Raw(RcChannels.IGNORE);
-                case 14 -> builder.chan14Raw(RcChannels.IGNORE);
-                case 15 -> builder.chan15Raw(RcChannels.IGNORE);
-                case 16 -> builder.chan16Raw(RcChannels.IGNORE);
-                case 17 -> builder.chan17Raw(RcChannels.IGNORE);
-                case 18 -> builder.chan18Raw(RcChannels.IGNORE);
-                default -> throw new IllegalStateException("unreachable: channel " + channel);
-            }
+                    .chan1Raw(channels.wireValue(1))
+                    .chan2Raw(channels.wireValue(2))
+                    .chan3Raw(channels.wireValue(3))
+                    .chan4Raw(channels.wireValue(4))
+                    .chan5Raw(channels.wireValue(5))
+                    .chan6Raw(channels.wireValue(6))
+                    .chan7Raw(channels.wireValue(7))
+                    .chan8Raw(channels.wireValue(8))
+                    .chan9Raw(channels.wireValue(9))
+                    .chan10Raw(channels.wireValue(10))
+                    .chan11Raw(channels.wireValue(11))
+                    .chan12Raw(channels.wireValue(12))
+                    .chan13Raw(channels.wireValue(13))
+                    .chan14Raw(channels.wireValue(14))
+                    .chan15Raw(channels.wireValue(15))
+                    .chan16Raw(channels.wireValue(16))
+                    .chan17Raw(RcChannels.IGNORE)
+                    .chan18Raw(RcChannels.IGNORE)
+                    .build();
         }
 
         private void sleepUninterruptibly(long millis) {

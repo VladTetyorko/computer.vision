@@ -8,6 +8,13 @@ import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.flight.domain.model.ControlProfileId;
+import com.drones.vision.flight.domain.model.FeatureReadiness;
+import com.drones.vision.flight.domain.model.FeatureRequirement;
+import com.drones.vision.flight.domain.model.FeatureStatus;
+import com.drones.vision.flight.domain.model.ReadinessReport;
+import com.drones.vision.flight.domain.model.ReadinessVerdict;
+import com.drones.vision.flight.domain.model.RemedyKind;
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -31,9 +38,11 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -42,6 +51,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -73,6 +83,7 @@ class DefaultManualControlServiceTest {
     private AssetService assetService;
     private FakeManualControlPort manualControlPort;
     private FakeAuditTrailPort auditTrail;
+    private FakeReadinessService readinessService;
     private MutableClock clock;
     private RecordingScheduler scheduler;
     private DefaultManualControlService service;
@@ -86,9 +97,11 @@ class DefaultManualControlServiceTest {
         assetService = mock(AssetService.class);
         manualControlPort = new FakeManualControlPort();
         auditTrail = new FakeAuditTrailPort();
+        readinessService = new FakeReadinessService();
         clock = new MutableClock(Instant.parse("2026-07-31T00:00:00Z"));
         scheduler = new RecordingScheduler();
-        service = new DefaultManualControlService(assetService, manualControlPort, auditTrail, clock, scheduler);
+        service = new DefaultManualControlService(assetService, manualControlPort, auditTrail, readinessService,
+                clock, scheduler);
 
         device = new Device(DeviceId.random(), "FC", Set.of(Capability.TELEMETRY),
                 new StreamDescriptor("mavlink", URI.create("udp://127.0.0.1:14550"), Map.of()));
@@ -135,7 +148,7 @@ class DefaultManualControlServiceTest {
         List<UserId> askedFor = new ArrayList<>();
         List<VehicleKind> askedAbout = new ArrayList<>();
         DefaultManualControlService withProfiles = new DefaultManualControlService(assetService, manualControlPort,
-                auditTrail, clock, scheduler, 300L, (owner, kind) -> {
+                auditTrail, readinessService, clock, scheduler, 300L, (owner, kind) -> {
                     askedFor.add(owner);
                     askedAbout.add(kind);
                     return saved;
@@ -156,7 +169,7 @@ class DefaultManualControlServiceTest {
     void engageFallsBackToTheBuiltInWhenTheSelectorResolvesNothing() {
         stubDetails(device);
         DefaultManualControlService withProfiles = new DefaultManualControlService(assetService, manualControlPort,
-                auditTrail, clock, scheduler, 300L, (owner, kind) -> null);
+                auditTrail, readinessService, clock, scheduler, 300L, (owner, kind) -> null);
 
         ManualControlSession session = withProfiles.engage(assetId, actor, VisibilityScope.unbounded(), () -> { });
 
@@ -228,6 +241,140 @@ class DefaultManualControlServiceTest {
 
         assertTrue(second.active());
         assertEquals(2, manualControlPort.engagedDevices.size());
+    }
+
+    // -- engage: refusing an unidentified vehicle (FLEET-RADIO R2) --------------
+
+    /**
+     * The central case: a vehicle this platform has genuinely never seen. Unlike the
+     * out-of-scope/no-device guards, the port's link IS already open here (a real relay was
+     * started), so it must come back released, not just refused.
+     */
+    @Test
+    void engageRefusesAVehicleThatWasNeverIdentifiedReleasesTheOpenedLinkAndAuditsARefusal() {
+        stubDetails(device);
+        manualControlPort.kindToEngageAs = VehicleKind.UNKNOWN;
+        manualControlPort.unidentifiedReasonToReport = UnidentifiedReason.NEVER_IDENTIFIED;
+
+        VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertEquals(UnidentifiedReason.NEVER_IDENTIFIED, ex.reason());
+        assertTrue(ex.getMessage().contains("could not be identified"), "got: " + ex.getMessage());
+
+        assertEquals(1, manualControlPort.engagedDevices.size(), "the link was opened before being refused");
+        assertEquals(1, manualControlPort.releasedLinks.size(), "an opened-then-refused link must be released");
+        assertEquals(1, auditTrail.recorded.size());
+        assertEquals("REFUSED:unidentified-vehicle:NEVER_IDENTIFIED",
+                auditTrail.recorded.get(0).details().get("result"));
+    }
+
+    @Test
+    void engageRefusesAnUnsupportedAirframeWithItsOwnDistinctReason() {
+        stubDetails(device);
+        manualControlPort.kindToEngageAs = VehicleKind.UNKNOWN;
+        manualControlPort.unidentifiedReasonToReport = UnidentifiedReason.UNSUPPORTED_VEHICLE;
+
+        VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertEquals(UnidentifiedReason.UNSUPPORTED_VEHICLE, ex.reason());
+        assertTrue(ex.getMessage().contains("does not support"), "got: " + ex.getMessage());
+        assertEquals(1, manualControlPort.releasedLinks.size());
+    }
+
+    @Test
+    void engageRefusesANotAVehicleLinkWithItsOwnDistinctReason() {
+        stubDetails(device);
+        manualControlPort.kindToEngageAs = VehicleKind.UNKNOWN;
+        manualControlPort.unidentifiedReasonToReport = UnidentifiedReason.NOT_A_VEHICLE;
+
+        VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertEquals(UnidentifiedReason.NOT_A_VEHICLE, ex.reason());
+        assertTrue(ex.getMessage().contains("is not a vehicle"), "got: " + ex.getMessage());
+        assertEquals(1, manualControlPort.releasedLinks.size());
+    }
+
+    /**
+     * The refusal is the operator's answer; the release is only the cleanup that follows it. A port
+     * that throws on the way out must not replace "this vehicle is unidentified" with its own
+     * transport error -- nor swallow the refusal's audit record, which is the only trace that a real
+     * relay was opened and deliberately refused.
+     */
+    @Test
+    void aReleaseThatFailsDoesNotMaskTheRefusalOrItsAuditRecord() {
+        stubDetails(device);
+        manualControlPort.kindToEngageAs = VehicleKind.UNKNOWN;
+        manualControlPort.unidentifiedReasonToReport = UnidentifiedReason.NOT_A_VEHICLE;
+        manualControlPort.releaseFailure = new IllegalStateException("socket already closed");
+
+        VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertEquals(UnidentifiedReason.NOT_A_VEHICLE, ex.reason());
+        assertEquals(1, ex.getSuppressed().length, "the release failure must survive as a suppressed cause");
+        assertEquals("socket already closed", ex.getSuppressed()[0].getMessage());
+        assertEquals(1, auditTrail.recorded.size(), "the refusal must still be audited");
+        assertEquals("REFUSED:unidentified-vehicle:NOT_A_VEHICLE", auditTrail.recorded.get(0).details().get("result"));
+    }
+
+    /**
+     * The central design question, proven directly: refusing to engage is correct for all three
+     * causes, but a refusal that reads the same for all three tells the operator nothing. Each of
+     * the three must produce a genuinely different message.
+     */
+    @Test
+    void theThreeUnidentifiedReasonsProduceThreeDistinctOperatorFacingMessages() {
+        Set<String> messages = new HashSet<>();
+        for (UnidentifiedReason reason : UnidentifiedReason.values()) {
+            stubDetails(device);
+            FakeManualControlPort port = new FakeManualControlPort();
+            port.kindToEngageAs = VehicleKind.UNKNOWN;
+            port.unidentifiedReasonToReport = reason;
+            DefaultManualControlService serviceForReason =
+                    new DefaultManualControlService(assetService, port, new FakeAuditTrailPort(), readinessService,
+                            clock, scheduler);
+
+            VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                    () -> serviceForReason.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+            messages.add(ex.getMessage());
+        }
+        assertEquals(3, messages.size(), "each reason must read differently to the operator, got: " + messages);
+    }
+
+    /**
+     * An implementation that answers {@code UNKNOWN} without ever overriding {@code
+     * unidentifiedReason()} (the interface's own default) must still refuse -- it must not fail open
+     * just because it cannot name the finer cause. Exercised via a link that only implements the
+     * three original {@link ManualControlLink} methods, the same shape every pre-R2 implementation had.
+     */
+    @Test
+    void engageRefusesAnUnknownKindEvenFromALinkThatNeverOverridesUnidentifiedReason() {
+        stubDetails(device);
+        manualControlPort.linkFactory = () -> new ManualControlLink() {
+            @Override
+            public boolean active() {
+                return true;
+            }
+
+            @Override
+            public int rateHz() {
+                return 10;
+            }
+
+            @Override
+            public VehicleKind vehicleKind() {
+                return VehicleKind.UNKNOWN;
+            }
+        };
+
+        VehicleUnidentifiedException ex = assertThrows(VehicleUnidentifiedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertEquals(UnidentifiedReason.NEVER_IDENTIFIED, ex.reason(),
+                "the interface's own default must answer NEVER_IDENTIFIED, never a guess at the other two");
     }
 
     // -- onChannels -------------------------------------------------------------
@@ -359,15 +506,89 @@ class DefaultManualControlServiceTest {
     @Test
     void constructorsRejectNullCollaborators() {
         assertThrows(NullPointerException.class,
-                () -> new DefaultManualControlService(null, manualControlPort, auditTrail));
+                () -> new DefaultManualControlService(null, manualControlPort, auditTrail, readinessService));
         assertThrows(NullPointerException.class,
-                () -> new DefaultManualControlService(assetService, null, auditTrail));
+                () -> new DefaultManualControlService(assetService, null, auditTrail, readinessService));
         assertThrows(NullPointerException.class,
-                () -> new DefaultManualControlService(assetService, manualControlPort, null));
+                () -> new DefaultManualControlService(assetService, manualControlPort, null, readinessService));
         assertThrows(NullPointerException.class,
-                () -> new DefaultManualControlService(assetService, manualControlPort, auditTrail, null, scheduler));
+                () -> new DefaultManualControlService(assetService, manualControlPort, auditTrail, null));
         assertThrows(NullPointerException.class,
-                () -> new DefaultManualControlService(assetService, manualControlPort, auditTrail, clock, null));
+                () -> new DefaultManualControlService(assetService, manualControlPort, auditTrail, readinessService,
+                        null, scheduler));
+        assertThrows(NullPointerException.class,
+                () -> new DefaultManualControlService(assetService, manualControlPort, auditTrail, readinessService,
+                        clock, null));
+    }
+
+    // -- engage: a silently misconfigured vehicle is refused too (FLEET-RADIO R6) ----------
+
+    /**
+     * Required result 3: the {@code rc-relay} check runs at {@code engage}, not only at
+     * probe/preflight -- a MISSING verdict must refuse before any device is resolved or any link
+     * opened, and must audit the refusal distinctly from the R2 unidentified-vehicle refusal.
+     */
+    @Test
+    void engageRefusesWhenRcRelayIsMissingWithoutTouchingTheDeviceOrPort() {
+        stubDetails(device);
+        readinessService.features = List.of(new FeatureReadiness("rc-relay", "RC relay", FeatureStatus.MISSING,
+                "SYSID_MYGCS is 1, not the required 255.", RemedyKind.PARAM_WRITE));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertTrue(ex.getMessage().contains("SYSID_MYGCS"), "got: " + ex.getMessage());
+        assertTrue(manualControlPort.engagedDevices.isEmpty(), "no link should be opened when not-ready");
+        assertEquals(1, auditTrail.recorded.size());
+        assertEquals("REFUSED:not-ready:rc-relay", auditTrail.recorded.get(0).details().get("result"));
+    }
+
+    @Test
+    void engageProceedsWhenRcRelayIsReady() {
+        stubDetails(device);
+        readinessService.features = List.of(
+                new FeatureReadiness("rc-relay", "RC relay", FeatureStatus.READY, "Ready.", null));
+
+        ManualControlSession session = service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { });
+
+        assertTrue(session.active());
+        assertEquals(1, readinessService.evaluatedFor.size());
+        assertEquals(assetId, readinessService.evaluatedFor.get(0));
+    }
+
+    /**
+     * "Absence of evidence is not evidence of readiness" (this service's own javadoc, mirroring
+     * {@code ReadinessService}'s rule): a never-probed vehicle must still be able to engage, exactly
+     * as it could before this wave.
+     */
+    @Test
+    void engageProceedsWhenRcRelayIsUnknown() {
+        stubDetails(device);
+        readinessService.features = List.of(
+                new FeatureReadiness("rc-relay", "RC relay", FeatureStatus.UNKNOWN, "Never probed.", null));
+
+        assertTrue(service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }).active());
+    }
+
+    /** Only MISSING refuses -- a merely DEGRADED rc-relay row must not block engage. */
+    @Test
+    void engageProceedsWhenRcRelayIsDegraded() {
+        stubDetails(device);
+        readinessService.features = List.of(
+                new FeatureReadiness("rc-relay", "RC relay", FeatureStatus.DEGRADED, "Below threshold.", null));
+
+        assertTrue(service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }).active());
+    }
+
+    /** The scope gate runs first: an out-of-scope engage must never even query readiness. */
+    @Test
+    void engageDeniedForOutOfScopeNeverEvaluatesReadiness() {
+        stubDetails(device);
+
+        assertThrows(AccessDeniedException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.groups(Set.of()), () -> { }));
+
+        assertTrue(readinessService.evaluatedFor.isEmpty());
     }
 
     // -- thread-safety smoke --------------------------------------------------
@@ -424,9 +645,26 @@ class DefaultManualControlServiceTest {
     private static final class FakeManualControlPort implements ManualControlPort {
         boolean supportsResult = true;
         String engageFailureMessage;
+
+        /** What {@link #engage} hands back, by default -- a plain {@link FakeLink} for this kind. */
+        VehicleKind kindToEngageAs = FakeLink.KIND;
+
+        /** Rides the returned {@link FakeLink}'s {@code unidentifiedReason()}; {@code null} lets the
+         * {@link ManualControlLink} interface's own default answer instead (FLEET-RADIO R2). */
+        UnidentifiedReason unidentifiedReasonToReport;
+
+        /** When set, overrides {@code kindToEngageAs}/{@code unidentifiedReasonToReport} entirely --
+         * lets a test hand back a link shape of its own choosing (e.g. one that implements only the
+         * three original {@link ManualControlLink} methods, to exercise the interface's own default). */
+        Supplier<ManualControlLink> linkFactory;
+
+        /** When set, {@link #release} throws it -- the shape of a port whose socket died between
+         * engage and release. */
+        RuntimeException releaseFailure;
+
         final List<Device> engagedDevices = new ArrayList<>();
         final List<RcChannels> sentChannels = new ArrayList<>();
-        final List<FakeLink> releasedLinks = new ArrayList<>();
+        final List<ManualControlLink> releasedLinks = new ArrayList<>();
 
         @Override
         public boolean supports(Device device) {
@@ -439,7 +677,7 @@ class DefaultManualControlServiceTest {
                 throw new IllegalArgumentException(engageFailureMessage);
             }
             engagedDevices.add(device);
-            return new FakeLink();
+            return linkFactory != null ? linkFactory.get() : new FakeLink(kindToEngageAs, unidentifiedReasonToReport);
         }
 
         @Override
@@ -449,9 +687,13 @@ class DefaultManualControlServiceTest {
 
         @Override
         public void release(ManualControlLink link) {
-            FakeLink fakeLink = (FakeLink) link;
-            fakeLink.active = false;
-            releasedLinks.add(fakeLink);
+            if (link instanceof FakeLink fakeLink) {
+                fakeLink.active = false;
+            }
+            releasedLinks.add(link);
+            if (releaseFailure != null) {
+                throw releaseFailure;
+            }
         }
 
         private static final class FakeLink implements ManualControlLink {
@@ -459,19 +701,37 @@ class DefaultManualControlServiceTest {
             /** Any positive value -- these tests assert plumbing, not a particular cadence. */
             static final int RATE_HZ = 33;
 
-            /** The kind these tests engage as. Not UNKNOWN, so a profile actually gets chosen from it. */
+            /** The kind these tests engage as by default. Not UNKNOWN, so a profile actually gets
+             * chosen from it -- the UNKNOWN-refusal tests override this explicitly. */
             static final VehicleKind KIND = VehicleKind.ROVER;
+
+            private final VehicleKind kind;
+            private final UnidentifiedReason reasonOverride;
+            private boolean active = true;
+
+            FakeLink() {
+                this(KIND, null);
+            }
+
+            FakeLink(VehicleKind kind, UnidentifiedReason reasonOverride) {
+                this.kind = kind;
+                this.reasonOverride = reasonOverride;
+            }
 
             @Override
             public VehicleKind vehicleKind() {
-                return KIND;
+                return kind;
+            }
+
+            @Override
+            public Optional<UnidentifiedReason> unidentifiedReason() {
+                return reasonOverride != null ? Optional.of(reasonOverride) : ManualControlLink.super.unidentifiedReason();
             }
 
             @Override
             public int rateHz() {
                 return RATE_HZ;
             }
-            private boolean active = true;
 
             @Override
             public boolean active() {
@@ -503,6 +763,26 @@ class DefaultManualControlServiceTest {
         @Override
         public List<AuditEntry> findByActor(UserId actor, int limit) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    /**
+     * In-memory {@link ReadinessService}: defaults to every frozen feature key {@code READY}, the
+     * common case where this collaborator must never interfere with an engage a test is not
+     * specifically exercising. A test that cares about the {@code rc-relay} gate overwrites {@link
+     * #features} directly, mirroring {@code FakeFeatureRequirementRepositoryPort}'s own style in
+     * {@code DefaultReadinessServiceTest}.
+     */
+    private static final class FakeReadinessService implements ReadinessService {
+        List<FeatureReadiness> features = FeatureRequirement.FEATURE_KEYS.stream()
+                .map(key -> new FeatureReadiness(key, key, FeatureStatus.READY, "Ready.", null))
+                .toList();
+        final List<AssetId> evaluatedFor = new ArrayList<>();
+
+        @Override
+        public ReadinessReport evaluate(AssetId assetId, VisibilityScope scope) {
+            evaluatedFor.add(assetId);
+            return new ReadinessReport(assetId, ReadinessVerdict.GO, Instant.EPOCH, Instant.EPOCH, features, List.of());
         }
     }
 

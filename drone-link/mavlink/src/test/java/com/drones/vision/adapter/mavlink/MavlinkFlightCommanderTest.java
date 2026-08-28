@@ -563,6 +563,218 @@ class MavlinkFlightCommanderTest {
         }
     }
 
+    // ---- FLEET-RADIO R4b: emergencyStop is vehicle-kind-gated -----------------------------
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void emergencyStopOnACopterIsAnUnconditionalForcedDisarmByteIdenticalToBeforeThisWave() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 121, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<CommandLong> received = new AtomicReference<>();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_COMPONENT_ARM_DISARM,
+                    MavResult.MAV_RESULT_ACCEPTED, received, vehicleError);
+
+            CommandResult result = commander.emergencyStop(device);
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            CommandLong commandLong = received.get();
+            assertNotNull(commandLong, "expected the vehicle to receive a COMMAND_LONG");
+            assertEquals(121, commandLong.targetSystem());
+            assertEquals(MavCmd.MAV_CMD_COMPONENT_ARM_DISARM, commandLong.command().entry(),
+                    "a copter's emergency stop must still be a forced disarm, not a mode change");
+            assertEquals(0.0f, commandLong.param1(), "param1 must be 0.0 (disarm)");
+            assertEquals(21196.0f, commandLong.param2(), "param2 must be the 21196 force magic value");
+            assertEquals(CommandResult.ACCEPTED, result);
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void emergencyStopOnARoverSwitchesToHoldNotAForcedDisarm() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 122, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_GROUND_ROVER)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<CommandLong> received = new AtomicReference<>();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_DO_SET_MODE,
+                    MavResult.MAV_RESULT_ACCEPTED, received, vehicleError);
+
+            CommandResult result = commander.emergencyStop(device);
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            CommandLong commandLong = received.get();
+            assertNotNull(commandLong, "expected the vehicle to receive a COMMAND_LONG");
+            assertEquals(122, commandLong.targetSystem());
+            assertEquals(MavCmd.MAV_CMD_DO_SET_MODE, commandLong.command().entry(),
+                    "a rover's emergency stop must be a mode change (Hold), never a forced disarm");
+            assertEquals(1.0f, commandLong.param1(), "param1 must be MAV_MODE_FLAG_CUSTOM_MODE_ENABLED");
+            assertEquals(4.0f, commandLong.param2(), "param2 must be ArduRover's Hold custom_mode (4)");
+            assertEquals(CommandResult.ACCEPTED, result);
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void emergencyStopOnASurfaceBoatAlsoSwitchesToHold() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 123, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_SURFACE_BOAT)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<CommandLong> received = new AtomicReference<>();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_DO_SET_MODE,
+                    MavResult.MAV_RESULT_ACCEPTED, received, vehicleError);
+
+            CommandResult result = commander.emergencyStop(device);
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            CommandLong commandLong = received.get();
+            assertNotNull(commandLong);
+            assertEquals(MavCmd.MAV_CMD_DO_SET_MODE, commandLong.command().entry());
+            assertEquals(4.0f, commandLong.param2(), "a surface boat shares ArduRover's Hold mode table (D2)");
+            assertEquals(CommandResult.ACCEPTED, result);
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void emergencyStopOnARoverThrowsIllegalStateExceptionWhenTheVehicleDeniesHoldRatherThanReportingSuccess() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 124, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_GROUND_ROVER)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_DO_SET_MODE,
+                    MavResult.MAV_RESULT_DENIED, new AtomicReference<>(), vehicleError);
+
+            IllegalStateException ex = assertThrows(IllegalStateException.class, () -> commander.emergencyStop(device));
+            assertTrue(ex.getMessage().contains("MAV_RESULT_DENIED"),
+                    "a refused rover Hold must surface as a real failure naming the ack, got: " + ex.getMessage());
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void emergencyStopOnARoverReturnsNoAckWhenTheVehicleNeverRepliesRatherThanReportingSuccess() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 125, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_GROUND_ROVER)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            Thread vehicleThread = new Thread(() -> {
+                try {
+                    vehicle.awaitCommandLong(Duration.ofSeconds(10)); // drain but never reply
+                } catch (Exception ignored) {
+                    // best-effort drain only
+                }
+            }, "fake-vehicle-125");
+            vehicleThread.start();
+
+            assertEquals(CommandResult.NO_ACK, commander.emergencyStop(device),
+                    "a silent vehicle must report NO_ACK, never a false success, for a rover's stop attempt");
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void emergencyStopOnAnUnrecognizedVehicleKindStillForceDisarmsRatherThanGuessing() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        // MAV_TYPE_SUBMARINE (12) resolves to VehicleClass.SUBMARINE, which FlightModes.vehicleKind
+        // folds into VehicleKind.UNKNOWN (ArduSub is out of scope, docs/plans/active/FLEET-RADIO-PLAN.md
+        // R1) -- an ArduPilot-firmware vehicle with no rover/copter/plane family this class can name.
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 126, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_SUBMARINE)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<CommandLong> received = new AtomicReference<>();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_COMPONENT_ARM_DISARM,
+                    MavResult.MAV_RESULT_ACCEPTED, received, vehicleError);
+
+            CommandResult result = commander.emergencyStop(device);
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            CommandLong commandLong = received.get();
+            assertNotNull(commandLong, "expected the vehicle to receive a COMMAND_LONG");
+            assertEquals(MavCmd.MAV_CMD_COMPONENT_ARM_DISARM, commandLong.command().entry(),
+                    "an unidentified vehicle kind must fall back to the universal forced disarm, "
+                            + "never a guessed mode change");
+            assertEquals(0.0f, commandLong.param1(), "param1 must be 0.0 (disarm)");
+            assertEquals(21196.0f, commandLong.param2(), "param2 must be the 21196 force magic value");
+            assertEquals(CommandResult.ACCEPTED, result);
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
     // ---- Stage 2: capabilities -----------------------------------------------------------
 
     @Test

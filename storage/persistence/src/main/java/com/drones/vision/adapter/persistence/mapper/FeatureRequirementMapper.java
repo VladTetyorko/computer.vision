@@ -22,12 +22,13 @@ public final class FeatureRequirementMapper {
         String id = requirement.firmware() + ":" + requirement.featureKey();
         return new FeatureRequirementEntity(id, requirement.featureKey(), requirement.label(),
                 requirement.firmware(), requirement.requiredMessageId(), requirement.requiredMessageName(),
-                requirement.minimumHz(), requirement.requiredParameterName());
+                requirement.minimumHz(), requirement.requiredParameterName(), requirement.requiredParameterValue(),
+                requirement.forbiddenParameterBits());
     }
 
     public static FeatureRequirement toDomain(FeatureRequirementEntity entity) {
         return new FeatureRequirement(entity.featureKey(), entity.label(), entity.firmware(),
                 entity.requiredMessageId(), entity.requiredMessageName(), entity.minimumHz(),
-                entity.requiredParameterName());
+                entity.requiredParameterName(), entity.requiredParameterValue(), entity.forbiddenParameterBits());
     }
 }

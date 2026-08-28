@@ -3,7 +3,7 @@ import { RcSource } from './rc-source.service';
 import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
 import { describeHttpError } from '../api-error';
-import type { ControlAction, FlightCommandResult, ControlProfile, SwitchPosition } from '../api/models';
+import type { ControlAction, FlightCommandResult, ControlProfile, SwitchPosition, VehicleKind } from '../api/models';
 import {
   actionLabel,
   controlKey,
@@ -142,7 +142,7 @@ export class ControlActionDispatcher {
       } else if (Date.now() - this.holdSince >= DANGEROUS_HOLD_MS) {
         this.cancelHold();
         void this.send(assetId, holdingAction.action, holdingAction.parameter, held,
-          controlLabel(binding.source, binding.sourceIndex));
+          controlLabel(binding.source, binding.sourceIndex), profile.kind);
       }
     }
 
@@ -151,9 +151,10 @@ export class ControlActionDispatcher {
         this.holdKey = action.key;
         this.holdPosition = action.position;
         this.holdSince = Date.now();
-        this._holding.set(`Hold ${action.label} to ${actionLabel(action.action, action.parameter).toLowerCase()}`);
+        const what = actionLabel(action.action, action.parameter, profile.kind).toLowerCase();
+        this._holding.set(`Hold ${action.label} to ${what}`);
       } else {
-        void this.send(assetId, action.action, action.parameter, action.position, action.label);
+        void this.send(assetId, action.action, action.parameter, action.position, action.label, profile.kind);
       }
     }
   }
@@ -171,12 +172,13 @@ export class ControlActionDispatcher {
     parameter: string | null | undefined,
     position: SwitchPosition,
     from: string,
+    vehicleKind: VehicleKind | undefined,
   ): Promise<void> {
     if (this.inFlight) {
       return;
     }
     this.inFlight = true;
-    const what = actionLabel(action, parameter);
+    const what = actionLabel(action, parameter, vehicleKind);
     try {
       const result = await this.dispatch(assetId, action, parameter, position);
       // NO_ACK is reported as its own outcome, never folded into success: the command genuinely

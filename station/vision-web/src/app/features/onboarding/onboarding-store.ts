@@ -14,6 +14,7 @@ import {
 } from '../../core/fleet/simulation-logic';
 import { isProbeDisabledError } from '../../core/readiness/readiness-logic';
 import { buildMavlinkScanRequest, isClaimedVehicle } from './drone-scan-logic';
+import { detectSysidCollision, sysidParameterName } from './sysid-collision-logic';
 import {
   buildDroneDeviceSpec,
   linkCompatibility,
@@ -27,6 +28,8 @@ import { buildTelemetryRequest, type FlightPlanForm } from '../../shared/map/fli
 import type {
   DiscoveredDevice,
   NetworkAddress,
+  ParameterWriteRequest,
+  ParameterWriteResponse,
   ProbeCandidateRequest,
   ProbeDeviceRequest,
   ProbeDeviceResult,
@@ -545,6 +548,16 @@ export class OnboardingStore {
   readonly lastVerifyError = signal<string | null>(null);
   /** `true` once a {@link verify} attempt has confirmed `vision.onboarding.probe.enabled=false` on this deployment — read by `onboarding.html` to render the same honest "not enabled here" state `ModelsPage`/`DatasetsPage` use, never a generic error banner for the default, expected case. */
   readonly verifyDisabled = signal(false);
+  /**
+   * The sysid a successful {@link verify} collides with, if any (docs/plans/active/FLEET-RADIO-PLAN.md
+   * R5/F0) — `sysid-collision-logic.ts#detectSysidCollision` against the fleet's current device list.
+   * `null` means "no collision detected", never "unknown" — a failed device-list fetch degrades to
+   * this same value (see `verify`'s own silent-degrade read below). Reset to `null` at the top of
+   * every `verify()` call so a re-verify against edited fields never keeps a stale collision around.
+   */
+  readonly sysidCollision = signal<number | null>(null);
+  /** Which spelling to write for {@link sysidCollision} — set alongside it, `null` whenever that is. */
+  readonly sysidParameterToWrite = signal<'MAV_SYSID' | 'SYSID_THISMAV' | null>(null);
 
   /** Whether the last observed profile was for *these exact* connection fields, not a stale one — mirrors {@link probeStillCurrent}. */
   readonly verifyStillCurrent = computed(() => {
@@ -574,10 +587,13 @@ export class OnboardingStore {
     this.verifying.set(true);
     this.lastVerifyError.set(null);
     this.verifyDisabled.set(false);
+    this.sysidCollision.set(null);
+    this.sysidParameterToWrite.set(null);
     try {
       const result = await this.api.probeVehicleCandidate(request);
       this.lastVerifyRequest.set(request);
       this.lastVerifyResult.set(result);
+      await this.detectSysidCollisionQuietly(result);
     } catch (error) {
       this.lastVerifyRequest.set(request);
       this.lastVerifyResult.set(null);
@@ -588,6 +604,27 @@ export class OnboardingStore {
       }
     } finally {
       this.verifying.set(false);
+    }
+  }
+
+  /**
+   * The device-list read feeding {@link sysidCollision} (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) —
+   * silent-degrade, exactly like `loadCategoryOptions`/`loadSystemNetwork` below: a failed fetch (a
+   * caller without fleet-wide visibility, a network blip) must never throw out of {@link verify} or
+   * block/mislead the wizard, matching `canAdvanceFromVerify`'s own "verify never blocks" contract.
+   * It simply leaves {@link sysidCollision} at `null` — an honest "no collision detected", not a
+   * fabricated one.
+   */
+  private async detectSysidCollisionQuietly(profile: VehicleProfile): Promise<void> {
+    try {
+      const devices = await this.api.listDevices();
+      const collision = detectSysidCollision(profile, devices);
+      this.sysidCollision.set(collision);
+      if (collision !== null) {
+        this.sysidParameterToWrite.set(sysidParameterName(profile));
+      }
+    } catch {
+      // Silent-degrade — see this method's own doc comment.
     }
   }
 
@@ -703,7 +740,73 @@ export class OnboardingStore {
     this.toasts.ok(`"${displayName}" is ready.`);
     // Docs/plans/done/OPS-UX-PLAN.md §2 A3: the wizard's last step, not a redirect — "Who flies this?"
     // renders in place of navigating straight to /assets/:id, see `enterAssignStep` below.
-    await this.enterAssignStep(assetId, displayName);
+    //
+    // FLEET-RADIO-PLAN.md R5/F0: a `register`-path asset whose Verify-step profile collided with an
+    // already-claimed sysid detours through the sysid step first — every other path (no collision
+    // detected, or a Connect method other than `register`, e.g. `simulate`/`discover`/`listen`) goes
+    // straight to Assign, byte-identical to this wizard's behavior before this step existed.
+    if (this.connectMethod() === 'register' && this.sysidCollision() !== null) {
+      await this.enterSysidStep(assetId, displayName);
+    } else {
+      await this.enterAssignStep(assetId, displayName);
+    }
+  }
+
+  // --- Step 4.5: fix a sysid collision (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) ----------------
+  // Entered only from `finishCreate` above, only for a `register`-path asset whose Verify-step probe
+  // collided with an already-claimed sysid (`sysidCollision`, computed in `verify()`). Like Step 5
+  // below, this step is offered only *after* `POST /api/assets` has already succeeded — a failed
+  // write here can never be mistaken for "the asset wasn't created", the asset demonstrably already
+  // exists by the time any of this runs. Advisory, never a hard block (same philosophy as
+  // `canAdvanceFromVerify`): `continueFromSysidStep` always proceeds into Assign regardless of
+  // whether a write was even attempted, let alone whether it succeeded.
+
+  readonly writingSysid = signal(false);
+  readonly sysidWriteResult = signal<ParameterWriteResponse | null>(null);
+  readonly sysidWriteError = signal<string | null>(null);
+  /** The operator's chosen replacement sysid — left for them to type; this wizard does not attempt to suggest a "free" sysid (out of scope for this wave). */
+  readonly sysidValue = signal<number | null>(null);
+
+  private async enterSysidStep(assetId: string, displayName: string): Promise<void> {
+    this.createdAssetId.set(assetId);
+    this.createdAssetDisplayName.set(displayName);
+    this.step.set('sysid');
+  }
+
+  /**
+   * Writes the operator's chosen sysid to the newly-created asset's own device, under whichever
+   * spelling {@link sysidParameterToWrite} resolved (F0). `consent: true` is sent only because this
+   * call itself is the operator's explicit click on the step's own "Write sysid" button — never
+   * defaulted, never invoked automatically. No-op with nothing to write or while already writing.
+   */
+  async writeSysid(): Promise<void> {
+    const assetId = this.createdAssetId();
+    const parameterName = this.sysidParameterToWrite();
+    const value = this.sysidValue();
+    if (!assetId || parameterName === null || value === null || this.writingSysid()) {
+      return;
+    }
+    this.writingSysid.set(true);
+    this.sysidWriteError.set(null);
+    try {
+      const request: ParameterWriteRequest = { name: parameterName, value, consent: true };
+      const result = await this.api.writeAssetParameter(assetId, request);
+      this.sysidWriteResult.set(result);
+    } catch (error) {
+      this.sysidWriteResult.set(null);
+      this.sysidWriteError.set(describeHttpError(error));
+    } finally {
+      this.writingSysid.set(false);
+    }
+  }
+
+  /** Proceeds into the existing Assign flow — the step's "Continue" action. Also effectively "skip": a collision is informative, never a hard block, so this never checks whether a write was attempted or succeeded. */
+  continueFromSysidStep(): void {
+    const assetId = this.createdAssetId();
+    if (!assetId) {
+      return;
+    }
+    void this.enterAssignStep(assetId, this.createdAssetDisplayName());
   }
 
   // --- Step 5: "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) -------------------------------
@@ -813,6 +916,8 @@ export class OnboardingStore {
         return this.canAdvanceVerify();
       case 'create':
         return false; // the Create step has its own "Create asset" action, not a "Next"
+      case 'sysid':
+        return false; // the sysid step has its own "Write sysid"/"Continue" actions, not a "Next"
       case 'assign':
         return false; // the Assign step has its own "Assign & finish"/"Skip for now" actions, not a "Next"
     }

@@ -10,12 +10,14 @@ import com.drones.mavlink.session.DefaultTxScheduler;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.flight.domain.model.RcChannels;
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.flight.domain.port.ManualControlLink;
 import com.drones.vision.flight.domain.port.ManualControlPort;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * {@link ManualControlPort} implementation sending a persistent, fixed-rate, ack-less MAVLink 2
@@ -56,10 +58,16 @@ import java.util.Objects;
  * module cannot import a context type; duplicating the tiny value type there was the deliberate
  * alternative to a shared jar for one record).
  *
- * <h2>v1 scope: channels 1..8 only</h2>
- * {@code mavlink-core}'s {@code ManualControlService} already fixes channels 9..18 to {@code
- * IGNORE} unconditionally and pads a shorter-than-8 frame the same way (docs/plans/done/
- * RC-CONTROL-PHASE1-PLAN.md §5) — unchanged wire behaviour, now enforced one level down.
+ * <h2>Channel range and sentinel translation live one level down (docs/plans/active/FLEET-RADIO-PLAN.md R3)</h2>
+ * This class does no channel-range or sentinel work of its own: {@link #toCoreChannels} copies
+ * {@code vision-flight}'s {@link RcChannels#microsByChannel()} verbatim into {@code mavlink-core}'s
+ * structurally-identical {@link com.drones.mavlink.service.RcChannels}, whose own compact constructor
+ * enforces the accepted range (1..16 — {@code mavlink-core}'s own F17 fix; ArduPilot reads no RC-override
+ * channel past 16) and whose {@code wireValue(int)} resolves the release sentinel that differs between
+ * channels 1..8 and 9..16 (F4). Before FLEET-RADIO R3, {@code ManualControlService.buildFrame} hardcoded
+ * channels 9..18 to {@code IGNORE} regardless of what this class sent — every channel above 8 a caller of
+ * this port bound was silently dropped (F3). That is fixed now: whatever this class forwards on channels
+ * 1..16 reaches the wire.
  *
  * <h2>Cadence settings (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2)</h2>
  * {@code ManualControlService} only exposes a public constructor over {@code
@@ -79,9 +87,6 @@ import java.util.Objects;
 public final class MavlinkManualControlSender implements ManualControlPort {
 
     private static final System.Logger LOG = System.getLogger(MavlinkManualControlSender.class.getName());
-
-    /** v1 scope: {@code RC_CHANNELS_OVERRIDE} channels 1..8 only (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §5). */
-    static final int CHANNEL_COUNT = 8;
 
     private static final Duration SCHEDULER_CLOSE_JOIN_TIMEOUT = Duration.ofSeconds(5);
 
@@ -143,9 +148,11 @@ public final class MavlinkManualControlSender implements ManualControlPort {
         LOG.log(System.Logger.Level.INFO, () -> "Engaged MAVLink RC override link for device " + device.id()
                 + " (sysid " + target.sysid() + ") at " + coreRc.clampedOverrideHz() + "Hz");
         // Resolved here, from the heartbeat being heard right now -- the domain picks the stick
-        // layout from it (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §3.3).
+        // layout from it (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §3.3). The finer
+        // "why" behind an UNKNOWN kind rides alongside it (FLEET-RADIO R2) -- empty whenever the
+        // kind is recognized, since FlightModes.unidentifiedReason mirrors vehicleKind's own switch.
         return new AdapterLink(service, coreLink, device.id(), coreRc.clampedOverrideHz(),
-                FlightModes.vehicleKind(target.mavType()));
+                FlightModes.vehicleKind(target.mavType()), FlightModes.unidentifiedReason(target.mavType()));
     }
 
     @Override
@@ -188,14 +195,16 @@ public final class MavlinkManualControlSender implements ManualControlPort {
         private final DeviceId deviceId;
         private final int rateHz;
         private final VehicleKind vehicleKind;
+        private final Optional<UnidentifiedReason> unidentifiedReason;
 
         AdapterLink(ManualControlService service, ManualControlService.ManualControlLink coreLink, DeviceId deviceId,
-                    int rateHz, VehicleKind vehicleKind) {
+                    int rateHz, VehicleKind vehicleKind, Optional<UnidentifiedReason> unidentifiedReason) {
             this.service = service;
             this.coreLink = coreLink;
             this.deviceId = deviceId;
             this.rateHz = rateHz;
             this.vehicleKind = vehicleKind;
+            this.unidentifiedReason = unidentifiedReason;
         }
 
         @Override
@@ -213,6 +222,12 @@ public final class MavlinkManualControlSender implements ManualControlPort {
         @Override
         public VehicleKind vehicleKind() {
             return vehicleKind;
+        }
+
+        /** The finer "why" behind {@link VehicleKind#UNKNOWN}, from {@link FlightModes#unidentifiedReason}. */
+        @Override
+        public Optional<UnidentifiedReason> unidentifiedReason() {
+            return unidentifiedReason;
         }
     }
 }

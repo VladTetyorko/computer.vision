@@ -24,9 +24,9 @@ class RcChannelsTest {
     }
 
     @Test
-    void acceptsLengthOneAndLengthEighteen() {
+    void acceptsLengthOneAndLengthSixteen() {
         assertEquals(1, new RcChannels(List.of(1500)).microsByChannel().size());
-        assertEquals(18, new RcChannels(java.util.Collections.nCopies(18, 1500)).microsByChannel().size());
+        assertEquals(16, new RcChannels(java.util.Collections.nCopies(16, 1500)).microsByChannel().size());
     }
 
     @Test
@@ -40,9 +40,9 @@ class RcChannelsTest {
     }
 
     @Test
-    void rejectsListLongerThanEighteen() {
+    void rejectsListLongerThanSixteen() {
         assertThrows(IllegalArgumentException.class,
-                () -> new RcChannels(java.util.Collections.nCopies(19, 1500)));
+                () -> new RcChannels(java.util.Collections.nCopies(17, 1500)));
     }
 
     @Test
@@ -103,6 +103,6 @@ class RcChannelsTest {
     @Test
     void releasedRejectsOutOfRangeChannelCount() {
         assertThrows(IllegalArgumentException.class, () -> RcChannels.released(0));
-        assertThrows(IllegalArgumentException.class, () -> RcChannels.released(19));
+        assertThrows(IllegalArgumentException.class, () -> RcChannels.released(17));
     }
 }

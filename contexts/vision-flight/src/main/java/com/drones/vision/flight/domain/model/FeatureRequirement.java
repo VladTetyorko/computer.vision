@@ -33,6 +33,21 @@ import java.util.Set;
  *                             iff {@code requiredMessageId} is present
  * @param requiredParameterName a parameter that must be readable/present for this feature, or
  *                             {@code null}
+ * @param requiredParameterValue the exact value {@code requiredParameterName} must equal (compared
+ *                             with a small floating-point tolerance, since MAVLink parameters wire
+ *                             as float32 regardless of type), or {@code null} to check presence
+ *                             only; never set without {@code requiredParameterName} (FLEET-RADIO-PLAN.md
+ *                             R6 — e.g. this platform transmits as MAVLink sysid 255, so a vehicle's
+ *                             GCS-sysid parameter must equal exactly that for its overrides to be
+ *                             accepted)
+ * @param forbiddenParameterBits a bitmask that {@code requiredParameterName}'s value must have none
+ *                             of set (the value is rounded to the nearest {@code long} first — every
+ *                             known use is an integer bitmask wired as a float), or {@code null} to
+ *                             check presence/value only; never set without {@code
+ *                             requiredParameterName} (FLEET-RADIO-PLAN.md R6 — e.g. ArduPilot's
+ *                             {@code RC_OPTIONS} bit 1, {@code IGNORE_OVERRIDES}: <b>set</b> means the
+ *                             vehicle discards every MAVLink RC override, so the requirement is that
+ *                             the bit be <b>clear</b>)
  */
 public record FeatureRequirement(
         String featureKey,
@@ -41,7 +56,9 @@ public record FeatureRequirement(
         Integer requiredMessageId,
         String requiredMessageName,
         Double minimumHz,
-        String requiredParameterName) {
+        String requiredParameterName,
+        Double requiredParameterValue,
+        Long forbiddenParameterBits) {
 
     /**
      * The frozen v1 feature keys (docs/plans/active/DRONE-ONBOARDING-PLAN.md §8.1) — exact strings,
@@ -80,6 +97,18 @@ public record FeatureRequirement(
         }
         if (requiredParameterName != null && requiredParameterName.isBlank()) {
             throw new IllegalArgumentException("requiredParameterName must not be blank when present");
+        }
+        if (requiredParameterName == null && requiredParameterValue != null) {
+            throw new IllegalArgumentException(
+                    "requiredParameterValue must not be set without requiredParameterName");
+        }
+        if (requiredParameterName == null && forbiddenParameterBits != null) {
+            throw new IllegalArgumentException(
+                    "forbiddenParameterBits must not be set without requiredParameterName");
+        }
+        if (forbiddenParameterBits != null && forbiddenParameterBits < 0) {
+            throw new IllegalArgumentException(
+                    "forbiddenParameterBits must not be negative: " + forbiddenParameterBits);
         }
     }
 }

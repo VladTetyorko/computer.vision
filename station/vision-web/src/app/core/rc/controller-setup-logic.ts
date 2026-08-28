@@ -45,8 +45,13 @@ const MIN_MICROS = 1000;
 const CENTER_MICROS = 1500;
 const MAX_MICROS = 2000;
 
-/** Highest RC channel the domain accepts (`ControlBinding`'s own `[1,18]`). */
-const MAX_RC_CHANNEL = 18;
+/**
+ * Highest RC channel the domain accepts (`ControlBinding`'s own `[1,16]`). Narrowed from 18 by
+ * FLEET-RADIO R3/F17: ArduPilot reads only channels 1-16 from an `RC_CHANNELS_OVERRIDE`, so a
+ * binding on 17 or 18 could never reach a servo. `ControlBinding` now throws on those, which would
+ * turn an offer this page made into a rejection from the server, so the two must agree.
+ */
+const MAX_RC_CHANNEL = 16;
 
 /** What one control does: stream into a channel, or fire commands from its positions. */
 export type ControlRole = 'CHANNEL' | 'ACTIONS';

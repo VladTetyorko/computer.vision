@@ -126,20 +126,31 @@ class ControlProfileTest {
                 ControlProfile.forKind(VehicleKind.PLANE).displayName());
     }
 
+    /**
+     * FLEET-RADIO R2: before this wave, an unidentified vehicle's profile was the historical
+     * four-axis centred map -- reachable by any session that engaged an unknown kind, since {@code
+     * DefaultManualControlService#engage} had no refusal for it yet. This map is now empty, and the
+     * refusal itself lives one layer up (see {@code DefaultManualControlServiceTest}'s own
+     * {@code engageRefuses*} tests) -- this test guards this type's own half: total does not mean
+     * flyable.
+     */
     @Test
-    void anUnknownVehicleKeepsTheHistoricalCentredMapRatherThanGuessing() {
+    void anUnknownVehicleGetsAnEmptyUnflyableMapNotAGuess() {
         ControlProfile unknown = ControlProfile.forKind(VehicleKind.UNKNOWN);
 
-        RcChannels rest = atRest(unknown);
+        assertTrue(unknown.channelMap().bindings().isEmpty(),
+                "an unidentified vehicle's profile must bind nothing -- there is no safe guess");
 
-        assertEquals(List.of(1500, 1500, 1500, 1500), rest.microsByChannel());
-        assertEquals(ControlBinding.Travel.CENTERED, bindingFor(unknown, ControlFunction.THROTTLE).travel());
+        RcChannels rest = atRest(unknown);
+        assertEquals(List.of(RcChannels.IGNORE), rest.microsByChannel(),
+                "with no bindings at all the frame must be pure IGNORE -- incapable of driving anything");
     }
 
     @Test
     void everyProfileCarriesAPasteableChannelOrderCode() {
         assertEquals("AETR", ControlProfile.forKind(VehicleKind.COPTER).code());
         assertEquals("S-T-", ControlProfile.forKind(VehicleKind.ROVER).code());
+        assertEquals("----", ControlProfile.forKind(VehicleKind.UNKNOWN).code());
     }
 
     @Test

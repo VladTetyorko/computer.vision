@@ -1,9 +1,11 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -19,8 +21,11 @@ class FlightModesTest {
     private static final int MAV_TYPE_FIXED_WING = 1;
     private static final int MAV_TYPE_VTOL_TAILSITTER = 23;
     private static final int MAV_TYPE_GROUND_ROVER = 10;
+    private static final int MAV_TYPE_SURFACE_BOAT = 11;
     private static final int MAV_TYPE_HELICOPTER = 4;
-    private static final int MAV_TYPE_GCS = 6; // not copter/plane/rover
+    private static final int MAV_TYPE_GCS = 6; // not a vehicle at all (FLEET-RADIO R1)
+    private static final int MAV_TYPE_DODECAROTOR = 29; // missing from every table before FLEET-RADIO R1
+    private static final int MAV_TYPE_GIMBAL = 26; // not a vehicle at all (FLEET-RADIO R1)
 
     @Test
     void resolvesArdupilotCopterModesByName() {
@@ -64,6 +69,35 @@ class FlightModesTest {
         assertEquals("Guided", FlightModes.name(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER, 15));
     }
 
+    // --- FLEET-RADIO R1: the three ArduRover modes this table was missing (Dock/Circle/Initialising) ---
+
+    @Test
+    void resolvesTheArduRoverModesThisTableWasMissingBeforeFleetRadioR1() {
+        assertEquals("Dock", FlightModes.name(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER, 8));
+        assertEquals("Circle", FlightModes.name(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER, 9));
+        assertEquals("Initialising", FlightModes.name(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER, 16));
+    }
+
+    @Test
+    void resolvesTheArduRoverModesThisTableWasMissingOnASurfaceBoatToo() {
+        // A surface boat (MAV_TYPE 11) shares ArduRover's mode table with a ground rover (D2) --
+        // Dock is exactly as real for a boat returning to its charging dock as for a ground rover.
+        assertEquals("Dock", FlightModes.name(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_SURFACE_BOAT, 8));
+    }
+
+    @Test
+    void dockResolvesBothWaysDespiteBeingAnOptionalCompileTimeMode() {
+        // See customModeFor's own javadoc for why this class does not try to hide Dock defensively.
+        assertEquals(8, FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER, "Dock"));
+    }
+
+    @Test
+    void selectableModesForARoverIncludesDockCircleAndInitialising() {
+        List<String> rover = FlightModes.selectableModes(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER);
+        assertTrue(rover.contains("Dock") && rover.contains("Circle") && rover.contains("Initialising"),
+                "expected the completed rover mode table, got: " + rover);
+    }
+
     @Test
     void resolvesBetaflightModesRegardlessOfMavType() {
         assertEquals("Acro", FlightModes.name(AUTOPILOT_GENERIC, MAV_TYPE_QUADROTOR, 0));
@@ -100,6 +134,14 @@ class FlightModesTest {
         assertEquals(6, FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_QUADROTOR, "RTL"));
         assertEquals(11, FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_FIXED_WING, "RTL"));
         assertEquals(11, FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER, "RTL"));
+    }
+
+    @Test
+    void aDodecarotorGetsItsRealModeNameNotAModeNFallback() {
+        // Before FLEET-RADIO R1, MAV_TYPE_DODECAROTOR (29) was in no local table at all, so it fell
+        // through to the generic "no table selected" branch and rendered every mode as "Mode <n>".
+        assertEquals("RTL", FlightModes.name(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_DODECAROTOR, 6));
+        assertEquals(6, FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_DODECAROTOR, "RTL"));
     }
 
     @Test
@@ -170,10 +212,61 @@ class FlightModesTest {
     }
 
     @Test
+    void vehicleKindNowKnowsTheFamiliesNoLocalTableCoveredBeforeFleetRadioR1() {
+        // Dodecarotor, decarotor and generic multirotor were missing from every one of the three
+        // pre-R1 local tables. FlightModes.vehicleKind delegates to com.drones.mavlink.VehicleClass
+        // now, so these resolve without this class needing its own entry for them.
+        assertEquals(VehicleKind.COPTER, FlightModes.vehicleKind(MAV_TYPE_DODECAROTOR));
+        assertEquals(VehicleKind.COPTER, FlightModes.vehicleKind(35)); // MAV_TYPE_DECAROTOR
+        assertEquals(VehicleKind.COPTER, FlightModes.vehicleKind(43)); // MAV_TYPE_GENERIC_MULTIROTOR
+    }
+
+    @Test
     void anUnrecognizedMavTypeIsUnknownNotAGuess() {
+        // MAV_TYPE_GCS (6) is classified NOT_A_VEHICLE by com.drones.mavlink.VehicleClass -- a real,
+        // distinct fact from "we never heard of this number" -- but VehicleKind has no room for that
+        // distinction (deliberately, FLEET-RADIO R1 D2/R2), so both still collapse to UNKNOWN here.
         assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(6));   // MAV_TYPE_GCS
+        assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(MAV_TYPE_GIMBAL));
+        assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(12)); // MAV_TYPE_SUBMARINE -- a table slot, not a VehicleKind
         assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(0));   // MAV_TYPE_GENERIC
         assertEquals(VehicleKind.UNKNOWN, FlightModes.vehicleKind(255));
+    }
+
+    // --- unidentifiedReason (docs/plans/active/FLEET-RADIO-PLAN.md R2) -------------------------
+
+    @Test
+    void unidentifiedReasonIsEmptyForEveryRecognizedVehicleKind() {
+        assertEquals(Optional.empty(), FlightModes.unidentifiedReason(MAV_TYPE_QUADROTOR));
+        assertEquals(Optional.empty(), FlightModes.unidentifiedReason(MAV_TYPE_FIXED_WING));
+        assertEquals(Optional.empty(), FlightModes.unidentifiedReason(MAV_TYPE_GROUND_ROVER));
+        assertEquals(Optional.empty(), FlightModes.unidentifiedReason(MAV_TYPE_SURFACE_BOAT));
+    }
+
+    @Test
+    void unidentifiedReasonNamesAGenuinelyUnseenNumberAsNeverIdentified() {
+        assertEquals(Optional.of(UnidentifiedReason.NEVER_IDENTIFIED), FlightModes.unidentifiedReason(255));
+        assertEquals(Optional.of(UnidentifiedReason.NEVER_IDENTIFIED), FlightModes.unidentifiedReason(0));
+    }
+
+    @Test
+    void unidentifiedReasonNamesAGimbalOrAGcsAsNotAVehicle() {
+        assertEquals(Optional.of(UnidentifiedReason.NOT_A_VEHICLE), FlightModes.unidentifiedReason(MAV_TYPE_GIMBAL));
+        assertEquals(Optional.of(UnidentifiedReason.NOT_A_VEHICLE), FlightModes.unidentifiedReason(MAV_TYPE_GCS));
+    }
+
+    @Test
+    void unidentifiedReasonNamesAnAirshipAndASubmarineBothAsUnsupportedVehicle() {
+        assertEquals(Optional.of(UnidentifiedReason.UNSUPPORTED_VEHICLE), FlightModes.unidentifiedReason(7)); // airship
+        assertEquals(Optional.of(UnidentifiedReason.UNSUPPORTED_VEHICLE), FlightModes.unidentifiedReason(12)); // submarine
+    }
+
+    @Test
+    void unidentifiedReasonTellsAGimbalApartFromAGenuinelyUnknownNumber() {
+        // Expected result #6: "we refused because a gimbal is on your link" must not read like "we
+        // could not identify this vehicle" -- both used to collapse into the same UNKNOWN VehicleKind.
+        assertEquals(UnidentifiedReason.NOT_A_VEHICLE, FlightModes.unidentifiedReason(MAV_TYPE_GIMBAL).orElseThrow());
+        assertEquals(UnidentifiedReason.NEVER_IDENTIFIED, FlightModes.unidentifiedReason(9001).orElseThrow());
     }
 
     @Test

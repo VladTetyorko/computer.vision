@@ -69,7 +69,7 @@
             <span class="rc-binding-name">{{ controlLabel(binding.source, binding.sourceIndex) }}</span>
             <span class="rc-binding-actions">
               @for (position of binding.positions; track position.position) {
-                <span class="chip">{{ position.position }} · {{ actionLabel(position.action, position.parameter) }}</span>
+                <span class="chip">{{ position.position }} · {{ actionLabel(position.action, position.parameter, capabilities()?.vehicleKind) }}</span>
               }
             </span>
           </li>

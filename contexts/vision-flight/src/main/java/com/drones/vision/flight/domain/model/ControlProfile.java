@@ -17,7 +17,10 @@ import java.util.Set;
  * frame. One map cannot be right for both, because the two machines are not the same machine.
  *
  * <p>{@link #forKind} is total: every {@link VehicleKind}, {@link VehicleKind#UNKNOWN} included, has
- * a profile, so a session can never end up choosing a map by accident.
+ * a profile, so a session can never end up choosing a map by accident. Total does not mean flyable,
+ * though (FLEET-RADIO R2): {@link VehicleKind#UNKNOWN}'s profile binds nothing at all, and {@code
+ * DefaultManualControlService#engage} refuses to open a session on that kind before this profile is
+ * ever handed to a live one — see {@link VehicleKind#UNKNOWN}'s own javadoc.
  *
  * <h2>What is deliberately absent</h2>
  * No profile binds an aux channel. Arm, disarm and mode select travel over the flight-command REST
@@ -176,7 +179,7 @@ public record ControlProfile(ControlProfileId id, VehicleKind kind, String code,
             case PLANE -> new ControlProfile(id, kind, "AETR", "Fixed-wing", airborneMap(), ActionMap.empty());
             case ROVER -> new ControlProfile(id, kind, "S-T-", "Ground vehicle", roverMap(), ActionMap.empty());
             case UNKNOWN ->
-                    new ControlProfile(id, kind, "AETR?", "Unrecognised vehicle", unknownMap(), ActionMap.empty());
+                    new ControlProfile(id, kind, "----", "Unidentified vehicle", unknownMap(), ActionMap.empty());
         };
     }
 
@@ -206,19 +209,24 @@ public record ControlProfile(ControlProfileId id, VehicleKind kind, String code,
     }
 
     /**
-     * A vehicle that has not said what it is: the four-axis, everything-centred map this platform
-     * relayed before profiles existed.
+     * A vehicle that has not said what it is, or has said something this platform will not fly or
+     * drive (FLEET-RADIO R2): no bindings at all. {@link ChannelMap#apply} on an empty map fabricates
+     * nothing — {@link RcChannels#IGNORE} on the one channel it reports — so this profile is
+     * physically incapable of driving any axis.
      *
-     * <p>Deliberately not upgraded to a guess. A throttle resting at its minimum is idle on a copter
-     * and <em>full reverse</em> on a rover, so neither travel is safe to assume; the platform keeps
-     * the historical behaviour and reports {@link VehicleKind#UNKNOWN} on the wire so the operator —
-     * who can see the vehicle — decides what to make of it (§2 P8).
+     * <p>Before FLEET-RADIO R2 this returned the historical four-axis, everything-centred map — the
+     * one every session relayed before per-vehicle profiles existed at all — which meant an engaged
+     * session actually could drive an unidentified vehicle's sticks, just with no assurance any axis
+     * meant what the operator thought. R2 closes that path one layer up: {@code
+     * DefaultManualControlService#engage} now refuses to open a session at all when {@link
+     * com.drones.vision.flight.domain.port.ManualControlLink#vehicleKind()} is {@link
+     * VehicleKind#UNKNOWN}, naming the specific reason
+     * (see {@link UnidentifiedReason}). This method exists purely as defense in depth after that —
+     * {@link #forKind} stays total and never throws, by its own documented invariant, and an empty
+     * map is the one shape that is safe to hand out unconditionally, because nothing can fly on it
+     * even if it were ever reached.
      */
     private static ChannelMap unknownMap() {
-        return new ChannelMap(List.of(
-                ControlBinding.centeredAxis(ControlFunction.ROLL, AXIS_AILERON, CH_ROLL_OR_STEERING),
-                ControlBinding.centeredAxis(ControlFunction.PITCH, AXIS_ELEVATOR, CH_PITCH),
-                ControlBinding.centeredAxis(ControlFunction.THROTTLE, AXIS_THROTTLE, CH_THROTTLE),
-                ControlBinding.centeredAxis(ControlFunction.YAW, AXIS_RUDDER, CH_YAW)));
+        return new ChannelMap(List.of());
     }
 }

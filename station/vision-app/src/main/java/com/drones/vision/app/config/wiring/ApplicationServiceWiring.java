@@ -245,9 +245,11 @@ public class ApplicationServiceWiring {
     @Bean
     public ManualControlService manualControlService(AssetService assetService, ManualControlPort manualControlPort,
                                                        AuditTrailPort auditTrailPort, VisionRcProperties rcProperties,
-                                                       ControlProfileService controlProfileService) {
-        return new DefaultManualControlService(assetService, manualControlPort, auditTrailPort, Clock.systemUTC(),
-                rcWatchdogScheduler(), rcProperties.watchdogTimeoutMs(), controlProfileService::activeFor);
+                                                       ControlProfileService controlProfileService,
+                                                       ReadinessService readinessService) {
+        return new DefaultManualControlService(assetService, manualControlPort, auditTrailPort, readinessService,
+                Clock.systemUTC(), rcWatchdogScheduler(), rcProperties.watchdogTimeoutMs(),
+                controlProfileService::activeFor);
     }
 
     private static ScheduledExecutorService rcWatchdogScheduler() {

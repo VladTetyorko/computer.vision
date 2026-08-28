@@ -87,8 +87,15 @@ class ManualControlServiceTest {
         assertFalse(scheduler.started, "no periodic task should have been started for an unreachable target");
     }
 
+    /**
+     * docs/plans/active/FLEET-RADIO-PLAN.md F3: before this wave, {@code buildFrame} hardcoded
+     * {@code chan9Raw..chan18Raw} to {@link RcChannels#IGNORE} regardless of what a caller sent, so
+     * an operator's CH9 binding (a rover's mode switch, a light, a winch) never reached the wire at
+     * all. Failing assertion text against the pre-fix code:
+     * {@code expected: <1150> but was: <65535>} at the {@code chan9Raw} line below.
+     */
     @Test
-    void framesCarrySentChannelValuesWithChannels9To18AlwaysIgnore() {
+    void framesCarryAllSentChannelValuesIncludingExtensionChannelsNineThroughSixteen() {
         RecordingFrameSink sink = new RecordingFrameSink();
         FakePeerDirectory peers = FakePeerDirectory.knowing(TARGET, LINK);
         realScheduler = new DefaultTxScheduler(Duration.ofSeconds(2));
@@ -96,7 +103,9 @@ class ManualControlServiceTest {
 
         ManualControlService.ManualControlLink link = service.engage(TARGET);
         assertTrue(link.active());
-        service.send(link, new RcChannels(List.of(1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900)));
+        service.send(link, new RcChannels(List.of(
+                1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900,
+                1150, 1250, 1350, 1450, 1550, 1650, 1750, 1850)));
 
         RcChannelsOverride frame = sink.awaitOverrideWhereChan1Is(1200, Duration.ofSeconds(3));
         assertEquals(VEHICLE.value(), frame.targetSystem());
@@ -109,8 +118,19 @@ class ManualControlServiceTest {
         assertEquals(1700, frame.chan6Raw());
         assertEquals(1800, frame.chan7Raw());
         assertEquals(1900, frame.chan8Raw());
-        assertEquals(RcChannels.IGNORE, frame.chan9Raw());
-        assertEquals(RcChannels.IGNORE, frame.chan13Raw());
+        // The bound value at CH9 (and every channel through CH16) reaches the wire -- this is the
+        // F3 fix: these used to be hardcoded IGNORE (65535) no matter what was sent.
+        assertEquals(1150, frame.chan9Raw());
+        assertEquals(1250, frame.chan10Raw());
+        assertEquals(1350, frame.chan11Raw());
+        assertEquals(1450, frame.chan12Raw());
+        assertEquals(1550, frame.chan13Raw());
+        assertEquals(1650, frame.chan14Raw());
+        assertEquals(1750, frame.chan15Raw());
+        assertEquals(1850, frame.chan16Raw());
+        // Channels 17/18 do not exist for ArduPilot (F17); RcChannels itself refuses to carry a
+        // value there, so this class always sends IGNORE for them, unconditionally.
+        assertEquals(RcChannels.IGNORE, frame.chan17Raw());
         assertEquals(RcChannels.IGNORE, frame.chan18Raw());
 
         service.release(link);
@@ -155,6 +175,11 @@ class ManualControlServiceTest {
         service.release(link);
     }
 
+    /**
+     * docs/plans/active/FLEET-RADIO-PLAN.md F4: a release must not read as "ignore" on the
+     * extension channels, or a channel like a rover's mode switch (CH9) stays latched at its last
+     * commanded value forever instead of actually being released back to the RC radio.
+     */
     @Test
     @Timeout(value = 15, unit = TimeUnit.SECONDS)
     void releaseEmitsAReleaseBurstThenGoesSilentAndIsIdempotent() {
@@ -164,15 +189,25 @@ class ManualControlServiceTest {
         ManualControlService service = new ManualControlService(sink, realScheduler, peers, TICK, RELEASE_FRAMES);
 
         ManualControlService.ManualControlLink link = service.engage(TARGET);
-        service.send(link, new RcChannels(List.of(1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500)));
+        service.send(link, new RcChannels(List.of(
+                1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500,
+                1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500)));
         sink.awaitOverrideWhereChan1Is(1500, Duration.ofSeconds(3)); // confirm real values flowed first
 
         service.release(link);
         assertFalse(link.active());
 
         RcChannelsOverride releaseFrame = sink.awaitOverrideWhereChan1Is(RcChannels.RELEASE, Duration.ofSeconds(3));
+        // Channels 1..8: the wire's own RELEASE=0.
         assertEquals(0, releaseFrame.chan1Raw());
         assertEquals(0, releaseFrame.chan8Raw());
+        // Channels 9..16: RELEASE is 65534 on the wire, not 0 (F4) -- 0 would mean "ignore" there.
+        assertEquals(RcChannels.EXTENSION_RELEASE, releaseFrame.chan9Raw());
+        assertEquals(65534, releaseFrame.chan9Raw());
+        assertEquals(RcChannels.EXTENSION_RELEASE, releaseFrame.chan16Raw());
+        // Channels 17/18: always IGNORE, unconditionally (F17 -- ArduPilot does not read them).
+        assertEquals(RcChannels.IGNORE, releaseFrame.chan17Raw());
+        assertEquals(RcChannels.IGNORE, releaseFrame.chan18Raw());
 
         sink.clear();
         sleepQuietly(TICK.toMillis() * 5);

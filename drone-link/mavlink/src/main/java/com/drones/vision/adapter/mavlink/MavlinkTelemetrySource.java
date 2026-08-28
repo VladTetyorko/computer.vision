@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -139,13 +140,15 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
 
         SubmissionPublisher<Telemetry> publisher = new SubmissionPublisher<>();
         VehicleRegistration[] registrationHolder = new VehicleRegistration[1];
+        MavlinkGateway[] gatewayHolder = new MavlinkGateway[1];
         gateways.compute(bindKey, (key, existing) -> {
             MavlinkGateway gateway = existing == null || existing.isClosed() ? newGateway(host, port) : existing;
             registrationHolder[0] = gateway.register(device.id(), pinnedSysid, publisher);
+            gatewayHolder[0] = gateway;
             return gateway;
         });
 
-        DeviceRuntime runtime = new DeviceRuntime(bindKey, registrationHolder[0]);
+        DeviceRuntime runtime = new DeviceRuntime(bindKey, gatewayHolder[0], registrationHolder[0]);
         DeviceRuntime previous = runtimes.put(device.id(), runtime);
         if (previous != null) {
             closeRuntime(previous); // defensive: a device id must not have two live runtimes
@@ -195,18 +198,25 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
 
     /**
      * {@link LinkHealth.Health} for every vehicle currently claimed across every open gateway
-     * (every bind address, not just one) — {@code mavlink-link}'s {@code SubsystemStatusPort}
-     * plumbing (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2). Public — unlike this class's other
-     * {@code MavlinkGateway}-plumbing accessors — because {@code vision-app}'s wiring passes {@code
-     * this::claimedVehicleHealth} as the {@code Supplier<List<LinkHealth.Health>>}
-     * {@link MavlinkLinkStatusProvider} takes; that wiring class lives in a different package and
-     * cannot reach a package-private method. Empty when no gateway is open, i.e. no MAVLink-protocol
-     * device has ever been opened — a genuinely different, more honest state than "the link is down".
+     * (every bind address, not just one), keyed by {@link DeviceId} (FLEET-RADIO-PLAN.md D4) —
+     * {@code mavlink-link}'s {@code SubsystemStatusPort} plumbing (docs/plans/done/SYSTEM-STATUS-PLAN.md
+     * §4.2). Public — unlike this class's other {@code MavlinkGateway}-plumbing accessors — because
+     * {@code vision-app}'s wiring passes {@code this::claimedVehicleHealth} as the {@code
+     * Supplier<Map<DeviceId, LinkHealth.Health>>} {@link MavlinkLinkStatusProvider} takes; that
+     * wiring class lives in a different package and cannot reach a package-private method. Empty
+     * when no gateway is open, i.e. no MAVLink-protocol device has ever been opened — a genuinely
+     * different, more honest state than "the link is down".
+     *
+     * <p>A {@code DeviceId} can claim on only one gateway at a time (one {@code open()} per device),
+     * so merging every gateway's own map here can never collide two gateways' entries under the same
+     * key.
      */
-    public List<LinkHealth.Health> claimedVehicleHealth() {
-        return gateways.values().stream()
-                .flatMap(gateway -> gateway.claimedVehicleHealth().stream())
-                .toList();
+    public Map<DeviceId, LinkHealth.Health> claimedVehicleHealth() {
+        Map<DeviceId, LinkHealth.Health> merged = new HashMap<>();
+        for (MavlinkGateway gateway : gateways.values()) {
+            merged.putAll(gateway.claimedVehicleHealth());
+        }
+        return merged;
     }
 
     /**
@@ -253,14 +263,31 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         }
     }
 
+    /**
+     * Unregisters {@code runtime} from the exact {@link MavlinkGateway} instance it was opened
+     * against — not whatever gateway {@link #gateways} currently maps {@code runtime.bindKey()} to.
+     *
+     * <p>Those can differ: once {@link MavlinkGateway#handleLinkFailure} exists (FLEET-RADIO-PLAN.md
+     * R4), a gateway can close itself from its own reader thread, independent of any {@code
+     * unregister} call, and a fresh {@link #open} for the same bind address may already have
+     * replaced it in {@link #gateways} (see that method's {@code existing.isClosed()} check) by the
+     * time this device's {@link #close(DeviceId)} runs. Looking the gateway up by {@code bindKey}
+     * here, as this method did before R4, would then unregister from the wrong — newer, healthy —
+     * gateway instead of the failed one this runtime actually belongs to, corrupting a second
+     * device's claim bookkeeping over a race this class never needed to run. Holding the gateway
+     * reference directly in {@link DeviceRuntime} makes that impossible: {@link
+     * MavlinkGateway#unregister} is idempotent and safe to call on an already-closed gateway.
+     *
+     * <p>The map is still touched, but only for its own conditional cleanup: {@link
+     * Map#remove(Object, Object)} evicts the entry <i>only</i> if it still points at this exact
+     * gateway, so a concurrent replacement already installed by a new {@link #open} is never
+     * clobbered.
+     */
     private void closeRuntime(DeviceRuntime runtime) {
-        gateways.compute(runtime.bindKey(), (key, gateway) -> {
-            if (gateway == null) {
-                return null;
-            }
-            boolean gatewayNowEmpty = gateway.unregister(runtime.registration());
-            return gatewayNowEmpty ? null : gateway;
-        });
+        boolean gatewayNowEmpty = runtime.gateway().unregister(runtime.registration());
+        if (gatewayNowEmpty) {
+            gateways.remove(runtime.bindKey(), runtime.gateway());
+        }
     }
 
     private String bindHost(URI uri) {
@@ -287,7 +314,11 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         }
     }
 
-    /** This device's share of a {@link MavlinkGateway}: which gateway, and its registration within it. */
-    private record DeviceRuntime(String bindKey, VehicleRegistration registration) {
+    /**
+     * This device's share of a {@link MavlinkGateway}: which bind address, which exact gateway
+     * instance (see {@link #closeRuntime} for why this must be the instance actually registered
+     * against, not a re-lookup by {@code bindKey}), and its registration within it.
+     */
+    private record DeviceRuntime(String bindKey, MavlinkGateway gateway, VehicleRegistration registration) {
     }
 }

@@ -1,6 +1,9 @@
 package com.drones.vision.flight.domain.port;
 
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.flight.domain.model.VehicleKind;
+
+import java.util.Optional;
 
 /**
  * Opaque, adapter-owned handle to one
@@ -47,4 +50,24 @@ public interface ManualControlLink {
      * @return the vehicle kind, never {@code null}
      */
     VehicleKind vehicleKind();
+
+    /**
+     * Why {@link #vehicleKind()} is {@link VehicleKind#UNKNOWN}, when it is — the distinction {@link
+     * VehicleKind} itself has no room for, because the three causes share one (nonexistent) control
+     * shape (docs/plans/active/FLEET-RADIO-PLAN.md R2; see {@link UnidentifiedReason} for the three
+     * and why the platform still tells them apart).
+     *
+     * <p>Defaults to {@link UnidentifiedReason#NEVER_IDENTIFIED} whenever {@link #vehicleKind()} is
+     * {@link VehicleKind#UNKNOWN} — the safe, honest answer for an implementation that cannot (or has
+     * not been taught to) distinguish the finer cause. An implementation that heard enough to tell
+     * "a real airframe we don't support" or "not a vehicle at all" apart from "never seen this
+     * number" overrides this to say so.
+     *
+     * @return the reason, or empty when {@link #vehicleKind()} is not {@link VehicleKind#UNKNOWN}
+     */
+    default Optional<UnidentifiedReason> unidentifiedReason() {
+        return vehicleKind() == VehicleKind.UNKNOWN
+                ? Optional.of(UnidentifiedReason.NEVER_IDENTIFIED)
+                : Optional.empty();
+    }
 }
