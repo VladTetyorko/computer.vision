@@ -1,103 +1,80 @@
-<vision-side-panel title="Controller" icon="gamepad" subtitle="Mode · arm · sticks" (close)="close.emit()">
-  <!-- Flight commands (mode / arm / disarm) — the former separate `flight` drawer, merged in here as
-       a body-only section (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10). First, because it is
-       what an operator answers before deciding whether to take the sticks below; it gates itself on
-       `canCommand`/`capabilities` and renders nothing at all when the vehicle takes no commands. -->
-  <vision-flight-command-panel
-    [assetId]="assetId()"
-    [assetDisplayName]="assetDisplayName()"
-    [capabilities]="capabilities()"
-    [canCommand]="canCommand()"
-    [armed]="armed()"
-  />
-
-  <!-- The read-only transmitter monitor. Purely about a plugged-in gamepad, so the whole block is
-       hidden when there is none — "Take control" below is deliberately outside it, because control
-       no longer needs one (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P10). -->
-  @if (!rc.supported()) {
-    <vision-notice variant="warn">
-      This browser doesn't expose gamepad input, so a transmitter can't be read here. The on-screen
-      controls below still work.
-    </vision-notice>
-  } @else if (!rc.connected()) {
-    <p class="muted">
-      Plug your RadioMaster in over USB in <strong>USB Joystick</strong> mode, then move a stick or
-      flip a switch — the browser only reveals a controller after its first input. Or drive from the
-      on-screen controls below.
-    </p>
-    <vision-notice variant="warn">
-      In USB Joystick mode the radio stops transmitting over RF. Keep this a bench/SITL check —
-      it does not fly anything yet.
-    </vision-notice>
-  } @else {
-    <div class="rc-head">
-      <span class="rc-device mono truncate" [title]="rc.device()?.id">{{ rc.deviceLabel() }}</span>
-      <span class="chip ok"><span class="dot ok"></span>{{ rc.updateRateHz() }} Hz</span>
-    </div>
-
-    <span class="label rc-group-label">Axes ({{ rc.axes().length }})</span>
-    <div class="rc-list">
-      @for (v of rc.axes(); track $index) {
-        <div class="rc-row">
-          <span class="rc-name">{{ axisLabel($index) }}</span>
-          <div class="rc-bar" role="img" [attr.aria-label]="axisLabel($index) + ': ' + axisToPercent(v) + ' percent'">
-            <span class="rc-tick"></span>
-            <span class="rc-fill" [style.left.%]="barLeftPercent(v)" [style.width.%]="barWidthPercent(v)"></span>
-          </div>
-          <span class="rc-value mono">{{ axisToPercent(v) }}</span>
-        </div>
+<vision-side-panel title="Controller" icon="gamepad" subtitle="Sticks · mode · arm" (close)="close.emit()">
+  <div class="rc-body">
+    <!-- State strip (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 U5) — chips only, no prose above the
+         sticks. Armed always renders (a faint dash while unknown); mode and the device+rate chip
+         appear only once there is a real signal to show. -->
+    <div class="state-strip">
+      <span class="chip" [class.ok]="armedChipView().tone === 'ok'">{{ armedChipView().text }}</span>
+      @if (mode(); as m) {
+        <span class="chip">{{ m }}</span>
+      }
+      @if (rc.connected()) {
+        <span class="chip ok mono" [title]="rc.device()?.id">
+          <span class="dot ok"></span>{{ rc.deviceLabel() }} · {{ rc.updateRateHz() }} Hz
+        </span>
       }
     </div>
 
-    <span class="label rc-group-label">Switches ({{ rc.buttons().length }})</span>
-    <div class="rc-switches">
-      @for (b of rc.buttons(); track $index) {
-        <span class="rc-switch" [class.on]="isOn(b)">{{ buttonLabel($index) }}</span>
-      }
-    </div>
-  }
+    @if (!rc.supported()) {
+      <vision-notice variant="warn">
+        This browser doesn't expose gamepad input, so a transmitter can't be read here. The on-screen
+        controls below still work.
+      </vision-notice>
+    } @else if (!rc.connected()) {
+      <vision-notice variant="warn">
+        Plug your transmitter in over USB in <strong>USB Joystick</strong> mode to see it here — the
+        radio stops transmitting over RF in that mode, so keep this a bench/SITL check. Or drive from
+        the on-screen controls below.
+      </vision-notice>
+    }
 
-  <!-- Bound switches (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C2/C3) — what this operator's
-       layout fires when a switch moves. Deliberately above "Take control" and outside it: these go
-       over the ordinary command endpoints, so they work without taking the sticks at all. -->
-  @if (actionBindings().length > 0) {
-    <div class="rc-actions">
-      <span class="label rc-group-label">Bound switches</span>
-      <ul class="rc-binding-list">
-        @for (binding of actionBindings(); track controlLabel(binding.source, binding.sourceIndex)) {
-          <li>
-            <span class="rc-binding-name">{{ controlLabel(binding.source, binding.sourceIndex) }}</span>
-            <span class="rc-binding-actions">
-              @for (position of binding.positions; track position.position) {
-                <span class="chip">{{ position.position }} · {{ actionLabel(position.action, position.parameter, capabilities()?.vehicleKind) }}</span>
-              }
-            </span>
-          </li>
-        }
-      </ul>
-      @if (dispatcher.holding(); as holding) {
-        <vision-notice variant="warn">{{ holding }}.</vision-notice>
-      } @else if (dispatcher.lastFired(); as fired) {
-        <p class="muted hint">{{ fired }}</p>
-      }
-      @if (!canCommand()) {
-        <p class="muted hint">These do nothing until this drone accepts commands.</p>
-      }
-    </div>
-  }
+    <!-- The transmitter picture (§2.1) — renders before engage, mirroring whatever is plugged in or
+         selected; becomes draggable only once engaged on the on-screen source (decisions U1/U2). -->
+    <vision-transmitter-view
+      [channelMap]="transmitterChannelMap()"
+      [actionMap]="actionBindings()"
+      [vehicleKind]="vehicleKind()"
+      [catalog]="profiles.catalog()"
+      [axes]="source.axes()"
+      [buttons]="source.buttons()"
+      [interactive]="interactive()"
+      [holding]="dispatcher.holding()"
+      (valuesChange)="onValuesChange($event)"
+    />
+    @if (interactive()) {
+      <button type="button" class="btn secondary small centre-all" (click)="virtual.centreAll()">
+        Centre all
+      </button>
+    }
 
-  <!-- Take control (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R5) — the relay engage/release gesture.
-       Deliberately a sibling of the monitor above, not nested inside it: a mid-session gamepad
-       disconnect flips that branch, but the engage state below must keep showing (e.g. a watchdog/
-       released notice) either way — and with the on-screen source there may never have been a
-       gamepad to lose. -->
-  <div class="rc-engage">
-    <span class="label rc-group-label">Take control</span>
+    @if (dispatcher.lastFired(); as fired) {
+      <p class="muted hint">{{ fired }}</p>
+    }
+    @if (actionBindings().length > 0 && !canCommand()) {
+      <p class="muted hint">These do nothing until this drone accepts commands.</p>
+    }
 
-    <div class="rc-source" role="group" aria-label="Input source">
+    <!-- Mode/Arm/Disarm (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10) — below the sticks now
+         (decision U3), each row naming the switch that fires the same command when one is bound. -->
+    <vision-flight-command-panel
+      [assetId]="assetId()"
+      [assetDisplayName]="assetDisplayName()"
+      [capabilities]="capabilities()"
+      [canCommand]="canCommand()"
+      [armed]="armed()"
+      [modeAlsoOn]="modeAlsoOn()"
+      [armAlsoOn]="armAlsoOn()"
+    />
+  </div>
+
+  <!-- Take control (decision U6) — a sticky footer via `SidePanel`'s own `[footer]` slot, so
+       engage/release stays reachable without scrolling past the sticks; it is the safety control. -->
+  <div footer class="rc-footer">
+    <span class="label">Input</span>
+    <div class="segmented rc-source" role="group" aria-label="Input source">
       <button
         type="button"
-        class="btn small"
+        class="btn secondary small"
         [class.active]="source.kind() === 'virtual'"
         [disabled]="sourceLocked()"
         (click)="useSource('virtual')"
@@ -106,7 +83,7 @@
       </button>
       <button
         type="button"
-        class="btn small"
+        class="btn secondary small"
         [class.active]="source.kind() === 'gamepad'"
         [disabled]="sourceLocked() || !rc.connected()"
         (click)="useSource('gamepad')"
@@ -117,33 +94,12 @@
 
     @switch (client.state()) {
       @case ('engaged') {
-        <vision-notice variant="ok">
-          Live — {{ source.kind() === 'gamepad' ? 'this transmitter is' : 'the on-screen controls are' }} driving
-          {{ assetDisplayName() }}. Releasing, closing this panel, or switching tabs stops it
-          immediately and hands control back to the vehicle's own failsafe.
-        </vision-notice>
-        <div class="rc-engage-stats">
-          <span class="chip ok">{{ client.rateHz() }} Hz link</span>
-          <span class="chip">{{ latencyLabel(client.latencyMs()) }} RTT</span>
+        <button type="button" class="btn danger big danger-action" (click)="release()">RELEASE</button>
+        <div class="rc-link-chips">
+          <span class="chip ok mono">{{ client.rateHz() }} Hz</span>
+          <span class="chip mono">{{ latencyLabel(client.latencyMs()) }} RTT</span>
           <span class="chip">{{ client.profileName() }}</span>
         </div>
-
-        @if (client.channelMap(); as map) {
-          @if (source.kind() === 'virtual') {
-            <vision-virtual-control-surface
-              [channelMap]="map"
-              [vehicleKind]="client.vehicleKind() ?? 'UNKNOWN'"
-              [profileName]="client.profileName() ?? ''"
-            />
-          }
-          <span class="label rc-group-label">Channel map</span>
-          <ul class="rc-channel-map">
-            @for (binding of map; track binding.rcChannel) {
-              <li>{{ channelBindingLabel(binding) }}</li>
-            }
-          </ul>
-        }
-        <button type="button" class="btn danger big danger-action" (click)="release()">RELEASE</button>
       }
       @case ('denied') {
         <vision-notice variant="danger">
@@ -170,11 +126,6 @@
         }
       }
       @default {
-        <p class="muted hint">
-          Taking control relays the selected input to the vehicle over MAVLink RC override, at the
-          server's own fixed rate, with the stick layout the vehicle itself reported. Releasing,
-          closing this panel, or switching tabs drops control immediately.
-        </p>
         <button type="button" class="btn big" (click)="engage()" [disabled]="engageDisabled()">
           {{ client.state() === 'engaging' ? 'Engaging…' : 'Take control' }}
         </button>

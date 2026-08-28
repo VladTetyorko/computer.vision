@@ -1,0 +1,62 @@
+:host {
+  display: inline-flex;
+}
+
+.sg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sg-cell {
+  position: relative;
+  width: 0.85rem;
+  height: 1rem;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+  border: 1px solid var(--border-strong);
+  overflow: hidden;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* A button's single cell is round, not a pill — it has one detent, not a row of them. */
+.sg-cell.round {
+  width: 1rem;
+  border-radius: var(--radius-pill);
+}
+
+/* Lit cell — the app's one selection language (frontend-style §4): a 2px inset bar in
+   --color-info plus a --color-info-soft fill, the same treatment a selected table row gets. */
+.sg-cell.lit {
+  background: var(--color-info-soft);
+  box-shadow: inset 2px 0 0 0 var(--color-info);
+}
+
+/* Hold-to-fire (decision C9): a linear sweep across the lit cell over the dispatcher's hold
+   window (control-action-dispatcher.ts's DANGEROUS_HOLD_MS, 600ms) — arming from a switch is
+   visible while it is happening, not just after. `prefers-reduced-motion` drops it to a step. */
+.sg-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left;
+  transform: scaleX(0);
+  background: var(--color-info);
+  animation: sg-hold-fill 0.6s linear forwards;
+}
+
+@keyframes sg-hold-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sg-fill {
+    animation: none;
+    transform: scaleX(1);
+  }
+}

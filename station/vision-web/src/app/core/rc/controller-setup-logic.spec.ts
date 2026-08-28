@@ -7,6 +7,7 @@ import {
   draftKey,
   draftLabel,
   kindsFor,
+  microsFor,
   movedControl,
   nextFreeChannel,
   parameterKindOf,
@@ -233,6 +234,33 @@ describe('toUpdateRequest', () => {
 
   it('trims the name, so a trailing space is not what a layout is called', () => {
     expect(toUpdateRequest(draft([], '  Rover  ')).name).toBe('Rover');
+  });
+});
+
+describe('microsFor', () => {
+  it('rests a unidirectional control at its minimum', () => {
+    expect(microsFor('UNIDIRECTIONAL')).toEqual({ min: 1000, center: 1000, max: 2000 });
+  });
+
+  it('rests a centered control at the midpoint', () => {
+    expect(microsFor('CENTERED')).toEqual({ min: 1000, center: 1500, max: 2000 });
+  });
+
+  it('agrees with what toUpdateRequest actually sends', () => {
+    const control: ControlDraft = {
+      ...blankControlDraft('AXIS', 1, draft([])),
+      role: 'CHANNEL',
+      function: 'THROTTLE',
+      rcChannel: 3,
+      travel: 'CENTERED',
+    };
+    const sent = toUpdateRequest(draft([control])).channelMap[0];
+    const derived = microsFor('CENTERED');
+    expect({ minMicros: sent.minMicros, centerMicros: sent.centerMicros, maxMicros: sent.maxMicros }).toEqual({
+      minMicros: derived.min,
+      centerMicros: derived.center,
+      maxMicros: derived.max,
+    });
   });
 });
 

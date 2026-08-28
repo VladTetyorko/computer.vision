@@ -1,5 +1,6 @@
 import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { describe, expect, it, vi } from 'vitest';
 import { RcMonitor } from './rc-monitor';
 import { RcInputService } from '../../core/rc/rc-input.service';
@@ -11,6 +12,7 @@ import { ControlProfileStore } from '../../core/rc/control-profile-store';
 import { rulesFrom } from '../../core/rc/control-action-logic';
 import { VisionApi } from '../../core/api/vision-api';
 import type {
+  ControlBinding,
   ControlCatalog,
   ControlProfile,
   FlightCapability,
@@ -62,7 +64,8 @@ class FakeManualControlClient {
   readonly release = vi.fn();
 }
 
-/** The layouts store, stubbed — the drawer only ever reads `profiles`/`rules` and calls `load`. */
+/** The layouts store, stubbed — the drawer only ever reads `profiles`/`rules`/`catalog` and calls
+ * `load`. */
 class FakeControlProfileStore {
   readonly profilesSignal = signal<readonly ControlProfile[]>([]);
   readonly catalogSignal = signal<ControlCatalog | undefined>(undefined);
@@ -91,7 +94,8 @@ const ROVER_CAPABILITY: FlightCapability = {
   vehicleKind: 'ROVER',
 };
 
-/** One saved rover layout with a single arm-bound switch — the shape the drawer lists. */
+/** One saved rover layout with a single arm-bound switch — the shape the drawer's transmitter view
+ * draws a switch-gauge row for. */
 const ROVER_PROFILE: ControlProfile = {
   id: 'profile-1',
   source: 'SAVED',
@@ -135,6 +139,14 @@ const ROVER_MAP: readonly ManualControlChannelBinding[] = [
   centered('THROTTLE', 2, 3, 'Throttle'),
 ];
 
+/** The same rover layout, as a saved profile's own `ControlBinding[]` — the shape
+ * `transmitter-view-logic.ts#normalizeChannelMap` adapts before engage (decision U1). */
+const ROVER_CHANNEL_MAP: readonly ControlBinding[] = ROVER_MAP.map((binding) => ({
+  ...binding,
+  deadband: 0,
+  reversed: false,
+}));
+
 /** `providers` is replaced wholesale by `overrideComponent`, so the real `RcSource`/
  * `VirtualRcInputService` are re-listed here: only the two browser-touching collaborators are
  * faked, and the source-selection logic under test stays the real one. */
@@ -143,7 +155,10 @@ function render(
   fakeClient: FakeManualControlClient,
   extras: { store?: FakeControlProfileStore; dispatcher?: FakeControlActionDispatcher } = {},
 ) {
-  TestBed.configureTestingModule({});
+  // `vision-transmitter-view` renders a `routerLink` "Set up ›" link whenever a control is
+  // unmapped (transmitter-view.html) — same `provideRouter([])` precedent as
+  // transmitter-view.spec.ts itself; RcMonitor doesn't route anywhere, it just hosts the child.
+  TestBed.configureTestingModule({ providers: [provideRouter([])] });
   const store = extras.store ?? new FakeControlProfileStore();
   const dispatcher = extras.dispatcher ?? new FakeControlActionDispatcher();
   TestBed.overrideComponent(RcMonitor, {
@@ -169,16 +184,16 @@ function render(
 }
 
 const engageButton = (fixture: { nativeElement: HTMLElement }) =>
-  fixture.nativeElement.querySelector('.rc-engage button.big') as HTMLButtonElement;
+  fixture.nativeElement.querySelector('.rc-footer button.big') as HTMLButtonElement;
 
-describe('RcMonitor — Take control', () => {
+describe('RcMonitor — Take control (sticky footer, decision U6)', () => {
   it('keeps the engage section when the Gamepad API is unsupported — control no longer needs one', () => {
     const fakeRc = new FakeRcInputService();
     fakeRc.setSupported(false);
     const fixture = render(fakeRc, new FakeManualControlClient());
 
     expect(fixture.nativeElement.textContent).toContain("doesn't expose gamepad input");
-    expect(fixture.nativeElement.querySelector('.rc-engage')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.rc-footer')).not.toBeNull();
     expect(engageButton(fixture).disabled).toBe(false);
   });
 
@@ -234,7 +249,7 @@ describe('RcMonitor — Take control', () => {
     );
   });
 
-  it('the engaged state shows rateHz/latency and the channel map, with a big, text-labeled, danger-styled RELEASE control', () => {
+  it('the engaged state shows a big, text-labeled, danger-styled RELEASE control and the link chips', () => {
     const fakeRc = new FakeRcInputService();
     fakeRc.setConnected(true);
     const fakeClient = new FakeManualControlClient();
@@ -246,29 +261,17 @@ describe('RcMonitor — Take control', () => {
     fakeClient.channelMap.set(ROVER_MAP);
     const fixture = render(fakeRc, fakeClient);
 
-    expect(fixture.nativeElement.textContent).toContain('33 Hz link');
-    expect(fixture.nativeElement.textContent).toContain('42 ms RTT');
-    expect(fixture.nativeElement.textContent).toContain('Steering → CH1');
+    const footerText = fixture.nativeElement.querySelector('.rc-footer')?.textContent ?? '';
+    expect(footerText).toContain('33 Hz');
+    expect(footerText).toContain('42 ms RTT');
+    expect(footerText).toContain('Ground vehicle');
 
-    const releaseButton = fixture.nativeElement.querySelector('.rc-engage button.btn.danger') as HTMLButtonElement;
+    const releaseButton = fixture.nativeElement.querySelector('.rc-footer button.btn.danger') as HTMLButtonElement;
     expect(releaseButton.textContent?.trim()).toBe('RELEASE');
     expect(releaseButton.classList.contains('big')).toBe(true);
 
     releaseButton.click();
     expect(fakeClient.release).toHaveBeenCalledTimes(1);
-  });
-
-  it('renders the on-screen surface, shaped by the engaged map, only for the virtual source', () => {
-    const fakeClient = new FakeManualControlClient();
-    fakeClient.state.set('engaged');
-    fakeClient.vehicleKind.set('ROVER');
-    fakeClient.profileName.set('Ground vehicle');
-    fakeClient.channelMap.set(ROVER_MAP);
-    const fixture = render(new FakeRcInputService(), fakeClient);
-
-    // A rover binds two controls, which share one steer/drive pad.
-    expect(fixture.nativeElement.querySelectorAll('.vcs-pad').length).toBe(1);
-    expect(fixture.nativeElement.textContent).toContain('Ground vehicle layout');
   });
 
   it('freezes the input choice while a session is live', () => {
@@ -306,6 +309,104 @@ describe('RcMonitor — Take control', () => {
   });
 });
 
+describe('RcMonitor — the transmitter view (docs/plans/active/CONTROLLER-UX-PLAN.md §2.1/§2.2)', () => {
+  it('renders the transmitter view before engage, mirroring a connected gamepad live (decision U1)', () => {
+    const fakeRc = new FakeRcInputService();
+    fakeRc.setConnected(true);
+    fakeRc.axes.set([0.5, 0, 0]);
+    const store = new FakeControlProfileStore();
+    store.profilesSignal.set([{ ...ROVER_PROFILE, channelMap: ROVER_CHANNEL_MAP }]);
+    const fixture = render(fakeRc, new FakeManualControlClient(), { store });
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
+    fixture.detectChanges();
+
+    // A rover's steer/drive pad, drawn from this operator's own saved layout — no session exists yet.
+    expect(fixture.nativeElement.querySelectorAll('.tv-pad').length).toBe(1);
+    const readouts = fixture.nativeElement.querySelectorAll('.tv-readout-value') as NodeListOf<HTMLElement>;
+    const values = Array.from(readouts).map((el) => el.textContent?.trim());
+    expect(values).toContain('75'); // steering's axes[0]=0.5, centred: round((0.5+1)*50)
+  });
+
+  it('is interactive only once engaged on the on-screen source (decision U2)', () => {
+    const fakeClient = new FakeManualControlClient();
+    fakeClient.state.set('engaged');
+    fakeClient.vehicleKind.set('ROVER');
+    fakeClient.profileName.set('Ground vehicle');
+    fakeClient.channelMap.set(ROVER_MAP);
+    const fixture = render(new FakeRcInputService(), fakeClient);
+
+    // A rover binds two controls, which share one steer/drive pad.
+    expect(fixture.nativeElement.querySelectorAll('.tv-pad').length).toBe(1);
+    expect(fixture.nativeElement.querySelector('.tv-pad')?.classList.contains('interactive')).toBe(true);
+  });
+
+  it('stays a read-only mirror for a connected transmitter, even engaged', () => {
+    const fakeRc = new FakeRcInputService();
+    fakeRc.setConnected(true);
+    const fakeClient = new FakeManualControlClient();
+    fakeClient.state.set('engaged');
+    fakeClient.vehicleKind.set('ROVER');
+    fakeClient.profileName.set('Ground vehicle');
+    fakeClient.channelMap.set(ROVER_MAP);
+    const fixture = render(fakeRc, fakeClient);
+
+    expect(fixture.nativeElement.querySelector('.tv-pad')?.classList.contains('interactive')).toBe(false);
+  });
+
+  it('prefers the engaged frame\'s own channel map over the browser-resolved profile once one exists', () => {
+    const store = new FakeControlProfileStore();
+    store.profilesSignal.set([ROVER_PROFILE]);
+    const fakeClient = new FakeManualControlClient();
+    const fixture = render(new FakeRcInputService(), fakeClient, { store });
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
+    fixture.detectChanges();
+    // Before engage: the profile carries no channel map (only an arm switch) — no pads.
+    expect(fixture.nativeElement.querySelectorAll('.tv-pad').length).toBe(0);
+
+    fakeClient.state.set('engaged');
+    fakeClient.channelMap.set(ROVER_MAP);
+    fixture.detectChanges();
+    // Once engaged, the server's own two-control rover map takes over — one steer/drive pad.
+    expect(fixture.nativeElement.querySelectorAll('.tv-pad').length).toBe(1);
+  });
+});
+
+describe('RcMonitor — state strip (decision U5)', () => {
+  it('shows a faint dash for an unknown armed state, and omits the mode/device chips with no signal', () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+
+    const strip = fixture.nativeElement.querySelector('.state-strip') as HTMLElement;
+    expect(strip.textContent).toContain('—');
+    expect(strip.querySelectorAll('.chip').length).toBe(1);
+  });
+
+  it('reflects armed/disarmed and the mode chip from their own inputs', () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+    fixture.componentRef.setInput('armed', true);
+    fixture.componentRef.setInput('mode', 'HOLD');
+    fixture.detectChanges();
+
+    const strip = fixture.nativeElement.querySelector('.state-strip') as HTMLElement;
+    expect(strip.textContent).toContain('ARMED');
+    expect(strip.textContent).toContain('HOLD');
+  });
+
+  it('shows the device label and update rate only once a transmitter is connected', () => {
+    const fakeRc = new FakeRcInputService();
+    const fixture = render(fakeRc, new FakeManualControlClient());
+    expect((fixture.nativeElement.querySelector('.state-strip') as HTMLElement).textContent).not.toContain('Hz');
+
+    fakeRc.device.set({ id: 'RadioMaster TX16S' });
+    fakeRc.setConnected(true);
+    fakeRc.updateRateHz.set(62);
+    fixture.detectChanges();
+
+    const strip = (fixture.nativeElement.querySelector('.state-strip') as HTMLElement).textContent ?? '';
+    expect(strip).toContain('RadioMaster TX16S');
+    expect(strip).toContain('62 Hz');
+  });
+});
+
 describe('RcMonitor — the merged Controller drawer (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10)', () => {
   it('shows mode and arm/disarm inside this one drawer, with no drawer of their own', () => {
     const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
@@ -324,7 +425,7 @@ describe('RcMonitor — the merged Controller drawer (docs/plans/active/CONTROLL
     expect(fixture.nativeElement.querySelector('.command-cluster')).toBeNull();
   });
 
-  it('lists the switches the operator bound, and points the dispatcher at that same layout', () => {
+  it('lists the switches the operator bound as transmitter-view rows, and points the dispatcher at that same layout', () => {
     const store = new FakeControlProfileStore();
     const dispatcher = new FakeControlActionDispatcher();
     store.profilesSignal.set([ROVER_PROFILE]);
@@ -332,9 +433,10 @@ describe('RcMonitor — the merged Controller drawer (docs/plans/active/CONTROLL
     fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
     fixture.detectChanges();
 
-    const text = fixture.nativeElement.querySelector('.rc-actions')?.textContent ?? '';
+    const text = fixture.nativeElement.textContent ?? '';
     expect(text).toContain('Sw 2');
     expect(text).toContain('Arm');
+    expect(fixture.nativeElement.querySelectorAll('vision-switch-gauge').length).toBe(1);
     expect(dispatcher.bind).toHaveBeenCalledWith('asset-1', ROVER_PROFILE, store.rules(), true);
   });
 
@@ -346,7 +448,32 @@ describe('RcMonitor — the merged Controller drawer (docs/plans/active/CONTROLL
     fixture.componentRef.setInput('capabilities', { ...ROVER_CAPABILITY, vehicleKind: 'COPTER' as VehicleKind });
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.querySelector('.rc-actions')).toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('vision-switch-gauge').length).toBe(0);
     expect(dispatcher.bind).toHaveBeenLastCalledWith('asset-1', undefined, store.rules(), true);
+  });
+
+  it('computes the "also on" hints from the active profile and passes them to the flight command panel', () => {
+    const store = new FakeControlProfileStore();
+    store.profilesSignal.set([
+      {
+        ...ROVER_PROFILE,
+        actionMap: [
+          ...ROVER_PROFILE.actionMap,
+          {
+            source: 'AXIS',
+            kind: 'SWITCH_2',
+            sourceIndex: 4,
+            positions: [{ position: 'HIGH', action: 'SET_MODE', parameter: 'HOLD' }],
+          },
+        ],
+      },
+    ]);
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store });
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.querySelector('.command-cluster')?.textContent ?? '';
+    expect(text).toContain('also on Sw 2 ↑');
+    expect(text).toContain('also on Axis 5');
   });
 });

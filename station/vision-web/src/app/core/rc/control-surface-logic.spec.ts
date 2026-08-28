@@ -5,6 +5,7 @@ import {
   REST_VALUE,
   axesFrom,
   displayPercent,
+  displayPercentFor,
   fractionAlong,
   knobLeftPercent,
   knobTopPercent,
@@ -99,6 +100,15 @@ describe('displayPercent — the operator reads 0-100', () => {
   it('clamps rather than reporting an out-of-range value it could never have produced', () => {
     expect(displayPercent(COPTER_THROTTLE, -0.5)).toBe(0);
     expect(displayPercent(ROVER_THROTTLE, 3)).toBe(100);
+  });
+});
+
+describe('displayPercentFor — the same math, before a binding exists', () => {
+  it('agrees with displayPercent for the same travel', () => {
+    expect(displayPercentFor('UNIDIRECTIONAL', REST_VALUE)).toBe(displayPercent(COPTER_THROTTLE, REST_VALUE));
+    expect(displayPercentFor('UNIDIRECTIONAL', 1)).toBe(displayPercent(COPTER_THROTTLE, 1));
+    expect(displayPercentFor('CENTERED', REST_VALUE)).toBe(displayPercent(ROVER_THROTTLE, REST_VALUE));
+    expect(displayPercentFor('CENTERED', -1)).toBe(displayPercent(ROVER_THROTTLE, -1));
   });
 });
 

@@ -2,112 +2,49 @@
   display: contents;
 }
 
-.rc-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-8);
-  margin-bottom: var(--space-16);
-}
-
-.rc-device {
-  font-size: 0.85rem;
-  min-width: 0;
-}
-
-.rc-group-label {
-  margin-top: var(--space-16);
-}
-
-.rc-list {
+/* One flex column with a consistent gap — `vision-transmitter-view`/`vision-flight-command-panel`
+   both render `:host { display: contents }`, so their own root element (not the component tag)
+   becomes the promoted flex item here; this is what gives every body section even spacing without
+   a `margin-bottom` rule per child (mirrors `cv-control-panel.css`'s identical convention for the
+   Vision drawer's own body). */
+.rc-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-8);
+  gap: var(--space-16);
 }
 
-.rc-row {
-  display: grid;
-  grid-template-columns: 3.5rem 1fr 3rem;
-  align-items: center;
-  gap: var(--space-8);
-}
+/* ---- State strip (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 U5) — chips only ------------------- */
 
-.rc-name {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
-
-/* Center-origin bar: a track with a center tick and a fill that grows from the middle. */
-.rc-bar {
-  position: relative;
-  height: 0.5rem;
-  border-radius: var(--radius-pill);
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
-  overflow: hidden;
-}
-
-.rc-tick {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  background: var(--border-strong);
-}
-
-.rc-fill {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: var(--color-info);
-}
-
-.rc-value {
-  font-size: 0.8rem;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.rc-switches {
+.state-strip {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: var(--space-8);
 }
 
-.rc-switch {
-  padding: var(--space-4) var(--space-8);
-  border-radius: var(--radius-sm);
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
-  color: var(--text-faint);
-  font-size: 0.72rem;
-  font-variant-numeric: tabular-nums;
-  transition: color 0.1s ease, background 0.1s ease, border-color 0.1s ease;
-}
-
-.rc-switch.on {
-  background: var(--color-success-soft);
-  border-color: var(--color-success-line);
-  color: var(--color-success-text);
-}
-
-/* ---- Take control (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R5) --------------------------------------- */
-
-.rc-engage {
-  margin-top: var(--space-24);
-  padding-top: var(--space-16);
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
+.centre-all {
+  align-self: flex-start;
 }
 
 .hint {
   font-size: 0.72rem;
+  margin: 0;
 }
 
-.rc-engage .btn.big {
-  margin-top: var(--space-8);
+/* ---- Take control footer (decision U6) ------------------------------------------------------------ */
+
+.rc-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  width: 100%;
+}
+
+.rc-footer .label {
+  margin-bottom: 0;
+}
+
+.rc-footer .btn.big {
   padding: var(--space-8) var(--space-24);
   font-size: 1rem;
   border-radius: var(--radius);
@@ -115,74 +52,8 @@
   justify-content: center;
 }
 
-.rc-engage vision-notice {
-  margin-bottom: var(--space-8);
-}
-
-.rc-engage-stats {
+.rc-link-chips {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-8);
-  margin-bottom: var(--space-8);
-}
-
-.rc-channel-map {
-  list-style: none;
-  margin: 0 0 var(--space-8);
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Input-source picker — two mutually-exclusive choices, so the selected one is marked rather than
-   the unselected ones being hidden. */
-.rc-source {
-  display: flex;
-  gap: var(--space-8);
-  margin-bottom: var(--space-8);
-}
-
-.rc-source .btn.active {
-  border-color: var(--color-info);
-  color: var(--color-info-text);
-  background: var(--color-info-soft);
-}
-
-/* Bound switches (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C2/C3) — a read-out of what the
-   operator's own layout fires, in the same quiet list register as the channel map below it. */
-.rc-actions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-}
-
-.rc-binding-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-}
-
-.rc-binding-list li {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-8);
-  flex-wrap: wrap;
-}
-
-.rc-binding-name {
-  min-width: 4rem;
-  color: var(--text-muted);
-}
-
-.rc-binding-actions {
-  display: flex;
-  gap: var(--space-8);
-  flex-wrap: wrap;
 }

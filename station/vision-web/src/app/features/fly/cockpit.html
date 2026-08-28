@@ -272,6 +272,7 @@
           [canCommand]="facade.canShowCommands()"
           [capabilities]="facade.capabilities()"
           [armed]="facade.telemetry.latest()?.flightState?.armed"
+          [mode]="facade.telemetry.latest()?.flightState?.mode"
           (close)="panels.close()"
         />
       }

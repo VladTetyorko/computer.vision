@@ -1,4 +1,4 @@
-import type { ControlFunction, ManualControlChannelBinding, VehicleKind } from '../api/models';
+import type { ControlFunction, ControlTravel, ManualControlChannelBinding, VehicleKind } from '../api/models';
 
 /**
  * Pure geometry and value math behind the on-screen control surface
@@ -99,9 +99,17 @@ export function springsBack(binding: ManualControlChannelBinding): boolean {
  * @param value   its current normalized value (`[-1,1]` centred, `[0,1]` unidirectional)
  */
 export function displayPercent(binding: ManualControlChannelBinding, value: number): number {
-  return binding.travel === 'UNIDIRECTIONAL'
-    ? Math.round(clamp(value, 0, 1) * 100)
-    : Math.round((clamp(value, -1, 1) + 1) * 50);
+  return displayPercentFor(binding.travel, value);
+}
+
+/**
+ * {@link displayPercent}'s own math, taking `travel` directly rather than a whole binding — the
+ * setup wizard's live detection gauge (docs/plans/active/CONTROLLER-UX-PLAN.md §2.3, wave X4) shows
+ * a percent, and where rest sits, for a control it is *in the middle of binding*: there is no
+ * {@link ManualControlChannelBinding} yet, only the travel the operator is about to choose for it.
+ */
+export function displayPercentFor(travel: ControlTravel, value: number): number {
+  return travel === 'UNIDIRECTIONAL' ? Math.round(clamp(value, 0, 1) * 100) : Math.round((clamp(value, -1, 1) + 1) * 50);
 }
 
 /**

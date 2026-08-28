@@ -1,0 +1,73 @@
+:host {
+  display: block;
+}
+
+.rail {
+  overflow-x: auto;
+  margin-bottom: var(--space-16);
+}
+
+.rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+/* One step chip. Large enough to be a comfortable touch target on a phone, per this app's own
+   responsive rule — not just a desktop hover target. */
+.rail-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-16);
+  min-height: 2.25rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.rail-step:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+/* Current step: this app's one selection language (frontend-style §4) — a 2px inset bar in
+   --color-info plus a --color-info-soft fill. */
+.rail-step.current {
+  background: var(--color-info-soft);
+  box-shadow: inset 2px 0 0 0 var(--color-info);
+  color: var(--text);
+}
+
+.rail-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex: none;
+}
+
+.rail-step.done .rail-glyph {
+  color: var(--color-success-text);
+}
+
+.rail-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+}
+
+.rail-step.current .rail-dot {
+  background: var(--color-info);
+  border-color: var(--color-info);
+}
