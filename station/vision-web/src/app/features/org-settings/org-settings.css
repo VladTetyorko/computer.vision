@@ -49,6 +49,17 @@
   min-height: 40px;
 }
 
+/* Cancel + submit as one group (O1, docs/plans/active/OPERATOR-UX-6-PLAN.md) — keeps
+   `.org-form-actions`'s own `justify-content: space-between` down to exactly two children
+   (this group, plus the "Can sign in immediately" checkbox on the Users form) so the two don't
+   spread across the row unevenly on a wide viewport. */
+.org-form-buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
 .org-check {
   display: inline-flex;
   align-items: center;

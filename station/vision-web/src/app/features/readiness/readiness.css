@@ -15,8 +15,29 @@
   margin-bottom: var(--space-8);
 }
 
+/* Button + its disabled-reason text sit as one group on the row's right side (R1,
+   docs/plans/active/OPERATOR-UX-6-PLAN.md) — wraps as a unit under `.verdict-row`'s own
+   `flex-wrap`, and wraps internally too on a narrow viewport if the reason text is long. */
+.probe-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.probe-reason {
+  font-size: 0.8rem;
+}
+
 .verdict-card .facts {
   margin-bottom: var(--space-8);
+}
+
+/* R1's "not probed yet" state replaces the `.facts` timestamp pair outright (never both at once) —
+   same trailing margin as `.facts` above so the notices below it sit at an identical distance
+   either way. Structural-label register (frontend-style §8), reusing the global `.label` token. */
+.not-probed {
+  margin: 0 0 var(--space-8);
 }
 
 /* Every notice on this page (inside the verdict card or standing alone between it and the feature

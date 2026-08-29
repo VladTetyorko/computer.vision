@@ -19,15 +19,24 @@
           <span class="dot" [class.ok]="facade.verdictTone(report.verdict) === 'ok'" [class.danger]="facade.verdictTone(report.verdict) === 'danger'"></span>
           {{ facade.verdictLabel(report.verdict) }}
         </span>
-        <button type="button" class="btn secondary" (click)="onProbe()" [disabled]="facade.probing()">
-          {{ facade.probing() ? 'Observing…' : 'Probe now' }}
-        </button>
+        <div class="probe-control">
+          <button type="button" class="btn secondary" (click)="onProbe()" [disabled]="facade.probing() || facade.probeReason() !== null">
+            {{ facade.probing() ? 'Observing…' : 'Probe now' }}
+          </button>
+          @if (facade.probeReason(); as reason) {
+            <span class="muted probe-reason">{{ reason }}</span>
+          }
+        </div>
       </div>
 
-      <dl class="facts">
-        <div class="fact"><dt>Evaluated</dt><dd>{{ formatDate(report.evaluatedAt) }}</dd></div>
-        <div class="fact"><dt>Last profiled</dt><dd>{{ formatDate(report.profileObservedAt) }}</dd></div>
-      </dl>
+      @if (facade.hasBeenProbed(report)) {
+        <dl class="facts">
+          <div class="fact"><dt>Evaluated</dt><dd>{{ formatDate(report.evaluatedAt) }}</dd></div>
+          <div class="fact"><dt>Last profiled</dt><dd>{{ formatDate(report.profileObservedAt) }}</dd></div>
+        </dl>
+      } @else {
+        <p class="label not-probed">Not probed yet</p>
+      }
 
       @if (facade.probeDisabled()) {
         <vision-notice icon="help">

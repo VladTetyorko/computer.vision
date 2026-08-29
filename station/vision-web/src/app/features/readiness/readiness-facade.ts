@@ -5,10 +5,12 @@ import {
   featureLabel,
   featureStatusLabel,
   featureStatusTone,
+  hasBeenProbed,
   isProbeDisabledError,
   isRemediable,
   outcomeLabel,
   outcomeTone,
+  probeBlockedReason,
   remedyLabel,
   verdictLabel,
   verdictTone,
@@ -43,6 +45,14 @@ import type { FeatureKey, ReadinessReport, RemediationResult } from '../../core/
  * identical handling of the same disabled body. `GET .../readiness` itself is never gated by that
  * flag (verified against `ReadinessController` — no flag check in the read path), so {@link load}
  * carries no disabled state of its own, only a generic {@link error}.
+ *
+ * **Streaming/last-seen for the probe gate (R1, docs/plans/active/OPERATOR-UX-6-PLAN.md).** The
+ * "Probe now" button needs a live link the vehicle doesn't have when it isn't currently streaming
+ * — {@link load}'s existing `getAsset(assetId)` read (already made for {@link displayName}) already
+ * carries `status`/`lastUsedAt` (`AssetSummary`'s own fields, `AssetDetails extends AssetSummary`),
+ * so this reuses that one read rather than a second call; {@link assetStreaming}/
+ * {@link assetLastUsedAt} degrade to `false`/`undefined` on the same failed-read path
+ * {@link displayName} already degrades on (`Promise.allSettled`, never blocking the report itself).
  */
 @Injectable()
 export class ReadinessFacade {
@@ -53,6 +63,11 @@ export class ReadinessFacade {
   readonly error = signal<string | null>(null);
   readonly displayName = signal<string | null>(null);
   readonly report = signal<ReadinessReport | null>(null);
+
+  /** This asset's `AssetSummary.status`/`lastUsedAt`, read alongside {@link displayName} — see this
+   *  class's own doc comment above. */
+  readonly assetStreaming = signal(false);
+  readonly assetLastUsedAt = signal<string | undefined>(undefined);
 
   readonly probing = signal(false);
   readonly probeDisabled = signal(false);
@@ -75,6 +90,16 @@ export class ReadinessFacade {
   readonly isRemediable = isRemediable;
   readonly outcomeLabel = outcomeLabel;
   readonly outcomeTone = outcomeTone;
+  readonly hasBeenProbed = hasBeenProbed;
+
+  /**
+   * Why "Probe now" is disabled, or `null` when it isn't (R1) — `computed()` rather than a plain
+   * alias like {@link hasBeenProbed} above because it also needs the current clock, mirroring
+   * `DronePickerFacade#groups`' own documented "`Date.now()` read directly inside this `computed()`"
+   * idiom: it recomputes whenever {@link assetStreaming}/{@link assetLastUsedAt} change (a fresh
+   * `load()`), the same cadence every other "ago" label in this app already refreshes at.
+   */
+  readonly probeReason = computed(() => probeBlockedReason(this.assetStreaming(), this.assetLastUsedAt(), Date.now()));
 
   /** Re-fetches for a new route param — mirrors `AssetDetailFacade#load`'s per-navigation reset. */
   async load(assetId: string): Promise<void> {
@@ -86,7 +111,15 @@ export class ReadinessFacade {
     this.remediateError.set(null);
     this.lastRemediation.set(null);
     const [nameResult, reportResult] = await Promise.allSettled([this.api.getAsset(assetId), this.api.assetReadiness(assetId)]);
-    this.displayName.set(nameResult.status === 'fulfilled' ? nameResult.value.displayName : null);
+    if (nameResult.status === 'fulfilled') {
+      this.displayName.set(nameResult.value.displayName);
+      this.assetStreaming.set(nameResult.value.status === 'STREAMING');
+      this.assetLastUsedAt.set(nameResult.value.lastUsedAt);
+    } else {
+      this.displayName.set(null);
+      this.assetStreaming.set(false);
+      this.assetLastUsedAt.set(undefined);
+    }
     if (reportResult.status === 'fulfilled') {
       this.report.set(reportResult.value);
     } else {

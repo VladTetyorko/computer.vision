@@ -1,6 +1,7 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { FEATURE_KEYS } from '../api/models';
-import type { ApiErrorBody, FeatureStatus, ReadinessRow, ReadinessVerdict, RemedyKind } from '../api/models';
+import type { ApiErrorBody, FeatureStatus, ReadinessReport, ReadinessRow, ReadinessVerdict, RemedyKind } from '../api/models';
+import { humanAge } from '../telemetry/telemetry-logic';
 
 /**
  * Pure, Angular-free rendering/sorting helpers for the drone-onboarding readiness surfaces
@@ -247,4 +248,43 @@ export function readinessCounts(rows: readonly ReadinessRow[]): ReadinessCounts 
     else unknown++;
   }
   return { go, noGo, unknown };
+}
+
+// --- Per-asset probe state (docs/plans/active/OPERATOR-UX-6-PLAN.md finding R1) ----------------
+
+/**
+ * Whether this report reflects at least one completed vehicle probe. `profileObservedAt` is a
+ * literal `null` on the wire (never omitted, C7) exactly when `DefaultReadinessService#evaluate`
+ * found no `VehicleProfile` at all for this asset — the same condition under which *every* one of
+ * the eleven frozen feature rows' own `detail` reads "Never probed." (`evaluateFeature`, verified
+ * against source: `profile == null` is the one branch that returns that exact detail string, for
+ * every feature key at once). Checking this single report-level fact is equivalent to, and cheaper
+ * than, scanning every row's detail text — and it's the fact `ReadinessPage`'s own header needs
+ * (R1: an `Evaluated …` timestamp sitting next to eleven "Never probed." rows implies something was
+ * evaluated, when nothing ever was — the header now says exactly that instead, see `readiness.html`).
+ */
+export function hasBeenProbed(report: Pick<ReadinessReport, 'profileObservedAt'>): boolean {
+  return report.profileObservedAt !== null;
+}
+
+/**
+ * Why `ReadinessPage`'s "Probe now" button is disabled, or `null` when it isn't blocked (R1: "a
+ * live Probe now button on a rover offline for 18h" — a probe is a live MAVLink message-interval
+ * request that then waits on a fresh sample, which needs the link a non-streaming asset does not
+ * have; clicking it today just times out silently). The age renders through `humanAge`
+ * (`core/telemetry/telemetry-logic.ts`) — this app's one duration vocabulary, already shared by the
+ * OSD, the Controller drawer and the `/fly` picker's own offline chips (`core/fleet/triage-logic.ts
+ * #offlineLabel` uses the same function) — never a new formatter. `lastUsedAt` absent (an asset
+ * that has never reported at all) degrades to an honest "never been online" rather than fabricating
+ * an age for a timestamp that does not exist.
+ */
+export function probeBlockedReason(streaming: boolean, lastUsedAt: string | undefined, nowMs: number): string | null {
+  if (streaming) {
+    return null;
+  }
+  if (!lastUsedAt) {
+    return 'Needs a live link — this vehicle has never been online';
+  }
+  const ageSeconds = Math.max(0, (nowMs - Date.parse(lastUsedAt)) / 1000);
+  return `Needs a live link — vehicle is offline (${humanAge(ageSeconds)})`;
 }
