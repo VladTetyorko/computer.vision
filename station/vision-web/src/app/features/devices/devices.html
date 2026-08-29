@@ -97,10 +97,20 @@
                   <div class="name">{{ row.device.name }}</div>
                 </td>
                 <td class="source">
-                  <!-- Protocol is classification, not state (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4
-                       — "category/protocol become muted plain text, not chips"). -->
-                  <span class="muted">{{ row.device.protocol }}</span>
-                  <span class="mono muted truncate" [title]="row.device.uri">{{ row.device.uri }}</span>
+                  <div class="source-endpoint">
+                    <!-- Protocol is classification, not state (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4
+                         — "category/protocol become muted plain text, not chips"). -->
+                    <span class="muted">{{ row.device.protocol }}</span>
+                    <span class="mono muted truncate" [title]="row.device.uri">{{ row.device.uri }}</span>
+                  </div>
+                  <!-- D1 (docs/plans/active/OPERATOR-UX-7-PLAN.md): a shared endpoint is a fact worth one
+                       quiet line, not a chip — the row already carries its own state chip (§5's "one
+                       chip per row max"). No blocking; the operator may intend a shared listener. -->
+                  @if (endpointConflictNames(row.device); as conflictNames) {
+                    <span class="endpoint-conflict truncate" [title]="'Same endpoint as ' + conflictNames.join(', ')">
+                      Same endpoint as {{ conflictNames.join(', ') }}
+                    </span>
+                  }
                 </td>
                 <td class="muted truncate">{{ row.device.capabilities.join(', ') || '—' }}</td>
                 <td>

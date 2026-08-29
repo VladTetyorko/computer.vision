@@ -19,15 +19,21 @@
     <span class="event-source truncate" [title]="sourceLabel()">{{ sourceLabel() }}</span>
     <span class="event-time faint mono">{{ relativeTime() }}</span>
   } @else {
-    <!-- The rail/bell's own two-line layout — byte-for-byte the pre-extraction markup, just fed by
-         inputs instead of reading `EventsRail`'s own fields directly. -->
+    <!-- The rail/bell's own two-line layout. One status indicator, not two (docs/plans/active/
+         OPERATOR-UX-7-PLAN.md finding W1): OPEN's own chip *replaces* the severity dot rather than
+         joining it — the pre-W1 markup rendered both (plus the chip's own inner dot), leaving so
+         little room for the flexible label that it truncated to a single letter (`P…`) on a
+         narrow host. The chip sits after the time, not at the row's front, so the label/time keep
+         their normal position regardless of state. -->
     <span class="event-row-top">
-      <span class="event-dot" [class.open]="event().state === 'OPEN'"></span>
-      @if (event().state === 'OPEN') {
-        <span class="chip event-state ok"><span class="dot live"></span>OPEN</span>
+      @if (event().state !== 'OPEN') {
+        <span class="event-dot"></span>
       }
       <span class="event-label">{{ event().label }}</span>
       <span class="event-time faint">{{ relativeTime() }}</span>
+      @if (event().state === 'OPEN') {
+        <span class="chip event-state ok"><span class="dot live"></span>OPEN</span>
+      }
       @if (actionLabel(); as action) {
         <span class="event-affordance faint">{{ action }} ›</span>
       }

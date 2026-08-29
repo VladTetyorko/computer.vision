@@ -75,6 +75,60 @@ export function mapDeviceOwners(assets: readonly AssetDetails[]): ReadonlyMap<st
   return owners;
 }
 
+/**
+ * docs/plans/active/OPERATOR-UX-7-PLAN.md finding D1: only one device can actually own a given
+ * `protocol`+`uri` pair — a UDP listener, an RTSP path — but the table showed two or three
+ * identically-configured devices as unrelated rows, and the operator learned which one was
+ * authoritative by starting one and watching the others fail. This is the missing cross-reference:
+ * deviceId → the *other* ACTIVE (non-archived) devices sharing its exact `protocol`+`uri`.
+ *
+ * Deliberately narrow: normalises only trailing whitespace (a copy-pasted URI with a stray
+ * trailing space is still the same endpoint) — no case-folding, no scheme-aware parsing. The
+ * backend treats `protocol`+`uri` as an opaque connection string, so this compares it the same
+ * way. A `DELETED` device neither contributes to nor appears in another device's conflict list —
+ * an archived listener isn't competing for the endpoint any more.
+ *
+ * No blocking, no backend change: the operator may well intend a shared listener (docs/plans/active/
+ * OPERATOR-UX-7-PLAN.md's own §2 D1 design note) — this only makes the fact visible.
+ */
+/** `udp://` / `tcp://` URIs are local listening sockets — the only kind two devices cannot share. */
+export function isBindEndpoint(uri: string): boolean {
+  return /^(udp|tcp):\/\//i.test(uri.trim());
+}
+
+export function endpointConflicts(devices: readonly Device[]): ReadonlyMap<string, readonly string[]> {
+  // Only a *bound* endpoint is exclusive: two devices listening on the same udp/tcp socket
+  // conflict; two devices reading the same video file or pulling the same rtsp URL do not.
+  const active = devices.filter((device) => device.state !== 'DELETED' && isBindEndpoint(device.uri));
+  const groupsByEndpoint = new Map<string, Device[]>();
+  for (const device of active) {
+    // A NUL separator, not a plain concatenation or a space — a protocol/uri pair split
+    // differently (e.g. protocol 'a b' + uri 'c' vs. protocol 'a' + uri 'b c') must never
+    // collide into the same key.
+    const key = `${device.protocol.replace(/\s+$/, '')}\u0000${device.uri.replace(/\s+$/, '')}`;
+    const group = groupsByEndpoint.get(key);
+    if (group) {
+      group.push(device);
+    } else {
+      groupsByEndpoint.set(key, [device]);
+    }
+  }
+
+  const conflicts = new Map<string, readonly string[]>();
+  for (const group of groupsByEndpoint.values()) {
+    if (group.length < 2) {
+      continue;
+    }
+    for (const device of group) {
+      conflicts.set(
+        device.id,
+        group.filter((other) => other.id !== device.id).map((other) => other.name),
+      );
+    }
+  }
+  return conflicts;
+}
+
 /** One row of the Advanced/raw-devices table: a device plus everything its row needs to render. */
 export interface WarehouseRow {
   readonly device: Device;

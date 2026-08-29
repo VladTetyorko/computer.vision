@@ -25,7 +25,7 @@ function event(partial: Partial<DetectionEvent> = {}): DetectionEvent {
     streamId: 's-1',
     label: 'person',
     peakConfidence: 0.9,
-    firstSeen: '2026-01-01T00:00:00Z',
+    firstSeen: new Date(Date.now() + 60_000).toISOString(),
     lastSeen: '2026-01-01T00:00:05Z',
     state: 'OPEN',
     ...partial,
@@ -81,6 +81,23 @@ function render(events: DetectionEvent[] = [], liveEvents: LiveEvent[] = [], str
 function trigger(fixture: { nativeElement: HTMLElement }): HTMLButtonElement {
   return fixture.nativeElement.querySelector('.bell-trigger') as HTMLButtonElement;
 }
+
+/**
+ * `readIds` now persists under `vision.bell.readIds` (docs/plans/active/OPERATOR-UX-7-PLAN.md finding
+ * B1) — every test below that isn't specifically exercising that persistence pre-seeds an *explicit,
+ * empty* persisted set (not a true cold start) so a fresh component's initial events read as
+ * genuinely unread, matching this whole suite's pre-B1 assumption (`seedReadIds`'s own doc comment:
+ * an empty persisted set is a seed taken before the feed loaded, so it is treated as cold — hence the one foreign id here). The dedicated "read-ids
+ * persistence" describe block below removes/sets this key itself per test to exercise the real
+ * cold-start and reload paths.
+ */
+beforeEach(() => {
+  localStorage.setItem('vision.bell.readIds', '["already-read-elsewhere"]');
+});
+
+afterEach(() => {
+  localStorage.clear();
+});
 
 describe('NotificationBell — dropdown state (docs/plans/done/UI-STATE-PLAN.md)', () => {
   it('starts closed: aria-expanded=false, no dropdown, no badge with zero events', () => {
@@ -280,5 +297,48 @@ describe('NotificationBell — geofence breach toasts (docs/plans/active/OPERATO
     // GEOFENCE_BREACH is excluded from the system-events card by design (class doc) — this asserts
     // the dropdown mounts and the suppressed toast didn't otherwise break rendering.
     expect(fixture.nativeElement.querySelector('vision-events-rail')).not.toBeNull();
+  });
+});
+
+/**
+ * `readIds` persistence (docs/plans/active/OPERATOR-UX-7-PLAN.md finding B1) — reproduces and fixes
+ * the live symptom: a `9+` unread badge on every reload for a station where nothing has happened in
+ * days, because the pre-B1 `readIds` was in-memory only. Each test here manages
+ * `vision.bell.readIds` itself (overriding the file's own `beforeEach` seed) to exercise the real
+ * cold-start / persisted-restore / write-through paths.
+ */
+describe('NotificationBell — read-ids persistence (docs/plans/active/OPERATOR-UX-7-PLAN.md finding B1)', () => {
+  it('a true cold start (nothing ever persisted) seeds every currently-present event as read — no badge for pre-existing history', () => {
+    localStorage.removeItem('vision.bell.readIds');
+    const fixture = render([event({ id: 'a' }), event({ id: 'b' })]);
+    expect(fixture.nativeElement.querySelector('.bell-badge')).toBeNull();
+  });
+
+  it('a persisted read-id set is trusted on mount — an id missing from it is genuinely unread', () => {
+    localStorage.setItem('vision.bell.readIds', JSON.stringify(['a']));
+    const fixture = render([event({ id: 'a' }), event({ id: 'b' })]);
+    expect(fixture.nativeElement.querySelector('.bell-badge')?.textContent?.trim()).toBe('1');
+  });
+
+  it('opening the dropdown persists the newly-read ids — a fresh component (a reload) reads them back and shows no badge', () => {
+    localStorage.removeItem('vision.bell.readIds');
+    const first = render([event({ id: 'a' })]);
+    trigger(first).click();
+    first.detectChanges();
+    expect(JSON.parse(localStorage.getItem('vision.bell.readIds') ?? '[]')).toEqual(['a']);
+
+    TestBed.resetTestingModule();
+    const second = render([event({ id: 'a' })]);
+    expect(second.nativeElement.querySelector('.bell-badge')).toBeNull();
+  });
+
+  it('a corrupt persisted value degrades to a cold start rather than throwing', () => {
+    localStorage.setItem('vision.bell.readIds', 'not valid json');
+    expect(() => render([event({ id: 'a' })])).not.toThrow();
+
+    TestBed.resetTestingModule();
+    localStorage.setItem('vision.bell.readIds', 'not valid json');
+    const fixture = render([event({ id: 'a' })]);
+    expect(fixture.nativeElement.querySelector('.bell-badge')).toBeNull();
   });
 });

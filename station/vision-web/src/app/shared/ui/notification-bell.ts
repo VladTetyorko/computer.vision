@@ -7,12 +7,21 @@ import { LiveStore } from '../../core/live/live-store';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { ToastService } from '../../core/toast.service';
 import { GlobalOverlayStore } from '../../core/ui/overlay-store';
+import { readPersistedString, writePersistedString } from '../../core/panel-state';
 import { eventNotificationText, relativeTimeLabel, resolveEventTarget, resolveReplayDeepLink } from '../../core/events/events-logic';
 import { geofenceBreachToastMessage, parseGeofenceBreach } from '../../core/geofence/geofence-logic';
 import { describeSystemEventSource, type SystemEventRow as SystemEventRowModel } from '../../core/system-events/system-events-logic';
 import { SystemEventsStore } from '../../core/system-events/system-events-store';
 import { EventsRail } from './events-rail';
-import { newlyOpenedEvents, shouldToast, unreadEvents } from './notification-logic';
+import {
+  BELL_READ_IDS_CAP,
+  BELL_READ_IDS_KEY,
+  newlyOpenedEvents,
+  pruneReadIds,
+  seedReadIds,
+  shouldToast,
+  unreadEvents,
+} from './notification-logic';
 import { SystemEventRow } from './system-event-row';
 import type { DetectionEvent } from '../../core/api/models';
 
@@ -74,6 +83,21 @@ import type { DetectionEvent } from '../../core/api/models';
  * timestamp/streaming checks instead of a fragile "first run = history" assumption — see that
  * function's own doc comment.
  *
+ * **`readIds` now survives a reload (docs/plans/active/OPERATOR-UX-7-PLAN.md finding B1)** — it used
+ * to be a plain in-memory signal, so *every* reload re-marked every historic event unread again
+ * (reproduced live: `9+` on a station with nothing new in days). It now persists under
+ * `notification-logic.ts#BELL_READ_IDS_KEY` (`vision.bell.readIds`, capped to the newest
+ * `BELL_READ_IDS_CAP` ids) through `core/panel-state.ts`'s plain string read/write pair — that file
+ * has no JSON-array-shaped helper of its own, so `loadPersistedReadIds`/`persistReadIds` below
+ * JSON-encode/decode through it directly, each guarded with its own try/catch (a corrupt or
+ * inaccessible value degrades to "cold start", never a thrown error). Seeding follows the exact same
+ * "history is not news" idiom as `toastedIds`/`seededToasts` above: `notification-logic.ts#seedReadIds`
+ * marks everything already present as read only on a genuine cold start (nothing ever persisted for
+ * this browser profile) — once a persisted set exists, it is trusted as-is, so a genuinely new event
+ * id correctly stays unread across reloads. This is a third, independent id-tracking concern from
+ * `toastedIds`/`toastedBreachIds` above (persisted vs. in-memory-only, unread-badge vs. toast-dedupe)
+ * — **the bell's existing toast behavior is untouched by this**, only what backs the unread badge.
+ *
  * **Signal-backed open state, not `<details>`** (docs/plans/done/UI-STATE-PLAN.md §1 D4/D5, §2.3, §2.2): the
  * dropdown used to be a native `<details>`, whose `open` state lived in the DOM where nothing could
  * see or reset it — and since this component is mounted once in the always-on shell
@@ -128,7 +152,12 @@ export class NotificationBell {
   private readonly triggerEl = viewChild<ElementRef<HTMLButtonElement>>('trigger');
 
   private readonly readIds = signal<ReadonlySet<string>>(new Set());
-  protected readonly unreadCount = computed(() => unreadEvents(this.events.events(), this.readIds()).length);
+  private readonly mountedAtMs = Date.now();
+  protected readonly unreadCount = computed(() => unreadEvents(this.events.events(), this.readIds(), this.mountedAtMs).length);
+
+  /** Guards `readIds`'s own one-time seed effect below (finding B1) — mirrors `seededToasts`'s
+   *  identical "only the very first tick decides cold-start-or-not" shape. */
+  private readIdsSeeded = false;
 
   /** Toast-dedup only — never read by a `computed()`, so a plain mutable set is fine here (mirrors
    * `core/events/events-store.ts`'s own private `seenIds`). */
@@ -143,7 +172,6 @@ export class NotificationBell {
    *  `notification-logic.ts#shouldToast`'s own doc comment for the full U4 root-cause writeup).
    *  Captured once, here, rather than read fresh per effect run — the whole point is one fixed
    *  reference instant, not "whatever `Date.now()` happens to be on this particular tick". */
-  private readonly mountedAtMs = Date.now();
 
   /**
    * Drives the system-events card's own "…s ago" timestamps (mirrors `events-rail.ts`'s identical
@@ -187,6 +215,24 @@ export class NotificationBell {
       for (const event of newlyOpenedEvents(current, this.toastedIds)) {
         this.toastedIds.add(event.id);
         this.toastNewEvent(event);
+      }
+    });
+
+    // `readIds`'s own one-time seed (docs/plans/active/OPERATOR-UX-7-PLAN.md finding B1, class doc's
+    // own "readIds now survives a reload" paragraph) — cold start (nothing ever persisted) seeds
+    // read with whatever this first tick already has (history, not news); a real persisted set is
+    // trusted as-is instead. Persisted immediately either way, so a reload before the dropdown is
+    // ever opened again still resumes from this seed rather than reverting to another cold start.
+    effect(() => {
+      const current = this.events.events();
+      // Nothing to seed from yet: the store's first tick is empty and the backlog lands later.
+      // Seeding (and persisting) an empty set here is exactly what made every historic event
+      // "unread" after the first reload — wait for the first non-empty tick instead.
+      if (!this.readIdsSeeded && current.length > 0) {
+        const seeded = seedReadIds(current, this.loadPersistedReadIds());
+        this.readIds.set(seeded);
+        this.readIdsSeeded = true;
+        this.persistReadIds(seeded);
       }
     });
 
@@ -242,7 +288,9 @@ export class NotificationBell {
     const opening = !this.overlays.isOpen('notification-bell');
     this.overlays.toggle('notification-bell');
     if (opening) {
-      this.readIds.set(new Set(this.events.events().map((event) => event.id)));
+      const ids = new Set(this.events.events().map((event) => event.id));
+      this.readIds.set(ids);
+      this.persistReadIds(ids);
     }
   }
 
@@ -269,6 +317,36 @@ export class NotificationBell {
    *  yet, never a fabricated "yes". */
   private isAssetStreaming(assetId: string): boolean {
     return this.liveStore.fleet()?.some((asset) => asset.assetId === assetId && asset.status === 'STREAMING') ?? false;
+  }
+
+  /**
+   * `readIds`'s own persisted load (finding B1) — `null` for "nothing ever persisted" (a genuine
+   * cold start, `seedReadIds`'s own cue) covers both a first-ever visit *and* a value this browser
+   * can no longer make sense of (corrupt JSON, a non-array shape from some future/older format) —
+   * degrading to cold-start-reseed is always safe here, never worse than the pre-B1 behavior every
+   * reload already had.
+   */
+  private loadPersistedReadIds(): readonly string[] | null {
+    try {
+      const raw = readPersistedString(BELL_READ_IDS_KEY, null);
+      if (raw === null) {
+        return null;
+      }
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) && parsed.every((id) => typeof id === 'string') ? (parsed as string[]) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The write-through half of `loadPersistedReadIds` — best-effort (a full/denied `localStorage`
+   *  must never block the UI), pruned to `BELL_READ_IDS_CAP` before encoding (finding B1). */
+  private persistReadIds(ids: ReadonlySet<string>): void {
+    try {
+      writePersistedString(BELL_READ_IDS_KEY, JSON.stringify(pruneReadIds([...ids], BELL_READ_IDS_CAP)));
+    } catch {
+      // Best-effort — quota exceeded, private browsing, etc. Never worse than the pre-B1 in-memory-only behavior.
+    }
   }
 
   private toastNewEvent(event: DetectionEvent): void {

@@ -44,9 +44,12 @@
   border-left-color: var(--color-info);
 }
 
-/* The always-visible severity dot (both variants) — gray at rest (`CLOSED`, the norm), live-colored
-   only while OPEN. A fast at-a-glance scan target even on the (now rare) row that has no visible
-   `OPEN` chip room, e.g. a very narrow rail. */
+/* The severity dot. `dense` (`/monitor/alerts`) still renders it unconditionally, live-colored via
+   `.open` while OPEN, since a dense row has no separate chip-after-time slot to move one into. The
+   default variant (`event-row.html`'s non-dense branch) renders this element only for `CLOSED`
+   (the norm) — `OPEN`'s own chip replaces it entirely rather than joining it (docs/plans/active/
+   OPERATOR-UX-7-PLAN.md finding W1, this file's own class doc) — so `.event-dot.open` there is
+   unreachable by construction, not dead CSS: it's still live for `dense`. */
 .event-dot {
   flex: none;
   width: 0.5rem;
@@ -99,7 +102,7 @@
   font-size: 0.72rem;
 }
 
-/* ---- Default (rail/bell — 300px / 22rem hosts): two lines, unchanged from the pre-extraction markup */
+/* ---- Default (rail/bell — 300px / 22rem hosts): two lines ---------------------------------- */
 
 .event-row:not(.dense) {
   display: flex;
@@ -108,10 +111,12 @@
   padding: var(--space-8);
 }
 
-/* The row's top line: state chip, label, time, action — all inline, none of them ever truncate or
-   shrink (the source-name meta line below is the one place that gives up space; see `.event-meta`).
-   `min-width: 0` here is what lets `.event-label` (its one flexible member) actually shrink instead
-   of forcing this line — and therefore the whole row — wider than its container. */
+/* The row's top line — dot (CLOSED only) or label/time/chip(OPEN only)/action, all inline, DOM
+   order per `event-row.html`'s own comment (docs/plans/active/OPERATOR-UX-7-PLAN.md finding W1: one
+   status indicator, chip after the time). Nothing here truncates or shrinks except the label (the
+   source-name meta line below is the one place that gives up space; see `.event-meta`). `min-width:
+   0` here is what lets `.event-label` (its one flexible member) actually shrink instead of forcing
+   this line — and therefore the whole row — wider than its container. */
 .event-row-top {
   display: flex;
   align-items: center;

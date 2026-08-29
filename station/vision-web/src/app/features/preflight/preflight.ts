@@ -24,6 +24,13 @@ import { PreflightFacade } from './preflight-facade';
  *
  * **Advisory only (OQ3, docs/plans/active/DRONE-ONBOARDING-PLAN.md §10):** `NO_GO` sorts first and
  * reads in the danger tone, but nothing on this page is ever hidden or disabled on a verdict.
+ *
+ * **Triages like `/fly`/Command, and never fabricates a checklist for a row with nothing to check
+ * (docs/plans/active/OPERATOR-UX-7-PLAN.md finding P1, §2 P1, wave W1).** Rows split into **Your
+ * vehicles** / **Simulated** groups (same `vision.fly.hideSimulated` toggle those two pages already
+ * use); a row that has never been probed (or owns no `TELEMETRY`-capable device at all) reads a plain
+ * `Not probed yet`/`No telemetry device` label instead of a muted `Unknown` chip, with its attention
+ * cell `—` — see `preflight-facade.ts`'s own doc comment for the full reasoning.
  */
 @Component({
   selector: 'vision-preflight',

@@ -2,10 +2,20 @@
   <vision-page-bar
     title="Fleet readiness"
     icon="list"
-    [count]="facade.loading() ? null : facade.rows().length"
-    countNoun="drone"
+    [count]="facade.loading() ? null : facade.totalCount()"
+    countNoun="vehicle"
     hint="Whether each drone's last-observed link satisfies what this platform's own features need — video feed and the live cockpit checklist stay on Fly. Advisory only: a No-go never blocks flight, it just tells you what's missing."
-  />
+  >
+    <!-- docs/plans/active/OPERATOR-UX-7-PLAN.md P1, §2 P1 — the same persisted preference `/fly`'s
+         picker and Command's rail already use, only shown once there is at least one simulated
+         vehicle to hide. -->
+    @if (facade.boardGroups().simulated.length > 0) {
+      <label class="row" pageBarFilters>
+        <input type="checkbox" name="hideSimulated" [checked]="facade.hideSimulated()" (change)="facade.toggleHideSimulated()" />
+        <span>Hide simulated</span>
+      </label>
+    }
+  </vision-page-bar>
 
   @if (facade.loading()) {
     <p class="muted">Loading fleet readiness…</p>
@@ -46,57 +56,147 @@
       >
         <vision-stat label="Unknown" [value]="facade.counts().unknown" tone="muted" />
       </button>
+      <!-- docs/plans/active/OPERATOR-UX-7-PLAN.md P1, §2 P1: "Summary strip gains NOT PROBED n so
+           UNKNOWN counts only probed-but-undecided rows." -->
+      <button
+        type="button"
+        class="stat-filter"
+        [class.selected]="facade.verdictFilter() === 'NOT_PROBED'"
+        [attr.aria-pressed]="facade.verdictFilter() === 'NOT_PROBED'"
+        (click)="facade.toggleVerdictFilter('NOT_PROBED')"
+      >
+        <vision-stat label="Not probed" [value]="facade.counts().notProbed" tone="muted" />
+      </button>
     </div>
 
-    @if (facade.filteredRows().length === 0) {
+    @if (facade.filteredCount() === 0) {
       <vision-empty [title]="facade.filteredEmptyTitle()">
         <button type="button" class="btn secondary" (click)="facade.clearVerdictFilter()">Clear filter</button>
       </vision-empty>
     } @else {
-      <div class="card">
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Drone</th>
-                <th>Verdict</th>
-                <th>Needs attention</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of facade.filteredRows(); track row.assetId) {
-                <tr>
-                  <td class="name-cell truncate" [title]="row.displayName">{{ row.displayName }}</td>
-                  <td>
-                    <span class="chip" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'">
-                      <span class="dot" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'"></span>
-                      {{ facade.verdictLabel(row.verdict) }}
-                    </span>
-                  </td>
-                  @if (facade.blocker(row); as blocker) {
-                    @if (blocker.first) {
-                      <td class="attention-cell">
-                        <span class="attention-row" [title]="blocker.first">
-                          <span class="blocker-name truncate muted">{{ blocker.first }}</span>
-                          @if (blocker.more > 0) {
-                            <span class="chip">+{{ blocker.more }}</span>
-                          }
-                        </span>
+      <!-- docs/plans/active/OPERATOR-UX-7-PLAN.md P1, §2 P1 — the same "Your vehicles"/"Simulated"
+           structural-label group split `/fly`'s picker and Command's rail already use
+           (`core/fleet/triage-logic.ts#isSimulated`), re-sorted worst-verdict-first within each group
+           (`preflight-logic.ts#buildBoardGroups`) rather than kept in that shared helper's own
+           streaming-first order — this board's whole point is readiness severity, not what's flying
+           right now. "Your vehicles" always renders (mirrors `/fly`'s own unconditional leg); its own
+           empty line is a structural fact ("this fleet has zero real vehicles"), independent of the
+           verdict filter above. -->
+      <section class="table-group">
+        <h2 class="group-label">Your vehicles ({{ facade.boardGroups().yours.length }})</h2>
+        @if (facade.boardGroups().yours.length === 0) {
+          <p class="muted group-empty">No real vehicles yet — <a routerLink="/add-source">Add source ›</a></p>
+        } @else if (facade.filteredGroups().yours.length > 0) {
+          <div class="card">
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Vehicle</th>
+                    <th>Verdict</th>
+                    <th>Needs attention</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of facade.filteredGroups().yours; track row.assetId) {
+                    <tr>
+                      <td class="name-cell truncate" [title]="row.displayName">{{ row.displayName }}</td>
+                      <td>
+                        @if (facade.statusOverride(row); as override) {
+                          <span class="verdict-note">{{ override }}</span>
+                        } @else {
+                          <span class="chip" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'">
+                            <span class="dot" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'"></span>
+                            {{ facade.verdictLabel(row.verdict) }}
+                          </span>
+                        }
                       </td>
-                    } @else {
-                      <td class="faint">—</td>
-                    }
+                      @if (facade.statusOverride(row)) {
+                        <td class="faint">—</td>
+                      } @else if (facade.blocker(row); as blocker) {
+                        @if (blocker.first) {
+                          <td class="attention-cell">
+                            <span class="attention-row" [title]="blocker.first">
+                              <span class="blocker-name truncate muted">{{ blocker.first }}</span>
+                              @if (blocker.more > 0) {
+                                <span class="chip">+{{ blocker.more }}</span>
+                              }
+                            </span>
+                          </td>
+                        } @else {
+                          <td class="faint">—</td>
+                        }
+                      }
+                      <td class="actions">
+                        <a class="btn secondary small" [routerLink]="['/assets', row.assetId, 'readiness']">Report ›</a>
+                      </td>
+                    </tr>
                   }
-                  <td class="actions">
-                    <a class="btn secondary small" [routerLink]="['/assets', row.assetId, 'readiness']">Report ›</a>
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        }
+      </section>
+
+      @if (facade.boardGroups().simulated.length > 0) {
+        <section class="table-group">
+          <h2 class="group-label">Simulated ({{ facade.boardGroups().simulated.length }})</h2>
+          @if (!facade.hideSimulated() && facade.filteredGroups().simulated.length > 0) {
+            <div class="card">
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Vehicle</th>
+                      <th>Verdict</th>
+                      <th>Needs attention</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (row of facade.filteredGroups().simulated; track row.assetId) {
+                      <tr>
+                        <td class="name-cell truncate" [title]="row.displayName">{{ row.displayName }}</td>
+                        <td>
+                          @if (facade.statusOverride(row); as override) {
+                            <span class="verdict-note">{{ override }}</span>
+                          } @else {
+                            <span class="chip" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'">
+                              <span class="dot" [class.ok]="facade.verdictTone(row.verdict) === 'ok'" [class.danger]="facade.verdictTone(row.verdict) === 'danger'"></span>
+                              {{ facade.verdictLabel(row.verdict) }}
+                            </span>
+                          }
+                        </td>
+                        @if (facade.statusOverride(row)) {
+                          <td class="faint">—</td>
+                        } @else if (facade.blocker(row); as blocker) {
+                          @if (blocker.first) {
+                            <td class="attention-cell">
+                              <span class="attention-row" [title]="blocker.first">
+                                <span class="blocker-name truncate muted">{{ blocker.first }}</span>
+                                @if (blocker.more > 0) {
+                                  <span class="chip">+{{ blocker.more }}</span>
+                                }
+                              </span>
+                            </td>
+                          } @else {
+                            <td class="faint">—</td>
+                          }
+                        }
+                        <td class="actions">
+                          <a class="btn secondary small" [routerLink]="['/assets', row.assetId, 'readiness']">Report ›</a>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          }
+        </section>
+      }
     }
   }
 </div>
