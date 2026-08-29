@@ -12,6 +12,7 @@ import {
   transportLabel,
 } from '../../core/stream-info-logic';
 import type { Transport } from './player';
+import { humanAge } from '../../core/telemetry/telemetry-logic';
 
 /** How often the live-ticking duration/detection-age readouts tick, independent of any poll cadence. */
 const CLOCK_TICK_MS = 1_000;
@@ -193,7 +194,7 @@ export class StreamInfoPanel {
   protected readonly lastDetectionAgeLabel = computed(() => {
     const latest = this.detections.results()[0];
     const age = ageSeconds(latest?.capturedAt, this.nowSignal());
-    return age === undefined ? undefined : `${age.toFixed(0)}s ago`;
+    return age === undefined ? undefined : `${humanAge(age)} ago`;
   });
 
   constructor() {

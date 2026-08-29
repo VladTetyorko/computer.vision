@@ -5,6 +5,7 @@ import { attentionAgeLabel, batteryAttentionSeverity, type AttentionReason } fro
 import { canCommandReturnHome, deriveDiagnostics, gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
 import type { AssetAttention, ActiveStream } from '../../core/api/models';
 import type { FleetMarker } from '../../core/map/map-logic';
+import { humanAge } from '../../core/telemetry/telemetry-logic';
 
 export type AssetPanelTab = 'status' | 'telemetry' | 'video';
 
@@ -53,6 +54,11 @@ export class AssetPanel {
    * one gap; see `command-facade.ts`'s own doc comment for the full accounting.
    */
   readonly reasons = input.required<readonly AttentionReason[]>();
+
+  /** `4d 2h ago`, never a raw second count — the one age vocabulary (`humanAge`). */
+  protected sampleAgeText(seconds: number | undefined): string {
+    return seconds === undefined ? '—' : `${humanAge(seconds)} ago`;
+  }
 
   /** `CommandPage`'s own `/fly?asset=…&watch=1` navigation — this panel never touches the router. */
   readonly watchLive = output<void>();

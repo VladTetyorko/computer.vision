@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { batterySeverity } from '../../core/telemetry/telemetry-logic';
+import { humanAge } from '../../core/telemetry/telemetry-logic';
 
 /**
  * The live telemetry HUD strip for `/live/:deviceId` (docs/main/CYCLES-PLAN.md §2, UX-DESIGN §5.2).
@@ -247,6 +248,6 @@ export class TelemetryOsd {
 
   protected readonly ageLabel = computed(() => {
     const age = this.store.sampleAgeSeconds();
-    return age === undefined ? '—' : `${age.toFixed(0)}s ago`;
+    return age === undefined ? '—' : `${humanAge(age)} ago`;
   });
 }

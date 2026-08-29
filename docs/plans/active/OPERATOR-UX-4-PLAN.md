@@ -38,4 +38,4 @@ Fourth cycle of the operator-UX series (after CONTROLLER-UX cycles 1–2 and OPE
 
 Every wave: tsc both configs, `npm run test:ci` (W1–W3) / `./mvnw -B -pl drone-link/mavlink test` (W4), prod build, MODULE.md, own files only.
 
-Status: W1–W4 open.
+Status: W1 (`f42f4ff3`), W2 (`5f660ca5`), W3 (`34c0578e`), W4 (`1f7077e8`), W5 fixups (`e279c348`) + post-wave sweep built; **merged to master 2026-08-29**. N2's real root cause: a KEEP-IN breach computed from Null Island on an offline rover — breaches, like gps-degraded, are now live-only reasons. Open: the bell still replays a historic breach toast on `/command` load (SSE replay, not an attention verdict).
