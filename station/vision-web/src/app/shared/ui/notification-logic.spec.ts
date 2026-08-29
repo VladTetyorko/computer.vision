@@ -23,6 +23,12 @@ function event(partial: Partial<DetectionEvent> = {}): DetectionEvent {
 }
 
 describe('unreadEvents', () => {
+  it('an event first seen before the bell mounted is history, not unread — whatever order the feed loaded in', () => {
+    const old = event({ id: 'old', firstSeen: '2026-01-01T00:00:00Z' });
+    const fresh = event({ id: 'fresh', firstSeen: '2026-01-01T00:10:00Z' });
+    expect(unreadEvents([old, fresh], new Set(), Date.parse('2026-01-01T00:05:00Z'))).toEqual([fresh]);
+  });
+
   it('keeps every event whose id is not in readIds', () => {
     const a = event({ id: 'a' });
     const b = event({ id: 'b' });

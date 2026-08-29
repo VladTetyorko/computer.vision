@@ -152,7 +152,8 @@ export class NotificationBell {
   private readonly triggerEl = viewChild<ElementRef<HTMLButtonElement>>('trigger');
 
   private readonly readIds = signal<ReadonlySet<string>>(new Set());
-  protected readonly unreadCount = computed(() => unreadEvents(this.events.events(), this.readIds()).length);
+  private readonly mountedAtMs = Date.now();
+  protected readonly unreadCount = computed(() => unreadEvents(this.events.events(), this.readIds(), this.mountedAtMs).length);
 
   /** Guards `readIds`'s own one-time seed effect below (finding B1) — mirrors `seededToasts`'s
    *  identical "only the very first tick decides cold-start-or-not" shape. */
@@ -171,7 +172,6 @@ export class NotificationBell {
    *  `notification-logic.ts#shouldToast`'s own doc comment for the full U4 root-cause writeup).
    *  Captured once, here, rather than read fresh per effect run — the whole point is one fixed
    *  reference instant, not "whatever `Date.now()` happens to be on this particular tick". */
-  private readonly mountedAtMs = Date.now();
 
   /**
    * Drives the system-events card's own "…s ago" timestamps (mirrors `events-rail.ts`'s identical

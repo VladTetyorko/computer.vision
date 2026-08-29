@@ -235,6 +235,15 @@ describe('describeDeviceState', () => {
 });
 
 describe('endpointConflicts (docs/plans/active/OPERATOR-UX-7-PLAN.md finding D1)', () => {
+  it('two devices reading the same video file never conflict — only bound udp/tcp sockets are exclusive', () => {
+    const shared = 'file:///home/op/Videos/drone.mp4';
+    const conflicts = endpointConflicts([
+      device({ id: 'dev-1', name: 'Warmate 2 · video', protocol: 'file', uri: shared }),
+      device({ id: 'dev-2', name: 'FPV Vyriy 3 · video', protocol: 'file', uri: shared }),
+    ]);
+    expect(conflicts.size).toBe(0);
+  });
+
   it('returns an empty map when no two devices share a protocol+uri', () => {
     const conflicts = endpointConflicts([
       device({ id: 'dev-1', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' }),

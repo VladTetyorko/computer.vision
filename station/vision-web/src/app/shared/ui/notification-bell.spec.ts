@@ -25,7 +25,7 @@ function event(partial: Partial<DetectionEvent> = {}): DetectionEvent {
     streamId: 's-1',
     label: 'person',
     peakConfidence: 0.9,
-    firstSeen: '2026-01-01T00:00:00Z',
+    firstSeen: new Date(Date.now() + 60_000).toISOString(),
     lastSeen: '2026-01-01T00:00:05Z',
     state: 'OPEN',
     ...partial,

@@ -91,8 +91,15 @@ export function mapDeviceOwners(assets: readonly AssetDetails[]): ReadonlyMap<st
  * No blocking, no backend change: the operator may well intend a shared listener (docs/plans/active/
  * OPERATOR-UX-7-PLAN.md's own §2 D1 design note) — this only makes the fact visible.
  */
+/** `udp://` / `tcp://` URIs are local listening sockets — the only kind two devices cannot share. */
+export function isBindEndpoint(uri: string): boolean {
+  return /^(udp|tcp):\/\//i.test(uri.trim());
+}
+
 export function endpointConflicts(devices: readonly Device[]): ReadonlyMap<string, readonly string[]> {
-  const active = devices.filter((device) => device.state !== 'DELETED');
+  // Only a *bound* endpoint is exclusive: two devices listening on the same udp/tcp socket
+  // conflict; two devices reading the same video file or pulling the same rtsp URL do not.
+  const active = devices.filter((device) => device.state !== 'DELETED' && isBindEndpoint(device.uri));
   const groupsByEndpoint = new Map<string, Device[]>();
   for (const device of active) {
     // A NUL separator, not a plain concatenation or a space — a protocol/uri pair split

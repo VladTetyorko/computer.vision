@@ -15,8 +15,15 @@ import type { DetectionEvent, LiveEvent } from '../../core/api/models';
  * **not** `EventsStore`'s own `seenIds` (a private, poll-arrival dedupe with a different job: "has
  * this id ever been fetched", not "has the operator looked at it").
  */
-export function unreadEvents(events: readonly DetectionEvent[], readIds: ReadonlySet<string>): readonly DetectionEvent[] {
-  return events.filter((event) => !readIds.has(event.id));
+export function unreadEvents(
+  events: readonly DetectionEvent[],
+  readIds: ReadonlySet<string>,
+  mountedAtMs = 0,
+): readonly DetectionEvent[] {
+  // `mountedAtMs`: the same gate `shouldToast` applies — an event first seen before this bell
+  // mounted is history, not news, whatever order the feed happens to load in (the backlog can
+  // land one event at a time, so a read-set seeded from "the first tick" is never enough alone).
+  return events.filter((event) => !readIds.has(event.id) && Date.parse(event.firstSeen) >= mountedAtMs);
 }
 
 /**
