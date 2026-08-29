@@ -34,4 +34,4 @@ Fifth cycle of the operator-UX series (after OPERATOR-UX-4). Live walkthrough 20
 
 Every wave: scoped build green (`-pl` with `-am` for W1), tests, MODULE.md, own files only.
 
-Status: W1–W3 open.
+Status: W1 (`23d13895`), W2 (`aba10429`), W3 (`e4360ba1`) built; **merged to master 2026-08-29**. Facts learned: no vision-perception path ever closed a usage on source/link failure — the idle sweep is the only recovery; the toast replay was the seed-on-first-tick idiom racing the SSE backlog. Open: `UsageSummary` carries no last-activity time on the wire (web estimates from `startedAt`); `/assets` has no column sort to override.
