@@ -10,6 +10,34 @@ import type {
 } from '../api/models';
 import { VISUAL_GEO_DISABLED_MESSAGE } from '../api/models';
 
+// --- Fix validity (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N1 — "a fix is a fix") -----------
+
+/**
+ * Whether `position` is a legitimate vehicle fix — `false` for `undefined`, a non-finite lat/lon,
+ * or exactly `(0, 0)`. A MAVLink `GLOBAL_POSITION_INT` with no GPS lock reports `(0, 0)` — "Null
+ * Island" — not a vehicle actually parked at 0°N 0°E in the Gulf of Guinea; rendering that literal
+ * wire value as a real position is what recentred the fleet map on open ocean and printed a
+ * confident-looking `0.00000, 0.00000` coordinate for data that was never acquired (N1's own
+ * live-app finding). Every reader of a raw position — `AssetSummary.lastKnownPosition`, a
+ * `TelemetrySample`'s own lat/lon — should gate through this before plotting or displaying it;
+ * `core/map/map-logic.ts#bucketForAsset`/`buildMarker` and `features/asset-detail/**`'s position
+ * card are this predicate's first two callers. Deliberately structural (an object shape, not a
+ * `GeoPosition`/`TelemetrySample` type import) so it reads either without a cast.
+ */
+export function hasFix(position: { latitude?: number; longitude?: number } | undefined): boolean {
+  if (!position) {
+    return false;
+  }
+  const { latitude, longitude } = position;
+  if (latitude === undefined || longitude === undefined) {
+    return false;
+  }
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return false;
+  }
+  return !(latitude === 0 && longitude === 0);
+}
+
 /**
  * Pure, Angular-free logic behind wave H6 of `docs/plans/done/VISUAL-GEO-V2-PLAN.md` — the cockpit's
  * divergence chip + detail popover (`features/fly/cockpit`), the `TacticalMap` corrected-track layer

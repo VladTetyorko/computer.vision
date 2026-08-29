@@ -11,6 +11,7 @@ import {
   geoChipTone,
   geoDetailRows,
   hasCorrectionFix,
+  hasFix,
   isVisualGeoDisabledError,
   regionIngestRequest,
   regionPhaseLabel,
@@ -31,6 +32,35 @@ function correction(partial: Partial<CorrectionResponse> = {}): CorrectionRespon
     ...partial,
   };
 }
+
+describe('hasFix (OPERATOR-UX-4-PLAN.md finding N1 — Null Island is not a position)', () => {
+  it('is false for undefined', () => {
+    expect(hasFix(undefined)).toBe(false);
+  });
+
+  it('is false for exactly (0, 0) — a MAVLink no-fix GLOBAL_POSITION_INT', () => {
+    expect(hasFix({ latitude: 0, longitude: 0 })).toBe(false);
+  });
+
+  it('is false when only one coordinate is missing', () => {
+    expect(hasFix({ latitude: 10 })).toBe(false);
+    expect(hasFix({ longitude: 20 })).toBe(false);
+  });
+
+  it('is false for a non-finite coordinate', () => {
+    expect(hasFix({ latitude: NaN, longitude: 20 })).toBe(false);
+    expect(hasFix({ latitude: 10, longitude: Infinity })).toBe(false);
+  });
+
+  it('is true for a real fix', () => {
+    expect(hasFix({ latitude: 50.4381, longitude: 30.5183 })).toBe(true);
+  });
+
+  it('is true for a real fix that happens to sit on one axis of the equator/prime meridian', () => {
+    expect(hasFix({ latitude: 0, longitude: 30.5183 })).toBe(true);
+    expect(hasFix({ latitude: 50.4381, longitude: 0 })).toBe(true);
+  });
+});
 
 describe('isVisualGeoDisabledError', () => {
   it('matches the D9 flag-off envelope exactly', () => {

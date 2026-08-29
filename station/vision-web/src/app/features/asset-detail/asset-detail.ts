@@ -25,7 +25,14 @@ import { PageBar, type PageBarCrumb, pluralize } from '../../shared/ui/page-bar/
 import { PilotsCard } from './pilots-card';
 import { CameraPosePanel } from '../camera-geo/camera-pose-panel';
 import { AssetDetailFacade } from './asset-detail-facade';
-import { attributeRowsToRecord, attributesToRows, telemetryFactRows, type AttributeRow, type TelemetryFactRow } from './asset-detail-logic';
+import {
+  attributeRowsToRecord,
+  attributesToRows,
+  sampleAgeLabel,
+  telemetryFactRows,
+  type AttributeRow,
+  type TelemetryFactRow,
+} from './asset-detail-logic';
 import type { AssetUsage, Device, DetectionEvent } from '../../core/api/models';
 
 /** The page's four independent editor overlays — docs/plans/done/UI-ARCHITECTURE-PLAN.md's own migration
@@ -184,6 +191,17 @@ export class AssetDetailPage {
 
   protected deviceStale(deviceId: string): boolean {
     return isStale(this.deviceSampleAgeSeconds(deviceId));
+  }
+
+  /** `<humanAge> ago` for the freshest-sample summary card's own "Sample" fact — docs/plans/active/
+   *  OPERATOR-UX-4-PLAN.md finding N4, one age vocabulary. */
+  protected freshestAgeLabel(): string {
+    return sampleAgeLabel(this.facade.freshestAgeSeconds());
+  }
+
+  /** Same as {@link freshestAgeLabel}, per device, for the "Full telemetry" drawer's own rows. */
+  protected deviceAgeLabel(deviceId: string): string {
+    return sampleAgeLabel(this.deviceSampleAgeSeconds(deviceId));
   }
 
   protected usageDuration(usage: AssetUsage): string {

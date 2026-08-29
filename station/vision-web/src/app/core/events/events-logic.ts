@@ -1,5 +1,5 @@
 import type { ActiveStream, AssetUsage, DetectionEvent, Device } from '../api/models';
-import { formatDuration } from '../stream-info-logic';
+import { humanAge } from '../telemetry/telemetry-logic';
 
 /**
  * Pure derivations behind `core/events-store.ts` and every page that reads it (docs/plans/done/MVP2-PLAN.md
@@ -106,13 +106,17 @@ export function formatConfidence(peakConfidence: number): string {
 }
 
 /**
- * A short "n ago" label for `atIso` relative to `nowMs`, e.g. `"12s ago"`, `"4m 07s ago"` — reuses
- * `stream-info-logic.ts#formatDuration`'s own rendering rather than inventing a second one, so the
- * two "elapsed time" readouts in this app always agree on formatting.
+ * A short "n ago" label for `atIso` relative to `nowMs`, e.g. `"12s ago"`, `"4m ago"`, `"4h 2m ago"` —
+ * reuses `core/telemetry/telemetry-logic.ts#humanAge`, this app's one age vocabulary
+ * (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N4), rather than `stream-info-logic.ts#formatDuration`'s
+ * zero-padded, hour-capped rendering — an event can legitimately be days old (a removed device's
+ * last-seen event), and a raw `323353s ago` is a number nobody parses. `formatDuration` stays this
+ * app's one *duration* renderer (a ticking session length); this is an *age*, and every age reader
+ * in this app now agrees on formatting.
  */
 export function relativeTimeLabel(atIso: string, nowMs: number): string {
   const seconds = Math.max(0, (nowMs - Date.parse(atIso)) / 1000);
-  return `${formatDuration(seconds)} ago`;
+  return `${humanAge(seconds)} ago`;
 }
 
 /**
@@ -130,10 +134,16 @@ export interface EventSourceIdentifiers {
  * A friendly name for the source behind an event — the device streaming it, when resolvable via
  * the fleet's currently-active streams, falling back to a short id fragment. Neither `DetectionEvent`
  * nor `LiveEvent` carries a display name of its own, so this always needs `FleetStore`'s own
- * `devices`/`streams` snapshots to do better than a raw id. A device-level event with neither a
- * `streamId` nor an `assetId` (e.g. `LiveEvent` for `DEVICE_ONLINE`/`DEVICE_OFFLINE` — see
- * `Event.java`'s own "`streamId` nullable … device-level events" doc comment) degrades to `'—'`,
- * never a crash on an absent fallback id.
+ * `devices`/`streams` snapshots to do better than a raw id.
+ *
+ * When neither the device nor its stream can be resolved (the event references a device or asset
+ * that no longer exists in the fleet — every row in `/monitor/alerts` after a device is archived,
+ * docs/plans/active/OPERATOR-UX-4-PLAN.md finding N5), the fallback reads `'Removed device · 7fd88790'`,
+ * never a bare, unlabeled hash — a raw id fragment with no word next to it reads as a name, not as
+ * "this device is gone". A device-level event with neither a `streamId` nor an `assetId` (e.g.
+ * `LiveEvent` for `DEVICE_ONLINE`/`DEVICE_OFFLINE` — see `Event.java`'s own "`streamId` nullable …
+ * device-level events" doc comment) still degrades to `'—'` — there is no id at all to name as
+ * removed.
  */
 export function describeEventSource(
   event: EventSourceIdentifiers,
@@ -146,7 +156,7 @@ export function describeEventSource(
     return device.name;
   }
   const fallback = event.assetId ?? event.streamId;
-  return fallback ? fallback.slice(0, 8) : '—';
+  return fallback ? `Removed device · ${fallback.slice(0, 8)}` : '—';
 }
 
 // --- Navigation target (Wall rail / map marker popup "open" action) ---------------------------

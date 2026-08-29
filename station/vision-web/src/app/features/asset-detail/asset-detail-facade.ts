@@ -20,6 +20,7 @@ import { canManageOrg } from '../../core/org/org-logic';
 import { describeHttpError } from '../../core/api-error';
 import { findVideoDevice } from '../../core/fleet/device-logic';
 import { ageSeconds, isStale, trackingIdChanged } from '../../core/telemetry/telemetry-logic';
+import { hasFix } from '../../core/geo/geo-logic';
 import { filterEvents } from '../../core/events/events-logic';
 import {
   RESTORE_TARGET_STATE,
@@ -34,7 +35,14 @@ import {
   type FlightBar,
   type KpiTile,
 } from '../../core/fleet/asset-stats-logic';
-import { freshestSample, groupTelemetryByDevice, telemetryDevices, telemetryFactRows, type TelemetryFactRow } from './asset-detail-logic';
+import {
+  freshestSample,
+  groupTelemetryByDevice,
+  telemetryDevices,
+  telemetryFactRows,
+  withFixOnlyPosition,
+  type TelemetryFactRow,
+} from './asset-detail-logic';
 import type {
   AssetDetails,
   AssetStats,
@@ -155,7 +163,17 @@ export class AssetDetailFacade {
   /** Switches the map into follow mode; `null` until the asset has loaded. */
   readonly mapFollowAssetId = computed(() => this.asset()?.assetId ?? null);
 
-  /** `<vision-tactical-map>`'s `[assets]` — 0 or 1 markers, built from the freshest sample + trail. */
+  /**
+   * `<vision-tactical-map>`'s `[assets]` — 0 or 1 markers, built from the freshest sample + trail.
+   *
+   * `trail`/`latest` are both filtered through {@link withFixOnlyPosition}/`hasFix`
+   * (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N1) before reaching `followMarkers` — a `(0, 0)`
+   * point is a no-fix report, not a place, and `shared/map/tactical-map/tactical-map-logic.ts#followMarker`'s
+   * own fix check (unrelated to this wave, not repatched here) would otherwise treat it as real and
+   * recentre the map on Null Island. Stripping it here makes that helper's existing "no fix → last
+   * real trail point, or nothing plotted" fallback fire instead — the position card's map keeps its
+   * previous/default view rather than jumping to open ocean.
+   */
   readonly mapAssets = computed(() => {
     const asset = this.asset();
     if (!asset) {
@@ -165,8 +183,8 @@ export class AssetDetailFacade {
       assetId: asset.assetId,
       displayName: asset.displayName,
       categoryName: asset.categoryName,
-      trail: this.telemetry.trail(),
-      latest: this.freshestOverall(),
+      trail: this.telemetry.trail().filter((point) => hasFix(point)),
+      latest: withFixOnlyPosition(this.freshestOverall()),
     });
   });
 
