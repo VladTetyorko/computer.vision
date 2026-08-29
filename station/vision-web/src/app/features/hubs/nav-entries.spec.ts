@@ -1,10 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import { NAV_MODES, navModeById } from './nav-entries';
 
+/** Every entry a session with (`canManage`) or without (`!canManage`) ADMIN/MANAGER rights would see
+ *  in the sidebar — mirrors `shared/ui/app-sidebar/app-sidebar.ts#modes`'s own filter exactly, kept
+ *  here as a small local helper rather than imported so this spec stays a pure data-level check with
+ *  no Angular/TestBed dependency (matching this file's own pre-existing "no Angular" precedent). */
+function visibleEntries(canManage: boolean) {
+  return NAV_MODES.flatMap((mode) => mode.entries.filter((entry) => !entry.managerOnly || canManage));
+}
+
 describe('NAV_MODES', () => {
-  it('has exactly the three frozen modes, in order, each with its own primaryRoute (docs/extracts/design/19-hubs.md — where the retired /operate|/monitor|/manage hub paths now redirect)', () => {
-    expect(NAV_MODES.map((mode) => mode.id)).toEqual(['operate', 'monitor', 'manage']);
-    expect(NAV_MODES.map((mode) => mode.primaryRoute)).toEqual(['/fly', '/command', '/assets']);
+  it('has exactly the five frozen groups, in order, each with its own primaryRoute (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1, wave W1)', () => {
+    expect(NAV_MODES.map((mode) => mode.id)).toEqual(['operate', 'monitor', 'fleet', 'vision', 'system']);
+    expect(NAV_MODES.map((mode) => mode.primaryRoute)).toEqual([
+      '/fly',
+      '/command',
+      '/assets',
+      '/manage/training',
+      '/manage/system',
+    ]);
+  });
+
+  it('exactly one group (system) renders in the sidebar footer, next to the identity chip', () => {
+    expect(NAV_MODES.filter((mode) => mode.footer).map((mode) => mode.id)).toEqual(['system']);
   });
 
   it('every entry has a non-empty name/description and a `to` that starts with a slash', () => {
@@ -17,17 +35,21 @@ describe('NAV_MODES', () => {
     }
   });
 
-  it('every badge (when set) is the frozen "soon" scaffold flag — no other value', () => {
+  /**
+   * The `badge: 'soon'` scaffold tier is retired wholesale this wave (docs/plans/active/WAREHOUSE-UX-PLAN.md
+   * §3.1 rule 1) — every entry that used to carry it (Flight plans/missions, Saved Wall layouts,
+   * Firmware, Maintenance/health) left `NAV_MODES` outright rather than staying with the flag unset;
+   * `NavEntry` no longer declares the field at all. This checks no entry carries it back in by hand.
+   */
+  it('no entry carries a `badge` field anywhere in NAV_MODES', () => {
     for (const mode of NAV_MODES) {
       for (const entry of mode.entries) {
-        if (entry.badge !== undefined) {
-          expect(entry.badge, `${mode.id}/${entry.name}`).toBe('soon');
-        }
+        expect('badge' in entry, `${mode.id}/${entry.name}`).toBe(false);
       }
     }
   });
 
-  it('has no duplicate entry name within one mode', () => {
+  it('has no duplicate entry name within one group', () => {
     for (const mode of NAV_MODES) {
       const names = mode.entries.map((entry) => entry.name);
       expect(new Set(names).size, mode.id).toBe(names.length);
@@ -69,103 +91,192 @@ describe('NAV_MODES', () => {
     }
   });
 
-  describe('F3 — Manage grouping/role-scoping shape', () => {
-    const manage = NAV_MODES.find((mode) => mode.id === 'manage')!;
+  /**
+   * docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 rule 5 — a detection profile and a transmitter layout
+   * are configuration a user visits rarely, not an everyday Operate/Manage door. Both routes stay
+   * live and ungated; they are reached from `/settings`'s own new link list instead
+   * (`features/settings/account-settings.html`).
+   */
+  it('Detection defaults and Controller have both left the rail entirely', () => {
+    for (const mode of NAV_MODES) {
+      expect(mode.entries.some((entry) => entry.to === '/settings/detection'), mode.id).toBe(false);
+      expect(mode.entries.some((entry) => entry.to === '/manage/controller'), mode.id).toBe(false);
+    }
+  });
 
-    it('every `group` (when set) is one of the three frozen groups', () => {
-      for (const entry of manage.entries) {
-        if (entry.group !== undefined) {
-          expect(['configuration', 'diagnostics', 'advanced'], entry.name).toContain(entry.group);
-        }
+  describe('OPERATE — Readiness rename (rule 4)', () => {
+    const operate = NAV_MODES.find((mode) => mode.id === 'operate')!;
+
+    it('has exactly Cockpit, Wall, Readiness, in that order, none managerOnly', () => {
+      expect(operate.entries.map((entry) => entry.name)).toEqual(['Cockpit', 'Wall', 'Readiness']);
+      for (const entry of operate.entries) {
+        expect(entry.managerOnly, entry.name).toBeFalsy();
       }
     });
 
-    /**
-     * A group is always role-scoped, with exactly one named, documented exception: `System status`
-     * (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1) sits in `diagnostics` but is deliberately not
-     * `managerOnly` — an operator whose CV pipeline just died needs to see why, not be told to find a
-     * manager. This carve-out must stay narrow (one specific entry, not a loosened rule) — any *other*
-     * grouped entry gaining `managerOnly: false` should still fail this test.
-     */
-    it('every grouped entry is also managerOnly, except the documented "System status" carve-out', () => {
-      const rollupExceptions = new Set(['System status']);
-      for (const entry of manage.entries) {
-        if (entry.group !== undefined && !rollupExceptions.has(entry.name)) {
-          expect(entry.managerOnly, `${entry.name} has a group but isn't managerOnly`).toBe(true);
-        }
-      }
-    });
-
-    it('"System status" is the one documented non-managerOnly diagnostics entry', () => {
-      const entry = manage.entries.find((e) => e.name === 'System status')!;
-      expect(entry, 'System status').toBeDefined();
-      expect(entry.group).toBe('diagnostics');
-      expect(entry.managerOnly).toBeFalsy();
-      expect(entry.to).toBe('/manage/system');
-    });
-
-    it('Assets is ungrouped and ungated — every role reaches it (reading the fleet is not a management action)', () => {
-      const assets = manage.entries.find((e) => e.name === 'Assets')!;
-      expect(assets).toBeDefined();
-      expect(assets.group).toBeUndefined();
-      expect(assets.managerOnly).toBeFalsy();
-    });
-
-    /**
-     * docs/plans/done/OPS-UX-PLAN.md §2 A4: the concurrent backend wave gates `POST /api/assets` on
-     * `canManageOrg()`, so the nav must not dangle a door the API now refuses — "Add source" moved
-     * from ungated to `managerOnly` (it stays ungrouped: it's a primary action for the roles that can
-     * use it, not tucked into an advanced/diagnostics disclosure).
-     */
-    it('Add source is ungrouped but managerOnly — a PILOT no longer sees a door the API would refuse', () => {
-      const addSource = manage.entries.find((e) => e.name === 'Add source')!;
-      expect(addSource).toBeDefined();
-      expect(addSource.group).toBeUndefined();
-      expect(addSource.managerOnly).toBe(true);
-    });
-
-    it('Devices is demoted into the advanced group, managerOnly', () => {
-      const devices = manage.entries.find((e) => e.name === 'Devices')!;
-      expect(devices).toBeDefined();
-      expect(devices.group).toBe('advanced');
-      expect(devices.managerOnly).toBe(true);
-      expect(devices.to).toBe('/devices');
+    it('"Pre-flight checklist" is renamed to "Readiness"; the route (/operate/preflight) is unchanged', () => {
+      const readiness = operate.entries.find((entry) => entry.to === '/operate/preflight');
+      expect(readiness).toBeDefined();
+      expect(readiness?.name).toBe('Readiness');
+      expect(operate.entries.some((entry) => entry.name === 'Pre-flight checklist')).toBe(false);
     });
   });
 
-  describe('Monitor: Command is one merged entry, not two', () => {
+  describe('MONITOR — Command still one merged entry; Audit trail moved out to System', () => {
     const monitor = NAV_MODES.find((mode) => mode.id === 'monitor')!;
+
+    it('has exactly Command, Activity, Replay library, Alerts center, in that order, none managerOnly', () => {
+      expect(monitor.entries.map((entry) => entry.name)).toEqual(['Command', 'Activity', 'Replay library', 'Alerts center']);
+      for (const entry of monitor.entries) {
+        expect(entry.managerOnly, entry.name).toBeFalsy();
+      }
+    });
 
     it('has exactly one /command entry, named "Command"', () => {
       const commandEntries = monitor.entries.filter((entry) => entry.to === '/command');
       expect(commandEntries.map((entry) => entry.name)).toEqual(['Command']);
     });
 
-    it('has no separate "Wall" entry — Wall\'s canonical home is Operate', () => {
+    it("has no separate \"Wall\" entry — Wall's canonical home is Operate", () => {
       expect(monitor.entries.some((entry) => entry.name === 'Wall' || entry.to === '/wall')).toBe(false);
     });
 
-    /**
-     * docs/plans/done/OPS-UX-PLAN.md §3 B1: "Audit trail" mirrors the backend's own `canManageOrg()`
-     * gate on `AuditController#list` — a PILOT must never see a door the API would 403 on.
-     */
-    it('Audit trail is managerOnly and ungrouped (Monitor never groups)', () => {
-      const audit = monitor.entries.find((e) => e.name === 'Audit trail')!;
-      expect(audit).toBeDefined();
-      expect(audit.to).toBe('/monitor/audit');
-      expect(audit.managerOnly).toBe(true);
-      expect(audit.group).toBeUndefined();
+    it('has no "Audit trail" entry — it moved to System this wave (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1)', () => {
+      expect(monitor.entries.some((entry) => entry.name === 'Audit trail' || entry.to === '/monitor/audit')).toBe(false);
     });
+  });
+
+  describe('FLEET — three renames plus three carried-over entries (rule 4; see this file\'s own class doc for the carried-over three)', () => {
+    const fleet = NAV_MODES.find((mode) => mode.id === 'fleet')!;
+
+    it('Assets is renamed to "Inventory", stays ungrouped and ungated', () => {
+      const inventory = fleet.entries.find((entry) => entry.to === '/assets');
+      expect(inventory).toBeDefined();
+      expect(inventory?.name).toBe('Inventory');
+      expect(inventory?.managerOnly).toBeFalsy();
+      expect(fleet.entries.some((entry) => entry.name === 'Assets')).toBe(false);
+    });
+
+    it('"Add source" is renamed to "Add vehicle", stays managerOnly', () => {
+      const addVehicle = fleet.entries.find((entry) => entry.to === '/add-source');
+      expect(addVehicle).toBeDefined();
+      expect(addVehicle?.name).toBe('Add vehicle');
+      expect(addVehicle?.managerOnly).toBe(true);
+      expect(fleet.entries.some((entry) => entry.name === 'Add source')).toBe(false);
+    });
+
+    it('"Pilots / roster" is renamed to "Crew", stays managerOnly', () => {
+      const crew = fleet.entries.find((entry) => entry.to === '/manage/roster');
+      expect(crew).toBeDefined();
+      expect(crew?.name).toBe('Crew');
+      expect(crew?.managerOnly).toBe(true);
+      expect(fleet.entries.some((entry) => entry.name === 'Pilots / roster')).toBe(false);
+    });
+
+    it('Asset categories, Inventory reports and Devices carry over unrenamed, all managerOnly', () => {
+      const carried: readonly [string, string][] = [
+        ['/manage/categories', 'Asset categories'],
+        ['/manage/reports', 'Inventory reports'],
+        ['/devices', 'Devices'],
+      ];
+      for (const [to, name] of carried) {
+        const entry = fleet.entries.find((candidate) => candidate.to === to);
+        expect(entry, to).toBeDefined();
+        expect(entry?.name).toBe(name);
+        expect(entry?.managerOnly, name).toBe(true);
+      }
+    });
+  });
+
+  describe('VISION — every entry managerOnly', () => {
+    const vision = NAV_MODES.find((mode) => mode.id === 'vision')!;
+
+    it('has exactly CV training, CV model registry, Geo regions, in that order, all managerOnly', () => {
+      expect(vision.entries.map((entry) => entry.name)).toEqual(['CV training', 'CV model registry', 'Geo regions']);
+      for (const entry of vision.entries) {
+        expect(entry.managerOnly, entry.name).toBe(true);
+      }
+    });
+  });
+
+  describe('SYSTEM — footer group, one deliberate managerOnly carve-out plus the new Settings entry', () => {
+    const system = NAV_MODES.find((mode) => mode.id === 'system')!;
+
+    it('renders in the sidebar footer', () => {
+      expect(system.footer).toBe(true);
+    });
+
+    it('has exactly System status, Audit trail, Debug, Settings, in that order', () => {
+      expect(system.entries.map((entry) => entry.name)).toEqual(['System status', 'Audit trail', 'Debug', 'Settings']);
+    });
+
+    /**
+     * docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1: "System status" is not managerOnly — an operator whose CV
+     * pipeline just died needs to see why. "Settings" is not managerOnly either — every signed-in
+     * user, pilot included, owns account/detection/controller preferences. Audit trail and Debug stay
+     * managerOnly, mirroring the backend's own gates.
+     */
+    it('System status and Settings are ungated; Audit trail and Debug are managerOnly', () => {
+      const byName = (name: string) => system.entries.find((entry) => entry.name === name)!;
+      expect(byName('System status').managerOnly).toBeFalsy();
+      expect(byName('Settings').managerOnly).toBeFalsy();
+      expect(byName('Audit trail').managerOnly).toBe(true);
+      expect(byName('Debug').managerOnly).toBe(true);
+    });
+
+    it('Audit trail still targets /monitor/audit — only its group changed, not its route', () => {
+      const auditTrail = system.entries.find((entry) => entry.name === 'Audit trail');
+      expect(auditTrail?.to).toBe('/monitor/audit');
+    });
+
+    it('Settings is new this wave and targets /settings', () => {
+      const settings = system.entries.find((entry) => entry.name === 'Settings');
+      expect(settings).toBeDefined();
+      expect(settings?.to).toBe('/settings');
+    });
+  });
+
+  /**
+   * Entry-count regression guard (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1's own illustrative
+   * "25 → 15 for a manager, 11 → 10 for a pilot"). That figure is the *eventual*, post-wave-W7 count
+   * — it bakes in `Maintenance` (W7, not built) and the merged Inventory page's tab consolidation
+   * (W4, not built); summing the plan's own §3.1 itemization for "15" independently gives 17-18, not
+   * 15, even before Asset categories/Inventory reports/Devices are placed anywhere (the plan's own
+   * §3.1 mermaid diagram never names a group for any of the three). This wave (W1) is a pure IA
+   * regroup, not a feature removal, so those three fully-built pages stay in the rail (`fleet` — see
+   * `nav-entries.ts`'s own class doc) rather than vanishing with no replacement. The PILOT figure
+   * below does land exactly on the plan's own "10" (every item it names for a pilot is accounted
+   * for); the MANAGER figure is the TRUE count this wave produces, not the plan's estimate.
+   */
+  it('a PILOT sees exactly the plan\'s own 10 entries; a MANAGER/ADMIN sees the true full set (20, not the plan\'s illustrative "15" — see this test\'s own doc comment)', () => {
+    const pilotVisible = visibleEntries(false);
+    const managerVisible = visibleEntries(true);
+
+    expect(pilotVisible.map((entry) => entry.name)).toEqual([
+      'Cockpit',
+      'Wall',
+      'Readiness',
+      'Command',
+      'Activity',
+      'Replay library',
+      'Alerts center',
+      'Inventory',
+      'System status',
+      'Settings',
+    ]);
+    expect(pilotVisible.length).toBe(10);
+    expect(managerVisible.length).toBe(20);
   });
 });
 
 describe('navModeById', () => {
-  it('returns the matching mode', () => {
-    expect(navModeById('manage').label).toBe('Manage');
+  it('returns the matching group', () => {
+    expect(navModeById('fleet').label).toBe('Fleet');
   });
 
   it('throws for an id outside the frozen set', () => {
-    // @ts-expect-error deliberately an invalid id, to exercise the guard
-    expect(() => navModeById('nope')).toThrow('Unknown nav mode: nope');
+    // @ts-expect-error deliberately an invalid id, to exercise the guard — 'manage' was a valid id
+    // before this wave split it into fleet/vision/system, which is exactly why it's a good probe here.
+    expect(() => navModeById('manage')).toThrow('Unknown nav mode: manage');
   });
 });

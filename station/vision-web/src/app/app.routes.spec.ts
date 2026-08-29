@@ -46,10 +46,21 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     }
   });
 
-  it("/operate, /monitor, /manage no longer have their own page — each redirects to its mode's primaryRoute (docs/extracts/design/19-hubs.md, docs/plans/done/NAV-IA-REDESIGN-PLAN.md F1/F10)", () => {
-    expect(NAV_MODES.map((mode) => mode.primaryRoute)).toEqual(['/fly', '/command', '/assets']);
-    for (const mode of NAV_MODES) {
-      const hubPath = `/${mode.id}`;
+  it("/operate, /monitor, /manage no longer have their own page — each redirects to its legacy target (docs/extracts/design/19-hubs.md, docs/plans/done/NAV-IA-REDESIGN-PLAN.md F1/F10)", () => {
+    // Five NAV_MODES groups exist since WAREHOUSE-UX wave W1 (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1), but
+    // only three ever had their own hub route — 'fleet'/'vision'/'system' are pure sidebar groupings with
+    // no `/fleet`, `/vision`, `/system` path at all (system's primaryRoute, /manage/system, is a real page
+    // in its own right, not a legacy hub redirect) — so this checks the three legacy hub paths directly
+    // rather than deriving them from every mode id.
+    expect(NAV_MODES.map((mode) => mode.primaryRoute)).toEqual([
+      '/fly',
+      '/command',
+      '/assets',
+      '/manage/training',
+      '/manage/system',
+    ]);
+    const legacyHubs = ['/operate', '/monitor', '/manage'];
+    for (const hubPath of legacyHubs) {
       expect(routeExists(flat, hubPath), hubPath).toBe(true);
       expect(flattenRoutes(routes).find((route) => route.path === hubPath)?.kind, hubPath).toBe('redirect');
     }

@@ -49,7 +49,10 @@ export const HUBS_ROUTES: Routes = [
   { path: 'monitor', pathMatch: 'full', redirectTo: 'command' },
   { path: 'manage', pathMatch: 'full', redirectTo: 'assets' },
 
-  // --- ComingSoon scaffolds — every remaining badge: 'soon' entry in nav-entries.ts#NAV_MODES ------
+  // --- ComingSoon scaffolds — the four routes that used to carry `badge: 'soon'` in
+  // nav-entries.ts#NAV_MODES until docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 wave W1 removed every such
+  // entry from the rail outright (rule 1); these routes (and the ComingSoon page they render) are
+  // deliberately left in place so no deep link/bookmark to them 404s ------------------------------
   {
     path: 'operate/missions',
     title: 'Flight plans / missions · Vision',
