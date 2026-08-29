@@ -8,6 +8,8 @@ import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetImage;
 import com.drones.vision.kernel.Capability;
@@ -74,9 +76,11 @@ class AssetImageControllerTest {
     private static AssetDetails details(AssetId id) {
         Device device = new Device(DeviceId.random(), "fpv-cam", Set.of(Capability.VIDEO),
                 new StreamDescriptor("sim", URI.create("sim://demo"), Map.of()));
-        Asset asset = new Asset(id, "my drone", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(device.id()), Map.of());
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(id, "my drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(device.id()), Map.of(), Identity.NONE,
+                Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                asset.inventoryState(), asset.identity(), asset.custody());
         return new AssetDetails(summary, List.of(device), List.of());
     }
 

@@ -11,6 +11,8 @@ import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
@@ -65,8 +67,8 @@ class DeviceControllerTest {
     private final CurrentUser currentUser = new CurrentUser(ownership);
     private final DeviceId deviceId = DeviceId.random();
     /** The asset {@link #deviceId} belongs to, for the authority tests near the end of this file. */
-    private final Asset ownedAsset = new Asset(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
-            Set.of(deviceId), Map.of());
+    private final Asset ownedAsset = Asset.register(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
+            Set.of(deviceId), Map.of(), Identity.NONE, Custody.NONE);
     /** An asset the PILOT authority tests below are deliberately NOT scoped to. */
     private final AssetId otherAssetId = AssetId.random();
 
@@ -662,8 +664,9 @@ class DeviceControllerTest {
     @Test
     void listFiltersOutDevicesThePilotsScopeCannotReach() throws Exception {
         Device otherDevice = device();
-        Asset otherAsset = new Asset(otherAssetId, "someone else's drone", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(otherDevice.id()), Map.of());
+        Asset otherAsset = Asset.register(otherAssetId, "someone else's drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(otherDevice.id()), Map.of(), Identity.NONE,
+                Custody.NONE);
         when(assetRepositoryPort.findByDeviceId(otherDevice.id())).thenReturn(Optional.of(otherAsset));
         Device ownDevice = new Device(deviceId, "cam-1", Set.of(Capability.VIDEO),
                 new StreamDescriptor("sim", URI.create("sim://cam-1"), Map.of()));

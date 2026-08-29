@@ -29,6 +29,12 @@ import java.util.Map;
  * @param attributes         free-form key/value attributes
  * @param hasImage           whether an image is stored for this asset (docs/plans/done/UX-REWORK-PLAN.md
  *                           §U-d item 3, CONTRACT 2)
+ * @param identity           serial/make/model/registration facts (docs/plans/active/WAREHOUSE-UX-PLAN.md D1)
+ * @param custody            who currently holds this asset, or in-stock if nobody (D2)
+ * @param inventoryState     this asset's <b>effective</b> inventory state (D6) — see {@link
+ *                           AssetSummaryResponse#inventoryState()}
+ * @param createdAt          when this asset was first registered
+ * @param updatedAt          when this asset was last changed
  * @param devices            the asset's resolved devices
  * @param recentUsages       the asset's recent usage history, newest first
  */
@@ -36,8 +42,9 @@ import java.util.Map;
 public record AssetDetailsResponse(String assetId, String displayName, String category, String categoryName,
                                     String owner, String status, String lifecycle, Instant lastUsedAt,
                                     GeoPositionResponse lastKnownPosition, Map<String, String> attributes,
-                                    boolean hasImage, List<DeviceResponse> devices,
-                                    List<AssetUsageResponse> recentUsages) {
+                                    boolean hasImage, IdentityResponse identity, CustodyResponse custody,
+                                    String inventoryState, Instant createdAt, Instant updatedAt,
+                                    List<DeviceResponse> devices, List<AssetUsageResponse> recentUsages) {
 
     /**
      * Maps an {@link AssetDetails} read model to its wire representation.
@@ -63,6 +70,11 @@ public record AssetDetailsResponse(String assetId, String displayName, String ca
                 summary.lastKnownPosition(),
                 summary.attributes(),
                 summary.hasImage(),
+                summary.identity(),
+                summary.custody(),
+                summary.inventoryState(),
+                summary.createdAt(),
+                summary.updatedAt(),
                 devices,
                 usages);
     }

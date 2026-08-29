@@ -20,6 +20,7 @@ import com.drones.vision.flight.domain.port.VehicleConfigPort;
 import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.maintenance.MaintenanceQuery;
 import com.drones.vision.warehouse.application.usage.UsageSessionService;
 import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 
@@ -117,13 +118,19 @@ public class OnboardingWiringConfiguration {
         return new DefaultRemediationService(assetService, assetLiveStatePort, vehicleConfigPort, auditTrailPort);
     }
 
-    /** The NEGOTIATE stage (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1) — behind {@code ReadinessController}. */
+    /**
+     * The NEGOTIATE stage (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1) — behind {@code
+     * ReadinessController}. Takes {@link MaintenanceQuery} per docs/plans/active/
+     * WAREHOUSE-UX-CONTEXT.md's W5 handoff (OQ1, D6 default): an open, flight-blocking maintenance
+     * record now forces {@code NO_GO} regardless of every other feature's readiness.
+     */
     @Bean
     public ReadinessService readinessService(AssetService assetService,
                                               VehicleProfileRepositoryPort vehicleProfileRepositoryPort,
-                                              FeatureRequirementRepositoryPort featureRequirementRepositoryPort) {
+                                              FeatureRequirementRepositoryPort featureRequirementRepositoryPort,
+                                              MaintenanceQuery maintenanceQuery) {
         return new DefaultReadinessService(assetService, vehicleProfileRepositoryPort,
-                featureRequirementRepositoryPort);
+                featureRequirementRepositoryPort, maintenanceQuery);
     }
 
     /**

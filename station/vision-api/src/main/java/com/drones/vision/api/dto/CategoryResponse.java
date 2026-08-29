@@ -15,9 +15,12 @@ import java.util.List;
  * @param name           human-readable name
  * @param parent         parent category slug, or absent for a top-level category
  * @param attributeHints suggested attribute keys for assets in this category (UI suggestions, not a rigid schema)
+ * @param connected      whether an asset in this category must wrap at least one device
+ *                       (docs/plans/active/WAREHOUSE-UX-PLAN.md D4)
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record CategoryResponse(String slug, String name, String parent, List<String> attributeHints) {
+public record CategoryResponse(String slug, String name, String parent, List<String> attributeHints,
+                                boolean connected) {
 
     /**
      * Maps a domain {@link DeviceCategory} to its wire representation.
@@ -30,6 +33,7 @@ public record CategoryResponse(String slug, String name, String parent, List<Str
                 category.id().slug(),
                 category.name(),
                 category.parent() != null ? category.parent().slug() : null,
-                category.attributeHints());
+                category.attributeHints(),
+                category.connected());
     }
 }

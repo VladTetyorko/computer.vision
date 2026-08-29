@@ -9,6 +9,9 @@ import com.drones.vision.simulation.application.SimulationService;
 import com.drones.vision.simulation.application.SimulationSpec;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.DeviceId;
@@ -16,6 +19,7 @@ import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -177,8 +181,11 @@ class DemoFleetTest {
     }
 
     private AssetSummary summary(String displayName) {
-        return new AssetSummary(new Asset(AssetId.random(), displayName, new CategoryId("simulated"), ownership,
-                Set.of(DeviceId.random()), Map.of(), LifecycleState.ACTIVE), "Simulated", AssetStatus.OFFLINE,
-                null, null);
+        Instant now = Instant.now();
+        Asset asset = new Asset(AssetId.random(), displayName, new CategoryId("simulated"), ownership,
+                Set.of(DeviceId.random()), Map.of(), LifecycleState.ACTIVE, Identity.NONE, Custody.NONE,
+                InventoryState.IN_STOCK, now, now);
+        return new AssetSummary(asset, "Simulated", AssetStatus.OFFLINE, null, null, asset.inventoryState(),
+                asset.identity(), asset.custody());
     }
 }

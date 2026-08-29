@@ -3,6 +3,8 @@ package com.drones.vision.learning.application;
 import com.drones.vision.learning.domain.model.Annotation;
 import com.drones.vision.learning.domain.model.AnnotationSource;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.warehouse.domain.model.Device;
@@ -129,8 +131,8 @@ class DefaultLabelingServiceTest {
     }
 
     private Asset asset(AssetId assetId, GroupId owningGroup) {
-        Asset asset = new Asset(assetId, "Drone 1", new CategoryId("drone"), new Ownership(actor, owningGroup),
-                Set.of(DeviceId.random()), Map.of());
+        Asset asset = Asset.register(assetId, "Drone 1", new CategoryId("drone"), new Ownership(actor, owningGroup),
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
         assetDirectory.save(asset);
         return asset;
     }

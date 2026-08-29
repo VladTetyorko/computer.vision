@@ -15,6 +15,8 @@ import com.drones.vision.perception.application.stream.UpdateOutcome;
 import com.drones.vision.perception.application.pipeline.DetectionRate;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.BoundingBox;
@@ -114,8 +116,8 @@ class StreamControllerTest {
     /** Unbounded (auth-off-equivalent) by default, so every pre-existing test below is unaffected. */
     private final CurrentUser currentUser = new CurrentUser(ownership);
     /** The asset {@link #deviceId} belongs to, for the authority tests near the end of this file. */
-    private final Asset ownedAsset = new Asset(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
-            Set.of(deviceId), Map.of());
+    private final Asset ownedAsset = Asset.register(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
+            Set.of(deviceId), Map.of(), Identity.NONE, Custody.NONE);
     /** An asset the PILOT authority tests below are deliberately NOT scoped to. */
     private final AssetId otherAssetId = AssetId.random();
 
@@ -1467,8 +1469,9 @@ class StreamControllerTest {
         StreamId visibleStreamId = StreamId.random();
         StreamId hiddenStreamId = StreamId.random();
         DeviceId otherDeviceId = DeviceId.random();
-        Asset otherAsset = new Asset(otherAssetId, "someone else's drone", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(otherDeviceId), Map.of());
+        Asset otherAsset = Asset.register(otherAssetId, "someone else's drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(otherDeviceId), Map.of(), Identity.NONE,
+                Custody.NONE);
         when(assetRepositoryPort.findByDeviceId(otherDeviceId)).thenReturn(Optional.of(otherAsset));
         when(streamService.streams()).thenReturn(List.of(
                 new ActiveStream(visibleStreamId, deviceId, Instant.now()),

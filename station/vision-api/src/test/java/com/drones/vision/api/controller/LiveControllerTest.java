@@ -17,6 +17,8 @@ import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.DeviceId;
@@ -249,8 +251,10 @@ class LiveControllerTest {
     }
 
     private static AssetSummary summary(AssetId assetId) {
-        Asset asset = new Asset(assetId, "drone-1", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(DeviceId.random()), Map.of());
-        return new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "drone-1", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(DeviceId.random()), Map.of(), Identity.NONE,
+                Custody.NONE);
+        return new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null, asset.inventoryState(),
+                asset.identity(), asset.custody());
     }
 }

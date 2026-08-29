@@ -1,6 +1,7 @@
 package com.drones.vision.adapter.persistence.entity;
 
 import com.drones.vision.kernel.LifecycleState;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
@@ -16,6 +17,7 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -65,12 +67,48 @@ public class AssetEntity {
     @Column(name = "state", nullable = false, length = 32)
     private LifecycleState state;
 
+    @Column(name = "serial_number", length = 120)
+    private String serialNumber;
+
+    @Column(name = "make", length = 120)
+    private String make;
+
+    @Column(name = "model", length = 120)
+    private String model;
+
+    @Column(name = "registration", length = 120)
+    private String registration;
+
+    @Column(name = "custodian_id")
+    private UUID custodianId;
+
+    @Column(name = "location")
+    private String location;
+
+    @Column(name = "custody_since")
+    private Instant custodySince;
+
+    /** Stored values only — {@code IN_STOCK}/{@code MAINTENANCE}/{@code RETIRED}; see {@link
+     * InventoryState#storable()}. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "inventory_state", nullable = false, length = 32)
+    private InventoryState inventoryState;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
     /** JPA only. */
     protected AssetEntity() {
     }
 
     public AssetEntity(UUID id, String displayName, String categoryId, UUID ownerId, UUID groupId,
-                        Set<UUID> deviceIds, Map<String, String> attributes, LifecycleState state) {
+                        Set<UUID> deviceIds, Map<String, String> attributes, LifecycleState state,
+                        String serialNumber, String make, String model, String registration, UUID custodianId,
+                        String location, Instant custodySince, InventoryState inventoryState, Instant createdAt,
+                        Instant updatedAt) {
         this.id = id;
         this.displayName = displayName;
         this.categoryId = categoryId;
@@ -79,6 +117,16 @@ public class AssetEntity {
         this.deviceIds = new LinkedHashSet<>(deviceIds);
         this.attributes = new LinkedHashMap<>(attributes);
         this.state = state;
+        this.serialNumber = serialNumber;
+        this.make = make;
+        this.model = model;
+        this.registration = registration;
+        this.custodianId = custodianId;
+        this.location = location;
+        this.custodySince = custodySince;
+        this.inventoryState = inventoryState;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
     }
 
     public UUID id() {
@@ -111,5 +159,45 @@ public class AssetEntity {
 
     public LifecycleState state() {
         return state;
+    }
+
+    public String serialNumber() {
+        return serialNumber;
+    }
+
+    public String make() {
+        return make;
+    }
+
+    public String model() {
+        return model;
+    }
+
+    public String registration() {
+        return registration;
+    }
+
+    public UUID custodianId() {
+        return custodianId;
+    }
+
+    public String location() {
+        return location;
+    }
+
+    public Instant custodySince() {
+        return custodySince;
+    }
+
+    public InventoryState inventoryState() {
+        return inventoryState;
+    }
+
+    public Instant createdAt() {
+        return createdAt;
+    }
+
+    public Instant updatedAt() {
+        return updatedAt;
     }
 }

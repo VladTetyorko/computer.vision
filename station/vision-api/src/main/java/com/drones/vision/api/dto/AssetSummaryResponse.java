@@ -33,12 +33,20 @@ import com.drones.vision.api.controller.AssetController;
  * @param hasImage           whether an image is stored for this asset (docs/plans/done/UX-REWORK-PLAN.md
  *                           §U-d item 3, CONTRACT 2) — never the image bytes themselves, only
  *                           whether {@code GET /api/assets/{id}/image} would return one
+ * @param identity           serial/make/model/registration facts (docs/plans/active/WAREHOUSE-UX-PLAN.md D1)
+ * @param custody            who currently holds this asset, or in-stock if nobody (D2)
+ * @param inventoryState     this asset's <b>effective</b> inventory state — {@code ISSUED}/{@code
+ *                           IN_FIELD} already resolved from custody/open-usage (D6, {@code
+ *                           InventoryStates#effective}), never the raw stored value
+ * @param createdAt          when this asset was first registered
+ * @param updatedAt          when this asset was last changed
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AssetSummaryResponse(String assetId, String displayName, String category, String categoryName,
                                     String owner, String status, String lifecycle, Instant lastUsedAt,
                                     GeoPositionResponse lastKnownPosition, Map<String, String> attributes,
-                                    boolean hasImage) {
+                                    boolean hasImage, IdentityResponse identity, CustodyResponse custody,
+                                    String inventoryState, Instant createdAt, Instant updatedAt) {
 
     /**
      * Maps an {@link AssetSummary} read model to its wire representation.
@@ -61,6 +69,11 @@ public record AssetSummaryResponse(String assetId, String displayName, String ca
                 summary.lastUsedAt(),
                 GeoPositionResponse.from(summary.lastKnownPosition()),
                 summary.asset().attributes(),
-                hasImage);
+                hasImage,
+                IdentityResponse.from(summary.identity()),
+                CustodyResponse.from(summary.custody()),
+                summary.inventoryState().name(),
+                summary.asset().createdAt(),
+                summary.asset().updatedAt());
     }
 }

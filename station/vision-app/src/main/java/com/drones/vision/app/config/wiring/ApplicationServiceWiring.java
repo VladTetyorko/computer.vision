@@ -26,11 +26,13 @@ import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
+import com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
 import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
 import com.drones.vision.api.live.LiveUpdateRegistry;
+import com.drones.vision.api.support.InventoryExportService;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.config.properties.VisionLiveProperties;
@@ -49,7 +51,9 @@ import com.drones.vision.app.stream.LiveFrameFallbackStreamService;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
 import com.drones.vision.warehouse.application.asset.*;
 import com.drones.vision.warehouse.application.category.*;
+import com.drones.vision.warehouse.application.custody.*;
 import com.drones.vision.warehouse.application.device.*;
+import com.drones.vision.warehouse.application.maintenance.*;
 import com.drones.vision.warehouse.application.fleet.*;
 import com.drones.vision.flight.application.*;
 import com.drones.vision.flight.application.geofence.*;
@@ -638,6 +642,43 @@ public class ApplicationServiceWiring {
     @Bean
     public CategoryService categoryService(CategoryRepositoryPort categoryRepositoryPort) {
         return new DefaultCategoryService(categoryRepositoryPort);
+    }
+
+    /**
+     * docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.4 (W3) — the warehouse-to-field lifecycle
+     * (issue/return/ground/release/retire), same shape as {@link #assetService} above.
+     */
+    @Bean
+    public AssetCustodyService assetCustodyService(AssetRepositoryPort assetRepositoryPort,
+                                                    MaintenanceRepositoryPort maintenanceRepositoryPort,
+                                                    AuditTrailPort auditTrailPort) {
+        return new DefaultAssetCustodyService(assetRepositoryPort, maintenanceRepositoryPort, auditTrailPort);
+    }
+
+    /**
+     * docs/plans/active/WAREHOUSE-UX-PLAN.md wave W7 — user-facing maintenance-record management,
+     * wired as both {@link MaintenanceService} (the CRUD surface {@code AssetInventoryController}
+     * drives) and {@link MaintenanceQuery} (the cross-context read {@code
+     * OnboardingWiringConfiguration#readinessService} needs — one instance, two seams, exactly how
+     * {@code UsageSessionService}/{@code DefaultUsageSessionService} is already wired below).
+     */
+    @Bean
+    public DefaultMaintenanceService maintenanceService(MaintenanceRepositoryPort maintenanceRepositoryPort,
+                                                         AssetRepositoryPort assetRepositoryPort,
+                                                         AuditTrailPort auditTrailPort) {
+        return new DefaultMaintenanceService(maintenanceRepositoryPort, assetRepositoryPort, auditTrailPort);
+    }
+
+    /**
+     * docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.3 (W3) — the hand-rolled CSV behind {@code
+     * GET /api/inventory/export}, a {@code vision-api}-side support class (not a {@code
+     * vision-warehouse} application service, since rendering a wire format is exactly the "read
+     * model to bytes" concern {@link com.drones.vision.api.dto.AssetSummaryResponse} already draws
+     * that line at) wired here alongside every other {@code vision-warehouse}-consuming bean above.
+     */
+    @Bean
+    public InventoryExportService inventoryExportService(AssetService assetService) {
+        return new InventoryExportService(assetService);
     }
 
     /**

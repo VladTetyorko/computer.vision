@@ -1,6 +1,8 @@
 package com.drones.vision.perception.application.stream;
 
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.DeviceId;
@@ -190,6 +192,7 @@ class DefaultAssetStreamServiceTest {
     }
 
     private Asset asset(Set<DeviceId> devices) {
-        return new Asset(AssetId.random(), "my drone", DRONE, ownership, devices, Map.of());
+        return Asset.register(AssetId.random(), "my drone", DRONE, ownership, devices, Map.of(), Identity.NONE,
+                Custody.NONE);
     }
 }

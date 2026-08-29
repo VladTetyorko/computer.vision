@@ -31,6 +31,8 @@ import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import org.junit.jupiter.api.AfterEach;
@@ -142,9 +144,11 @@ class VisualGeoRunnerTest {
         private final TrackCorrectionService trackCorrectionService = mock(TrackCorrectionService.class);
 
         private VisualGeoRunner newRunner() {
-            Asset asset = new Asset(assetId, "drone-1", new CategoryId("drone"),
-                    new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of());
-            AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+            Asset asset = Asset.register(assetId, "drone-1", new CategoryId("drone"),
+                    new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of(), Identity.NONE,
+                    Custody.NONE);
+            AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                    asset.inventoryState(), asset.identity(), asset.custody());
             Device device = new Device(deviceId, "cam-1", Set.of(),
                     new StreamDescriptor("sim", URI.create("sim://cam-1"), Map.of()), LifecycleState.ACTIVE);
 

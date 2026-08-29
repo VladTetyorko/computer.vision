@@ -17,6 +17,8 @@ import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -426,8 +428,9 @@ class HlsProxyControllerTest {
         DeviceId deviceId = DeviceId.random();
         StreamId streamId = StreamId.random();
         AssetId visibleAssetId = AssetId.random();
-        Asset foreignAsset = new Asset(AssetId.random(), "someone else's drone", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of());
+        Asset foreignAsset = Asset.register(AssetId.random(), "someone else's drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of(), Identity.NONE,
+                Custody.NONE);
 
         StreamService streamService = mock(StreamService.class);
         when(streamService.streams())
@@ -454,8 +457,9 @@ class HlsProxyControllerTest {
         DeviceId deviceId = DeviceId.random();
         StreamId streamId = StreamId.random();
         AssetId ownedAssetId = AssetId.random();
-        Asset ownedAsset = new Asset(ownedAssetId, "my drone", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of());
+        Asset ownedAsset = Asset.register(ownedAssetId, "my drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of(), Identity.NONE,
+                Custody.NONE);
 
         upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         upstream.createContext("/", exchange -> {

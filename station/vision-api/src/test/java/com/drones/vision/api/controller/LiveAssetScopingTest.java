@@ -29,6 +29,8 @@ import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -341,8 +343,9 @@ class LiveAssetScopingTest {
     }
 
     private static Asset asset(AssetId id, UserId ownerId) {
-        return new Asset(id, "asset-" + id.value(), new CategoryId("drone"), new Ownership(ownerId, GroupId.random()),
-                Set.of(DeviceId.random()), Map.of());
+        return Asset.register(id, "asset-" + id.value(), new CategoryId("drone"),
+                new Ownership(ownerId, GroupId.random()), Set.of(DeviceId.random()), Map.of(), Identity.NONE,
+                Custody.NONE);
     }
 
     private static User user(UserId id, String name) {

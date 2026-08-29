@@ -11,6 +11,8 @@ import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.Capability;
@@ -101,19 +103,20 @@ class AssetControllerTest {
         for (Device device : devices) {
             ids.add(device.id());
         }
-        return new Asset(AssetId.random(), "my drone", new CategoryId("drone"), ownership, ids,
-                Map.of("weightKg", "1.2"));
+        return Asset.register(AssetId.random(), "my drone", new CategoryId("drone"), ownership, ids,
+                Map.of("weightKg", "1.2"), Identity.NONE, Custody.NONE);
     }
 
     /** An asset with an explicit id (rather than a random one) — for a test that needs to name its own id up front. */
     private Asset assetWithId(AssetId id) {
-        return new Asset(id, "my drone", new CategoryId("drone"), ownership, Set.of(DeviceId.random()), Map.of());
+        return Asset.register(id, "my drone", new CategoryId("drone"), ownership, Set.of(DeviceId.random()), Map.of(),
+                Identity.NONE, Custody.NONE);
     }
 
     /** Stubs {@link #assetService} so {@code asset} resolves as an existing asset. */
     private void stubExistingAsset(Asset asset, Device... devices) {
         AssetSummary summary = new AssetSummary(asset, "Drone",
-                AssetStatus.OFFLINE, null, null);
+                AssetStatus.OFFLINE, null, null, asset.inventoryState(), asset.identity(), asset.custody());
         AssetDetails details =
                 new AssetDetails(summary, List.of(devices), List.of());
         when(assetService.details(any(VisibilityScope.class), eq(asset.id()))).thenReturn(details);
@@ -168,7 +171,7 @@ class AssetControllerTest {
         when(assetService.create(any(), any(), any())).thenReturn(created);
 
         AssetSummary summary = new AssetSummary(created, "Drone",
-                AssetStatus.OFFLINE, null, null);
+                AssetStatus.OFFLINE, null, null, created.inventoryState(), created.identity(), created.custody());
         AssetDetails details =
                 new AssetDetails(summary, List.of(device), List.of());
         when(assetService.details(any(VisibilityScope.class), eq(created.id()))).thenReturn(details);
@@ -267,7 +270,14 @@ class AssetControllerTest {
     }
 
     @Test
-    void createReturns400ForZeroDevices() throws Exception {
+    void createReturns400ForZeroDevicesInAConnectedCategory() throws Exception {
+        // WAREHOUSE-UX-PLAN D4: "at least one device" is category-dependent (a battery/spare/radio
+        // category has connected=false and needs none), so DefaultAssetService — not AssetSpec's own
+        // validation — is what rejects this; the controller must reach the service to find out.
+        when(assetService.create(any(), any(), any()))
+                .thenThrow(new IllegalArgumentException("Category drone requires at least one device "
+                        + "(WAREHOUSE-UX-PLAN D4)"));
+
         String body = """
                 {"displayName":"my drone","category":"drone","devices":[]}
                 """;
@@ -275,8 +285,6 @@ class AssetControllerTest {
         mockMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
-
-        verifyNoInteractions(assetService);
     }
 
     // ---- POST /api/assets with deviceIds ("promote to asset") -----------------
@@ -359,13 +367,15 @@ class AssetControllerTest {
     void listReturnsSummariesOmittingAbsentLastUsedAndPosition() throws Exception {
         Asset neverUsed = asset(videoDevice());
         AssetSummary neverUsedSummary = new AssetSummary(neverUsed, "Drone",
-                AssetStatus.OFFLINE, null, null);
+                AssetStatus.OFFLINE, null, null, neverUsed.inventoryState(), neverUsed.identity(),
+                neverUsed.custody());
 
         Asset used = asset(videoDevice());
         Instant lastUsedAt = Instant.parse("2026-07-20T10:00:00Z");
         GeoPosition position = new GeoPosition(50.45, 30.52, 120.0);
         AssetSummary usedSummary = new AssetSummary(used, "Drone",
-                AssetStatus.STREAMING, lastUsedAt, position);
+                AssetStatus.STREAMING, lastUsedAt, position, used.inventoryState(), used.identity(),
+                used.custody());
 
         when(assetService.assets(any(VisibilityScope.class), eq(false))).thenReturn(List.of(neverUsedSummary, usedSummary));
 
@@ -387,9 +397,11 @@ class AssetControllerTest {
     @Test
     void listIncludesHasImagePerAssetFromTheImageRepository() throws Exception {
         Asset withImage = asset(videoDevice());
-        AssetSummary withImageSummary = new AssetSummary(withImage, "Drone", AssetStatus.OFFLINE, null, null);
+        AssetSummary withImageSummary = new AssetSummary(withImage, "Drone", AssetStatus.OFFLINE, null, null,
+                withImage.inventoryState(), withImage.identity(), withImage.custody());
         Asset withoutImage = asset(videoDevice());
-        AssetSummary withoutImageSummary = new AssetSummary(withoutImage, "Drone", AssetStatus.OFFLINE, null, null);
+        AssetSummary withoutImageSummary = new AssetSummary(withoutImage, "Drone", AssetStatus.OFFLINE, null, null,
+                withoutImage.inventoryState(), withoutImage.identity(), withoutImage.custody());
 
         when(assetService.assets(any(VisibilityScope.class), eq(false))).thenReturn(List.of(withImageSummary, withoutImageSummary));
         when(assetImageRepositoryPort.existsByAssetId(withImage.id())).thenReturn(true);
@@ -413,7 +425,8 @@ class AssetControllerTest {
     @Test
     void listExposesLifecycleAlongsideStatusAndPassesIncludeDeletedThrough() throws Exception {
         Asset deleted = asset(videoDevice()).withState(LifecycleState.DELETED);
-        AssetSummary summary = new AssetSummary(deleted, "Drone", AssetStatus.OFFLINE, null, null);
+        AssetSummary summary = new AssetSummary(deleted, "Drone", AssetStatus.OFFLINE, null, null,
+                deleted.inventoryState(), deleted.identity(), deleted.custody());
         when(assetService.assets(any(VisibilityScope.class), eq(true))).thenReturn(List.of(summary));
 
         mockMvc.perform(get("/api/assets").param("includeDeleted", "true"))
@@ -713,7 +726,7 @@ class AssetControllerTest {
         Device device = videoDevice();
         Asset asset = asset(device);
         AssetSummary summary = new AssetSummary(asset, "Drone",
-                AssetStatus.OFFLINE, null, null);
+                AssetStatus.OFFLINE, null, null, asset.inventoryState(), asset.identity(), asset.custody());
 
         AssetUsage closedUsage = new AssetUsage(UsageId.random(), asset.id(),
                 Instant.parse("2026-07-20T10:00:00Z"), Instant.parse("2026-07-20T10:05:00Z"),
@@ -748,7 +761,8 @@ class AssetControllerTest {
     void detailsIncludesHasImageFromTheImageRepository() throws Exception {
         Device device = videoDevice();
         Asset asset = asset(device);
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                asset.inventoryState(), asset.identity(), asset.custody());
         when(assetService.details(any(VisibilityScope.class), eq(asset.id()))).thenReturn(new AssetDetails(summary, List.of(device), List.of()));
         when(assetImageRepositoryPort.existsByAssetId(asset.id())).thenReturn(true);
 

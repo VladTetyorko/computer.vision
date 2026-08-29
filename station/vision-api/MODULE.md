@@ -13,14 +13,16 @@ vision-app depends on — see Gotchas)
 
 ## Package layout
 
-`controller/` (every `@RestController`) · `dto/` (wire records only, ~160 — house rule "zero DTO
-leakage": no domain type is ever serialized directly) · `security/` (`CurrentUser`/
+`controller/` (every `@RestController`, now including `AssetInventoryController`/
+`InventoryExportController` — WAREHOUSE-UX W3) · `dto/` (wire records only, ~170 — house rule "zero
+DTO leakage": no domain type is ever serialized directly) · `security/` (`CurrentUser`/
 `PrincipalResolver`/`StreamAccess`/`OpenByDesign` — the authorization seam, see Conventions) ·
 `live/` (SSE connection registry, per-topic ring buffers, per-connection visibility filtering) ·
 `ws/` (`/ws/manual-control` raw `WebSocketHandler`) · `proxy/` (`HlsProxyController` — a pass-through
 edge owning no application service) · `ratelimit/` (`RateLimitFilter`/`TokenBucket`, per-principal
 `/api/**` token bucket) · `support/` (edge-local helpers: `SnapshotJpegEncoder`, `CapabilityParsing`,
-`DeviceOriginParsing`, `RemediationOrchestrator`, `VisionApiProperties`) · `demo/` (property-gated
+`DeviceOriginParsing`, `RemediationOrchestrator`, `VisionApiProperties`, `InventoryExportService` —
+WAREHOUSE-UX W3, the hand-rolled CSV behind `GET /api/inventory/export`) · `demo/` (property-gated
 demo-data seeding, deletable as one unit) · `exception/` (`ApiExceptionHandler` + api-local
 exceptions) · `config/` (MVC/WebSocket/SPA `@Configuration`).
 
@@ -57,6 +59,12 @@ the full mechanism.
 | AssetController | POST | `/api/assets/{id}/devices` | Attach a device | manage |
 | AssetController | DELETE | `/api/assets/{id}/devices/{deviceId}` | Detach a device | manage |
 | AssetController | GET | `/api/usages/{usageId}/telemetry?limit=` | Raw (unwindowed) telemetry trail | **unscoped** (ledger: `AssetController#telemetry`) |
+| AssetInventoryController | POST | `/api/assets/{id}/custody` | Issue to a custodian / return to stock (`{action:ISSUE\|RETURN,custodianId?,location?}`) | manage (via `AssetCustodyService`) |
+| AssetInventoryController | POST | `/api/assets/{id}/inventory` | Ground / release / retire (`{action:GROUND\|RELEASE\|RETIRE,kind?,summary?}`) | manage (via `AssetCustodyService`) |
+| AssetInventoryController | GET | `/api/assets/{id}/maintenance` | List an asset's maintenance history, open and closed | scope (via `MaintenanceService`) |
+| AssetInventoryController | POST | `/api/assets/{id}/maintenance` | Open a maintenance record directly, without also grounding | manage (via `MaintenanceService`) |
+| AssetInventoryController | POST | `/api/assets/{id}/maintenance/{recordId}/close` | Close an open record | manage (via `MaintenanceService`) |
+| InventoryExportController | GET | `/api/inventory/export?format=csv` | Hand-rolled CSV, one row per visible asset (id/name/category/serial/make/model/registration/inventoryState/custodian/location/lifecycle/createdAt/lastFlownAt) | scope |
 | AssetStreamController | POST | `/api/assets/{id}/stream` | Start the asset's video stream | scope |
 | AssetStreamController | DELETE | `/api/assets/{id}/stream` | Stop it (idempotent) | scope |
 | AssetSessionController | POST | `/api/assets/{id}/session` | Operator "engage" — opens/promotes a usage, no video, no device traffic | scope |
@@ -66,6 +74,8 @@ the full mechanism.
 | AssetImageController | GET | `/api/assets/{id}/image` | Fetch it | scope |
 | AssetImageController | DELETE | `/api/assets/{id}/image` | Remove it (idempotent) | scope |
 | CategoryController | GET | `/api/categories` | Category taxonomy | open |
+| CategoryController | POST | `/api/categories` | Create a category | manageOrg |
+| CategoryController | PUT | `/api/categories/{id}` | Replace a category's mutable fields (whole-record, not a patch) | manageOrg |
 | DeviceController | POST | `/api/devices` | Register a device | manageOrg |
 | DeviceController | GET | `/api/devices?includeDeleted=` | List devices | scope (filtered) |
 | DeviceController | PATCH | `/api/devices/{id}` | Update a device | scope (deliberately not `manage` — a PILOT may edit their own assigned camera) |
@@ -249,6 +259,27 @@ carries `origin` (`STREAM` or `OPERATOR` — the only two `UsageOrigin` values t
 value was considered and deliberately left out since nothing produces it, see
 `com.drones.vision.kernel.UsageOrigin`'s own javadoc). `ErrorResponse(error, message)` is the
 uniform error body every `ApiExceptionHandler` mapping returns.
+
+**WAREHOUSE-UX W3 additions** — `IdentityResponse(serialNumber, make, model, registration)` /
+`CustodyResponse(custodianId, location, since)`, both `@JsonInclude(NON_NULL)` with a static
+`from(Identity)`/`from(Custody)`; `AssetSummaryResponse`/`AssetDetailsResponse` each gained trailing
+`identity`, `custody`, `inventoryState` (effective value, already a `String` name), `createdAt`,
+`updatedAt` fields. `IdentityRequest(serialNumber, make, model, registration)` is a shared top-level
+record (not nested per-DTO) so `CreateAssetRequest`/`UpdateAssetRequest` both reuse it via
+`toIdentity()`; `CreateAssetRequest` additionally gained a nested `CustodySpec(custodianId, location)`
+record (`toCustody()` returns `Custody.NONE` when `custodianId` is blank/absent, else stamps
+`Instant.now()` for `since`) — custody is create-time-only, there is no "custody" field on
+`UpdateAssetRequest` (custody changes go through `AssetInventoryController`'s dedicated endpoint, not
+a general asset PATCH). `CustodyActionRequest(action, custodianId, location)` /
+`InventoryActionRequest(action, kind, summary)` each carry a nested `Action` enum and
+`toAction()`/`requireXxx()` parse helpers (case-insensitive, throwing `IllegalArgumentException` on
+an unknown value — 400 via `ApiExceptionHandler`). `CreateMaintenanceRecordRequest(kind, summary)` /
+`MaintenanceRecordResponse(id, assetId, kind, openedAt, closedAt, openedBy, summary,
+flightSecondsAt)` (`@JsonInclude(NON_NULL)` — `closedAt`/`flightSecondsAt` omitted, not `null`, when
+absent). `CreateCategoryRequest(id, name, parentId, connected, attributeHints)` /
+`UpdateCategoryRequest(name, parentId, connected, attributeHints)` mirror `CategorySpec`/
+`CategoryEdit` 1:1; `CategoryResponse` gained `connected`; `CategoryCountsResponse` gained
+`inStock`/`issued`/`inField`/`maintenance`/`retired`.
 
 ## Conventions
 

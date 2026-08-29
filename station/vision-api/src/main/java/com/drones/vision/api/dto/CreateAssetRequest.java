@@ -2,12 +2,16 @@ package com.drones.vision.api.dto;
 
 import com.drones.vision.warehouse.application.asset.AssetSpec;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.UserId;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import com.drones.vision.api.support.CapabilityParsing;
@@ -38,13 +42,19 @@ import com.drones.vision.api.support.DeviceOriginParsing;
  *                    deviceIds} supplies at least one device instead
  * @param deviceIds   existing device ids (canonical UUID strings) to assign to this asset; may be
  *                    {@code null}/empty
+ * @param identity    serial/make/model/registration facts (docs/plans/active/WAREHOUSE-UX-PLAN.md D1); may
+ *                    be {@code null} if none are known yet
+ * @param custody     initial custody — issue straight to a pilot instead of receiving into stock
+ *                    (D2); may be {@code null} to receive into stock
  */
 public record CreateAssetRequest(String displayName, String category, Map<String, String> attributes,
-                                  List<DeviceSpec> devices, List<String> deviceIds) {
+                                  List<DeviceSpec> devices, List<String> deviceIds, IdentityRequest identity,
+                                  CustodySpec custody) {
 
     /**
-     * Convenience constructor for the original, {@code deviceIds}-less shape — defaults it to
-     * empty, keeping every pre-existing caller (new devices only) working unchanged.
+     * Convenience constructor for the original, {@code deviceIds}/{@code identity}/{@code
+     * custody}-less shape — defaults them, keeping every pre-existing caller (new devices only,
+     * received into stock, identity unknown) working unchanged.
      *
      * @param displayName human-readable name (e.g. "my drone"); must not be blank
      * @param category    the asset's category slug; must be a known category (validated by the service)
@@ -53,7 +63,7 @@ public record CreateAssetRequest(String displayName, String category, Map<String
      */
     public CreateAssetRequest(String displayName, String category, Map<String, String> attributes,
                                List<DeviceSpec> devices) {
-        this(displayName, category, attributes, devices, List.of());
+        this(displayName, category, attributes, devices, List.of(), null, null);
     }
 
     /**
@@ -63,8 +73,9 @@ public record CreateAssetRequest(String displayName, String category, Map<String
      * @throws IllegalArgumentException if {@code displayName} is blank, {@code category} is not a
      *                                   lower-case-kebab slug, both {@code devices} and {@code
      *                                   deviceIds} are empty, any device entry fails its own
-     *                                   validation (see {@link DeviceSpec#toRegistration()}), or a
-     *                                   {@code deviceIds} entry is not a valid UUID
+     *                                   validation (see {@link DeviceSpec#toRegistration()}), a
+     *                                   {@code deviceIds} entry is not a valid UUID, or {@code
+     *                                   custody.custodianId} is not a valid UUID
      */
     public AssetSpec toSpec() {
         CategoryId categoryId = new CategoryId(category);
@@ -76,8 +87,33 @@ public record CreateAssetRequest(String displayName, String category, Map<String
                 .stream()
                 .map(DeviceId::of)
                 .toList();
+        Identity identityValue = identity == null ? Identity.NONE : identity.toIdentity();
+        Custody custodyValue = custody == null ? Custody.NONE : custody.toCustody();
         return new AssetSpec(displayName, categoryId, attributes == null ? Map.of() : attributes, registrations,
-                existingDeviceIds);
+                existingDeviceIds, identityValue, custodyValue);
+    }
+
+    /**
+     * Custody to establish at creation time — issuing straight to a pilot instead of receiving
+     * into stock.
+     *
+     * @param custodianId the custodian's id, as a canonical UUID string; {@code null}/blank means
+     *                    receive into stock ({@link Custody#NONE})
+     * @param location    a free-form note of where the asset is; may be {@code null}
+     */
+    public record CustodySpec(String custodianId, String location) {
+
+        /**
+         * @return {@link Custody#NONE} if {@code custodianId} is absent, otherwise a fresh custody
+         *         with {@code since} stamped now
+         * @throws IllegalArgumentException if {@code custodianId} is present but not a valid UUID
+         */
+        public Custody toCustody() {
+            if (custodianId == null || custodianId.isBlank()) {
+                return Custody.NONE;
+            }
+            return new Custody(UserId.of(custodianId), location, Instant.now());
+        }
     }
 
     /**

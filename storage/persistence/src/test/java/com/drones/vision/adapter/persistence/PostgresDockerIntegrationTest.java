@@ -37,8 +37,10 @@ import com.drones.vision.perception.domain.model.DetectionEventId;
 import com.drones.vision.perception.domain.model.DetectionEventState;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.model.DeviceCategory;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.GeoPosition;
@@ -219,21 +221,43 @@ class PostgresDockerIntegrationTest {
     private static final Instant NOW = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
     /**
+     * {@link Asset#register} stamps {@code createdAt}/{@code updatedAt} with an internal, untestable
+     * {@code Instant.now()} — unlike every other timestamp in this file, the test cannot substitute
+     * the millisecond-truncated {@link #NOW} for it. Compare with both sides truncated to milliseconds
+     * for the same reason {@link #NOW} exists: a raw {@code assertEquals(Asset, Asset)} is flaky
+     * because Postgres's {@code TIMESTAMPTZ} keeps only microsecond precision and rounds — not
+     * truncates — on the way in, so e.g. {@code .xxx614510} can come back as {@code .xxx615000}.
+     */
+    private static void assertAssetRoundTrips(Asset expected, Asset actual) {
+        assertEquals(millisTruncated(expected), millisTruncated(actual));
+    }
+
+    private static Asset millisTruncated(Asset asset) {
+        return new Asset(asset.id(), asset.displayName(), asset.category(), asset.ownership(), asset.devices(),
+                asset.attributes(), asset.state(), asset.identity(), asset.custody(), asset.inventoryState(),
+                asset.createdAt().truncatedTo(ChronoUnit.MILLIS), asset.updatedAt().truncatedTo(ChronoUnit.MILLIS));
+    }
+
+    /**
      * The control-plane / configuration tables {@code V21__db_audit_log.sql} attaches {@code
      * trg_audit_*} to — kept here, not just in the migration's own header, so {@link
      * DbAuditLogCoverageTests} fails loudly the moment a future migration adds a table and
      * nobody consciously classifies it. Mirrors that migration's "Included" list, plus {@code
      * camera_poses} added by {@code V22__fixed_camera_geo.sql} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
-     * decision D4 — a camera's pose is control-plane configuration, not telemetry) and {@code
+     * decision D4 — a camera's pose is control-plane configuration, not telemetry), {@code
      * control_profiles} added by {@code V24__control_profiles.sql}
      * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C4 — a saved layout decides what a switch
-     * does to an aircraft, which is control-plane configuration by any reading).
+     * does to an aircraft, which is control-plane configuration by any reading), and {@code
+     * maintenance_records}/{@code asset_notes} added by {@code V28__asset_inventory.sql}
+     * (docs/plans/active/WAREHOUSE-UX-PLAN.md D7 — grounding/inspection history and crew notes are
+     * operator-authored, low-volume, accountability-relevant records, not machine-output telemetry).
      */
     private static final Set<String> AUDITED_TABLES = Set.of(
             "categories", "devices", "device_capabilities", "assets", "asset_devices",
             "asset_usages", "geofence_zones", "groups", "users", "pilot_assignments",
             "marks", "datasets", "map_layers", "map_layer_grants", "map_drawings",
-            "vehicle_profiles", "feature_requirements", "camera_poses", "control_profiles");
+            "vehicle_profiles", "feature_requirements", "camera_poses", "control_profiles",
+            "maintenance_records", "asset_notes");
 
     /**
      * Every other base table in the schema as of V22 — high-volume append-only event tables, the
@@ -291,7 +315,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void savedTopLevelCategoryRoundTrips() {
             DeviceCategory category = new DeviceCategory(new CategoryId("cat-toplevel"), "Top Level", null,
-                    List.of("hint-a", "hint-b"));
+                    List.of("hint-a", "hint-b"), true);
 
             repository.save(category);
 
@@ -302,10 +326,11 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void savedChildCategoryRoundTripsWithParent() {
-            DeviceCategory parent = new DeviceCategory(new CategoryId("cat-parent"), "Parent", null, List.of());
+            DeviceCategory parent = new DeviceCategory(new CategoryId("cat-parent"), "Parent", null, List.of(),
+                    true);
             repository.save(parent);
             DeviceCategory child = new DeviceCategory(new CategoryId("cat-child"), "Child", parent.id(),
-                    List.of("hint"));
+                    List.of("hint"), true);
             repository.save(child);
 
             Optional<DeviceCategory> found = repository.findById(child.id());
@@ -316,8 +341,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void saveIsAnUpsert() {
             CategoryId id = new CategoryId("cat-upsert");
-            repository.save(new DeviceCategory(id, "Original Name", null, List.of("a")));
-            repository.save(new DeviceCategory(id, "Renamed", null, List.of("a", "b")));
+            repository.save(new DeviceCategory(id, "Original Name", null, List.of("a"), true));
+            repository.save(new DeviceCategory(id, "Renamed", null, List.of("a", "b"), true));
 
             Optional<DeviceCategory> found = repository.findById(id);
             assertTrue(found.isPresent());
@@ -327,7 +352,8 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void findAllIncludesSavedCategory() {
-            DeviceCategory category = new DeviceCategory(new CategoryId("cat-findall"), "Find All", null, List.of());
+            DeviceCategory category = new DeviceCategory(new CategoryId("cat-findall"), "Find All", null, List.of(),
+                    true);
             repository.save(category);
 
             List<DeviceCategory> all = repository.findAll();
@@ -432,14 +458,14 @@ class PostgresDockerIntegrationTest {
             deviceRepository.save(new Device(deviceId, "asset-device", Set.of(Capability.VIDEO),
                     new StreamDescriptor("sim", URI.create("sim://asset-device"), Map.of())));
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
-                    Set.of(deviceId), Map.of("weight-kg", "1.2"));
+            Asset asset = Asset.register(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
+                    Set.of(deviceId), Map.of("weight-kg", "1.2"), Identity.NONE, Custody.NONE);
 
             repository.save(asset);
 
             Optional<Asset> found = repository.findById(asset.id());
             assertTrue(found.isPresent());
-            assertEquals(asset, found.get());
+            assertAssetRoundTrips(asset, found.get());
         }
 
         @Test
@@ -447,8 +473,8 @@ class PostgresDockerIntegrationTest {
             AssetId id = AssetId.random();
             DeviceId deviceId = DeviceId.random();
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset original = new Asset(id, "original", new CategoryId("drone"), ownership, Set.of(deviceId),
-                    Map.of());
+            Asset original = Asset.register(id, "original", new CategoryId("drone"), ownership, Set.of(deviceId),
+                    Map.of(), Identity.NONE, Custody.NONE);
             repository.save(original);
 
             Asset deactivated = original.withState(LifecycleState.DEACTIVATED);
@@ -463,8 +489,8 @@ class PostgresDockerIntegrationTest {
         void findByDeviceIdLocatesOwningAsset() {
             DeviceId deviceId = DeviceId.random();
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "device-owner", new CategoryId("drone"), ownership,
-                    Set.of(deviceId), Map.of());
+            Asset asset = Asset.register(AssetId.random(), "device-owner", new CategoryId("drone"), ownership,
+                    Set.of(deviceId), Map.of(), Identity.NONE, Custody.NONE);
             repository.save(asset);
 
             Optional<Asset> found = repository.findByDeviceId(deviceId);
@@ -480,8 +506,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void deleteByIdIsIdempotent() {
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "to-delete", new CategoryId("drone"), ownership,
-                    Set.of(DeviceId.random()), Map.of());
+            Asset asset = Asset.register(AssetId.random(), "to-delete", new CategoryId("drone"), ownership,
+                    Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
             repository.save(asset);
 
             repository.deleteById(asset.id());
@@ -494,8 +520,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void findAllIncludesSavedAsset() {
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "findall-asset", new CategoryId("drone"), ownership,
-                    Set.of(DeviceId.random()), Map.of());
+            Asset asset = Asset.register(AssetId.random(), "findall-asset", new CategoryId("drone"), ownership,
+                    Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
             repository.save(asset);
 
             List<Asset> all = repository.findAll();
@@ -1904,8 +1930,8 @@ class PostgresDockerIntegrationTest {
         new JpaDeviceRepository(entityManagerFactory).save(new Device(deviceId, "restart-device",
                 Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://restart"), Map.of())));
         Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-        Asset asset = new Asset(AssetId.random(), "restart-survivor", new CategoryId("drone"), ownership,
-                Set.of(deviceId), Map.of("note", "written-before-restart"));
+        Asset asset = Asset.register(AssetId.random(), "restart-survivor", new CategoryId("drone"), ownership,
+                Set.of(deviceId), Map.of("note", "written-before-restart"), Identity.NONE, Custody.NONE);
         new JpaAssetRepository(entityManagerFactory).save(asset);
 
         EntityManagerFactory freshContext = PersistenceUnit.start(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),
@@ -1913,7 +1939,7 @@ class PostgresDockerIntegrationTest {
         try {
             Optional<Asset> found = new JpaAssetRepository(freshContext).findById(asset.id());
             assertTrue(found.isPresent());
-            assertEquals(asset, found.get());
+            assertAssetRoundTrips(asset, found.get());
             assertFalse(found.get().attributes().isEmpty());
         } finally {
             freshContext.close();
