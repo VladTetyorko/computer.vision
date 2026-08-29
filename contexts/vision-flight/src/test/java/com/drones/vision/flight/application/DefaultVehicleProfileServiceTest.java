@@ -32,7 +32,10 @@ import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.application.usage.UsageSessionService;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.GeoPosition;
 import org.junit.jupiter.api.BeforeEach;
@@ -113,8 +116,10 @@ class DefaultVehicleProfileServiceTest {
      * of this wave's fix) seed {@link #usageSessionService} directly instead.
      */
     private void stubDetailsWithUsages(Ownership ownership, List<AssetUsage> usages, Device... devices) {
-        Asset asset = new Asset(assetId, "Drone 1", DRONE, ownership, Set.of(devices[0].id()), Map.of());
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "Drone 1", DRONE, ownership, Set.of(devices[0].id()), Map.of(),
+                Identity.NONE, Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                InventoryState.IN_STOCK, Identity.NONE, Custody.NONE);
         AssetDetails details = new AssetDetails(summary, List.of(devices), usages);
         when(assetService.details(assetId)).thenReturn(details);
         when(assetService.details(org.mockito.ArgumentMatchers.any(VisibilityScope.class),

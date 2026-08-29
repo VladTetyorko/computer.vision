@@ -16,7 +16,10 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.maintenance.MaintenanceQuery;
 import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.warehouse.domain.model.MaintenanceKind;
+import com.drones.vision.warehouse.domain.model.MaintenanceRecord;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -26,6 +29,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The one implementation of {@link ReadinessService}.
@@ -44,7 +48,24 @@ import java.util.stream.Collectors;
  *
  * <h2>Scope</h2>
  * See this class's own module Status entry and the interface javadoc: only the configuration-derived
- * half (profile vs. requirement table) is evaluated here.
+ * half (profile vs. requirement table) is evaluated here -- plus, since WAREHOUSE-UX wave W5, a
+ * third, independent source of {@link ReadinessVerdict#NO_GO}: an asset's open, flight-blocking
+ * warehouse {@link MaintenanceRecord}s (see {@link #maintenanceBlockers}). The telemetry-derived
+ * half (video/telemetry/GPS/battery/armable) remains an intentional gap.
+ *
+ * <h2>Maintenance blockers (WAREHOUSE-UX-CONTEXT.md D6/OQ1)</h2>
+ * A manager grounding an asset ({@code AssetCustodyService#ground}, or any open {@code GROUNDING}/
+ * {@code INSPECTION_DUE} record) is a harder fact than the configuration-derived verdict above --
+ * it forces {@link ReadinessVerdict#NO_GO} even when the profile has never been probed ({@code
+ * UNKNOWN} would otherwise apply): "grounded" must never read as merely "unknown". Each open
+ * blocking record contributes one {@link ReadinessReport#blockers()} entry, prefixed {@link
+ * #MAINTENANCE_BLOCKER_PREFIX} and carrying the record's own {@code kind} and {@code summary} --
+ * deliberately not a {@link FeatureReadiness} row, since {@code featureKey} is validated against the
+ * frozen {@link FeatureRequirement#FEATURE_KEYS} eleven-key set and a maintenance record is not one
+ * of those keys. {@code blockers} carries no such constraint and the wire ({@code
+ * ReadinessReportResponse}) already renders it verbatim, so this rides the existing shape with zero
+ * new wire surface. {@link DefaultManualControlService#engage} checks for this exact prefix to
+ * refuse manual control on a grounded asset.
  *
  * <h2>Value/bit-aware parameter checks (FLEET-RADIO-PLAN.md R6)</h2>
  * A {@link FeatureRequirement} row's {@code requiredParameterName} was, before this wave, a
@@ -60,23 +81,36 @@ import java.util.stream.Collectors;
  */
 public final class DefaultReadinessService implements ReadinessService {
 
+    /**
+     * The {@link ReadinessReport#blockers()} entry prefix a maintenance blocker uses:
+     * {@code "<prefix><kind>:<summary>"}, e.g. {@code
+     * "MAINTENANCE_GROUNDED:GROUNDING:Propeller crack found on preflight"}. See this class's own
+     * "Maintenance blockers" javadoc section for why this rides the existing {@code List<String>}
+     * shape rather than becoming a new {@link FeatureReadiness} row.
+     */
+    public static final String MAINTENANCE_BLOCKER_PREFIX = "MAINTENANCE_GROUNDED:";
+
     private final AssetService assetService;
     private final VehicleProfileRepositoryPort profileRepository;
     private final FeatureRequirementRepositoryPort requirementRepository;
+    private final MaintenanceQuery maintenanceQuery;
     private final Supplier<Instant> clock;
 
     public DefaultReadinessService(AssetService assetService, VehicleProfileRepositoryPort profileRepository,
-                                    FeatureRequirementRepositoryPort requirementRepository) {
-        this(assetService, profileRepository, requirementRepository, Instant::now);
+                                    FeatureRequirementRepositoryPort requirementRepository,
+                                    MaintenanceQuery maintenanceQuery) {
+        this(assetService, profileRepository, requirementRepository, maintenanceQuery, Instant::now);
     }
 
     /** Test seam: an injected clock, never {@code Instant.now()} on a test path. */
     DefaultReadinessService(AssetService assetService, VehicleProfileRepositoryPort profileRepository,
-                             FeatureRequirementRepositoryPort requirementRepository, Supplier<Instant> clock) {
+                             FeatureRequirementRepositoryPort requirementRepository, MaintenanceQuery maintenanceQuery,
+                             Supplier<Instant> clock) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.profileRepository = Objects.requireNonNull(profileRepository, "profileRepository must not be null");
         this.requirementRepository =
                 Objects.requireNonNull(requirementRepository, "requirementRepository must not be null");
+        this.maintenanceQuery = Objects.requireNonNull(maintenanceQuery, "maintenanceQuery must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -99,17 +133,47 @@ public final class DefaultReadinessService implements ReadinessService {
         features.sort((a, b) -> a.featureKey().compareTo(b.featureKey()));
 
         boolean unresolvable = profile == null || !profile.complete();
-        List<String> blockers = features.stream()
+        List<String> configBlockers = features.stream()
                 .filter(f -> f.status() == FeatureStatus.MISSING)
                 .map(FeatureReadiness::featureKey)
                 .toList();
-        ReadinessVerdict verdict = unresolvable
-                ? ReadinessVerdict.UNKNOWN
-                : blockers.isEmpty() ? ReadinessVerdict.GO : ReadinessVerdict.NO_GO;
+        List<String> maintenanceBlockers = maintenanceBlockers(assetId);
+
+        ReadinessVerdict verdict = !maintenanceBlockers.isEmpty()
+                // A maintenance blocker is a harder fact than "never probed" -- it must win over
+                // UNKNOWN too, not only over a would-be GO. See this class's own "Maintenance
+                // blockers" javadoc section.
+                ? ReadinessVerdict.NO_GO
+                : unresolvable
+                        ? ReadinessVerdict.UNKNOWN
+                        : configBlockers.isEmpty() ? ReadinessVerdict.GO : ReadinessVerdict.NO_GO;
+        List<String> blockers = verdict == ReadinessVerdict.NO_GO
+                ? Stream.concat(configBlockers.stream(), maintenanceBlockers.stream()).toList()
+                : List.of();
 
         return new ReadinessReport(assetId, verdict, clock.get(),
-                profile == null ? null : profile.observedAt(), features,
-                verdict == ReadinessVerdict.NO_GO ? blockers : List.of());
+                profile == null ? null : profile.observedAt(), features, blockers);
+    }
+
+    /**
+     * WAREHOUSE-UX-CONTEXT.md D6/OQ1: this asset's currently-open, flight-blocking warehouse
+     * maintenance records, rendered as {@link ReadinessReport#blockers()} entries. Filters
+     * defensively on {@link MaintenanceRecord#isOpen()}/{@link MaintenanceKind#blocksFlight()}
+     * rather than trusting {@link MaintenanceQuery#openBlockers}'s own "open, blocking only"
+     * contract alone -- the same "defense in depth, not the mechanism" posture this module already
+     * applies elsewhere to a cross-boundary contract (see {@code ControlProfile.forKind(UNKNOWN)}'s
+     * own javadoc for the precedent).
+     *
+     * @param assetId the asset to check
+     * @return one {@link #MAINTENANCE_BLOCKER_PREFIX}-prefixed string per open blocking record;
+     *         empty when the asset carries none
+     */
+    private List<String> maintenanceBlockers(AssetId assetId) {
+        return maintenanceQuery.openBlockers(assetId).stream()
+                .filter(MaintenanceRecord::isOpen)
+                .filter(record -> record.kind().blocksFlight())
+                .map(record -> MAINTENANCE_BLOCKER_PREFIX + record.kind().name() + ":" + record.summary())
+                .toList();
     }
 
     private Optional<VehicleProfile> latestProfileOf(AssetDetails details) {

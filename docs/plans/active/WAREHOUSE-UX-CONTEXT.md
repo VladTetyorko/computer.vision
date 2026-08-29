@@ -20,7 +20,7 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | W2 domain | domain-modeler | done (uncommitted — see W2 → W3 handoff) | — |
 | W3 persistence + API | spring-integrator | blocked on W2 | |
 | W4 inventory page | web-ui | blocked on W1, W3 | |
-| W5 readiness ← maintenance | application-service | blocked on W2 | |
+| W5 readiness ← maintenance | application-service | done (uncommitted — agent instructions forbid `git commit`; see W5 handoff) | — |
 | W6 wizard | web-ui | blocked on W3 | |
 | W7 maintenance + crew | web-ui | blocked on W3 | |
 
@@ -130,3 +130,91 @@ site below needs updating in W3; none are safe to leave as "will fix later" sinc
   pre-existing mutators** (`setState`, `delete`, `assignDevice`, `unassignDevice`, in addition to
   `update`) — since `Asset` now carries `updatedAt`, leaving it stale on those verbs would have made
   the field actively misleading rather than merely absent.
+
+## W5 handoff (readiness ← maintenance, D6/OQ1 default)
+
+`contexts/vision-flight`'s changes are complete and green
+(`./mvnw -B -pl contexts/vision-flight test` — **379 tests, 0 failures**) but **left uncommitted in
+the working tree** — the application-service agent's own operating instructions say `Do NOT git
+commit`, which overrides this ledger's usual "commit by path" convention (the same situation W2 left
+for `contexts/vision-warehouse`). Whoever next touches `vision-flight`, or lands W3, should review and
+commit the `contexts/vision-flight/**` diff (nothing outside that path was touched — `vision-warehouse`,
+`vision-api`, `vision-app`, `vision-simulation` and every other dirty file in the tree belong to other
+sessions and were not read for API surface beyond their `MODULE.md`s, let alone edited).
+
+### What changed
+
+- `DefaultReadinessService` gained a new required 4th constructor parameter,
+  `com.drones.vision.warehouse.application.maintenance.MaintenanceQuery maintenanceQuery` (no
+  default — every call site must now pass it; the public ctor is
+  `DefaultReadinessService(AssetService, VehicleProfileRepositoryPort,
+  FeatureRequirementRepositoryPort, MaintenanceQuery)`, plus a package-private 5-arg test seam adding
+  `Supplier<Instant> clock`).
+- `evaluate(AssetId, VisibilityScope)` now forces `ReadinessVerdict.NO_GO` — **overriding even
+  `UNKNOWN`** — whenever `maintenanceQuery.openBlockers(assetId)` yields at least one record that is
+  both `MaintenanceRecord#isOpen()` and `MaintenanceKind#blocksFlight()` (true only for
+  `GROUNDING`/`INSPECTION_DUE`; `REPAIR`/`NOTE` never block, and are filtered defensively even though
+  the port's own contract already promises "open, blocking only"). Each surviving record contributes
+  exactly one entry to `ReadinessReport#blockers()`.
+- **The exact wire shape**, as it appears verbatim in `GET /api/assets/{id}/readiness`'s JSON body
+  (`ReadinessReportResponse`, unchanged shape — no new field): a `blockers` array entry of the form
+  ```
+  "MAINTENANCE_GROUNDED:<KIND>:<summary>"
+  ```
+  e.g. `"MAINTENANCE_GROUNDED:GROUNDING:Propeller crack found on preflight"`. The prefix is the public
+  constant `DefaultReadinessService.MAINTENANCE_BLOCKER_PREFIX = "MAINTENANCE_GROUNDED:"`. This rides
+  the pre-existing `blockers: List<String>` field — deliberately **not** a new `FeatureReadiness` row,
+  since `featureKey` is validated against the frozen `FeatureRequirement.FEATURE_KEYS` eleven-key set
+  and a maintenance record isn't one of those keys. `verdict` on the same response, and the fleet
+  board's `GET /api/fleet/readiness` (`ReadinessRowResponse`, which carries `verdict` but not
+  `blockers`), both already surface the resulting `NO_GO` correctly with no DTO change either. **No
+  `vision-api` or `station/vision-web` change is needed for this to render** —
+  `readiness-logic.ts#featureLabel`'s existing fallback (`FEATURE_LABELS[key] ?? key`) already renders
+  an unrecognized string verbatim rather than blank.
+- `DefaultManualControlService#engage` now also refuses a grounded asset: right after the scope gate,
+  it calls `readinessService.evaluate(assetId, scope)` once and reuses that single `ReadinessReport`
+  for two checks — the new `requireNotMaintenanceGrounded` (checked first; audits
+  `REFUSED:maintenance-grounded`, throws `IllegalStateException` naming every blocker's summary) and
+  the pre-existing FLEET-RADIO R6 `requireRcRelayReady` (refactored to take the already-fetched report
+  instead of calling `evaluate` a second time internally — net zero change in `AssetService#details`
+  call count per `engage`). This is OQ1's "`engage` refuses" half.
+
+### What this wave deliberately did NOT gate (flagged, not built)
+
+- **`DefaultFlightCommandService#arm`/`disarm`** (the MAVLink command path) — a different service,
+  not named by WAREHOUSE-UX-PLAN.md §4's own W5 row (`contexts/vision-flight/**readiness**`), and
+  arguably a *harder* case (an already-armed/airborne vehicle grounded mid-flight should not be
+  force-disarmed by a maintenance record landing at the wrong moment) that deserves its own design
+  pass, not a drive-by addition here.
+- **Perception's `UsageTracker`** (opens the underlying `AssetUsage` session) — lives in
+  `contexts/vision-perception`, a different context module, out of this agent's file scope entirely.
+  If OQ1's "engage refuses" is meant to also mean "cannot even open a flight session on a grounded
+  asset", the hook belongs on `UsageTracker`'s own session-open path (perception depends on warehouse
+  directly, so it could call `MaintenanceQuery` itself) — not routed through `vision-flight`.
+
+### Wiring change `vision-app`/W3 must still make (does not compile without it)
+
+`station/vision-app/src/main/java/com/drones/vision/app/config/wiring/OnboardingWiringConfiguration.java`,
+the `readinessService(...)` `@Bean` factory (currently ~lines 110-138), still calls
+`DefaultReadinessService`'s old 3-arg constructor:
+
+```java
+@Bean
+public ReadinessService readinessService(AssetService assetService,
+                                          VehicleProfileRepositoryPort vehicleProfileRepositoryPort,
+                                          FeatureRequirementRepositoryPort featureRequirementRepositoryPort) {
+    return new DefaultReadinessService(assetService, vehicleProfileRepositoryPort,
+            featureRequirementRepositoryPort);
+}
+```
+
+This needs a 4th `MaintenanceQuery maintenanceQuery` parameter, threaded into the `new
+DefaultReadinessService(...)` call last. **This cannot be fixed yet**: as of this handoff, no
+`MaintenanceQuery`/`MaintenanceService` Spring `@Bean` and no `MaintenanceRepositoryPort` JPA
+implementation exist anywhere in `vision-app`/`storage/persistence` (confirmed by grep at handoff
+time) — W3's own D7 migration (`V28__asset_inventory.sql`, `maintenance_records` table, see the W2 →
+W3 handoff above) has to land first. So this is a **two-part** follow-up for W3, not the one-line fix
+FLEET-RADIO R6 left behind in the same file: (1) add the persistence-backed `MaintenanceQuery`
+implementation + its `@Bean`, (2) add the 4th parameter to `readinessService(...)` and pass it
+through. Until both land, `vision-app` will not compile with `vision-flight`'s change picked up —
+same "blocked on a sibling module's bean" situation this file already documents for other call sites.
