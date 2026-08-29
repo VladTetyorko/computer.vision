@@ -133,6 +133,20 @@ vision:
     #   batch-size: 100
     #   batch-window: 200ms
 
+  # --- Idle-usage-close sweep (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U1, wave W1) ---
+  usage:
+    # UsageIdleCloseRunner sweeps every open AssetUsage once at startup and then
+    # on this cadence, closing any whose last observed activity (its freshest
+    # telemetry sample, or startedAt if none was ever seen) is older than
+    # idle-close below -- endedAt is stamped at that last-activity instant, never
+    # "now". Before this sweep existed, a usage was only ever closed by an
+    # explicit clean stop; a crashed process, a killed station, or a lost
+    # MAVLink link on an offline rover left it open forever, and the web UI
+    # rendered it as "Flying now" indefinitely. Unconditional -- this fixes a
+    # data-correctness defect, not an optional feature.
+    idle-close: 10m
+    sweep-period: 60s
+
   # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3; default flipped by
   # docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7) ---
   auth:
@@ -149,7 +163,7 @@ vision:
     # /api/auth/* report that dev admin with authEnabled=false. Turn this on for a
     # local run or a demo stack with no login flow set up -- never for anything
     # reachable by someone who isn't already trusted with the whole fleet.
-    enabled: true
+    enabled: false
 
   # --- adapter-publish-hls: stream egress (Phase 1, see docs/plans/done/PHASE1-PLAN.md Task U5) ---
   publish:
