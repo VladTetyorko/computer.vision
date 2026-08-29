@@ -17,12 +17,12 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | Wave | Agent | State | Commit |
 |---|---|---|---|
 | W1 rail | web-ui | done | `3b8a9649` |
-| W2 domain | domain-modeler | done (uncommitted — see W2 → W3 handoff) | — |
-| W3 persistence + API | spring-integrator | blocked on W2 | |
-| W4 inventory page | web-ui | blocked on W1, W3 | |
-| W5 readiness ← maintenance | application-service | done (uncommitted — agent instructions forbid `git commit`; see W5 handoff) | — |
-| W6 wizard | web-ui | blocked on W3 | |
-| W7 maintenance + crew | web-ui | blocked on W3 | |
+| W2 domain | domain-modeler | done | `47f7eb99` |
+| W3 persistence + API | spring-integrator | done | `5a712e71` |
+| W4 inventory page | web-ui | ready (W1 + W3 both done) | |
+| W5 readiness ← maintenance | application-service | done | `445e145b` |
+| W6 wizard | web-ui | ready (W3 done) | |
+| W7 maintenance + crew | web-ui | ready (W3 done) | |
 
 Shared tree: agents commit **by path**, never stash. Unrelated dirty files (`infra/rover-sim/**`, `core/rc/manual-control-client*`, `DefaultPeerDirectory.java`) belong to another session — do not touch.
 
@@ -32,13 +32,12 @@ Shared tree: agents commit **by path**, never stash. Unrelated dirty files (`inf
 - Manager entry count is **20**, not §3.1's own illustrative "15" — that figure already assumes W4's tab merge + W7's Maintenance entry, neither of which exists yet. Pilot count matches the plan's "10" exactly. Full reconciliation in `station/vision-web/MODULE.md`'s W1 changelog entry and `nav-entries.spec.ts`'s own count test.
 - `/devices`, `/manage/categories`, `/manage/reports` all gained `canActivate: [orgGuard]` this wave (they didn't have it before) — W4's OQ4 redirect-into-tabs plan should keep that gate on whatever route ends up serving that content.
 
-## W2 → W3 handoff
+## W2 → W3 handoff (done — kept for the record; W3 built directly on this)
 
-W2's domain + application changes to `contexts/vision-warehouse` are complete and green
-(`./mvnw -B -pl contexts/vision-warehouse test` — 315 tests, 0 failures) but **left uncommitted in
-the working tree** — the domain-modeler agent's own operating instructions say not to commit, which
-overrides this ledger's usual "commit by path" convention; whoever picks up W3 should review and
-commit the `contexts/vision-warehouse/**` diff first (nothing outside that path was touched).
+W2's domain + application changes to `contexts/vision-warehouse` landed in `47f7eb99`
+(`./mvnw -B -pl contexts/vision-warehouse test` — 315 tests, 0 failures at the time). The handoff
+below is left as originally written (including "must persist"/"41 files" framing) since it is the
+spec W3 actually built against; see "W3 → W4/W6/W7 handoff" further down for what shipped.
 
 ### What W3 must persist (D7, `V28__asset_inventory.sql`)
 
@@ -131,16 +130,13 @@ site below needs updating in W3; none are safe to leave as "will fix later" sinc
   `update`) — since `Asset` now carries `updatedAt`, leaving it stale on those verbs would have made
   the field actively misleading rather than merely absent.
 
-## W5 handoff (readiness ← maintenance, D6/OQ1 default)
+## W5 handoff (readiness ← maintenance, D6/OQ1 default) — done, see below for the wiring W3 owed it
 
-`contexts/vision-flight`'s changes are complete and green
-(`./mvnw -B -pl contexts/vision-flight test` — **379 tests, 0 failures**) but **left uncommitted in
-the working tree** — the application-service agent's own operating instructions say `Do NOT git
-commit`, which overrides this ledger's usual "commit by path" convention (the same situation W2 left
-for `contexts/vision-warehouse`). Whoever next touches `vision-flight`, or lands W3, should review and
-commit the `contexts/vision-flight/**` diff (nothing outside that path was touched — `vision-warehouse`,
-`vision-api`, `vision-app`, `vision-simulation` and every other dirty file in the tree belong to other
-sessions and were not read for API surface beyond their `MODULE.md`s, let alone edited).
+`contexts/vision-flight`'s changes landed in `445e145b`
+(`./mvnw -B -pl contexts/vision-flight test` — **379 tests, 0 failures** at the time). The "wiring
+change vision-app/W3 must still make" section below is left as originally written for the record;
+W3 made exactly that change (`OnboardingWiringConfiguration#readinessService` now takes the 4th
+`MaintenanceQuery` parameter) — see "W3 → W4/W6/W7 handoff" further down.
 
 ### What changed
 
@@ -218,3 +214,190 @@ FLEET-RADIO R6 left behind in the same file: (1) add the persistence-backed `Mai
 implementation + its `@Bean`, (2) add the 4th parameter to `readinessService(...)` and pass it
 through. Until both land, `vision-app` will not compile with `vision-flight`'s change picked up —
 same "blocked on a sibling module's bean" situation this file already documents for other call sites.
+
+## W3 → W4/W6/W7 handoff (persistence + API, D1–D8)
+
+W3's changes are complete and green — `./mvnw -B -pl contexts/vision-warehouse,contexts/vision-identity,
+contexts/vision-flight,contexts/vision-perception,contexts/vision-learning,contexts/vision-simulation,
+storage/persistence,station/vision-api,station/vision-app -DskipWeb test` — **all 9 modules BUILD
+SUCCESS, 0 failures/errors** (per-module counts in the "Build proof" table below). Committed at
+`5a712e71`. This section gives W4/W6/W7 the exact wire shapes so they can build
+against the contract without re-reading `station/vision-api` source.
+
+### Build proof (before → after this wave)
+
+| Module | Before | After |
+|---|---|---|
+| vision-warehouse | 315 (W2's own count) | 319 |
+| vision-identity | — | 93 |
+| vision-flight | 379 (W5's own count) | 379 |
+| vision-perception | — | 571 |
+| vision-learning | — | 160 |
+| vision-simulation | — | 72 |
+| storage/persistence | 224 (MODULE.md's last-measured figure) | 225 |
+| vision-api | — | 893 |
+| vision-app | — | 277 |
+
+"Before" is left blank where no baseline was recorded for this exact module list before this wave
+(only vision-warehouse/vision-flight had one, from W2/W5's own reports); every module's "after" count
+is BUILD SUCCESS with 0 failures, 0 errors. `vision-app`'s `ArchitectureTest`/`ContextArchitectureTest`
+(the dependency-rule ArchUnit suites) and `EndpointAuthorizationTest`/`OnboardingWiringTest` all stay
+green with the new wiring. Docker was available and used — `storage/persistence`'s
+`PostgresDockerIntegrationTest` (Testcontainers `postgres:16`) ran for real, not skipped.
+
+### New/changed DTOs (`station/vision-api/.../dto`)
+
+`IdentityResponse` — embedded in `AssetSummaryResponse`/`AssetDetailsResponse` as `identity`, always
+present as an object, individual fields omitted (not `null`) when unknown:
+```json
+{"serialNumber": "SN-1234", "make": "DJI", "model": "Mavic 3", "registration": "FA3-1234-ABCD"}
+```
+
+`CustodyResponse` — embedded as `custody`, always present, `custodianId`/`since` omitted when in stock:
+```json
+{"custodianId": "3db9ba6d-...", "location": "Hangar B", "since": "2026-08-29T12:00:00Z"}
+```
+or, in stock: `{}`
+
+`IdentityRequest` — shared shape on `CreateAssetRequest`/`UpdateAssetRequest`; any field left `null` is
+unknown, and a present `identity` object always replaces the asset's identity wholesale (not a
+per-field patch):
+```json
+{"serialNumber": "SN-1234", "make": "DJI", "model": "Mavic 3", "registration": "FA3-1234-ABCD"}
+```
+
+`CreateAssetRequest.CustodySpec` — optional `custody` field on `POST /api/assets`, issues straight to a
+pilot instead of receiving into stock; `custodianId` absent/blank means `Custody.NONE`:
+```json
+{"custodianId": "3db9ba6d-...", "location": "Hangar B"}
+```
+Full `CreateAssetRequest` now also accepts top-level `identity` (an `IdentityRequest`, optional).
+
+`UpdateAssetRequest` gained the same optional `identity` field (an `IdentityRequest`) — PATCH
+semantics still apply to the request as a whole, but `identity`, like every other field on this
+DTO, is a whole-value replacement when present (there is no field-level identity patch).
+
+`CustodyActionRequest` — body for `POST /api/assets/{id}/custody`:
+```json
+{"action": "ISSUE", "custodianId": "3db9ba6d-...", "location": "Hangar B"}
+```
+```json
+{"action": "RETURN"}
+```
+`action` is `ISSUE`|`RETURN`, case-insensitive; response is the asset's `AssetDetailsResponse`.
+
+`InventoryActionRequest` — body for `POST /api/assets/{id}/inventory`:
+```json
+{"action": "GROUND", "kind": "GROUNDING", "summary": "Propeller crack found on preflight"}
+```
+```json
+{"action": "RELEASE"}
+```
+```json
+{"action": "RETIRE"}
+```
+`action` is `GROUND`|`RELEASE`|`RETIRE`; `kind`/`summary` required only for `GROUND`; response is
+`AssetDetailsResponse`.
+
+`CreateMaintenanceRecordRequest` — body for `POST /api/assets/{id}/maintenance` (opens a record
+*without* also grounding the asset — use the `inventory` GROUND action above for that):
+```json
+{"kind": "INSPECTION_DUE", "summary": "100-hour service due"}
+```
+`kind` is `GROUNDING`|`INSPECTION_DUE`|`REPAIR`|`NOTE`, case-insensitive.
+
+`MaintenanceRecordResponse` — one element of `GET /api/assets/{id}/maintenance`'s array, and the
+return value of the open/close endpoints; `closedAt`/`flightSecondsAt` omitted (not `null`) when
+absent:
+```json
+{
+  "id": "b1f2...", "assetId": "cb3223ab-...", "kind": "GROUNDING",
+  "openedAt": "2026-08-29T12:00:00Z", "openedBy": "3db9ba6d-...",
+  "summary": "Propeller crack found on preflight"
+}
+```
+closed example adds `"closedAt": "2026-08-30T09:00:00Z"` and, if known, `"flightSecondsAt": 12345`.
+
+`CreateCategoryRequest` — body for `POST /api/categories` (201, gated on `canManageOrg`):
+```json
+{"id": "battery", "name": "Battery", "parentId": null, "connected": false,
+ "attributeHints": ["capacity-mah", "chemistry", "cycles"]}
+```
+
+`UpdateCategoryRequest` — body for `PUT /api/categories/{id}` (gated on `canManageOrg`) — a **whole-
+record replacement**, not a partial patch (see `CategoryEdit`'s own javadoc: `parentId` can
+legitimately be `null`, so there is no unambiguous "unchanged" sentinel):
+```json
+{"name": "Battery", "parentId": null, "connected": false, "attributeHints": ["capacity-mah"]}
+```
+
+`CategoryResponse` gained `connected` (boolean, always present):
+```json
+{"slug": "battery", "name": "Battery", "attributeHints": ["capacity-mah"], "connected": false}
+```
+(`parent` omitted here as an example of a top-level category.)
+
+`CategoryCountsResponse` (one row of `GET /api/fleet/summary`'s `categories` array) gained 5 fields,
+always present — `inStock`/`issued`/`inField`/`maintenance`/`retired`, each counting `total`'s subset
+at that **effective** inventory state:
+```json
+{"categoryId": "drone", "categoryName": "Drone", "total": 2, "active": 2, "deactivated": 0,
+ "deleted": 0, "streaming": 1, "inStock": 1, "issued": 1, "inField": 0, "maintenance": 0, "retired": 0}
+```
+
+`AssetSummaryResponse`/`AssetDetailsResponse` both gained 5 trailing fields (same shapes, same
+position at the end of the record): `identity` (`IdentityResponse`, always an object), `custody`
+(`CustodyResponse`, always an object), `inventoryState` (string, one of `IN_STOCK`/`ISSUED`/
+`IN_FIELD`/`MAINTENANCE`/`RETIRED` — the **effective** value, `InventoryStates#effective`, not the raw
+stored one), `createdAt`/`updatedAt` (`Instant`, always present).
+
+### New endpoints (`station/vision-api/.../controller`)
+
+| Method | Path | Body | Returns | Authorization |
+|---|---|---|---|---|
+| `POST` | `/api/assets/{id}/custody` | `CustodyActionRequest` | `AssetDetailsResponse` | `canManage` (checked by `AssetCustodyService`) |
+| `POST` | `/api/assets/{id}/inventory` | `InventoryActionRequest` | `AssetDetailsResponse` | `canManage` |
+| `GET` | `/api/assets/{id}/maintenance` | — | `List<MaintenanceRecordResponse>` | `scope.includes` (visibility, not authority — read-only) |
+| `POST` | `/api/assets/{id}/maintenance` | `CreateMaintenanceRecordRequest` | `MaintenanceRecordResponse` (201) | `canManage` |
+| `POST` | `/api/assets/{id}/maintenance/{recordId}/close` | — | `MaintenanceRecordResponse` | `canManage` |
+| `GET` | `/api/inventory/export` | — (query `format=csv`, default) | `text/csv` attachment `inventory.csv` | caller's own `scope()` (one row per asset in scope, no elevated authority needed — same visibility rule as `GET /api/assets`) |
+| `POST` | `/api/categories` | `CreateCategoryRequest` | `CategoryResponse` (201) | `canManageOrg` |
+| `PUT` | `/api/categories/{id}` | `UpdateCategoryRequest` | `CategoryResponse` | `canManageOrg` |
+
+All 6 new `AssetInventoryController`/`InventoryExportController` handlers, plus the 2 new
+`CategoryController` handlers, call `currentUser.scope()` directly — `EndpointAuthorizationTest`
+(vision-app's ArchUnit-based call-graph check) verified without needing `@OpenByDesign` or a
+`TEMPORARY_UNSCOPED` ledger entry.
+
+### Wiring decisions (`station/vision-app`)
+
+- `ApplicationServiceWiring` gained 3 beans: `assetCustodyService` (`DefaultAssetCustodyService`),
+  `maintenanceService`, and `inventoryExportService`.
+- **`maintenanceService`'s `@Bean` factory method returns the concrete `DefaultMaintenanceService`
+  type, not the `MaintenanceService` interface** — `DefaultMaintenanceService implements
+  MaintenanceService, MaintenanceQuery`, so declaring the concrete return type lets this one bean
+  instance satisfy both injection points. This is what let `OnboardingWiringConfiguration
+  #readinessService` take the 4th `MaintenanceQuery` parameter W5 required without a second bean or
+  a wrapper class.
+- `PersistenceWiringConfiguration` gained 2 ports: `maintenanceRepositoryPort`
+  (`JpaMaintenanceRepository`) and `assetNoteRepositoryPort` (`JpaAssetNoteRepository`).
+
+### Deferred (flagged, not built)
+
+- **`AssetNoteRepositoryPort` is wired (JPA impl + bean) but nothing calls it yet** — no
+  `AssetNoteService`/application-layer use case and no controller endpoint exist. W7 (crew notes UI)
+  is the natural owner of that application service + `POST/GET /api/assets/{id}/notes` — the
+  persistence is ready and waiting.
+- **`CategorySpec`/`CategoryEdit` have no delete verb** — `DELETE /api/categories/{id}` was not in
+  this wave's deliverable list and was not added speculatively.
+- A migration-layer bug was found and fixed in this wave, not left for W4/W6/W7 to hit: `Asset
+  .register`'s internally-stamped `Instant.now()` round-trips lossy through Postgres `TIMESTAMPTZ`
+  (microsecond precision, rounds rather than truncates) — see `storage/persistence/MODULE.md`
+  Gotchas for the fix. Purely a test-assertion concern; `createdAt`/`updatedAt` are display/sort
+  fields, never compared for exact equality in production code.
+- A pre-existing, unrelated bug surfaced by this wave's own D4 change (already fixed, not deferred):
+  `AssetControllerTest#createReturns400ForZeroDevices` asserted `verifyNoInteractions(assetService)`,
+  which stopped being true once W2 moved the "at least one device" check from `AssetSpec`'s own
+  validation into `DefaultAssetService#create` (D4 — the rule is now category-`connected`-dependent,
+  which the DTO layer cannot evaluate on its own). Renamed to
+  `createReturns400ForZeroDevicesInAConnectedCategory` and restubbed to match the real call path.
