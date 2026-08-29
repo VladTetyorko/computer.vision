@@ -150,12 +150,12 @@ describe('attentionReasons', () => {
 
 describe('geofence-breach (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
   it('never fires with no breaches given at all', () => {
-    expect(attentionReasons(asset())).toEqual([]);
-    expect(attentionReasons(asset(), undefined, [])).toEqual([]);
+    expect(attentionReasons(asset({ streaming: true }))).toEqual([]);
+    expect(attentionReasons(asset({ streaming: true }), undefined, [])).toEqual([]);
   });
 
-  it('fires with one active breach, naming the zone', () => {
-    const reasons = attentionReasons(asset(), undefined, [
+  it('fires with one active breach while streaming, naming the zone', () => {
+    const reasons = attentionReasons(asset({ streaming: true }), undefined, [
       { assetId: 'a-0', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT', direction: 'enter' },
     ]);
     expect(reasons).toHaveLength(1);
@@ -164,7 +164,7 @@ describe('geofence-breach (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
 
   it('ranks above every other reason, including failsafe', () => {
     const reasons = attentionReasons(
-      asset({ failsafe: true, batteryPercent: 5 }),
+      asset({ streaming: true, failsafe: true, batteryPercent: 5 }),
       undefined,
       [{ assetId: 'a-0', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT', direction: 'enter' }],
     );
@@ -172,12 +172,21 @@ describe('geofence-breach (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
   });
 
   it('joins multiple active breaches into one reason', () => {
-    const reasons = attentionReasons(asset(), undefined, [
+    const reasons = attentionReasons(asset({ streaming: true }), undefined, [
       { assetId: 'a-0', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT', direction: 'enter' },
       { assetId: 'a-0', zoneId: 'z-2', zoneName: 'Charging pad', kind: 'KEEP_IN', direction: 'enter' },
     ]);
     expect(reasons).toHaveLength(1);
     expect(reasons[0].text).toBe('KEEP-OUT breach — North perimeter; KEEP-IN breach — Charging pad.');
+  });
+
+  /** docs/plans/active/OPERATOR-UX-4-PLAN.md finding N2 follow-up, §2 N2, this cycle's W5 —
+   *  reproduced live: an ESP32 rover offline 3 days still read CRIT off a `KEEP-IN` breach it
+   *  recorded from Null Island before going offline. Mirrors the identical `gps-degraded` test
+   *  above — an offline asset is not physically breaching a boundary *right now*. */
+  it('never fires for a non-streaming asset, regardless of an active breach — an offline asset is not CRIT for a boundary it crossed before going offline', () => {
+    const breaches = [{ assetId: 'a-0', zoneId: 'z-1', zoneName: 'Demo operating area', kind: 'KEEP_IN' as const, direction: 'enter' as const }];
+    expect(attentionReasons(asset({ streaming: false }), undefined, breaches)).toEqual([]);
   });
 });
 

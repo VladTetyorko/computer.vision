@@ -195,9 +195,21 @@ function gpsDegradedReason(asset: AssetAttention, gpsFixType: number | undefined
  * (`core/geofence/geofence-logic.ts#activeGeofenceBreaches`, sourced from `LiveStore.liveEvents()`),
  * not the fleet-summary DTO. An empty/absent array never fires this reason — "no breach known", not
  * "definitely not breaching" (the honest-unknown rule every other optional reason input here follows).
+ *
+ * **Live-only, like `telemetryReason`/`gpsDegradedReason`** (docs/plans/active/OPERATOR-UX-4-PLAN.md
+ * finding N2 follow-up, §2 N2, this cycle's W5 — reproduced live: an ESP32 rover offline 3 days,
+ * still reading CRIT for a `KEEP-IN` breach recorded from Null Island before it went offline) — an
+ * asset that isn't currently streaming is not physically crossing a boundary *right now*; a breach
+ * `LiveEvent` never clears itself on its own (`activeGeofenceBreaches`'s own "an 'enter' opens the
+ * concern … a matching 'exit' clears it" contract — nothing emits a synthetic 'exit' when a vehicle
+ * simply goes offline mid-breach), so without this gate a historic breach outlives the session that
+ * produced it and reads as an active, ongoing safety event forever. `geofence-breach` is this app's
+ * single highest-ranked reason (`REASON_RANK`) precisely because it means "happening right now" —
+ * an offline asset is simply offline, with its own age, exactly like `gps-degraded`/
+ * `telemetry-stale` already read for the same asset state.
  */
-function geofenceBreachReason(breaches: readonly GeofenceBreach[] | undefined): AttentionReason | undefined {
-  if (!breaches || breaches.length === 0) {
+function geofenceBreachReason(asset: AssetAttention, breaches: readonly GeofenceBreach[] | undefined): AttentionReason | undefined {
+  if (!asset.streaming || !breaches || breaches.length === 0) {
     return undefined;
   }
   return { kind: 'geofence-breach', severity: 'critical', text: geofenceBreachReasonText(breaches) };
@@ -243,7 +255,7 @@ export function attentionReasons(
   pipelineErrorDetail?: string,
 ): readonly AttentionReason[] {
   const reasons = [
-    geofenceBreachReason(geofenceBreaches),
+    geofenceBreachReason(asset, geofenceBreaches),
     failsafeReason(asset),
     batteryReason(asset.batteryPercent),
     telemetryReason(asset),

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { DEFAULT_WIND_LIMIT_MPS, windAdvisory } from '../../core/weather/weather-logic';
-import { formatDuration } from '../../core/stream-info-logic';
+import { humanAge } from '../../core/telemetry/telemetry-logic';
 
 /**
  * The weather go/no-go chip (docs/plans/done/OPS-CORE-PLAN.md §W) — reused by Command's header and Fly's OSD,
@@ -51,7 +51,11 @@ export class WeatherChip {
     if (!reading) {
       return '';
     }
+    // `humanAge`, not `stream-info-logic.ts#formatDuration` — this is a reading's *age*, this
+    // app's one age vocabulary (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N4, §2 N4), not a
+    // ticking session duration; found via this cycle's own W5 "grep `ago` for any remaining
+    // formatDuration-based age" sweep.
     const ageSeconds = Math.max(0, (Date.now() - reading.fetchedAtMs) / 1000);
-    return `Open-Meteo · updated ${formatDuration(ageSeconds)} ago · precipitation ${reading.precipitationMm.toFixed(1)}mm`;
+    return `Open-Meteo · updated ${humanAge(ageSeconds)} ago · precipitation ${reading.precipitationMm.toFixed(1)}mm`;
   });
 }

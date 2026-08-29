@@ -21,7 +21,7 @@
     @if (position(); as positionValue) {
       <div class="fact">
         <dt>Position</dt>
-        <dd class="mono">{{ positionValue }}</dd>
+        <dd [class.mono]="positionValue.mono" [class.faint]="positionValue.faint">{{ positionValue.value }}</dd>
       </div>
     }
   </dl>

@@ -67,6 +67,15 @@
   color: var(--text-muted);
 }
 
+/* A no-fix position (docs/plans/active/OPERATOR-UX-4-PLAN.md finding 1, this cycle's W5 —
+   `fly-logic.ts#positionFact`'s faint register) reads even quieter than an ordinary fact value —
+   this file's own base `.picker-card-facts dd` rule above already sets `color`, so the shared
+   global `.faint` (`src/styles.css`) can't win on specificity alone; this local override matches
+   its exact token. */
+.picker-card-facts dd.faint {
+  color: var(--text-faint);
+}
+
 /* Cards state their action (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2 rule 6) — `margin-top: auto` pins this
    to the card's bottom edge regardless of how many facts render above it, so every card in a grid
    row ends on the same line. */

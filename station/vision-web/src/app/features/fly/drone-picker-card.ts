@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { lastSeenLabel, positionLabel, streamStateLabel } from './fly-logic';
+import { lastSeenLabel, positionFact, streamStateLabel, type PositionFact } from './fly-logic';
 import { offlineLabel } from './drone-picker-logic';
 import type { AssetSummary } from '../../core/api/models';
 
@@ -20,6 +20,13 @@ import type { AssetSummary } from '../../core/api/models';
  * `drone-picker-logic.ts#offlineLabel` ("Offline · 2h 29m" / "Offline · 6d" / "Never seen") instead
  * of the bare word "Offline" every card used to show regardless of how stale it was (T1's own
  * finding: "17 identical 'Offline' cards").
+ *
+ * **Position now routes through `fly-logic.ts#positionFact`** (docs/plans/active/OPERATOR-UX-4-PLAN.md
+ * finding 1, this cycle's W5 — reproduced live: two "Your vehicles" cards for an offline rover
+ * printed `POSITION 0.0000, 0.0000`, Null Island read as a real fix) instead of the bare
+ * `positionLabel` string this card used before — a no-fix position now reads the faint
+ * `'No GPS fix yet'` in place of a fabricated coordinate; a position never reported at all still
+ * omits the fact entirely, unchanged.
  */
 @Component({
   selector: 'vision-drone-picker-card',
@@ -40,7 +47,7 @@ export class DronePickerCard {
     return lastSeenLabel(this.asset().lastUsedAt, Date.now());
   }
 
-  protected position(): string | undefined {
-    return positionLabel(this.asset().lastKnownPosition);
+  protected position(): PositionFact | undefined {
+    return positionFact(this.asset().lastKnownPosition);
   }
 }

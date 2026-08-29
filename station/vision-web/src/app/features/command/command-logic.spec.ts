@@ -22,8 +22,8 @@ function asset(partial: Partial<AssetAttention> = {}): AssetAttention {
 }
 
 describe('buildEntityRows — geofenceBreachesByAssetId (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
-  it('feeds breaches into each asset\'s own reason, by id, ranking it above every other asset', () => {
-    const breaching = asset({ assetId: 'b', displayName: 'Breaching' });
+  it('feeds breaches into each streaming asset\'s own reason, by id, ranking it above every other asset', () => {
+    const breaching = asset({ assetId: 'b', displayName: 'Breaching', streaming: true });
     const critical = asset({ assetId: 'c', displayName: 'Zulu-critical', batteryPercent: 5 });
     const breachesByAssetId = new Map([
       ['b', [{ assetId: 'b', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT' as const, direction: 'enter' as const }]],
@@ -31,6 +31,20 @@ describe('buildEntityRows — geofenceBreachesByAssetId (docs/plans/done/OPS-COR
     const rows = buildEntityRows([breaching, critical], undefined, breachesByAssetId);
     expect(rows.map((row) => row.asset.assetId)).toEqual(['b', 'c']);
     expect(rows[0].severity).toBe('critical');
+  });
+
+  /** docs/plans/active/OPERATOR-UX-4-PLAN.md finding N2 follow-up, §2 N2, this cycle's W5 — the
+   *  live-only gate now inside `core/fleet/attention-logic.ts#geofenceBreachReason`; the rail row for
+   *  an offline asset with a leftover breach must read quiet, exactly like the "ranking it above
+   *  every other asset" case above does for a *streaming* one. */
+  it('never ranks a non-streaming asset\'s leftover breach as an active reason', () => {
+    const offlineBreached = asset({ assetId: 'o', displayName: 'Offline-breached', streaming: false });
+    const breachesByAssetId = new Map([
+      ['o', [{ assetId: 'o', zoneId: 'z-1', zoneName: 'Demo operating area', kind: 'KEEP_IN' as const, direction: 'enter' as const }]],
+    ]);
+    const rows = buildEntityRows([offlineBreached], undefined, breachesByAssetId);
+    expect(rows[0].severity).toBe('ok');
+    expect(rows[0].reasons).toEqual([]);
   });
 });
 

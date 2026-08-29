@@ -1,5 +1,6 @@
 import type { AssetStatus, AssetSummary, AssetUsage, GeoPosition, Membership, Role } from '../../core/api/models';
-import { formatDuration } from '../../core/stream-info-logic';
+import { hasFix } from '../../core/geo/geo-logic';
+import { humanAge } from '../../core/telemetry/telemetry-logic';
 
 /**
  * Re-exported from `core/telemetry/telemetry-logic.ts`, which is now its canonical home
@@ -230,18 +231,21 @@ export function streamStateLabel(status: AssetStatus): 'Streaming' | 'Offline' {
 
 /**
  * The card's "last seen" fact — elapsed time since `lastUsedAt`, reusing
- * `core/stream-info-logic.ts#formatDuration` (this app's one duration renderer) rather than a
- * second one, e.g. `"4m 07s ago"`. `undefined` when the asset has never been used — the card omits
- * the fact entirely rather than showing a fabricated placeholder. `nowMs` is a parameter (not
- * `Date.now()` read in here) purely so this stays deterministic under test; `FlyPage` supplies the
- * real clock.
+ * `core/telemetry/telemetry-logic.ts#humanAge` (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N4,
+ * §2 N4 — "one age vocabulary"), e.g. `"4m 07s ago"` for a fresh one, `"3d 18h ago"` for a stale
+ * one — **not** `core/stream-info-logic.ts#formatDuration` (the zero-padded, hour-capped session
+ * *duration* renderer this card used before this cycle's W5: a raw `"170h 20m ago"` is a number
+ * nobody parses, the exact class of bug N4 already fixed everywhere else this age reads). `undefined`
+ * when the asset has never been used — the card omits the fact entirely rather than showing a
+ * fabricated placeholder. `nowMs` is a parameter (not `Date.now()` read in here) purely so this
+ * stays deterministic under test; `FlyPage` supplies the real clock.
  */
 export function lastSeenLabel(lastUsedAt: string | undefined, nowMs: number): string | undefined {
   if (!lastUsedAt) {
     return undefined;
   }
   const elapsedSeconds = Math.max(0, (nowMs - Date.parse(lastUsedAt)) / 1000);
-  return `${formatDuration(elapsedSeconds)} ago`;
+  return `${humanAge(elapsedSeconds)} ago`;
 }
 
 /**
@@ -249,12 +253,48 @@ export function lastSeenLabel(lastUsedAt: string | undefined, nowMs: number): st
  * glance), `undefined` when the asset has never reported a fix. Altitude is deliberately left out
  * here — the card states *where*, not *how high*; altitude already has its own home in the cockpit
  * OSD once actually flying (`fly-osd.ts`).
+ *
+ * **Does not itself gate on {@link hasFix}** — `positionFact` below is the one caller that needs
+ * the no-fix distinction (a picker card); `fly-osd.ts#positionText` calls this directly for the
+ * cockpit's own live position readout, unchanged by this function's own contract.
  */
 export function positionLabel(position: GeoPosition | undefined): string | undefined {
   if (!position) {
     return undefined;
   }
   return `${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)}`;
+}
+
+/** One rendered fact — `dt`/`dd` register a `<dl class="picker-card-facts">` row needs: `mono` for
+ *  a real numeric reading, `faint` for a structural "known but not meaningful" label. Mirrors
+ *  `features/asset-detail/asset-detail-logic.ts#TelemetryFactRow`'s identical two-register shape. */
+export interface PositionFact {
+  readonly value: string;
+  readonly mono?: boolean;
+  readonly faint?: boolean;
+}
+
+/**
+ * The picker card's own "position" fact (docs/plans/active/OPERATOR-UX-4-PLAN.md finding 1 of this
+ * cycle's W5 — reproduced live: two "Your vehicles" cards for an offline rover printed a
+ * confident-looking `POSITION 0.0000, 0.0000`, Null Island read as a real fix). `undefined` when
+ * the asset has never reported a position at all — the card omits the fact entirely, unchanged.
+ * When a position exists but carries no real fix (`core/geo/geo-logic.ts#hasFix` — a MAVLink
+ * `GLOBAL_POSITION_INT` with no GPS lock), this renders the faint structural `'No GPS fix yet'`,
+ * matching `features/asset-detail/asset-detail-logic.ts#positionFact`'s own wording/register for
+ * the identical fact (that function's own private name, unrelated collision — this is the picker
+ * card's own copy, not an import, since the two pages' fact-row shapes differ:
+ * `TelemetryFactRow`'s `label` field has no picker-card use). Otherwise the real `lat, lon` in the
+ * `.mono` numeric register, via `positionLabel` above.
+ */
+export function positionFact(position: GeoPosition | undefined): PositionFact | undefined {
+  if (!position) {
+    return undefined;
+  }
+  if (!hasFix(position)) {
+    return { value: 'No GPS fix yet', faint: true };
+  }
+  return { value: positionLabel(position) as string, mono: true };
 }
 
 // --- Header switcher / "All drones" merge (docs/plans/done/UX-REWORK-PLAN.md §U-a bullet 4 — "Merge 'All
