@@ -4,7 +4,8 @@ import { WallTile } from './wall-tile';
 import { EventsRail } from '../../shared/ui/events-rail';
 import { Notice } from '../../shared/ui/notice';
 import { EmptyState } from '../../shared/ui/empty-state';
-import { PageBar, pluralize } from '../../shared/ui/page-bar/page-bar';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
+import { pluralize } from '../../shared/ui/text-logic';
 import { WallFacade } from './wall-facade';
 
 /**

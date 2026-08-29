@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, HostListener, computed,
 import { RouterLink } from '@angular/router';
 import { Icon } from '../icon';
 import type { IconName } from '../icon-registry';
+import { pluralize } from '../text-logic';
 
 /** A `‹ Assets`-style back link rendered at the far left of the bar. */
 export interface PageBarCrumb {
@@ -9,15 +10,6 @@ export interface PageBarCrumb {
   readonly to: string;
 }
 
-/**
- * Regular English pluralisation for the bar's count chip — exported (and unit-tested) rather than
- * inlined so the `asset(s)`/`device(s)` placeholder-looking parenthetical this app rendered on
- * `/assets`, `/devices` and `/manage/reports` has exactly one replacement, not one per page
- * (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2). Callers that need an irregular plural pass it explicitly.
- */
-export function pluralize(count: number, singular: string, plural = `${singular}s`): string {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
 
 /**
  * The one page header for every routed page (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2,
@@ -71,7 +63,7 @@ export class PageBar {
   readonly icon = input<IconName | null>(null);
   /** Omit (or pass `null`) to render no count chip — `0` is a real count and still renders. */
   readonly count = input<number | null>(null);
-  /** Singular noun for the count chip; pluralised by `pluralize` above. */
+  /** Singular noun for the count chip; pluralised by `shared/ui/text-logic.ts#pluralize`. */
   readonly countNoun = input<string>('item');
   /** Irregular plural, when `${countNoun}s` is wrong. */
   readonly countNounPlural = input<string | null>(null);

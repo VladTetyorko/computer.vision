@@ -139,10 +139,9 @@ export interface PipelineSettings {
 export type MapLayerId = 'standard' | 'night' | 'relief' | 'satellite';
 
 /**
- * `night` (CARTO Dark Matter) rather than `standard` (plain OSM) — this console is dark by
- * default (docs/main/UX-DESIGN.md §7.7), and `night` is the true-dark-tile replacement for what used
- * to be an always-on CSS invert filter over OSM, so it is the closer match to the app's existing
- * look out of the box.
+ * `night` (OSM tiles through a dark tile-pane filter, OPERATOR-UX-6 M1) rather than `standard` (plain
+ * OSM) — this console is dark by default (docs/main/UX-DESIGN.md §7.7), so it is the closer match to
+ * the app's existing look out of the box.
  */
 const DEFAULT_MAP_LAYER: MapLayerId = 'night';
 

@@ -4,7 +4,7 @@ import { describeHttpError } from '../../core/api-error';
 import type { FleetSummary } from '../../core/api/models';
 import { LiveStore } from '../../core/live/live-store';
 import { activePipelineErrorMessagesByStreamId } from '../../core/system-events/system-events-logic';
-import { pluralize } from '../../shared/ui/page-bar/page-bar';
+import { pluralize } from '../../shared/ui/text-logic';
 import { attentionRows, categoryBars, reportKpis } from './reports-logic';
 
 /**

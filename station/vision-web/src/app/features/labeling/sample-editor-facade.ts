@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
-import { pluralize } from '../../shared/ui/page-bar/page-bar';
+import { pluralize } from '../../shared/ui/text-logic';
 import type { Annotation, Dataset, TrainingSample } from '../../core/api/models';
 import { validateAnnotations } from './sample-editor-logic';
 

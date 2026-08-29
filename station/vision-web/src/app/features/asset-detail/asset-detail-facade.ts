@@ -5,7 +5,7 @@ import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
-import { pluralize } from '../../shared/ui/page-bar/page-bar';
+import { pluralize } from '../../shared/ui/text-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { EventsStore } from '../../core/events/events-store';
