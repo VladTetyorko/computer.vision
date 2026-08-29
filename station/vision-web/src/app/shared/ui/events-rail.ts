@@ -3,6 +3,7 @@ import { FleetStore } from '../../core/fleet/fleet-store';
 import { EventsStore } from '../../core/events/events-store';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { describeEventSource, distinctLabels, filterEvents, relativeTimeLabel, resolveEventTarget } from '../../core/events/events-logic';
+import { isRemovedDeviceSource } from './notification-logic';
 import { EventRow } from './event-row';
 import type { DetectionEvent } from '../../core/api/models';
 
@@ -43,6 +44,19 @@ const CLOCK_TICK_MS = 1_000;
  * component to get the identical row look) now renders `vision-event-row` directly instead, in its
  * own `dense` variant — see that component's own doc comment for why the two hosts get different
  * density rather than one shape forced onto both.
+ *
+ * **Removed-device events are hidden by default (docs/plans/active/OPERATOR-UX-7-PLAN.md finding
+ * W1).** Reproduced live on `/wall`: 33 rows, every one `Removed device · 7fd88790` — a live page's
+ * rail showing 100% history from devices that no longer exist. `includeRemoved` (a plain
+ * component-local signal, deliberately **not** persisted — this is a one-glance "show me anyway"
+ * toggle, not a durable preference) defaults `false`; `matchedEvents` (the pre-existing label/asset
+ * filter, renamed from this file's old `filteredEvents`) is filtered a second time through
+ * `notification-logic.ts#isRemovedDeviceSource` unless the checkbox is checked. `removedCount` — the
+ * number of `matchedEvents` whose source names a removed device — backs both the header's own
+ * `Include removed devices (n)` label and the empty state's `… n from removed devices` text, so the
+ * two numbers can never drift apart. `isRemovedDeviceSource` reuses `sourceLabel`'s already-computed
+ * string (which already ran the real device/stream lookup via `describeEventSource`) rather than
+ * re-deriving "is this a removed device" as a second, independent lookup.
  */
 @Component({
   selector: 'vision-events-rail',
@@ -63,6 +77,10 @@ export class EventsRail {
   protected readonly labelFilter = signal('');
   protected readonly assetFilter = signal('');
 
+  /** `Include removed devices` — a one-glance toggle, not a durable preference (finding W1, class
+   *  doc's own "Removed-device events" paragraph): plain component-local state, never persisted. */
+  protected readonly includeRemoved = signal(false);
+
   protected readonly availableLabels = computed(() => distinctLabels(this.events.events()));
 
   /** One entry per distinct `assetId` seen in the feed, labeled with `describeEventSource`. */
@@ -76,12 +94,26 @@ export class EventsRail {
     return [...seen.entries()].map(([id, name]) => ({ id, name }));
   });
 
-  private readonly filteredEvents = computed(() =>
+  /** Label/asset filter only — was this file's own `filteredEvents` before finding W1 added a
+   *  second, removed-device filter stage below. */
+  protected readonly matchedEvents = computed(() =>
     filterEvents(this.events.events(), {
       label: this.labelFilter() || undefined,
       assetId: this.assetFilter() || undefined,
     }),
   );
+
+  /** How many of `matchedEvents` are sourced from a removed device — backs both the header
+   *  checkbox's own count and the empty state's `… n from removed devices` text (class doc). */
+  protected readonly removedCount = computed(
+    () => this.matchedEvents().filter((event) => isRemovedDeviceSource(this.sourceLabel(event))).length,
+  );
+
+  /** `matchedEvents`, minus removed-device events unless `includeRemoved` is checked (finding W1). */
+  private readonly filteredEvents = computed(() => {
+    const matched = this.matchedEvents();
+    return this.includeRemoved() ? matched : matched.filter((event) => !isRemovedDeviceSource(this.sourceLabel(event)));
+  });
 
   protected readonly railEvents = computed(() => this.filteredEvents().slice(0, EVENTS_DISPLAY_LIMIT));
 
@@ -96,6 +128,10 @@ export class EventsRail {
 
   protected setAssetFilter(value: string): void {
     this.assetFilter.set(value);
+  }
+
+  protected setIncludeRemoved(value: boolean): void {
+    this.includeRemoved.set(value);
   }
 
   protected sourceLabel(event: DetectionEvent): string {

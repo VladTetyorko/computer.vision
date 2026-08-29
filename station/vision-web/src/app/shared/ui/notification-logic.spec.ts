@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { newlyOpenedEvents, shouldToast, unreadEvents } from './notification-logic';
+import {
+  isRemovedDeviceSource,
+  newlyOpenedEvents,
+  pruneReadIds,
+  seedReadIds,
+  shouldToast,
+  unreadEvents,
+} from './notification-logic';
 import type { DetectionEvent, LiveEvent } from '../../core/api/models';
 
 function event(partial: Partial<DetectionEvent> = {}): DetectionEvent {
@@ -94,5 +101,62 @@ describe('shouldToast (OPERATOR-UX-5-PLAN.md finding U4)', () => {
     const fresh = liveEvent({ at: '2026-08-29T12:00:01.000Z' });
     expect(shouldToast(fresh, mountedAtMs, true)).toBe(true);
     expect(shouldToast(fresh, mountedAtMs, false)).toBe(false);
+  });
+});
+
+describe('seedReadIds (docs/plans/active/OPERATOR-UX-7-PLAN.md finding B1)', () => {
+  it('cold start (persisted === null) seeds with every event already present — history is not news', () => {
+    const a = event({ id: 'a' });
+    const b = event({ id: 'b' });
+    expect(seedReadIds([a, b], null)).toEqual(new Set(['a', 'b']));
+  });
+
+  it('cold start with zero events yet loaded seeds an empty set, not a crash', () => {
+    expect(seedReadIds([], null)).toEqual(new Set());
+  });
+
+  it('a persisted set is trusted as-is, even when it excludes a currently-present event id (a genuinely unread one)', () => {
+    const a = event({ id: 'a' });
+    const b = event({ id: 'b' });
+    expect(seedReadIds([a, b], ['a'])).toEqual(new Set(['a']));
+  });
+
+  it('an explicit, previously-persisted empty array is trusted too — never re-seeded as if cold', () => {
+    const a = event({ id: 'a' });
+    expect(seedReadIds([a], [])).toEqual(new Set());
+  });
+});
+
+describe('pruneReadIds (docs/plans/active/OPERATOR-UX-7-PLAN.md finding B1)', () => {
+  it('leaves a list at or under the cap untouched', () => {
+    expect(pruneReadIds(['a', 'b', 'c'], 3)).toEqual(['a', 'b', 'c']);
+    expect(pruneReadIds([], 3)).toEqual([]);
+  });
+
+  it('keeps only the newest (front) `cap` ids, dropping the oldest tail', () => {
+    const ids = ['newest', 'mid', 'oldest'];
+    expect(pruneReadIds(ids, 2)).toEqual(['newest', 'mid']);
+  });
+
+  it('defaults to the 500-id cap', () => {
+    const ids = Array.from({ length: 501 }, (_, i) => `id-${i}`);
+    const pruned = pruneReadIds(ids);
+    expect(pruned).toHaveLength(500);
+    expect(pruned[0]).toBe('id-0');
+    expect(pruned.at(-1)).toBe('id-499');
+  });
+});
+
+describe('isRemovedDeviceSource (docs/plans/active/OPERATOR-UX-7-PLAN.md finding W1)', () => {
+  it('names a removed device when the label carries describeEventSource\'s own fallback prefix', () => {
+    expect(isRemovedDeviceSource('Removed device · 7fd88790')).toBe(true);
+  });
+
+  it('is false for a resolved device name', () => {
+    expect(isRemovedDeviceSource('Falcon-2')).toBe(false);
+  });
+
+  it('is false for the no-id-at-all fallback', () => {
+    expect(isRemovedDeviceSource('—')).toBe(false);
   });
 });

@@ -21,12 +21,23 @@ import type { DetectionEvent } from '../../core/api/models';
  *   would be a lie (`08-alerts.md`: "the row is the click target; delete the per-row Details › link").
  * - **default (the Wall rail / the header bell's dropdown — 300px / 22rem hosts respectively,
  *   `wall.css#.events-rail`/`notification-bell.css#.bell-dropdown`)** — the pre-existing two-line
- *   layout survives: state/label/time/action on top, source+confidence below. A single dense line
+ *   layout survives: label/time/action on top, source+confidence below. A single dense line
  *   at that width would either crush the source name to an unreadable sliver or overflow the host's
  *   own card — this component picks the layout that fits its host rather than forcing one shape on
  *   both, which is what "share one visual language" means here: same colors, same chip logic, same
  *   type scale, density adapted to the room available (mirrors `vision-page-bar`'s own "the same
  *   values throughout, presented at the width each page actually has" principle).
+ *
+ * **One status indicator per row, not two (docs/plans/active/OPERATOR-UX-7-PLAN.md finding W1).**
+ * The default variant's top line used to render the always-on severity dot *and* the `OPEN` chip
+ * together — reproduced live on `/wall`: the selected row showed a red `OPEN` chip and its own label
+ * truncated to `P…`, both non-flexible elements crowding out the label's `flex: 1; min-width: 0`
+ * (frontend-style §5's "one chip per row" already named the dot+chip combination as exactly the kind
+ * of double indicator to avoid). The chip now *replaces* the dot when `OPEN` (the dot renders only
+ * for the norm, `CLOSED`) and sits after the time rather than at the row's front, so the label and
+ * time keep their usual position regardless of state — see `event-row.html`'s own comment on the
+ * default branch. The `dense` variant (`/monitor/alerts`, out of this finding's own reproduction) is
+ * unchanged.
  */
 @Component({
   selector: 'vision-event-row',
