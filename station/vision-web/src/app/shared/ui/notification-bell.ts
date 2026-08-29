@@ -8,11 +8,11 @@ import { PollScheduler } from '../../core/poll-scheduler';
 import { ToastService } from '../../core/toast.service';
 import { GlobalOverlayStore } from '../../core/ui/overlay-store';
 import { eventNotificationText, relativeTimeLabel, resolveEventTarget, resolveReplayDeepLink } from '../../core/events/events-logic';
-import { geofenceBreachToastMessage } from '../../core/geofence/geofence-logic';
+import { geofenceBreachToastMessage, parseGeofenceBreach } from '../../core/geofence/geofence-logic';
 import { describeSystemEventSource, type SystemEventRow as SystemEventRowModel } from '../../core/system-events/system-events-logic';
 import { SystemEventsStore } from '../../core/system-events/system-events-store';
 import { EventsRail } from './events-rail';
-import { newlyOpenedEvents, unreadEvents } from './notification-logic';
+import { newlyOpenedEvents, shouldToast, unreadEvents } from './notification-logic';
 import { SystemEventRow } from './system-event-row';
 import type { DetectionEvent } from '../../core/api/models';
 
@@ -58,11 +58,21 @@ import type { DetectionEvent } from '../../core/api/models';
  * `LiveStore.liveEvents()`, the generic `event` SSE topic, not this bell's own `DetectionEvent`
  * dropdown list (see `LiveEvent`'s own doc comment for why the two are genuinely different domain
  * concepts). This component is still where they toast from (the app's one "background thing just
- * happened" chrome), via a second, independent id-tracking set (`toastedBreachIds`/
- * `seededBreachToasts`, mirroring `toastedIds`/`seededToasts` exactly) — deliberately **not**
- * folded into the unread-badge count or the dropdown list itself, since both are typed to
- * `DetectionEvent` and a breach isn't one; a future cycle that wants breaches counted in the badge
- * too would need to widen that typing, out of this batch's own scope.
+ * happened" chrome), via a second, independent id-tracking set (`toastedBreachIds`, mirroring
+ * `toastedIds` above, still needed so a breach already toasted once doesn't re-fire as
+ * `liveEvents()` grows and this effect re-runs) — deliberately **not** folded into the unread-badge
+ * count or the dropdown list itself, since both are typed to `DetectionEvent` and a breach isn't
+ * one; a future cycle that wants breaches counted in the badge too would need to widen that typing,
+ * out of this batch's own scope.
+ *
+ * **Toast eligibility is `notification-logic.ts#shouldToast` (docs/plans/active/OPERATOR-UX-5-PLAN.md
+ * finding U4, §2 U4), not a "seed the first tick silently" idiom** — the breach effect used to
+ * assume `liveEvents()` was already fully populated the instant it first ran, which is false
+ * whenever the SSE connection's own backlog/snapshot arrives on a *later* tick (a historic breach —
+ * an asset offline for days — then read as freshly "new" and toasted, U4's own reproduction: a
+ * `KEEP-IN breach` toast on every page load). `shouldToast` fixes this by construction with two
+ * timestamp/streaming checks instead of a fragile "first run = history" assumption — see that
+ * function's own doc comment.
  *
  * **Signal-backed open state, not `<details>`** (docs/plans/done/UI-STATE-PLAN.md §1 D4/D5, §2.3, §2.2): the
  * dropdown used to be a native `<details>`, whose `open` state lived in the DOM where nothing could
@@ -86,9 +96,11 @@ import type { DetectionEvent } from '../../core/api/models';
  * (`providedIn: 'root'`, backed by `LiveStore.liveEvents()`) is this section's one data source —
  * `DETECTION` is excluded there already (that store's own doc comment), so this section can never
  * duplicate a detection the card above it already shows, avoiding exactly the alert-noise failure
- * mode `SYSTEM-STATUS-PLAN.md §1` names. `GEOFENCE_BREACH` still toasts *in addition* — the existing
- * `toastedBreachIds` effect below is unchanged — this section is the durable record of the same
- * event, not a replacement for its toast.
+ * mode `SYSTEM-STATUS-PLAN.md §1` names. `GEOFENCE_BREACH` still toasts *in addition* (the breach
+ * effect below, U4's own eligibility fix notwithstanding) — this section is the durable record of
+ * the same event, not a replacement for its toast; a breach `shouldToast` suppresses still shows up
+ * here exactly as before, since this card's own list is untouched by this wave (class doc, "Toast
+ * eligibility" paragraph).
  */
 @Component({
   selector: 'vision-notification-bell',
@@ -125,7 +137,13 @@ export class NotificationBell {
 
   /** The identical dedup idiom, for `GEOFENCE_BREACH` `LiveEvent`s — see class doc's own "Geofence breaches" paragraph. */
   private readonly toastedBreachIds = new Set<string>();
-  private seededBreachToasts = false;
+
+  /** The instant this bell actually mounted — `shouldToast`'s own "never toast something that
+   *  predates the bell watching at all" gate (see class doc's "Toast eligibility" paragraph and
+   *  `notification-logic.ts#shouldToast`'s own doc comment for the full U4 root-cause writeup).
+   *  Captured once, here, rather than read fresh per effect run — the whole point is one fixed
+   *  reference instant, not "whatever `Date.now()` happens to be on this particular tick". */
+  private readonly mountedAtMs = Date.now();
 
   /**
    * Drives the system-events card's own "…s ago" timestamps (mirrors `events-rail.ts`'s identical
@@ -172,17 +190,12 @@ export class NotificationBell {
       }
     });
 
-    // Geofence breach toasts (docs/plans/done/OPS-CORE-PLAN.md §G-c) — a separate feed, a separate dedup set,
-    // identical "seed silently, toast only what arrives after" rule as the effect above.
+    // Geofence breach toasts (docs/plans/done/OPS-CORE-PLAN.md §G-c) — a separate feed, a separate dedup
+    // set. Eligibility is `shouldToast` (class doc's "Toast eligibility" paragraph) — no "seed the
+    // first tick silently" step: `shouldToast`'s own mount-time gate makes one unnecessary, and it
+    // was the very thing racing against a late SSE replay burst (U4's own root cause).
     effect(() => {
       const current = this.liveStore.liveEvents();
-      if (!this.seededBreachToasts) {
-        for (const event of current) {
-          this.toastedBreachIds.add(event.id);
-        }
-        this.seededBreachToasts = true;
-        return;
-      }
       // `liveEvents` is newest-first; iterate oldest-of-the-new-batch-first so a toast burst (rare,
       // but possible on reconnect) reads in the order the breaches actually happened.
       for (const event of [...current].reverse()) {
@@ -190,6 +203,10 @@ export class NotificationBell {
           continue;
         }
         this.toastedBreachIds.add(event.id);
+        const breach = parseGeofenceBreach(event);
+        if (!breach || !shouldToast(event, this.mountedAtMs, this.isAssetStreaming(breach.assetId))) {
+          continue;
+        }
         const message = geofenceBreachToastMessage(event);
         if (message) {
           this.toasts.error(message);
@@ -243,6 +260,15 @@ export class NotificationBell {
 
   protected systemEventRelativeTime(row: SystemEventRowModel): string {
     return relativeTimeLabel(row.atIso, this.nowSignal());
+  }
+
+  /** `shouldToast`'s own "is this asset currently streaming" input — `LiveStore.fleet()` (the
+   *  always-on `fleet` SSE topic's own `AssetSummary[]`, already flowing into this same store for
+   *  `liveEvents()`; no new subscription) is `undefined` only before that topic's first snapshot
+   *  ever arrives, which reads as "not streaming" — the honest default while nothing is confirmed
+   *  yet, never a fabricated "yes". */
+  private isAssetStreaming(assetId: string): boolean {
+    return this.liveStore.fleet()?.some((asset) => asset.assetId === assetId && asset.status === 'STREAMING') ?? false;
   }
 
   private toastNewEvent(event: DetectionEvent): void {

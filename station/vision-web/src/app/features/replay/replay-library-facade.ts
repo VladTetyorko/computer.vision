@@ -3,7 +3,13 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import type { UsageSummary } from '../../core/api/models';
-import { filterUsagesByTimeRange, usageAssetOptions, type TimeRangeFilter, type UsageAssetOption } from './replay-library-logic';
+import {
+  filterUsagesByTimeRange,
+  sortUsagesForDisplay,
+  usageAssetOptions,
+  type TimeRangeFilter,
+  type UsageAssetOption,
+} from './replay-library-logic';
 
 /** The server's own page size — the newest N flights fleet-wide, or per-asset once filtered (docs/extracts/design/10-replay.md's frozen contract). No pagination beyond it. */
 const USAGE_LIMIT = 50;
@@ -43,8 +49,11 @@ export class ReplayLibraryFacade {
   readonly hasActiveFilters = computed(() => this.assetFilter().length > 0 || this.timeRangeFilter() !== 'all');
 
   /** The list the template actually renders — `usages` (server-filtered by asset already) narrowed
-   *  by the client-side time-range filter on top. */
-  readonly filteredUsages = computed(() => filterUsagesByTimeRange(this.usages(), this.timeRangeFilter(), Date.now()));
+   *  by the client-side time-range filter, then triaged (OPERATOR-UX-5-PLAN.md finding U1, §2 U1):
+   *  a `sampleCount === 0` row sorts last, everything else keeps the server's newest-first order. */
+  readonly filteredUsages = computed(() =>
+    sortUsagesForDisplay(filterUsagesByTimeRange(this.usages(), this.timeRangeFilter(), Date.now())),
+  );
 
   // --- Two-pane selection (`?sel=<usageId>`, docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4) ------------------
   // `ReplayLibraryPage`'s own constructor `effect()` forwards its route-bound `sel` input straight

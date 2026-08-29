@@ -1,10 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotificationBell } from './notification-bell';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { EventsStore } from '../../core/events/events-store';
 import { LiveStore } from '../../core/live/live-store';
+import { ToastService } from '../../core/toast.service';
 import { VisionApi } from '../../core/api/vision-api';
 import { GlobalOverlayStore } from '../../core/ui/overlay-store';
 import type { DetectionEvent, LiveEvent } from '../../core/api/models';
@@ -50,17 +51,25 @@ function liveEvent(partial: Partial<LiveEvent> = {}): LiveEvent {
   };
 }
 
-function fakeLiveStore(events: LiveEvent[] = []) {
-  return { liveEvents: () => events };
+/** `fleet` (the always-on `fleet` SSE topic's own `AssetSummary[]`) backs `shouldToast`'s own
+ *  "is this asset currently streaming" gate (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U4) —
+ *  `streamingAssetIds` is every asset id this fake reports `'STREAMING'`; everything else is
+ *  simply absent from the list, mirroring how a real offline/unknown asset just isn't in `fleet`'s
+ *  own snapshot at all. */
+function fakeLiveStore(events: LiveEvent[] = [], streamingAssetIds: readonly string[] = []) {
+  return {
+    liveEvents: () => events,
+    fleet: () => streamingAssetIds.map((assetId) => ({ assetId, status: 'STREAMING' as const })),
+  };
 }
 
-function render(events: DetectionEvent[] = [], liveEvents: LiveEvent[] = []) {
+function render(events: DetectionEvent[] = [], liveEvents: LiveEvent[] = [], streamingAssetIds: readonly string[] = []) {
   TestBed.configureTestingModule({
     providers: [
       provideRouter([]),
       { provide: FleetStore, useValue: fakeFleetStore() },
       { provide: EventsStore, useValue: fakeEventsStore(events) },
-      { provide: LiveStore, useValue: fakeLiveStore(liveEvents) },
+      { provide: LiveStore, useValue: fakeLiveStore(liveEvents, streamingAssetIds) },
       { provide: VisionApi, useValue: {} },
     ],
   });
@@ -205,5 +214,71 @@ describe('NotificationBell — system events (docs/plans/done/SYSTEM-STATUS-PLAN
     trigger(fixture).click();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.system-events')).toBeNull();
+  });
+});
+
+/**
+ * Geofence breach toasts (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U4, §2 U4) — reproduces
+ * and fixes the live symptom: a `KEEP-IN breach` toast firing on every page load for an asset that
+ * has been offline for days. `Date.now()` is pinned so `NotificationBell#mountedAtMs` (captured at
+ * `TestBed.createComponent` time) is a known instant `shouldToast`'s own gate can be tested against.
+ */
+function breachEvent(partial: Partial<LiveEvent> = {}): LiveEvent {
+  return liveEvent({
+    type: 'GEOFENCE_BREACH',
+    message: 'KEEP-IN breach — Demo operating area',
+    attributes: { assetId: 'a-1', zoneId: 'z-1', zoneName: 'Demo operating area', kind: 'KEEP_IN', direction: 'enter' },
+    ...partial,
+  });
+}
+
+describe('NotificationBell — geofence breach toasts (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U4)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-29T12:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("never toasts a breach that predates the bell mounting, even for a streaming asset — U4's own root cause (a replayed historic breach)", () => {
+    const daysOld = breachEvent({ id: 'old', at: '2026-08-25T09:00:00.000Z' });
+    render([], [daysOld], ['a-1']);
+    expect(TestBed.inject(ToastService).toasts()).toEqual([]);
+  });
+
+  it('never toasts a breach for an asset that is not currently streaming, even with a perfectly fresh timestamp', () => {
+    const fresh = breachEvent({ id: 'fresh', at: '2026-08-29T12:00:01.000Z' });
+    render([], [fresh], []); // 'a-1' is not in the fleet's streaming set
+    expect(TestBed.inject(ToastService).toasts()).toEqual([]);
+  });
+
+  it('toasts a genuinely fresh breach for a currently-streaming asset', () => {
+    const fresh = breachEvent({ id: 'fresh', at: '2026-08-29T12:00:01.000Z' });
+    render([], [fresh], ['a-1']);
+    const toasts = TestBed.inject(ToastService).toasts();
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].text).toBe('KEEP-IN breach — Demo operating area');
+  });
+
+  it('an exit breach never toasts (relief, not a new alert) regardless of timing/streaming', () => {
+    const exit = breachEvent({
+      id: 'exit',
+      at: '2026-08-29T12:00:01.000Z',
+      attributes: { assetId: 'a-1', zoneId: 'z-1', zoneName: 'Demo operating area', kind: 'KEEP_IN', direction: 'exit' },
+    });
+    render([], [exit], ['a-1']);
+    expect(TestBed.inject(ToastService).toasts()).toEqual([]);
+  });
+
+  it('the dropdown\'s durable system-events log is unaffected by toast eligibility — history stays visible there', () => {
+    const daysOld = breachEvent({ id: 'old', at: '2026-08-25T09:00:00.000Z', type: 'GEOFENCE_BREACH' });
+    const fixture = render([], [daysOld], []); // no toast either way
+    trigger(fixture).click();
+    fixture.detectChanges();
+    // GEOFENCE_BREACH is excluded from the system-events card by design (class doc) — this asserts
+    // the dropdown mounts and the suppressed toast didn't otherwise break rendering.
+    expect(fixture.nativeElement.querySelector('vision-events-rail')).not.toBeNull();
   });
 });

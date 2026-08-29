@@ -1,4 +1,4 @@
-import type { DetectionEvent } from '../../core/api/models';
+import type { DetectionEvent, LiveEvent } from '../../core/api/models';
 
 /**
  * Pure derivations behind `shared/ui/notification-bell.ts` (docs/plans/done/UX-REWORK-PLAN.md §U-c's user
@@ -33,4 +33,29 @@ export function newlyOpenedEvents(
   knownIds: ReadonlySet<string>,
 ): readonly DetectionEvent[] {
   return events.filter((event) => !knownIds.has(event.id) && event.state === 'OPEN');
+}
+
+/**
+ * Whether a `LiveEvent` (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U4, §2 U4 — today the
+ * geofence-breach toast effect's own input) is actually news, not history replaying late.
+ *
+ * **Root cause this fixes.** The breach effect's old "seed silently on the first tick, toast
+ * everything after" idiom (mirroring `toastedIds`/`seededToasts` above) assumed
+ * `LiveStore.liveEvents()` was already fully populated the instant that first effect run happened.
+ * It isn't, reliably: the SSE connection's own snapshot/backlog can arrive on a *later* tick than
+ * the bell's first render, so a historic breach — an `enter` event for an asset that has been
+ * offline for days — lands in the "not yet seeded" set and fires as if it had just happened live.
+ * Reproduced live (`http://localhost:4200`, any page load): a `KEEP-IN breach — Demo operating
+ * area` toast for an asset that hasn't reported in days.
+ *
+ * **The fix is two independent, honest gates, both required — a construction fix, not a better
+ * dedup set**: the event's own `at` must be no older than the instant this bell mounted (a plain
+ * timestamp comparison, immune to *when* the event happens to arrive over the wire — unlike the
+ * old seed, it can't be fooled by an SSE replay landing on a later tick), and the asset the event
+ * concerns must be currently streaming (an offline asset cannot be having something happen to it
+ * *right now*, whatever the event's own timestamp claims — the second, independent honesty check
+ * this finding's own design section names).
+ */
+export function shouldToast(event: LiveEvent, mountedAtMs: number, assetStreaming: boolean): boolean {
+  return assetStreaming && Date.parse(event.at) >= mountedAtMs;
 }
