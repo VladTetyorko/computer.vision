@@ -80,3 +80,44 @@ td.actions {
   background: var(--color-info-soft);
   box-shadow: inset 2px 0 0 0 var(--color-info);
 }
+
+/* docs/plans/active/OPERATOR-UX-7-PLAN.md P1, §2 P1 — "Your vehicles"/"Simulated" triage groups,
+   mirrors `features/command/command.css`'s `.rail-group`/`.rail-group-label` and
+   `features/fly/drone-picker.css`'s `.picker-group`/`.picker-group-label` exactly (frontend-style §8
+   structural-label register: uppercase, muted, +0.05em tracking) — each page keeps its own copy, no
+   shared class exists for it yet (same precedent `.kpi-tiles`/`.table-scroll` above already document). */
+.table-group + .table-group {
+  margin-top: var(--space-24);
+}
+
+.group-label {
+  margin: 0 0 var(--space-8);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.group-empty {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.group-empty a {
+  color: var(--color-info);
+}
+
+/* A never-probed/no-telemetry row's verdict cell (§2 P1: "structural-label register, no chip") —
+   this app's other typography register (frontend-style §8), the same recipe `fly-osd.css`'s
+   `.osd-group-label` uses for its own "LAST KNOWN · …" stale-group relabel: this row costs the table
+   zero chips rather than a muted `Unknown` one (frontend-style §5, one chip per row max). Inline, not
+   `styles.css`'s own block-display `.label` (that one is a form-field caption with its own
+   margin-bottom — wrong shape sitting inside a table cell next to nothing else). */
+.verdict-note {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
