@@ -2,7 +2,8 @@ import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angu
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { EmptyState } from '../../shared/ui/empty-state';
-import { PageBar, pluralize } from '../../shared/ui/page-bar/page-bar';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
+import { pluralize } from '../../shared/ui/text-logic';
 import { TwoPane } from '../../shared/ui/two-pane/two-pane';
 import { ReplayPage } from './replay';
 import { ReplayLibraryFacade } from './replay-library-facade';

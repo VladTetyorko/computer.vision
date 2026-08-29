@@ -6,7 +6,7 @@
        renders, and a working crumb even on `notFound` is a genuine improvement (a way back that
        wasn't there before), not a fabricated status — the title just names the page, it never
        claims the flight loaded successfully. -->
-  <vision-page-bar title="Flight replay" icon="replay" [crumb]="crumb()" />
+  <vision-page-bar title="Replay" icon="replay" [crumb]="crumb()" />
 
   @if (facade.loading() && !facade.timeline()) {
     <div class="card skeleton-card"></div>
@@ -18,9 +18,9 @@
     </div>
   } @else if (facade.usageOpen()) {
     <div class="card empty">
-      <h3>This flight is still in progress</h3>
+      <h3>This session is still in progress</h3>
       <p>
-        Replay is for finished flights — this usage hasn't ended yet, so there's nothing fixed to
+        Replay is for finished sessions — this usage hasn't ended yet, so there's nothing fixed to
         scrub through. Watch it live instead.
       </p>
       @if (facade.videoDeviceId(); as deviceId) {
@@ -46,29 +46,23 @@
          `<vision-page-bar>`'s frozen contract fits a read-only stat like this one). -->
     <p class="range-label muted">
       {{ facade.clockLabel(facade.fromMs()) }} – {{ facade.clockLabel(facade.toMs()) }}
-      ({{ facade.totalLabel() }} flight)
+      ({{ facade.totalLabel() }} session)
     </p>
 
     <div class="detail-grid">
-      <!-- ---- Evidence package (docs/plans/done/AFTER-ACTION-PLAN.md, wave W2) --------------------------- -->
-      <!-- First card: "where a referee sees that honesty before they download anything" — every other
-           card below is this same flight's own data; this one names what's actually in the downloadable
-           package and what isn't, up front, not buried at the bottom of the page. -->
-      <vision-after-action-panel
-        [manifest]="facade.afterAction()"
-        [loading]="facade.afterActionLoading()"
-        [errorMessage]="facade.afterActionErrorMessage()"
-        [archiveUrl]="facade.afterActionArchiveUrl()"
-      />
+      <!-- ---- Position + Recording (docs/plans/active/OPERATOR-UX-6-PLAN.md finding E1) --------------------------
+           Side by side, `span-1` each on the two-column grid (stacked under 900px, `replay.css`'s
+           existing breakpoint) — the replay *is* the map + video + transport, so those lead the page;
+           the evidence package (below, last) is a download link, not the thing a referee came for. -->
 
       <!-- ---- Map --------------------------------------------------------------------------- -->
-      <section class="card span-2">
+      <section class="card span-1">
         <header>
           <h2>Position</h2>
           <span class="muted mono">at {{ facade.clockLabel(facade.atMs()) }}</span>
         </header>
         @if (facade.fullTrail().length === 0) {
-          <p class="muted hint">No position data recorded for this flight.</p>
+          <p class="muted hint">No position data recorded for this session.</p>
         } @else {
           <vision-replay-map
             [fullTrail]="facade.fullTrail()"
@@ -92,7 +86,7 @@
            document. (The replay *library* — `replay-library.html`'s flight list/two-pane preview —
            never shows video at all, so it needed no boundary decision of its own; "Open replay ›"
            just navigates here.) -->
-      <section class="card span-2 recording-card surface-dark">
+      <section class="card span-1 recording-card surface-dark">
         <header>
           <h2>Recording</h2>
         </header>
@@ -144,7 +138,7 @@
             }
           </div>
           <p class="muted hint">
-            {{ facade.hasClipSelection() ? 'Clip covers the marked start/end.' : 'No selection — clip covers the whole flight.' }}
+            {{ facade.hasClipSelection() ? 'Clip covers the marked start/end.' : 'No selection — clip covers the whole session.' }}
           </p>
           @if (!facade.training.disabled()) {
             <p class="muted hint">
@@ -154,7 +148,7 @@
           }
         } @else {
           <div class="empty-recording">
-            <p class="muted">No recording for this flight.</p>
+            <p class="muted">No recording for this session.</p>
             <p class="faint hint">Recording must be enabled in mediamtx (<code>MTX_PATHDEFAULTS_RECORD=yes</code>) for a clip to be available.</p>
           </div>
         }
@@ -223,7 +217,7 @@
         </div>
 
         @if (t.detections.length === 0) {
-          <p class="muted hint">No detections recorded for this flight.</p>
+          <p class="muted hint">No detections recorded for this session.</p>
         } @else if (facade.detectionStripCapNote(); as note) {
           <p class="muted hint">{{ note }}</p>
         }
@@ -280,7 +274,7 @@
       <section class="card span-2">
         <header><h2>Detections at scrub time</h2></header>
         @if (t.detections.length === 0) {
-          <p class="muted hint">No detections recorded for this flight.</p>
+          <p class="muted hint">No detections recorded for this session.</p>
         } @else if (!facade.detectionIsNear()) {
           <p class="muted hint">No detection data near this moment.</p>
         } @else if (facade.nearestDetection()!.detections.length === 0) {
@@ -293,6 +287,18 @@
           </div>
         }
       </section>
+
+      <!-- ---- Evidence package (docs/plans/done/AFTER-ACTION-PLAN.md, wave W2) --------------------------- -->
+      <!-- Last card, collapsed by default (docs/plans/active/OPERATOR-UX-6-PLAN.md finding E1) — the replay *is*
+           the map + video + transport above; this is a download link, one click away, not the first
+           screen a referee sees. `<vision-after-action-panel>`'s own `collapsed` signal defaults to
+           `true`; only its header line + "Download package" render until opened. -->
+      <vision-after-action-panel
+        [manifest]="facade.afterAction()"
+        [loading]="facade.afterActionLoading()"
+        [errorMessage]="facade.afterActionErrorMessage()"
+        [archiveUrl]="facade.afterActionArchiveUrl()"
+      />
     </div>
   }
 </div>
