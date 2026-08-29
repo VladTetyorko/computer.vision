@@ -1,6 +1,5 @@
 import type { AssetAttention } from '../api/models';
-import { formatDuration } from '../stream-info-logic';
-import { TELEMETRY_AGE_RED_SECONDS } from '../telemetry/telemetry-logic';
+import { TELEMETRY_AGE_RED_SECONDS, humanAge } from '../telemetry/telemetry-logic';
 import { gpsSeverity } from '../telemetry/flight-state-logic';
 import { geofenceBreachReasonText, type GeofenceBreach } from '../geofence/geofence-logic';
 
@@ -167,9 +166,16 @@ function failsafeReason(asset: AssetAttention): AttentionReason | undefined {
  * passes its `gpsFixType` in; a caller with no marker for this asset (not currently plotted/live)
  * simply omits it, and this reason never fires — "unknown" silently means "not evaluated", not "ok".
  * Reuses `flight-state-logic.ts#gpsSeverity` rather than re-deriving the same fix-quality tiers.
+ *
+ * **Live-only, like `telemetryReason`** (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N2, §2 N2) — an asset
+ * that isn't currently streaming was never trying to get a fix right now, so it is never CRIT/WARN
+ * for lacking one; a stale `gpsFixType` left over from an earlier session is not itself a live safety
+ * condition. Only reachable in practice while `FleetMarker.gpsFixType` is populated at all (today,
+ * `buildMarker`'s `offline` bucket never sets it — see that function's own doc comment), but the
+ * guard is asserted here rather than left as an accident of the marker shape upstream.
  */
-function gpsDegradedReason(gpsFixType: number | undefined): AttentionReason | undefined {
-  if (gpsFixType === undefined) {
+function gpsDegradedReason(asset: AssetAttention, gpsFixType: number | undefined): AttentionReason | undefined {
+  if (!asset.streaming || gpsFixType === undefined) {
     return undefined;
   }
   const severity = gpsSeverity(gpsFixType);
@@ -241,14 +247,20 @@ export function attentionReasons(
     failsafeReason(asset),
     batteryReason(asset.batteryPercent),
     telemetryReason(asset),
-    gpsDegradedReason(gpsFixType),
+    gpsDegradedReason(asset, gpsFixType),
     pipelineErrorReason(pipelineErrorDetail),
     openEventsReason(asset.openEventCount),
   ].filter((reason): reason is AttentionReason => reason !== undefined);
   return [...reasons].sort((a, b) => REASON_RANK[b.kind] - REASON_RANK[a.kind]);
 }
 
-/** The rail/panel's own "age" column — the freshest telemetry sample's age, or `'—'` when none exists yet. */
+/**
+ * The rail/panel's own "age" column — the freshest telemetry sample's age, or `'—'` when none
+ * exists yet. Renders through `humanAge` (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N4, §2 N4 —
+ * "one age vocabulary"), not `stream-info-logic.ts#formatDuration` (session *durations*, capped at
+ * hours with zero-padded minutes — wrong register for a telemetry sample that can legitimately be
+ * days stale, see `humanAge`'s own doc comment).
+ */
 export function attentionAgeLabel(asset: AssetAttention): string {
-  return asset.telemetryAgeMs === undefined ? '—' : `${formatDuration(asset.telemetryAgeMs / 1000)} ago`;
+  return asset.telemetryAgeMs === undefined ? '—' : `${humanAge(asset.telemetryAgeMs / 1000)} ago`;
 }

@@ -115,28 +115,35 @@ describe('attentionReasons', () => {
 
   describe('gps-degraded (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d)', () => {
     it('never fires with no gpsFixType given at all', () => {
-      expect(attentionReasons(asset(), undefined)).toEqual([]);
+      expect(attentionReasons(asset({ streaming: true }), undefined)).toEqual([]);
     });
 
     it('never fires for a healthy (3D+) fix', () => {
-      expect(attentionReasons(asset(), 3)).toEqual([]);
+      expect(attentionReasons(asset({ streaming: true }), 3)).toEqual([]);
     });
 
     it('flags a 2D fix as a warning', () => {
-      const reasons = attentionReasons(asset(), 2);
+      const reasons = attentionReasons(asset({ streaming: true }), 2);
       expect(reasons).toHaveLength(1);
       expect(reasons[0].kind).toBe('gps-degraded');
       expect(reasons[0].severity).toBe('warning');
     });
 
     it('flags no-GPS/no-fix as critical', () => {
-      expect(attentionReasons(asset(), 0)[0].severity).toBe('critical');
-      expect(attentionReasons(asset(), 1)[0].severity).toBe('critical');
+      expect(attentionReasons(asset({ streaming: true }), 0)[0].severity).toBe('critical');
+      expect(attentionReasons(asset({ streaming: true }), 1)[0].severity).toBe('critical');
     });
 
     it('ranks between battery-low and open-events', () => {
-      const reasons = attentionReasons(asset({ batteryPercent: 15, openEventCount: 1 }), 2);
+      const reasons = attentionReasons(asset({ streaming: true, batteryPercent: 15, openEventCount: 1 }), 2);
       expect(reasons.map((r) => r.kind)).toEqual(['battery-low', 'gps-degraded', 'open-events']);
+    });
+
+    /** docs/plans/active/OPERATOR-UX-4-PLAN.md finding N2, §2 N2 — reproduced live: a rail row read CRIT
+     *  off a fleet marker's leftover `gpsFixType` for an asset that was not currently streaming. */
+    it('never fires for a non-streaming asset, regardless of fix quality — an offline asset is not CRIT for lacking a fix it is not trying to get', () => {
+      expect(attentionReasons(asset({ streaming: false }), 0)).toEqual([]);
+      expect(attentionReasons(asset({ streaming: false }), 1)).toEqual([]);
     });
   });
 });
@@ -191,7 +198,7 @@ describe('pipeline-error (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4)', () => {
   });
 
   it('ranks below gps-degraded and above open-events', () => {
-    const reasons = attentionReasons(asset({ openEventCount: 1 }), 2, undefined, 'RTSP source unreachable');
+    const reasons = attentionReasons(asset({ streaming: true, openEventCount: 1 }), 2, undefined, 'RTSP source unreachable');
     expect(reasons.map((r) => r.kind)).toEqual(['gps-degraded', 'pipeline-error', 'open-events']);
   });
 
@@ -208,5 +215,15 @@ describe('attentionAgeLabel', () => {
 
   it('renders a formatted duration otherwise', () => {
     expect(attentionAgeLabel(asset({ telemetryAgeMs: 12_000 }))).toBe('12s ago');
+  });
+
+  /** docs/plans/active/OPERATOR-UX-4-PLAN.md finding N4, §2 N4 — one age vocabulary (`humanAge`), not
+   *  `formatDuration`'s zero-padded, day-tier-less duration format. */
+  it('drops a zero remainder rather than zero-padding it, unlike the old duration formatter', () => {
+    expect(attentionAgeLabel(asset({ telemetryAgeMs: 3_900_000 }))).toBe('1h 5m ago'); // 65 minutes
+  });
+
+  it('rolls a multi-day age into a day tier rather than an ever-growing raw hour count', () => {
+    expect(attentionAgeLabel(asset({ telemetryAgeMs: 353_099_000 }))).toBe('4d 2h ago');
   });
 });

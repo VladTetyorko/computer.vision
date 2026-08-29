@@ -86,15 +86,25 @@ describe('buildEntityRows', () => {
     expect(list).toEqual(original);
   });
 
-  it('feeds gpsFixTypeByAssetId into each asset\'s own gps-degraded reason, by id', () => {
-    const degraded = asset({ assetId: 'd', displayName: 'Degraded' });
-    const healthy = asset({ assetId: 'h', displayName: 'Healthy' });
+  it('feeds gpsFixTypeByAssetId into each asset\'s own gps-degraded reason, by id (streaming only — docs/plans/active/OPERATOR-UX-4-PLAN.md N2)', () => {
+    const degraded = asset({ assetId: 'd', displayName: 'Degraded', streaming: true });
+    const healthy = asset({ assetId: 'h', displayName: 'Healthy', streaming: true });
     const noMarker = asset({ assetId: 'n', displayName: 'NoMarker' });
     const gpsFixTypeByAssetId = new Map([['d', 1], ['h', 3]]);
     const rows = buildEntityRows([degraded, healthy, noMarker], gpsFixTypeByAssetId);
     expect(rows.find((r) => r.asset.assetId === 'd')!.severity).toBe('critical');
     expect(rows.find((r) => r.asset.assetId === 'h')!.severity).toBe('ok');
     expect(rows.find((r) => r.asset.assetId === 'n')!.severity).toBe('ok');
+  });
+
+  /** docs/plans/active/OPERATOR-UX-4-PLAN.md finding N2, §2 N2 — reproduced live: a rail row read
+   *  CRIT off a fleet marker's leftover `gpsFixType` for an ESP32 rover that was not streaming. */
+  it('never ranks an offline asset critical for a bad gpsFixType — it is not trying to get a fix', () => {
+    const offlineNoFix = asset({ assetId: 'o', displayName: 'Offline', streaming: false });
+    const gpsFixTypeByAssetId = new Map([['o', 0]]);
+    const rows = buildEntityRows([offlineNoFix], gpsFixTypeByAssetId);
+    expect(rows[0].severity).toBe('ok');
+    expect(rows[0].reasons).toEqual([]);
   });
 
   it('holds at scale (N=100): pure selection logic never issues a request and stays correct', () => {

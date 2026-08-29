@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { Player } from '../../shared/player/player';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
-import { attentionAgeLabel, attentionReasons, batteryAttentionSeverity } from './command-logic';
+import { attentionAgeLabel, batteryAttentionSeverity, type AttentionReason } from './command-logic';
 import { canCommandReturnHome, deriveDiagnostics, gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
 import type { AssetAttention, ActiveStream } from '../../core/api/models';
 import type { FleetMarker } from '../../core/map/map-logic';
@@ -42,6 +42,17 @@ export class AssetPanel {
   readonly marker = input<FleetMarker | undefined>(undefined);
   readonly videoDeviceId = input<string | undefined>(undefined);
   readonly stream = input<ActiveStream | undefined>(undefined);
+  /**
+   * docs/plans/active/OPERATOR-UX-4-PLAN.md finding N2, §2 N2 — fed by `CommandFacade#selectedAttentionReasons`,
+   * the SAME `attentionByAssetId` map the rail's own row severity/rank reads (`CommandFacade`'s own
+   * doc comment on that computed). This panel used to derive its own `reasons` from `attentionReasons(
+   * this.asset(), this.marker()?.gpsFixType)` — passing only `gpsFixType`, never `geofenceBreaches`/
+   * `pipelineErrorDetail`, so a CRIT asset (breach/pipeline-error) could show "All quiet" here while the
+   * rail behind it correctly showed CRIT (N2's exact repro). One shared read-model — computed once,
+   * consumed twice — makes that class of drift impossible by construction rather than patching this
+   * one gap; see `command-facade.ts`'s own doc comment for the full accounting.
+   */
+  readonly reasons = input.required<readonly AttentionReason[]>();
 
   /** `CommandPage`'s own `/fly?asset=…&watch=1` navigation — this panel never touches the router. */
   readonly watchLive = output<void>();
@@ -51,19 +62,6 @@ export class AssetPanel {
 
   protected readonly activeTab = signal<AssetPanelTab>('status');
 
-  /**
-   * `marker()?.gpsFixType` feeds the same `gps-degraded` reason the rail's own row rank uses — see
-   * `command-logic.ts#gpsDegradedReason`'s doc comment. `geofenceBreaches`/`pipelineErrorDetail`
-   * (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4) are **not** threaded here, matching this component's
-   * pre-existing gap for `geofenceBreaches` (both need a `LiveStore` read this deliberately-dumb,
-   * store-free panel doesn't have — see class doc's "issues no HTTP itself and holds no store" line);
-   * `buildEntityRows`' own rail-row computation (`command-facade.ts#entityRows`) is still the
-   * authoritative source for both reasons — an asset selected into this panel while erroring/breaching
-   * shows the correct severity/rank in the rail behind it, just not restated in this panel's own
-   * "why" line. Widening this panel to read `LiveStore` directly, if ever wanted, is a small,
-   * disjoint follow-up.
-   */
-  protected readonly reasons = computed(() => attentionReasons(this.asset(), this.marker()?.gpsFixType));
   protected readonly ageLabel = computed(() => attentionAgeLabel(this.asset()));
   protected readonly batterySeverity = computed(() => batteryAttentionSeverity(this.marker()?.batteryPercent));
 

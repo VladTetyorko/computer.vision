@@ -19,7 +19,8 @@ import { selectEventMarkers } from '../../core/events/events-logic';
 import { LiveStore } from '../../core/live/live-store';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { fleetCentroid } from '../../core/weather/weather-logic';
-import { buildEntityRows, commandGridColumns, type DetailPanelState } from './command-logic';
+import { buildEntityRows, buildRailGroups, commandGridColumns, type AttentionReason, type DetailPanelState, type EntityRow, type RailRow } from './command-logic';
+import type { PickerGroups } from '../../core/fleet/triage-logic';
 import { buildSetupChecklist, isFreshStation, type SetupChecklistRow } from '../../core/command/setup-checklist-logic';
 import type { DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import type { AssetAttention, FleetSummary, GroupSummary, UserSummary } from '../../core/api/models';
@@ -29,6 +30,16 @@ const SUMMARY_POLL_INTERVAL_MS = 5_000;
 
 const RAIL_OPEN_KEY = 'vision.command.railOpen';
 const PANEL_OPEN_KEY = 'vision.command.panelOpen';
+
+/**
+ * `hideSimulated`'s persisted key (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — "the same
+ * `vision.fly.hideSimulated` flag (one preference, both pages)") — deliberately the *same* key
+ * `features/fly/drone-picker-facade.ts` already reads/writes, namespaced `vision.fly.*` rather than
+ * `vision.command.*` like this file's own two keys above: an operator's "I don't want to see
+ * simulated aircraft" preference is one fact about them, not a per-page one, so hiding them on `/fly`
+ * and reopening `/command` (or vice versa) should not re-show what they just hid.
+ */
+const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
 
 /**
  * `CommandPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md wave W2) — owns every store/service the page
@@ -168,6 +179,41 @@ export class CommandFacade {
     () => new Set(this.entityRows().filter((row) => row.severity !== 'ok').map((row) => row.asset.assetId)),
   );
 
+  /**
+   * `assetId → attention row` (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N2, §2 N2) — the *same*
+   * `EntityRow` objects `entityRows` already sorts, just addressable by id. This is the fix for a
+   * rail-vs-panel disagreement reproduced live on the running dev server: the rail's row read CRIT
+   * (a `geofence-breach`/`pipeline-error` reason, fed from `LiveStore` and threaded into
+   * `buildEntityRows` but never into `AssetPanel`'s own, narrower `attentionReasons()` call) while the
+   * panel it opened read "All quiet" for the identical asset — two independent derivations of the
+   * same fact, free to drift. `AssetPanel` now takes `[reasons]` as a plain input fed from this map
+   * (via `selectedAttentionReasons` below) instead of recomputing its own — one verdict, one source.
+   */
+  readonly attentionByAssetId = computed<ReadonlyMap<string, EntityRow>>(
+    () => new Map(this.entityRows().map((row) => [row.asset.assetId, row])),
+  );
+
+  /**
+   * The rail's own **Your vehicles** / **Simulated** groups (docs/plans/active/OPERATOR-UX-4-PLAN.md finding
+   * N3, §2 N3 — "the rail triages like `/fly`"), replacing the old flat `entityRows`-as-one-list
+   * rendering. Built from `entityRows` (never a second attention derivation) via
+   * `command-logic.ts#buildRailGroups`; `nowSignal` (already ticked alongside the 5s summary poll —
+   * see that signal's own doc comment) is the shared clock so this recomputes on the same cadence the
+   * rail's age text already did.
+   */
+  readonly railGroups = computed<PickerGroups<RailRow>>(() => buildRailGroups(this.entityRows(), this.nowSignal()));
+
+  /** Whether the rail's **Simulated** group is collapsed (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3)
+   *  — see `HIDE_SIMULATED_KEY`'s own doc comment for why this is the identical persisted preference
+   *  `/fly`'s picker uses, not a second, page-scoped one. The group header (with its own count) stays
+   *  visible either way; only the row list beneath it collapses — mirrors `drone-picker.html`'s own
+   *  "Hide simulated" behavior exactly. */
+  readonly hideSimulated = signal(readPersistedFlag(HIDE_SIMULATED_KEY, false));
+
+  toggleHideSimulated(): void {
+    this.hideSimulated.update((hidden) => !hidden);
+  }
+
   /** Every asset's currently-known position — threaded to the Zones panel's own draw-dialog advisory. */
   readonly assetPositions = computed(() => this.mapStore.markers().map((marker) => marker.position));
 
@@ -223,6 +269,14 @@ export class CommandFacade {
   readonly selectedMarker = computed(() => {
     const assetId = this.selectedAssetId();
     return assetId ? this.mapStore.markers().find((marker) => marker.assetId === assetId) : undefined;
+  });
+
+  /** `AssetPanel`'s own `[reasons]` input — see `attentionByAssetId`'s own doc comment for the
+   *  disagreement this replaces. `[]` (not "quiet" fabricated from nothing) whenever nothing is
+   *  selected or the selection has no row yet (the very first render, before `entityRows` exists). */
+  readonly selectedAttentionReasons = computed<readonly AttentionReason[]>(() => {
+    const assetId = this.selectedAssetId();
+    return (assetId ? this.attentionByAssetId().get(assetId) : undefined)?.reasons ?? [];
   });
 
   readonly selectedStream = computed(() => {
@@ -293,6 +347,7 @@ export class CommandFacade {
 
     effect(() => writePersistedFlag(RAIL_OPEN_KEY, this.railOpenSignal()));
     effect(() => writePersistedFlag(PANEL_OPEN_KEY, this.panelOpenPreferenceSignal()));
+    effect(() => writePersistedFlag(HIDE_SIMULATED_KEY, this.hideSimulated()));
 
     // Keeps the weather chip fresh as the fleet centroid moves — `WeatherStore.track` itself
     // no-ops instantly unless the 10-minute cache is actually stale (docs/plans/done/OPS-CORE-PLAN.md §W).

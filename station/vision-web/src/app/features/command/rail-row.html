@@ -1,0 +1,27 @@
+<button
+  type="button"
+  class="rail-row"
+  [class.selected]="selected()"
+  [class.critical]="row().severity === 'critical'"
+  [class.warning]="row().severity === 'warning'"
+  (click)="select.emit()"
+>
+  <span class="dot" [class.live]="row().asset.streaming"></span>
+  <span class="rail-name truncate">{{ row().asset.displayName }}</span>
+  @if (row().asset.failsafe === true) {
+    <span class="chip fs-chip" title="Failsafe active">FS</span>
+  }
+  <span class="rail-category faint truncate">{{ row().asset.categoryName }}</span>
+  <!-- docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — the row's own honest offline age
+       ("Offline · 3d"), never the bare word "Offline"; absent while streaming (the dot above already
+       says so). Plain text, not a chip — the severity chip below stays the row's only chip
+       (frontend-style §5). -->
+  @if (row().offlineAge) {
+    <span class="rail-age faint mono truncate">{{ row().offlineAge }}</span>
+  }
+  @if (row().severity !== 'ok') {
+    <span class="chip severity-chip" [class.danger]="row().severity === 'critical'" [class.warn]="row().severity === 'warning'">
+      {{ row().severity === 'critical' ? 'CRIT' : 'WARN' }}
+    </span>
+  }
+</button>
