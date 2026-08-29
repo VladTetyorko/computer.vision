@@ -37,25 +37,19 @@
   border-left-color: var(--color-info);
 }
 
-.rail-name {
+.rail-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rail-name {
   font-size: 0.84rem;
 }
 
-.rail-category {
-  flex: none;
-  max-width: 6rem;
-  font-size: 0.7rem;
-}
-
-/* docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — the row's own honest offline age
-   ("Offline · 3d"), plain text (not a chip — the severity chip stays the row's only one,
-   frontend-style §5). Same fixed-width-and-truncate treatment as `.rail-category` immediately above
-   it, so a long age never squeezes the severity chip out of the row. */
-.rail-age {
-  flex: none;
-  max-width: 5.5rem;
+.rail-meta {
   font-size: 0.7rem;
 }
 
