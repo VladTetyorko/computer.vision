@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetSummary } from '../../core/api/models';
-import { groupAndSort, isSimulated, offlineLabel } from './drone-picker-logic';
+import type { AssetSummary } from '../api/models';
+import { groupAndSort, isSimulated, offlineLabel } from './triage-logic';
 
+/**
+ * Moved from `features/fly/drone-picker-logic.spec.ts` (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3,
+ * §2 N3, wave W2) alongside the rules themselves — see `triage-logic.ts`'s own doc comment.
+ * `features/fly/drone-picker-logic.ts` re-exports these same functions verbatim, so `/fly`'s own
+ * behavior stays covered by `drone-picker.spec.ts`/`drone-picker-card.ts`'s own callers; nothing
+ * `/fly`-specific was left behind to keep a spec file here for.
+ */
 function asset(partial: Partial<AssetSummary>): AssetSummary {
   return {
     assetId: 'a-0',
@@ -25,6 +32,11 @@ describe('isSimulated', () => {
   it('is false for any real category', () => {
     expect(isSimulated(asset({ category: 'rover' }))).toBe(false);
     expect(isSimulated(asset({ category: 'drone' }))).toBe(false);
+  });
+
+  it('is structurally typed on just `category` — a caller with only that field works too', () => {
+    expect(isSimulated({ category: 'simulated' })).toBe(true);
+    expect(isSimulated({ category: 'robot' })).toBe(false);
   });
 });
 
@@ -82,6 +94,33 @@ describe('groupAndSort', () => {
     const groups = groupAndSort([future, justNow], NOW);
     // Both clamp to age 0 — tie broken alphabetically ('future' < 'just-now'), never by raw timestamp.
     expect(groups.yours.map((a) => a.assetId)).toEqual(['future', 'just-now']);
+  });
+
+  // --- attentionRank (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — new this wave, the
+  // Command rail's own "streaming → needs attention (severity desc) → last seen desc" order) -------
+
+  it('omitting attentionRank reproduces the pre-N3 order exactly (no /fly behavior change)', () => {
+    const older = asset({ assetId: 'older', lastUsedAt: '2026-08-28T08:00:00Z' });
+    const newer = asset({ assetId: 'newer', lastUsedAt: '2026-08-28T11:00:00Z' });
+    const groups = groupAndSort([older, newer], NOW);
+    expect(groups.yours.map((a) => a.assetId)).toEqual(['newer', 'older']);
+  });
+
+  it('with attentionRank, ranks higher-urgency rows first within a status tier, ahead of last-seen', () => {
+    // 'stale' is far more recently seen than 'critical', but critical outranks it.
+    const critical = asset({ assetId: 'critical', lastUsedAt: '2026-01-01T00:00:00Z' });
+    const stale = asset({ assetId: 'stale', lastUsedAt: '2026-08-28T11:59:00Z' });
+    const quiet = asset({ assetId: 'quiet', lastUsedAt: '2026-08-28T11:00:00Z' });
+    const rankById: Record<string, number> = { critical: 6, stale: 5 };
+    const groups = groupAndSort([quiet, stale, critical], NOW, (a) => rankById[a.assetId] ?? 0);
+    expect(groups.yours.map((a) => a.assetId)).toEqual(['critical', 'stale', 'quiet']);
+  });
+
+  it('attentionRank never promotes an offline row ahead of a streaming one — status is still the first tier', () => {
+    const streamingQuiet = asset({ assetId: 'streaming', status: 'STREAMING' });
+    const offlineCritical = asset({ assetId: 'offline-critical', status: 'OFFLINE' });
+    const groups = groupAndSort([offlineCritical, streamingQuiet], NOW, (a) => (a.assetId === 'offline-critical' ? 9 : 0));
+    expect(groups.yours.map((a) => a.assetId)).toEqual(['streaming', 'offline-critical']);
   });
 });
 

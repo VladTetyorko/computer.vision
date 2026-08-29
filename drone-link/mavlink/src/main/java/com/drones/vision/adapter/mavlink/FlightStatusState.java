@@ -2,9 +2,11 @@ package com.drones.vision.adapter.mavlink;
 
 import com.drones.vision.kernel.FlightState;
 
+import io.dronefleet.mavlink.common.GpsFixType;
 import io.dronefleet.mavlink.common.GpsRawInt;
 import io.dronefleet.mavlink.minimal.Heartbeat;
 import io.dronefleet.mavlink.minimal.MavState;
+import io.dronefleet.mavlink.util.EnumValue;
 
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -28,6 +30,14 @@ final class FlightStatusState {
     private static final int UNKNOWN_SATELLITES = 255;
     private static final int UNKNOWN_EPH_CENTIUNITS = 65535;
     private static final int UNKNOWN_RSSI = 255;
+
+    /**
+     * The wire value of {@link GpsFixType#GPS_FIX_TYPE_2D_FIX}, read off the enum itself (the
+     * project's established {@code EnumValue.of(...).value()} idiom, e.g. {@code CommandService}/
+     * {@code CapabilityService} in {@code mavlink-core}) rather than hardcoded as the literal
+     * {@code 2} — docs/plans/active/OPERATOR-UX-4-PLAN.md N1.
+     */
+    private static final int GPS_FIX_TYPE_2D_FIX_VALUE = EnumValue.of(GpsFixType.GPS_FIX_TYPE_2D_FIX).value();
 
     private static final int MAV_MODE_FLAG_SAFETY_ARMED = 128;
     private static final int MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1;
@@ -82,6 +92,19 @@ final class FlightStatusState {
         satellites = satellitesVisible == UNKNOWN_SATELLITES ? null : satellitesVisible;
         int ephCentiunits = gpsRawInt.eph();
         hdop = ephCentiunits == UNKNOWN_EPH_CENTIUNITS ? null : ephCentiunits / 100.0;
+    }
+
+    /**
+     * {@code true} once {@code GPS_RAW_INT} has reported at least a 2D fix. {@code false} both for
+     * an explicit sub-2D fix (no fix / no GPS at all) <b>and</b> for "no {@code GPS_RAW_INT} has
+     * ever arrived" ({@link #gpsFixType} still {@code null}) — an unknown fix state must never be
+     * treated as "assume it's fine" (docs/plans/active/OPERATOR-UX-4-PLAN.md N1: a real ESP32 rover
+     * with no fix sends {@code GLOBAL_POSITION_INT} {@code lat=lon=0} regardless, which this decoder
+     * must never record as a real position — see {@link PositionAndPowerState#applyPosition}, the
+     * one caller of this method).
+     */
+    boolean hasGpsFix() {
+        return gpsFixType != null && gpsFixType >= GPS_FIX_TYPE_2D_FIX_VALUE;
     }
 
     void applyRssi(int rssiRaw) {

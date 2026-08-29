@@ -199,6 +199,23 @@ describe('relativeTimeLabel', () => {
     const now = Date.parse('2026-07-23T10:00:00.000Z');
     expect(relativeTimeLabel('2026-07-23T10:00:05.000Z', now)).toBe('0s ago');
   });
+
+  // docs/plans/active/OPERATOR-UX-4-PLAN.md finding N4 — one age vocabulary (humanAge), not
+  // formatDuration's zero-padded, hour-capped rendering.
+  it('renders minutes via humanAge, dropping a zero seconds remainder', () => {
+    const now = Date.parse('2026-07-23T10:10:00.000Z');
+    expect(relativeTimeLabel('2026-07-23T10:00:00.000Z', now)).toBe('10m ago');
+  });
+
+  it('renders hours via humanAge, with a non-zero minutes remainder', () => {
+    const now = Date.parse('2026-07-23T14:20:00.000Z');
+    expect(relativeTimeLabel('2026-07-23T10:00:00.000Z', now)).toBe('4h 20m ago');
+  });
+
+  it('renders days for an age humanAge could never reach as a duration (N4\'s own 323353s finding)', () => {
+    const now = Date.parse('2026-07-23T10:00:00.000Z');
+    expect(relativeTimeLabel('2026-07-19T14:04:07.000Z', now)).toBe('3d 19h ago');
+  });
 });
 
 describe('describeEventSource', () => {
@@ -209,14 +226,21 @@ describe('describeEventSource', () => {
     );
   });
 
-  it('falls back to a short assetId fragment when the device cannot be resolved', () => {
+  // docs/plans/active/OPERATOR-UX-4-PLAN.md finding N5 — a bare hash reads as a name; this says the
+  // device is gone.
+  it('falls back to "Removed device · <8-char id>" from assetId when the device cannot be resolved', () => {
     const e = event({ streamId: 'unknown-stream', assetId: 'asset-1234-5678' });
-    expect(describeEventSource(e, [], [])).toBe('asset-12');
+    expect(describeEventSource(e, [], [])).toBe('Removed device · asset-12');
   });
 
-  it('falls back to a short streamId fragment when neither device nor asset resolve', () => {
+  it('falls back to "Removed device · <8-char id>" from streamId when neither device nor asset resolve', () => {
     const e = event({ streamId: 'stream-1234-5678', assetId: undefined });
-    expect(describeEventSource(e, [], [])).toBe('stream-1');
+    expect(describeEventSource(e, [], [])).toBe('Removed device · stream-1');
+  });
+
+  it('degrades to "—" for a device-level event with neither a streamId nor an assetId', () => {
+    const e = event({ streamId: undefined, assetId: undefined });
+    expect(describeEventSource(e, [], [])).toBe('—');
   });
 });
 

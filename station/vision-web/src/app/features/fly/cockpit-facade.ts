@@ -9,6 +9,7 @@ import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { GeoStore } from '../../core/geo/geo-store';
+import { hasFix } from '../../core/geo/geo-logic';
 import { LiveStore } from '../../core/live/live-store';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import { MarksStore } from '../../core/map-data/marks-store';
@@ -370,9 +371,14 @@ export class CockpitFacade {
   /** The card's "last position" line — reuses {@link dronePosition} verbatim (live fix else the
    * asset's own last-known position) and `fly-logic.ts#positionLabel`'s identical `lat, lon`
    * format, rather than a third rendering of "best position we have right now". `undefined` omits
-   * the line entirely (no fix has ever been reported), same poka-yoke rule as every other chip on
-   * this page. */
-  readonly notStreamingPosition = computed(() => positionLabel(this.dronePosition()));
+   * the line entirely — no fix has ever been reported, **or** the only position on record is
+   * exactly `(0, 0)` (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N1: a MAVLink no-fix report,
+   * never a real vehicle position) — same poka-yoke rule as every other chip on this page. Gated on
+   * `core/geo/geo-logic.ts#hasFix` rather than re-deriving the `(0, 0)` check here. */
+  readonly notStreamingPosition = computed(() => {
+    const position = this.dronePosition();
+    return hasFix(position) ? positionLabel(position) : undefined;
+  });
 
   // --- Map inset (docs/plans/done/MAP-REWORK-PLAN.md §5.1 Wave D) ------------------------------------------
   // `<vision-tactical-map>` replaced the deleted `<vision-live-map>`, which read this facade's own

@@ -7,7 +7,7 @@ import { DEFAULT_WIND_LIMIT_MPS } from '../../core/weather/weather-logic';
 import { Icon } from '../../shared/ui/icon';
 import { WeatherChip } from '../../shared/ui/weather-chip';
 import { GeoChip } from './geo-chip';
-import { positionLabel } from './fly-logic';
+import { positionFact } from './fly-logic';
 import { armedOsdText, isStaleReading, osdGroupLabel } from './fly-osd-logic';
 import type { Transport } from '../../shared/player/player';
 
@@ -152,7 +152,7 @@ export class FlyOsd {
     if (latest?.latitude === undefined || latest.longitude === undefined) {
       return undefined;
     }
-    return positionLabel({ latitude: latest.latitude, longitude: latest.longitude });
+    return positionFact({ latitude: latest.latitude, longitude: latest.longitude })?.value;
   });
 
   protected readonly altitudeLabel = computed(() => {

@@ -5,7 +5,9 @@ import {
   attributesToRows,
   freshestSample,
   groupTelemetryByDevice,
+  sampleAgeLabel,
   telemetryFactRows,
+  withFixOnlyPosition,
 } from './asset-detail-logic';
 
 function sample(partial: Partial<TelemetrySample> = {}): TelemetrySample {
@@ -107,5 +109,49 @@ describe('telemetryFactRows', () => {
       { label: 'Heading', value: '—' },
       { label: 'Battery', value: '—' },
     ]);
+  });
+
+  // docs/plans/active/OPERATOR-UX-4-PLAN.md finding N1 — a (0, 0) sample is a no-fix report, not a
+  // real coordinate; it renders as a faint structural label, never a confident mono "0.00000, 0.00000".
+  it('renders "No GPS fix yet" (faint, not mono) for a sample reporting exactly (0, 0)', () => {
+    const rows = telemetryFactRows(sample({ latitude: 0, longitude: 0, batteryPercent: 90 }));
+    expect(rows[0]).toEqual({ label: 'Position', value: 'No GPS fix yet', faint: true });
+    expect(rows[3]).toEqual({ label: 'Battery', value: '90%' });
+  });
+
+  it('still renders a real fix that sits on one axis of the equator/prime meridian', () => {
+    const rows = telemetryFactRows(sample({ latitude: 0, longitude: 30.5183 }));
+    expect(rows[0]).toEqual({ label: 'Position', value: '0.00000, 30.51830', mono: true });
+  });
+});
+
+describe('sampleAgeLabel', () => {
+  it('renders humanAge + " ago" for a known age', () => {
+    expect(sampleAgeLabel(353_099)).toBe('4d 2h ago');
+  });
+
+  it('degrades to "—" for no sample at all — never the old bare "—s ago" suffix bug', () => {
+    expect(sampleAgeLabel(undefined)).toBe('—');
+  });
+});
+
+describe('withFixOnlyPosition', () => {
+  it('passes a real fix through unchanged', () => {
+    const s = sample({ latitude: 50.4381, longitude: 30.5183, batteryPercent: 80 });
+    expect(withFixOnlyPosition(s)).toBe(s);
+  });
+
+  it('strips lat/lon from a (0, 0) sample but keeps every other field', () => {
+    const s = sample({ latitude: 0, longitude: 0, batteryPercent: 80, headingDegrees: 12 });
+    expect(withFixOnlyPosition(s)).toEqual({ ...s, latitude: undefined, longitude: undefined });
+  });
+
+  it('passes a sample with no position at all through unchanged', () => {
+    const s = sample({ batteryPercent: 80 });
+    expect(withFixOnlyPosition(s)).toBe(s);
+  });
+
+  it('passes undefined through unchanged', () => {
+    expect(withFixOnlyPosition(undefined)).toBeUndefined();
   });
 });

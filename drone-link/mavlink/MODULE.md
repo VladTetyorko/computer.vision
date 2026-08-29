@@ -266,7 +266,7 @@ merely "chose not to".
 
 | MAVLink message | Field(s) | Domain field | Conversion |
 |---|---|---|---|
-| `GLOBAL_POSITION_INT` | `lat`/`lon` | `Telemetry.latitude`/`longitude` | ÷ 1e7 |
+| `GLOBAL_POSITION_INT` | `lat`/`lon` | `Telemetry.latitude`/`longitude` | ÷ 1e7, **only when `FlightStatusState.hasGpsFix()` is true** (OPERATOR-UX-4 N1 — `GPS_RAW_INT.fix_type` ≥ `GPS_FIX_TYPE_2D_FIX`; unheard/no-fix → both `null`, dropping any previously-known position) |
 | | `alt` (mm, AMSL) | `Telemetry.altitudeMeters` | ÷ 1000 (AMSL, not `relativeAlt`) |
 | | `relative_alt` (mm, height above home) | `Telemetry.aglMeters` | ÷ 1000; always sent, no sentinel |
 | | `time_boot_ms` | `Telemetry.deviceBootMillis` | none |
@@ -283,7 +283,7 @@ merely "chose not to".
 | | `base_mode` bit `128` | `FlightState.armed` | boolean, always set |
 | | `base_mode` bit `1` gates `custom_mode` | `FlightState.mode` | resolved via `FlightModes.name`; unchanged when the bit is clear |
 | | `system_status == MAV_STATE_CRITICAL` | `FlightState.failsafe` | boolean, always set |
-| `GPS_RAW_INT` | `fix_type` | `FlightState.gpsFixType` | none (already the 0..8 ordinal) |
+| `GPS_RAW_INT` | `fix_type` | `FlightState.gpsFixType` | none (already the 0..8 ordinal); also gates `GLOBAL_POSITION_INT`'s `lat`/`lon` (see above row) |
 | | `satellites_visible` (`255`=unknown) | `FlightState.satellites` | none, or `null` |
 | | `eph` (HDOP×100, `65535`=invalid) | `FlightState.hdop` | ÷ 100, or `null` |
 | `RC_CHANNELS` / `RC_CHANNELS_RAW` | `rssi` (0–254, `255`=invalid) | `FlightState.rssiPercent` | `round(rssi/254×100)`, or `null` |
@@ -317,6 +317,22 @@ one `FlightState`-contributing row above has fired at least once.
 - **`udp://host:port` means listen, not connect (RX).** A telemetry radio or SITL instance *pushes*
   datagrams to this app; `MavlinkTelemetrySource` never dials out. `host` is the local bind address
   (wildcard when blank), `port` the local bind port.
+- **(OPERATOR-UX-4 N1 — fixed) No GPS fix means no position, never `{0,0}`.** A real ESP32 rover
+  with no GPS fix sends `GLOBAL_POSITION_INT` with `lat=lon=0` regardless — before this fix, this
+  decoder recorded that unconditionally, so warehouse's `lastKnownPosition` became `{0,0,0}` and the
+  UI plotted the vehicle on Null Island (an ocean spot off West Africa). Fixed by gating
+  `PositionAndPowerState.applyPosition`'s `lat`/`lon` on `FlightStatusState.hasGpsFix()`
+  (`GPS_RAW_INT.fix_type >= GPS_FIX_TYPE_2D_FIX`, read off the enum via this codebase's established
+  `EnumValue.of(...).value()` idiom — never a bare `2` literal): no fix (or no `GPS_RAW_INT` ever
+  heard, treated identically — "unknown" is never "assume it's fine") emits a sample with `latitude`/
+  `longitude` both `null`; a fix that drops **mid-session** drops the position on the *next*
+  `GLOBAL_POSITION_INT`, not merely stops updating it — a stale last-known reading is never left in
+  place once the fix that produced it is gone. Every other field on the same message (`alt`, `hdg`,
+  velocity, `relative_alt`, `time_boot_ms`) is unaffected; only the lat/lon pair is gated. This
+  depends on `GPS_RAW_INT` having been processed by the time a given `GLOBAL_POSITION_INT` arrives —
+  true for every real vehicle and for `SimulatedVehicleMessages` (always transmits a fixed 3D fix,
+  and does so before its first position tick in `MavlinkFeedTransmitter.FeedRuntime`'s send-order),
+  so RX/TX round-trip and SITL tests stay green unchanged.
 - **Claim/re-election is project policy, not a protocol fact — `VehicleClaimPolicy`, not
   `PeerDirectory`.** A **pinned** device claims exactly that sysid, permanently, the first time it's
   heard. An **unpinned** device claims the first sysid heard that nothing else claims; if its
@@ -638,3 +654,16 @@ three pre-existing overloads unchanged and still default to the image's own `cop
 `serial2Port()` accessor for exactly this second-connection use case. Measured stable across three
 consecutive runs: **~15.8s each**, no flakiness observed. `./mvnw -B -o -pl drone-link/mavlink test` —
 **236 tests**, all green (2026-08-27, Docker available and used, not skipped).
+
+**`docs/plans/active/OPERATOR-UX-4-PLAN.md` N1 (W4) done.** `PositionAndPowerState.applyPosition`
+now takes `boolean hasGpsFix` (`FlightStatusState.hasGpsFix()`, the caller — `MavlinkTelemetryDecoder`
+— resolves it fresh per `GLOBAL_POSITION_INT`); `lat`/`lon` are recorded only when true, else both
+set `null` — see the Gotchas entry above for the full defect/fix/test-impact writeup. 4 new decoder
+tests (`noGpsFixSampleHasNoPosition`, `a3dGpsFixSampleHasAPosition`, `a2dGpsFixIsAlsoSufficientForAPosition`,
+`gpsFixLostMidSessionDropsThePosition`); 4 pre-existing `MavlinkTelemetryDecoderTest` fixtures that
+asserted on a bare `GlobalPositionInt` with no preceding fix now prime one first
+(`mapsGlobalPositionIntWithUnitConversions`, `heartbeatEmitsASampleWithoutChangingAnyOtherField`,
+`locksOntoTheFirstSystemIdAndIgnoresAllOthers`,
+`preExistingPositionBatteryAndHeadingMappingsAreUnchangedAlongsideFlightState`) — the position values
+themselves are unchanged, only the fixture setup. `./mvnw -B -pl drone-link/mavlink -am test` —
+**240 tests**, all green (2026-08-29).

@@ -18,6 +18,7 @@ import type * as Leaflet from 'leaflet';
 import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
 import { ThemeStore } from '../../../core/shell/theme-store';
 import { capitalizeLabel, formatConfidence, relativeTimeLabel } from '../../../core/events/events-logic';
+import { humanAge } from '../../../core/telemetry/telemetry-logic';
 import type { CorrectionResponse, GeoPosition, GeofenceZone } from '../../../core/api/models';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
 import { resolveZoneColors, zoneLayerStyle, FALLBACK_ZONE_COLORS, type ZoneColors } from '../../../core/geofence/geofence-logic';
@@ -841,7 +842,7 @@ export class TacticalMap {
       rows.push(`<div class="popup-row">Altitude ${asset.position.altitudeMeters.toFixed(0)} m</div>`);
     }
     if (asset.sampleAgeSeconds !== undefined) {
-      rows.push(`<div class="popup-row faint">Updated ${asset.sampleAgeSeconds.toFixed(0)}s ago</div>`);
+      rows.push(`<div class="popup-row faint">Updated ${humanAge(asset.sampleAgeSeconds)} ago</div>`);
     }
     if (asset.live) {
       rows.push(

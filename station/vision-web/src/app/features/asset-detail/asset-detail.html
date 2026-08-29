@@ -155,11 +155,11 @@
             />
             <dl class="facts freshest-facts">
               @for (row of facade.freshestFacts(); track row.label) {
-                <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono">{{ row.value }}</dd></div>
+                <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono" [class.faint]="row.faint">{{ row.value }}</dd></div>
               }
               <div class="fact">
                 <dt>Sample</dt>
-                <dd [class.stale-text]="facade.freshestStale()">{{ facade.freshestAgeSeconds()?.toFixed(0) ?? '—' }}s ago</dd>
+                <dd [class.stale-text]="facade.freshestStale()">{{ freshestAgeLabel() }}</dd>
               </div>
             </dl>
           </section>
@@ -460,12 +460,12 @@
                 @if (facade.latestSampleFor(device.id); as sample) {
                   <dl class="facts">
                     @for (row of deviceFacts(device.id); track row.label) {
-                      <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono">{{ row.value }}</dd></div>
+                      <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono" [class.faint]="row.faint">{{ row.value }}</dd></div>
                     }
                     <div class="fact">
                       <dt>Sample</dt>
                       <dd [class.stale-text]="deviceStale(device.id)">
-                        {{ deviceSampleAgeSeconds(device.id)?.toFixed(0) ?? '—' }}s ago
+                        {{ deviceAgeLabel(device.id) }}
                       </dd>
                     </div>
                   </dl>

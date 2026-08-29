@@ -1,4 +1,5 @@
 import type { AssetStatus, AssetSummary, GeoPosition, TelemetrySample } from '../api/models';
+import { hasFix } from '../geo/geo-logic';
 import { ageSeconds, deriveTrail } from '../telemetry/telemetry-logic';
 
 /**
@@ -39,9 +40,14 @@ export type MarkerBucket = 'streaming' | 'offline' | 'noPosition';
  * - `noPosition`: no position has ever been recorded — including the brief window right after a
  *   stream starts, before any positioned sample exists yet (see `DefaultStreamService#start`) —
  *   never invisible, always accounted for in the "no position yet" rail instead.
+ *
+ * A `lastKnownPosition` that carries no real GPS fix (exactly `(0, 0)` — see `core/geo/geo-logic.ts#hasFix`'s
+ * own doc comment, docs/plans/active/OPERATOR-UX-4-PLAN.md finding N1) is treated exactly like no position at
+ * all: bucketing it as `streaming`/`offline` would plot a marker on Null Island and recentre the
+ * fleet map on open ocean for data that was never acquired.
  */
 export function bucketForAsset(asset: Pick<AssetSummary, 'status' | 'lastKnownPosition'>): MarkerBucket {
-  if (!asset.lastKnownPosition) {
+  if (!hasFix(asset.lastKnownPosition)) {
     return 'noPosition';
   }
   return asset.status === 'STREAMING' ? 'streaming' : 'offline';
@@ -176,8 +182,8 @@ export function buildMarker(
   }
 
   const latest = telemetry?.latest;
-  const hasFix = latest?.latitude !== undefined && latest.longitude !== undefined;
-  const position: GeoPosition = hasFix
+  const latestHasFix = hasFix(latest);
+  const position: GeoPosition = latestHasFix
     ? { latitude: latest!.latitude!, longitude: latest!.longitude!, altitudeMeters: latest!.altitudeMeters }
     : (asset.lastKnownPosition as GeoPosition);
 

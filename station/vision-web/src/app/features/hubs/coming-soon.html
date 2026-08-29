@@ -1,0 +1,11 @@
+<div class="page">
+  <vision-page-bar [title]="title()" />
+
+  <div class="card empty">
+    <span class="label eyebrow">{{ eyebrow() }} · Coming soon</span>
+    <p>{{ description() }}</p>
+    @if (nearestTo(); as to) {
+      <a class="btn" [routerLink]="to">{{ nearestLabel() }}</a>
+    }
+  </div>
+</div>
