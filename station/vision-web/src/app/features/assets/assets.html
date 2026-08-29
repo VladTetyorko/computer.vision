@@ -140,7 +140,9 @@
         }
       } @else if (viewMode() === 'list') {
         <!-- ---- Dense list (default, docs/extracts/design/04-assets.md's own row spec, F5 column order —
-             name · category · state · devices · kebab), ~36px rows — ~20 fit a 1080p screen without
+             name · category · state · last seen · devices · kebab; "Last seen" added
+             docs/plans/active/OPERATOR-UX-5-PLAN.md finding U5, placed right after State per that
+             finding's own instruction), ~36px rows — ~20 fit a 1080p screen without
              scrolling (the page's own acceptance bar). A real `<table>`, not a
              CSS-grid list: it's the same shape `features/devices/devices.html`'s table already
              proves, and reuses that table's global CSS (`src/styles.css`) instead of a bespoke
@@ -158,6 +160,7 @@
               <th>Name</th>
               <th>Category</th>
               <th>State</th>
+              <th>Last seen</th>
               <th class="col-num">Devices</th>
               <th aria-label="Actions"></th>
             </tr>
@@ -202,6 +205,7 @@
                     }
                   }
                 </td>
+                <td class="muted">{{ assetLastSeen(row) }}</td>
                 <td class="col-num mono">{{ row.deviceCount }}</td>
                 <td class="row-kebab-cell" (click)="$event.stopPropagation()">
                   <vision-kebab-menu [label]="'More actions for ' + row.asset.displayName">
@@ -289,6 +293,10 @@
                 }
                 <span class="muted">{{ pluralize(row.deviceCount, 'device') }}</span>
               </div>
+              <!-- "Last seen" (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U5) — the same text the
+                   dense list's own new column shows, under the status here instead of a column of
+                   its own. -->
+              <div class="muted asset-card-lastseen">{{ assetLastSeen(row) }}</div>
             </article>
           }
         </div>

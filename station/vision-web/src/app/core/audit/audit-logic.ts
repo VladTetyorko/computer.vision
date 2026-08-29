@@ -1,6 +1,7 @@
 import type { AssetSummary, AuditEntry, UserSummary } from '../api/models';
 import { formatActivity } from '../org/org-logic';
 import { activityAccentTone, type ActivityAccentTone } from '../activity/activity-logic';
+import { actorLabel, buildNameMap, humanizeSummary } from './summary-logic';
 
 /**
  * Pure, Angular-free logic behind `/monitor/audit` (docs/plans/done/OPS-UX-PLAN.md §3 B1) — the manager's
@@ -23,7 +24,8 @@ export interface AuditRow {
   /** Locale-formatted absolute date+time — an audit log is read by "when exactly", not "how long ago" (mirrors `features/activity/activity-facade.ts#toRow`'s identical absolute-time choice). */
   readonly absoluteTime: string;
   readonly actorId: string;
-  /** The actor's resolved display name, or a short id fragment when unresolvable — same fallback rule as `features/roster/roster-logic.ts#buildRosterRows`, never fabricated. */
+  /** The actor's resolved display name via `summary-logic.ts#actorLabel` — the root/system principal
+   *  reads `Station`, a known user their name, anything else a short id fragment (never fabricated). */
   readonly actorLabel: string;
   readonly action: string;
   readonly actionLabel: string;
@@ -34,7 +36,13 @@ export interface AuditRow {
   readonly targetId: string;
   /** The target's resolved display name (currently only ever resolved for `ASSET`, the only target kind this page has a name source for) or a short id fragment. */
   readonly targetName: string;
+  /** The raw, unmodified `AuditEntry.summary` — kept around only to back the SUMMARY cell's `[title]` tooltip; the cell itself renders {@link summaryLabel}. */
   readonly summary: string;
+  /** `summary` with every resolvable UUID swapped for its display name (docs/plans/active/OPERATOR-UX-5-PLAN.md
+   *  finding U2, §2 U2, `summary-logic.ts#humanizeSummary`) — "Flight command 'ARM' for asset Falcon-1"
+   *  instead of the raw id the backend wrote, the same way `targetName` already resolves the row's own
+   *  dedicated Target column. */
+  readonly summaryLabel: string;
   readonly details: readonly { readonly key: string; readonly value: string }[];
   /** Whether `details.result` (the `DENIED:<reason>` convention several application services already write — see {@link auditResult}) marks this entry a refused attempt rather than a completed change. */
   readonly denied: boolean;
@@ -67,10 +75,6 @@ export function auditResult(entry: AuditEntry): { readonly denied: boolean; read
   return { denied: true, label: reason ? `Denied — ${reason}` : 'Denied' };
 }
 
-function actorLabelFor(actorId: string, users: readonly UserSummary[]): string {
-  return users.find((user) => user.userId === actorId)?.displayName ?? actorId.slice(0, 8);
-}
-
 /**
  * Resolves a target to a display name when this page has a name source for its kind — today only
  * `ASSET`, against the already-loaded fleet (which, like `actorLabelFor`, may legitimately not
@@ -97,6 +101,7 @@ export function buildAuditRows(
   assets: readonly AssetSummary[],
   nowMs: number,
 ): readonly AuditRow[] {
+  const names = buildNameMap(assets, users);
   return entries.map((entry) => {
     const activity = formatActivity(entry, nowMs);
     const result = auditResult(entry);
@@ -110,7 +115,7 @@ export function buildAuditRows(
         minute: '2-digit',
       }),
       actorId: entry.actor,
-      actorLabel: actorLabelFor(entry.actor, users),
+      actorLabel: actorLabel(entry.actor, names),
       action: entry.action,
       actionLabel: activity.actionLabel,
       accentTone: activityAccentTone(entry.action),
@@ -119,6 +124,7 @@ export function buildAuditRows(
       targetId: entry.targetId,
       targetName: targetNameFor(entry, assets),
       summary: activity.summary,
+      summaryLabel: humanizeSummary(activity.summary, names),
       details: activity.details,
       denied: result.denied,
       resultLabel: result.label,

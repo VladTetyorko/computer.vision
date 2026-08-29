@@ -217,6 +217,13 @@ tbody tr.row-selectable.archived {
     font-size: 0.78rem;
 }
 
+/* "Last seen" card fact (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U5) — same small muted
+   register as `.asset-card-meta`, its own class since it sits under the status chips row rather
+   than the category line. */
+.asset-card-lastseen {
+    font-size: 0.78rem;
+}
+
 /* Per-row kebab (⋯) menu — `.kebab`/`.kebab-trigger`/`.kebab-menu`/`.kebab-item`/`.kebab-divider`/
    `.kebab-reason`/`.danger-action` are a shared global primitive (src/styles.css) — see
    `features/devices/devices.css`'s identical note. */

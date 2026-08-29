@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetSummary } from '../api/models';
-import { groupAndSort, isSimulated, offlineLabel } from './triage-logic';
+import { groupAndSort, isSimulated, offlineLabel, triageOrder } from './triage-logic';
 
 /**
  * Moved from `features/fly/drone-picker-logic.spec.ts` (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3,
@@ -121,6 +121,50 @@ describe('groupAndSort', () => {
     const offlineCritical = asset({ assetId: 'offline-critical', status: 'OFFLINE' });
     const groups = groupAndSort([offlineCritical, streamingQuiet], NOW, (a) => (a.assetId === 'offline-critical' ? 9 : 0));
     expect(groups.yours.map((a) => a.assetId)).toEqual(['streaming', 'offline-critical']);
+  });
+});
+
+// --- triageOrder (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U5, §2 U5 — the flat, ungrouped
+// comparator `features/assets/**` sorts its own grid with) -------------------------------------
+
+describe('triageOrder', () => {
+  it('sorts real vehicles ahead of simulated ones as the outermost tier', () => {
+    const sim = asset({ assetId: 'sim-1', category: 'simulated', status: 'STREAMING' });
+    const real = asset({ assetId: 'real-1', category: 'rover', status: 'OFFLINE' });
+    const rows = [sim, real].sort((a, b) => triageOrder(a, b, NOW));
+    expect(rows.map((a) => a.assetId)).toEqual(['real-1', 'sim-1']);
+  });
+
+  it('within the same real/simulated tier, streaming still sorts first', () => {
+    const offlineZ = asset({ assetId: 'z', displayName: 'Zulu', status: 'OFFLINE' });
+    const streamingA = asset({ assetId: 'a', displayName: 'Alpha', status: 'STREAMING' });
+    const rows = [offlineZ, streamingA].sort((a, b) => triageOrder(a, b, NOW));
+    expect(rows.map((a) => a.assetId)).toEqual(['a', 'z']);
+  });
+
+  it('sorts by lastUsedAt descending, never-seen last, within a status tier', () => {
+    const neverSeen = asset({ assetId: 'never' });
+    const older = asset({ assetId: 'older', lastUsedAt: '2026-08-28T08:00:00Z' });
+    const newer = asset({ assetId: 'newer', lastUsedAt: '2026-08-28T11:00:00Z' });
+    const rows = [neverSeen, older, newer].sort((a, b) => triageOrder(a, b, NOW));
+    expect(rows.map((a) => a.assetId)).toEqual(['newer', 'older', 'never']);
+  });
+
+  it('honors an attentionRank ahead of last-seen, still behind status and the real/simulated tier', () => {
+    const critical = asset({ assetId: 'critical', lastUsedAt: '2026-01-01T00:00:00Z' });
+    const quiet = asset({ assetId: 'quiet', lastUsedAt: '2026-08-28T11:00:00Z' });
+    const rankById: Record<string, number> = { critical: 9 };
+    const rows = [quiet, critical].sort((a, b) => triageOrder(a, b, NOW, (x) => rankById[x.assetId] ?? 0));
+    expect(rows.map((a) => a.assetId)).toEqual(['critical', 'quiet']);
+  });
+
+  it('reproduces groupAndSort exactly when concatenating its two groups (same comparator, flattened)', () => {
+    const rover = asset({ assetId: 'rover-1', category: 'rover', status: 'STREAMING' });
+    const drone = asset({ assetId: 'drone-1', category: 'drone', lastUsedAt: '2026-08-28T08:00:00Z' });
+    const sim = asset({ assetId: 'sim-1', category: 'simulated', lastUsedAt: '2026-08-28T11:00:00Z' });
+    const groups = groupAndSort([sim, drone, rover], NOW);
+    const flat = [rover, drone, sim].sort((a, b) => triageOrder(a, b, NOW));
+    expect(flat.map((a) => a.assetId)).toEqual([...groups.yours, ...groups.simulated].map((a) => a.assetId));
   });
 });
 
