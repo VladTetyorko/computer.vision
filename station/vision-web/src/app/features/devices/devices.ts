@@ -98,6 +98,14 @@ export class DevicesPage {
   }
 
   /**
+   * docs/plans/active/OPERATOR-UX-7-PLAN.md finding D1 — the names of the other active devices
+   * sharing this one's exact protocol+uri, or `undefined` when it has the endpoint to itself.
+   */
+  protected endpointConflictNames(device: Device): readonly string[] | undefined {
+    return this.facade.conflictingEndpoints().get(device.id);
+  }
+
+  /**
    * The table row/detail panel's one merged state indicator (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 — "at
    * most one chip per row"): replaces the old separate Lifecycle + Live/Stopped chips. See
    * `devices-page-logic.ts#describeDeviceState`'s own doc comment for the priority order.

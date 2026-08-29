@@ -33,12 +33,29 @@ td:nth-child(4) {
 
 .source {
     display: flex;
-    align-items: center;
-    gap: var(--space-8);
+    flex-direction: column;
+    gap: var(--space-4);
     /* Halved from the pre-Wave-3 26rem: the full URI is always one `title` hover or one click (the
        detail panel) away now, so the row's own copy can truncate more eagerly in exchange for
        leaving Name enough room to stay single-line. */
     max-width: 13rem;
+}
+
+.source-endpoint {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+}
+
+/* D1 (docs/plans/active/OPERATOR-UX-7-PLAN.md) — a shared protocol+uri is a fact worth one quiet
+   line, not a chip (the row already carries its own state chip). Same secondary-line register as
+   `features/system-status/system-status.css`'s `.stale-note`: plain text in the warning text
+   token, no background, no border. Stretches to `.source`'s own `max-width` (flex column default
+   `align-items: stretch`), so a long conflict list truncates the same way the uri above it does —
+   `title` on the element carries the untruncated list. */
+.endpoint-conflict {
+    font-size: 0.8rem;
+    color: var(--color-warn-text);
 }
 
 /* Tighter than the global `td { padding: var(--space-8) }` (src/styles.css) — now that each row

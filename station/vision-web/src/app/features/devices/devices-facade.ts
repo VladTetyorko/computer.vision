@@ -19,6 +19,7 @@ import {
   buildDeviceRenameEdit,
   buildWarehouseRows,
   deriveCategoryOptions,
+  endpointConflicts,
   filterRowsByArchived,
   findWarehouseRowById,
   mapDeviceOwners,
@@ -97,6 +98,17 @@ export class DevicesFacade {
   /** `true` once at least one device has loaded — distinguishes "no devices exist yet" from
    *  "search matched nothing" for the empty state. */
   readonly hasAnyDevices = computed(() => this.warehouseDevices().length > 0);
+
+  /**
+   * docs/plans/active/OPERATOR-UX-7-PLAN.md finding D1: deviceId → the other ACTIVE devices sharing
+   * its exact protocol+uri. Read off `warehouseDevices()`, not the search-narrowed
+   * `warehouseRows()` — typing into the search box must not hide a device's own conflict fact, and
+   * `endpointConflicts` already excludes archived devices on its own, so feeding it the
+   * `showArchived`-widened list (when that toggle is on) is safe.
+   */
+  readonly conflictingEndpoints = computed<ReadonlyMap<string, readonly string[]>>(() =>
+    endpointConflicts(this.warehouseDevices()),
+  );
 
   // --- Two-pane selection (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/06-devices.md) ----------
   // `DevicesPage`'s own constructor `effect()` forwards its route-bound `sel` input straight into
