@@ -225,7 +225,10 @@ export class NotificationBell {
     // ever opened again still resumes from this seed rather than reverting to another cold start.
     effect(() => {
       const current = this.events.events();
-      if (!this.readIdsSeeded) {
+      // Nothing to seed from yet: the store's first tick is empty and the backlog lands later.
+      // Seeding (and persisting) an empty set here is exactly what made every historic event
+      // "unread" after the first reload — wait for the first non-empty tick instead.
+      if (!this.readIdsSeeded && current.length > 0) {
         const seeded = seedReadIds(current, this.loadPersistedReadIds());
         this.readIds.set(seeded);
         this.readIdsSeeded = true;

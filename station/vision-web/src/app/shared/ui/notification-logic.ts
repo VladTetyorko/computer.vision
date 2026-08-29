@@ -98,9 +98,11 @@ export function seedReadIds(
   events: readonly DetectionEvent[],
   persisted: readonly string[] | null,
 ): ReadonlySet<string> {
-  if (persisted !== null) {
+  if (persisted !== null && persisted.length > 0) {
     return new Set(persisted);
   }
+  // An empty persisted set is a seed taken before the feed had loaded (the store's first tick is
+  // empty) — treat it as a cold start, or every historic event becomes "unread" on the next tick.
   return new Set(events.map((event) => event.id));
 }
 

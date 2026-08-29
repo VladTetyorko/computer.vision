@@ -87,12 +87,12 @@ function trigger(fixture: { nativeElement: HTMLElement }): HTMLButtonElement {
  * B1) — every test below that isn't specifically exercising that persistence pre-seeds an *explicit,
  * empty* persisted set (not a true cold start) so a fresh component's initial events read as
  * genuinely unread, matching this whole suite's pre-B1 assumption (`seedReadIds`'s own doc comment:
- * an explicit persisted `[]` is trusted as-is, never re-seeded as if cold). The dedicated "read-ids
+ * an empty persisted set is a seed taken before the feed loaded, so it is treated as cold — hence the one foreign id here). The dedicated "read-ids
  * persistence" describe block below removes/sets this key itself per test to exercise the real
  * cold-start and reload paths.
  */
 beforeEach(() => {
-  localStorage.setItem('vision.bell.readIds', '[]');
+  localStorage.setItem('vision.bell.readIds', '["already-read-elsewhere"]');
 });
 
 afterEach(() => {

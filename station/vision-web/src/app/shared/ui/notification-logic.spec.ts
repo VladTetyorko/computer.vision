@@ -121,9 +121,9 @@ describe('seedReadIds (docs/plans/active/OPERATOR-UX-7-PLAN.md finding B1)', () 
     expect(seedReadIds([a, b], ['a'])).toEqual(new Set(['a']));
   });
 
-  it('an explicit, previously-persisted empty array is trusted too — never re-seeded as if cold', () => {
+  it('a persisted empty set is a seed taken before the feed loaded — treated as cold, not trusted', () => {
     const a = event({ id: 'a' });
-    expect(seedReadIds([a], [])).toEqual(new Set());
+    expect(seedReadIds([a], [])).toEqual(new Set(['a']));
   });
 });
 
