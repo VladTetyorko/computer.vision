@@ -71,7 +71,12 @@ import java.util.Map;
  *       MAV_STATE_CRITICAL} → {@code failsafe}. Arming becoming {@code true} clears
  *       any accumulated {@code armingBlockers} (see {@code STATUSTEXT} below).</li>
  *   <li>{@code GLOBAL_POSITION_INT} — {@code lat}/{@code lon} (degrees × 1e7) → {@link
- *       Telemetry#latitude()}/{@link Telemetry#longitude()} (÷ 1e7); {@code alt} (mm, AMSL) →
+ *       Telemetry#latitude()}/{@link Telemetry#longitude()} (÷ 1e7), <b>only when {@link
+ *       FlightStatusState#hasGpsFix()} is currently {@code true}</b> (docs/plans/active/OPERATOR-UX-4-PLAN.md
+ *       N1 — the vehicle's most recently reported {@code GPS_RAW_INT.fix_type} is at least 2D;
+ *       {@code null}/never-heard is treated as no fix); otherwise both fields are {@code null},
+ *       dropping any previously-known position — see {@link PositionAndPowerState}'s own javadoc.
+ *       {@code alt} (mm, AMSL) →
  *       {@link Telemetry#altitudeMeters()} (÷ 1000 — the AMSL reading, not {@code relativeAlt}, to
  *       match {@link Telemetry#altitudeMeters()}'s "absolute" semantics used elsewhere in this
  *       codebase, e.g. {@code GeoPosition}); {@code relative_alt} (mm, height above home) → {@link
@@ -221,7 +226,7 @@ final class MavlinkTelemetryDecoder {
         }
 
         if (payload instanceof GlobalPositionInt position) {
-            positionAndPower.applyPosition(position);
+            positionAndPower.applyPosition(position, flightStatus.hasGpsFix());
         } else if (payload instanceof SysStatus sysStatus) {
             positionAndPower.applyBatteryPercent(sysStatus.batteryRemaining());
             positionAndPower.applyBatteryVoltage(sysStatus.voltageBattery());

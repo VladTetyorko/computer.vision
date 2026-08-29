@@ -84,7 +84,8 @@ class MavlinkTelemetryDecoderTest {
                 .hdg(9000)        // centidegrees -> 90.0 degrees
                 .build();
 
-        Telemetry sample = decode(1, payload);
+        // OPERATOR-UX-4 N1: lat/lon are recorded only once a GPS fix is known -- prime one first.
+        Telemetry sample = decodeWithGpsFix(1, GpsFixType.GPS_FIX_TYPE_3D_FIX, payload);
 
         assertNotNull(sample);
         assertEquals(50.45, sample.latitude(), 1e-9);
@@ -130,6 +131,66 @@ class MavlinkTelemetryDecoderTest {
         assertNull(sample.headingDegrees());
     }
 
+    // --- docs/plans/active/OPERATOR-UX-4-PLAN.md N1: no GPS fix -> no position (Null Island) ---
+
+    @Test
+    void noGpsFixSampleHasNoPosition() throws IOException {
+        // The real-world defect this guards against: a real ESP32 rover with no GPS fix sends
+        // GLOBAL_POSITION_INT lat=lon=0 regardless -- this decoder must never record that as a
+        // position. No GPS_RAW_INT has been seen at all here, which N1 requires be treated the
+        // same as an explicit no-fix (never "assume it's fine").
+        Telemetry sample = decode(1, GlobalPositionInt.builder()
+                .timeBootMs(0L).lat(0).lon(0).alt(50000).relativeAlt(0).vx(0).vy(0).vz(0).hdg(0).build());
+
+        assertNotNull(sample, "non-position fields must still be emitted");
+        assertNull(sample.latitude());
+        assertNull(sample.longitude());
+        assertEquals(50.0, sample.altitudeMeters(), 1e-9, "altitude is independent of the GPS fix gate");
+    }
+
+    @Test
+    void a3dGpsFixSampleHasAPosition() throws IOException {
+        Telemetry sample = decodeWithGpsFix(1, GpsFixType.GPS_FIX_TYPE_3D_FIX, GlobalPositionInt.builder()
+                .timeBootMs(0L).lat(504500000).lon(305200000).alt(0).relativeAlt(0).vx(0).vy(0).vz(0).hdg(0)
+                .build());
+
+        assertNotNull(sample);
+        assertEquals(50.45, sample.latitude(), 1e-9);
+        assertEquals(30.52, sample.longitude(), 1e-9);
+    }
+
+    @Test
+    void a2dGpsFixIsAlsoSufficientForAPosition() throws IOException {
+        // N1's rule is "fix type >= 2D", not "== 3D" -- a 2D-only fix must still count.
+        Telemetry sample = decodeWithGpsFix(1, GpsFixType.GPS_FIX_TYPE_2D_FIX, GlobalPositionInt.builder()
+                .timeBootMs(0L).lat(504500000).lon(305200000).alt(0).relativeAlt(0).vx(0).vy(0).vz(0).hdg(0)
+                .build());
+
+        assertNotNull(sample);
+        assertEquals(50.45, sample.latitude(), 1e-9);
+        assertEquals(30.52, sample.longitude(), 1e-9);
+    }
+
+    @Test
+    void gpsFixLostMidSessionDropsThePosition() throws IOException {
+        MavlinkTelemetryDecoder decoder = new MavlinkTelemetryDecoder(DEVICE_ID);
+        decoder.accept(encodeThenDecode(1, gpsRawInt(GpsFixType.GPS_FIX_TYPE_3D_FIX, 12, 90)));
+        Telemetry withFix = decoder.accept(encodeThenDecode(1, GlobalPositionInt.builder()
+                .timeBootMs(0L).lat(504500000).lon(305200000).alt(0).relativeAlt(0).vx(0).vy(0).vz(0).hdg(0)
+                .build()));
+        assertNotNull(withFix.latitude(), "sanity check: the fix must have been applied before it is lost");
+
+        decoder.accept(encodeThenDecode(1, gpsRawInt(GpsFixType.GPS_FIX_TYPE_NO_FIX, 255, 65535)));
+        // The rover keeps streaming GLOBAL_POSITION_INT after losing its fix, exactly like the
+        // real defect -- a fresh lat=lon=0 reading arrives on the very same message type.
+        Telemetry afterFixLost = decoder.accept(encodeThenDecode(1, GlobalPositionInt.builder()
+                .timeBootMs(1000L).lat(0).lon(0).alt(0).relativeAlt(0).vx(0).vy(0).vz(0).hdg(0).build()));
+
+        assertNotNull(afterFixLost);
+        assertNull(afterFixLost.latitude(), "a lost fix must drop the position, not freeze on the last known one");
+        assertNull(afterFixLost.longitude());
+    }
+
     @Test
     void mapsBatteryPercentFromSysStatusThenBatteryStatusOverridesItAsTheMoreRecentReading() throws IOException {
         MavlinkTelemetryDecoder decoder = new MavlinkTelemetryDecoder(DEVICE_ID);
@@ -169,6 +230,7 @@ class MavlinkTelemetryDecoderTest {
     @Test
     void heartbeatEmitsASampleWithoutChangingAnyOtherField() throws IOException {
         MavlinkTelemetryDecoder decoder = new MavlinkTelemetryDecoder(DEVICE_ID);
+        decoder.accept(encodeThenDecode(1, gpsRawInt(GpsFixType.GPS_FIX_TYPE_3D_FIX, 12, 90)));
         decoder.accept(encodeThenDecode(1, GlobalPositionInt.builder()
                 .timeBootMs(0L).lat(100000000).lon(200000000).alt(0).relativeAlt(0).vx(0).vy(0).vz(0).hdg(0)
                 .build()));
@@ -195,6 +257,7 @@ class MavlinkTelemetryDecoderTest {
     @Test
     void locksOntoTheFirstSystemIdAndIgnoresAllOthers() throws IOException {
         MavlinkTelemetryDecoder decoder = new MavlinkTelemetryDecoder(DEVICE_ID);
+        decoder.accept(encodeThenDecode(5, gpsRawInt(GpsFixType.GPS_FIX_TYPE_3D_FIX, 12, 90)));
 
         Telemetry fromFirstSystem = decoder.accept(encodeThenDecode(5, GlobalPositionInt.builder()
                 .timeBootMs(0L).lat(100000000).lon(100000000).alt(0).relativeAlt(0).vx(0).vy(0).vz(0).hdg(0)
@@ -406,6 +469,7 @@ class MavlinkTelemetryDecoderTest {
     @Test
     void preExistingPositionBatteryAndHeadingMappingsAreUnchangedAlongsideFlightState() throws IOException {
         MavlinkTelemetryDecoder mavlinkTelemetryDecoder = new MavlinkTelemetryDecoder(DEVICE_ID);
+        mavlinkTelemetryDecoder.accept(encodeThenDecode(1, gpsRawInt(GpsFixType.GPS_FIX_TYPE_3D_FIX, 12, 90)));
         mavlinkTelemetryDecoder.accept(encodeThenDecode(1, GlobalPositionInt.builder()
                 .timeBootMs(0L).lat(504500000).lon(305200000).alt(123456).relativeAlt(0)
                 .vx(0).vy(0).vz(0).hdg(9000).build()));
@@ -775,6 +839,18 @@ class MavlinkTelemetryDecoderTest {
 
     private static Telemetry decode(int systemId, Object payload) throws IOException {
         return new MavlinkTelemetryDecoder(DEVICE_ID).accept(encodeThenDecode(systemId, payload));
+    }
+
+    /**
+     * Like {@link #decode(int, Object)}, but first primes {@code systemId}'s GPS fix via a {@code
+     * GPS_RAW_INT} message before decoding {@code payload} — docs/plans/active/OPERATOR-UX-4-PLAN.md
+     * N1's fix-gating means a bare {@code GlobalPositionInt} fixture needs a fix known first for its
+     * lat/lon to actually land in the emitted {@link Telemetry}.
+     */
+    private static Telemetry decodeWithGpsFix(int systemId, GpsFixType fixType, Object payload) throws IOException {
+        MavlinkTelemetryDecoder decoder = new MavlinkTelemetryDecoder(DEVICE_ID);
+        decoder.accept(encodeThenDecode(systemId, gpsRawInt(fixType, 12, 90)));
+        return decoder.accept(encodeThenDecode(systemId, payload));
     }
 
     /**
