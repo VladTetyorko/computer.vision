@@ -42,6 +42,7 @@ import {
   ensureLeafletStylesheet,
   importLeaflet,
   isMapLayerExplicit,
+  mapLayerDef,
   markMapLayerExplicit,
   mapLayerTileLayer,
 } from '../tile-cache/leaflet-loader';
@@ -200,7 +201,14 @@ interface CorrectionHandle {
   imports: [Icon],
   templateUrl: './tactical-map.html',
   styleUrl: './tactical-map.css',
-  host: { '[class.follow-mode]': 'followMode()' },
+  host: {
+    '[class.follow-mode]': 'followMode()',
+    // Night basemap: OSM raster run through a CSS filter on `.leaflet-tile-pane` only
+    // (docs/plans/active/OPERATOR-UX-6-PLAN.md M1) — see `activeBasemapTileFilter`'s own doc
+    // comment and `tactical-map.css`'s `.basemap-filtered` rule for the mechanism.
+    '[class.basemap-filtered]': '!!activeBasemapTileFilter()',
+    '[style.--basemap-tile-filter]': 'activeBasemapTileFilter()',
+  },
 })
 export class TacticalMap {
   private readonly settings = inject(SettingsStore);
@@ -346,6 +354,22 @@ export class TacticalMap {
    */
   readonly activeBasemapId = computed<MapLayerId>(() =>
     effectiveMapLayerId(this.theme.theme(), this.settings.mapLayer(), isMapLayerExplicit()),
+  );
+
+  /**
+   * The CSS filter (if any) {@link activeBasemapId}'s own {@link MapLayerDef.tileFilter} carries —
+   * `null` for Standard/Relief/Satellite, the dark-tuning filter for Night
+   * (docs/plans/active/OPERATOR-UX-6-PLAN.md M1). Read by this component's own `host` bindings
+   * above, which expose it as the `--basemap-tile-filter` custom property and toggle the
+   * `basemap-filtered` class in the same tick `activeBasemapId` changes — no manual DOM write in
+   * `applyBasemap()` needed, since a host binding re-evaluates on every signal read exactly like a
+   * template one does (see `[class.follow-mode]` on the same `host` object, the existing precedent).
+   * A CSS custom property inherits down the real DOM regardless of Angular's emulated view
+   * encapsulation (there is no actual Shadow DOM boundary), so setting it on the host element still
+   * reaches `.leaflet-tile-pane` several elements below, inside `mapHost()`'s own div.
+   */
+  protected readonly activeBasemapTileFilter = computed<string | null>(
+    () => mapLayerDef(this.activeBasemapId()).tileFilter ?? null,
   );
 
   /**
