@@ -7,17 +7,19 @@
   (click)="select.emit()"
 >
   <span class="dot" [class.live]="row().asset.streaming"></span>
-  <span class="rail-name truncate">{{ row().asset.displayName }}</span>
+  <span class="rail-text">
+    <span class="rail-name truncate">{{ row().asset.displayName }}</span>
+    <!-- docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — one meta line under the name:
+         the category word, then the row's own honest offline age ("Offline · 3d"), never the bare
+         word "Offline"; the age is absent while streaming (the dot already says so). Plain text,
+         not a chip — the severity chip stays the row's only chip (frontend-style §5). A second line
+         instead of a third column so neither the name nor the age is ever truncated at rail width. -->
+    <span class="rail-meta faint truncate">
+      {{ row().asset.categoryName }}@if (row().offlineAge) { · {{ row().offlineAge }} }
+    </span>
+  </span>
   @if (row().asset.failsafe === true) {
     <span class="chip fs-chip" title="Failsafe active">FS</span>
-  }
-  <span class="rail-category faint truncate">{{ row().asset.categoryName }}</span>
-  <!-- docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — the row's own honest offline age
-       ("Offline · 3d"), never the bare word "Offline"; absent while streaming (the dot above already
-       says so). Plain text, not a chip — the severity chip below stays the row's only chip
-       (frontend-style §5). -->
-  @if (row().offlineAge) {
-    <span class="rail-age faint mono truncate">{{ row().offlineAge }}</span>
   }
   @if (row().severity !== 'ok') {
     <span class="chip severity-chip" [class.danger]="row().severity === 'critical'" [class.warn]="row().severity === 'warning'">

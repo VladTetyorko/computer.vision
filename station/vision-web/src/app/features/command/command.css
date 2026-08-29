@@ -108,7 +108,7 @@
   gap: var(--space-4);
 }
 
-/* Per-row markup (`.rail-row`, `.rail-name`, `.rail-category`, `.rail-age`, `.severity-chip`,
+/* Per-row markup (`.rail-row`, `.rail-name`, `.rail-meta`, `.severity-chip`,
    `.fs-chip`) moved to `rail-row.css` (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3) when
    the row split into its own `<vision-command-rail-row>` component — see that file's own doc
    comment. */
