@@ -160,11 +160,20 @@ public final class DefaultFleetSummaryService implements FleetSummaryService {
             if (summary.status() == AssetStatus.STREAMING) {
                 acc.streaming++;
             }
+            switch (summary.inventoryState()) {
+                case IN_STOCK -> acc.inStock++;
+                case ISSUED -> acc.issued++;
+                case IN_FIELD -> acc.inField++;
+                case MAINTENANCE -> acc.maintenance++;
+                case RETIRED -> acc.retired++;
+            }
         }
         return byCategory.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey(Comparator.comparing(CategoryId::slug)))
                 .map(e -> new CategoryCounts(e.getKey(), e.getValue().categoryName, e.getValue().total,
-                        e.getValue().active, e.getValue().deactivated, e.getValue().deleted, e.getValue().streaming))
+                        e.getValue().active, e.getValue().deactivated, e.getValue().deleted, e.getValue().streaming,
+                        e.getValue().inStock, e.getValue().issued, e.getValue().inField, e.getValue().maintenance,
+                        e.getValue().retired))
                 .toList();
     }
 
@@ -176,6 +185,11 @@ public final class DefaultFleetSummaryService implements FleetSummaryService {
         private int deactivated;
         private int deleted;
         private int streaming;
+        private int inStock;
+        private int issued;
+        private int inField;
+        private int maintenance;
+        private int retired;
 
         Accumulator(String categoryName) {
             this.categoryName = categoryName;

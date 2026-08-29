@@ -4,9 +4,11 @@ import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
@@ -41,8 +43,9 @@ class DefaultAssetDirectoryServiceTest {
     @Test
     void findByDeviceDelegatesToAssetRepository() {
         DeviceId deviceId = DeviceId.random();
-        Asset asset = new Asset(AssetId.random(), "drone", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of());
+        Asset asset = Asset.register(AssetId.random(), "drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of(), Identity.NONE,
+                Custody.NONE);
         when(assetRepository.findByDeviceId(deviceId)).thenReturn(Optional.of(asset));
 
         assertEquals(Optional.of(asset), service.findByDevice(deviceId));
@@ -75,8 +78,9 @@ class DefaultAssetDirectoryServiceTest {
 
     @Test
     void findDelegatesToAssetRepository() {
-        Asset asset = new Asset(AssetId.random(), "drone", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(DeviceId.random()), Map.of());
+        Asset asset = Asset.register(AssetId.random(), "drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(DeviceId.random()), Map.of(), Identity.NONE,
+                Custody.NONE);
         when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
 
         assertEquals(Optional.of(asset), service.find(asset.id()));

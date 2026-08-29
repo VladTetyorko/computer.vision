@@ -26,10 +26,10 @@ class DefaultCategoryServiceTest {
 
     @Test
     void categoriesDelegatesToRepositoryFindAllSortedBySlug() {
-        DeviceCategory robot = new DeviceCategory(new CategoryId("robot"), "Robot", null, List.of());
-        DeviceCategory drone = new DeviceCategory(new CategoryId("drone"), "Drone", null, List.of("range-km"));
-        DeviceCategory fpvDrone =
-                new DeviceCategory(new CategoryId("fpv-drone"), "FPV Drone", new CategoryId("drone"), List.of());
+        DeviceCategory robot = new DeviceCategory(new CategoryId("robot"), "Robot", null, List.of(), true);
+        DeviceCategory drone = new DeviceCategory(new CategoryId("drone"), "Drone", null, List.of("range-km"), true);
+        DeviceCategory fpvDrone = new DeviceCategory(new CategoryId("fpv-drone"), "FPV Drone",
+                new CategoryId("drone"), List.of(), true);
         when(categoryRepository.findAll()).thenReturn(List.of(robot, drone, fpvDrone));
 
         List<DeviceCategory> result = service.categories();
