@@ -1,4 +1,5 @@
 import type { AssetDetails, AssetUsage, Device, GeoPosition, TelemetrySample } from '../api/models';
+import { hasFix } from '../geo/geo-logic';
 
 /**
  * Pure derivations behind `TelemetryStore` (docs/main/CYCLES-PLAN.md §2), split out so the
@@ -42,12 +43,12 @@ export function selectOpenUsage(usages: readonly AssetUsage[]): AssetUsage | und
 export function deriveTrail(samples: readonly TelemetrySample[]): readonly GeoPosition[] {
   const trail: GeoPosition[] = [];
   for (const sample of samples) {
-    if (sample.latitude === undefined || sample.longitude === undefined) {
+    if (!hasFix(sample)) {
       continue;
     }
     trail.push({
-      latitude: sample.latitude,
-      longitude: sample.longitude,
+      latitude: sample.latitude!,
+      longitude: sample.longitude!,
       altitudeMeters: sample.altitudeMeters,
     });
   }

@@ -6,10 +6,12 @@ import {
   featureStatusLabel,
   featureStatusTone,
   fleetRowAttention,
+  hasBeenProbed,
   isProbeDisabledError,
   isRemediable,
   outcomeLabel,
   outcomeTone,
+  probeBlockedReason,
   readinessCounts,
   remedyLabel,
   sortReadinessRows,
@@ -196,5 +198,39 @@ describe('readinessCounts', () => {
   it('tallies a mixed fleet', () => {
     const rows = [row({ verdict: 'GO' }), row({ verdict: 'GO' }), row({ verdict: 'NO_GO' }), row({ verdict: 'UNKNOWN' })];
     expect(readinessCounts(rows)).toEqual({ go: 2, noGo: 1, unknown: 1 });
+  });
+});
+
+describe('hasBeenProbed', () => {
+  it('is false when profileObservedAt is null (never probed)', () => {
+    expect(hasBeenProbed({ profileObservedAt: null })).toBe(false);
+  });
+
+  it('is true once a profile has ever been observed', () => {
+    expect(hasBeenProbed({ profileObservedAt: '2026-08-29T13:44:31Z' })).toBe(true);
+  });
+});
+
+describe('probeBlockedReason', () => {
+  const now = Date.parse('2026-08-29T18:00:00Z');
+
+  it('is null (button enabled) while the asset is streaming', () => {
+    expect(probeBlockedReason(true, '2026-08-28T00:00:00Z', now)).toBeNull();
+    expect(probeBlockedReason(true, undefined, now)).toBeNull();
+  });
+
+  it('names the honest offline age via humanAge, matching the exact R1 finding text', () => {
+    // 18h before `now`
+    const lastUsedAt = new Date(now - 18 * 60 * 60 * 1000).toISOString();
+    expect(probeBlockedReason(false, lastUsedAt, now)).toBe('Needs a live link — vehicle is offline (18h)');
+  });
+
+  it('degrades to an honest "never been online" when there is no lastUsedAt at all', () => {
+    expect(probeBlockedReason(false, undefined, now)).toBe('Needs a live link — this vehicle has never been online');
+  });
+
+  it('clamps a future-dated lastUsedAt to a zero age rather than a negative one', () => {
+    const future = new Date(now + 60_000).toISOString();
+    expect(probeBlockedReason(false, future, now)).toBe('Needs a live link — vehicle is offline (0s)');
   });
 });

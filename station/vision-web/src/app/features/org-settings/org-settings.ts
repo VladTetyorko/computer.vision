@@ -21,6 +21,16 @@ import { OrgSettingsFacade } from './org-settings-facade';
  * `.empty`), no new colors. Responsive: the page is a single scrolling column of cards; each list row
  * and each form wraps rather than overflowing on a narrow viewport (see `org-settings.css`).
  *
+ * **Roster leads, create-on-demand (O1, docs/plans/active/OPERATOR-UX-6-PLAN.md).** Each section used to
+ * open on its own 5-to-7-field create form, with the roster/tree starting below it — the same
+ * hierarchy inversion this cycle's E1 finding named for the replay page. Each tab's create form now
+ * renders inside a `@if (…FormOpen())` panel *above* its roster, revealed by a primary `Create
+ * user`/`Create group` button in the page bar's `[pageBarActions]` slot; the roster itself is always
+ * the first thing visible. `OrgSettingsFacade#userFormOpen`/`groupFormOpen` are the same kind of
+ * plain, non-persisted, non-mutually-exclusive view-toggle signal as `tab` (see that facade's own
+ * doc comment) — closed by `Cancel`, `Escape` (bound on the `<form>` itself, bubbling from any
+ * field), or a successful create.
+ *
  * **Page bar (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2, docs/extracts/design/12-org.md, wave 2).** The old
  * description was two sentences doing two different jobs: "Manage the people and groups in your
  * organization" only restated what the title "Organization" already says, so it's deleted outright;

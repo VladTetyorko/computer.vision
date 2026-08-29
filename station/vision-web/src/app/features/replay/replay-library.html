@@ -9,7 +9,7 @@
       title="Replay library"
       icon="replay"
       [count]="facade.loaded() && !facade.errorMessage() ? facade.filteredUsages().length : null"
-      countNoun="flight"
+      countNoun="session"
     >
       <select
         pageBarFilters
@@ -49,12 +49,12 @@
          `?sel=<usageId>`, never a bare component signal, so refresh/Back/sharing all keep working. -->
     <vision-two-pane
       [detailOpen]="!!facade.selectedUsage()"
-      [detailLabel]="facade.selectedUsage()?.assetName || 'Flight details'"
+      [detailLabel]="facade.selectedUsage()?.assetName || 'Session details'"
       (detailClose)="facade.clearSelection()"
     >
       <section class="card" twoPaneList>
         @if (facade.hasActiveFilters() && facade.loaded() && !facade.errorMessage()) {
-          <div class="muted flights-shown">{{ facade.filteredUsages().length }} of {{ pluralize(facade.usages().length, 'flight') }}</div>
+          <div class="muted flights-shown">{{ facade.filteredUsages().length }} of {{ pluralize(facade.usages().length, 'session') }}</div>
         }
 
         @if (facade.errorMessage(); as message) {
@@ -62,16 +62,16 @@
             <button type="button" class="btn secondary" (click)="facade.refresh()">Retry</button>
           </vision-empty>
         } @else if (facade.loading() && !facade.loaded()) {
-          <p class="muted loading-line">Loading flights…</p>
+          <p class="muted loading-line">Loading sessions…</p>
         } @else if (facade.filteredUsages().length === 0) {
           @if (facade.usages().length > 0) {
-            <vision-empty title="No flights match these filters" message="Nothing in the selected time range for this asset.">
+            <vision-empty title="No sessions match these filters" message="Nothing in the selected time range for this asset.">
               <button type="button" class="btn secondary" (click)="facade.clearFilters()">Clear filters</button>
             </vision-empty>
           } @else {
             <vision-empty
-              title="No finished flights yet"
-              message="Flights show up here once a drone has flown — start a stream and fly to build replay history."
+              title="No finished sessions yet"
+              message="Sessions show up here once a vehicle has been used — start a stream to build replay history."
             />
           }
         } @else {
@@ -93,7 +93,7 @@
                     tabindex="0"
                     role="button"
                     [attr.aria-pressed]="usage.usageId === facade.selectedId()"
-                    [attr.aria-label]="'View details for ' + (usage.assetName || 'this flight')"
+                    [attr.aria-label]="'View details for ' + (usage.assetName || 'this session')"
                     (click)="facade.selectRow(usage.usageId)"
                     (keydown.enter)="facade.selectRow(usage.usageId)"
                     (keydown.space)="$event.preventDefault(); facade.selectRow(usage.usageId)"

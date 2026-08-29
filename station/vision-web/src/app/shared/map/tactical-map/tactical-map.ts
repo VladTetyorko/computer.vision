@@ -200,7 +200,9 @@ interface CorrectionHandle {
   imports: [Icon],
   templateUrl: './tactical-map.html',
   styleUrl: './tactical-map.css',
-  host: { '[class.follow-mode]': 'followMode()' },
+  host: {
+    '[class.follow-mode]': 'followMode()',
+  },
 })
 export class TacticalMap {
   private readonly settings = inject(SettingsStore);

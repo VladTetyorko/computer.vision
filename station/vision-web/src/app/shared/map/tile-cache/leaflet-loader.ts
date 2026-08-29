@@ -4,7 +4,7 @@ import type { MapLayerId } from '../../../core/settings/settings-store';
 import type { Theme } from '../../../core/shell/theme-store';
 import { readPersistedFlag, writePersistedFlag } from '../../../core/panel-state';
 import { getCachedTile, putCachedTile } from './tile-cache-db';
-import { tileCacheKey } from './tile-cache-logic';
+import { tileCacheKey, tileHost } from './tile-cache-logic';
 
 /**
  * Leaflet bootstrap bits shared by every map in this app (`shared/map/tactical-map/`, the one map
@@ -29,11 +29,13 @@ const LEAFLET_STYLESHEET_HREF = '/leaflet/leaflet.css';
 
 /**
  * One definition per switchable base layer (docs/main/CYCLES-PLAN.md §9, CU-b item 6): **Standard**
- * (plain OSM raster), **Night** (CARTO Dark Matter — real dark tiles, replacing the CSS `invert()`
- * filter every map used to apply unconditionally), **Relief** (OpenTopoMap, contour shading), and
- * **Satellite** (Esri World Imagery). Each carries its own attribution text, shown by Leaflet's
- * attribution control automatically whenever that layer is the one added to the map. Selection is
- * `SettingsStore.mapLayer` — persisted, one choice shared by every map in the app.
+ * (plain OSM raster), **Night** (also OSM raster, run through {@link MapLayerDef.tileFilter} — see
+ * that field's own doc comment for why: CARTO Dark Matter, the real-dark-tile source this used to
+ * be, started returning "API KEY REQUIRED" tiles, per docs/plans/active/OPERATOR-UX-6-PLAN.md M1),
+ * **Relief** (OpenTopoMap, contour shading), and **Satellite** (Esri World Imagery). Each carries
+ * its own attribution text, shown by Leaflet's attribution control automatically whenever that
+ * layer is the one added to the map. Selection is `SettingsStore.mapLayer` — persisted, one choice
+ * shared by every map in the app.
  */
 export interface MapLayerDef {
   readonly id: MapLayerId;
@@ -41,13 +43,28 @@ export interface MapLayerDef {
   readonly url: string;
   readonly attribution: string;
   readonly maxZoom: number;
+  /**
+   * A CSS `filter` value the host applies to `.leaflet-tile-pane` only — never markers, drawings,
+   * or popups, which live in their own Leaflet panes (docs/plans/active/OPERATOR-UX-6-PLAN.md M1).
+   * `undefined` for every layer except `night`: Standard/Relief/Satellite render their source tiles
+   * as-is. `tactical-map.ts#activeBasemapTileFilter` reads this and exposes it as the
+   * `--basemap-tile-filter` custom property on the host, gated behind a `basemap-filtered` class so
+   * the CSS rule (`tactical-map.css`) only ever matches while the active basemap actually has one.
+   */
+  readonly tileFilter?: string;
 }
 
 const OSM_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-const CARTO_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ' +
-  '&copy; <a href="https://carto.com/attributions">CARTO</a>';
+
+/**
+ * The standard Leaflet dark-basemap trick: invert OSM's light tiles, then rotate/tune them back to
+ * a plausible dark palette rather than an inverted rainbow (docs/plans/active/OPERATOR-UX-6-PLAN.md
+ * M1). Lives here, next to the layer it belongs to, rather than inline in `MAP_LAYERS` below, so
+ * its own "why these five numbers" reasoning doesn't have to interrupt that table's scan.
+ */
+const NIGHT_TILE_FILTER = 'invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.6)';
+
 const OPENTOPOMAP_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, ' +
   '<a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)';
@@ -65,9 +82,16 @@ export const MAP_LAYERS: readonly MapLayerDef[] = [
   {
     id: 'night',
     label: 'Night',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: CARTO_ATTRIBUTION,
-    maxZoom: 20,
+    // Same source as `standard` (OSM raster) — deliberately: the dark look comes entirely from
+    // `tileFilter` below, not a different tile provider. See that field's doc comment for why
+    // (CARTO Dark Matter needs an API key this app doesn't have). The tile cache keys by layer id
+    // as well as z/x/y (`tile-cache-logic.ts#tileCacheKey`), so `standard` and `night` panning over
+    // the same area cache the identical bytes twice under two different keys — extra storage, never
+    // a correctness issue (no key collision, nothing to invalidate).
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: OSM_ATTRIBUTION,
+    maxZoom: 19,
+    tileFilter: NIGHT_TILE_FILTER,
   },
   {
     id: 'relief',
@@ -105,8 +129,9 @@ export function mapLayerDef(id: MapLayerId): MapLayerDef {
 const MAP_LAYER_EXPLICIT_KEY = 'vision.map.layerExplicit';
 
 /** `standard` (plain OSM raster) is already a genuinely light basemap — no new layer needed. `night`
- * (CARTO Dark Matter) is the existing dark one. Every other layer (`relief`/`satellite`) is neutral
- * imagery, never a *default* either theme picks on its own — only ever reached by an explicit pick. */
+ * (same OSM raster, run dark through its own `tileFilter`) is the existing dark one. Every other
+ * layer (`relief`/`satellite`) is neutral imagery, never a *default* either theme picks on its own
+ * — only ever reached by an explicit pick. */
 export function defaultMapLayerIdForTheme(theme: Theme): MapLayerId {
   return theme === 'dark' ? 'night' : 'standard';
 }
@@ -212,6 +237,8 @@ export function mapLayerTileLayer(
     maxZoom: def.maxZoom,
     attribution: def.attribution,
     cacheLayerId: layerId,
+    cacheHost: tileHost(def.url),
+    tileFilter: def.tileFilter ?? '',
   } as Leaflet.TileLayerOptions);
   tiles.on('tileerror', () => onStatus(false));
   tiles.on('load', () => onStatus(true));
@@ -239,11 +266,32 @@ function cachedTileLayerClass(
         extend(props: unknown): new (url: string, options: Leaflet.TileLayerOptions) => Leaflet.TileLayer;
       }
     ).extend({
+      /**
+       * The basemap's `tileFilter` lives on the map's own tile pane, not on each tile — one style
+       * write per layer swap, and markers/drawings/popups (sibling panes) stay unfiltered. Set here,
+       * on the one class every map host (tactical map, replay map, geofence dialog) instantiates,
+       * so no host has to know a basemap can be filtered (docs/plans/active/OPERATOR-UX-6-PLAN.md M1).
+       */
+      onAdd(this: Leaflet.TileLayer, map: Leaflet.Map): Leaflet.TileLayer {
+        const pane = map.getPane('tilePane');
+        if (pane) {
+          pane.style.filter = String((this.options as { tileFilter?: string }).tileFilter ?? '');
+        }
+        return (L.TileLayer.prototype.onAdd as (this: Leaflet.TileLayer, m: Leaflet.Map) => Leaflet.TileLayer).call(this, map);
+      },
+      onRemove(this: Leaflet.TileLayer, map: Leaflet.Map): Leaflet.TileLayer {
+        const pane = map.getPane('tilePane');
+        if (pane) {
+          pane.style.filter = '';
+        }
+        return (L.TileLayer.prototype.onRemove as (this: Leaflet.TileLayer, m: Leaflet.Map) => Leaflet.TileLayer).call(this, map);
+      },
       createTile(this: Leaflet.TileLayer, coords: Leaflet.Coords, done: Leaflet.DoneCallback): HTMLElement {
         const img = document.createElement('img');
         const url: string = (this as unknown as { getTileUrl(c: Leaflet.Coords): string }).getTileUrl(coords);
         const layerId = String((this.options as { cacheLayerId?: string }).cacheLayerId ?? '');
-        const key = tileCacheKey(layerId, coords.z, coords.x, coords.y);
+        const host = String((this.options as { cacheHost?: string }).cacheHost ?? '');
+        const key = tileCacheKey(layerId, coords.z, coords.x, coords.y, host);
         void resolveTileSrc(key, url).then(({ src, isObjectUrl }) => {
           img.onload = () => {
             if (isObjectUrl) {

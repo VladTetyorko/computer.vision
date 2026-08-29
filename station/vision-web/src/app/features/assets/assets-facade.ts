@@ -9,7 +9,7 @@ import { describeHttpError } from '../../core/api-error';
 import { buildSyntheticRegisterRequest } from '../../core/fleet/simulation-logic';
 import { deriveCategoryOptions, type CategoryOption } from '../../core/fleet/category-logic';
 import { RESTORE_TARGET_STATE } from '../../core/fleet/warehouse-logic';
-import { pluralize } from '../../shared/ui/page-bar/page-bar';
+import { pluralize } from '../../shared/ui/text-logic';
 import type { AssetDetails } from '../../core/api/models';
 import {
   buildAssetListRows,

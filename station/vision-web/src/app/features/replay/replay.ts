@@ -3,7 +3,8 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ReplayMap } from './replay-map';
 import { AfterActionPanel } from './after-action-panel';
-import { PageBar, type PageBarCrumb, pluralize } from '../../shared/ui/page-bar/page-bar';
+import { PageBar, type PageBarCrumb } from '../../shared/ui/page-bar/page-bar';
+import { pluralize } from '../../shared/ui/text-logic';
 import { ReplayFacade } from './replay-facade';
 import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs, type DetectionDensityBucket } from './replay-logic';
 

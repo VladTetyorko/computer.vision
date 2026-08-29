@@ -8,10 +8,42 @@
     display: contents;
 }
 
-/* ---- Header ------------------------------------------------------------------------------------ */
+/* ---- Header (docs/plans/active/OPERATOR-UX-6-PLAN.md finding E1 — collapsed by default, header + Download
+   are the whole collapsed card) ------------------------------------------------------------------ */
 
 .after-action-card header h2 {
     margin: 0;
+}
+
+/* The head is a real toggle button (mirrors `shared/ui/preflight-checklist.css`'s own `.head-toggle`
+   idiom) — reset to plain inline chrome so it reads as the card's title, not a button. */
+.disclosure {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--text);
+    cursor: pointer;
+}
+
+.disclosure vision-icon {
+    flex: none;
+    color: var(--text-faint);
+}
+
+.header-actions {
+    flex: none;
+}
+
+/* Collapsed: no trailing whitespace below the header — the card is genuinely just its header line +
+   Download until opened, not a tall card with an empty body (mirrors `shared/ui/preflight-checklist.css`'s
+   own `.checklist.collapsed` treatment, overriding `.card > header`'s global `margin-bottom`). */
+.after-action-card.collapsed > header {
+    margin-bottom: 0;
 }
 
 .after-action-card .hint {
@@ -98,8 +130,4 @@
 .caveats li {
     font-size: 0.82rem;
     color: var(--text-muted);
-}
-
-.actions {
-    margin: 0;
 }
