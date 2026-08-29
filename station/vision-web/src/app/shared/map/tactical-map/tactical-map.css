@@ -321,24 +321,6 @@
    descendant of this host, whoever rendered it, so the legend can never drift from the map.
    ============================================================================================ */
 
-/* ---- Night basemap: OSM raster through a CSS filter, tile pane only ---------------------------
-   docs/plans/active/OPERATOR-UX-6-PLAN.md M1: CARTO Dark Matter (the previous `night` tile source)
-   now demands an API key this app doesn't have, so every dark-theme map rendered "API KEY
-   REQUIRED" tiles. `night` is plain OSM raster again, run through the standard Leaflet dark-mode
-   filter trick — scoped to `.leaflet-tile-pane` alone, which is why this reads correctly: markers,
-   mark symbols, drawings and popups below all live in sibling Leaflet panes
-   (`.leaflet-marker-pane`/`.leaflet-overlay-pane`/`.leaflet-popup-pane`/`.leaflet-tooltip-pane`),
-   never inside `.leaflet-tile-pane`, so this selector's specificity never reaches them. The filter
-   value itself is not hardcoded here — it comes from the active layer's own
-   `MapLayerDef.tileFilter` (`leaflet-loader.ts`), exposed as the `--basemap-tile-filter` custom
-   property on `:host` by `tactical-map.ts#activeBasemapTileFilter`, so a future basemap needing a
-   different filter is a data change there, not a CSS change here. `.basemap-filtered` only appears
-   on the host while the active basemap actually carries a `tileFilter` (today, only Night), so
-   Standard/Relief/Satellite never match this rule at all. */
-:host.basemap-filtered ::ng-deep .leaflet-tile-pane {
-  filter: var(--basemap-tile-filter);
-}
-
 :host ::ng-deep .leaflet-control-attribution {
   background: var(--panel-raised);
   color: var(--text-faint);

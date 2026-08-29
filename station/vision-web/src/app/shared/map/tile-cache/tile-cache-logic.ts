@@ -12,10 +12,18 @@
  * `{z}/{x}/{y}` a tile is fetched at is what the layer's `MapLayerId` (`core/settings/settings-store.ts`)
  * distinguishes: two layers can tile the same `z/x/y` slot with completely different imagery
  * (Standard vs. Satellite over the same coordinates), so the layer must be part of the key, not
- * an afterthought.
+ * an afterthought. The tile host is part of the key too: when a layer's source changes (Night
+ * moved from Carto to OSM when Carto started returning "API KEY REQUIRED" tiles,
+ * docs/plans/active/OPERATOR-UX-6-PLAN.md M1), tiles cached from the old host must never be
+ * served for the new one — a stale dead tile in the cache looked exactly like the live defect.
  */
-export function tileCacheKey(layerId: string, z: number, x: number, y: number): string {
-  return `${layerId}/${z}/${x}/${y}`;
+export function tileCacheKey(layerId: string, z: number, x: number, y: number, host = ''): string {
+  return host ? `${layerId}@${host}/${z}/${x}/${y}` : `${layerId}/${z}/${x}/${y}`;
+}
+
+/** The host of a tile URL template — `{s}` subdomains collapse to one host so keys stay stable across shards. */
+export function tileHost(urlTemplate: string): string {
+  return urlTemplate.replace(/^https?:\/\//, '').replace(/^\{s\}\./, '').split('/')[0] ?? '';
 }
 
 /**

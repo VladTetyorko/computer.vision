@@ -84,6 +84,14 @@ describe('deriveTrail', () => {
     return { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', ...partial };
   }
 
+  it('drops Null Island samples — a (0,0) position is no fix, not a place (OPERATOR-UX-6)', () => {
+    const samples: TelemetrySample[] = [
+      sample({ at: '2026-07-22T00:00:00Z', latitude: 0, longitude: 0 }),
+      sample({ at: '2026-07-22T00:00:02Z', latitude: 3, longitude: 4 }),
+    ];
+    expect(deriveTrail(samples)).toEqual([{ latitude: 3, longitude: 4, altitudeMeters: undefined }]);
+  });
+
   it('keeps chronological order and maps lat/lon/altitude', () => {
     const samples: TelemetrySample[] = [
       sample({ at: '2026-07-22T00:00:00Z', latitude: 1, longitude: 2, altitudeMeters: 10 }),

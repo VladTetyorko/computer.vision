@@ -4,7 +4,7 @@ import type { MapLayerId } from '../../../core/settings/settings-store';
 import type { Theme } from '../../../core/shell/theme-store';
 import { readPersistedFlag, writePersistedFlag } from '../../../core/panel-state';
 import { getCachedTile, putCachedTile } from './tile-cache-db';
-import { tileCacheKey } from './tile-cache-logic';
+import { tileCacheKey, tileHost } from './tile-cache-logic';
 
 /**
  * Leaflet bootstrap bits shared by every map in this app (`shared/map/tactical-map/`, the one map
@@ -237,6 +237,8 @@ export function mapLayerTileLayer(
     maxZoom: def.maxZoom,
     attribution: def.attribution,
     cacheLayerId: layerId,
+    cacheHost: tileHost(def.url),
+    tileFilter: def.tileFilter ?? '',
   } as Leaflet.TileLayerOptions);
   tiles.on('tileerror', () => onStatus(false));
   tiles.on('load', () => onStatus(true));
@@ -264,11 +266,32 @@ function cachedTileLayerClass(
         extend(props: unknown): new (url: string, options: Leaflet.TileLayerOptions) => Leaflet.TileLayer;
       }
     ).extend({
+      /**
+       * The basemap's `tileFilter` lives on the map's own tile pane, not on each tile — one style
+       * write per layer swap, and markers/drawings/popups (sibling panes) stay unfiltered. Set here,
+       * on the one class every map host (tactical map, replay map, geofence dialog) instantiates,
+       * so no host has to know a basemap can be filtered (docs/plans/active/OPERATOR-UX-6-PLAN.md M1).
+       */
+      onAdd(this: Leaflet.TileLayer, map: Leaflet.Map): Leaflet.TileLayer {
+        const pane = map.getPane('tilePane');
+        if (pane) {
+          pane.style.filter = String((this.options as { tileFilter?: string }).tileFilter ?? '');
+        }
+        return (L.TileLayer.prototype.onAdd as (this: Leaflet.TileLayer, m: Leaflet.Map) => Leaflet.TileLayer).call(this, map);
+      },
+      onRemove(this: Leaflet.TileLayer, map: Leaflet.Map): Leaflet.TileLayer {
+        const pane = map.getPane('tilePane');
+        if (pane) {
+          pane.style.filter = '';
+        }
+        return (L.TileLayer.prototype.onRemove as (this: Leaflet.TileLayer, m: Leaflet.Map) => Leaflet.TileLayer).call(this, map);
+      },
       createTile(this: Leaflet.TileLayer, coords: Leaflet.Coords, done: Leaflet.DoneCallback): HTMLElement {
         const img = document.createElement('img');
         const url: string = (this as unknown as { getTileUrl(c: Leaflet.Coords): string }).getTileUrl(coords);
         const layerId = String((this.options as { cacheLayerId?: string }).cacheLayerId ?? '');
-        const key = tileCacheKey(layerId, coords.z, coords.x, coords.y);
+        const host = String((this.options as { cacheHost?: string }).cacheHost ?? '');
+        const key = tileCacheKey(layerId, coords.z, coords.x, coords.y, host);
         void resolveTileSrc(key, url).then(({ src, isObjectUrl }) => {
           img.onload = () => {
             if (isObjectUrl) {
