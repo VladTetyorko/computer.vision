@@ -100,16 +100,23 @@
                   >
                     <td>
                       <div class="name-cell">
-                        <span class="dot" [class.live]="!usage.endedAt"></span>
+                        <span class="dot" [class.live]="usageStatus(usage).live"></span>
                         <span class="name truncate" [title]="usage.assetName || 'Unknown asset'">{{ usage.assetName || '—' }}</span>
                       </div>
                     </td>
                     <td class="muted">{{ startedLabel(usage.startedAt) }}</td>
                     <td>
-                      @if (!usage.endedAt) {
-                        <span class="chip ok"><span class="dot live"></span>Flying now</span>
-                      } @else {
-                        {{ formatUsageDuration(usage.durationSeconds) }}
+                      @if (usageStatus(usage); as status) {
+                        @if (status.kind === 'flying' || status.kind === 'open-stale') {
+                          <span class="chip" [class.ok]="status.tone === 'ok'">
+                            @if (status.live) {
+                              <span class="dot live"></span>
+                            }
+                            {{ status.label }}
+                          </span>
+                        } @else {
+                          {{ status.label }}
+                        }
                       }
                     </td>
                     <td class="muted">{{ usage.sampleCount }}</td>
@@ -126,12 +133,17 @@
       @if (facade.selectedUsage(); as usage) {
         <div twoPaneDetail>
           <div class="detail-chips">
-            @if (!usage.endedAt) {
-              <span class="chip ok"><span class="dot live"></span>Flying now</span>
-            } @else {
-              <span class="chip">{{ formatUsageDuration(usage.durationSeconds) }}</span>
+            @if (usageStatus(usage); as status) {
+              <span class="chip" [class.ok]="status.tone === 'ok'">
+                @if (status.live) {
+                  <span class="dot live"></span>
+                }
+                {{ status.label }}
+              </span>
+              @if (status.kind !== 'no-samples') {
+                <span class="chip">{{ pluralize(usage.sampleCount, 'sample') }}</span>
+              }
             }
-            <span class="chip">{{ pluralize(usage.sampleCount, 'sample') }}</span>
           </div>
 
           <dl class="detail-fields">
@@ -152,7 +164,11 @@
           </dl>
 
           <div class="detail-actions">
-            <a class="btn" [routerLink]="['/assets', usage.assetId, 'replay', usage.usageId]">Open replay ›</a>
+            @if (usageStatus(usage).isReplayLink) {
+              <a class="btn" [routerLink]="['/assets', usage.assetId, 'replay', usage.usageId]">Open replay ›</a>
+            } @else {
+              <p class="muted no-replay-note">No samples recorded — nothing to replay.</p>
+            }
           </div>
         </div>
       }

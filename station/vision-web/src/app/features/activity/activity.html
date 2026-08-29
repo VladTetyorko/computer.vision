@@ -48,7 +48,7 @@
                      verb" — the summary text below already states it, e.g. "Created asset 11…";
                      the left accent border is a color reinforcement of information already present
                      in visible/announced text, not its sole carrier). -->
-                <span class="activity-summary truncate">{{ row.summary }}</span>
+                <span class="activity-summary truncate" [title]="row.summary">{{ row.summaryLabel }}</span>
               </div>
               @if (row.details.length > 0) {
                 <div class="activity-details">

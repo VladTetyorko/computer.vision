@@ -99,6 +99,9 @@ nothing else.
   - `AssetUsage close(AssetUsage, UsagePhase, Instant endedAt)` — stamps `endedAt`+`phase`, persists
   - `AssetUsage save(AssetUsage)` — persists as-is, for a caller (perception's batching) that decides its own write timing
   - `boolean usageBelongsToAsset(UsageId, AssetId)` — unscoped membership check; filed here rather than on `UsageService` because every `UsageService` method is scope-checked and this one deliberately isn't
+- `UsageIdleCloseService` (interface) → `DefaultUsageIdleCloseService(AssetUsageRepositoryPort, AssetLiveStatePort, UsageSessionService, IdleUsageCloseSettings)` (+ package-private test-seam ctor taking `Supplier<Instant> clock`) — `docs/plans/active/OPERATOR-UX-5-PLAN.md` finding U1, wave W1: closes every open usage whose last observed activity is stale, so a crashed process/killed station/lost MAVLink link no longer leaves a usage "Flying now" forever. `vision-app`'s `UsageIdleCloseRunner` calls this on a schedule; nothing in this module invokes it on its own
+  - `int closeIdleUsages()` — fetch-then-filter over `AssetUsageRepositoryPort#findRecent(SWEEP_FETCH_LIMIT=10_000)` (same honest-cap workaround as `DefaultAssetStatsService#statsFor`; no fleet-wide "open usages" port method exists), skips already-`endedAt`-stamped rows; for each open one, last-activity = `AssetLiveStatePort#latestTelemetry(assetId)`'s sample instant, clamped up to `startedAt` if that sample predates this usage (a stale sample can outlive its own usage — perception's per-asset tracker is never evicted) or if no sample is known at all (e.g. after a station restart); closes through `usageSessionService.close(usage, phase, lastActivityAt)` — `endedAt` is always that observed instant, **never `Instant.now()`** (CLAUDE.md rule 9: "newest data... should be used", not fabricated). Closed `phase` mirrors `vision-flight`'s `FlightPhaseRule#onSessionClosed` by name only (see `UsagePhase`'s own gotcha below): `IN_FLIGHT`/`LINK_LOST` → `ABANDONED`, everything else → `CLOSED`. Returns the count actually closed
+- `IdleUsageCloseSettings(Duration idleThreshold)` — validates positive/non-null in its compact ctor; `defaults()` → 10 minutes
 
 ## Conventions
 - **Validation**: every domain record validates in its compact constructor (`if (…) throw new IllegalArgumentException(…)`); the application layer uses `Objects.requireNonNull`.
@@ -126,12 +129,19 @@ nothing else.
 
 ## Status
 Fully implemented: asset/device/category CRUD, discovery aggregation, fleet summary, per-asset
-stats, the usage-session lifecycle (`UsageSessionService`), and the fleet-wide replay-library list
-(`UsageService`). Nothing in this context is a stub — every port above has at least one real
-implementation in `storage/persistence` or `vision-app`'s devsupport.
+stats, the usage-session lifecycle (`UsageSessionService`), the fleet-wide replay-library list
+(`UsageService`), and the idle-usage-close sweep (`UsageIdleCloseService`). Nothing in this context
+is a stub — every port above has at least one real implementation in `storage/persistence` or
+`vision-app`'s devsupport.
 
 Session ownership (`AssetUsage` construction/persistence, `AssetDirectoryService`) and the
 `UsageOrigin`/`DeviceOrigin` fields are the product of
 `docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md` waves R1-R5c; see that plan and
 `vision-perception`'s MODULE.md for the runtime (`UsageTracker`) side of the same split. Backing
 migrations (`V25__device_origin.sql`, `V26__asset_usage_origin.sql`) live in `storage/persistence`.
+
+`UsageIdleCloseService` (`docs/plans/active/OPERATOR-UX-5-PLAN.md` finding U1, wave W1) fixes a
+correctness defect found in `/api/usages`: `vision-perception` never closes a usage on a source or
+pipeline failure alone (`DefaultStreamService#stop` is the only path that ever does, see that
+module's MODULE.md), so a crashed process or a lost link on an offline rover used to leave a usage
+open — and rendered as "Flying now" — indefinitely.

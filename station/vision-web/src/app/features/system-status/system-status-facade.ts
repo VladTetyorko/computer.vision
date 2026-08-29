@@ -7,10 +7,10 @@ import { describeSystemEventSource, type SystemEventRow } from '../../core/syste
 import { SystemEventsStore } from '../../core/system-events/system-events-store';
 import {
   connectionSeverity,
-  healthLabel,
-  healthSeverity,
   reachableSeverity,
+  verdictFor,
   type ShellSeverity,
+  type SystemVerdict,
 } from '../../core/system-status/system-status-logic';
 import { SystemStatusStore } from '../../core/system-status/system-status-store';
 
@@ -52,20 +52,28 @@ export class SystemStatusFacade {
   /** Present while the most recent background poll failed — `status` (if any) is still shown, stale. */
   readonly statusError = this.statusStore.error;
 
-  readonly overall = computed(() => this.status()?.overall);
-  /** `'neutral'` (never a fabricated `'ok'`) before the first successful fetch — see class doc. */
-  readonly overallSeverity = computed<ShellSeverity>(() => {
-    const overall = this.overall();
-    return overall === undefined ? 'neutral' : healthSeverity(overall);
-  });
-  /** The overall verdict's own sentence — composed here, not in the template, so "Checking…" (before
-   *  the first fetch ever settles) reads as its own honest sentence rather than being forced through
-   *  `"System is ${label.toLowerCase()}."`'s punctuation, which would read as "System is checking….". */
-  readonly overallMessage = computed(() => {
-    const overall = this.overall();
-    return overall === undefined ? 'Checking system status…' : `System is ${healthLabel(overall).toLowerCase()}.`;
-  });
   readonly subsystems = computed(() => this.status()?.subsystems ?? []);
+
+  /**
+   * The banner's own verdict (OPERATOR-UX-5-PLAN.md finding U3, §2 U3) — `undefined` only before
+   * the very first `GET /api/system/status` fetch has ever settled (`this.status()` itself
+   * `undefined`), which `overallMessage` below reads as its own honest "Checking…" sentence rather
+   * than forcing that state through `verdictFor`'s own punctuation. Once `status` has loaded even
+   * once, `verdictFor` is fed this page's own already-fetched `subsystems` plus the two transport
+   * signals it was already reading for `backendSeverity`/`connectionSeverity` below — no new fetch,
+   * no re-derivation of facts this facade didn't already have.
+   */
+  readonly verdict = computed<SystemVerdict | undefined>(() => {
+    const status = this.status();
+    if (status === undefined) {
+      return undefined;
+    }
+    return verdictFor(status.subsystems, { backendReachable: this.fleet.reachable(), liveConnection: this.live.connectionState() });
+  });
+  /** `'neutral'` (never a fabricated `'ok'`) before the first successful fetch — see class doc. */
+  readonly overallSeverity = computed<ShellSeverity>(() => this.verdict()?.severity ?? 'neutral');
+  /** The banner's own sentence — see {@link verdict}'s doc comment for the pre-first-fetch case. */
+  readonly overallMessage = computed(() => this.verdict()?.message ?? 'Checking system status…');
   readonly checkedAtRelative = computed(() => {
     const status = this.status();
     return status ? relativeTimeLabel(status.checkedAt, this.nowSignal()) : undefined;

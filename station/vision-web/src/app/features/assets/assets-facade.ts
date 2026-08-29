@@ -19,6 +19,7 @@ import {
   filterAssetListRowsByStreaming,
   findAssetRowById,
   searchAssetListRowsByName,
+  sortAssetListRowsByTriage,
   type AssetListRow,
   type AssetStatusFilter,
   type AssetStreamingFilter,
@@ -95,9 +96,14 @@ export class AssetsFacade {
    * Every loaded asset as a row, before any search/filter narrows it — `assetRows` (the grid) and
    * `selectedRow` (the two-pane detail panel) both read this rather than each re-deriving from
    * `assets()`/`fleet.liveDeviceIds()` independently, so a row object picked out of one is
-   * reference-equal to the one found in the other.
+   * reference-equal to the one found in the other. Sorted into the grid's own default triage order
+   * here (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U5, §2 U5, `assets-logic.ts#sortAssetListRowsByTriage`)
+   * exactly once — every filter below is a plain `Array#filter`, which preserves relative order, so
+   * sorting the unfiltered set is equivalent to (and cheaper than) re-sorting each filtered view.
    */
-  private readonly allRows = computed<readonly AssetListRow[]>(() => buildAssetListRows(this.assets(), this.fleet.liveDeviceIds()));
+  private readonly allRows = computed<readonly AssetListRow[]>(() =>
+    sortAssetListRowsByTriage(buildAssetListRows(this.assets(), this.fleet.liveDeviceIds()), Date.now()),
+  );
 
   /**
    * The grid's rows: every filter narrows in sequence (archived → category → status → streaming →

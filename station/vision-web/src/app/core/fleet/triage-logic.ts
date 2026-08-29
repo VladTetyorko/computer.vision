@@ -90,38 +90,66 @@ function ageMsOrInfinity(asset: Pick<AssetSummary, 'lastUsedAt'>, nowMs: number)
 }
 
 /**
+ * One flat triage comparator (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U5, §2 U5) — the same
+ * per-candidate priority {@link sortByFreshness} applies *within* one of `groupAndSort`'s two groups,
+ * generalized to a plain `Array#sort` comparator for a caller that wants a single ungrouped list
+ * rather than the Yours/Simulated section split — `features/assets/**`, the third fleet list to need
+ * this triage after `/fly`'s picker and Command's rail, and the first that has no grouped section
+ * headers to carry the real-vs-simulated split visually. Real (non-simulated) rows sort ahead of
+ * simulated ones as the *outermost* tier here — the flattened equivalent of `groupAndSort`'s own
+ * yours-then-simulated group order, reproduced with no separate visible section. Streaming first,
+ * then (when supplied) `attentionRank` descending, then `lastUsedAt` descending/never-seen-last, then
+ * the same case-insensitive alphabetical tiebreak — identical to {@link sortByFreshness}'s own order,
+ * which now delegates here directly: within either of its two homogeneous groups `isSimulated` never
+ * differs between any two rows, so this extra outer tier is always a no-op there (verified by this
+ * file's own pre-existing `groupAndSort`/`sortByFreshness` spec, which stayed green unmodified
+ * through this refactor).
+ */
+export function triageOrder<T extends TriageCandidate>(
+  a: T,
+  b: T,
+  nowMs: number,
+  attentionRank?: AttentionRank<T>,
+): number {
+  const simA = isSimulated(a);
+  const simB = isSimulated(b);
+  if (simA !== simB) {
+    return simA ? 1 : -1;
+  }
+  if (a.status !== b.status) {
+    return a.status === 'STREAMING' ? -1 : 1;
+  }
+  if (attentionRank) {
+    const rankDiff = attentionRank(b) - attentionRank(a);
+    if (rankDiff !== 0) {
+      return rankDiff;
+    }
+  }
+  const ageA = ageMsOrInfinity(a, nowMs);
+  const ageB = ageMsOrInfinity(b, nowMs);
+  if (ageA !== ageB) {
+    return ageA - ageB;
+  }
+  return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
+}
+
+/**
  * One group's own order: streaming first (mirrors `features/fly/fly-logic.ts#sortAssetsForPicker`'s
  * reasoning — an operator most likely wants what's already in the air), then — when the caller
  * supplies one — `attentionRank` descending (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3: "needs
- * attention (severity desc)", the one addition this wave makes), then by `lastUsedAt`
- * **descending** (most recently seen first) within each remaining tie, never-seen assets last of
- * all. Equal ages (including two never-seen assets, both `Infinity`) fall back to the same
- * case-insensitive alphabetical tiebreak `sortAssetsForPicker` uses, so ordering never depends on
- * fetch/insertion order. `Array#sort` is stable, but every branch here is a real, deterministic
- * comparison — nothing relies on that stability alone.
+ * attention (severity desc)"), then by `lastUsedAt` **descending** (most recently seen first) within
+ * each remaining tie, never-seen assets last of all, falling back to the same case-insensitive
+ * alphabetical tiebreak `sortAssetsForPicker` uses — see {@link triageOrder}, which now carries this
+ * comparison (plus its own extra outer real-vs-simulated tier, moot within one already-homogeneous
+ * group). `Array#sort` is stable, but every branch is a real, deterministic comparison — nothing
+ * relies on that stability alone.
  */
 function sortByFreshness<T extends TriageCandidate>(
   assets: readonly T[],
   nowMs: number,
   attentionRank?: AttentionRank<T>,
 ): readonly T[] {
-  return [...assets].sort((a, b) => {
-    if (a.status !== b.status) {
-      return a.status === 'STREAMING' ? -1 : 1;
-    }
-    if (attentionRank) {
-      const rankDiff = attentionRank(b) - attentionRank(a);
-      if (rankDiff !== 0) {
-        return rankDiff;
-      }
-    }
-    const ageA = ageMsOrInfinity(a, nowMs);
-    const ageB = ageMsOrInfinity(b, nowMs);
-    if (ageA !== ageB) {
-      return ageA - ageB;
-    }
-    return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
-  });
+  return [...assets].sort((a, b) => triageOrder(a, b, nowMs, attentionRank));
 }
 
 /**

@@ -23,8 +23,8 @@ toggle exists to turn it off). Always `mvn clean` first — see Gotchas.
 ```
 com.drones.vision.app
   config/
-    properties/        every @ConfigurationProperties record (20 — see table below)
-    wiring/             19 per-concern @Configuration classes (see table below)
+    properties/        every @ConfigurationProperties record (21 — see table below)
+    wiring/             20 per-concern @Configuration classes (see table below)
     SecurityConfig      the 2 mutually-exclusive SecurityFilterChain beans
   security/             BcryptPasswordHasher, VisionUserDetails, DevPrincipalResolver,
                          SecurityContextPrincipalResolver, Security/NoopSessionAuthenticator
@@ -32,6 +32,7 @@ com.drones.vision.app
                          LiveUpdateAuditTrail, LiveUpdateDetectionEventRepository (decorator chains)
   onboarding/            PassportCaptureObserver (UsagePhaseObserver impl)
   geo/                   TrackProjectionRunner, VisualGeoRunner (poller ApplicationRunners)
+  usage/                 UsageIdleCloseRunner (self-scheduled sweep, same shape as geo/'s runners)
   stream/                LiveFrameFallbackStreamService (StreamService decorator)
   bootstrap/             SimulationResumeRunner (the one remaining ApplicationRunner-as-bean)
   devsupport/            8 Noop*/constant-holder classes — see table below
@@ -62,6 +63,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisualGeoWiringConfiguration` | GeoVisual | `visualGeoApiProperties`, `referenceTileSourcePort` (`WaybackTileSource` vs `HttpTileSource` by `tiles.waybackMultiDate()`), `referenceRegionService`, `geolocationSessionService`, `trackCorrectionService` unconditional. `pulledGeolocationPort`/`referenceIndexPort` unconditional beans that self-branch on `enabled()` (real gRPC impl via `CvWiring.controlPlaneChannel` vs. `Noop*`) — both take **two `@Qualifier`-annotated `ObjectProvider<ManagedChannel>` params** (`cvTrainingChannel`, `cvGrpcChannel`), required once `cvGrpcChannel` is `@Primary` alongside a second channel bean (see Gotchas). `visualGeoRunner` (`initMethod="start"`/`destroyMethod="close"`) is the only truly gated bean, COP `vision.geo.visual.enabled=true` |
 | `ControlProfileWiring` | Control | `controlProfileService`, `auxFunctionCatalog` (`AuxFunctionCatalog.defaults()` unless `properties.auxFunctions()` configured) — unconditional; the catalog is display-only, never a whitelist |
 | `AfterActionWiringConfiguration` | — | `afterActionProperties`, `afterActionSources`, `afterActionAssembler` — unconditional, no flag. `maxPoints` is derived from `vision.application.replay.max-points-ceiling`, not its own key |
+| `UsageWiringConfiguration` | Usage | `usageIdleCloseService(AssetUsageRepositoryPort, AssetLiveStatePort, UsageSessionService, VisionUsageProperties)` (warehouse's `DefaultUsageIdleCloseService`), `usageIdleCloseRunner` (`initMethod="start"`, `destroyMethod="close"`) — both **unconditional, no enable flag** (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U1, wave W1: a data-correctness fix, not an optional feature). Pure downstream leaf — composes three already-unconditional beans from `PersistenceWiringConfiguration`/`ApplicationServiceWiring`, no new bean-cycle risk |
 | `ApplicationServiceWiring` | Cv, Live, Rc, Application, Publish, Simulation | The largest class — every `vision-application`/context `DefaultXService` bean. See "Application-service beans" below |
 
 ### Application-service beans (`ApplicationServiceWiring`)
@@ -102,6 +104,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisionGeoVisualProperties` | `vision.geo.visual` | `VisualGeoWiringConfiguration` (incl. `tiles.*`) |
 | `VisionStreamsProperties` | `vision.streams` | `StreamLifecycleWiring`'s idle-stream reaper |
 | `VisionTrackingProperties` | `vision.tracking` | `TrackingWiring` seed + per-stream read-model windows |
+| `VisionUsageProperties` | `vision.usage` | `UsageWiringConfiguration`'s idle-usage-close sweep (`idleClose` default 10m, `sweepPeriod` default 60s) |
 
 `vision.discovery.enabled` and `vision.api.rate-limit.enabled` are read directly via
 `@ConditionalOnProperty` with no dedicated properties record.
@@ -277,7 +280,8 @@ maps to a real handler, so it can't quietly outlive the gap it records.
 - Real and default-on: video/telemetry source registries, mediamtx publish (`vision.publish.enabled=true`),
   discovery scanning, persistence (Postgres/Flyway, unconditional), auth (secured filter chain,
   `vision.auth.enabled=true`), tracking (`default-mode=ASSOCIATE`), idle-stream reaping, after-action
-  evidence assembly (no flag).
+  evidence assembly (no flag), idle-usage-close sweep (no flag — `UsageIdleCloseRunner`, sweeps once
+  at startup then every `vision.usage.sweep-period`, default 60s).
 - Real and default-off: CV inference (`vision.cv.enabled`), CV training + split-channel routing
   (`vision.training.enabled`, `vision.cv.training.target`), API rate limiting
   (`vision.api.rate-limit.enabled`), mediamtx source-proxy (`vision.publish.source-proxy.enabled`),

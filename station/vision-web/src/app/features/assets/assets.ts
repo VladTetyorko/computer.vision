@@ -9,7 +9,14 @@ import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar, pluralize } from '../../shared/ui/page-bar/page-bar';
 import { TwoPane } from '../../shared/ui/two-pane/two-pane';
 import { AssetsFacade } from './assets-facade';
-import { describeAssetState, parseAssetViewMode, type AssetListRow, type AssetStateDescriptor, type AssetViewMode } from './assets-logic';
+import {
+  describeAssetState,
+  lastSeenLabel,
+  parseAssetViewMode,
+  type AssetListRow,
+  type AssetStateDescriptor,
+  type AssetViewMode,
+} from './assets-logic';
 
 /** `localStorage` key for the `▤ ▦` view toggle (docs/extracts/design/04-assets.md) — one page's own key,
  *  same `vision.<page>.<field>` shape as `vision.command.railOpen`/`vision.fly.mapVisible`. */
@@ -51,6 +58,14 @@ const VIEW_MODE_KEY = 'vision.assets.viewMode';
  * facade (see `AssetsFacade`'s own doc comment). `/assets/:id` survives as the panel's own "Open
  * full ›" link, for the deep work — rename, KPIs, recent flights, pilots — a triage panel has no room
  * for.
+ *
+ * **Triage order + "Last seen" (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U5, §2 U5, wave W3)**:
+ * the grid's default row order is now `core/fleet/triage-logic.ts#triageOrder` — streaming first,
+ * real vehicles before simulated, last-seen descending with never-seen last (`AssetsFacade#allRows`,
+ * via `assets-logic.ts#sortAssetListRowsByTriage`) — replacing the old plain insertion order (this
+ * page's own third fleet list to need the triage `/fly`'s picker and Command's rail already had). A
+ * new **Last seen** column sits right after State in the dense list, and the identical text
+ * (`assetLastSeen`, `assets-logic.ts#lastSeenLabel`) renders under the status chips in the card grid.
  */
 @Component({
   selector: 'vision-assets',
@@ -136,6 +151,14 @@ export class AssetsPage {
    */
   protected assetState(row: AssetListRow): AssetStateDescriptor {
     return describeAssetState(row);
+  }
+
+  /** The grid's "Last seen" column (list) / fact (cards) text (docs/plans/active/OPERATOR-UX-5-PLAN.md
+   *  finding U5) — `Date.now()` read directly here, the same "no facade-level determinism seam needed"
+   *  precedent `features/fly/drone-picker-card.ts#lastSeen` already sets: only the pure `*-logic.ts`
+   *  functions themselves are unit-tested against a fixed clock, never this thin wrapper. */
+  protected assetLastSeen(row: AssetListRow): string {
+    return lastSeenLabel(row.asset.lastUsedAt, Date.now());
   }
 
   /** The card's per-row kebab menu — just Archive/Restore, reasoned (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 2). */

@@ -127,3 +127,12 @@ tbody tr.row-selectable.selected {
 .detail-actions .btn {
     justify-content: center;
 }
+
+/* A zero-sample usage has no replay to open (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U1,
+   §2 U1) — this note fills the actions slot in its place; zeroed margin so it sits flush inside
+   `.detail-actions`'s own `gap`, matching every other `<p class="muted">` fact/detail line in this
+   app (e.g. `.subsystem-detail` in `features/system-status/system-status.css`). */
+.no-replay-note {
+    margin: 0;
+    font-size: 0.85rem;
+}

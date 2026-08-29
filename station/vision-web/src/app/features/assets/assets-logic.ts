@@ -1,5 +1,7 @@
 import type { AssetDetails, LifecycleState } from '../../core/api/models';
 import { findVideoDevice } from '../../core/fleet/device-logic';
+import { triageOrder } from '../../core/fleet/triage-logic';
+import { humanAge } from '../../core/telemetry/telemetry-logic';
 
 /**
  * Pure logic behind the Assets page (this cycle's Assets/Devices/Warehouse inventory restructure —
@@ -51,6 +53,41 @@ export function buildAssetListRows(
       watchDeviceId: findVideoDevice(asset.devices)?.id,
     };
   });
+}
+
+/**
+ * The grid's default row order (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U5, §2 U5) — the same
+ * triage `core/fleet/triage-logic.ts#triageOrder` gives `/fly`'s picker and Command's rail, applied
+ * here as one flat list (this page has no Your-vehicles/Simulated section headers to carry
+ * `groupAndSort`'s own two-group split) rather than the grouped form: streaming first, then
+ * last-seen descending (never-seen last), real (non-simulated) assets ahead of simulated ones as the
+ * outer tier. This page's `AssetListRow` carries no attention concept (that belongs to Command's rail,
+ * not this grid), so `triageOrder`'s optional urgency tier is simply omitted — U5's own "then
+ * attention if the row has it" clause, applied honestly: there isn't one here. Any future explicit
+ * column-header sort this page adds should run *after* this and override it, never replace it — this
+ * is only ever the list's opening order, not a competing sort mode.
+ */
+export function sortAssetListRowsByTriage(rows: readonly AssetListRow[], nowMs: number): readonly AssetListRow[] {
+  return [...rows].sort((a, b) => triageOrder(a.asset, b.asset, nowMs));
+}
+
+/**
+ * The grid's own "Last seen" column/card-fact text (docs/plans/active/OPERATOR-UX-5-PLAN.md finding
+ * U5) — `2h 29m ago` / `6d 4h ago`, via the app's one age vocabulary
+ * (`core/telemetry/telemetry-logic.ts#humanAge`); `Never seen` for an asset with no `lastUsedAt` at
+ * all (never a fabricated age). Deliberately a different register from
+ * `core/fleet/triage-logic.ts#offlineLabel`'s "Offline · 2h 29m" — this page's own State column
+ * already carries "Offline"/"Live" as its own dot/chip, so repeating the word here would be
+ * redundant; mirrors `features/fly/fly-logic.ts#lastSeenLabel`'s `<age> ago` wording (that function
+ * returns `undefined` instead of "Never seen" — its own caller wraps that case separately — where
+ * this page wants the text ready to render directly).
+ */
+export function lastSeenLabel(lastUsedAt: string | undefined, nowMs: number): string {
+  if (!lastUsedAt) {
+    return 'Never seen';
+  }
+  const ageSeconds = Math.max(0, (nowMs - Date.parse(lastUsedAt)) / 1000);
+  return `${humanAge(ageSeconds)} ago`;
 }
 
 /** Hides archived rows unless the "show archived" toggle is on — the client-side half of it. */

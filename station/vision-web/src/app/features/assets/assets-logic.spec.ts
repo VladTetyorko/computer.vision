@@ -8,8 +8,10 @@ import {
   filterAssetListRowsByStatus,
   filterAssetListRowsByStreaming,
   findAssetRowById,
+  lastSeenLabel,
   parseAssetViewMode,
   searchAssetListRowsByName,
+  sortAssetListRowsByTriage,
 } from './assets-logic';
 
 function device(partial: Partial<Device> = {}): Device {
@@ -83,6 +85,73 @@ describe('buildAssetListRows', () => {
   it('marks a DELETED asset archived', () => {
     const rows = buildAssetListRows([assetDetails({ lifecycle: 'DELETED' })], new Set());
     expect(rows[0].archived).toBe(true);
+  });
+});
+
+// --- sortAssetListRowsByTriage (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U5, §2 U5 — the
+// grid's default order, via `core/fleet/triage-logic.ts#triageOrder`) --------------------------
+
+const NOW = Date.parse('2026-08-29T12:00:00Z');
+
+describe('sortAssetListRowsByTriage', () => {
+  it('sorts streaming assets ahead of offline ones', () => {
+    const rows = buildAssetListRows(
+      [
+        assetDetails({ assetId: 'offline-1', displayName: 'Zulu', status: 'OFFLINE' }),
+        assetDetails({ assetId: 'streaming-1', displayName: 'Alpha', status: 'STREAMING' }),
+      ],
+      new Set(),
+    );
+    expect(sortAssetListRowsByTriage(rows, NOW).map((r) => r.asset.assetId)).toEqual(['streaming-1', 'offline-1']);
+  });
+
+  it('sorts by lastUsedAt descending (most recently seen first), never-seen last', () => {
+    const rows = buildAssetListRows(
+      [
+        assetDetails({ assetId: 'never' }),
+        assetDetails({ assetId: 'older', lastUsedAt: '2026-08-29T08:00:00Z' }),
+        assetDetails({ assetId: 'newer', lastUsedAt: '2026-08-29T11:00:00Z' }),
+      ],
+      new Set(),
+    );
+    expect(sortAssetListRowsByTriage(rows, NOW).map((r) => r.asset.assetId)).toEqual(['newer', 'older', 'never']);
+  });
+
+  it('sorts real vehicles ahead of simulated ones, even a streaming simulated asset', () => {
+    const rows = buildAssetListRows(
+      [
+        assetDetails({ assetId: 'sim-1', category: 'simulated', status: 'STREAMING' }),
+        assetDetails({ assetId: 'rover-1', category: 'rover', status: 'OFFLINE' }),
+      ],
+      new Set(),
+    );
+    expect(sortAssetListRowsByTriage(rows, NOW).map((r) => r.asset.assetId)).toEqual(['rover-1', 'sim-1']);
+  });
+
+  it('does not mutate the input array', () => {
+    const rows = buildAssetListRows(
+      [assetDetails({ assetId: 'b', displayName: 'B' }), assetDetails({ assetId: 'a', displayName: 'A' })],
+      new Set(),
+    );
+    const original = [...rows];
+    sortAssetListRowsByTriage(rows, NOW);
+    expect(rows).toEqual(original);
+  });
+});
+
+describe('lastSeenLabel', () => {
+  it('reads "Never seen" for no lastUsedAt', () => {
+    expect(lastSeenLabel(undefined, NOW)).toBe('Never seen');
+  });
+
+  it('reads "<age> ago" for a real lastUsedAt', () => {
+    const twoHoursTwentyNineMinAgo = NOW - (2 * 3600 + 29 * 60) * 1000;
+    expect(lastSeenLabel(new Date(twoHoursTwentyNineMinAgo).toISOString(), NOW)).toBe('2h 29m ago');
+  });
+
+  it('drops a zero remainder — "6d ago", not "6d 0h ago"', () => {
+    const sixDaysAgo = NOW - 6 * 86_400 * 1000;
+    expect(lastSeenLabel(new Date(sixDaysAgo).toISOString(), NOW)).toBe('6d ago');
   });
 });
 
