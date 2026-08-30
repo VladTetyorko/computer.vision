@@ -12,6 +12,7 @@ import type {
   AssignedPilot,
   Assignment,
   AuditEntry,
+  BindingScope,
   CalibrateCameraPoseRequest,
   CalibrationResult,
   CameraPoseRequest,
@@ -28,7 +29,13 @@ import type {
   CreateMarkRequest,
   CreateUserRequest,
   CustodyActionRequest,
+  CvCoverageResponse,
   CvModelsResponse,
+  CvProfile,
+  CvProfileBinding,
+  CvProfileBindingRequest,
+  CvProfileRequest,
+  CvProfilesResponse,
   CvTrackersResponse,
   Dataset,
   DatasetsResponse,
@@ -36,6 +43,7 @@ import type {
   DetectionResult,
   Device,
   DeviceEdit,
+  EffectiveCvProfile,
   FleetMaintenanceRecord,
   FleetReadiness,
   FleetSummary,
@@ -1368,6 +1376,69 @@ export class VisionApi {
         atSeconds,
       }),
     );
+  }
+
+  // --- CV profiles (docs/plans/active/CV-SETTINGS-PLAN.md §5's frozen wire contract, wave W6) -------------
+  // `features/vision-profiles/**`'s `/vision/profiles` page is the one caller. Every method here
+  // codes against §5.2's endpoint table exactly — the backend (`contexts/vision-perception` +
+  // `vision-learning` + `storage/persistence`, waves W2-W4) had not shipped when this wave landed, so
+  // every read degrades to a visible notice on 404/transport failure rather than a fabricated row
+  // (§3.5 rule 2), and the page states once that a profile applies only at stream start.
+
+  /** Every profile in the caller's scope, built-in ones included (`CvProfilesResponse#profiles`). */
+  getCvProfiles(): Promise<CvProfilesResponse> {
+    return firstValueFrom(this.http.get<CvProfilesResponse>('/api/cv/profiles'));
+  }
+
+  /** Creates a non-built-in profile for the caller's own org. `403` when the caller may not manage
+   * the organization (`canManageOrg`-gated on this page); `400` a value fails the domain record's own
+   * compact-constructor validation. */
+  createCvProfile(request: CvProfileRequest): Promise<CvProfile> {
+    return firstValueFrom(this.http.post<CvProfile>('/api/cv/profiles', request));
+  }
+
+  /** Updates an existing, non-built-in profile in place. `404` unknown id; `403` a built-in profile
+   * (not editable — "Fork" creates an editable copy instead, never an in-place edit) or out-of-scope
+   * org; `400` a value fails validation. */
+  updateCvProfile(id: string, request: CvProfileRequest): Promise<CvProfile> {
+    return firstValueFrom(this.http.put<CvProfile>(`/api/cv/profiles/${encodeURIComponent(id)}`, request));
+  }
+
+  /** `404` unknown id; `409` reserved for "still bound somewhere" (the page still attempts the call
+   * and surfaces whatever the server says via `describeHttpError` — no client-side precondition
+   * check invented ahead of the real one). */
+  deleteCvProfile(id: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/cv/profiles/${encodeURIComponent(id)}`));
+  }
+
+  /** Sets (or replaces) the profile bound at one scope. `404` unknown `profileId`; `400` a
+   * `scopeId` that doesn't resolve (unknown group/category slug/asset id). */
+  setCvProfileBinding(request: CvProfileBindingRequest): Promise<CvProfileBinding> {
+    return firstValueFrom(this.http.put<CvProfileBinding>('/api/cv/bindings', request));
+  }
+
+  /** Clears whatever profile is bound at one scope, falling back to the next level up
+   * (§3.1's hierarchy) — never sends `profileId` (see `CvProfileBindingRequest`'s own doc comment). */
+  deleteCvProfileBinding(scopeKind: BindingScope, scopeId: string): Promise<void> {
+    return firstValueFrom(
+      this.http.delete<void>('/api/cv/bindings', { body: { scopeKind, scopeId } satisfies CvProfileBindingRequest }),
+    );
+  }
+
+  /** The profile that would actually apply to `assetId`'s next stream start, and which binding
+   * produced it (`EffectiveCvProfile#source`). `404` unknown asset. */
+  getEffectiveCvProfile(assetId: string): Promise<EffectiveCvProfile> {
+    return firstValueFrom(
+      this.http.get<EffectiveCvProfile>('/api/cv/profiles/effective', { params: { assetId } }),
+    );
+  }
+
+  /** The coverage table's one fleet-wide read (`CvCoverageResponse#rows` — §4's UI sketch: "asset ·
+   * category · profile · source · detection · model · filters"). Never errors server-side for an
+   * empty fleet (an empty `rows` array reads as the honest "no assets yet" empty state, not a
+   * failure); a transport failure still degrades to the page's own notice. */
+  getCvCoverage(): Promise<CvCoverageResponse> {
+    return firstValueFrom(this.http.get<CvCoverageResponse>('/api/cv/coverage'));
   }
 
   // --- CV model registry (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) — the dynamic registry

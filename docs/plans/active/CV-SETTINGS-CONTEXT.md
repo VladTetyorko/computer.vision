@@ -16,7 +16,7 @@ Spec: [CV-SETTINGS-PLAN.md](CV-SETTINGS-PLAN.md). Branch `feat/cv-settings`, cut
 | W2 | | pending W1 | | |
 | W3 persistence | spring-integrator | built, uncommitted | | `V29__cv_profiles.sql`/`V30__cv_model_registry.sql` + `JpaCvProfileRepository`/`JpaCvModelRepository`/`JpaTrainingRunRepository` implementing W1's/W4-domain's ports; `storage/persistence` green, 260 tests total, up from 237 (see Handoffs) |
 | W5 | | pending W2+W4 | | |
-| W6 | | pending (contract frozen, can start any time) | | |
+| W6 | web-ui | built, uncommitted | | `/vision/profiles` page (list/editor/bindings/coverage) + `CvProfile*`/`EffectiveCvProfile`/`CvCoverage*`/`TrainingRun*` TS types + 8 new `VisionApi` methods; `detection-settings.*` deleted, `/settings/detection` redirects; nav rail gained Profiles (see Handoffs) |
 | W7 / W8 | | after W6 | | |
 
 ## Handoffs
@@ -433,3 +433,67 @@ convention; new cases this wave adds):
    the first real `TrainingProgress` (or a terminal failure) arrives. A poller watching only `run()`/`runs()`
    (not `job()`) will not see "Uploading dataset…"/"Uploaded N samples…" text. Flag if W5's UI needs that text
    surfaced through the persisted-run read path too — it would need a deliberate change here, not a UI workaround.
+
+### W6 → W7/W8
+
+Built entirely in `station/vision-web` against §5's frozen wire contract — **no backend for any of
+these endpoints exists yet** (W2/W3/W4 above land the domain/persistence/app-service pieces this
+wave's calls will eventually hit; W5's own controller wiring is still open). Full detail in
+`station/vision-web/MODULE.md`'s `vision-profiles/` bullet (features section) and its own dated
+Status entry — this section only carries what W7/W8 need to build against.
+
+**New TS types (`core/api/models.ts`)** — mirror §5.1/§5.2 exactly, field names verbatim:
+`BindingScope`, `CvProfile`/`CvProfileTracking`/`CvProfileEventRule`/`CvProfilesResponse`/
+`CvProfileRequest`, `CvProfileBinding`/`CvProfileBindingRequest`, `EffectiveCvProfile`,
+`CvCoverageRow`/`CvCoverageResponse`, `TrainingRun`/`TrainingRunsResponse` (typed for W8, not yet
+consumed by any component). Widened `CvModel` with optional `version`/`taskType`/`runtime`/`classes`/
+`status`/`availability`/`metrics`/`provenance`/`source` (+ new `CvModelMetrics`/`CvModelProvenance`) —
+every addition is `?:`, chosen specifically so `features/fly/cv-control-panel-logic.spec.ts`'s existing
+object-literal `CvModel` fixture (out of this wave's scope) keeps compiling unchanged; W8 populating
+these fields for real does not need another type change.
+
+**New `VisionApi` methods (`core/api/vision-api.ts`)**: `getCvProfiles`/`createCvProfile`/
+`updateCvProfile`/`deleteCvProfile`, `setCvProfileBinding`/`deleteCvProfileBinding` (DELETE with a
+JSON body via `{body:...}`), `getEffectiveCvProfile`, `getCvCoverage`. **Deliberately not built here**
+— the plan's registry promote/rollback/training-runs endpoints (`§5.2`'s `/api/cv/registry/**`,
+matching W4-app's `ModelRegistryController`/`TrainingJobService#runs`/`#run` handoff above): those are
+W8's scope, both on the Java side (W5's still-open controller rewrite) and the TS client side.
+
+**`GET /api/cv/bindings` was never in the frozen contract** — the Profiles page derives "what's bound
+to profile X" client-side from `GET /api/cv/coverage` instead (`vision-profiles-logic.ts#summarizeProfileBindings`,
+grouped by `profileId`). If W7/W8 (or a future wave) ever add a real bindings-list endpoint, this
+derivation becomes redundant but not wrong — coverage will still agree with it as long as both read
+the same underlying binding rows.
+
+**`SettingsStore` (`core/settings/settings-store.ts`) is untouched this wave** and still imported by:
+`shared/player/detections-strip.ts`, `shared/map/tactical-map/tactical-map.ts`,
+`shared/map/tile-cache/leaflet-loader.ts`, `shared/map/fleet-plan-dialog/flight-plan-dialog.ts`,
+`features/wall/wall.ts`, `features/wall/wall-facade.ts`, `features/replay/replay-map.ts`,
+`features/inventory/inventory-facade.ts`, `features/command/geofence-zone-dialog.ts`,
+`features/fly/cv-control-panel.ts`, `features/fly/stream-state-logic.ts`,
+`core/events/events-store.spec.ts`, `features/asset-detail/asset-detail-facade.ts`,
+`features/live/live-facade.ts`, `features/onboarding/onboarding-facade.ts`,
+`features/settings/account-settings-facade.ts`, `features/devices/devices-facade.ts`,
+`features/fly/cockpit-facade.ts`, `features/fly/cv-setup-modal.ts`, `features/fly/fly-logic.ts`,
+`features/fly/fly-redirect-guard.ts`, `core/events/events-store.ts`, `core/events/events-logic.ts`,
+`core/settings/settings-store.spec.ts`. **This is W7's scope** (fly/live/wall dual-write onto the new
+`CvProfile` model per CV-SETTINGS-PLAN.md) — none of these files were read or edited this wave beyond
+what grep needed to compile this list.
+
+**Rail/route**: `nav-entries.ts`'s VISION group gained **Profiles** as its first entry
+(`/vision/profiles`, `managerOnly: true`); `nav-entries.spec.ts`'s manager-visible-entry regression
+count moved 18→19. `app.routes.ts` imports `VISION_PROFILES_ROUTES`; the route is `orgGuard`-guarded
+(confirmed by reading `core/org/org-guard.ts` directly — it resolves `AuthStore.ready` then is exactly
+`canManageOrg(auth.user()?.topRole)`, redirecting to `/fly` otherwise). `features/settings/detection-settings.*`
+(6 files: `.css`/`.ts`/`.html`/`-facade.ts`/`-logic.ts`/`-logic.spec.ts`) **deleted outright**;
+`settings.routes.ts`'s `/settings/detection` is now a plain-string `redirectTo: 'vision/profiles'`
+(`pathMatch: 'full'`, matching `hubs.routes.ts`'s `/manage/health` precedent); `account-settings.html`'s
+link list dropped its "Detection defaults" `<li>`; `core/ui/architecture.spec.ts`'s `ROUTED_PAGES`
+swapped `settings/detection-settings` → `vision-profiles/vision-profiles`.
+
+**Verify chain, all green**: `npx tsc --noEmit` clean on both configs, `npm run test:ci` **160/160
+files, 3086/3086 tests**, `npx ng build --configuration production` green (only the pre-existing
+initial-bundle budget warning, unrelated to this wave). Bundle delta (measured via a pathspec-scoped
+`git stash` limited to this wave's own 15 files, to avoid disturbing W2/W3/W4's concurrent uncommitted
+work on this same tree): initial bundle **+0.89 kB raw / +0.18 kB transfer**; new lazy chunk
+**`vision-profiles` 32.35 kB raw / 7.45 kB transfer**. Not committed, per this task's own instruction.

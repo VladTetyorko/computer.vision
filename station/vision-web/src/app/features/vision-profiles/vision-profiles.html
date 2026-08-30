@@ -1,0 +1,484 @@
+<div class="page">
+  <vision-page-bar
+    title="Profiles"
+    icon="layers"
+    hint="A profile resolves once, when a stream starts. Editing a profile or changing a binding here never touches a stream that's already running."
+  >
+    @if (facade.canManage() && !facade.editorOpen()) {
+      <button pageBarActions type="button" class="btn" (click)="facade.openCreate()">
+        <vision-icon name="plus" [size]="14" />
+        New profile
+      </button>
+    }
+  </vision-page-bar>
+
+  @if (facade.loading() && !facade.loaded()) {
+    <p class="muted">Loading…</p>
+  } @else if (facade.error(); as error) {
+    <vision-empty icon="alert" title="Couldn't load profiles" [message]="error">
+      <button type="button" class="btn secondary" (click)="facade.load()">Try again</button>
+    </vision-empty>
+  } @else {
+    <!-- ---- Profiles ---- -->
+    <section class="card">
+      <vision-section-header title="Profiles" [subtitle]="facade.profiles().length + ' total — built-in ones listed first'" />
+      @if (facade.profiles().length === 0) {
+        <vision-empty title="No profiles yet" message="Create the first one with New profile above." />
+      } @else {
+        <div class="profile-grid">
+          @for (profile of facade.profiles(); track trackByProfileId($index, profile)) {
+            <article class="profile-card">
+              <header class="profile-card-head">
+                <span class="profile-card-name truncate" [title]="profile.name">{{ profile.name }}</span>
+                @if (profile.builtIn) {
+                  <span class="chip">Built-in</span>
+                }
+              </header>
+              @if (profile.description) {
+                <p class="muted truncate" [title]="profile.description">{{ profile.description }}</p>
+              }
+              <dl class="profile-card-facts">
+                <div>
+                  <dt>Model</dt>
+                  <dd class="mono truncate" [title]="profile.model">{{ profile.model }}</dd>
+                </div>
+                <div>
+                  <dt>Confidence</dt>
+                  <dd class="mono">{{ profile.confidenceThreshold }}</dd>
+                </div>
+                <div>
+                  <dt>Rate</dt>
+                  <dd class="mono">{{ profile.inferenceFps }} fps</dd>
+                </div>
+                <div>
+                  <dt>Detection</dt>
+                  <dd>
+                    @if (profile.detectionEnabled) {
+                      <span class="chip ok">On</span>
+                    } @else {
+                      <span class="chip">Off</span>
+                    }
+                  </dd>
+                </div>
+              </dl>
+              <p class="muted profile-card-binding">{{ facade.bindingSummaryFor(profile) }}</p>
+              <div class="profile-card-actions">
+                @if (facade.canFork(profile)) {
+                  <button type="button" class="btn secondary small" (click)="facade.openFork(profile)">Fork</button>
+                }
+                @if (facade.canEdit(profile)) {
+                  <button type="button" class="btn secondary small" (click)="facade.openEdit(profile)">
+                    <vision-icon name="edit" [size]="14" />
+                    Edit
+                  </button>
+                }
+                @if (facade.canDelete(profile)) {
+                  <button
+                    type="button"
+                    class="btn danger small"
+                    [disabled]="facade.busyProfileId() === profile.id"
+                    (click)="facade.deleteProfile(profile)"
+                  >
+                    <vision-icon name="trash" [size]="14" />
+                    {{ facade.busyProfileId() === profile.id ? 'Deleting…' : 'Delete' }}
+                  </button>
+                }
+              </div>
+            </article>
+          }
+        </div>
+      }
+    </section>
+
+    <!-- ---- Editor ---- -->
+    @if (facade.draft(); as draft) {
+      <section class="card">
+        <vision-section-header
+          [title]="draft.sourceId ? 'Edit profile' : 'New profile'"
+          subtitle="Model, thresholds, filters, and tracking — applied the next time a stream bound to this profile starts."
+        />
+
+        @if (facade.formErrors().length > 0) {
+          <vision-notice variant="danger" icon="alert">
+            <ul class="profile-errors">
+              @for (message of facade.formErrors(); track message) {
+                <li>{{ message }}</li>
+              }
+            </ul>
+          </vision-notice>
+        }
+
+        <form class="profile-form" (ngSubmit)="facade.saveDraft()" (keydown.escape)="facade.closeEditor()">
+          <div class="profile-form-grid">
+            <label class="profile-field">
+              <span class="label">Name</span>
+              <input
+                type="text"
+                name="name"
+                class="field-md"
+                autocomplete="off"
+                [ngModel]="draft.name"
+                (ngModelChange)="facade.patchDraft({ name: $event })"
+                [disabled]="facade.saving()"
+                required
+              />
+            </label>
+            <label class="profile-field profile-field-wide">
+              <span class="label">Description</span>
+              <input
+                type="text"
+                name="description"
+                class="field-lg"
+                autocomplete="off"
+                [ngModel]="draft.description"
+                (ngModelChange)="facade.patchDraft({ description: $event })"
+                [disabled]="facade.saving()"
+              />
+            </label>
+            <label class="profile-field">
+              <span class="label">Model</span>
+              <select
+                name="model"
+                class="field-md"
+                [ngModel]="draft.model"
+                (ngModelChange)="facade.patchDraft({ model: $event })"
+                [disabled]="facade.saving()"
+                required
+              >
+                <option value="" disabled>Choose a model…</option>
+                @for (model of facade.models(); track model.id) {
+                  <option [value]="model.id">
+                    {{ model.displayName }}{{ isModelMissingOnWorker(model) ? ' — Missing on worker' : '' }}
+                  </option>
+                }
+              </select>
+            </label>
+            <label class="profile-field">
+              <span class="label">Confidence threshold</span>
+              <input
+                type="number"
+                name="confidence"
+                class="field-sm mono"
+                min="0"
+                max="1"
+                step="0.05"
+                [ngModel]="draft.confidenceThreshold"
+                (ngModelChange)="facade.patchDraft({ confidenceThreshold: $event })"
+                [disabled]="facade.saving()"
+              />
+            </label>
+            <label class="profile-field">
+              <span class="label">Inference rate</span>
+              <span class="profile-field-inline">
+                <input
+                  type="number"
+                  name="fps"
+                  class="field-sm mono"
+                  min="1"
+                  step="1"
+                  [ngModel]="draft.inferenceFps"
+                  (ngModelChange)="facade.patchDraft({ inferenceFps: $event })"
+                  [disabled]="facade.saving()"
+                />
+                <span class="faint">fps</span>
+              </span>
+            </label>
+            <label class="profile-check">
+              <input
+                type="checkbox"
+                name="detectionEnabled"
+                [ngModel]="draft.detectionEnabled"
+                (ngModelChange)="facade.patchDraft({ detectionEnabled: $event })"
+                [disabled]="facade.saving()"
+              />
+              <span>Detection on</span>
+            </label>
+            <label class="profile-field profile-field-wide">
+              <span class="label">Label filter (allow-list) — empty means every class</span>
+              <textarea
+                name="labelFilter"
+                rows="2"
+                placeholder="person, car"
+                [ngModel]="draft.labelFilterText"
+                (ngModelChange)="facade.patchDraft({ labelFilterText: $event })"
+                [disabled]="facade.saving()"
+              ></textarea>
+            </label>
+            <label class="profile-field profile-field-wide">
+              <span class="label">Label deny-list</span>
+              <textarea
+                name="labelDenyFilter"
+                rows="2"
+                placeholder="tree"
+                [ngModel]="draft.labelDenyFilterText"
+                (ngModelChange)="facade.patchDraft({ labelDenyFilterText: $event })"
+                [disabled]="facade.saving()"
+              ></textarea>
+            </label>
+          </div>
+
+          <h3>Tracking</h3>
+          <div class="profile-form-grid">
+            <label class="profile-field">
+              <span class="label">Mode</span>
+              <select
+                name="trackingMode"
+                class="field-sm"
+                [ngModel]="draft.trackingMode"
+                (ngModelChange)="facade.patchDraft({ trackingMode: $event })"
+                [disabled]="facade.saving()"
+              >
+                <option value="OFF">Off</option>
+                <option value="ASSOCIATE">Associate</option>
+                <option value="FOLLOW">Follow</option>
+              </select>
+            </label>
+            @if (draft.trackingMode !== 'OFF') {
+              <label class="profile-field">
+                <span class="label">Engine</span>
+                <select
+                  name="trackingEngine"
+                  class="field-md"
+                  [ngModel]="draft.trackingEngineId"
+                  (ngModelChange)="facade.patchDraft({ trackingEngineId: $event })"
+                  [disabled]="facade.saving()"
+                >
+                  <option value="">Deployment default</option>
+                  @for (tracker of facade.trackers(); track tracker.id) {
+                    @if (tracker.modes.includes(draft.trackingMode)) {
+                      <option [value]="tracker.id">{{ tracker.displayName }}</option>
+                    }
+                  }
+                </select>
+              </label>
+              <label class="profile-field">
+                <span class="label">Capability level</span>
+                <input
+                  type="number"
+                  name="capabilityLevel"
+                  class="field-sm mono"
+                  min="0"
+                  step="1"
+                  [ngModel]="draft.trackingCapabilityLevel"
+                  (ngModelChange)="facade.patchDraft({ trackingCapabilityLevel: $event })"
+                  [disabled]="facade.saving()"
+                />
+              </label>
+              @if (draft.trackingMode === 'FOLLOW') {
+                <label class="profile-field">
+                  <span class="label">Verify every</span>
+                  <span class="profile-field-inline">
+                    <input
+                      type="number"
+                      name="verifyEveryMillis"
+                      class="field-sm mono"
+                      min="0"
+                      step="100"
+                      [ngModel]="draft.trackingVerifyEveryMillis"
+                      (ngModelChange)="facade.patchDraft({ trackingVerifyEveryMillis: $event })"
+                      [disabled]="facade.saving()"
+                    />
+                    <span class="faint">ms</span>
+                  </span>
+                </label>
+                <label class="profile-field">
+                  <span class="label">Follow rate</span>
+                  <span class="profile-field-inline">
+                    <input
+                      type="number"
+                      name="followFps"
+                      class="field-sm mono"
+                      min="0"
+                      step="1"
+                      [ngModel]="draft.trackingFollowFps"
+                      (ngModelChange)="facade.patchDraft({ trackingFollowFps: $event })"
+                      [disabled]="facade.saving()"
+                    />
+                    <span class="faint">fps</span>
+                  </span>
+                </label>
+              }
+            }
+          </div>
+
+          @if (draft.existingEventRule; as rule) {
+            <h3>Event rule</h3>
+            <p class="muted">
+              Set when this profile was created — not editable here. Fork the profile to start a new one with a
+              different rule.
+            </p>
+            <div class="profile-event-rule">
+              <span class="chip">{{ rule.labels.length > 0 ? rule.labels.join(', ') : 'any label' }}</span>
+              <span class="muted">≥ {{ rule.confidenceThreshold }} confidence</span>
+              <span class="muted">{{ rule.consecutiveToOpen }} consecutive to open</span>
+              <span class="muted">{{ rule.absenceToCloseSeconds }}s absence to close</span>
+            </div>
+          }
+
+          <div class="profile-form-actions">
+            <button type="button" class="btn secondary" (click)="facade.closeEditor()" [disabled]="facade.saving()">Cancel</button>
+            <button type="submit" class="btn" [disabled]="facade.saving()">{{ facade.saving() ? 'Saving…' : 'Save' }}</button>
+          </div>
+        </form>
+      </section>
+    }
+
+    <!-- ---- Bindings ---- -->
+    @if (facade.canManage()) {
+      <section class="card">
+        <vision-section-header
+          title="Bindings"
+          subtitle="Bind a profile at organization, category, or asset scope. The most specific binding wins."
+        />
+        <form class="binding-form" (ngSubmit)="facade.submitBinding()">
+          <div class="binding-form-grid">
+            <label class="profile-field">
+              <span class="label">Scope</span>
+              <select
+                name="scopeKind"
+                class="field-sm"
+                [ngModel]="facade.bindingScopeKind()"
+                (ngModelChange)="facade.setBindingScopeKind($event)"
+                [disabled]="facade.bindingSaving()"
+              >
+                @for (kind of scopeKinds; track kind) {
+                  <option [value]="kind">{{ scopeKindLabel(kind) }}</option>
+                }
+              </select>
+            </label>
+
+            @switch (facade.bindingScopeKind()) {
+              @case ('ORGANIZATION') {
+                <div class="profile-field">
+                  <span class="label">Target</span>
+                  <span class="mono profile-field-static">{{ facade.orgGroupName() ?? 'No organization' }}</span>
+                </div>
+              }
+              @case ('CATEGORY') {
+                <label class="profile-field">
+                  <span class="label">Target</span>
+                  <select
+                    name="scopeIdCategory"
+                    class="field-md"
+                    [ngModel]="facade.bindingScopeId()"
+                    (ngModelChange)="facade.setBindingScopeId($event)"
+                    [disabled]="facade.bindingSaving()"
+                  >
+                    <option value="">Choose a category…</option>
+                    @for (category of facade.categories(); track category.slug) {
+                      <option [value]="category.slug">{{ category.name }}</option>
+                    }
+                  </select>
+                </label>
+              }
+              @case ('ASSET') {
+                <label class="profile-field">
+                  <span class="label">Target</span>
+                  <select
+                    name="scopeIdAsset"
+                    class="field-md"
+                    [ngModel]="facade.bindingScopeId()"
+                    (ngModelChange)="facade.setBindingScopeId($event)"
+                    [disabled]="facade.bindingSaving()"
+                  >
+                    <option value="">Choose an asset…</option>
+                    @for (asset of facade.assets(); track asset.assetId) {
+                      <option [value]="asset.assetId">{{ asset.displayName }}</option>
+                    }
+                  </select>
+                </label>
+              }
+            }
+
+            <label class="profile-field">
+              <span class="label">Profile</span>
+              <select
+                name="bindingProfile"
+                class="field-md"
+                [ngModel]="facade.bindingProfileId()"
+                (ngModelChange)="facade.setBindingProfileId($event)"
+                [disabled]="facade.bindingSaving()"
+              >
+                <option value="">Choose a profile…</option>
+                @for (profile of facade.profiles(); track profile.id) {
+                  <option [value]="profile.id">{{ profile.name }}</option>
+                }
+              </select>
+            </label>
+          </div>
+          <div class="binding-form-actions">
+            @if (facade.orgGroupId(); as orgGroupId) {
+              <button
+                type="button"
+                class="btn secondary"
+                [disabled]="facade.isClearingBinding('ORGANIZATION', orgGroupId)"
+                (click)="facade.clearOrgDefault()"
+              >
+                {{ facade.isClearingBinding('ORGANIZATION', orgGroupId) ? 'Clearing…' : 'Clear organization default' }}
+              </button>
+            }
+            <button type="submit" class="btn" [disabled]="!facade.canSubmitBinding() || facade.bindingSaving()">
+              {{ facade.bindingSaving() ? 'Saving…' : 'Set binding' }}
+            </button>
+          </div>
+        </form>
+      </section>
+    }
+
+    <!-- ---- Coverage ---- -->
+    <section class="card">
+      <vision-section-header title="Coverage" [subtitle]="facade.coverage().length + ' assets'" />
+      @if (facade.coverage().length === 0) {
+        <vision-empty title="No assets yet" message="Coverage lists one resolved profile per asset once assets exist." />
+      } @else {
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Category</th>
+                <th>Profile</th>
+                <th>Source</th>
+                <th>Detection</th>
+                <th>Model</th>
+                <th>Filters</th>
+                <th aria-label="Actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of facade.coverage(); track trackByCoverageRow($index, row)) {
+                <tr>
+                  <td class="truncate" [title]="row.assetName">{{ row.assetName }}</td>
+                  <td class="muted truncate">{{ row.categoryName }}</td>
+                  <td class="truncate" [title]="row.profileName">{{ row.profileName }}</td>
+                  <td><span class="chip">{{ describeCoverageSource(row.source) }}</span></td>
+                  <td>
+                    @if (row.detectionEnabled) {
+                      <span class="dot ok"></span> Yes
+                    } @else {
+                      <span class="dot"></span> No
+                    }
+                  </td>
+                  <td class="mono truncate" [title]="row.model">{{ row.model }}</td>
+                  <td class="muted">{{ describeCoverageFilters(row) }}</td>
+                  <td class="actions">
+                    @if (facade.canManage() && (row.source === 'CATEGORY' || row.source === 'ASSET')) {
+                      <button
+                        type="button"
+                        class="btn secondary small"
+                        [disabled]="facade.isClearingBinding(row.source, row.source === 'CATEGORY' ? row.categoryId : row.assetId)"
+                        (click)="facade.clearCoverageRow(row)"
+                      >
+                        {{ facade.isClearingBinding(row.source, row.source === 'CATEGORY' ? row.categoryId : row.assetId) ? 'Clearing…' : 'Clear' }}
+                      </button>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </section>
+  }
+</div>

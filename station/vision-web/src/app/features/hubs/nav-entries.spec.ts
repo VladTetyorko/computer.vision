@@ -92,12 +92,14 @@ describe('NAV_MODES', () => {
   });
 
   /**
-   * docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 rule 5 — a detection profile and a transmitter layout
-   * are configuration a user visits rarely, not an everyday Operate/Manage door. Both routes stay
-   * live and ungated; they are reached from `/settings`'s own new link list instead
-   * (`features/settings/account-settings.html`).
+   * docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 rule 5 — a transmitter layout is configuration a user
+   * visits rarely, not an everyday Operate/Manage door. `/manage/controller` stays live and ungated;
+   * it is reached from `/settings`'s own link list instead (`features/settings/account-settings.html`).
+   * `/settings/detection` never comes back as a `NavEntry.to` either — it now redirects to
+   * `/vision/profiles` (`settings.routes.ts`), which *is* on the rail (see the VISION describe block
+   * below) — wave W6's supersession of the WAREHOUSE-UX-era move, not a second instance of it.
    */
-  it('Detection defaults and Controller have both left the rail entirely', () => {
+  it('Controller has left the rail entirely; /settings/detection is never a live NavEntry.to', () => {
     for (const mode of NAV_MODES) {
       expect(mode.entries.some((entry) => entry.to === '/settings/detection'), mode.id).toBe(false);
       expect(mode.entries.some((entry) => entry.to === '/manage/controller'), mode.id).toBe(false);
@@ -205,11 +207,23 @@ describe('NAV_MODES', () => {
   describe('VISION — every entry managerOnly', () => {
     const vision = NAV_MODES.find((mode) => mode.id === 'vision')!;
 
-    it('has exactly CV training, CV model registry, Geo regions, in that order, all managerOnly', () => {
-      expect(vision.entries.map((entry) => entry.name)).toEqual(['CV training', 'CV model registry', 'Geo regions']);
+    it('has exactly Profiles, CV training, CV model registry, Geo regions, in that order, all managerOnly', () => {
+      expect(vision.entries.map((entry) => entry.name)).toEqual([
+        'Profiles',
+        'CV training',
+        'CV model registry',
+        'Geo regions',
+      ]);
       for (const entry of vision.entries) {
         expect(entry.managerOnly, entry.name).toBe(true);
       }
+    });
+
+    /** docs/plans/active/CV-SETTINGS-PLAN.md §4, wave W6 — replaces the old Settings-page "Detection
+     *  defaults" link outright; see this file's own "Controller has left the rail" test above. */
+    it('Profiles targets /vision/profiles', () => {
+      const profiles = vision.entries.find((entry) => entry.name === 'Profiles');
+      expect(profiles?.to).toBe('/vision/profiles');
     });
   });
 
@@ -254,14 +268,15 @@ describe('NAV_MODES', () => {
    * Entry-count regression guard (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1's own illustrative
    * "25 → 15 for a manager, 11 → 10 for a pilot"). Wave W1 landed the manager at the TRUE count of 20
    * (not the plan's own "15" estimate — see the W1-era version of this comment for the accounting).
-   * **Wave W4 moves the manager count to 18** — three carried-over `managerOnly` entries fold into
+   * **Wave W4 moved the manager count to 18** — three carried-over `managerOnly` entries fold into
    * Inventory's own tabs/KPI strip (Asset categories, Inventory reports, Devices: −3), and one new
-   * `managerOnly` entry (Maintenance, W7) joins Fleet (+1): 20 − 3 + 1 = 18. The PILOT count is
-   * unaffected — none of the four changed entries was ever pilot-visible (Categories/Devices/Reports
-   * were `managerOnly`; a pilot's `visibleInventoryTabs()` never showed Links/Categories inside
-   * Inventory either) — it still lands on the plan's own "10".
+   * `managerOnly` entry (Maintenance, W7) joins Fleet (+1): 20 − 3 + 1 = 18. **Wave W6
+   * (docs/plans/active/CV-SETTINGS-PLAN.md) moves it to 19** — one new `managerOnly` entry (Profiles)
+   * joins Vision (+1): 18 + 1 = 19. The PILOT count is unaffected across both waves — none of the
+   * changed entries was ever pilot-visible (every VISION entry, Profiles included, is `managerOnly`)
+   * — it still lands on the plan's own "10".
    */
-  it('a PILOT sees exactly the plan\'s own 10 entries; a MANAGER/ADMIN sees 18 (20 − 3 folded into Inventory + 1 new Maintenance — see this test\'s own doc comment)', () => {
+  it('a PILOT sees exactly the plan\'s own 10 entries; a MANAGER/ADMIN sees 19 (18 + 1 new Profiles — see this test\'s own doc comment)', () => {
     const pilotVisible = visibleEntries(false);
     const managerVisible = visibleEntries(true);
 
@@ -278,7 +293,7 @@ describe('NAV_MODES', () => {
       'Settings',
     ]);
     expect(pilotVisible.length).toBe(10);
-    expect(managerVisible.length).toBe(18);
+    expect(managerVisible.length).toBe(19);
   });
 });
 

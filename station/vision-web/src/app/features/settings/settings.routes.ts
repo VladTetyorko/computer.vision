@@ -1,11 +1,14 @@
 import type { Routes } from '@angular/router';
 
 /**
- * `/settings` and `/settings/detection` — split per docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5,
- * docs/extracts/design/11-settings.md (Wave 4's F7 fix: "one destination, several names and doors"). Both
- * routes still live in one file per vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8) — see
- * `features/fly/fly.routes.ts`'s doc comment for why — the split is between the two *page*
- * components (`account-settings.ts`/`detection-settings.ts`), not the route file.
+ * `/settings` — split per docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5, docs/extracts/design/11-settings.md
+ * (Wave 4's F7 fix: "one destination, several names and doors").
+ *
+ * `/settings/detection` used to own its own page (`detection-settings.ts`, the single-org "detection
+ * defaults" form) — replaced outright by `/vision/profiles` (docs/plans/active/CV-SETTINGS-PLAN.md §4,
+ * wave W6, §8 Q4: "delete `/settings/detection` outright"). The old page component and its facade/logic
+ * are deleted, not merely unrouted; this entry is now a plain redirect so any saved link/bookmark still
+ * lands somewhere useful instead of 404ing.
  */
 export const SETTINGS_ROUTES: Routes = [
   {
@@ -15,7 +18,7 @@ export const SETTINGS_ROUTES: Routes = [
   },
   {
     path: 'settings/detection',
-    title: 'Detection defaults · Vision',
-    loadComponent: () => import('./detection-settings').then((m) => m.DetectionSettingsPage),
+    pathMatch: 'full',
+    redirectTo: 'vision/profiles',
   },
 ];
