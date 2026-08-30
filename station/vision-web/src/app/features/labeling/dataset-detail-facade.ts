@@ -215,10 +215,12 @@ export class DatasetDetailFacade {
 
   /** Best-effort — the base-model field just falls back to free text with no suggestions on
    *  failure; never blocks the page (mirrors `DatasetsFacade#loadCategories`'s own posture). Fetched
-   *  once per page instance, not per `datasetId`, since the registry is dataset-independent. */
+   *  once per page instance, not per `datasetId`, since the roster is dataset-independent. Reads
+   *  `GET /api/cv/models` (never errors server-side, docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ5) —
+   *  **not** the deleted `GET /api/cv/registry/models` this used to call before wave W8. */
   private async loadBaseModelOptions(): Promise<void> {
     try {
-      const response = await this.api.registryModels();
+      const response = await this.api.getCvModels();
       this.baseModelOptionsSignal.set(response.models.map((model) => model.id));
     } catch {
       // Left at [] — see this method's own doc comment.

@@ -18,7 +18,7 @@ Spec: [CV-SETTINGS-PLAN.md](CV-SETTINGS-PLAN.md). Branch `feat/cv-settings`, cut
 | W5 | | pending W2+W4 | | |
 | W6 | web-ui | built, uncommitted | | `/vision/profiles` page (list/editor/bindings/coverage) + `CvProfile*`/`EffectiveCvProfile`/`CvCoverage*`/`TrainingRun*` TS types + 8 new `VisionApi` methods; `detection-settings.*` deleted, `/settings/detection` redirects; nav rail gained Profiles (see Handoffs) |
 | W7 | web-ui | built, uncommitted | | Fly/Live/Wall CV dual-write removed; Vision drawer "From profile" line + `canManageOrg`-gated "Save to this asset's profile"; H6 stream-config readback; H12 one shared `declutterLevel`; H8 dead `LiveFacade.onConfidence/onFps/onModel` deleted (see Handoffs) |
-| W8 | | after W5 + W7 | | |
+| W8 | web-ui | built, uncommitted | | Model registry rewrite (status/runtime/availability/metrics/provenance chips, source-honesty notice, `canAdministerRegistry`-gated Promote/Roll back); 3 new `VisionApi` methods (`promoteModel` widened, `rollbackModel`, `getTrainingRuns`/`getTrainingRun`); new `RunHistoryPage`/`RunDetailPage` (`manage/training/runs[/:runId]`, `orgGuard`); shared `<vision-cv-subnav>` across Models/Labeling/Training (see Handoffs) |
 
 ## Handoffs
 (filled per wave: port signatures, deviations from the plan)
@@ -760,3 +760,143 @@ running vs. what's configured" merge. `EffectiveCvProfile`/`CvProfile*` types (W
 consumed by two call sites (`CockpitFacade#loadEffectiveProfile`, `CvSetupModal#saveToAssetProfile`) —
 any wire-shape drift W8 introduces there will now be caught by `tsc`, not just by W6's own unconsumed
 fixtures. `TrainingRun`/`TrainingRunsResponse` (W6) remain untouched and unconsumed — still W8's own.
+
+### W8 → (closing)
+
+Built entirely inside `station/vision-web`, write scope exactly as launched: `src/app/features/models/**`,
+`src/app/features/labeling/**`, `src/app/features/training-jobs/**`, `src/app/core/api/{models.ts,vision-api.ts}`
+(three missing endpoints only), a new shared sub-nav under `src/app/shared/ui/`, this file, and
+`station/vision-web/MODULE.md`. Never touched `src/app/features/vision-profiles/**` or
+`src/app/features/fly/**`. Built on a shared tree with the still-running Java W5 agent
+(`station/vision-api`/`station/vision-app`) — confirmed disjoint via `git status` throughout; every
+`station/vision-web/**` file the final `git status` shows changed/untracked is one this task touched,
+nothing else.
+
+**1. Three `VisionApi` endpoints.** `promoteModel(id, version)` now returns `Promise<PromotionResultResponse>`
+(`{id, version, status:'LIVE', previousModelId?, previousVersion?}`) instead of `void`; new
+`rollbackModel(): Promise<PromotionResultResponse>` (`POST /api/cv/registry/rollback`, no body); new
+`getTrainingRuns(): Promise<TrainingRunsResponse>` / `getTrainingRun(runId): Promise<TrainingRun>`
+(`GET /api/cv/training/runs[/:runId]`, W6's own `TrainingRun`/`TrainingRunsResponse` types, unconsumed
+until now). **Coded directly against the real W5 Java DTOs**, read off this shared tree's own
+uncommitted `CvModelResponse.java`/`CvModelMetricsResponse.java`/`CvModelProvenanceResponse.java`/
+`PromotionResultResponse.java` (all new/modified files on the shared tree, not yet committed by W5 at
+the time this task read them) rather than trusting §5.2's prose alone — this caught a real drift: W6's
+`CvModel.status` TS union was `'LIVE'|'CANDIDATE'|'ARCHIVED'`, a guess at the shape before the domain
+model existed; the real backend enum (`ModelStatus`, W4) is `DRAFT`/`CANDIDATE`/`LIVE`/`RETIRED` — fixed
+in `core/api/models.ts`. `RegisteredModel`/`RegisteredModelsResponse` (the old wire types `promoteModel`'s
+pre-widened signature and the deleted `registryModels()` method used) are removed outright, along with
+`VisionApi#registryModels()` itself; its one caller, `DatasetDetailFacade#loadBaseModelOptions`, now
+calls `getCvModels()` like every other reader of the roster.
+
+**2. Models page rewrite (`features/models/**`).** `ModelsFacade`/`models-logic.ts`/`models.html`
+rewritten wholesale around the joined read model §3.2 describes — worker truth (`ModelInfo`, live/not,
+id/version) merged with platform governance (`CvModelRecord` — status/runtime/metrics/provenance/
+availability). Table columns: Model/Version/Runtime/Status (one chip)/Availability (`MISSING_ON_WORKER`
+→ a plain `.availability-warn` line, never hidden or silently substituted)/Training mAP50 (labelled
+that exact way — `metricsKindLabel` — never presented as held-out evaluation)/Provenance (dataset→run
+links via `model.provenance.datasetId`/`.trainingRunId` when present, `'—'` otherwise)/Actions. A
+`source: 'config'` roster (registry off or its worker unreachable — `ModelRegistryService#models()`'s
+own documented fallback path) still renders every configured row, plus one `vision-notice warn`
+("Showing the configured model catalogue…") — `GET /api/cv/models` never errors server-side by
+contract (`CvModelsController` is `@OpenByDesign`, unconditional), so this page has **no** "feature
+disabled" empty state any more, unlike its pre-W8 shape.
+
+**Promote** (row-level, `canPromoteModel` gates on not-already-`LIVE` + `canAdministerRegistry` + no
+other row currently promoting) and a new page-level **Roll back** button both require
+`models-logic.ts#canAdministerRegistry(topRole)` — **`ModelRegistryController#promote`/`#rollback` both
+require `canAdminister()`** (confirmed by reading the controller: ADMIN topRole *or* `VisibilityScope`
+kind `UNBOUNDED`), which is **narrower** than `canManageOrg` (ADMIN|MANAGER) — the route's own
+`orgGuard` still lets a MANAGER *see* the page, but `canAdministerRegistry` hides both mutation
+affordances from one. This predicate had to be file-local to `models-logic.ts` rather than added to
+`core/org/org-logic.ts`, since that file is outside this task's write scope and the two predicates
+answer genuinely different questions (`canManageOrg` = "may administer this organization's fleet",
+`canAdministerRegistry` = "may mutate the platform-wide model registry" — the latter reads
+`VisibilityScope`, a different axis than role alone). Roll back opens a `ConfirmDialog` (via a small
+page-local `UiStore` group, `ROLLBACK_DIALOG_ID`) whose message names only the model currently `LIVE`
+(`rollbackConfirmMessage(liveModel)`) — **deliberately not** a guess at which model gets restored,
+since `PromotionResultResponse` only reveals `previousModelId`/`previousVersion` *after* the call
+succeeds, and the wire gives no way to know it beforehand; a `409` ("nothing to roll back to") is
+folded into `rollbackError` as its own honest sentence, never a raw error dump, mirroring the same
+`409`/`404` handling `promote` already had.
+
+**3. Persisted training-run history (`features/training-jobs/**`).** New `RunHistoryPage`
+(`/manage/training/runs`) and `RunDetailPage` (`/manage/training/runs/:runId`), both `orgGuard`-gated
+(`TrainingJobService#runs`/`#run` are `canManageOrg`-gated server-side per W4's own ledger note — a
+403 for a non-manager the route guard already prevents from being issued). **Distinct from the
+pre-existing `TrainingJobPage`** (`/manage/training/jobs/:jobId`, the live in-flight poll view over the
+separate, in-memory `TrainingJobResponse`) — `TrainingRun` is the **persisted** record
+(`cv_training_runs`, W3), survives a restart, and this pair of pages never polls it; a run still
+actively training is watched live at the job page instead. One shared `run-history-logic.ts` (+spec,
+10 cases) serves both pages — `sortRunsNewestFirst`, `runStateLabel`/`runProgressLabel` (reusing
+`training-job-logic.ts#jobStateLabel`/`#formatMetric`, same feature folder, not a third near-identical
+copy), `formatRunMetric` (null-safe — a persisted run's `loss`/`map50` are `number | null`, unlike the
+in-flight job's `0`-until-reported sentinel), `runDatasetLabel`, `hasProducedModel`. **No separate
+`run-detail-logic.ts` exists** — a deviation from the launching task's own working plan, reasoned in
+both facades' doc comments: once the list page's own logic file existed, the detail page needed
+nothing further of its own.
+
+`RunHistoryPage` renders every run as a full-row link (state chip/progress/loss/mAP50/dataset name/
+started-by+at) — one large touch target per row, the same idiom `dataset-detail.html`'s pre-existing
+"Training jobs" list already uses, rather than a table + trailing "Open" action column (a nested
+`<a>` inside a table row's own row-link is invalid HTML, and the task's own touch-target/responsive
+rule favors the bigger target anyway). `RunDetailPage` is the dataset → run → produced model walk's
+middle link: a "Dataset" action link to `DatasetDetailPage`, and — only once `hasProducedModel(run)` —
+an "open the model registry" link forward to `ModelsPage` (whose own Provenance column links back here
+from the model side). A `RUNNING` run with no model yet reads a quiet "still training" notice; it
+**deliberately does not** link to `/manage/training/jobs/:runId` on the assumption `TrainingRun#runId`
+equals `TrainingJobResponse#jobId` — nothing on the frozen §5.2 wire contract documents that
+equivalence (they're separate id namespaces on two separate persistence stores, W3 vs. the in-memory
+job map), and CLAUDE.md's "degrade honestly" rule rules out fabricating a link the wire can't back up.
+
+`training-jobs.routes.ts`'s `TRAINING_JOB_ROUTES` array gained `manage/training/runs` and
+`manage/training/runs/:runId`, both `orgGuard`. `manage/training/runs` is a static 3-segment path that
+would be swallowed by `LABELING_ROUTES`'s `manage/training/:datasetId` param route if registered after
+it in `app.routes.ts`'s merged array — the identical hazard `MODELS_ROUTES`'s own doc comment already
+documents for `manage/training/models` — but `TRAINING_JOB_ROUTES` already precedes `LABELING_ROUTES`
+there (true before this wave, verified by reading `app.routes.ts`), so **no edit to `app.routes.ts`
+was needed**, only to `training-jobs.routes.ts` itself (inside this task's write scope).
+`manage/training/runs/:runId` (4 segments) faces no such hazard regardless of order.
+
+**4. Shared `<vision-cv-subnav>` (`shared/ui/cv-subnav.*`, +spec, 5 cases).** One `active` input
+(`'models'|'labeling'|'training'`, explicit rather than `routerLinkActive` — `/manage/training`,
+`/manage/training/models`, and `/manage/training/runs` all share the literal string prefix
+`/manage/training`, so a non-exact `routerLinkActive` would misfire onto Labeling everywhere) rendering
+three `.segmented` tab links, one per tree root. Wired into `ModelsPage`, `DatasetsPage` (replacing its
+old header-actions "Models" link outright — now always visible, not gated by `!disabled()` the way
+that old link was, since jumping to another CV-settings tree is meaningful even when this deployment's
+training feature is off), and the new `RunHistoryPage`. **Deliberately not added to any drill-in page**
+(`DatasetDetailPage`, `SampleEditorPage`, `TrainingJobPage`, `RunDetailPage`) — those already carry
+their own "Back to …"/cross-link actions, so a second always-visible nav row there would only repeat
+one. **The Vision rail entries themselves are unchanged** (`nav-entries.ts`, out of this task's write
+scope and untouched) — this is a page-level lateral jump between the three route trees, not a rail
+change.
+
+**Role-gating summary**: Promote/Roll back → `canAdministerRegistry` (ADMIN/unbounded only). Training
+tree (`manage/training/runs[/:runId]`) → `orgGuard` (`canManageOrg`, ADMIN|MANAGER). Models roster read
+and all of Labeling → open to any signed-in user, unchanged from before this wave. **Dev parity**:
+`vision.auth.enabled=false`'s dev admin resolves ADMIN/unbounded, so both gates above pass exactly as
+they do for a real admin — nothing in this wave behaves differently under dev-parity than it will in
+production for the matching real role.
+
+**Verify chain, all green**: `npx tsc --noEmit -p tsconfig.app.json`/`-p tsconfig.spec.json` — 0 errors
+both. `npm run test:ci` — **162/162 files, 3121/3121 tests** (+42 over W7's 3079/3079). `npx ng build
+--configuration production` — green, same two pre-existing budget warnings only (initial bundle over
+its 390 kB budget; `tactical-map.css` over its own 8 kB budget — neither new nor worsened this wave).
+**Bundle delta**, measured via a pathspec-scoped `git stash push -u -- station/vision-web` baseline
+(same isolation technique W6/W7 used, for the same shared-tree reason): initial bundle **419.78 kB →
+420.28 kB raw (+0.50 kB), 118.20 kB → 118.37 kB transfer (+0.17 kB)** — effectively flat, since every
+substantial addition this wave lands inside already-lazy or newly-lazy chunks rather than the eager
+shell. Changed/new lazy chunks (measured by content-grep directly against `dist/`, since `ng build`'s
+own summary table truncates past its top 15 and none of these four chunks carry a route `title`-derived
+name): `models` chunk ~11.14 kB raw, `labeling`/`datasets` chunk ~8.83 kB raw, new `run-history` chunk
+~5.34 kB raw, new `run-detail` chunk ~5.88 kB raw. No separate `cv-subnav` chunk was split out — small
+enough that esbuild inlined it into each of the three consuming chunks. Not committed, per this task's
+own instruction — every file is staged-ready.
+
+**Plan status**: docs/plans/active/CV-SETTINGS-PLAN.md's client side is now fully implemented, W1–W8 all
+built on this shared tree. What remains open is entirely backend/integration: W5 (still mid-flight on
+this same tree at the time this wave finished) wiring `vision-app`/`vision-api` to the new domain/
+persistence/application-service ports, and then a live end-to-end verification of every endpoint this
+wave (and W6/W7) called against a real server — nothing here has been exercised against a running
+backend; every response shape is coded against the plan's own frozen §5.2 contract plus the real DTOs
+read directly off W5's uncommitted files on this shared tree.

@@ -1,0 +1,48 @@
+/* Reuses `.page`/`.card`/`.chip`/`.dot`/`.btn`/`.mono`/`.faint`/`.muted`/`.notice` from
+   `src/styles.css` — no new colors. `.run-osd`/`.item`/`.label`/`.value` mirror
+   `training-job.css`'s own `.job-osd`/`.item`/`.label`/`.value` mono-readout pattern, kept
+   component-local here per that same file's "repeated rather than shared" convention. */
+
+.back-link {
+  display: inline-flex;
+  margin-bottom: var(--space-16);
+}
+
+.state-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+}
+
+.run-osd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-24);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+a.value {
+  text-decoration: none;
+}
+
+a.value:hover {
+  text-decoration: underline;
+}

@@ -1,85 +1,141 @@
 <div class="page">
+  <vision-cv-subnav active="models" />
+
   <vision-section-header
     title="CV model registry"
-    subtitle="Every model cv-service currently knows about. Promote one to make it the live default for new detections."
+    subtitle="Every model this deployment knows about — worker truth joined with what's been trained and promoted here. Promote one to make it the live default for new detections."
   >
-    @if (!facade.disabled()) {
-      <div actions>
-        <a routerLink="/manage/training" class="btn secondary small">Datasets</a>
-      </div>
-    }
-  </vision-section-header>
-
-  @if (facade.disabled()) {
-    <vision-empty
-      icon="alert"
-      title="Training tools aren't enabled here"
-      message="This deployment hasn't turned on the CV training feature yet. Ask an administrator to enable vision.training.enabled if you need to promote a model."
-    />
-  } @else {
-    @if (facade.promoteError(); as promoteError) {
-      <vision-notice variant="warn" icon="alert">{{ promoteError }}</vision-notice>
-    }
-
-    <div class="card">
-      @if (facade.loading() && !facade.loaded()) {
-        <p class="muted">Loading the model registry…</p>
-      } @else if (facade.models().length === 0) {
-        <vision-empty
-          icon="target"
-          title="No models in the registry"
-          message="cv-service hasn't reported any models yet — check that the registry is reachable, or rsync a trained model artifact into its model directory."
-        />
-      } @else {
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th>Version</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (model of facade.models(); track model.id) {
-                <tr>
-                  <td class="mono">{{ model.id }}</td>
-                  <td>
-                    @if (model.version) {
-                      <span class="mono faint">{{ model.version }}</span>
-                    } @else {
-                      <span class="faint">—</span>
-                    }
-                  </td>
-                  <td>
-                    @if (model.active) {
-                      <span class="chip ok"><span class="dot ok"></span>Live</span>
-                    } @else {
-                      <span class="muted">Available</span>
-                    }
-                  </td>
-                  <td class="actions">
-                    @if (model.active) {
-                      <span class="faint">Currently live</span>
-                    } @else if (facade.canManage()) {
-                      <button
-                        type="button"
-                        class="btn secondary small"
-                        [disabled]="!facade.canPromote(model)"
-                        (click)="facade.promote(model)"
-                      >
-                        <vision-icon name="chevron-up" [size]="14" />
-                        {{ facade.promotingId() === model.id ? 'Promoting…' : 'Promote' }}
-                      </button>
-                    }
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
+    <div actions>
+      @if (facade.canAdminister()) {
+        <button
+          type="button"
+          class="btn secondary small"
+          [disabled]="facade.promotingKey() !== null || facade.rollbackBusy()"
+          (click)="facade.requestRollback()"
+        >
+          <vision-icon name="history" [size]="14" />
+          Roll back
+        </button>
       }
     </div>
+  </vision-section-header>
+
+  @if (facade.source() === 'config') {
+    <vision-notice variant="warn" icon="alert">
+      Showing the configured model catalogue — the live registry is unreachable or not enabled on this deployment.
+    </vision-notice>
+  }
+
+  @if (facade.promoteError(); as promoteError) {
+    <vision-notice variant="warn" icon="alert">{{ promoteError }}</vision-notice>
+  }
+
+  @if (facade.rollbackError(); as rollbackError) {
+    <vision-notice variant="warn" icon="alert">{{ rollbackError }}</vision-notice>
+  }
+
+  <div class="card">
+    @if (facade.loading() && !facade.loaded()) {
+      <p class="muted">Loading the model registry…</p>
+    } @else if (facade.models().length === 0) {
+      <vision-empty
+        icon="target"
+        title="No models in the registry"
+        message="Nothing reported yet — check that the registry is reachable, or rsync a trained model artifact into its model directory."
+      />
+    } @else {
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Version</th>
+              <th>Runtime</th>
+              <th>Status</th>
+              <th>Availability</th>
+              <th>Training mAP50</th>
+              <th>Provenance</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (model of facade.models(); track modelKey(model)) {
+              <tr>
+                <td class="mono">{{ model.id }}</td>
+                <td>
+                  @if (model.version) {
+                    <span class="mono faint">{{ model.version }}</span>
+                  } @else {
+                    <span class="faint">—</span>
+                  }
+                </td>
+                <td class="muted">{{ runtimeLabel(model.runtime) }}</td>
+                <td>
+                  <span class="chip" [class.ok]="statusChipVariant(model.status) === 'ok'" [class.accent]="statusChipVariant(model.status) === 'accent'">
+                    {{ statusLabel(model.status) }}
+                  </span>
+                </td>
+                <td>
+                  @if (isMissingOnWorker(model)) {
+                    <span class="availability-warn">Missing on worker</span>
+                  } @else {
+                    <span class="muted">Present</span>
+                  }
+                </td>
+                <td class="mono">
+                  @if (model.metrics; as metrics) {
+                    <span [title]="metricsKindLabel(metrics.kind)">{{ formatMap50(metrics.map50) }}</span>
+                  } @else {
+                    <span class="faint">—</span>
+                  }
+                </td>
+                <td>
+                  @if (hasProvenance(model.provenance)) {
+                    <span class="prov-links">
+                      @if (model.provenance?.datasetId; as datasetId) {
+                        <a [routerLink]="['/manage/training', datasetId]">Dataset</a>
+                      }
+                      @if (model.provenance?.datasetId && model.provenance?.trainingRunId) {
+                        <span class="faint"> → </span>
+                      }
+                      @if (model.provenance?.trainingRunId; as runId) {
+                        <a [routerLink]="['/manage/training/runs', runId]">Run</a>
+                      }
+                    </span>
+                  } @else {
+                    <span class="faint">—</span>
+                  }
+                </td>
+                <td class="actions">
+                  @if (model.status === 'LIVE') {
+                    <span class="faint">Currently live</span>
+                  } @else if (facade.canAdminister()) {
+                    <button
+                      type="button"
+                      class="btn secondary small"
+                      [disabled]="!facade.canPromote(model)"
+                      (click)="facade.promote(model)"
+                    >
+                      <vision-icon name="chevron-up" [size]="14" />
+                      {{ facade.promotingKey() === modelKey(model) ? 'Promoting…' : 'Promote' }}
+                    </button>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+
+  @if (facade.rollbackDialogOpen()) {
+    <vision-confirm-dialog
+      [message]="facade.rollbackMessage()"
+      confirmLabel="Roll back"
+      [busy]="facade.rollbackBusy()"
+      (confirmed)="facade.confirmRollback()"
+      (cancelled)="facade.cancelRollback()"
+    />
   }
 </div>

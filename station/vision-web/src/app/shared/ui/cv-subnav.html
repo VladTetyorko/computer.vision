@@ -1,0 +1,32 @@
+<nav class="segmented cv-subnav" role="tablist" aria-label="CV settings">
+  <a
+    routerLink="/manage/training/models"
+    role="tab"
+    class="btn secondary small"
+    [class.active]="active() === 'models'"
+    [attr.aria-selected]="active() === 'models'"
+  >
+    <vision-icon name="archive" [size]="14" />
+    Models
+  </a>
+  <a
+    routerLink="/manage/training"
+    role="tab"
+    class="btn secondary small"
+    [class.active]="active() === 'labeling'"
+    [attr.aria-selected]="active() === 'labeling'"
+  >
+    <vision-icon name="grid" [size]="14" />
+    Labeling
+  </a>
+  <a
+    routerLink="/manage/training/runs"
+    role="tab"
+    class="btn secondary small"
+    [class.active]="active() === 'training'"
+    [attr.aria-selected]="active() === 'training'"
+  >
+    <vision-icon name="history" [size]="14" />
+    Training
+  </a>
+</nav>

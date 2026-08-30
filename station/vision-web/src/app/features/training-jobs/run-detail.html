@@ -1,0 +1,78 @@
+<div class="page">
+  @if (facade.notFound()) {
+    <a routerLink="/manage/training/runs" class="btn secondary small back-link">Back to run history</a>
+    <vision-empty
+      icon="alert"
+      title="Training run not found"
+      message="It may never have existed, the id is wrong, or this deployment has since turned off the CV training feature."
+    />
+  } @else if (facade.loading() && !facade.run()) {
+    <p class="muted">Loading…</p>
+  } @else if (facade.run(); as run) {
+    <vision-section-header
+      eyebrow="Training run"
+      [title]="'Fine-tuning from ' + run.baseModel"
+      [subtitle]="'Started ' + formatWhen(run.startedAt) + ' by ' + run.startedBy"
+    >
+      <div actions>
+        <a routerLink="/manage/training/runs" class="btn secondary small">Back to run history</a>
+        <a [routerLink]="['/manage/training', run.datasetId]" class="btn secondary small">Dataset</a>
+      </div>
+    </vision-section-header>
+
+    <div class="card">
+      <div class="state-row">
+        @switch (run.state) {
+          @case ('RUNNING') {
+            <span class="chip accent"><span class="dot live"></span>{{ runStateLabel(run.state) }}</span>
+          }
+          @case ('SUCCEEDED') {
+            <span class="chip ok"><span class="dot ok"></span>{{ runStateLabel(run.state) }}</span>
+          }
+          @case ('FAILED') {
+            <span class="chip danger"><span class="dot danger"></span>{{ runStateLabel(run.state) }}</span>
+          }
+        }
+        <span class="muted">{{ run.epochs }} epoch{{ run.epochs === 1 ? '' : 's' }} requested</span>
+      </div>
+
+      <div class="run-osd">
+        <div class="item">
+          <span class="label">Progress</span>
+          <span class="value mono">{{ runProgressLabel(run) }}</span>
+        </div>
+        <div class="item">
+          <span class="label">Loss</span>
+          <span class="value mono">{{ formatRunMetric(run.loss) }}</span>
+        </div>
+        <div class="item">
+          <span class="label">mAP@50</span>
+          <span class="value mono">{{ formatRunMetric(run.map50) }}</span>
+        </div>
+        <div class="item">
+          <span class="label">Dataset</span>
+          <a class="value mono" [routerLink]="['/manage/training', run.datasetId]">{{ runDatasetLabel(run) }}</a>
+        </div>
+        @if (run.finishedAt; as finishedAt) {
+          <div class="item">
+            <span class="label">Finished</span>
+            <span class="value">{{ formatWhen(finishedAt) }}</span>
+          </div>
+        }
+      </div>
+    </div>
+
+    @if (hasProducedModel(run)) {
+      <vision-notice variant="ok" icon="target">
+        This run produced <span class="mono">"{{ run.outputModelId }}"</span> —
+        <a routerLink="/manage/training/models">open the model registry</a> to review or promote it.
+      </vision-notice>
+    } @else if (run.state === 'FAILED') {
+      <vision-notice variant="danger" icon="alert">This run failed and produced no model.</vision-notice>
+    } @else if (run.state === 'RUNNING') {
+      <vision-notice variant="neutral" icon="history">Still training — this record will update once the run finishes.</vision-notice>
+    } @else {
+      <vision-notice variant="warn" icon="alert">This run finished without reporting a produced model.</vision-notice>
+    }
+  }
+</div>

@@ -338,9 +338,13 @@ export interface CvModel {
   readonly taskType?: 'DETECT' | 'SEGMENT' | 'POSE' | 'CLASSIFY';
   readonly runtime?: 'PYTORCH' | 'ONNX' | 'OPENVINO' | 'TENSORRT';
   readonly classes?: readonly string[];
-  /** Registry lifecycle state — `'LIVE'` is the promoted, servable version; `'CANDIDATE'`/`'ARCHIVED'`
-   * are registry-only states this picker still lists for context but should not default-select. */
-  readonly status?: 'LIVE' | 'CANDIDATE' | 'ARCHIVED';
+  /** Registry lifecycle state — `'LIVE'` is the promoted, servable version; `'CANDIDATE'`/`'DRAFT'`/
+   * `'RETIRED'` are registry-only states this picker still lists for context but should not
+   * default-select. **Corrected wave W8** (docs/plans/active/CV-SETTINGS-PLAN.md §6 row W8) from
+   * this file's own original `'LIVE' | 'CANDIDATE' | 'ARCHIVED'` guess, written before the backend
+   * landed — `dto.CvModelResponse#status` (station/vision-api) serializes the domain `ModelStatus`
+   * name verbatim, which is `DRAFT`/`CANDIDATE`/`LIVE`/`RETIRED`; `'ARCHIVED'` is never sent. */
+  readonly status?: 'DRAFT' | 'CANDIDATE' | 'LIVE' | 'RETIRED';
   /** Whether the model file this entry names actually exists on the worker filesystem right now —
    * `'MISSING'` is CV-SETTINGS-PLAN.md §3.5 rule 4's "Missing on worker" case: the profile still
    * references it, but the picker must say so rather than silently falling back to something else. */
@@ -527,12 +531,14 @@ export interface CvCoverageResponse {
 }
 
 /**
- * Mirrors `domain.model.TrainingRun` (§5.2) — a `vision-learning` training job's own record, distinct
- * from the older `TrainingJobResponse` (`core/api/models.ts` below, still W8's registry surface).
- * Reuses `TrainingJobState` for `state` rather than a second near-identical union (`RUNNING` /
- * `SUCCEEDED` / `FAILED`) — same three-state lifecycle, one vocabulary. Not consumed by any UI this
- * wave ships (the training-runs endpoint itself is explicitly out of W6's scope, CV-SETTINGS-PLAN.md
- * §6) — declared now so W8 can build against a name that already matches the frozen contract.
+ * Mirrors `domain.model.TrainingRun` (§5.2) — a `vision-learning` training job's own **persisted**
+ * record (`cv_training_runs`, survives a browser/server restart), distinct from the older, in-memory
+ * `TrainingJobResponse` (`core/api/models.ts` below) that `TrainingJobController#job`/`#jobs` still
+ * serve — that one is this app's live-poll view of a run still in flight; this one is the
+ * queryable history `VisionApi#getTrainingRuns`/`#getTrainingRun` reads (wave W8,
+ * `features/training-jobs/run-history*`). Reuses `TrainingJobState` for `state` rather than a second
+ * near-identical union (`RUNNING` / `SUCCEEDED` / `FAILED`) — same three-state lifecycle, one
+ * vocabulary.
  */
 export interface TrainingRun {
   readonly runId: string;
@@ -551,8 +557,8 @@ export interface TrainingRun {
   readonly startedBy: string;
 }
 
-/** Mirrors `GET /api/cv/training-runs`'s `200` body — wrapped-list convention, not wired to any
- * `VisionApi` method this wave (W8's registry/training-runs scope, CV-SETTINGS-PLAN.md §6). */
+/** Mirrors `GET /api/cv/training/runs`'s `200` body — wrapped-list convention, matching
+ * `CvModelsResponse`/`DatasetsResponse`'s own precedent. Read by `VisionApi#getTrainingRuns`. */
 export interface TrainingRunsResponse {
   readonly runs: readonly TrainingRun[];
 }
@@ -3216,35 +3222,39 @@ export interface LabelAnnotationsRequest {
   readonly annotations: readonly Annotation[];
 }
 
-// --- CV model registry (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) -------------------------
-// The dynamic model registry — every model reference cv-service's own `Training/ListModels` RPC
-// actually reports, live, and the one place a model gets promoted to production. **Not** the same
-// roster as `CvModelsResponse`/`GET /api/cv/models` above (a static, config-backed picker for the
-// Fly cockpit's model dropdown) — see `ModelRegistryController`'s own javadoc (vision-api/MODULE.md,
-// "Not the same roster as `CvModelsController`"). Gated by the same `vision.training.enabled` flag
-// as the dataset/labeling endpoints above; `features/models/**` (Phase 2 T10) is the one consumer.
-
-/**
- * Mirrors `dto.RegisteredModelResponse` — one row of `GET /api/cv/registry/models`. No optional
- * fields (no `@JsonInclude(NON_NULL)` server-side, mirroring `CvModelResponse`'s own posture) —
- * `version` is routinely `""` today, since cv-service's registry tracks no per-model version data
- * yet (`cv_service/server.py#ListModels`'s own doc comment). See
- * `features/models/models-logic.ts#resolvePromoteVersion` for why that matters when promoting.
- */
-export interface RegisteredModel {
-  readonly id: string;
-  readonly version: string;
-  readonly active: boolean;
-}
-
-/** Mirrors `dto.RegisteredModelsResponse` — `GET /api/cv/registry/models`'s wrapper shape, the same `{"models":[...]}` precedent `CvModelsResponse`/`DatasetsResponse` set. */
-export interface RegisteredModelsResponse {
-  readonly models: readonly RegisteredModel[];
-}
+// --- CV model registry (docs/plans/active/CV-SETTINGS-PLAN.md §3.2/§5.2, wave W8) --------------------------
+// The registry's mutation surface — promote a model to `LIVE`, or roll back to whichever model that
+// promotion demoted. **The read side moved**: `GET /api/cv/registry/models` is deleted; the roster
+// (worker truth joined with platform governance — status/runtime/metrics/provenance/availability) is
+// now `GET /api/cv/models`/`CvModelsResponse` above, the one roster this app reads (`CvModel#status`/
+// `#source` distinguish a registry row from a static config entry — see that interface's own doc
+// comment). Gated by `vision.cv.registry.enabled` (default `vision.cv.enabled`), **not**
+// `vision.training.enabled` — `ModelRegistryController`'s own javadoc, CV-SETTINGS-PLAN.md §5.5.
+// `features/models/**` is the one consumer.
 
 /** Mirrors `dto.PromoteModelRequest` — the body of `POST /api/cv/registry/models/{id}/promote`. `version` must be non-blank server-side (`ModelRef`'s own compact-constructor check, surfaced as a 400). */
 export interface PromoteModelRequest {
   readonly version: string;
+}
+
+/**
+ * Mirrors `dto.PromotionResultResponse` — the shared response body of `POST
+ * /api/cv/registry/models/{id}/promote` and `POST /api/cv/registry/rollback` (§5.2): the model now
+ * `LIVE`, and whichever model (if any) that operation demoted to `RETIRED`. `id`/`version` name the
+ * model **now live** — not the one that was just promoted/rolled-back *from* — per the wire
+ * contract's own field names (unlike the domain `PromotionResult#modelId`).
+ *
+ * `previousModelId`/`previousVersion` are **absent, not `null`**, when nothing was demoted (the
+ * DTO carries `@JsonInclude(NON_NULL)` server-side, which omits a null field from the JSON body
+ * entirely rather than serializing it as `null`) — read `undefined` the same as any other
+ * "not reported" field in this app, never fabricate a "none" string.
+ */
+export interface PromotionResultResponse {
+  readonly id: string;
+  readonly version: string;
+  readonly status: 'LIVE';
+  readonly previousModelId?: string;
+  readonly previousVersion?: string;
 }
 
 // --- CV training-job flow (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2's last web wave) -------------
