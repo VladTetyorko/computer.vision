@@ -23,17 +23,17 @@ ALTER TABLE assets
     ADD COLUMN created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     ADD COLUMN updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now();
 
--- D8: `registration` used to live inside the free-form `attributes` bag (the only key every prior
--- onboarding flow actually wrote there); promote existing values onto the new first-class column,
--- then drop the key so a caller reading `attributes` going forward never sees a stale duplicate of
--- what `identity.registration` now owns.
+-- D8: the tail number used to live inside the free-form `attributes` bag under the key
+-- `registrationNumber` (UX-REWORK-PLAN §U-d item 3, `core/fleet/asset-attributes.ts`); a few
+-- early rows used `registration`. Promote either onto the first-class column (the canonical key
+-- wins), then drop both keys so nobody reads a stale duplicate of `identity.registration`.
 UPDATE assets
-   SET registration = attributes ->> 'registration'
- WHERE attributes ? 'registration';
+   SET registration = COALESCE(attributes ->> 'registrationNumber', attributes ->> 'registration')
+ WHERE attributes ? 'registrationNumber' OR attributes ? 'registration';
 
 UPDATE assets
-   SET attributes = attributes - 'registration'
- WHERE attributes ? 'registration';
+   SET attributes = attributes - 'registrationNumber' - 'registration'
+ WHERE attributes ? 'registrationNumber' OR attributes ? 'registration';
 
 -- D4: DeviceCategory.connected -- true for every category that already exists (drones, cameras,
 -- robots: Asset.devices stays non-empty for these, unchanged behavior), so the default keeps every
