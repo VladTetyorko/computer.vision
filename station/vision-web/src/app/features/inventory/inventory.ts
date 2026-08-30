@@ -18,7 +18,11 @@ import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehi
  * `VehiclesTable`, filtered to `Category#connected` categories) and mounts `DevicesPage`/
  * `CategoriesPage` verbatim as the Links/Categories tabs' content — neither is copied, both are
  * imported and reused exactly as they already exist (each keeps its own facade; this page injects
- * only its own {@link InventoryFacade}, never reaching into either).
+ * only its own {@link InventoryFacade}, never reaching into either). Both take `[embedded]="true"`
+ * (docs/plans/active/WAREHOUSE-UX-PLAN.md §4 wave W9), the same `CrewPage`-precedent swap of their
+ * own sticky `<vision-page-bar>` for a plain inline toolbar row — this page's own bar already carries
+ * the title/tab bar, so the pre-W9 double sticky header (WAREHOUSE-UX-CONTEXT.md's W4 status section)
+ * is gone; see `devices.ts`/`categories.ts`'s own `embedded` doc comments.
  *
  * **KPI strip + Export**: the old Reports page's "Fleet at a glance" KPI tiles sit above the tab bar
  * (only functional section that page had — see `features/reports/reports.routes.ts`'s own doc

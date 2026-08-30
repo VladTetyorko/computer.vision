@@ -36,6 +36,7 @@ import type {
   DetectionResult,
   Device,
   DeviceEdit,
+  FleetMaintenanceRecord,
   FleetReadiness,
   FleetSummary,
   AuxFunctionRequest,
@@ -52,6 +53,7 @@ import type {
   InventoryActionRequest,
   LabelAnnotationsRequest,
   LiveSubscription,
+  MaintenanceListState,
   MaintenanceRecord,
   MapDrawingResponse,
   MapLayer,
@@ -336,14 +338,27 @@ export class VisionApi {
     return firstValueFrom(this.http.post<AssetDetails>('/api/assets', request));
   }
 
-  // --- Maintenance / inventory (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.2/§4 W7) ------------------
-  // No fleet-wide maintenance endpoint exists (WAREHOUSE-UX-CONTEXT.md W7 handoff) — a caller reads
-  // one asset's own record list at a time, same shape as `listAssetPilots` below.
+  // --- Maintenance / inventory (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.2/§4 W7/W9) ---------------
 
   /** One asset's maintenance history, open and closed, oldest-first (server order) — `404` unknown or out-of-scope asset. */
   listAssetMaintenance(assetId: string): Promise<MaintenanceRecord[]> {
     return firstValueFrom(
       this.http.get<MaintenanceRecord[]>(`/api/assets/${encodeURIComponent(assetId)}/maintenance`),
+    );
+  }
+
+  /**
+   * Maintenance records across every asset the caller's scope includes, one call rather than one
+   * {@link listAssetMaintenance} per grounded asset (docs/plans/active/WAREHOUSE-UX-CONTEXT.md
+   * "W8 → W9 handoff") — `AssetInventoryController#fleetMaintenance`, `GET /api/maintenance`.
+   * `limit` bounds the `closed`/`all` portion's fleet-wide scan; open records are never
+   * limit-truncated server-side.
+   */
+  fleetMaintenance(state: MaintenanceListState = 'open', limit?: number): Promise<FleetMaintenanceRecord[]> {
+    return firstValueFrom(
+      this.http.get<FleetMaintenanceRecord[]>('/api/maintenance', {
+        params: limit === undefined ? { state } : { state, limit },
+      }),
     );
   }
 

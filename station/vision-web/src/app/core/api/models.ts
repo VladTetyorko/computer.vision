@@ -855,6 +855,25 @@ export interface AssetUsage {
 }
 
 /**
+ * Mirrors `dto.FirmwareResponse` — the asset's most recently observed firmware, joined from
+ * vision-flight at the vision-api layer (docs/plans/active/WAREHOUSE-UX-PLAN.md D5: "firmware stays
+ * flight-owned; the table joins it. Warehouse must not read `vehicle_profiles`."). Nested on
+ * {@link AssetSummary}, absent entirely (not `{ name: undefined, version: undefined }`) when the
+ * asset's devices were never probed at all. Not to be confused with `VehicleProfile#firmware`/
+ * `firmwareVersion` (`core/api/models.ts`'s own flat-string probe-result pair, a different feature) —
+ * this is the joined, display-ready fact `AssetSummaryResponse`/`FleetMaintenanceRecordResponse`
+ * carry.
+ *
+ * @property name    `"ardupilot"` | `"generic"` | `"px4"`, or absent if the probe answered but
+ *                    firmware was not identified.
+ * @property version  the firmware version string, or absent if not identified.
+ */
+export interface Firmware {
+  readonly name?: string;
+  readonly version?: string;
+}
+
+/**
  * Mirrors `dto.AssetSummaryResponse`, the shared field set `AssetDetails` extends. `lastUsedAt`
  * and `lastKnownPosition` are absent for an asset that has never been used.
  *
@@ -900,6 +919,20 @@ export interface AssetSummary {
   readonly inventoryState?: InventoryState;
   readonly createdAt?: string;
   readonly updatedAt?: string;
+  /**
+   * Mirrors `AssetSummaryResponse#firmware` (docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9
+   * handoff") — absent when never probed, or when the caller has no join to offer (`GET
+   * /api/assets/{id}/custody`/`/inventory`'s own responses always omit it, see
+   * `AssetInventoryController#detailsResponse`'s own doc comment on the five-parameter ceiling; a
+   * caller wanting a fresh value after a custody/inventory mutation re-fetches `GET /api/assets/{id}`).
+   */
+  readonly firmware?: Firmware;
+  /**
+   * Mirrors `AssetSummaryResponse#totalFlightSeconds` — cumulative flight seconds across every
+   * usage; absent only when the caller has no join to offer (see {@link firmware}'s own doc
+   * comment), never when the true value is a genuine zero (a never-flown asset reports `0`).
+   */
+  readonly totalFlightSeconds?: number;
 }
 
 /** Mirrors `warehouse.domain.model.InventoryState` (WAREHOUSE-UX-PLAN.md §3.2 D1/D2). */
@@ -1067,6 +1100,30 @@ export interface MaintenanceRecord {
 export interface CreateMaintenanceRecordRequest {
   readonly kind: MaintenanceKind;
   readonly summary: string;
+}
+
+/** Mirrors `application.maintenance.MaintenanceListState` — the `state` query param `GET /api/maintenance` accepts, case-insensitive on the wire, always sent lowercase here. */
+export type MaintenanceListState = 'open' | 'closed' | 'all';
+
+/**
+ * Mirrors `dto.FleetMaintenanceRecordResponse` — one element of `GET /api/maintenance`'s array
+ * (docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9 handoff"), {@link MaintenanceRecord}'s
+ * fleet-wide counterpart: carries the asset's name and category slug alongside each record so the
+ * Maintenance page needs one call, not one `GET /api/assets/{id}/maintenance` per grounded asset.
+ * `closedAt`/`flightSecondsAt` are absent (never `null`) while the record is open / when the
+ * asset's flight-hours weren't known at open, same convention as {@link MaintenanceRecord}.
+ */
+export interface FleetMaintenanceRecord {
+  readonly id: string;
+  readonly assetId: string;
+  readonly assetName: string;
+  readonly categoryId: string;
+  readonly kind: MaintenanceKind;
+  readonly openedAt: string;
+  readonly closedAt?: string;
+  readonly openedBy: string;
+  readonly summary: string;
+  readonly flightSecondsAt?: number;
 }
 
 /** Mirrors the three actions `POST /api/assets/{id}/inventory` accepts. */

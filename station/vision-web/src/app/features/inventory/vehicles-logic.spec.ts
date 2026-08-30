@@ -11,6 +11,7 @@ import {
   filterVehicleRowsByReadiness,
   filterVehicleRowsByRetired,
   findVehicleRowById,
+  firmwareLabel,
   searchVehicleRowsByName,
   sortVehicleRowsByTriage,
   vehicleLastFlownLabel,
@@ -71,6 +72,31 @@ describe('vehicleLastFlownLabel', () => {
   });
 });
 
+describe('firmwareLabel', () => {
+  it('is "—" when firmware is entirely absent (never probed)', () => {
+    expect(firmwareLabel(undefined)).toBe('—');
+  });
+
+  it('is "—" when the probe answered but identified neither field', () => {
+    expect(firmwareLabel({})).toBe('—');
+  });
+
+  it('maps a known name code to its display label and joins the version', () => {
+    expect(firmwareLabel({ name: 'ardupilot', version: '4.7.0' })).toBe('ArduPilot 4.7.0');
+    expect(firmwareLabel({ name: 'px4', version: '1.14' })).toBe('PX4 1.14');
+    expect(firmwareLabel({ name: 'generic', version: '1.0' })).toBe('Generic 1.0');
+  });
+
+  it('renders an unrecognized name code verbatim rather than hiding it', () => {
+    expect(firmwareLabel({ name: 'betaflight', version: '4.5' })).toBe('betaflight 4.5');
+  });
+
+  it('renders whichever one field is known when only one is', () => {
+    expect(firmwareLabel({ name: 'ardupilot' })).toBe('ArduPilot');
+    expect(firmwareLabel({ version: '4.7.0' })).toBe('4.7.0');
+  });
+});
+
 describe('buildVehicleRows', () => {
   it('resolves the custodian id to a display name when found', () => {
     const rows = buildVehicleRows(
@@ -112,10 +138,26 @@ describe('buildVehicleRows', () => {
     expect(rows[0].readinessVerdict).toBeUndefined();
   });
 
-  it('always renders firmware/hours as "—" (no fleet-wide source — see this module\'s own doc comment)', () => {
+  it('renders firmware/hours as "—" when the asset carries neither field (never probed/flown)', () => {
     const rows = buildVehicleRows([asset()], [], new Map(), Date.now());
     expect(rows[0].firmware).toBe('—');
     expect(rows[0].hours).toBe('—');
+  });
+
+  it('renders firmware as "<name> <version>" and hours via formatFlightTime once the asset carries both', () => {
+    const rows = buildVehicleRows(
+      [asset({ firmware: { name: 'ardupilot', version: '4.7.0' }, totalFlightSeconds: 3_720 })],
+      [],
+      new Map(),
+      Date.now(),
+    );
+    expect(rows[0].firmware).toBe('ArduPilot 4.7.0');
+    expect(rows[0].hours).toBe('1h 02m');
+  });
+
+  it('renders a genuine zero totalFlightSeconds honestly, not as "—"', () => {
+    const rows = buildVehicleRows([asset({ totalFlightSeconds: 0 })], [], new Map(), Date.now());
+    expect(rows[0].hours).toBe('0m');
   });
 
   it('builds an honest stateChip merging lifecycle/archived/inventoryState', () => {

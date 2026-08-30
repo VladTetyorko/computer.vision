@@ -24,6 +24,7 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | W6 wizard | web-ui | done | `eafb807e` |
 | W7 maintenance + crew | web-ui | done | `cae23506` |
 | W8 fleet maintenance read, firmware + hours on the row | spring-integrator | done | `fe1c143d` |
+| W9 consume W8's facts (one-call maintenance, firmware/hours columns, embedded Links/Categories) | web-ui | done, uncommitted | — (see W9 status) |
 
 Shared tree: agents commit **by path**, never stash. Unrelated dirty files (`infra/rover-sim/**`, `core/rc/manual-control-client*`, `DefaultPeerDirectory.java`) belong to another session — do not touch.
 
@@ -816,3 +817,79 @@ value after either).
 **Nothing deferred from this wave's own three numbered items** — all three shipped. Open, unrelated
 to this wave: the crew-notes UI (`AssetNoteRepositoryPort`, flagged by W7); the Links/Categories
 double-page-bar (flagged by W4); Reports' bar chart/needs-attention list (flagged by W4).
+
+## W9 status (consume W8's facts — one-call maintenance, firmware/hours columns, embedded Links/Categories) — done
+
+Built against W8's own handoff above with no re-reads of `station/vision-api` source beyond the
+JSON contracts already quoted there. File scope kept to `station/vision-web/**` plus this file's
+own W9 row/section — did not touch any backend module.
+
+**What shipped:**
+- `core/api/models.ts`/`vision-api.ts` gained the client mirror of the handoff: `Firmware`
+  (`{name?, version?}` on `AssetSummary#firmware`), `AssetSummary#totalFlightSeconds`,
+  `MaintenanceListState`, `FleetMaintenanceRecord`, `VisionApi#fleetMaintenance(state, limit?)` →
+  `GET /api/maintenance`.
+- `/fleet/maintenance` now fetches `fleetMaintenance('all')` once instead of the pre-W9
+  `GET /api/assets/{id}/maintenance` per-`MAINTENANCE`-asset fan-out W7 flagged as its own
+  handoff to W3/vision-warehouse (closed now by W8+W9 together). `core/maintenance/maintenance-logic.ts`
+  rewritten around the flat record list — `AssetMaintenanceRow` deleted, `openRecordRows`/
+  `recentlyClosedRecordRows` renamed `openRecords`/`recentlyClosedRecords` and no longer
+  asset-joining (each record already carries `assetName`/`categoryId`); `MaintenanceFacade` still
+  loads `assets`/`users` for the KPI `RETIRED` count, the "Ground a vehicle" picker, and category
+  display name / custodian lookups. `hoursSinceClose` retyped to a minimal `{closedAt?: string}`
+  structural interface so it still serves `asset-detail-logic.ts#sinceServiceTile`'s unrelated
+  per-asset `MaintenanceRecord` caller.
+- Vehicles/Equipment table's Firmware/Hours columns render real values —
+  `vehicles-logic.ts#firmwareLabel(firmware)` (`"ArduPilot 4.5.1"`, `'—'` only when both fields are
+  absent) and the existing `core/fleet/asset-stats-logic.ts#formatFlightTime` against
+  `totalFlightSeconds`. Equipment tab still hides both columns, unchanged.
+- Links/Categories tabs' double page-bar (flagged by W4 above) is fixed — `DevicesPage`/
+  `CategoriesPage` both gained `embedded = input(false)` (own `<vision-page-bar>` swapped for a
+  plain `.embedded-toolbar` row via `<ng-template>`+`NgTemplateOutlet`), the identical pattern W7
+  set for `RosterPage`/`OrgSettingsPage`; `inventory.html` now passes `[embedded]="true"` to both
+  mounts.
+- **Item 3(b) of this wave's task brief — the two flagged empty-state quick-adds — investigated,
+  nothing to delete.** `features/assets/**` no longer exists (deleted outright by W4);
+  `devices-facade.ts` carries no quick-add, only `goToAddSource()`. The one remaining bypass button
+  (`InventoryFacade#registerSimulator`) is a different facade than either named target and is
+  already W4's own documented, accepted relocation of the original quick-add — not a second one to
+  remove.
+
+**Role-gating/dev-parity:** unchanged — `orgGuard` on `/fleet/maintenance`, Links/Categories
+tab-visibility gating (`InventoryFacade#visibleTabs`), and `vision.auth.enabled=false` dev-admin
+behavior are all untouched by this wave.
+
+**Degrade-honestly note:** `MaintenanceFacade.load()` now folds `fleetMaintenance('all')` into the
+same blocking `Promise.all` as `listAssets`/`listUsers`, a deliberate change from the pre-W9
+per-asset reads' silent per-asset degrade — maintenance records are this page's primary content,
+not enrichment, so a failed read now shows the page's own error empty-state rather than a quietly
+incomplete table. Documented in `MaintenanceFacade`'s own class doc comment.
+
+**Verify:** `npx tsc --noEmit -p tsconfig.app.json`/`tsconfig.spec.json` clean (one real
+compile-break caught and fixed mid-wave: `hoursSinceClose`'s retyping above, found by grepping
+every caller before assuming the rewrite was safe). `npm run test:ci` green: 160/160 files,
+3049/3049 tests (+7 over W4's own last-recorded 3042). `ng build --configuration production` green,
+same two pre-existing budget warnings only — versus W4's own last-recorded numbers (the
+immediately-preceding vision-web wave on this branch; W8 was backend-only, nothing to diff against
+of its own): initial bundle 413.46 kB → 413.58 kB raw (+0.12 kB), 115.83 kB → 115.88 kB transfer
+(+0.05 kB), effectively flat; `inventory` lazy chunk 81.57 kB → 83.93 kB raw (+2.36 kB), 16.40 kB →
+16.90 kB transfer (+0.50 kB, from `firmwareLabel`/`formatFlightTime` plus the new embedded-toolbar
+templates for the statically-absorbed `DevicesPage`/`CategoriesPage`); `maintenance-page` lazy
+chunk 12.71 kB raw / 3.62 kB transfer, measured here for the first time (W7 never got a clean
+build on this shared tree to record one).
+
+**Commit:** not run by this wave — its own governing instructions say not to `git commit`
+autonomously despite the task brief specifying an exact message/trailers. Every file below is
+staged-ready, not committed:
+`core/api/models.ts`, `core/api/vision-api.ts`, `core/maintenance/maintenance-logic.ts`(+`.spec.ts`),
+`features/maintenance/{maintenance-facade,maintenance.page.ts,maintenance.page.html}`,
+`features/inventory/{vehicles-logic.ts(+.spec.ts),vehicles-table.ts,inventory.html,inventory.ts,inventory-facade.ts}`,
+`features/devices/{devices.ts,devices.html,devices.css}`,
+`features/categories/{categories.ts,categories.html,categories.css}`,
+`features/asset-detail/asset-detail-facade.ts`, `station/vision-web/MODULE.md`, this file. Suggested
+message: `feat(vision-web): one-call maintenance page, firmware + hours columns, embedded
+links/categories (WAREHOUSE-UX W9)`.
+
+**Not built, out of this wave's declared deliverables:** nothing — all four numbered deliverables in
+the task brief (maintenance one-call rewrite, firmware/hours columns, embedded Links/Categories,
+the item 3(b) quick-add check) landed, the last as a confirmed no-op.

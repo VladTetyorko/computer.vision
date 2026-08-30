@@ -110,38 +110,38 @@
               </tr>
             </thead>
             <tbody>
-              @for (row of facade.openRows(); track row.record.id) {
+              @for (record of facade.openRows(); track record.id) {
                 <tr>
-                  <td class="truncate" [title]="row.asset.displayName">{{ row.asset.displayName }}</td>
-                  <td class="muted truncate">{{ row.asset.categoryName }}</td>
+                  <td class="truncate" [title]="record.assetName">{{ record.assetName }}</td>
+                  <td class="muted truncate">{{ facade.categoryNameFor(record) }}</td>
                   <td>
                     <span
                       class="chip"
-                      [class.danger]="row.record.kind === 'GROUNDING'"
-                      [class.warn]="row.record.kind === 'INSPECTION_DUE'"
-                      [class.faded]="row.record.kind === 'NOTE'"
+                      [class.danger]="record.kind === 'GROUNDING'"
+                      [class.warn]="record.kind === 'INSPECTION_DUE'"
+                      [class.faded]="record.kind === 'NOTE'"
                     >
-                      {{ kindLabels[row.record.kind] }}
+                      {{ kindLabels[record.kind] }}
                     </span>
                   </td>
-                  <td class="muted truncate" [title]="row.record.summary">{{ row.record.summary }}</td>
-                  <td class="mono">{{ openedAge(row) }}</td>
-                  <td class="muted truncate">{{ facade.displayNameFor(row.record.openedBy) }}</td>
-                  <td class="muted truncate">{{ facade.custodianLabelFor(row.asset) ?? '—' }}</td>
+                  <td class="muted truncate" [title]="record.summary">{{ record.summary }}</td>
+                  <td class="mono">{{ openedAge(record) }}</td>
+                  <td class="muted truncate">{{ facade.displayNameFor(record.openedBy) }}</td>
+                  <td class="muted truncate">{{ facade.custodianLabelFor(record) ?? '—' }}</td>
                   <td class="actions">
                     <button
                       type="button"
                       class="btn small"
-                      [disabled]="facade.busyRecordId() === row.record.id"
-                      (click)="facade.closeRecord(row)"
+                      [disabled]="facade.busyRecordId() === record.id"
+                      (click)="facade.closeRecord(record)"
                     >
                       Close
                     </button>
                     <button
                       type="button"
                       class="btn secondary small"
-                      [disabled]="facade.busyAssetId() === row.asset.assetId"
-                      (click)="facade.release(row.asset)"
+                      [disabled]="facade.busyAssetId() === record.assetId"
+                      (click)="facade.release(record.assetId)"
                     >
                       Release
                     </button>
@@ -168,12 +168,12 @@
               </tr>
             </thead>
             <tbody>
-              @for (row of facade.closedRows(); track row.record.id) {
+              @for (record of facade.closedRows(); track record.id) {
                 <tr>
-                  <td class="truncate" [title]="row.asset.displayName">{{ row.asset.displayName }}</td>
-                  <td class="muted">{{ kindLabels[row.record.kind] }}</td>
-                  <td class="muted truncate" [title]="row.record.summary">{{ row.record.summary }}</td>
-                  <td class="mono">{{ closedHoursAgo(row) }} ago</td>
+                  <td class="truncate" [title]="record.assetName">{{ record.assetName }}</td>
+                  <td class="muted">{{ kindLabels[record.kind] }}</td>
+                  <td class="muted truncate" [title]="record.summary">{{ record.summary }}</td>
+                  <td class="mono">{{ closedHoursAgo(record) }} ago</td>
                 </tr>
               }
             </tbody>

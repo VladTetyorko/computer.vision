@@ -1,12 +1,9 @@
-<div class="page">
-  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/06-devices.md: `page-head` and its own
-       toolbar row are gone — search and the archived toggle project into `[pageBarFilters]`;
-       `+ Add source`/`Refresh` into `[pageBarActions]`. Both subtitle sentences are deleted (see
-       this file's own class doc comment for why). The `List | Grid` toggle that used to sit here is
-       gone outright (Wave 3, §2.4) — see the class doc comment. -->
-  <vision-page-bar title="Devices" icon="chip" [count]="facade.warehouseRows().length" countNoun="device">
+<div [class.page]="!embedded()">
+  <!-- `[class.page]` not a bare class — `embedded()` mounts inside `InventoryPage`'s own `.page`
+       (WAREHOUSE-UX-PLAN.md §4 W9); a second nested `.page` would double its 24/32/64px padding. -->
+  <!-- Shared by both header shapes below — see `devices.ts`'s own `embedded` doc comment. -->
+  <ng-template #deviceFiltersTpl>
     <input
-      pageBarFilters
       type="search"
       name="deviceSearch"
       class="device-search"
@@ -15,7 +12,7 @@
       [ngModel]="facade.searchQuery()"
       (ngModelChange)="facade.searchQuery.set($event)"
     />
-    <label class="row toggle" pageBarFilters>
+    <label class="row toggle">
       <input
         type="checkbox"
         name="showArchived"
@@ -24,18 +21,30 @@
       />
       <span>Show archived</span>
     </label>
-
-    <button pageBarActions type="button" class="btn" (click)="facade.goToAddSource()">+ Add source</button>
-    <button
-      pageBarActions
-      type="button"
-      class="btn secondary"
-      (click)="facade.refreshAll()"
-      [disabled]="facade.fleet.loading()"
-    >
+  </ng-template>
+  <ng-template #deviceActionsTpl>
+    <button type="button" class="btn" (click)="facade.goToAddSource()">+ Add source</button>
+    <button type="button" class="btn secondary" (click)="facade.refreshAll()" [disabled]="facade.fleet.loading()">
       Refresh
     </button>
-  </vision-page-bar>
+  </ng-template>
+
+  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/06-devices.md: `page-head` and its own
+       toolbar row are gone — search and the archived toggle project into `[pageBarFilters]`;
+       `+ Add source`/`Refresh` into `[pageBarActions]`. Both subtitle sentences are deleted (see
+       this file's own class doc comment for why). The `List | Grid` toggle that used to sit here is
+       gone outright (Wave 3, §2.4) — see the class doc comment. -->
+  @if (!embedded()) {
+    <vision-page-bar title="Devices" icon="chip" [count]="facade.warehouseRows().length" countNoun="device">
+      <ng-container pageBarFilters><ng-container *ngTemplateOutlet="deviceFiltersTpl" /></ng-container>
+      <ng-container pageBarActions><ng-container *ngTemplateOutlet="deviceActionsTpl" /></ng-container>
+    </vision-page-bar>
+  } @else {
+    <div class="embedded-toolbar">
+      <ng-container *ngTemplateOutlet="deviceFiltersTpl" />
+      <ng-container *ngTemplateOutlet="deviceActionsTpl" />
+    </div>
+  }
 
   <!-- ---- Devices: table + detail panel (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/06-devices.md)
        `vision-two-pane` docks the detail beside the table ≥1200px and overlays it below that — see

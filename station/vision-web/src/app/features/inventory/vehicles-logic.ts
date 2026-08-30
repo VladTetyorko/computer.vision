@@ -1,5 +1,6 @@
-import type { AssetDetails, InventoryState, LifecycleState, ReadinessVerdict, UserSummary } from '../../core/api/models';
+import type { AssetDetails, Firmware, InventoryState, LifecycleState, ReadinessVerdict, UserSummary } from '../../core/api/models';
 import { effectiveRegistration } from '../../core/fleet/asset-attributes';
+import { formatFlightTime } from '../../core/fleet/asset-stats-logic';
 import { triageOrder } from '../../core/fleet/triage-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
 import { effectiveInventoryStateChip, type InventoryStateChip } from '../../core/fleet/inventory-logic';
@@ -13,16 +14,14 @@ import { effectiveInventoryStateChip, type InventoryStateChip } from '../../core
  * table component itself decides which columns to render for which (`connected` input hides
  * Readiness/Links for Equipment).
  *
- * **Firmware/Hours are always `'—'`** (docs/plans/active/WAREHOUSE-UX-CONTEXT.md's own W3→W4 handoff
- * claimed `GET /api/fleet/readiness` "already carries VehicleProfile" — verified false against
- * `ReadinessRowResponse`/`ReadinessRow`; firmware only exists per-asset via
- * `GET /api/assets/{id}/profile`, an N+1 fetch this table deliberately avoids the same way the plan's
- * own "no per-row N+1" guardrail already rules out for every other column). **Hours has no
- * fleet-wide source at all** — `totalFlightSeconds` lives only on `AssetStats`
- * (`GET /api/assets/{id}/stats`, one fetch per asset) — a discrepancy this wave's own handoff didn't
- * flag; see `station/vision-web/MODULE.md`'s W4 changelog entry for the full writeup of both. Neither
- * is a client bug: both degrade honestly to an unknown value rather than fabricating one, per this
- * app's own "never a blocked page, never a fabricated value" rule.
+ * **Firmware/Hours** ({@link firmwareLabel}, `core/fleet/asset-stats-logic.ts#formatFlightTime`) —
+ * wave W9 (docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9 handoff") wires both to
+ * `AssetSummary#firmware`/`#totalFlightSeconds`, joined server-side at the vision-api layer
+ * (`AssetRowFacts`, WAREHOUSE-UX-PLAN.md D5) and already present on every `GET /api/assets`/
+ * `GET /api/assets/{id}` response this page already fetches — no new call, no N+1 (the W4→W7
+ * "always '—', no fleet-wide source" gap `station/vision-web/MODULE.md`'s W4 entry documented is
+ * closed). Both still degrade honestly to `'—'` when the underlying asset was never probed /
+ * never flown — see {@link firmwareLabel} and `formatFlightTime`'s own `null` case.
  */
 
 /** One row of the Vehicles/Equipment table. */
@@ -43,11 +42,37 @@ export interface VehicleRow {
   readonly registration?: string;
   /** Joined from `GET /api/fleet/readiness` by `assetId`; `undefined` when the asset has never been evaluated. */
   readonly readinessVerdict?: ReadinessVerdict;
-  /** Always `'—'` — see this file's own module doc. */
+  /** `{@link firmwareLabel}` of `asset.firmware` — `'—'` when never probed. */
   readonly firmware: string;
-  /** Always `'—'` — see this file's own module doc. */
+  /** `formatFlightTime` of `asset.totalFlightSeconds` — `'—'` when absent (no join to offer), never for a genuine zero (renders `'0m'`). */
   readonly hours: string;
   readonly lastFlownLabel: string;
+}
+
+/**
+ * Human display names for `Firmware#name`'s wire codes (`FirmwareResponse`'s own doc comment:
+ * `"ardupilot" | "generic" | "px4"`) — an unrecognized code (a future firmware this file hasn't
+ * heard of yet) renders verbatim rather than being hidden, the same "render it, don't invent its
+ * meaning" rule `readiness-logic.ts#featureLabel` uses for an unknown key.
+ */
+const FIRMWARE_NAME_LABELS: Record<string, string> = {
+  ardupilot: 'ArduPilot',
+  px4: 'PX4',
+  generic: 'Generic',
+};
+
+/**
+ * The Firmware column's own render: `"<name> <version>"` when both are known (e.g. `"ArduPilot
+ * 4.7.0"`), whichever one alone is known when only one is, and `'—'` when the asset was never
+ * probed at all (`firmware` absent) or the probe answered with neither field identified.
+ */
+export function firmwareLabel(firmware: Firmware | undefined): string {
+  const name = firmware?.name ? (FIRMWARE_NAME_LABELS[firmware.name] ?? firmware.name) : undefined;
+  const version = firmware?.version;
+  if (name && version) {
+    return `${name} ${version}`;
+  }
+  return name ?? version ?? '—';
 }
 
 /** `<humanAge> ago` / `'Never flown'` — this table's own register, distinct from
@@ -87,8 +112,8 @@ export function buildVehicleRows(
       custodianName: custodianId ? (nameById.get(custodianId) ?? custodianId) : undefined,
       registration: effectiveRegistration(asset),
       readinessVerdict: readinessByAssetId.get(asset.assetId),
-      firmware: '—',
-      hours: '—',
+      firmware: firmwareLabel(asset.firmware),
+      hours: formatFlightTime(asset.totalFlightSeconds ?? null),
       lastFlownLabel: vehicleLastFlownLabel(asset.lastUsedAt, nowMs),
     };
   });

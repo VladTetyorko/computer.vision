@@ -161,10 +161,10 @@
       <vision-vehicles-table [rows]="facade.equipmentRows()" [connected]="false" />
     }
     @case ('links') {
-      <vision-devices [sel]="sel()" />
+      <vision-devices [sel]="sel()" [embedded]="true" />
     }
     @case ('categories') {
-      <vision-categories />
+      <vision-categories [embedded]="true" />
     }
   }
 </div>

@@ -225,9 +225,9 @@ export class AssetDetailFacade {
 
   /** This asset's own maintenance history — fetched alongside `fetchAsset`/`refresh`
    *  (`GET /api/assets/{id}/maintenance`, the same per-asset endpoint `InventoryFacade`'s drawer
-   *  uses — there is no fleet-wide maintenance list, `core/maintenance/maintenance-logic.ts`'s own
-   *  doc comment). Feeds both {@link kpiTiles}' "Since service" tile and (later waves) a maintenance
-   *  drawer on this page. */
+   *  uses — deliberately not the fleet-wide `GET /api/maintenance` `/fleet/maintenance` itself uses
+   *  since wave W9, which would fetch every other asset's records just to discard them here). Feeds
+   *  both {@link kpiTiles}' "Since service" tile and (later waves) a maintenance drawer on this page. */
   readonly maintenanceRecords = signal<readonly MaintenanceRecord[]>([]);
 
   // --- Hardware section: attach-a-device picker ---------------------------------------------------

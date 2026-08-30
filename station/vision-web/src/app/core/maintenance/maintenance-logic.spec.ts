@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetSummary, InventoryState, MaintenanceKind, MaintenanceRecord } from '../api/models';
+import type { AssetSummary, FleetMaintenanceRecord, InventoryState, MaintenanceKind } from '../api/models';
 import {
   MAINTENANCE_KIND_LABELS,
   groundableAssets,
   hoursSinceClose,
   isOpenRecord,
   maintenanceKpis,
-  openRecordRows,
   openRecords,
   primaryOpenRecord,
-  recentlyClosedRecordRows,
+  recentlyClosedRecords,
 } from './maintenance-logic';
 
 function asset(partial: Partial<AssetSummary> = {}): AssetSummary {
@@ -25,10 +24,12 @@ function asset(partial: Partial<AssetSummary> = {}): AssetSummary {
   };
 }
 
-function record(partial: Partial<MaintenanceRecord> = {}): MaintenanceRecord {
+function record(partial: Partial<FleetMaintenanceRecord> = {}): FleetMaintenanceRecord {
   return {
     id: 'r-0',
     assetId: 'a-0',
+    assetName: 'Asset',
+    categoryId: 'drone',
     kind: 'GROUNDING',
     openedAt: '2026-08-01T00:00:00Z',
     openedBy: 'u-0',
@@ -76,52 +77,36 @@ describe('primaryOpenRecord', () => {
 });
 
 describe('openRecords', () => {
-  it('flattens every asset\'s open records, worst-first, and drops closed ones', () => {
-    const byAsset = new Map<string, readonly MaintenanceRecord[]>([
-      ['a-1', [record({ id: 'r-1', assetId: 'a-1', kind: 'REPAIR' }), record({ id: 'r-1-closed', assetId: 'a-1', closedAt: '2026-08-02T00:00:00Z' })]],
-      ['a-2', [record({ id: 'r-2', assetId: 'a-2', kind: 'GROUNDING' })]],
-    ]);
-    expect(openRecords(byAsset).map((r) => r.id)).toEqual(['r-2', 'r-1']);
+  it('flattens a fleet-wide list, worst-first, and drops closed ones', () => {
+    const records = [
+      record({ id: 'r-1', assetId: 'a-1', kind: 'REPAIR' }),
+      record({ id: 'r-1-closed', assetId: 'a-1', closedAt: '2026-08-02T00:00:00Z' }),
+      record({ id: 'r-2', assetId: 'a-2', kind: 'GROUNDING' }),
+    ];
+    expect(openRecords(records).map((r) => r.id)).toEqual(['r-2', 'r-1']);
+  });
+
+  it('carries the record\'s own assetName/categoryId through untouched — no asset join needed', () => {
+    const records = [record({ id: 'r-1', assetId: 'a-1', assetName: 'Falcon', categoryId: 'drone' })];
+    expect(openRecords(records)).toEqual(records);
   });
 });
 
-describe('openRecordRows', () => {
-  it('joins each open record back to its asset', () => {
-    const assets = [asset({ assetId: 'a-1', displayName: 'Falcon' })];
-    const byAsset = new Map<string, readonly MaintenanceRecord[]>([['a-1', [record({ id: 'r-1', assetId: 'a-1' })]]]);
-    const rows = openRecordRows(assets, byAsset);
-    expect(rows).toEqual([{ asset: assets[0], record: byAsset.get('a-1')![0] }]);
-  });
-
-  it('skips a record whose asset is not in the given list rather than fabricating a row', () => {
-    const byAsset = new Map<string, readonly MaintenanceRecord[]>([['a-missing', [record({ id: 'r-1', assetId: 'a-missing' })]]]);
-    expect(openRecordRows([], byAsset)).toEqual([]);
-  });
-});
-
-describe('recentlyClosedRecordRows', () => {
+describe('recentlyClosedRecords', () => {
   it('returns only closed records, newest-closed-first', () => {
-    const assets = [asset({ assetId: 'a-1' })];
-    const byAsset = new Map<string, readonly MaintenanceRecord[]>([
-      [
-        'a-1',
-        [
-          record({ id: 'r-open', assetId: 'a-1' }),
-          record({ id: 'r-old', assetId: 'a-1', closedAt: '2026-08-01T00:00:00Z' }),
-          record({ id: 'r-new', assetId: 'a-1', closedAt: '2026-08-10T00:00:00Z' }),
-        ],
-      ],
-    ]);
-    expect(recentlyClosedRecordRows(assets, byAsset).map((row) => row.record.id)).toEqual(['r-new', 'r-old']);
+    const records = [
+      record({ id: 'r-open', assetId: 'a-1' }),
+      record({ id: 'r-old', assetId: 'a-1', closedAt: '2026-08-01T00:00:00Z' }),
+      record({ id: 'r-new', assetId: 'a-1', closedAt: '2026-08-10T00:00:00Z' }),
+    ];
+    expect(recentlyClosedRecords(records).map((r) => r.id)).toEqual(['r-new', 'r-old']);
   });
 
   it('caps at the given limit', () => {
-    const assets = [asset({ assetId: 'a-1' })];
     const records = Array.from({ length: 5 }, (_, i) =>
       record({ id: `r-${i}`, assetId: 'a-1', closedAt: `2026-08-0${i + 1}T00:00:00Z` }),
     );
-    const byAsset = new Map<string, readonly MaintenanceRecord[]>([['a-1', records]]);
-    expect(recentlyClosedRecordRows(assets, byAsset, 2)).toHaveLength(2);
+    expect(recentlyClosedRecords(records, 2)).toHaveLength(2);
   });
 });
 
@@ -132,7 +117,7 @@ function assetWithState(inventoryState: InventoryState, assetId = 'a-0'): AssetS
 describe('maintenanceKpis', () => {
   it('counts RETIRED assets directly, with no record lookup', () => {
     const assets = [assetWithState('RETIRED')];
-    expect(maintenanceKpis(assets, new Map())).toEqual({ grounded: 0, inspectionDue: 0, inRepair: 0, retired: 1 });
+    expect(maintenanceKpis(assets, [])).toEqual({ grounded: 0, inspectionDue: 0, inRepair: 0, retired: 1 });
   });
 
   it('buckets a MAINTENANCE asset by its primary open record kind', () => {
@@ -143,21 +128,27 @@ describe('maintenanceKpis', () => {
     ];
     for (const [kind, bucket] of cases) {
       const assets = [assetWithState('MAINTENANCE')];
-      const byAsset = new Map<string, readonly MaintenanceRecord[]>([['a-0', [record({ kind })]]]);
-      const kpis = maintenanceKpis(assets, byAsset);
+      const records = [record({ assetId: 'a-0', kind })];
+      const kpis = maintenanceKpis(assets, records);
       expect(kpis[bucket]).toBe(1);
     }
   });
 
   it('counts a MAINTENANCE asset with only a NOTE-kind open record toward nothing, honestly', () => {
     const assets = [assetWithState('MAINTENANCE')];
-    const byAsset = new Map<string, readonly MaintenanceRecord[]>([['a-0', [record({ kind: 'NOTE' })]]]);
-    expect(maintenanceKpis(assets, byAsset)).toEqual({ grounded: 0, inspectionDue: 0, inRepair: 0, retired: 0 });
+    const records = [record({ assetId: 'a-0', kind: 'NOTE' })];
+    expect(maintenanceKpis(assets, records)).toEqual({ grounded: 0, inspectionDue: 0, inRepair: 0, retired: 0 });
   });
 
   it('ignores IN_STOCK/ISSUED/IN_FIELD assets entirely', () => {
     const assets = [assetWithState('IN_STOCK', 'a-1'), assetWithState('ISSUED', 'a-2'), assetWithState('IN_FIELD', 'a-3')];
-    expect(maintenanceKpis(assets, new Map())).toEqual({ grounded: 0, inspectionDue: 0, inRepair: 0, retired: 0 });
+    expect(maintenanceKpis(assets, [])).toEqual({ grounded: 0, inspectionDue: 0, inRepair: 0, retired: 0 });
+  });
+
+  it('ignores records belonging to an asset not in the given list, honestly (no fabricated bucket)', () => {
+    const assets = [assetWithState('MAINTENANCE', 'a-0')];
+    const records = [record({ assetId: 'a-other', kind: 'GROUNDING' })];
+    expect(maintenanceKpis(assets, records)).toEqual({ grounded: 0, inspectionDue: 0, inRepair: 0, retired: 0 });
   });
 });
 

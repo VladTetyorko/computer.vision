@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { SectionHeader } from '../../shared/ui/section-header';
@@ -21,10 +22,19 @@ import { canCreateCategory, isValidCategoryId, isValidCategoryName, type Categor
  * The create/edit forms are local, template-branch UI state (not the facade's) — same "doesn't feed
  * any facade computed" reasoning `AssetsPage`'s own `viewMode` doc comment gives — the facade owns
  * only the HTTP-backed `createCategory`/`updateCategory` calls themselves.
+ *
+ * **`embedded` (docs/plans/active/WAREHOUSE-UX-PLAN.md §4 wave W9).** Mounted as the Inventory
+ * page's "Categories" tab (`features/inventory/inventory.ts`) with `[embedded]="true"` — same
+ * `OrgSettingsPage`/`DevicesPage` pattern (see either's own `embedded` doc comment): Inventory's own
+ * single sticky `vision-page-bar` already carries the page's title/tab bar, so a second stacked
+ * sticky bar here would be duplicate chrome. `embedded` true swaps `<vision-page-bar>` for a plain,
+ * non-sticky `.embedded-toolbar` row carrying the identical search input + "+ Add category" button —
+ * one `<ng-template>` per slot fed to both header shapes via `NgTemplateOutlet`, so the two never
+ * drift. Defaults to `false` (the standalone route still renders its own bar).
  */
 @Component({
   selector: 'vision-categories',
-  imports: [FormsModule, RouterLink, PageBar, SectionHeader, EmptyState],
+  imports: [FormsModule, RouterLink, PageBar, SectionHeader, EmptyState, NgTemplateOutlet],
   templateUrl: './categories.html',
   styleUrl: './categories.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -32,6 +42,9 @@ import { canCreateCategory, isValidCategoryId, isValidCategoryName, type Categor
 })
 export class CategoriesPage {
   protected readonly facade = inject(CategoriesFacade);
+
+  /** `true` when mounted inside `InventoryPage`'s "Categories" tab — see this class's own doc comment. */
+  readonly embedded = input(false);
 
   // --- Create form -----------------------------------------------------------------------------
 

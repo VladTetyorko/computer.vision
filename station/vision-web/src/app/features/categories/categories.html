@@ -1,15 +1,10 @@
-<div class="page">
-  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/14-categories.md: `page-head` is gone; the
-       subtitle carries genuine instruction so it becomes a `hint` rather than being deleted (see
-       this file's own class doc comment). -->
-  <vision-page-bar
-    title="Categories"
-    icon="category"
-    hint="Every category assets are grouped by, with live counts."
-  >
+<div [class.page]="!embedded()">
+  <!-- `[class.page]` not a bare class — `embedded()` mounts inside `InventoryPage`'s own `.page`
+       (WAREHOUSE-UX-PLAN.md §4 W9); a second nested `.page` would double its 24/32/64px padding. -->
+  <!-- Shared by both header shapes below — see `categories.ts`'s own `embedded` doc comment. -->
+  <ng-template #categoryFiltersTpl>
     @if (facade.hasAny()) {
       <input
-        pageBarFilters
         type="search"
         class="categories-search"
         placeholder="Search categories…"
@@ -18,10 +13,31 @@
         (ngModelChange)="facade.searchQuery.set($event)"
       />
     }
+  </ng-template>
+  <ng-template #categoryActionsTpl>
     @if (!showCreate()) {
-      <button pageBarActions type="button" class="btn" (click)="openCreate()">+ Add category</button>
+      <button type="button" class="btn" (click)="openCreate()">+ Add category</button>
     }
-  </vision-page-bar>
+  </ng-template>
+
+  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/14-categories.md: `page-head` is gone; the
+       subtitle carries genuine instruction so it becomes a `hint` rather than being deleted (see
+       this file's own class doc comment). -->
+  @if (!embedded()) {
+    <vision-page-bar
+      title="Categories"
+      icon="category"
+      hint="Every category assets are grouped by, with live counts."
+    >
+      <ng-container pageBarFilters><ng-container *ngTemplateOutlet="categoryFiltersTpl" /></ng-container>
+      <ng-container pageBarActions><ng-container *ngTemplateOutlet="categoryActionsTpl" /></ng-container>
+    </vision-page-bar>
+  } @else {
+    <div class="embedded-toolbar">
+      <ng-container *ngTemplateOutlet="categoryFiltersTpl" />
+      <ng-container *ngTemplateOutlet="categoryActionsTpl" />
+    </div>
+  }
 
   <!-- ---- Create form (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's write half, wave W4) — a plain
        card, not a modal: only four fields, no reason to block the rest of the page. -->

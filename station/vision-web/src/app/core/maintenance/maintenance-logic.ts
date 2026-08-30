@@ -1,13 +1,17 @@
-import type { AssetSummary, MaintenanceKind, MaintenanceRecord } from '../api/models';
+import type { AssetSummary, FleetMaintenanceRecord, MaintenanceKind } from '../api/models';
 
 /**
  * Pure, Angular-free logic behind `/fleet/maintenance` (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3/§4
- * wave W7). There is no fleet-wide maintenance endpoint (docs/plans/active/WAREHOUSE-UX-CONTEXT.md's "W3
- * → W4/W6/W7 handoff" — flagged there as a W3 follow-up): `MaintenanceFacade` fetches
- * `GET /api/assets/{id}/maintenance` per asset, only for assets whose `inventoryState` is already
- * `MAINTENANCE` (the stored fact — WAREHOUSE-UX-PLAN.md §3.2 D2). Every function here takes that
- * already-fetched `assetId → MaintenanceRecord[]` map rather than reaching for `VisionApi` itself,
- * so it stays unit-testable with hand-built maps, no `HttpClient`/zoneless-signal ceremony.
+ * wave W7, one-call rewrite wave W9). `MaintenanceFacade` fetches the fleet-wide `GET /api/maintenance`
+ * once (`VisionApi.fleetMaintenance`, docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9 handoff") —
+ * every function here takes that already-fetched flat {@link FleetMaintenanceRecord} list rather than
+ * reaching for `VisionApi` itself, so it stays unit-testable with hand-built arrays, no
+ * `HttpClient`/zoneless-signal ceremony. `FleetMaintenanceRecord` already carries its own asset's
+ * `assetName`/`categoryId` (the endpoint's whole point — WAREHOUSE-UX-PLAN.md §3.3 D5), so unlike the
+ * pre-W9 `AssetMaintenanceRow` this file no longer joins against a separately-fetched asset list at
+ * all; `MaintenanceFacade` still loads `assets` for the KPI tiles' `RETIRED` count, the "Ground a
+ * vehicle" picker, and the (asset-only) category display name / custodian lookups the table also
+ * shows — see that class's own doc comment.
  *
  * A record with an open kind this app has never heard of (a future `MaintenanceKind` value the
  * backend adds before this file does) degrades honestly — it counts toward nothing in
@@ -34,12 +38,6 @@ export const MAINTENANCE_KIND_LABELS: Record<MaintenanceKind, string> = {
   NOTE: 'Note',
 };
 
-/** One open/closed record paired with the asset it belongs to — the table row shape both `openRecordRows`/`recentlyClosedRecordRows` below build. */
-export interface AssetMaintenanceRow {
-  readonly asset: AssetSummary;
-  readonly record: MaintenanceRecord;
-}
-
 /**
  * Severity/priority order — the strongest blocker first. Drives both the open-records table's sort
  * (worst-first, so the manager sees the thing actually keeping a vehicle NO-GO before an
@@ -56,15 +54,15 @@ const KIND_PRIORITY: Record<MaintenanceKind, number> = {
 };
 
 /** A record is open exactly when `closedAt` is absent — the same rule `MaintenanceRecord#isOpen()` (Java) applies server-side. */
-export function isOpenRecord(record: MaintenanceRecord): boolean {
+export function isOpenRecord(record: FleetMaintenanceRecord): boolean {
   return record.closedAt === undefined;
 }
 
-function byOpenedAtAsc(a: MaintenanceRecord, b: MaintenanceRecord): number {
+function byOpenedAtAsc(a: FleetMaintenanceRecord, b: FleetMaintenanceRecord): number {
   return Date.parse(a.openedAt) - Date.parse(b.openedAt);
 }
 
-function bySeverityThenAge(a: MaintenanceRecord, b: MaintenanceRecord): number {
+function bySeverityThenAge(a: FleetMaintenanceRecord, b: FleetMaintenanceRecord): number {
   const bySeverity = KIND_PRIORITY[a.kind] - KIND_PRIORITY[b.kind];
   return bySeverity !== 0 ? bySeverity : byOpenedAtAsc(a, b);
 }
@@ -73,9 +71,10 @@ function bySeverityThenAge(a: MaintenanceRecord, b: MaintenanceRecord): number {
  * One asset's "primary" open record — the one that actually explains why it's grounded: most
  * severe kind first, then the longest-outstanding (oldest `openedAt`) of that kind. `undefined` for
  * an asset with no open record — either a genuinely clean asset, or one whose maintenance read
- * failed and degraded to an empty list (never fabricated).
+ * failed and degraded to an empty list (never fabricated). Callers pass a list already scoped to
+ * one asset — see {@link maintenanceKpis}'s own grouping.
  */
-export function primaryOpenRecord(records: readonly MaintenanceRecord[]): MaintenanceRecord | undefined {
+export function primaryOpenRecord(records: readonly FleetMaintenanceRecord[]): FleetMaintenanceRecord | undefined {
   const open = records.filter(isOpenRecord);
   if (open.length === 0) {
     return undefined;
@@ -83,55 +82,34 @@ export function primaryOpenRecord(records: readonly MaintenanceRecord[]): Mainte
   return [...open].sort(bySeverityThenAge)[0];
 }
 
-/**
- * Every open record across a fleet's worth of already-fetched per-asset lists, worst-first
- * (severity, then longest outstanding) — the open-records table's own row order.
- */
-export function openRecords(
-  recordsByAssetId: ReadonlyMap<string, readonly MaintenanceRecord[]>,
-): readonly MaintenanceRecord[] {
-  return [...recordsByAssetId.values()]
-    .flatMap((records) => records.filter(isOpenRecord))
-    .sort(bySeverityThenAge);
+/** Every open record in a fleet-wide list, worst-first (severity, then longest outstanding) — the open-records table's own row order. */
+export function openRecords(records: readonly FleetMaintenanceRecord[]): readonly FleetMaintenanceRecord[] {
+  return [...records].filter(isOpenRecord).sort(bySeverityThenAge);
 }
 
-/** {@link openRecords} joined back to the asset each belongs to — skips a record whose asset isn't in `assets` (shouldn't happen; records are only ever fetched for a known asset id, but never fabricates a row over a missing one). */
-export function openRecordRows(
-  assets: readonly AssetSummary[],
-  recordsByAssetId: ReadonlyMap<string, readonly MaintenanceRecord[]>,
-): readonly AssetMaintenanceRow[] {
-  const assetsById = new Map(assets.map((asset) => [asset.assetId, asset]));
-  const rows: AssetMaintenanceRow[] = [];
-  for (const record of openRecords(recordsByAssetId)) {
-    const asset = assetsById.get(record.assetId);
-    if (asset) {
-      rows.push({ asset, record });
-    }
-  }
-  return rows;
-}
-
-/** Every closed record across a fleet's worth of already-fetched per-asset lists, newest-closed-first, capped to `limit` (the page's "Recently closed" section, default last 20). */
-export function recentlyClosedRecordRows(
-  assets: readonly AssetSummary[],
-  recordsByAssetId: ReadonlyMap<string, readonly MaintenanceRecord[]>,
+/** Every closed record in a fleet-wide list, newest-closed-first, capped to `limit` (the page's "Recently closed" section, default last 20). */
+export function recentlyClosedRecords(
+  records: readonly FleetMaintenanceRecord[],
   limit = 20,
-): readonly AssetMaintenanceRow[] {
-  const assetsById = new Map(assets.map((asset) => [asset.assetId, asset]));
-  const closed = [...recordsByAssetId.values()]
-    .flatMap((records) => records.filter((record) => !isOpenRecord(record)))
-    .sort((a, b) => Date.parse(b.closedAt as string) - Date.parse(a.closedAt as string));
-  const rows: AssetMaintenanceRow[] = [];
-  for (const record of closed) {
-    if (rows.length >= limit) {
-      break;
-    }
-    const asset = assetsById.get(record.assetId);
-    if (asset) {
-      rows.push({ asset, record });
+): readonly FleetMaintenanceRecord[] {
+  return [...records]
+    .filter((record) => !isOpenRecord(record))
+    .sort((a, b) => Date.parse(b.closedAt as string) - Date.parse(a.closedAt as string))
+    .slice(0, limit);
+}
+
+/** Groups a flat fleet-wide record list by `assetId` — the endpoint's own row shape doesn't nest by asset, so grouping happens here for {@link maintenanceKpis}'s per-asset bucketing. */
+function groupByAssetId(records: readonly FleetMaintenanceRecord[]): ReadonlyMap<string, readonly FleetMaintenanceRecord[]> {
+  const map = new Map<string, FleetMaintenanceRecord[]>();
+  for (const record of records) {
+    const bucket = map.get(record.assetId);
+    if (bucket) {
+      bucket.push(record);
+    } else {
+      map.set(record.assetId, [record]);
     }
   }
-  return rows;
+  return map;
 }
 
 /**
@@ -141,16 +119,20 @@ export function recentlyClosedRecordRows(
  * {@link primaryOpenRecord}'s kind; an asset whose only open record is a `NOTE` (never how `GROUND`
  * itself stores one, but not impossible if one was opened via the plain `POST .../maintenance`
  * endpoint on an asset some other record already grounded) counts toward none of the three —
- * degrading honestly rather than inventing a fifth silent bucket.
+ * degrading honestly rather than inventing a fifth silent bucket. `records` should be the fleet-wide
+ * `state=all` (or at least every open record) list — an asset's `MAINTENANCE` state with no matching
+ * open record here (a `state=open`-only caller that dropped it, or a genuinely stale read) still
+ * counts toward none of the three, same degrade-honestly rule.
  */
 export function maintenanceKpis(
   assets: readonly AssetSummary[],
-  recordsByAssetId: ReadonlyMap<string, readonly MaintenanceRecord[]>,
+  records: readonly FleetMaintenanceRecord[],
 ): MaintenanceKpis {
   let grounded = 0;
   let inspectionDue = 0;
   let inRepair = 0;
   let retired = 0;
+  const byAsset = groupByAssetId(records);
   for (const asset of assets) {
     if (asset.inventoryState === 'RETIRED') {
       retired += 1;
@@ -159,7 +141,7 @@ export function maintenanceKpis(
     if (asset.inventoryState !== 'MAINTENANCE') {
       continue;
     }
-    switch (primaryOpenRecord(recordsByAssetId.get(asset.assetId) ?? [])?.kind) {
+    switch (primaryOpenRecord(byAsset.get(asset.assetId) ?? [])?.kind) {
       case 'GROUNDING':
         grounded += 1;
         break;
@@ -178,10 +160,13 @@ export function maintenanceKpis(
 
 /**
  * Hours elapsed since a record's `closedAt` — the "hours since service" fact WAREHOUSE-UX-PLAN.md
- * §3.3 names for the asset-detail KPI band, reused here for the "Recently closed" section.
+ * §3.3 names for the asset-detail KPI band (`features/asset-detail/asset-detail-logic.ts#sinceServiceTile`,
+ * called with a per-asset `MaintenanceRecord`), reused here for the Maintenance page's own "Recently
+ * closed" section (called with a fleet-wide {@link FleetMaintenanceRecord}) — typed against the one
+ * field both shapes share rather than either concrete type, so this one function serves both callers.
  * `undefined` for a still-open record or an unparseable timestamp (degrades to "—", never `NaN`).
  */
-export function hoursSinceClose(record: MaintenanceRecord, nowMs: number): number | undefined {
+export function hoursSinceClose(record: { readonly closedAt?: string }, nowMs: number): number | undefined {
   if (record.closedAt === undefined) {
     return undefined;
   }

@@ -3,13 +3,12 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
-import type { AssetSummary, MaintenanceKind, MaintenanceRecord, UserSummary } from '../../core/api/models';
+import type { AssetSummary, FleetMaintenanceRecord, MaintenanceKind, UserSummary } from '../../core/api/models';
 import {
   groundableAssets,
   maintenanceKpis,
-  openRecordRows,
-  recentlyClosedRecordRows,
-  type AssetMaintenanceRow,
+  openRecords,
+  recentlyClosedRecords,
   type MaintenanceKpis,
 } from '../../core/maintenance/maintenance-logic';
 
@@ -18,22 +17,27 @@ import {
  * intermediate Store — same precedent as `ReportsFacade`/`RosterFacade`: this page's data isn't
  * shared across navigation, so there's nothing a Store would buy beyond an extra layer.
  *
- * **No fleet-wide maintenance endpoint exists** (docs/plans/active/WAREHOUSE-UX-CONTEXT.md's "W3 → W7
- * handoff", flagged again in `docs/plans/active/WAREHOUSE-UX-CONTEXT.md`'s W7 row as a follow-up for W3):
- * `load()` fetches every asset (`listAssets`, carries `inventoryState`/`custody`) and every user
- * (`listUsers`, for name resolution), then — only for assets whose `inventoryState` is already
- * `MAINTENANCE` — fetches that one asset's own maintenance history in parallel
- * (`listAssetMaintenance`, one call per grounded asset; mirrors `RosterFacade.load`'s identical
- * per-asset-in-parallel shape for `listAssetPilots`). A single asset's history failing to load is
- * swallowed to an empty list — that asset just drops out of the KPI/table counts until a retry,
- * never a fabricated row (the same "degrade honestly" rule `RosterFacade` already follows for
- * `listAssetPilots`).
+ * **One fleet-wide call, not one per grounded asset** (docs/plans/active/WAREHOUSE-UX-CONTEXT.md
+ * "W8 → W9 handoff", replacing the wave-W7 per-asset fan-out that same doc's W7 row had flagged as a
+ * follow-up): `load()` fetches every asset (`listAssets`, still needed for the KPI tiles' `RETIRED`
+ * count, the "Ground a vehicle" picker, and the table's category-name/custodian lookups — none of
+ * which the maintenance endpoint itself carries), every user (`listUsers`, for name resolution), and
+ * `VisionApi.fleetMaintenance('all')` — every maintenance record the caller's scope includes, open
+ * or closed, in one call. Unlike the pre-W9 per-asset reads (which degraded silently, one asset at a
+ * time, since they were enrichment on top of an already-shown `assets` list), the three fetches now
+ * run in one `Promise.all`: a failed `fleetMaintenance` read is this page's *primary* content, not an
+ * add-on, so it surfaces the same page-level error empty-state a failed `listAssets`/`listUsers`
+ * already did, never a silently-empty table with no explanation (CLAUDE.md's "never a blocked page,
+ * never a fabricated value" — an honest error state is neither).
  *
  * Every KPI/table/groundable-list derivation is pure (`core/maintenance/maintenance-logic.ts`) — this
- * class only owns the fetch, the "Ground a vehicle" form's view state, and the three mutations
- * (`submitGround`/`closeRecord`/`release`), each reloading the full page afterward rather than
- * hand-patching local state — the fleet-wide read is cheap enough (one `listAssets` + N grounded-asset
- * reads) that a full reload is simpler and can't drift from the server's own state machine.
+ * class only owns the fetch, the "Ground a vehicle" form's view state, the three mutations
+ * (`submitGround`/`closeRecord`/`release`, each reloading the full page afterward rather than
+ * hand-patching local state — the fleet-wide read is now one call plus `listAssets`/`listUsers`, cheap
+ * enough that a full reload is simpler and can't drift from the server's own state machine), and the
+ * per-record category-name/custodian lookups the table needs (`FleetMaintenanceRecord` carries its
+ * own `assetName`/`categoryId` slug already — see that type's own doc comment — but not the asset's
+ * human category *name* or its custody, both of which still need the loaded `assets` list).
  */
 @Injectable()
 export class MaintenanceFacade {
@@ -45,19 +49,16 @@ export class MaintenanceFacade {
 
   private readonly assets = signal<readonly AssetSummary[]>([]);
   private readonly users = signal<readonly UserSummary[]>([]);
-  private readonly recordsByAssetId = signal<ReadonlyMap<string, readonly MaintenanceRecord[]>>(new Map());
+  private readonly records = signal<readonly FleetMaintenanceRecord[]>([]);
 
+  private readonly assetsById = computed(() => new Map(this.assets().map((asset) => [asset.assetId, asset])));
   /** `userId → display name` — backs both {@link displayNameFor} ("Opened by") and {@link custodianLabelFor} ("Custodian"). */
   private readonly nameById = computed(() => new Map(this.users().map((user) => [user.userId, user.displayName])));
 
   readonly hasAnyAssets = computed(() => this.assets().length > 0);
-  readonly kpis = computed<MaintenanceKpis>(() => maintenanceKpis(this.assets(), this.recordsByAssetId()));
-  readonly openRows = computed<readonly AssetMaintenanceRow[]>(() =>
-    openRecordRows(this.assets(), this.recordsByAssetId()),
-  );
-  readonly closedRows = computed<readonly AssetMaintenanceRow[]>(() =>
-    recentlyClosedRecordRows(this.assets(), this.recordsByAssetId()),
-  );
+  readonly kpis = computed<MaintenanceKpis>(() => maintenanceKpis(this.assets(), this.records()));
+  readonly openRows = computed<readonly FleetMaintenanceRecord[]>(() => openRecords(this.records()));
+  readonly closedRows = computed<readonly FleetMaintenanceRecord[]>(() => recentlyClosedRecords(this.records()));
   readonly groundable = computed<readonly AssetSummary[]>(() => groundableAssets(this.assets()));
 
   /** "Nothing grounded · every vehicle is in stock or in the field" — the page's own empty state (WAREHOUSE-UX-PLAN.md §4 W7 exact copy). */
@@ -82,22 +83,14 @@ export class MaintenanceFacade {
     this.loading.set(true);
     this.error.set(null);
     try {
-      const [assets, users] = await Promise.all([this.api.listAssets(), this.api.listUsers()]);
+      const [assets, users, records] = await Promise.all([
+        this.api.listAssets(),
+        this.api.listUsers(),
+        this.api.fleetMaintenance('all'),
+      ]);
       this.assets.set(assets);
       this.users.set(users);
-      const grounded = assets.filter((asset) => asset.inventoryState === 'MAINTENANCE');
-      const entries = await Promise.all(
-        grounded.map(async (asset): Promise<readonly [string, readonly MaintenanceRecord[]]> => {
-          try {
-            return [asset.assetId, await this.api.listAssetMaintenance(asset.assetId)];
-          } catch {
-            // Best-effort per-asset enrichment (see this class's own doc comment) — one asset's
-            // history failing to load never blocks the rest of the page.
-            return [asset.assetId, []];
-          }
-        }),
-      );
-      this.recordsByAssetId.set(new Map(entries));
+      this.records.set(records);
     } catch (error) {
       this.error.set(describeHttpError(error));
     } finally {
@@ -110,9 +103,14 @@ export class MaintenanceFacade {
     return this.nameById().get(userId) ?? userId.slice(0, 8);
   }
 
-  /** "Custodian" column (WAREHOUSE-UX-PLAN.md §3.2 D3) — `undefined` when the asset is in stock (no custodian), rendered as "—" by the template. */
-  custodianLabelFor(asset: AssetSummary): string | undefined {
-    const custodianId = asset.custody?.custodianId;
+  /** "Category" column — the asset's human-readable category name when it's still loaded locally; falls back to the record's own `categoryId` slug otherwise (never a blank cell). */
+  categoryNameFor(record: FleetMaintenanceRecord): string {
+    return this.assetsById().get(record.assetId)?.categoryName ?? record.categoryId;
+  }
+
+  /** "Custodian" column (WAREHOUSE-UX-PLAN.md §3.2 D3) — `undefined` when the asset is in stock (no custodian) or no longer loaded, rendered as "—" by the template. */
+  custodianLabelFor(record: FleetMaintenanceRecord): string | undefined {
+    const custodianId = this.assetsById().get(record.assetId)?.custody?.custodianId;
     return custodianId ? this.displayNameFor(custodianId) : undefined;
   }
 
@@ -146,13 +144,13 @@ export class MaintenanceFacade {
     }
   }
 
-  async closeRecord(row: AssetMaintenanceRow): Promise<void> {
+  async closeRecord(record: FleetMaintenanceRecord): Promise<void> {
     if (this.busyRecordId()) {
       return;
     }
-    this.busyRecordId.set(row.record.id);
+    this.busyRecordId.set(record.id);
     try {
-      await this.api.closeMaintenanceRecord(row.asset.assetId, row.record.id);
+      await this.api.closeMaintenanceRecord(record.assetId, record.id);
       this.toasts.ok('Record closed.');
       await this.load();
     } catch (error) {
@@ -162,13 +160,13 @@ export class MaintenanceFacade {
     }
   }
 
-  async release(asset: AssetSummary): Promise<void> {
+  async release(assetId: string): Promise<void> {
     if (this.busyAssetId()) {
       return;
     }
-    this.busyAssetId.set(asset.assetId);
+    this.busyAssetId.set(assetId);
     try {
-      await this.api.setAssetInventory(asset.assetId, { action: 'RELEASE' });
+      await this.api.setAssetInventory(assetId, { action: 'RELEASE' });
       this.toasts.ok('Released back to stock.');
       await this.load();
     } catch (error) {

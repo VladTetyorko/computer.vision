@@ -58,8 +58,10 @@ import type {
  * ({@link filterVehicleRowsByConnected}) and run through one shared filter pipeline
  * ({@link filteredRows}) — switching tabs never re-fetches, only re-filters.
  *
- * **Firmware/Hours columns are always `'—'`** — see `vehicles-logic.ts`'s own module doc comment for
- * the two discrepancies this documents (no fleet-wide firmware or flight-hours source exists yet).
+ * **Firmware/Hours columns** read `AssetDetails#firmware`/`#totalFlightSeconds` directly (wave W9,
+ * docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9 handoff") — already present on the same
+ * `getAsset`/`listAssets` responses this facade already fetches, no second call. See
+ * `vehicles-logic.ts`'s own module doc comment for the render (`firmwareLabel`/`formatFlightTime`).
  *
  * **Mutations patch in place.** `setAssetCustody`/`setAssetInventory` both return the asset's full,
  * updated `AssetDetails` — {@link patchAsset} splices it back into `assets()` directly rather than
@@ -225,9 +227,10 @@ export class InventoryFacade {
     void this.loadAll();
 
     // The detail pane's Maintenance drawer only ever needs the *selected* asset's own records —
-    // fetched on selection, cleared on deselection, never kept warm for the whole table (the same
-    // "no fleet-wide maintenance endpoint" constraint `core/maintenance/maintenance-logic.ts`'s own
-    // doc comment names for wave W7's page).
+    // fetched on selection, cleared on deselection, never kept warm for the whole table. Deliberately
+    // still `listAssetMaintenance` (per-asset), not the fleet-wide `fleetMaintenance` `/fleet/maintenance`
+    // itself uses (wave W9) — this drawer is already scoped to one asset, so the fleet-wide read would
+    // fetch every other asset's records only to discard them.
     effect(() => {
       const assetId = this.selectedId();
       if (assetId) {

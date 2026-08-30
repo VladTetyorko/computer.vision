@@ -24,8 +24,10 @@ import { vehicleRowActions, type VehicleRow } from './vehicles-logic';
  * Firmware · Hours · Last flown · Links(n) — the last two only for `connected` (Vehicles); Equipment
  * has no "flown" concept and its own device-link count is rarely interesting, so both columns are
  * hidden there rather than always showing `'—'` for a whole tab (frontend-style's "never a column of
- * pure dashes" — the Firmware/Hours cells inside Vehicles are a different, narrower gap: this
- * wave's two documented backend discrepancies, not a whole-tab absence).
+ * pure dashes"). Firmware/Hours (wave W9, docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9
+ * handoff") render real values off `AssetSummary#firmware`/`#totalFlightSeconds` now
+ * (`vehicles-logic.ts#firmwareLabel`/`formatFlightTime`) — `'—'` only for a genuinely never-probed/
+ * never-flown asset, never a whole-column absence.
  *
  * **Kebab verbs** are gated by {@link vehicleRowActions} (a plain boolean set — see that function's
  * own doc comment for why this wave didn't reuse `warehouse-logic.ts`'s reasoned
