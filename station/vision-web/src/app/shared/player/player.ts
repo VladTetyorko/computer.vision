@@ -57,6 +57,7 @@ import {
   INITIAL_PACING_STATE,
   INITIAL_WHEP_ICE_STATE,
   STALL_WATCHDOG_MS,
+  WHEP_RETRY_COOLDOWN_MS,
   advancePacing,
   attachKey,
   cyclePacingDelayMs,
@@ -65,10 +66,12 @@ import {
   extractWhepStatsSnapshot,
   initialTransportState,
   isStalled,
+  isWhepPrePlayMiss,
   isWhepStillWaitingForTrack,
   reduceTransportRecovery,
   reduceWhepIce,
   shouldAttemptWhep,
+  shouldAttemptWhepUpgrade,
   type PacingEvent,
   type PacingState,
   type PlayerPhase,
@@ -134,6 +137,15 @@ const WHEP_NO_TRACK_TIMEOUT_MS = 6_000;
 
 /** Bounded wait for ICE gathering before POSTing the offer — see `waitForIceGatheringComplete`. */
 const ICE_GATHERING_TIMEOUT_MS = 3_000;
+
+/**
+ * Target jitter-buffer delay (ms) for the WHEP inbound video receiver — a small, fixed amount of
+ * smoothing headroom against network jitter, traded against the ~0.4s glass-to-glass latency this
+ * transport is chosen for in the first place. Applied via `RTCRtpReceiver#jitterBufferTarget`
+ * (feature-detected — Chromium-family only as of this writing; every other browser keeps its own
+ * default adaptive jitter buffer, exactly as before this constant existed).
+ */
+const WHEP_JITTER_BUFFER_TARGET_MS = 150;
 
 /**
  * hls.js live-edge tuning (docs/plans/done/MVP2-PLAN.md §V — V-a shrinks segment/part duration server-side,
@@ -622,6 +634,14 @@ export class Player {
   private currentSrc: string | null = null;
   private generation = 0;
   /**
+   * Whether the *current* `beginAttach` attempt has already reached `playing` once — reset `false`
+   * at the top of every fresh `beginAttach` (both the native and hls.js paths share it). Drives the
+   * `'firstAttach'` live-edge snap (fix/stream-start-latency, `live-edge-logic.ts#SnapToLiveReason`):
+   * `'recovered'` already snaps every later reattach within an attach's lifetime, but a brand new
+   * attach's own first playback start was never covered before this fix.
+   */
+  private hasPlayedThisAttach = false;
+  /**
    * The `src`/`whepUrl`/`suspended`/`stopped` tuple (`player-recovery.ts#attachKey`) the reattach
    * effect last actually acted on — see its own doc comment. Also what keeps a secondary tile's
    * `<vision-player>` from tearing down on every poll re-render (docs/plans/done/REALTIME-PLAN.md Phase R-a
@@ -668,6 +688,22 @@ export class Player {
   private iceRestartGraceTimer: ReturnType<typeof setTimeout> | null = null;
   /** Re-entrancy guard: the `connectionState` handler and the stall watchdog can both notice trouble on the same tick — only one `attemptIceRestart` runs at a time. */
   private restartInFlight = false;
+
+  // --- Background WHEP upgrade while parked on HLS (fix/stream-start-latency) --------------------
+  //
+  // `player-recovery.ts#shouldAttemptWhepUpgrade`'s own doc comment has the full rationale: once HLS
+  // reaches `playing`, `beginNextCycle` (the only place that ever re-tries WHEP) is never reached
+  // again while nothing keeps failing, so a stream that fell back once would otherwise never get a
+  // second chance at the low-latency transport for the rest of the page session.
+  private whepUpgradeTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * True while a background WHEP upgrade probe is negotiating — gates `beginWhepAttach`'s `ontrack`/
+   * `handleWhepFailure`/`handleWhepPathNotReady` handlers so a probe's outcome either commits (tears
+   * down HLS, flips `transportState`) or is discarded quietly, never corrupting the still-live HLS
+   * session's own `transportState`/`pacingState` bookkeeping while the probe is merely testing the
+   * water in the background.
+   */
+  private whepUpgradeInFlight = false;
 
   constructor() {
     effect(() => {
@@ -883,6 +919,7 @@ export class Player {
     }
     this.teardownMedia();
     this.lastProgressAt = Date.now();
+    this.hasPlayedThisAttach = false; // fresh attach — see this field's own doc comment
     this.startWatchdog(generation);
 
     const video = this.video().nativeElement;
@@ -923,12 +960,20 @@ export class Player {
       this.lastProgressAt = Date.now();
       this.mediaErrorRecoveryCount = 0; // real progress — the recovery cap starts fresh
       const wasReconnecting = this.transportState().recovery.phase === 'reconnecting';
+      const isFirstAttach = !this.hasPlayedThisAttach;
+      this.hasPlayedThisAttach = true;
       this.dispatchRecovery('firstSegment');
       this.dispatchPacing('playing', Date.now()); // docs/plans/done/MVP2-PLAN.md §S, S-c
-      if (wasReconnecting) {
+      if (isFirstAttach) {
+        // fix/stream-start-latency: this attach's own first playback start earns the same live-edge
+        // snap a later reattach-after-failure already got — see `SnapToLiveReason`'s own doc comment.
+        console.info(`${LOG_PREFIX} HLS first attach — snapping to live edge`);
+        this.maybeSnapToLive('firstAttach');
+      } else if (wasReconnecting) {
         console.info(`${LOG_PREFIX} HLS recovered — fragment buffered again`);
         this.maybeSnapToLive('recovered'); // see docs/plans/done/MVP2-PLAN.md §V, V-b — a fresh reattach earns a live-edge snap.
       }
+      this.scheduleWhepUpgradeAttempt(generation); // fix/stream-start-latency: an HLS fallback is never permanent for the page session
     });
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (generation !== this.generation || !data.fatal) {
@@ -940,7 +985,11 @@ export class Player {
           responseCode: data.response?.code,
         });
         this.dispatchRecovery('playlistNotReady');
-        this.scheduleColdStartRetry(generation);
+        this.scheduleColdStartRetry(generation, () => {
+          if (this.currentSrc !== null) {
+            void this.beginAttach(generation, this.currentSrc);
+          }
+        });
         return;
       }
       if (data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR) {
@@ -986,10 +1035,17 @@ export class Player {
     this.startOverlayLoop();
   }
 
+  /** Whether *this* attach attempt has never yet reached `playing` — the shared gate `isColdStartMiss`
+   *  (HLS's own playlist-miss cold start) and `beginWhepAttach`'s pre-play "path not ready" handling
+   *  (`isWhepPrePlayMiss`, fix/stream-start-latency) both read. */
+  private neverPlayedYet(): boolean {
+    const phase = this.transportState().recovery.phase;
+    return phase === 'connecting' || phase === 'waiting';
+  }
+
   /** A 404/network miss on the manifest while we've never yet played is the normal cold-start shape. */
   private isColdStartMiss(data: { response?: { code?: number } }): boolean {
-    const phase = this.transportState().recovery.phase;
-    if (phase !== 'connecting' && phase !== 'waiting') {
+    if (!this.neverPlayedYet()) {
       return false;
     }
     const code = data.response?.code;
@@ -1005,13 +1061,19 @@ export class Player {
    * ("a stream that HAS failed transports escalates") — closing the half of S-b's flagged gap where
    * a stuck-`waiting` phase (which `isColdStartMiss` can keep true indefinitely, since the phase
    * itself never leaves `connecting`/`waiting`) never got throttled at all.
+   *
+   * **Shared by both HLS's own playlist-miss cold start and WHEP's pre-play "path not ready" cold
+   * start** (fix/stream-start-latency, `handleWhepPathNotReady`) — `retry` is the one thing that
+   * differs between them (retry the same transport that just missed), everything else (the gentle
+   * fixed cadence, the escalation-to-`beginNextCycle` give-up policy) is identical on purpose: a
+   * cold-start miss is a cold-start miss regardless of which transport hit it.
    */
-  private scheduleColdStartRetry(generation: number): void {
+  private scheduleColdStartRetry(generation: number, retry: () => void): void {
     const pacing = this.pacingState();
     if (pacing.cycleAttempt === 0) {
       this.coldStartTimer = setTimeout(() => {
-        if (generation === this.generation && this.currentSrc !== null) {
-          void this.beginAttach(generation, this.currentSrc);
+        if (generation === this.generation) {
+          retry();
         }
       }, COLD_START_RETRY_DELAY_MS);
       return;
@@ -1083,11 +1145,17 @@ export class Player {
       () => {
         this.lastProgressAt = Date.now();
         const wasReconnecting = this.transportState().recovery.phase === 'reconnecting';
+        const isFirstAttach = !this.hasPlayedThisAttach;
+        this.hasPlayedThisAttach = true;
         this.dispatchRecovery('firstSegment');
         this.dispatchPacing('playing', Date.now()); // docs/plans/done/MVP2-PLAN.md §S, S-c
-        if (wasReconnecting) {
+        if (isFirstAttach) {
+          // fix/stream-start-latency — mirrors the hls.js FRAG_BUFFERED handler above.
+          this.maybeSnapToLive('firstAttach');
+        } else if (wasReconnecting) {
           this.maybeSnapToLive('recovered'); // see docs/plans/done/MVP2-PLAN.md §V, V-b — mirrors the hls.js FRAG_BUFFERED handler above.
         }
+        this.scheduleWhepUpgradeAttempt(generation); // fix/stream-start-latency: an HLS fallback is never permanent for the page session
       },
       { signal: abortSignal },
     );
@@ -1295,7 +1363,8 @@ export class Player {
         certificates.length > 0 ? { certificates: [...certificates] } : undefined,
       );
       this.peerConnection = pc;
-      pc.addTransceiver('video', { direction: 'recvonly' });
+      const transceiver = pc.addTransceiver('video', { direction: 'recvonly' });
+      this.applyJitterBufferTarget(transceiver.receiver);
 
       pc.ontrack = (event) => {
         if (generation !== this.generation) {
@@ -1315,6 +1384,19 @@ export class Player {
         this.lastFrameAt = Date.now();
         this.behindLive.set(0); // WHEP is effectively live — see class doc.
         this.clearWhepNoTrackTimer();
+        if (this.whepUpgradeInFlight) {
+          // fix/stream-start-latency: a background upgrade probe just won — commit it. Prime a
+          // fresh webrtc/connecting state first (mirrors what `reattach`/`beginNextCycle` already do
+          // *before* calling `beginWhepAttach` for a normal cycle) so the `dispatchRecovery`/
+          // `dispatchPacing` calls just below land on `transport: 'webrtc'` instead of silently
+          // leaving the visible chip on `'hls'` forever. Tearing HLS down *after* `video.srcObject`
+          // is already assigned above avoids a black-frame gap — `srcObject` already takes priority
+          // over the (about to be destroyed) hls.js-attached `src` per the HTMLMediaElement spec.
+          this.whepUpgradeInFlight = false;
+          console.info(`${LOG_PREFIX} background WHEP upgrade succeeded — switching from HLS`);
+          this.transportState.set(reduceTransportRecovery(initialTransportState(true), 'attachStarted'));
+          this.teardownHlsAfterWhepUpgrade();
+        }
         this.dispatchRecovery('firstSegment');
         this.dispatchPacing('playing', Date.now()); // docs/plans/done/MVP2-PLAN.md §S, S-c
         this.startOverlayLoop(); // idempotent — ontrack can fire more than once on renegotiation
@@ -1353,6 +1435,14 @@ export class Player {
       }
       console.info(`${LOG_PREFIX} WHEP POST ${whepUrl} → HTTP ${response.status}`);
       if (!response.ok) {
+        // fix/stream-start-latency: a non-2xx before this attach has ever played is mediamtx's own
+        // lazy-publisher-open shape (the path isn't ready *yet*, not broken) — see
+        // `isWhepPrePlayMiss`'s own doc comment. Handled outside the generic `catch` below so it
+        // never gets folded into the permanent-downgrade `'fatalError'` path.
+        if (isWhepPrePlayMiss(response.status, this.neverPlayedYet())) {
+          this.handleWhepPathNotReady(generation, whepUrl, hlsFallbackSrc);
+          return;
+        }
         throw new Error(`WHEP offer rejected: HTTP ${response.status}`);
       }
 
@@ -1387,6 +1477,26 @@ export class Player {
       }
       console.warn(`${LOG_PREFIX} WHEP negotiation failed`, { error });
       this.handleWhepFailure(generation, hlsFallbackSrc, 'fatalError');
+    }
+  }
+
+  /**
+   * Sets `RTCRtpReceiver#jitterBufferTarget` to {@link WHEP_JITTER_BUFFER_TARGET_MS} on the video
+   * receiver, if this browser supports it — feature-detected, since the property is Chromium-family
+   * only as of this writing; every other browser simply keeps its own default adaptive jitter buffer
+   * (an honest degrade, not a broken one — WHEP already plays fine without this). Wrapped in a
+   * `try`/`catch` because the setter can reject an out-of-range value per spec; a rejection here is
+   * never worth failing the whole attach over.
+   */
+  private applyJitterBufferTarget(receiver: RTCRtpReceiver): void {
+    if (!('jitterBufferTarget' in receiver)) {
+      return;
+    }
+    try {
+      (receiver as RTCRtpReceiver & { jitterBufferTarget: number }).jitterBufferTarget =
+        WHEP_JITTER_BUFFER_TARGET_MS;
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} could not set WHEP jitterBufferTarget`, { error });
     }
   }
 
@@ -1468,10 +1578,7 @@ export class Player {
       return;
     }
 
-    const neverPlayedYet =
-      this.transportState().recovery.phase === 'connecting' ||
-      this.transportState().recovery.phase === 'waiting';
-    if (neverPlayedYet) {
+    if (this.neverPlayedYet()) {
       if (state === 'failed' || state === 'disconnected') {
         console.warn(
           `${LOG_PREFIX} WHEP connection ${state} before ever playing — treating as a WHEP failure`,
@@ -1672,10 +1779,7 @@ export class Player {
       // in-place ICE restart before ever tearing anything down; a pre-play stall (rare — the
       // no-track timeout usually catches that first) still falls straight to `handleWhepFailure`.
       console.warn(`${LOG_PREFIX} no WHEP frame progress for ${STALL_WATCHDOG_MS}ms`);
-      const neverPlayedYet =
-        this.transportState().recovery.phase === 'connecting' ||
-        this.transportState().recovery.phase === 'waiting';
-      if (neverPlayedYet) {
+      if (this.neverPlayedYet()) {
         this.handleWhepFailure(generation, hlsFallbackSrc, 'stalled');
       } else {
         this.dispatchWhepIce('failed');
@@ -1759,6 +1863,12 @@ export class Player {
     if (generation !== this.generation) {
       return;
     }
+    if (this.whepUpgradeInFlight) {
+      // fix/stream-start-latency: this is a background upgrade probe, not the visible session — see
+      // `whepUpgradeFailed`'s own doc comment for why it never touches `transportState`/`pacingState`.
+      this.whepUpgradeFailed(generation, event);
+      return;
+    }
     this.teardownWhep();
     const next = this.dispatchRecovery(event);
 
@@ -1791,17 +1901,61 @@ export class Player {
     this.clearReconnectTimer(); // see its own doc comment — never leave a prior backoff orphaned
     this.reconnectTimer = setTimeout(() => {
       if (generation === this.generation && whepUrl !== null) {
+        // No `transportState` transition needed here: `reduceRecovery`'s `attachStarted` case only
+        // moves out of `idle`/`stopped`, so the phase legitimately stays `'reconnecting'` for the
+        // whole retry window — already the right thing for the chip to show until this attempt
+        // resolves (`firstSegment` on success, another failure event otherwise).
         this.dispatchPacing('whepAttempted', Date.now());
-
-        // --- THE FIX GOES HERE ---
-        this.transportState.set(
-          reduceTransportRecovery(this.transportState(), 'attachStarted')
-        );
-        // -------------------------
-
         void this.beginWhepAttach(generation, whepUrl, hlsFallbackSrc);
       }
     }, delay);
+  }
+
+  /**
+   * A WHEP POST that returned a non-2xx status before this attach has ever played
+   * (`isWhepPrePlayMiss`, fix/stream-start-latency) — mediamtx's own lazy-publisher-open shape (the
+   * path isn't ready *yet*), not a genuine failure. Routed through the shared `'playlistNotReady'`
+   * recovery event (not `'fatalError'`) so `reduceTransportRecovery`'s webrtc→hls permanent-
+   * downgrade rule — which only fires for `'fatalError'`/`'stalled'`/`'unsupported'` — never sees
+   * it: the transport stays `webrtc`, and `scheduleColdStartRetry`'s shared cadence/give-up policy
+   * (the exact one HLS's own playlist-miss cold start already uses) retries the WHEP POST directly
+   * instead of falling straight to HLS the very first time the path isn't ready yet.
+   */
+  private handleWhepPathNotReady(
+    generation: number,
+    whepUrl: string,
+    hlsFallbackSrc: string | null,
+  ): void {
+    if (generation !== this.generation) {
+      return;
+    }
+    if (this.whepUpgradeInFlight) {
+      this.whepUpgradeFailed(generation, 'pathNotReady');
+      return;
+    }
+    console.info(`${LOG_PREFIX} WHEP path not ready yet (cold start) — retrying`, { whepUrl });
+    this.teardownWhep();
+    this.dispatchRecovery('playlistNotReady');
+    this.scheduleColdStartRetry(generation, () => {
+      void this.beginWhepAttach(generation, whepUrl, hlsFallbackSrc);
+    });
+  }
+
+  /**
+   * A background WHEP upgrade probe (fix/stream-start-latency, `shouldAttemptWhepUpgrade`) failed —
+   * tears down its own (probe-only) peer connection/session and re-arms the same
+   * `WHEP_RETRY_COOLDOWN_MS` cooldown that scheduled this attempt in the first place. Deliberately
+   * never touches `transportState`/`pacingState`: the visible session never left HLS while this
+   * probe was negotiating, so its failure must stay invisible to it — see `whepUpgradeInFlight`'s
+   * own doc comment.
+   */
+  private whepUpgradeFailed(generation: number, event: string): void {
+    this.whepUpgradeInFlight = false;
+    console.info(
+      `${LOG_PREFIX} background WHEP upgrade attempt failed (${event}) — staying on HLS`,
+    );
+    this.teardownWhep();
+    this.scheduleWhepUpgradeAttempt(generation);
   }
 
   /**
@@ -1839,6 +1993,95 @@ export class Player {
     if (videoRef?.nativeElement.srcObject) {
       videoRef.nativeElement.srcObject = null;
     }
+  }
+
+  // --- Background WHEP upgrade while parked on HLS (fix/stream-start-latency) --------------------
+
+  /**
+   * Arms (or, if already counting down, no-ops — idempotent, safe to call from every FRAG_BUFFERED/
+   * native `'playing'` tick) the background WHEP upgrade probe: fires once,
+   * {@link WHEP_RETRY_COOLDOWN_MS} after this HLS session most recently reached playing, re-armed by
+   * a failed probe (`whepUpgradeFailed`) so the next attempt is always exactly one cooldown after the
+   * previous one, never a compounding cadence. See `shouldAttemptWhepUpgrade`'s own doc comment
+   * (`player-recovery.ts`) for why this exists.
+   */
+  private scheduleWhepUpgradeAttempt(generation: number): void {
+    if (this.whepUpgradeTimer !== null) {
+      return; // already counting down — a later FRAG_BUFFERED shouldn't push it back out
+    }
+    if (!shouldAttemptWhepUpgrade(this.transport(), this.phase(), this.currentWhepUrl !== null)) {
+      return;
+    }
+    this.whepUpgradeTimer = setTimeout(() => {
+      this.whepUpgradeTimer = null;
+      void this.attemptWhepUpgrade(generation);
+    }, WHEP_RETRY_COOLDOWN_MS);
+  }
+
+  private clearWhepUpgradeTimer(): void {
+    if (this.whepUpgradeTimer !== null) {
+      clearTimeout(this.whepUpgradeTimer);
+      this.whepUpgradeTimer = null;
+    }
+  }
+
+  /**
+   * The quiet background WHEP re-attempt `scheduleWhepUpgradeAttempt` arms — negotiates a full WHEP
+   * session via the existing `beginWhepAttach` path while HLS keeps playing completely undisturbed:
+   * nothing about the visible `<video>`/`transportState`/`pacingState` changes unless/until this
+   * attempt actually reaches a track (`whepUpgradeInFlight` gates `beginWhepAttach`'s own `ontrack`/
+   * `handleWhepFailure`/`handleWhepPathNotReady` handlers to commit-or-discard cleanly — see that
+   * field's own doc comment). Re-checks `shouldAttemptWhepUpgrade` at fire time, not just at arm
+   * time, since up to a full `WHEP_RETRY_COOLDOWN_MS` can have passed — if HLS itself degraded into
+   * `reconnecting` (or `whepUrl`/`src` changed) in the meantime, this simply does nothing; the next
+   * genuine `playing` transition re-arms a fresh probe on its own.
+   */
+  private async attemptWhepUpgrade(generation: number): Promise<void> {
+    if (
+      generation !== this.generation ||
+      this.currentWhepUrl === null ||
+      !shouldAttemptWhepUpgrade(this.transport(), this.phase(), true)
+    ) {
+      return;
+    }
+    console.info(`${LOG_PREFIX} background WHEP upgrade attempt starting (HLS parked, testing WHEP again)`, {
+      whepUrl: this.currentWhepUrl,
+    });
+    this.whepUpgradeInFlight = true;
+    await this.beginWhepAttach(generation, this.currentWhepUrl, this.currentSrc);
+  }
+
+  /**
+   * Tears down just the HLS/native side, leaving a freshly-committed WHEP `srcObject` alone — the
+   * "HLS won this round, WHEP just won the next one" cleanup step a successful upgrade probe runs
+   * (see the `ontrack` handler in `beginWhepAttach`). Deliberately narrower than `teardownMedia()`:
+   * that method also does `video.removeAttribute('src'); video.load()`, and `video.load()` would
+   * interrupt the `srcObject` stream `ontrack` just attached — this only clears the HLS-specific
+   * timers/engine, never resets the element itself.
+   */
+  private teardownHlsAfterWhepUpgrade(): void {
+    if (this.latencyTimer !== null) {
+      clearInterval(this.latencyTimer);
+      this.latencyTimer = null;
+    }
+    if (this.watchdogTimer !== null) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+    if (this.coldStartTimer !== null) {
+      clearTimeout(this.coldStartTimer);
+      this.coldStartTimer = null;
+    }
+    this.clearReconnectTimer();
+    this.mediaAbort?.abort();
+    this.mediaAbort = null;
+    this.mediaErrorRecoveryCount = 0;
+    if (this.hls) {
+      this.hls.destroy();
+      this.hls = null;
+    }
+    this.video().nativeElement.removeAttribute('src');
+    this.behindLive.set(null);
   }
 
   /**
@@ -2272,15 +2515,20 @@ export class Player {
       this.coldStartTimer = null;
     }
     this.clearReconnectTimer();
+    this.clearWhepUpgradeTimer(); // fix/stream-start-latency — a fresh attach invalidates any pending background probe
     this.mediaAbort?.abort();
     this.mediaAbort = null;
     this.mediaErrorRecoveryCount = 0; // a fresh `hls` instance below starts the recovery cap over
+    this.hasPlayedThisAttach = false;
     if (this.hls) {
       this.hls.destroy();
       this.hls = null;
     }
     const video = this.video().nativeElement;
     video.removeAttribute('src');
+    // Hardening: a stray `srcObject` left over from a previous WHEP attach (or a background upgrade
+    // probe torn down before it ever committed) must never leak into a fresh HLS/native attach.
+    video.srcObject = null;
     video.load();
     this.behindLive.set(null);
     this.whepLatencySeconds.set(null); // the badge resets with every fresh attach, not carried over.
@@ -2290,6 +2538,13 @@ export class Player {
   private teardown(): void {
     this.teardownMedia();
     this.teardownWhep();
+    // fix/stream-start-latency: a background upgrade probe that was still negotiating when the
+    // generation moved on (a fresh reattach, or component destroy) would otherwise leave this stuck
+    // `true` forever — neither `ontrack` nor `handleWhepFailure`/`handleWhepPathNotReady` ever runs
+    // for it (all generation-guarded), so nothing else clears it. A stale `true` here would make the
+    // *next*, fully unrelated WHEP attach's own failure handling silently swallow a genuine failure
+    // as if it were a probe's — see `whepUpgradeInFlight`'s own doc comment.
+    this.whepUpgradeInFlight = false;
     this.message.set(null);
     this.hoveredDetection.set(null);
     this.drawnBoxes = [];
