@@ -3,9 +3,11 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
+import { actorLabel } from '../../core/audit/summary-logic';
 import type { AssetSummary, FleetMaintenanceRecord, MaintenanceKind, UserSummary } from '../../core/api/models';
 import {
   groundableAssets,
+  isLastOpenRecordForAsset,
   maintenanceKpis,
   openRecords,
   recentlyClosedRecords,
@@ -98,9 +100,16 @@ export class MaintenanceFacade {
     }
   }
 
-  /** "Opened by" column — degrades to the id's own first 8 characters when the user isn't found (deactivated/removed), never a blank cell. */
+  /**
+   * "Opened by" column — `core/audit/summary-logic.ts#actorLabel`, the same one-owner vocabulary the
+   * Audit page already uses: the synthetic root/dev principal (`ROOT_ACTOR_ID`, `UUID(0,0)` — every
+   * record opened with `vision.auth.enabled=false`, dev-parity's own unbounded ADMIN) reads
+   * "Station" rather than the id's own unreadable "00000000…" prefix (W10 finding M1), a known org
+   * user reads their display name, and anything else (deactivated/removed) degrades to the id's own
+   * first 8 characters — never a blank cell, never a guess.
+   */
   displayNameFor(userId: string): string {
-    return this.nameById().get(userId) ?? userId.slice(0, 8);
+    return actorLabel(userId, this.nameById());
   }
 
   /** "Category" column — the asset's human-readable category name when it's still loaded locally; falls back to the record's own `categoryId` slug otherwise (never a blank cell). */
@@ -112,6 +121,11 @@ export class MaintenanceFacade {
   custodianLabelFor(record: FleetMaintenanceRecord): string | undefined {
     const custodianId = this.assetsById().get(record.assetId)?.custody?.custodianId;
     return custodianId ? this.displayNameFor(custodianId) : undefined;
+  }
+
+  /** Open-records table's Close/Release button treatment (W10 finding M1) — see `core/maintenance/maintenance-logic.ts#isLastOpenRecordForAsset`'s own doc comment for the reasoning. */
+  isLastOpenRecord(record: FleetMaintenanceRecord): boolean {
+    return isLastOpenRecordForAsset(record, this.records());
   }
 
   openGroundForm(): void {

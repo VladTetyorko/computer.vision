@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetSummary, AssignedPilot, UserSummary } from '../../core/api/models';
-import { buildRosterRows, countAssetsWithoutPilot, searchRosterRows, sortAssetsByName } from './roster-logic';
+import {
+  buildRosterRows,
+  countAssetsWithoutPilot,
+  custodyStatusFor,
+  custodyStatusLabel,
+  custodyStatusTitle,
+  searchRosterRows,
+  sortAssetsByName,
+} from './roster-logic';
 
 function asset(partial: Partial<AssetSummary> = {}): AssetSummary {
   return {
@@ -96,18 +104,20 @@ describe('searchRosterRows', () => {
 });
 
 describe('countAssetsWithoutPilot', () => {
+  const drone = new Set(['drone']);
+
   it('counts rows with zero assigned pilots', () => {
     const rows = buildRosterRows(
       [asset({ assetId: 'a-1' }), asset({ assetId: 'a-2' })],
       new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]),
       [user({ userId: 'u-1' })],
     );
-    expect(countAssetsWithoutPilot(rows)).toBe(1);
+    expect(countAssetsWithoutPilot(rows, drone)).toBe(1);
   });
 
   it('counts against every row, not a filtered subset — the caller is responsible for passing the unfiltered list', () => {
     const rows = buildRosterRows([asset({ assetId: 'a-1' }), asset({ assetId: 'a-2' })], new Map(), []);
-    expect(countAssetsWithoutPilot(rows)).toBe(2);
+    expect(countAssetsWithoutPilot(rows, drone)).toBe(2);
   });
 
   it('is zero when every asset has ≥1 pilot', () => {
@@ -116,6 +126,76 @@ describe('countAssetsWithoutPilot', () => {
       new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]),
       [user({ userId: 'u-1' })],
     );
-    expect(countAssetsWithoutPilot(rows)).toBe(0);
+    expect(countAssetsWithoutPilot(rows, drone)).toBe(0);
+  });
+
+  it('excludes a non-connected category (e.g. a battery) even with zero pilots — C1(b)', () => {
+    const rows = buildRosterRows(
+      [asset({ assetId: 'a-1', category: 'drone' }), asset({ assetId: 'a-2', category: 'battery' })],
+      new Map(),
+      [],
+    );
+    expect(countAssetsWithoutPilot(rows, drone)).toBe(1);
+  });
+
+  it('counts nothing while categories have not resolved yet (empty slug set)', () => {
+    const rows = buildRosterRows([asset({ assetId: 'a-1' })], new Map(), []);
+    expect(countAssetsWithoutPilot(rows, new Set())).toBe(0);
+  });
+});
+
+describe('custodyStatusFor', () => {
+  const nameById = new Map([['u-1', 'Jane Pilot']]);
+
+  it('is "in-stock" when nobody has it and it is not grounded/retired', () => {
+    expect(custodyStatusFor(asset(), nameById)).toEqual({ kind: 'in-stock' });
+  });
+
+  it('resolves an active custodian to a display name', () => {
+    const held = asset({ inventoryState: 'ISSUED', custody: { custodianId: 'u-1' } });
+    expect(custodyStatusFor(held, nameById)).toEqual({ kind: 'held', custodianName: 'Jane Pilot' });
+  });
+
+  it('falls back to a short id fragment for an unresolvable custodian', () => {
+    const held = asset({ inventoryState: 'IN_FIELD', custody: { custodianId: 'unknown-user-id' } });
+    expect(custodyStatusFor(held, nameById)).toEqual({ kind: 'held', custodianName: 'unknown-' });
+  });
+
+  it('MAINTENANCE beats a leftover custodian — C1(c)', () => {
+    const grounded = asset({ inventoryState: 'MAINTENANCE', custody: { custodianId: 'u-1' } });
+    expect(custodyStatusFor(grounded, nameById)).toEqual({ kind: 'maintenance' });
+  });
+
+  it('is "maintenance" for a grounded asset with no custodian at all — C1(c)', () => {
+    const grounded = asset({ inventoryState: 'MAINTENANCE' });
+    expect(custodyStatusFor(grounded, nameById)).toEqual({ kind: 'maintenance' });
+  });
+
+  it('RETIRED also beats a leftover custodian', () => {
+    const retired = asset({ inventoryState: 'RETIRED', custody: { custodianId: 'u-1' } });
+    expect(custodyStatusFor(retired, nameById)).toEqual({ kind: 'retired' });
+  });
+});
+
+describe('custodyStatusLabel / custodyStatusTitle', () => {
+  it('renders "Has: <name>" for an active custodian', () => {
+    const status = { kind: 'held' as const, custodianName: 'Jane Pilot' };
+    expect(custodyStatusLabel(status)).toBe('Has: Jane Pilot');
+    expect(custodyStatusTitle(status)).toBe('Has: Jane Pilot');
+  });
+
+  it('renders "In maintenance" for a grounded asset, never "In stock"', () => {
+    expect(custodyStatusLabel({ kind: 'maintenance' })).toBe('In maintenance');
+    expect(custodyStatusTitle({ kind: 'maintenance' })).toContain('Grounded for maintenance');
+  });
+
+  it('renders "Retired"', () => {
+    expect(custodyStatusLabel({ kind: 'retired' })).toBe('Retired');
+    expect(custodyStatusTitle({ kind: 'retired' })).toContain('Retired');
+  });
+
+  it('renders "In stock" for the genuine in-stock case', () => {
+    expect(custodyStatusLabel({ kind: 'in-stock' })).toBe('In stock');
+    expect(custodyStatusTitle({ kind: 'in-stock' })).toContain('In stock');
   });
 });

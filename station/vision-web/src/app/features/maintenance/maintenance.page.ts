@@ -6,6 +6,7 @@ import { SectionHeader } from '../../shared/ui/section-header';
 import { Stat } from '../../shared/ui/stat';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
 import { MAINTENANCE_KIND_LABELS, hoursSinceClose } from '../../core/maintenance/maintenance-logic';
+import { pluralize } from '../../shared/ui/text-logic';
 import type { FleetMaintenanceRecord, MaintenanceKind } from '../../core/api/models';
 import { MaintenanceFacade } from './maintenance-facade';
 
@@ -33,7 +34,11 @@ import { MaintenanceFacade } from './maintenance-facade';
  * re-deriving it client-side: **Close** (closes just this one record, `POST
  * .../maintenance/{id}/close`) and **Release** (returns the whole asset to `IN_STOCK`, `POST
  * .../inventory {action:RELEASE}`) — mirrors `pilots-card.ts`'s precedent of no confirm dialog on
- * either.
+ * either. Labelled "Close record" / "Release asset" (not the bare "Close"/"Release" wave W7 shipped)
+ * so the differing scope reads from the copy alone; which one renders as the row's primary `.btn` vs
+ * secondary flips per `MaintenanceFacade.isLastOpenRecord` (docs/plans/active/WAREHOUSE-UX-CONTEXT.md
+ * W10 finding M1 — see `core/maintenance/maintenance-logic.ts#isLastOpenRecordForAsset`'s own doc
+ * comment for why, never a change to what either button does).
  *
  * Empty state copy is pinned exactly by the plan: "Nothing grounded · every vehicle is in stock or in
  * the field" — shown only once assets have loaded and none are open (`MaintenanceFacade.nothingGrounded`),
@@ -51,6 +56,7 @@ export class MaintenancePage {
   protected readonly facade = inject(MaintenanceFacade);
   protected readonly kindLabels = MAINTENANCE_KIND_LABELS;
   protected readonly groundableKinds: readonly MaintenanceKind[] = ['GROUNDING', 'INSPECTION_DUE', 'REPAIR', 'NOTE'];
+  protected readonly pluralize = pluralize;
 
   /** "Opened" column — age since `openedAt`, this app's one age vocabulary (`core/telemetry/telemetry-logic.ts`). */
   protected openedAge(record: FleetMaintenanceRecord): string {

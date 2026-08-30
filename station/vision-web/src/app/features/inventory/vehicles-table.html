@@ -12,7 +12,7 @@
       } @else if (!facade.hasAnyAssets() && connected()) {
         <vision-empty
           title="No vehicles yet"
-          message='Register the built-in simulated source to see the whole pipeline work without any hardware — then use "+ Add source" to bring in the real thing as a first-class asset.'
+          message='Register the built-in simulated source to see the whole pipeline work without any hardware — then use "+ Add vehicle" to bring in the real thing as a first-class asset.'
         >
           <button type="button" class="btn" (click)="facade.registerSimulator()" [disabled]="facade.submitting()">
             Add the simulated source
@@ -32,7 +32,9 @@
               <th>Name</th>
               <th>Category</th>
               <th>Serial</th>
-              <th>Readiness</th>
+              @if (connected()) {
+                <th>Readiness</th>
+              }
               <th>Custodian</th>
               <th>State</th>
               @if (connected()) {
@@ -65,16 +67,18 @@
                 </td>
                 <td class="muted truncate">{{ row.asset.categoryName }}</td>
                 <td class="mono truncate">{{ row.asset.identity?.serialNumber ?? '—' }}</td>
-                <td>
-                  @if (row.readinessVerdict; as verdict) {
-                    <span class="row-state">
-                      <span class="dot" [class.ok]="verdictTone(verdict) === 'ok'" [class.danger]="verdictTone(verdict) === 'danger'"></span>
-                      <span class="muted">{{ verdictLabel(verdict) }}</span>
-                    </span>
-                  } @else {
-                    <span class="muted">—</span>
-                  }
-                </td>
+                @if (connected()) {
+                  <td>
+                    @if (row.readinessVerdict; as verdict) {
+                      <span class="row-state">
+                        <span class="dot" [class.ok]="verdictTone(verdict) === 'ok'" [class.danger]="verdictTone(verdict) === 'danger'"></span>
+                        <span class="muted">{{ verdictLabel(verdict) }}</span>
+                      </span>
+                    } @else {
+                      <span class="muted">—</span>
+                    }
+                  </td>
+                }
                 <td class="truncate">{{ row.custodianName ?? '—' }}</td>
                 <td>
                   <span

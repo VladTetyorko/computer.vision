@@ -4,6 +4,7 @@ import {
   MAINTENANCE_KIND_LABELS,
   groundableAssets,
   hoursSinceClose,
+  isLastOpenRecordForAsset,
   isOpenRecord,
   maintenanceKpis,
   openRecords,
@@ -184,6 +185,35 @@ describe('groundableAssets', () => {
   it('includes an asset with no known inventoryState (never fetched) rather than hiding it', () => {
     const assets = [asset({ assetId: 'a-1' })];
     expect(groundableAssets(assets).map((a) => a.assetId)).toEqual(['a-1']);
+  });
+});
+
+describe('isLastOpenRecordForAsset', () => {
+  it('is true for an asset with only one open record', () => {
+    const records = [record({ id: 'r-1', assetId: 'a-1' })];
+    expect(isLastOpenRecordForAsset(records[0], records)).toBe(true);
+  });
+
+  it('is false when the same asset has another open record', () => {
+    const records = [
+      record({ id: 'r-1', assetId: 'a-1', kind: 'GROUNDING' }),
+      record({ id: 'r-2', assetId: 'a-1', kind: 'NOTE' }),
+    ];
+    expect(isLastOpenRecordForAsset(records[0], records)).toBe(false);
+    expect(isLastOpenRecordForAsset(records[1], records)).toBe(false);
+  });
+
+  it('ignores another asset\'s open records', () => {
+    const records = [record({ id: 'r-1', assetId: 'a-1' }), record({ id: 'r-2', assetId: 'a-2' })];
+    expect(isLastOpenRecordForAsset(records[0], records)).toBe(true);
+  });
+
+  it('ignores an already-closed record on the same asset', () => {
+    const records = [
+      record({ id: 'r-1', assetId: 'a-1' }),
+      record({ id: 'r-2', assetId: 'a-1', closedAt: '2026-08-02T00:00:00Z' }),
+    ];
+    expect(isLastOpenRecordForAsset(records[0], records)).toBe(true);
   });
 });
 

@@ -109,14 +109,51 @@
   white-space: normal;
 }
 
-/* Filters take the slack so actions stay pinned right; both collapse onto their own line before the
-   title ever wraps (the flex-wrap above). */
+/* `.page-bar-controls` groups filters+actions into one flex item of `:host` (O1,
+   docs/plans/active/WAREHOUSE-UX-CONTEXT.md W10) — it, not each of its two children individually,
+   carries the `margin-left: auto` that claims the row's slack. Before this wrapper existed, filters
+   and actions were two *independent* items of `:host`'s own flex-wrap row: a dense filter row
+   (Inventory's search + four selects + two toggles + "Clear filters") already fills an entire line
+   on its own once it can no longer share the title's row, which pushed `.page-bar-actions` onto a
+   *third* line with no auto-margin of its own (that margin only ever applied when filters was
+   completely empty — see the removed `:host(:not(:has(...)))` rule below this comment used to carry)
+   — actions rendered flush-left there, stranded with a large dead gap before the bar's own right
+   edge, at 1416×713 on the Inventory/Maintenance/Categories page bars (confirmed live: `.page-bar-
+   actions`'s own `right` sat mid-row, ~790px short of the bar's right edge, while nothing overflowed
+   — the *symptom* here was never a horizontal scrollbar, it was actions never reaching the alignment
+   every other page bar shows them). Wrapping both in one flex-wrap container fixes this at the root:
+   filters and actions now wrap onto a new line *together*, and that line still right-aligns via the
+   one shared `margin-left: auto` regardless of which of the two needed to move. */
+.page-bar-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  /* Right-aligns *per wrapped line*, not just once — the piece that actually fixes O1. An auto
+     margin on one child only claims slack on whichever line that one child lands on; with filters
+     and actions as two independent children, whichever of them wraps alone (typically actions, once
+     a dense filter row like Inventory's already fills its own line) would still render flush-left
+     with no auto margin of its own. `justify-content: flex-end` needs no per-child margin at all —
+     it right-aligns every line a wrapping flex container produces, so filters+actions stay clustered
+     together when they share the title's row *and* independently re-right-align if either one drops
+     to its own line. */
+  justify-content: flex-end;
+  gap: var(--space-8) var(--space-16);
+  margin-left: auto;
+  /* `min-width: 0` — a flex item's automatic minimum size otherwise refuses to shrink below its
+     content's own min-content width (the same class of bug `app-sidebar.css`'s own doc comment
+     documents at length for `.sidebar`): without this, a wide `.page-bar-filters` child could force
+     `.page-bar-controls` itself wider than `:host`'s available row, pushing `main` into a real
+     horizontal scrollbar rather than wrapping — see this file's own `main` note has none, `app.css`
+     owns that container, but this item must still be willing to shrink for `:host`'s flex-wrap to
+     ever get the chance to wrap it down a line in the first place. */
+  min-width: 0;
+}
+
 .page-bar-filters {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-8);
-  margin-left: auto;
 }
 
 .page-bar-filters:empty {
@@ -127,12 +164,6 @@
   display: flex;
   align-items: center;
   gap: var(--space-8);
-}
-
-/* When there are no filters, the actions themselves must claim the slack — otherwise they'd sit
-   flush against the title. `:has()` is already used elsewhere in this codebase's global sheet. */
-:host(:not(:has(.page-bar-filters > *))) .page-bar-actions {
-  margin-left: auto;
 }
 
 .page-bar-actions:empty {
@@ -147,12 +178,12 @@
     gap: var(--space-8);
   }
 
-  .page-bar-filters {
+  .page-bar-controls {
     width: 100%;
     margin-left: 0;
   }
 
-  :host(:not(:has(.page-bar-filters > *))) .page-bar-actions {
-    margin-left: 0;
+  .page-bar-filters {
+    width: 100%;
   }
 }

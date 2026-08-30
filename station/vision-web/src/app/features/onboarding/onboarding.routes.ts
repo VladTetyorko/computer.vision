@@ -12,7 +12,7 @@ import { orgGuard } from '../../core/org/org-guard';
 export const ONBOARDING_ROUTES: Routes = [
   {
     path: 'add-source',
-    title: 'Add a source · Vision',
+    title: 'Add vehicle · Vision',
     canActivate: [orgGuard],
     loadComponent: () => import('./onboarding').then((m) => m.OnboardingPage),
   },

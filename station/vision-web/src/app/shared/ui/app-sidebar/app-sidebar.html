@@ -86,10 +86,6 @@
   </nav>
 
   <div class="sidebar-foot">
-    <!-- Additive, self-removing: renders nothing unless the backend's demo package is present
-         (`vision.demo.enabled`, default on) — see `features/demo/demo-button/demo-button.ts`. -->
-    <vision-demo-button />
-
     <!-- SYSTEM — the fifth group, rendered here rather than in `.sidebar-body`
          (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1: "SYSTEM (footer, with identity chip)"). Same
          label-not-link markup as every body group above (NAV-IA-REDESIGN §2.1 rule 1) and the same
@@ -127,6 +123,13 @@
          it), same "CSS hides text, the template never strips it" rule `.group-label-text`/
          `.nav-row-text` above already follow — see `app-sidebar.css`'s own comment on this row. -->
     <div class="status-row">
+      <!-- Additive, self-removing: renders nothing unless the backend's demo package is present
+           (`vision.demo.enabled`, default on) — see `features/demo/demo-button/demo-button.ts`. Folded
+           in here as a small icon button, no longer its own full-width row (WAREHOUSE-UX-CONTEXT.md
+           W10, finding N1) — at a short viewport (~713px) the old dedicated row was one more thing
+           between the nav list and the fold; `app-sidebar.css`'s own comment on this row has the
+           `::ng-deep` sizing that shrinks it to match the theme-toggle/bell icon buttons beside it. -->
+      <vision-demo-button />
       @if (liveCount() > 0) {
         <span class="chip"><span class="dot live"></span>{{ liveCount() }} live</span>
       }

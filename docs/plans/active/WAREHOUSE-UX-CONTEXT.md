@@ -25,6 +25,7 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | W7 maintenance + crew | web-ui | done | `cae23506` |
 | W8 fleet maintenance read, firmware + hours on the row | spring-integrator | done | `fe1c143d` |
 | W9 consume W8's facts (one-call maintenance, firmware/hours columns, embedded Links/Categories) | web-ui | done, uncommitted | — (see W9 status) |
+| W10 live-walkthrough sweep (N1/A1/E1/C1/M1/O1, six findings) | web-ui | done, uncommitted | — (see W10 status) |
 
 Shared tree: agents commit **by path**, never stash. Unrelated dirty files (`infra/rover-sim/**`, `core/rc/manual-control-client*`, `DefaultPeerDirectory.java`) belong to another session — do not touch.
 
@@ -893,3 +894,134 @@ links/categories (WAREHOUSE-UX W9)`.
 **Not built, out of this wave's declared deliverables:** nothing — all four numbered deliverables in
 the task brief (maintenance one-call rewrite, firmware/hours columns, embedded Links/Categories,
 the item 3(b) quick-add check) landed, the last as a confirmed no-op.
+
+## W10 status (live-walkthrough sweep — N1/A1/E1/C1/M1/O1) — done
+
+Six findings from a live click-through of the W4/W7/W9 surface, per `docs/plans/active/WAREHOUSE-UX-PLAN.md`
+§3's own finding list. File scope kept to `station/vision-web/**` — no backend change, no
+`VisionApi`/wire-shape change anywhere in this wave.
+
+**What shipped, by finding:**
+- **N1** (`shared/ui/app-sidebar/**` only) — sidebar cramped at short viewports (~713px). `<vision-demo-button>`
+  moved from `.sidebar-foot`'s own top-level row into `.status-row` as a compact ~30×30px icon-only
+  square (`::ng-deep .demo-button`/`.demo-label{display:none}`, `!important` needed since Angular's
+  cross-component CSS concatenation order isn't guaranteed — the same precedent `command.css` already
+  set, the only other `!important` in this codebase). Measured live at 1416×713: `.sidebar-body`
+  291px → 374px (+83px/+28%), `.sidebar-foot` 339px → 287px.
+- **A1** — copy inconsistency. "+ Add source"/"Add a source" → **"Add vehicle"** across
+  `inventory.html`'s button, `onboarding.html`'s title, `onboarding.routes.ts`'s route title, and the
+  Vehicles tab's own empty-state string quoting the button label.
+- **E1** (`features/inventory/**`) — Readiness column showed the literal wire value `'UNKNOWN'` as
+  "Unknown" for every Equipment-tab row (batteries, gimbals never get a `GET /api/fleet/readiness`
+  row at all — a real value meaning "not evaluated", read as a bad verdict). `vehicles-table.html`'s
+  Readiness `<th>`/`<td>` now gated `@if (connected())`, same as Firmware/Hours/Last flown/Links.
+- **C1** — three Crew-page fixes:
+  - **(a) Roster/Org tabs off-screen right at some width** — never reproduced across a live 8-width
+    sweep (1416/1200/1024/900/768/640/480/375px, `getBoundingClientRect()` on `.page-bar-filters`/
+    `.segmented[role=tablist]`). Covered defensively by the shared O1 page-bar fix below instead of
+    an unverified page-specific patch, since `shared/ui/page-bar/**` is C1(a)'s own named file scope.
+  - **(b) "Assets without a pilot" wrongly counted non-flyable equipment** (a battery with no pilot
+    concept at all still counted toward the gap tile). `roster-logic.ts#countAssetsWithoutPilot`
+    gained a second parameter, `connectedCategorySlugs: ReadonlySet<string>` — scopes the count to
+    `Category#connected` categories only, the same set `InventoryFacade`'s Vehicles/Equipment split
+    already uses. `RosterFacade` now also loads `listCategories()` (third `Promise.all` member) to
+    build that set client-side; an empty/not-yet-resolved set counts nothing (honest transient zero,
+    never "every asset is equipment").
+  - **(c) A grounded rover showed "In stock" instead of its effective inventory state** — the old
+    `RosterFacade#custodianLabel` derived custody purely from `asset.custody?.custodianId`, never
+    consulting `AssetSummary.inventoryState` (the server's own **effective** value,
+    `InventoryStates#effective`, MAINTENANCE/RETIRED already ground truth) at all. New
+    `roster-logic.ts#CustodyStatus` discriminated union (`'maintenance' | 'retired' | 'held' |
+    'in-stock'`) built by `custodyStatusFor(asset, nameById)` — MAINTENANCE/RETIRED win outright over
+    any leftover custodian, rendered via `custodyStatusLabel`/`custodyStatusTitle` ("In maintenance"
+    / "Retired" / "Has: X" / "In stock"). Deliberately **not** a new chip color — WAREHOUSE-UX-PLAN.md
+    §3.2 D3's own "no new chip colour" rule for this column, same plain muted-text treatment as
+    before, just reading the right fact now. `RosterFacade#custodyStatus`/`#custodyLabel`/
+    `#custodyTitle` replace `#custodianLabel` outright.
+- **M1** (`features/maintenance/**`) — three fixes:
+  - "Opened by 00000000…" (the dev-mode/root principal, `UUID(0,0)`, unreadable as a raw id prefix) —
+    `MaintenanceFacade#displayNameFor` now delegates to the *existing* `core/audit/summary-logic.ts#
+    actorLabel`/`ROOT_ACTOR_ID` (already "Station" on the Audit page for the identical fact) instead
+    of reinventing a second word ("system") for the same concept — one owner, matching this
+    codebase's own E3/`pluralize` precedent.
+  - "1 record(s)" hardcoded pluralization → `pluralize(count, 'record')` from `shared/ui/text-logic.ts`
+    (the "one owner" this repo's own E3 finding already established as canonical, grepped for and
+    reused rather than adding a third pluralization site).
+  - Primary "Close" vs. secondary "Release" read as an arbitrary hierarchy between two actions of
+    genuinely different scope (Close: this one record; Release: the whole asset, `POST
+    .../inventory {action:RELEASE}`, regardless of any other open records left on it). New
+    `core/maintenance/maintenance-logic.ts#isLastOpenRecordForAsset(record, records)` +
+    `MaintenanceFacade#isLastOpenRecord` drive which button renders primary: Close stays primary
+    while other open records remain (Release would prematurely return the asset to service), Release
+    becomes primary once this is the asset's last open record (the two now finish the same job).
+    Labels changed to "Close record"/"Release asset" (scope now readable from the copy alone even
+    without the color cue) plus a `title` naming the difference on each. Never changes what either
+    button *does* — presentation only, both backend calls untouched.
+- **O1** (`shared/ui/page-bar/**` + the pages using it) — page bars overflowing at 1416px on
+  Inventory/Maintenance/Categories. Root cause (found live, not assumed): `.page-bar-actions` only
+  got `margin-left:auto` via a `:host(:not(:has(.page-bar-filters > *)))` special case that fired
+  *only when filters was empty* — Inventory's own dense filter row (search+4 selects+2 toggles+clear
+  button) wrapping onto its own line left the action buttons on a third line with no auto-margin at
+  all, flush-left with ~790px of dead space to the bar's own right edge (measured: actions' right
+  edge x=594 vs. bar's right edge x=1384). Fix: `[pageBarFilters]`/`[pageBarActions]` now nest inside
+  one new `.page-bar-controls` wrapper (`flex-wrap:wrap; justify-content:flex-end; margin-left:auto`)
+  — `justify-content:flex-end` right-aligns *each wrapped line independently*, which a per-child
+  `margin-left:auto` alone does not do once a sibling has already claimed its own line. The old
+  empty-filters special case is deleted. Live-verified across 8 widths (1416→375px) on Inventory,
+  Categories, Maintenance, and Crew — zero remaining stranding anywhere; the literal "horizontal
+  scroll" framing never reproduced (`main` never actually overflowed at 1416px) — the fix targets
+  the real stranding bug found instead.
+
+**Live-verification limitation, flagged honestly:** M1's fixes (and O1's Maintenance-page instance)
+could not be confirmed against the page's *actual rendered content* this wave — the dev backend on
+`localhost:8080` (`ng serve`'s proxy target, a long-running process belonging to a concurrent
+IntelliJ-launched session on this shared machine, deliberately not restarted) is running from a
+`target/classes` snapshot that predates `/api/maintenance`'s controller mapping — confirmed via
+`strings` on the freshly-recompiled `.class` file (has the mapping) vs. the loaded JVM's stale
+classpath (doesn't) — so `GET /api/maintenance` 404s in the dev proxy regardless of frontend
+correctness. N1/O1/C1(a) *were* live-verified (Chrome-devtools iframe injection,
+`getBoundingClientRect()`/`scrollWidth` measurement, not screenshot inspection) since those pages'
+own chrome renders before any `/api/maintenance` call resolves. M1/E1/A1/C1(b)/C1(c) were
+implemented via careful reading of the existing W7/W9 code plus new pure-logic spec coverage, and
+validated via the full `tsc`+`test:ci`+`ng build` chain rather than a live click-through.
+
+**Role-gating/dev-parity:** unchanged everywhere in this sweep — `orgGuard` on `/fleet/maintenance`
+and `/manage/roster` untouched; `vision.auth.enabled=false`'s dev admin (itself `ROOT_ACTOR_ID`) now
+reads "Station" in the Maintenance table instead of a raw id fragment, which is *more* honest under
+dev-parity, not a behavior change.
+
+**Degrade-honestly note:** `custodyStatusFor`/`custodyLabel`/`custodyTitle` never fabricate a state;
+`countAssetsWithoutPilot` reads zero (never "everything") while categories haven't resolved yet;
+`isLastOpenRecordForAsset` only changes which button is *styled* primary, never which backend call
+either one makes.
+
+**Verify:** `npx tsc --noEmit -p tsconfig.app.json`/`-p tsconfig.spec.json` — 0 errors, both configs.
+`npm run test:ci` — **160 spec files / 3065 tests, all passing** (+16 over W9's own last-recorded
+3049: 4 new in `maintenance-logic.spec.ts#isLastOpenRecordForAsset`, 2 new + updated existing calls
+in `roster-logic.spec.ts#countAssetsWithoutPilot`, 6 new in a `custodyStatusFor` describe block, 4
+new in a `custodyStatusLabel`/`custodyStatusTitle` describe block). `ng build --configuration
+production` green, exit 0, same two pre-existing budget warnings only (initial bundle 413.80 kB vs.
+390 kB, `tactical-map.css` vs. 8 kB — neither new nor worsened; this wave's shared-file edits are a
+few dozen bytes of CSS each). Final absolute sizes (no isolated before/after diff taken — would have
+needed a `git stash push` scoped to `station/vision-web` on a tree shared with two other live
+sessions' own uncommitted work, judged not worth the risk for a CSS-only/copy-only/pure-logic sweep):
+`maintenance-page` lazy chunk 13.10 kB raw / 3.75 kB transfer, `crew` 35.87 kB / 7.92 kB, `inventory`
+84.10 kB / 16.90 kB, initial bundle unchanged (413.80 kB / 115.91 kB, both shared-file fixes are
+CSS/markup-only inside components already in the initial bundle).
+
+**Commit:** not run by this wave — governing instructions say not to `git commit` autonomously.
+Every file below is staged-ready, not committed:
+`core/maintenance/maintenance-logic.ts`(+`.spec.ts`),
+`features/maintenance/{maintenance-facade.ts,maintenance.page.ts,maintenance.page.html}`,
+`features/roster/{roster-facade.ts,roster.html,roster-logic.ts(+.spec.ts)}`,
+`features/inventory/{inventory.html,vehicles-table.html,vehicles-table.ts}`,
+`features/onboarding/{onboarding.html,onboarding.routes.ts}`,
+`shared/ui/app-sidebar/{app-sidebar.html,app-sidebar.css}`,
+`shared/ui/page-bar/{page-bar.html,page-bar.css}`, `station/vision-web/MODULE.md`, this file.
+`core/audit/summary-logic.ts` read-only (its pre-existing `actorLabel`/`ROOT_ACTOR_ID` reused as-is,
+not edited). Never touched `drone-link/**`, `infra/rover-sim/**`, `core/rc/manual-control-client.*`,
+or `features/devices/**` — other concurrent sessions' own dirty files on this shared tree.
+
+**Not built, out of this wave's declared deliverables:** nothing — all six named findings (N1, A1,
+E1, C1(a)/(b)/(c), M1, O1) addressed; C1(a) specifically via the shared O1 fix rather than a
+page-specific patch, since the literal symptom never reproduced live.

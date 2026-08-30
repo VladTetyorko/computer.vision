@@ -59,7 +59,87 @@ export function searchRosterRows(rows: readonly RosterRow[], query: string): rea
  * page answer a real management question at a glance"). Counts against **every** row this facade
  * loaded, not the search-filtered subset — the gap is a fleet fact, not something a typed query
  * should be able to hide.
+ *
+ * `connectedCategorySlugs` scopes the count to categories that can actually carry a pilot
+ * (`Category#connected` — the same set `vehicles-logic.ts#filterVehicleRowsByConnected` splits the
+ * Inventory page's Vehicles/Equipment tabs on) — a non-connected asset (a battery, a spare gimbal)
+ * has no pilot concept at all, so counting it as "without a pilot" alongside a genuinely unassigned
+ * drone was the exact bug WAREHOUSE-UX-CONTEXT.md's W10 finding C1(b) named: the tile read one
+ * higher than the number of drones a manager could actually go assign someone to. A category not
+ * yet loaded (an empty slug set, mid-fetch) counts nothing — the same honest "reads as zero until
+ * resolved" transient {@link filterVehicleRowsByConnected}'s own doc comment describes, never a
+ * fabricated "every asset is equipment".
  */
-export function countAssetsWithoutPilot(rows: readonly RosterRow[]): number {
-  return rows.filter((row) => row.pilotNames.length === 0).length;
+export function countAssetsWithoutPilot(
+  rows: readonly RosterRow[],
+  connectedCategorySlugs: ReadonlySet<string>,
+): number {
+  return rows.filter((row) => connectedCategorySlugs.has(row.asset.category) && row.pilotNames.length === 0).length;
+}
+
+/**
+ * The "By asset" pivot's custody column (WAREHOUSE-UX-PLAN.md §3.2 D3, wave W7) — "may fly"
+ * (`pilotNames`) vs. "has it" (this). One of four mutually exclusive states, in priority order:
+ *
+ * - `'maintenance'` / `'retired'` — the asset's **effective** `AssetSummary#inventoryState`
+ *   (`InventoryStates#effective` server-side, never a stored/stale field) wins outright over
+ *   whatever `custody` happens to still carry. This is WAREHOUSE-UX-CONTEXT.md's W10 finding C1(c):
+ *   a grounded rover can still have a leftover `custody.custodianId` from before it was grounded (or
+ *   none at all, if it was grounded straight out of stock), and reading custody first — as the
+ *   pre-fix `custodianLabel` did — rendered a grounded asset as either a stale custodian name or
+ *   plain "In stock", never the one fact that actually matters here: it isn't flyable right now
+ *   regardless of who last held it.
+ * - `'held'` — an active custodian (`ISSUED`/`IN_FIELD`), resolved to a display name the same way
+ *   `pilotNames` resolves a pilot: the org's user list, falling back to a short id fragment for an
+ *   unresolvable/deactivated account.
+ * - `'in-stock'` — nobody has it and it isn't grounded or retired; the honest default.
+ */
+export type CustodyStatus =
+  | { readonly kind: 'maintenance' }
+  | { readonly kind: 'retired' }
+  | { readonly kind: 'held'; readonly custodianName: string }
+  | { readonly kind: 'in-stock' };
+
+export function custodyStatusFor(asset: AssetSummary, nameById: ReadonlyMap<string, string>): CustodyStatus {
+  if (asset.inventoryState === 'MAINTENANCE') {
+    return { kind: 'maintenance' };
+  }
+  if (asset.inventoryState === 'RETIRED') {
+    return { kind: 'retired' };
+  }
+  const custodianId = asset.custody?.custodianId;
+  if (custodianId) {
+    return { kind: 'held', custodianName: nameById.get(custodianId) ?? custodianId.slice(0, 8) };
+  }
+  return { kind: 'in-stock' };
+}
+
+/** {@link custodyStatusFor}'s own row text — `roster.html`'s "Has: X" / "In maintenance" / "Retired" /
+ *  "In stock", one quiet muted string, never a second chip (D3's own "no new chip colour" rule). */
+export function custodyStatusLabel(status: CustodyStatus): string {
+  switch (status.kind) {
+    case 'held':
+      return `Has: ${status.custodianName}`;
+    case 'maintenance':
+      return 'In maintenance';
+    case 'retired':
+      return 'Retired';
+    case 'in-stock':
+      return 'In stock';
+  }
+}
+
+/** {@link custodyStatusFor}'s own `title` attribute text — one sentence longer than the row label,
+ *  matching the pre-fix `custodianLabel`'s own "In stock — nobody currently has it" tooltip register. */
+export function custodyStatusTitle(status: CustodyStatus): string {
+  switch (status.kind) {
+    case 'held':
+      return `Has: ${status.custodianName}`;
+    case 'maintenance':
+      return 'Grounded for maintenance — nobody currently has it';
+    case 'retired':
+      return 'Retired — no longer in active service';
+    case 'in-stock':
+      return 'In stock — nobody currently has it';
+  }
 }

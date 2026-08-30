@@ -127,16 +127,16 @@
                     <!-- Custodian — "has it" — next to "may fly" above (WAREHOUSE-UX-PLAN.md §3.2 D3, this
                          wave's own ask: keep it one quiet text, no new chip colour). Plain muted text,
                          never a chip — this row's one chip budget (if it had one) is already spent by
-                         nothing here, and adding a second stateful chip would violate F5 regardless. -->
+                         nothing here, and adding a second stateful chip would violate F5 regardless.
+                         `facade.custodyLabel`/`custodyTitle` (W10 finding C1(c)) read the asset's
+                         **effective** inventory state first — a grounded asset reads "In maintenance"
+                         here even if it still carries a leftover custodian, never a stale name or a
+                         false "In stock". -->
                     <span
                       class="muted roster-custodian truncate"
-                      [title]="facade.custodianLabel(row.asset) ?? 'In stock — nobody currently has it'"
+                      [title]="facade.custodyTitle(row.asset)"
                     >
-                      @if (facade.custodianLabel(row.asset); as custodian) {
-                        Has: {{ custodian }}
-                      } @else {
-                        In stock
-                      }
+                      {{ facade.custodyLabel(row.asset) }}
                     </span>
                   </button>
                 </li>

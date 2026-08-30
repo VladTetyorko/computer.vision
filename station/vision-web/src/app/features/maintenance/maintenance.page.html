@@ -94,7 +94,10 @@
       <vision-empty title="Nothing grounded · every vehicle is in stock or in the field" />
     } @else {
       <section class="card">
-        <vision-section-header title="Open" [subtitle]="facade.openRows().length + ' record(s) currently keeping an asset out of service'" />
+        <vision-section-header
+          title="Open"
+          [subtitle]="pluralize(facade.openRows().length, 'record') + ' currently keeping an asset out of service'"
+        />
         <div class="table-scroll">
           <table>
             <thead>
@@ -128,22 +131,34 @@
                   <td class="mono">{{ openedAge(record) }}</td>
                   <td class="muted truncate">{{ facade.displayNameFor(record.openedBy) }}</td>
                   <td class="muted truncate">{{ facade.custodianLabelFor(record) ?? '—' }}</td>
+                  <!-- Close vs Release read the same at a glance until you notice they act at different
+                       scope (this row's one record vs. the whole asset) — W10 finding M1. Copy now
+                       names that scope directly ("record" / "asset"); which one is styled primary
+                       flips per `isLastOpenRecord` (`maintenance-logic.ts#isLastOpenRecordForAsset`'s
+                       own doc comment): with other open records left on this asset, releasing it
+                       would return it to service while something else is still flagged — the riskier
+                       move — so Close stays primary; once this is the asset's last one, the two
+                       actions finish the same job and Release becomes primary instead. -->
                   <td class="actions">
                     <button
                       type="button"
                       class="btn small"
+                      [class.secondary]="facade.isLastOpenRecord(record)"
                       [disabled]="facade.busyRecordId() === record.id"
+                      title="Closes just this record — other open records on the asset, if any, stay open."
                       (click)="facade.closeRecord(record)"
                     >
-                      Close
+                      Close record
                     </button>
                     <button
                       type="button"
-                      class="btn secondary small"
+                      class="btn small"
+                      [class.secondary]="!facade.isLastOpenRecord(record)"
                       [disabled]="facade.busyAssetId() === record.assetId"
+                      title="Returns the whole asset to stock, regardless of any other open records on it."
                       (click)="facade.release(record.assetId)"
                     >
-                      Release
+                      Release asset
                     </button>
                   </td>
                 </tr>

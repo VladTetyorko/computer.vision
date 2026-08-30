@@ -21,13 +21,19 @@ import { vehicleRowActions, type VehicleRow } from './vehicles-logic';
  * construction (only one dialog renders at a time, gated by which target signal is set).
  *
  * **Columns** (§3.3): Name · Category · Serial · Readiness · Custodian · Inventory state chip ·
- * Firmware · Hours · Last flown · Links(n) — the last two only for `connected` (Vehicles); Equipment
- * has no "flown" concept and its own device-link count is rarely interesting, so both columns are
- * hidden there rather than always showing `'—'` for a whole tab (frontend-style's "never a column of
- * pure dashes"). Firmware/Hours (wave W9, docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9
- * handoff") render real values off `AssetSummary#firmware`/`#totalFlightSeconds` now
- * (`vehicles-logic.ts#firmwareLabel`/`formatFlightTime`) — `'—'` only for a genuinely never-probed/
- * never-flown asset, never a whole-column absence.
+ * Firmware · Hours · Last flown · Links(n) — Readiness, Firmware, Hours, Last flown and Links all
+ * render only for `connected` (Vehicles); Equipment categories are never flown or evaluated for
+ * flight readiness (`GET /api/fleet/readiness` only ever carries a row for a connected-category
+ * asset, per `docs/plans/active/WAREHOUSE-UX-CONTEXT.md`'s W10 finding E1 — a battery's row still
+ * came back a literal `'UNKNOWN'` verdict, which is a real wire value distinct from "never
+ * evaluated" and rendered as the word "Unknown" rather than the honest `'—'` an absent join gets),
+ * and Equipment has no "flown" concept and its own device-link count is rarely interesting either —
+ * every one of these five is hidden there rather than always showing `'—'`/a nonsensical verdict for
+ * a whole tab (frontend-style's "never a column of pure dashes"). Firmware/Hours (wave W9,
+ * docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9 handoff") render real values off
+ * `AssetSummary#firmware`/`#totalFlightSeconds` now (`vehicles-logic.ts#firmwareLabel`/
+ * `formatFlightTime`) — `'—'` only for a genuinely never-probed/never-flown asset, never a
+ * whole-column absence.
  *
  * **Kebab verbs** are gated by {@link vehicleRowActions} (a plain boolean set — see that function's
  * own doc comment for why this wave didn't reuse `warehouse-logic.ts`'s reasoned

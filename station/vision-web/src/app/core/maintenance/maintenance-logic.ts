@@ -181,3 +181,24 @@ export function hoursSinceClose(record: { readonly closedAt?: string }, nowMs: n
 export function groundableAssets(assets: readonly AssetSummary[]): readonly AssetSummary[] {
   return assets.filter((asset) => asset.inventoryState !== 'MAINTENANCE' && asset.inventoryState !== 'RETIRED');
 }
+
+/**
+ * Whether `record` is the only open record left on its own asset — the open-records table's own
+ * Close/Release button treatment (docs/plans/active/WAREHOUSE-UX-CONTEXT.md W10 finding M1: "primary
+ * 'Close' vs secondary 'Release' is ambiguous"). The two actions have genuinely different scope —
+ * Close (`POST .../maintenance/{id}/close`) closes just this one record; Release (`POST
+ * .../inventory {action:RELEASE}`) returns the *whole asset* to stock regardless of anything else
+ * still open on it — and the old fixed primary/secondary pair implied a hierarchy between them that
+ * doesn't exist. This flips which one is "the" primary action per row instead: with other open
+ * records left after this one, Release would return the asset to service while something else is
+ * still flagged — the riskier move — so Close (the narrow, low-consequence one) stays primary; once
+ * this is the asset's last open record, closing it and releasing it amount to the same outcome, and
+ * Release is the one that actually finishes the job. Never changes what either button *does* — only
+ * which one `maintenance.page.html` renders as `.btn` vs `.btn.secondary`.
+ */
+export function isLastOpenRecordForAsset(
+  record: FleetMaintenanceRecord,
+  records: readonly FleetMaintenanceRecord[],
+): boolean {
+  return openRecords(records).filter((candidate) => candidate.assetId === record.assetId).length <= 1;
+}

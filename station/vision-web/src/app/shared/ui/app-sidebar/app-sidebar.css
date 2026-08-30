@@ -233,9 +233,10 @@
    from the old header's `.status` block — see this file's own doc comment) ------------------------- */
 
 /* Padding mirrors `.sidebar-body`'s own `var(--space-16) var(--space-8)` exactly, so the foot's
-   three blocks (demo button, identity chip, status row) start on the same x as a nav row's box
-   (8px) instead of the 16px they used to — and, with the two inner-padding corrections below, their
-   glyphs land on the same x=16 axis as every icon above them. */
+   blocks (the SYSTEM group when present, the identity chip, the status row — the demo button moved
+   into the status row itself, N1/W10) start on the same x as a nav row's box (8px) instead of the
+   16px they used to — and, with the two inner-padding corrections below, their glyphs land on the
+   same x=16 axis as every icon above them. */
 .sidebar-foot {
   flex: none;
   display: flex;
@@ -267,6 +268,31 @@
    auto` used to do alone before the toggle sat between them. */
 .status-dot {
   margin-left: auto;
+}
+
+/* Demo button, folded into this row (N1, docs/plans/active/WAREHOUSE-UX-CONTEXT.md W10) — it used to
+   be its own full-width `.sidebar-foot` row (icon + "Fill demo data" label); at a short viewport
+   (~713px) that row plus the pinned SYSTEM group left `.sidebar-body`'s scrolling nav a tiny slot
+   (measured live: 291px of visible nav against a 732px scrollHeight — FLEET's later entries and the
+   whole VISION group sat below the fold). `demo-button.css` itself is out of this task's file scope
+   (`shared/ui/app-sidebar/**` only) and its own collapsed-rail compaction is gated on
+   `:host-context(.sidebar.collapsed)` — width alone, never this row's actual constraint (height,
+   independent of collapsed state) — so this reaches into its DOM instead, the same `::ng-deep`
+   licence this file's head comment already uses for `identity-chip`/`notification-bell`. Sized to
+   match `.theme-toggle`'s own 1.9rem square exactly, so the row reads as one family of icon buttons.
+   `!important` (rare in this codebase — `features/command/command.css` is the one other precedent)
+   because `.demo-button`'s own `width: 100%` is unconditional in its source file, and Angular gives
+   no guarantee this component's styles are concatenated after that one's in the build output — a
+   plain specificity tie is not enough to trust here. */
+.status-row ::ng-deep .demo-button {
+  width: 1.9rem !important;
+  height: 1.9rem !important;
+  padding: 0 !important;
+  justify-content: center !important;
+}
+
+.status-row ::ng-deep .demo-label {
+  display: none !important;
 }
 
 /* The live-transport dot+text (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.1, `app-sidebar.ts`'s own doc
