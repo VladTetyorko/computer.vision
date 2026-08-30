@@ -1,18 +1,23 @@
 import type {
+  BindingScope,
   CvModel,
+  CvProfile,
+  CvProfileRequest,
   CvTracker,
   DetectionRate,
   DetectionResult,
   DetectionState,
   DetectorReason,
+  EffectiveCvProfile,
   FrameTracking,
   PatchStreamConfigResponse,
+  StreamConfigResponse,
+  StreamTrackingConfigResponse,
   TrackingCapability,
   TrackingMode,
   TrackStats,
   UpdateStreamConfigRequest,
 } from '../../core/api/models';
-import type { PipelineSettings } from '../../core/settings/settings-store';
 
 /**
  * Pure, Angular-free logic behind `cv-control-panel.ts` (docs/plans/done/CV-CONTROL-PLAN.md Wave E) — the Fly
@@ -349,6 +354,169 @@ export function applyPreset(
   return [...new Set([...current, ...preset])];
 }
 
+// --- Resolved CV config (docs/plans/active/CV-SETTINGS-PLAN.md §3, wave W7) ---------------------
+// The one honest replacement for the old `SettingsStore#effective()` draft (H2: "stop the
+// dual-write"). Every fly-time CV control (this panel, the setup modal, the detections strip) now
+// renders **either** the running stream's own live config (`GET /api/streams/{id}/config`, wave
+// W7's H6 fix — a real readback instead of assuming from what was last sent) **or**, before a
+// stream exists, the asset's own effective profile (`GET /api/cv/profiles/effective?assetId=`,
+// §3.1's hierarchy) — never a browser-local draft that could disagree with either. `resolveCvConfig`
+// is the one place that choice is made; every reader (`cv-control-panel.ts`, `cv-setup-modal.ts`)
+// takes its `[config]` input from this function's result, computed once on `CockpitFacade`.
+
+/** The shape both sources above reduce to — everything a fly-time CV control needs to render,
+ *  independent of which of the two sources it came from. Mirrors {@link StreamConfigResponse}'s own
+ *  field set (a strict superset of {@link CvProfileTracking}'s five tracking fields), so a caller
+ *  never has to branch on where a value came from. */
+export interface ResolvedCvConfig {
+  readonly model: string;
+  readonly confidenceThreshold: number;
+  readonly inferenceFps: number;
+  readonly labelFilter: readonly string[];
+  readonly labelDenyFilter: readonly string[];
+  readonly detectionEnabled: boolean;
+  readonly tracking: {
+    readonly mode: TrackingMode;
+    readonly engineId: string;
+    readonly capabilityLevel: number;
+    readonly verifyEveryMillis: number;
+    readonly followFps: number;
+  };
+}
+
+function resolvedTrackingFromStream(tracking: StreamTrackingConfigResponse): ResolvedCvConfig['tracking'] {
+  return {
+    mode: tracking.mode,
+    engineId: tracking.engineId,
+    capabilityLevel: tracking.capabilityLevel,
+    verifyEveryMillis: tracking.verifyEveryMillis,
+    followFps: tracking.followFps,
+  };
+}
+
+/** The running stream's own live config, reduced to {@link ResolvedCvConfig} — the honest source
+ *  while a stream exists (H6: a real readback, never assumed from what this browser last sent). */
+export function resolvedConfigFromStream(config: StreamConfigResponse): ResolvedCvConfig {
+  return {
+    model: config.model,
+    confidenceThreshold: config.confidenceThreshold,
+    inferenceFps: config.inferenceFps,
+    labelFilter: config.labelFilter,
+    labelDenyFilter: config.labelDenyFilter,
+    detectionEnabled: config.detectionEnabled,
+    tracking: resolvedTrackingFromStream(config.tracking),
+  };
+}
+
+/** The asset's own effective profile, reduced to {@link ResolvedCvConfig} — what the *next* Start
+ *  will actually apply (§3.1: "resolved once at stream start"), shown before a stream exists so the
+ *  operator sees real intent rather than a blank/fabricated form. */
+export function resolvedConfigFromProfile(profile: CvProfile): ResolvedCvConfig {
+  return {
+    model: profile.model,
+    confidenceThreshold: profile.confidenceThreshold,
+    inferenceFps: profile.inferenceFps,
+    labelFilter: profile.labelFilter,
+    labelDenyFilter: profile.labelDenyFilter,
+    detectionEnabled: profile.detectionEnabled,
+    tracking: profile.tracking,
+  };
+}
+
+/**
+ * The one merge point: the running stream's own config while one exists, else the asset's effective
+ * profile, else `undefined` — never a fabricated middle ground. `undefined` means both reads are
+ * unavailable (neither fetch has resolved, or both failed) — every caller degrades to an honest
+ * empty state in that case (§3.5 rule 3: never fabricate a value), not a guessed default.
+ */
+export function resolveCvConfig(
+  streamConfig: StreamConfigResponse | undefined,
+  effectiveProfile: EffectiveCvProfile | undefined,
+): ResolvedCvConfig | undefined {
+  if (streamConfig) {
+    return resolvedConfigFromStream(streamConfig);
+  }
+  if (effectiveProfile) {
+    return resolvedConfigFromProfile(effectiveProfile.profile);
+  }
+  return undefined;
+}
+
+/** `'organization'`/`'category'`/`'asset'`/`'platform'` — the lowercase word the Vision drawer's
+ *  "From profile" line names the source with (docs/plans/active/CV-SETTINGS-PLAN.md §4's mockup:
+ *  `From profile "people-vehicles" (asset)`). */
+export function describeProfileSource(source: BindingScope | 'PLATFORM'): string {
+  switch (source) {
+    case 'ORGANIZATION':
+      return 'organization';
+    case 'CATEGORY':
+      return 'category';
+    case 'ASSET':
+      return 'asset';
+    case 'PLATFORM':
+      return 'platform';
+  }
+}
+
+/**
+ * The Vision drawer's one honesty line (docs/plans/active/CV-SETTINGS-PLAN.md §4, wave W7 item 2):
+ * `From profile "<name>" (<source>)` once the asset's effective profile has resolved, `'Platform
+ * defaults'` when there is no asset to resolve one for at all, or `'—'` when an asset exists but the
+ * read hasn't landed/failed — never a fabricated profile name in that last case (§3.5 rule 3).
+ */
+export function effectiveProfileLine(
+  assetId: string | undefined,
+  effectiveProfile: EffectiveCvProfile | undefined,
+): string {
+  if (!assetId) {
+    return 'Platform defaults';
+  }
+  if (!effectiveProfile) {
+    return '—';
+  }
+  return `From profile "${effectiveProfile.profile.name}" (${describeProfileSource(effectiveProfile.source)})`;
+}
+
+// --- "Save to this asset's profile" (docs/plans/active/CV-SETTINGS-PLAN.md §4, wave W7 item 2) ---
+// An explicit, `canManageOrg`-gated act, never a side effect of flying: `CvSetupModal`'s own footer
+// button builds a `CvProfileRequest` from the currently-resolved live config, then POSTs (a fresh
+// profile) or PUTs (updating the asset's own already-bound profile) it, then binds it to the asset —
+// see that component's own doc comment for the two-call sequence.
+
+/** The new-profile default name/description — used only the first time an asset gets a profile of
+ *  its own (no existing `ASSET`-sourced binding to update instead); an operator can rename either
+ *  afterward from `/vision/profiles`, this is just an honest starting point naming where it came
+ *  from. */
+export function defaultAssetProfileName(assetDisplayName: string): string {
+  return `${assetDisplayName} — live config`;
+}
+
+export function defaultAssetProfileDescription(assetDisplayName: string): string {
+  return `Saved from ${assetDisplayName}'s Fly cockpit.`;
+}
+
+/** Builds the `CvProfileRequest` body from whatever is currently resolved (the running stream's own
+ *  live config, or the asset's prior effective profile before a stream exists) — `name`/`description`
+ *  are supplied by the caller (either the existing profile's own, on an update, or the defaults
+ *  above, on a fresh create). */
+export function buildProfileRequestFromConfig(
+  config: ResolvedCvConfig,
+  name: string,
+  description: string,
+): CvProfileRequest {
+  return {
+    name,
+    description,
+    model: config.model,
+    confidenceThreshold: config.confidenceThreshold,
+    inferenceFps: config.inferenceFps,
+    labelFilter: config.labelFilter,
+    labelDenyFilter: config.labelDenyFilter,
+    detectionEnabled: config.detectionEnabled,
+    tracking: config.tracking,
+  };
+}
+
 // --- PATCH body construction (docs/plans/done/CV-CONTROL-PLAN.md §2-3's frozen contract) -----------------
 
 /**
@@ -357,15 +525,17 @@ export function applyPreset(
  * slider drag or a chip toggle can never accidentally trigger a re-arm). Sent on every debounced
  * hot-knob edit while a stream is running — includes `labelDenyFilter` since wave W5 (docs/plans/
  * active/CV-CLEAN-FEED-PLAN.md D-2) so a per-chip hide/unhide click reaches the wire the same way
- * every other hot knob already does.
+ * every other hot knob already does. Takes the full {@link ResolvedCvConfig} rather than a bespoke
+ * shape (wave W7) — the caller merges its own patch on top of the currently-resolved config first
+ * ("current + this one edit"), same as before this wave's `SettingsStore#effective()` was the base.
  */
-export function buildHotKnobPatch(settings: PipelineSettings): UpdateStreamConfigRequest {
+export function buildHotKnobPatch(config: ResolvedCvConfig): UpdateStreamConfigRequest {
   return {
-    confidenceThreshold: settings.confidenceThreshold,
-    inferenceFps: settings.inferenceFps,
-    labelFilter: settings.labelFilter,
-    labelDenyFilter: settings.labelDenyFilter,
-    detectionEnabled: settings.detectionEnabled,
+    confidenceThreshold: config.confidenceThreshold,
+    inferenceFps: config.inferenceFps,
+    labelFilter: config.labelFilter,
+    labelDenyFilter: config.labelDenyFilter,
+    detectionEnabled: config.detectionEnabled,
   };
 }
 

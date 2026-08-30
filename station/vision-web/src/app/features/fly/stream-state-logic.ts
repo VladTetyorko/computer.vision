@@ -7,14 +7,21 @@ import type { StreamState } from '../../core/api/models';
  *
  * Before this plan every one of those rendered `SettingsStore`'s own draft, which is this browser's
  * localStorage — so switching drone, reloading, or opening a second tab could show a switch position
- * that was simply false for the stream in front of the operator (`STREAM-STATE-CONTEXT.md` D1). The
- * draft is not deleted, it is demoted to its honest job: **the default the next `Start` will post**.
+ * that was simply false for the stream in front of the operator (`STREAM-STATE-CONTEXT.md` D1).
+ *
+ * Wave W7 (docs/plans/active/CV-SETTINGS-PLAN.md §3, H2) deleted that localStorage draft entirely —
+ * there is no browser-local "default the next Start will post" any more, since the server resolves a
+ * fresh stream's config from the profile hierarchy (§3.1) on its own. The fallback below is now the
+ * asset's own **resolved CV config** (`CockpitFacade.resolvedCvConfig`, itself the effective profile
+ * merged with any live stream readback) — still honest, just sourced from the wire instead of a draft.
  *
  * @param streamValue `ActiveStream.detectionEnabled` — the running stream's own server-side intent,
  *                    or `undefined` when nothing is running (there is no stream to be truthful
- *                    about) or the backend predates this field. Both degrade to the draft, which is
+ *                    about) or the backend predates this field. Both degrade to `draft`, which is
  *                    exactly today's behaviour — "an absent field means today"
- * @param draft       `settings.effective().detectionEnabled`
+ * @param draft       `CockpitFacade.resolvedCvConfig()?.detectionEnabled ?? false` — the asset's
+ *                    resolved CV config (see this comment's own wave-W7 note), or the honest `false`
+ *                    floor when even that hasn't resolved yet.
  */
 export function resolveDetectionEnabled(streamValue: boolean | undefined, draft: boolean): boolean {
   return streamValue ?? draft;

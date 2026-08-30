@@ -1,8 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, output } from '@angular/core';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
-import type { UpdateStreamConfigRequest } from '../../core/api/models';
+import type { EffectiveCvProfile, UpdateStreamConfigRequest } from '../../core/api/models';
 import type { BoxesMode } from '../../shared/player/player';
 import { DECLUTTER_LEVELS, DEFAULT_DECLUTTER_LEVEL, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
 import {
@@ -10,11 +9,13 @@ import {
   buildReleaseLockPatch,
   classesOnScreenCount,
   detectionStatus,
+  effectiveProfileLine,
   findModel,
   isCapabilityDowngraded,
   isDetectionLagOverBudget,
   latestFrameTracking,
   modelCostWord,
+  type ResolvedCvConfig,
 } from './cv-control-panel-logic';
 
 /**
@@ -87,9 +88,11 @@ export class CvControlPanel {
    *  "component only reports the request, host owns the `UiStore` write" shape for its dialogs. */
   readonly setupRequested = output<void>();
 
-  /** The detection-boxes declutter level (`FlyPage`'s own `facade.boxesMode`) — a client-side
-   * rendering preference, not part of `PipelineSettings`/the wire contract, so it round-trips via a
-   * plain input/output pair rather than `SettingsStore`. */
+  /** The detection-boxes declutter level (`FlyPage`'s own `facade.boxesMode`, itself an alias of
+   * `SettingsStore.declutterLevel` — wave W7, H12) — one shared, persisted **View** preference
+   * (docs/plans/active/CV-SETTINGS-PLAN.md §3.5 rule 1: a control with no backend effect lives in a
+   * View group and says so), never part of {@link ResolvedCvConfig}/the wire contract, so it still
+   * round-trips via a plain input/output pair rather than reading `SettingsStore` directly here. */
   readonly boxesMode = input<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
   readonly boxesModeChange = output<BoxesMode>();
   /** The four declutter levels, in cycle order — the segmented control's own `@for` source. */
@@ -98,8 +101,27 @@ export class CvControlPanel {
     return declutterLevelLabel(mode);
   }
 
+  /** The one value this panel renders every live knob from (`CockpitFacade#resolvedCvConfig`,
+   *  wave W7) — merges the running stream's own readback with the asset's effective profile, so
+   *  this panel never renders a browser-local draft. `undefined` before either half has resolved. */
+  readonly config = input<ResolvedCvConfig | undefined>(undefined);
+
+  /** The asset's own effective CV profile (`GET /api/cv/profiles/effective?assetId=`) — feeds the
+   *  "From profile …" line below, alongside {@link assetId} (see {@link profileLine}). */
+  readonly effectiveProfile = input<EffectiveCvProfile | undefined>(undefined);
+
+  /** The primary device's asset id, or `undefined` while nothing is selected — see {@link profileLine}. */
+  readonly assetId = input<string | undefined>(undefined);
+
+  /** Emitted after any PATCH this panel sends succeeds — the host (`CockpitFacade#refreshStreamConfig`)
+   *  re-reads `GET .../config` so {@link config} always renders the wire, never an assumption (H6). */
+  readonly configChanged = output<void>();
+
+  /** "From profile "name" (source)" / "Platform defaults" / "—" — see that function's own doc
+   *  comment for the three honest outcomes (docs/plans/active/CV-SETTINGS-PLAN.md §4 mockup). */
+  protected readonly profileLine = computed(() => effectiveProfileLine(this.assetId(), this.effectiveProfile()));
+
   private readonly fleet = inject(FleetStore);
-  protected readonly settings = inject(SettingsStore);
   /** Recent detection results and the tracks poll (`GET .../tracks`) alike — host-provided
    *  (`cockpit.ts`'s own `providers`), the same instance `CvSetupModal`, the detections strip, and
    *  `CockpitFacade` all share. See class doc's own "The tracks poll is still owned here" paragraph. */
@@ -108,7 +130,7 @@ export class CvControlPanel {
   // --- "Looking for" summary row (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1 §1.1 item 2) -------
 
   protected readonly models = computed(() => this.fleet.models());
-  protected readonly selectedModel = computed(() => findModel(this.models(), this.settings.effective().model));
+  protected readonly selectedModel = computed(() => findModel(this.models(), this.config()?.model ?? ''));
   /** The summary row's own cost word — shared with the setup modal's intent cards via
    *  `cv-control-panel-logic.ts#modelCostWord`, so the two surfaces can never disagree. */
   protected costWord(openVocab: boolean): string {
@@ -149,7 +171,7 @@ export class CvControlPanel {
   protected readonly hasStream = computed(() => !!this.streamId());
   private readonly latestResult = computed(() => this.detections.results()[0]);
   protected readonly classesOnScreen = computed(() =>
-    classesOnScreenCount(this.latestResult(), this.settings.effective().labelFilter),
+    classesOnScreenCount(this.latestResult(), this.config()?.labelFilter ?? []),
   );
   protected readonly detectionStatusInfo = computed(() =>
     detectionStatus(
@@ -186,12 +208,18 @@ export class CvControlPanel {
   }
 
   /** The release chip's own action — drops the lock, falls back to the mode's own policy. Every
-   *  tracking PATCH is sent immediately, never debounced. */
+   *  tracking PATCH is sent immediately, never debounced. Emits {@link configChanged} on success
+   *  only — a failed PATCH left the stream exactly where it was, so there is nothing new to re-read. */
   protected releaseLock(): void {
     const streamId = this.streamId();
-    if (streamId) {
-      void this.fleet.patchStreamConfig(streamId, buildReleaseLockPatch() as UpdateStreamConfigRequest);
+    if (!streamId) {
+      return;
     }
+    void this.fleet.patchStreamConfig(streamId, buildReleaseLockPatch() as UpdateStreamConfigRequest).then((result) => {
+      if (result) {
+        this.configChanged.emit();
+      }
+    });
   }
 
   /**

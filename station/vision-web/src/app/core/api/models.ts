@@ -152,14 +152,17 @@ export type StreamState = 'STARTING' | 'LIVE' | 'STALLED' | 'RECONNECTING' | 'UN
  * own additions, both optional — an absent `labelFilter` keeps today's "empty = all labels"
  * semantics, an absent `detectionEnabled` defaults to `PipelineConfig.DEFAULT_DETECTION_ENABLED`
  * server-side — **`false`** as of docs/plans/done/CV-DEMAND-PLAN.md wave D1 (flipped from `true`: detection
- * is opt-in per stream now, not opt-out). This app never relies on that server fallback either way —
- * `core/settings/settings-store.ts#SettingsStore.effective()` always resolves a concrete
- * `detectionEnabled` value, and every call site that starts a stream
- * (`features/fly/cockpit-facade.ts#start`, `features/live/live-facade.ts`,
- * `features/devices/devices-facade.ts`) passes `settings.effective()` straight through as this
- * request, so it is always sent explicitly — the SPA's own default (also flipped to `false`, same
- * wave, §D3) is what actually governs a stream this app started, not this field's absence. Both are
- * also PATCH-able live afterward — see `UpdateStreamConfigRequest`.
+ * is opt-in per stream now, not opt-out).
+ *
+ * **Wave W7 (docs/plans/active/CV-SETTINGS-PLAN.md §3.1, H2) deleted the browser-local draft this app
+ * used to always send explicitly** (`SettingsStore#effective()` — that slice of `SettingsStore` no
+ * longer exists at all). Every call site that starts a stream (`features/fly/cockpit-facade.ts#start`,
+ * `features/live/live-facade.ts#start`, `features/devices/devices-facade.ts#start`) now sends **no
+ * body at all**, so this request's own documented fallback governs instead: the server resolves the
+ * new stream's config from the profile hierarchy (PLATFORM → ORGANIZATION → CATEGORY → ASSET, §3.1) —
+ * `PipelineConfig.defaults()` merged with whatever profile is actually bound, not a fixed SPA-side
+ * default any more. Both `labelFilter`/`detectionEnabled` are still PATCH-able live afterward — see
+ * `UpdateStreamConfigRequest`.
  *
  * `labelDenyFilter` (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2, wave W5) mirrors `dto.StartStreamRequest
  * #labelDenyFilter` one for one: an explicit empty array is a real value meaning "deny nothing",
@@ -248,6 +251,48 @@ export interface PatchStreamConfigResponse {
   readonly streamId: string;
   readonly modelReArmed: boolean;
   readonly trackingChanged?: boolean;
+}
+
+/**
+ * `StreamConfigResponse#tracking` — mirrors `dto.StreamConfigResponse.StreamTrackingConfigResponse`
+ * field-for-field (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H6: "read tracking settings back
+ * from `GET .../config` instead of assuming from what was sent"). Wider than
+ * {@link CvProfileTracking} — this also carries the three session-only knobs a profile does not own
+ * (`redetectIouPercent`/`maxAgeFrames`/`minHits`) plus `reupdateMaxGapMillis`. `lock` is deliberately
+ * absent (the Java record's own doc comment): a held target is confirmed from `GET .../tracks`'s own
+ * `lockedTrackId` and nowhere else (docs/extracts/TRACKING-ORCHESTRATION.md §3.3).
+ */
+export interface StreamTrackingConfigResponse {
+  readonly mode: TrackingMode;
+  readonly engineId: string;
+  readonly verifyEveryMillis: number;
+  readonly followFps: number;
+  readonly redetectIouPercent: number;
+  readonly maxAgeFrames: number;
+  readonly minHits: number;
+  readonly capabilityLevel: number;
+  readonly reupdateMaxGapMillis: number;
+}
+
+/**
+ * Mirrors `dto.StreamConfigResponse`, the `200` body of `GET /api/streams/{streamId}/config`
+ * (docs/plans/active/CV-SETTINGS-PLAN.md wave W7) — "the read half of a knob that was write-only
+ * over HTTP" (the Java record's own doc comment). Field names mirror
+ * {@link UpdateStreamConfigRequest} one-for-one, but **every field here is always present** — this
+ * is the effective configuration, not a patch, so there is no "absent means unchanged" to represent.
+ * `404` for an unknown/not-running stream — the Java controller's own doc comment: "a plausible-
+ * looking default configuration for a stream that does not exist" is exactly the fabrication this
+ * app's "degrade honestly" rule forbids, so a `404` here means the caller has nothing to show, not a
+ * reason to substitute a guess.
+ */
+export interface StreamConfigResponse {
+  readonly model: string;
+  readonly confidenceThreshold: number;
+  readonly inferenceFps: number;
+  readonly labelFilter: readonly string[];
+  readonly labelDenyFilter: readonly string[];
+  readonly detectionEnabled: boolean;
+  readonly tracking: StreamTrackingConfigResponse;
 }
 
 /**

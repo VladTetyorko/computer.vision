@@ -17,7 +17,8 @@ Spec: [CV-SETTINGS-PLAN.md](CV-SETTINGS-PLAN.md). Branch `feat/cv-settings`, cut
 | W3 persistence | spring-integrator | built, uncommitted | | `V29__cv_profiles.sql`/`V30__cv_model_registry.sql` + `JpaCvProfileRepository`/`JpaCvModelRepository`/`JpaTrainingRunRepository` implementing W1's/W4-domain's ports; `storage/persistence` green, 260 tests total, up from 237 (see Handoffs) |
 | W5 | | pending W2+W4 | | |
 | W6 | web-ui | built, uncommitted | | `/vision/profiles` page (list/editor/bindings/coverage) + `CvProfile*`/`EffectiveCvProfile`/`CvCoverage*`/`TrainingRun*` TS types + 8 new `VisionApi` methods; `detection-settings.*` deleted, `/settings/detection` redirects; nav rail gained Profiles (see Handoffs) |
-| W7 / W8 | | after W6 | | |
+| W7 | web-ui | built, uncommitted | | Fly/Live/Wall CV dual-write removed; Vision drawer "From profile" line + `canManageOrg`-gated "Save to this asset's profile"; H6 stream-config readback; H12 one shared `declutterLevel`; H8 dead `LiveFacade.onConfidence/onFps/onModel` deleted (see Handoffs) |
+| W8 | | after W5 + W7 | | |
 
 ## Handoffs
 (filled per wave: port signatures, deviations from the plan)
@@ -649,3 +650,113 @@ initial-bundle budget warning, unrelated to this wave). Bundle delta (measured v
 `git stash` limited to this wave's own 15 files, to avoid disturbing W2/W3/W4's concurrent uncommitted
 work on this same tree): initial bundle **+0.89 kB raw / +0.18 kB transfer**; new lazy chunk
 **`vision-profiles` 32.35 kB raw / 7.45 kB transfer**. Not committed, per this task's own instruction.
+
+### W7 → W8
+
+Built entirely inside `station/vision-web`: `src/app/features/fly/**`, `src/app/shared/player/**`,
+`src/app/features/live/live-facade.ts`, `src/app/features/wall/wall-tile.ts`,
+`src/app/core/settings/settings-store.{ts,spec.ts}`, `src/app/core/api/{models.ts,vision-api.ts}`
+(doc-comment fix only — no new wire type needed, W6's `EffectiveCvProfile`/`CvProfile*` types and
+`getEffectiveCvProfile`/`getStreamConfig`/`createCvProfile`/`updateCvProfile`/`setCvProfileBinding`
+already covered everything this wave needed to call), plus one out-of-scope collateral fix,
+`src/app/features/devices/devices-facade.ts` (see below). Built on a shared tree with the still-running
+Java W5 agent (`station/vision-api`/`station/vision-app`) — never touched, confirmed disjoint via
+`git status` throughout.
+
+**1. Dual-write stopped.** `SettingsStore`'s CV-defaults slice (`model`/`confidenceThreshold`/
+`inferenceFps`/`labelFilter`/`labelDenyFilter`/`detectionEnabled`/`tracking`, `effective()`/`adjust()`,
+`PipelineSettings`) is deleted outright — no in-flight knob writes it or `localStorage` any more.
+`SettingsStore` now carries only genuinely personal view state: `flyAssetId`, `advancedMode`,
+`autoTts`, and the new `declutterLevel` (H12, below). Every hot-knob PATCH (`cv-control-panel.ts`,
+`cv-setup-modal.ts`, `detections-strip.ts`) now builds its patch from a `ResolvedCvConfig` — either
+the freshly-read-back stream config or the effective profile — never a browser-local draft.
+`StartStreamRequest` sends no CV body at all any more; the server resolves the initial config from
+the profile hierarchy (PLATFORM→ORGANIZATION→CATEGORY→ASSET), matching CV-SETTINGS-PLAN.md's
+"resolved once at stream start" rule for the first time on the client side too. Dead code deleted
+alongside: the old `SettingsStore.spec.ts` CV-defaults describe blocks, `DEFAULT_DECLUTTER_LEVEL`'s
+old three call sites (see H12 below).
+
+**2. "From profile" line + explicit save, in `CvControlPanel`/`CvSetupModal`.** `CockpitFacade` gained
+two new signals — `effectiveProfile` (`GET /api/cv/profiles/effective?assetId=`, re-fetched on asset
+change) and `streamConfig` (`GET /api/streams/{id}/config`, re-fetched on stream change and after every
+successful PATCH via the new `refreshStreamConfig()`/`refreshEffectiveProfile()` methods) — folded into
+one `resolvedCvConfig` the panel/modal render from. `cv-control-panel-logic.ts#effectiveProfileLine`
+renders `From profile "<name>" (<source>)` when the stream has an asset with a resolved profile, or
+`Platform defaults` otherwise — one line, above the "Looking for" summary in `CvControlPanel` and
+mirrored in `CvSetupModal`'s header. A new `canManage`-gated (`canManageOrg(topRole)`, `CockpitFacade`'s
+own computed, threaded into `CvSetupModal` as an `input<boolean>` rather than re-derived — one source
+of truth) **"Save to this asset's profile"** button in the setup modal's footer: `buildProfileRequestFromConfig`
+turns the modal's current live config into a `CvProfileRequest`, then either `updateCvProfile` (if the
+effective profile's `source === 'ASSET'`, i.e. this asset already owns one) or `createCvProfile` +
+`setCvProfileBinding({scopeKind:'ASSET', scopeId, profileId})` (first save). Explicit only — never a
+side effect of any hot-knob edit — and states once, in the footer's own hint text, "Applies to this
+asset's next stream start — never a side effect of the edits above."
+
+**3. H6 — tracking read-back from `GET /api/streams/{id}/config`.** `StreamConfigResponse`/
+`StreamTrackingConfigResponse` (added earlier this session, before this wave's own work began) +
+`VisionApi#getStreamConfig` are now actually consumed: `CvSetupModal`'s `capabilityLevel`/
+`verifyEveryMillis`/`followFps` are set from a constructor `effect()` reading `config()?.tracking`
+(the fresh readback), not assumed from whatever the last PATCH sent. The pre-existing tracking-mode/
+tracking-engine-id readback (sourced from `detections.tracks()?.stats`, a faster/more-live signal) was
+deliberately left untouched — only the three fields the wire genuinely had no readback for before
+gained one.
+
+**4. H12 — one shared, persisted declutter level.** `SettingsStore.declutterLevel` (a `WritableSignal<BoxesMode>`,
+persisted at `vision.settings.declutterLevel` via `core/panel-state.ts`, validated on restore with a new
+`isBoxesMode` guard) replaces the three previously-unshared in-memory signals on `CockpitFacade`,
+`LiveFacade`, and `WallTile` — all three now alias the exact same store signal
+(`readonly boxesMode = this.settings.declutterLevel;`), so **every wall tile app-wide now shares one
+declutter level**, not one per tile. This is the plan's literal wording ("one shared… replacing the
+three"), confirmed intentional, not a regression. Labelled "View · Boxes (shortcut: B)" in
+`cv-control-panel.html` per §3.5's "View" group.
+
+**5. H8 — dead `LiveFacade` methods deleted.** `onConfidence`/`onFps`/`onModel` are gone; grepped for
+template bindings first (zero hits in `live.html`) before deleting — they were the unused duplicates
+the plan described, writing `SettingsStore` with no reader.
+
+**Deviations from the pre-implementation plan, both reasoned in the code's own doc comments:**
+- **`CvSetupModal#onModelChange` sends two sequential PATCHes, not one combined `model`+`labelFilter`
+  PATCH.** `UpdateStreamConfigRequest`'s own doc comment (`core/api/models.ts`) freezes a wire-contract
+  invariant — a hot-knob edit and a model change must never share one PATCH, so a hot-knob drag can
+  never accidentally trigger a model re-arm. The model-change PATCH goes first, then a second
+  hot-knob-shaped PATCH carrying the seeded `labelFilter`, once the first succeeds.
+- **`cv-setup-modal.html`'s controls stay enabled pre-start**, not disabled as originally planned. A new
+  component-local `pendingEdits`/`liveConfig` overlay (`signal<Partial<ResolvedCvConfig>>({})` merged
+  onto the `config` input, reset by an `effect()` whenever `config()` itself changes) makes pre-start
+  edits genuinely meaningful — they stage values "Save to this asset's profile" can write — unlike
+  `CvControlPanel`'s Detect switch, which is a true no-op pre-start and stays disabled. The overlay also
+  fixes a real correctness gap the naive "read `config()` directly" approach would have had: `debounce()`'s
+  last-call-wins semantics would otherwise silently drop an earlier field's edit if two fields are
+  touched inside one debounce window.
+- **`features/devices/devices-facade.ts` needed a 3-line collateral fix** (outside the declared write
+  scope) — it called `SettingsStore.effective()` for `FleetStore.start()`'s second argument; deleting
+  the CV-defaults slice (build requirement 1) would otherwise have left the build red. Removed the
+  `SettingsStore` injection/import and dropped the now-nonexistent second argument; confirmed via
+  `git status` the file was untouched by any other agent before this fix.
+
+**Dev parity**: `vision.auth.enabled=false`'s dev admin resolves `canManageOrg` exactly as before (ADMIN/
+unbounded), so the "Save to this asset's profile" action is visible in dev exactly as it will be for a
+real manager. **Degrades honestly**: a failed `getEffectiveCvProfile`/`getStreamConfig` read leaves the
+respective signal `undefined` — the "From profile" line and the H6 tracking fields simply don't update
+rather than showing a stale or fabricated value (both logged via `console.warn` with the file's
+`LOG_PREFIX`, never thrown/toasted, since these are background enrichment reads, not the primary act).
+
+**Verify chain, all green**: `npx tsc --noEmit -p tsconfig.app.json` — 0 errors. `npx tsc --noEmit -p
+tsconfig.spec.json` — 0 errors. `npm run test:ci` — **160/160 files, 3079/3079 tests**. `npx ng build
+--configuration production` — green, same two pre-existing budget warnings only (initial bundle over its
+390 kB budget; `tactical-map.css` over its 8 kB budget, both untouched by this wave). **Bundle delta**,
+measured via a pathspec-scoped `git stash push -u -- station/vision-web` baseline (chosen for the same
+reason W6 used it — three-plus concurrent agents, Java W5 included, on this shared tree; verified via
+`git status` before/after): initial bundle **414.69 kB → 419.78 kB raw (+5.09 kB), 116.09 kB → 118.20 kB
+transfer (+2.11 kB)** — from the new `resolvedCvConfig`/`effectiveProfile`/`streamConfig` plumbing and
+the "Save to this asset's profile" action, all inside the eagerly-loaded `cockpit`/`fly` surface. Not
+committed, per this task's own instruction.
+
+**What W8 should know:** `SettingsStore` is now fully clean of CV-defaults — no more grep-and-avoid
+needed for that slice. `ResolvedCvConfig` (`cv-control-panel-logic.ts`) is the one shape every fly-time
+CV control renders from (`{...effectiveProfile fields..., ...live stream config overrides...}`) — a
+natural model for W8's own registry/training-run UI to follow if it needs a similar "what's actually
+running vs. what's configured" merge. `EffectiveCvProfile`/`CvProfile*` types (W6) are now genuinely
+consumed by two call sites (`CockpitFacade#loadEffectiveProfile`, `CvSetupModal#saveToAssetProfile`) —
+any wire-shape drift W8 introduces there will now be caught by `tsc`, not just by W6's own unconsumed
+fixtures. `TrainingRun`/`TrainingRunsResponse` (W6) remain untouched and unconsumed — still W8's own.

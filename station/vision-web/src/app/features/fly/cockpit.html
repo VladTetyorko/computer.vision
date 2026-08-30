@@ -274,12 +274,17 @@
           @if (facade.live()) {
             <vision-detections-strip
               [streamId]="facade.stream()?.streamId"
+              [labelDenyFilter]="facade.resolvedCvConfig()?.labelDenyFilter ?? []"
               (hoveredClassChange)="facade.hoveredDetectionClass.set($event)"
+              (configChanged)="facade.refreshStreamConfig()"
             />
           }
           @if (!facade.watchMode()) {
             <vision-cv-control-panel
               [streamId]="facade.stream()?.streamId"
+              [config]="facade.resolvedCvConfig()"
+              [effectiveProfile]="facade.effectiveProfile()"
+              [assetId]="a.assetId"
               [boxesMode]="facade.boxesMode()"
               (boxesModeChange)="facade.boxesMode.set($event)"
               (lockedTrackIdChange)="facade.lockedTrackId.set($event)"
@@ -287,6 +292,7 @@
               [detectionPending]="facade.detectionPending()"
               (detectionEnabledChange)="facade.setDetection($event)"
               (setupRequested)="requestCvSetup()"
+              (configChanged)="facade.refreshStreamConfig()"
             />
           }
         </vision-side-panel>
@@ -528,9 +534,16 @@
     @if (isDialogOpen('cv-setup') && !facade.watchMode()) {
       <vision-cv-setup-modal
         [streamId]="facade.stream()?.streamId"
+        [config]="facade.resolvedCvConfig()"
+        [effectiveProfile]="facade.effectiveProfile()"
+        [assetId]="a.assetId"
+        [assetDisplayName]="a.displayName"
+        [canManage]="facade.canManage()"
         [expertOpen]="facade.cvExpertOpen()"
         (expertOpenChange)="facade.cvExpertOpen.set($event)"
         (closed)="closeCvSetup()"
+        (configChanged)="facade.refreshStreamConfig()"
+        (profileSaved)="facade.refreshEffectiveProfile()"
       />
     }
   </div>

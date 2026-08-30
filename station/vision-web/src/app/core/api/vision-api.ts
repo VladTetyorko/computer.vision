@@ -101,6 +101,7 @@ import type {
   StartStreamRequest,
   StartStreamResult,
   StartTrainingJobRequest,
+  StreamConfigResponse,
   StreamTracksResponse,
   SystemNetworkResponse,
   SystemStatus,
@@ -219,6 +220,17 @@ export class VisionApi {
         patch,
       ),
     );
+  }
+
+  /**
+   * A running stream's effective configuration (`200`, see {@link StreamConfigResponse}'s own doc
+   * comment) — docs/plans/active/CV-SETTINGS-PLAN.md wave W7's H6 fix: every hot knob this app
+   * exposes now has a real readback instead of assuming from what was last sent. `404` for an
+   * unknown/not-running stream — the caller (`CockpitFacade`) degrades to `undefined`, never a
+   * fabricated default (see that type's own doc comment).
+   */
+  getStreamConfig(streamId: string): Promise<StreamConfigResponse> {
+    return firstValueFrom(this.http.get<StreamConfigResponse>(`/api/streams/${encodeURIComponent(streamId)}/config`));
   }
 
   /**
