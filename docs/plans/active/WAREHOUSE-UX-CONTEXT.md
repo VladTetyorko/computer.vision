@@ -23,6 +23,7 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | W5 readiness ← maintenance | application-service | done | `445e145b` |
 | W6 wizard | web-ui | done | `eafb807e` |
 | W7 maintenance + crew | web-ui | done | `cae23506` |
+| W8 fleet maintenance read, firmware + hours on the row | spring-integrator | done | pending — recorded in a follow-up docs commit, per W4's own precedent |
 
 Shared tree: agents commit **by path**, never stash. Unrelated dirty files (`infra/rover-sim/**`, `core/rc/manual-control-client*`, `DefaultPeerDirectory.java`) belong to another session — do not touch.
 
@@ -702,3 +703,116 @@ first time on a successful build (not a delta — W6/W7 never got a green build 
 replacement slot specced); the Links/Categories double-page-bar (would require reworking
 `DevicesPage`/`CategoriesPage` internals, out of this wave's file scope); Firmware/Hours (no backing
 data in `vision-warehouse`/`vision-flight` yet).
+
+## W8 status (fleet-wide maintenance read, firmware + flight hours on the asset row) — done
+
+Closes three backend follow-ups: W7's "Handoff to W3" (fleet-wide maintenance-records endpoint,
+§ above), and W4's own "two backend discrepancies" note (Firmware/Hours both rendering `'—'`, §
+above). File scope: `contexts/vision-warehouse/**`, `station/vision-api/**`, `station/vision-app/**`,
+`storage/persistence/**` (query methods only — no new migration, `V28` already carries every column
+needed), plus every touched module's `MODULE.md`.
+
+**1. Fleet-wide maintenance read.** `MaintenanceRepositoryPort` gained `findOpen()`/
+`findRecentlyClosed(int limit)`; `MaintenanceService` gained `fleetWide(MaintenanceListState state,
+int limit, VisibilityScope scope)` returning `List<MaintenanceRecordSummary>` — `state` selects
+`OPEN`/`CLOSED`/`ALL`, each record joined **in-context** to its asset's `displayName`/`category` via
+`AssetRepositoryPort` (already injected into `DefaultMaintenanceService` — not a cross-context
+join), silently dropping (never 403) a record whose asset is soft-deleted or out of scope, same
+"filter, don't throw" convention `DefaultFleetSummaryService` uses. New `GET /api/maintenance`
+(`AssetInventoryController#fleetMaintenance`) — see JSON shape below.
+
+**2. Firmware on the row (D5).** No warehouse→flight dependency was added (warehouse stays the pure
+leaf). Instead, a new `vision-api`-layer collaborator `com.drones.vision.api.support.AssetRowFacts`
+bundles `VehicleProfileRepositoryPort#findLatest` (per device, first hit wins) and the new usage
+aggregate (item 3) behind one class, injected as `AssetController`'s **fifth** constructor
+parameter — adding both ports directly would have pushed the constructor to six, past the
+five-parameter ceiling (`.claude/skills/java-clean-code/SKILL.md` §3). `AssetSummaryResponse`/
+`AssetDetailsResponse` each gained trailing `firmware`/`totalFlightSeconds` fields, joined in
+`AssetController#list`/`#details`.
+
+**3. Hours on the row.** `AssetUsageRepositoryPort` gained a `default Map<AssetId,Long>
+totalFlightSecondsByAsset()` (default, not abstract, specifically so `vision-learning`'s
+out-of-scope hand-rolled `FakeAssetUsageRepositoryPort` test fixture need not implement it) backed
+by `JpaAssetUsageRepository`'s new native aggregate query (`sum(extract(epoch from
+(coalesce(ended_at, now()) - started_at)))` grouped by `asset_id` — this module's first native
+SELECT-with-row-projection query). `hoursSinceService` was **not** built — it's web-derivable from
+the maintenance records `GET /api/maintenance` already returns (`flightSecondsAt` on the most
+recent record vs. current `totalFlightSeconds`), per this wave's own task brief.
+
+**Design decision: `AssetSummary` (the warehouse application record) was not widened.** A `grep` for
+`new AssetSummary(...)` found ~22 call sites across 5 modules, several outside this wave's declared
+scope (vision-identity, vision-flight, vision-simulation test files). Both new facts are joined
+entirely at the `vision-api` read-model layer instead (mirroring the precedent `AssetController`
+already set for `TelemetryRepositoryPort`) — zero warehouse-side call-site migration needed.
+
+**Build proof (before → after this wave):**
+
+| Module | Before | After | Delta |
+|---|---|---|---|
+| `contexts/vision-warehouse` | 319 | 325 | +6 (`DefaultMaintenanceServiceTest#fleetWide*`) |
+| `storage/persistence` | 225 | 237 | +12 (`MaintenanceRepositoryTests` nested class ×9, `AssetUsageRepositoryTests#totalFlightSecondsByAsset*` ×3) |
+| `station/vision-api` | 893 | 901 | +8 (`AssetControllerTest` ×4, `AssetInventoryControllerTest` ×4) |
+| `station/vision-app` | 277 | 277 | 0 (no new test file; `ArchitectureTest`/`ContextArchitectureTest`/`EndpointAuthorizationTest` all stayed green) |
+
+All four green, 0 failures/0 errors. Docker ran (not skipped) — `PostgresDockerIntegrationTest`'s new
+`MaintenanceRepositoryTests` nested class and the three new `AssetUsageRepositoryTests` cases
+executed against a real Testcontainers Postgres. ArchUnit stayed green: `AssetRowFacts` carries no
+Spring stereotype and depends on ports from two different contexts (`vision-flight`,
+`vision-warehouse`), which is architecturally sanctioned — `ContextArchitectureTest`'s `contextOf(...)`
+only recognizes `com.drones.vision.<context>` packages, so `vision-api`/`vision-app` classes are
+exempt from the cross-context edge rules entirely. `fleetMaintenance` reaches `currentUser.scope()`
+directly, so it needed no `TEMPORARY_UNSCOPED` ledger entry.
+
+## W8 → W9 handoff
+
+### `GET /api/maintenance?state=open|closed|all&limit=`
+
+Query params: `state` (default `open`, case-insensitive, invalid value → 400 `BAD_REQUEST`), `limit`
+(default 200, bounds the `closed`/`all` portion only — `open` records are never limit-truncated).
+Response: `List<FleetMaintenanceRecordResponse>`.
+
+```json
+[
+  {
+    "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "assetId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+    "assetName": "Drone 1",
+    "categoryId": "drone",
+    "kind": "GROUNDING",
+    "openedAt": "2026-08-29T10:00:00Z",
+    "closedAt": null,
+    "openedBy": "b3f8c1a2-...",
+    "summary": "Propeller crack found on preflight",
+    "flightSecondsAt": 12345
+  }
+]
+```
+
+`@JsonInclude(NON_NULL)` — `closedAt`/`flightSecondsAt` are omitted entirely (not `null`) when
+absent, matching `MaintenanceRecordResponse`'s existing convention.
+
+### `firmware`/`totalFlightSeconds` on `AssetSummaryResponse` (`GET /api/assets`) and
+`AssetDetailsResponse` (`GET /api/assets/{id}`)
+
+```json
+{
+  "assetId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "displayName": "Drone 1",
+  "...": "... every pre-existing field unchanged ...",
+  "firmware": { "name": "ardupilot", "version": "4.7.0" },
+  "totalFlightSeconds": 12345
+}
+```
+
+`firmware` is the whole `FirmwareResponse` object, omitted entirely when the asset's telemetry
+device has never been probed (`VehicleProfileRepositoryPort#findLatest` empty for every device) —
+`AssetRowFacts#firmwareOf` returns the first present profile across the asset's devices, not a
+merge. `totalFlightSeconds` is a plain `Long`: `0` for a never-flown asset (a known fact), omitted
+entirely **only** on the two call sites with no `AssetRowFacts` to join (`AssetInventoryController`'s
+custody/inventory/maintenance mutation responses, `LiveUpdateRegistry`'s SSE fleet snapshot — both
+already at their own five-parameter ceiling; follow up with `GET /api/assets/{id}` for an accurate
+value after either).
+
+**Nothing deferred from this wave's own three numbered items** — all three shipped. Open, unrelated
+to this wave: the crew-notes UI (`AssetNoteRepositoryPort`, flagged by W7); the Links/Categories
+double-page-bar (flagged by W4); Reports' bar chart/needs-attention list (flagged by W4).

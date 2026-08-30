@@ -360,5 +360,15 @@ class DefaultAssetCustodyServiceTest {
         public List<MaintenanceRecord> findOpenByAsset(AssetId assetId) {
             return records.values().stream().filter(r -> r.assetId().equals(assetId) && r.isOpen()).toList();
         }
+
+        @Override
+        public List<MaintenanceRecord> findOpen() {
+            return records.values().stream().filter(MaintenanceRecord::isOpen).toList();
+        }
+
+        @Override
+        public List<MaintenanceRecord> findRecentlyClosed(int limit) {
+            return records.values().stream().filter(r -> !r.isOpen()).limit(limit).toList();
+        }
     }
 }

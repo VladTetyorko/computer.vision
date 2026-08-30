@@ -40,7 +40,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `JpaCategoryRepository` | `CategoryRepositoryPort` | merge upsert, hard delete |
 | `JpaDeviceRepository` | `DeviceRepositoryPort` | merge upsert, hard delete |
 | `JpaAssetRepository` | `AssetRepositoryPort` | merge upsert, hard delete, `findByDeviceId`; `AssetMapper` flattens `Identity`/`Custody` onto the asset row directly (see WAREHOUSE-UX-PLAN.md D7, `V28`) |
-| `JpaAssetUsageRepository` | `AssetUsageRepositoryPort` | merge upsert; `findByStream` is a deliberately unindexed scan (one-row-per-flight table, read once per stream lookup); `findRecent(int)` is the fleet-wide sibling of `findRecentByAsset` |
+| `JpaAssetUsageRepository` | `AssetUsageRepositoryPort` | merge upsert; `findByStream` is a deliberately unindexed scan (one-row-per-flight table, read once per stream lookup); `findRecent(int)` is the fleet-wide sibling of `findRecentByAsset`; `totalFlightSecondsByAsset()` (WAREHOUSE-UX W8) is this module's **first native SELECT-with-row-projection query** (every earlier native query was a batch `DELETE`/`executeUpdate`) — `em.createNativeQuery(...)` returning `List<Object[]>`, needed because plain JPQL cannot express `coalesce(ended_at, now())` |
 | `JpaTelemetryRepository` | `TelemetryRepositoryPort` | always `persist` (append-only); prune-on-write retention (100k rows/usage default); optional batched-write mode via `TelemetryBatchSettings` (see Batching) — production wiring still uses the immediate-mode constructor; `findByUsage`'s `limit` returns the **earliest** samples, not the newest (see Gotchas) |
 | `JpaDetectionRepository` | `DetectionRepositoryPort` | always `persist`; prune-on-write (100k rows/stream); `DetectionQuery#to` treated as inclusive despite the port's javadoc calling it exclusive (see Gotchas) |
 | `JpaAssetImageRepository` | `AssetImageRepositoryPort` | keyed by `assetId` itself (no synthetic id — at most one image per asset); `data` plain `byte[]`/`bytea` |
@@ -63,7 +63,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `JpaTrackTrailRepository` | `TrackTrailRepositoryPort` | always `persist` (append-only breadcrumb trail); `trimToMostRecent`/`deleteOlderThan` are single bulk `DELETE`s, safe to call every tick; excluded from the audit log |
 | `JpaTrackCorrectionRepository` | `TrackCorrectionRepositoryPort` | always `persist`; `deleteOlderThan`/`trimUsageToMostRecent` are bulk `DELETE`s, same shape as `JpaTrackTrailRepository`; excluded from the audit log |
 | `JpaControlProfileRepository` | `ControlProfileRepositoryPort` | `merge` upsert; `activate` clears the owner's other active profiles for that vehicle kind then sets the flag, **in that order**, in one transaction — a partial unique index rejects the opposite order; `NoSuchElementException` for an unknown id **or** one belonging to another operator (deliberately indistinguishable, see Gotchas); audited |
-| `JpaMaintenanceRepository` | `MaintenanceRepositoryPort` | `merge` upsert by `MaintenanceId` (the record mutates via `close()`, same shape as `JpaControlProfileRepository`); `MaintenanceRecordEntity#kind` reuses the domain `MaintenanceKind` enum directly; audited (WAREHOUSE-UX-PLAN.md D7/W3, `V28`) |
+| `JpaMaintenanceRepository` | `MaintenanceRepositoryPort` | `merge` upsert by `MaintenanceId` (the record mutates via `close()`, same shape as `JpaControlProfileRepository`); `MaintenanceRecordEntity#kind` reuses the domain `MaintenanceKind` enum directly; audited (WAREHOUSE-UX-PLAN.md D7/W3, `V28`); `findOpen()`/`findRecentlyClosed(limit)` (WAREHOUSE-UX W8) are `findOpenByAsset`/`findByAsset`'s fleet-wide counterparts — same `closed_at`/`opened_at` columns, no `asset_id` predicate, `GET /api/maintenance`'s backing queries |
 | `JpaAssetNoteRepository` | `AssetNoteRepositoryPort` | always `persist` (append-only, same shape as `JpaAuditTrail`); no application service consumes this yet — wired ahead of a later wave's crew-notes UI; audited (WAREHOUSE-UX-PLAN.md D7/W3, `V28`) |
 
 ### `entity` — mapping conventions (not repeated per class)
@@ -331,6 +331,13 @@ Open items, all deliberate rather than oversights:
   field exists yet to map them to/from.
 - `DatasetExportPort`'s old filesystem-export implementation is gone; dataset delivery to the
   training host now rides a gRPC upload (`cv/grpc`'s `GrpcDatasetUploadPort`), not this module.
+
+**WAREHOUSE-UX wave W8** added two new query methods against the existing `V28` schema — no new
+migration, since `maintenance_records`/`asset_usages` already carried every column needed
+(`closed_at`/`opened_at`, `asset_id`/`started_at`/`ended_at`). `PostgresDockerIntegrationTest` gained
+a `MaintenanceRepositoryTests` nested class (previously untested against real Postgres) plus three
+new `AssetUsageRepositoryTests` cases for `totalFlightSecondsByAsset` (closed-usage exact duration,
+open-usage running-until-now, absent-asset no-entry).
 
 See `docs/plans/README.md` for the plan-status authority behind the phase references throughout this
 file (MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,

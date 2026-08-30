@@ -969,19 +969,21 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     }
 
     /**
-     * {@code hasImage} is always {@code false} on this live snapshot — deliberately, not an
-     * oversight (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2): this class's production
-     * constructor is already at the five-parameter ceiling (see {@code
-     * .claude/skills/java-clean-code/SKILL.md} §3) before adding a sixth collaborator just for this,
-     * and {@code AssetImageRepositoryPort} carries no per-asset lifecycle event of its own to
-     * announce a change through anyway (unlike {@code AuditTrailPort}/{@code EventPublisherPort},
-     * both already decorated for exactly this purpose in {@code vision-app}). A viewer relying on
-     * the SSE {@code fleet} topic for {@code hasImage} needs the plain {@code GET /api/assets}
-     * REST read instead, which computes it correctly (see {@code AssetController}).
+     * {@code hasImage} is always {@code false}, and {@code firmware}/{@code totalFlightSeconds} are
+     * always absent, on this live snapshot — deliberately, not an oversight (docs/plans/done/
+     * UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2; docs/plans/active/WAREHOUSE-UX-PLAN.md D5): this
+     * class's production constructor is already at the five-parameter ceiling (see {@code
+     * .claude/skills/java-clean-code/SKILL.md} §3) before adding another collaborator just for this,
+     * and neither {@code AssetImageRepositoryPort} nor {@code com.drones.vision.api.support.AssetRowFacts}
+     * carries a per-asset lifecycle event of its own to announce a change through anyway (unlike
+     * {@code AuditTrailPort}/{@code EventPublisherPort}, both already decorated for exactly this
+     * purpose in {@code vision-app}). A viewer relying on the SSE {@code fleet} topic for these three
+     * fields needs the plain {@code GET /api/assets} REST read instead, which computes them
+     * correctly (see {@code AssetController}).
      */
     private LiveEnvelopeResponse freshFleetEnvelope() {
         List<AssetSummaryResponse> snapshot = assetService.getObject().assets().stream()
-                .map(summary -> AssetSummaryResponse.from(summary, false))
+                .map(summary -> AssetSummaryResponse.from(summary, false, null, null))
                 .toList();
         return new LiveEnvelopeResponse(sequencer.incrementAndGet(), null, LiveTopicKind.FLEET.wire(), snapshot);
     }

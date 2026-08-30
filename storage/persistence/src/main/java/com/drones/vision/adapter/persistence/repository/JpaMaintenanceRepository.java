@@ -22,6 +22,11 @@ import java.util.Optional;
  * repositories, a record is opened and later {@code close}d under the same id (same "mutates over
  * its own lifecycle" shape {@link JpaControlProfileRepository#save} follows), so a second save for
  * the same {@link MaintenanceId} must update the existing row, not fail on a duplicate key.
+ *
+ * <p>{@link #findOpen()}/{@link #findRecentlyClosed(int)} (docs/plans/active/WAREHOUSE-UX-PLAN.md
+ * &sect;3.3, D5) are {@link #findOpenByAsset(AssetId)}/{@link #findByAsset(AssetId)}'s fleet-wide
+ * counterparts, over the same {@code closed_at}/{@code opened_at} columns without an {@code
+ * asset_id} predicate — {@code GET /api/maintenance}'s backing queries.
  */
 public final class JpaMaintenanceRepository implements MaintenanceRepositoryPort {
 
@@ -68,5 +73,25 @@ public final class JpaMaintenanceRepository implements MaintenanceRepositoryPort
             query.setParameter("assetId", assetId.value());
             return query.getResultList();
         }).stream().map(MaintenanceRecordMapper::toDomain).toList();
+    }
+
+    @Override
+    public List<MaintenanceRecord> findOpen() {
+        return jpa.read(em -> em.createQuery(
+                        "select m from MaintenanceRecordEntity m where m.closedAt is null order by m.openedAt desc",
+                        MaintenanceRecordEntity.class)
+                        .getResultList())
+                .stream().map(MaintenanceRecordMapper::toDomain).toList();
+    }
+
+    @Override
+    public List<MaintenanceRecord> findRecentlyClosed(int limit) {
+        return jpa.read(em -> em.createQuery(
+                        "select m from MaintenanceRecordEntity m where m.closedAt is not null "
+                                + "order by m.closedAt desc",
+                        MaintenanceRecordEntity.class)
+                        .setMaxResults(limit)
+                        .getResultList())
+                .stream().map(MaintenanceRecordMapper::toDomain).toList();
     }
 }

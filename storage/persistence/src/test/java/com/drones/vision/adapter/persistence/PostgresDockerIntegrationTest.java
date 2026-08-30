@@ -58,6 +58,10 @@ import com.drones.vision.map.domain.model.LayerGrant;
 import com.drones.vision.map.domain.model.LayerId;
 import com.drones.vision.map.domain.model.LayerKind;
 import com.drones.vision.kernel.LifecycleState;
+import com.drones.vision.warehouse.domain.model.MaintenanceId;
+import com.drones.vision.warehouse.domain.model.MaintenanceKind;
+import com.drones.vision.warehouse.domain.model.MaintenanceRecord;
+import com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort;
 import com.drones.vision.map.domain.model.MapLayer;
 import com.drones.vision.map.domain.model.Mark;
 import com.drones.vision.map.domain.model.MarkId;
@@ -146,6 +150,7 @@ import com.drones.vision.adapter.persistence.repository.JpaDrawingRepository;
 import com.drones.vision.adapter.persistence.repository.JpaFeatureRequirementRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGeofenceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGroupRepository;
+import com.drones.vision.adapter.persistence.repository.JpaMaintenanceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMapLayerRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMarkRepository;
 import com.drones.vision.adapter.persistence.repository.JpaSampleImageStore;
@@ -790,6 +795,179 @@ class PostgresDockerIntegrationTest {
 
             assertTrue(found.isPresent());
             assertEquals(UsagePhase.PREFLIGHT, found.get().phase());
+        }
+
+        /**
+         * The fleet-wide aggregate {@link AssetController} joins onto the asset row (WAREHOUSE-UX W8)
+         * -- a closed usage contributes its exact wall-clock duration.
+         */
+        @Test
+        void totalFlightSecondsByAssetSumsAClosedUsagesExactDuration() {
+            AssetId assetId = AssetId.random();
+            AssetUsage closed = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(90), null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+            repository.save(closed);
+
+            Map<AssetId, Long> totals = repository.totalFlightSecondsByAsset();
+
+            assertEquals(90L, totals.get(assetId));
+        }
+
+        /** An open usage (no {@code endedAt}) counts as running until now, not zero. */
+        @Test
+        void totalFlightSecondsByAssetTreatsAnOpenUsageAsRunningUntilNow() {
+            AssetId assetId = AssetId.random();
+            Instant startedThirtySecondsAgo = Instant.now().minusSeconds(30).truncatedTo(ChronoUnit.MILLIS);
+            AssetUsage open = new AssetUsage(UsageId.random(), assetId, startedThirtySecondsAgo, null, null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+            repository.save(open);
+
+            Long seconds = repository.totalFlightSecondsByAsset().get(assetId);
+
+            assertTrue(seconds != null && seconds >= 25 && seconds <= 120,
+                    "an open usage must count its in-progress duration up to now, not zero: " + seconds);
+        }
+
+        /** No row for an asset with no usages at all -- callers apply their own zero default. */
+        @Test
+        void totalFlightSecondsByAssetHasNoEntryForAnAssetWithNoUsages() {
+            assertFalse(repository.totalFlightSecondsByAsset().containsKey(AssetId.random()));
+        }
+    }
+
+    @Nested
+    class MaintenanceRepositoryTests {
+
+        private final MaintenanceRepositoryPort repository = new JpaMaintenanceRepository(entityManagerFactory);
+
+        private MaintenanceRecord record(AssetId assetId, boolean open) {
+            MaintenanceRecord record = new MaintenanceRecord(MaintenanceId.random(), assetId,
+                    MaintenanceKind.GROUNDING, NOW, null, UserId.random(), "prop strike", 1_800L);
+            return open ? record : record.close(NOW.plusSeconds(3600));
+        }
+
+        @Test
+        void unknownIdReturnsEmptyOptional() {
+            assertTrue(repository.findById(MaintenanceId.random()).isEmpty());
+        }
+
+        @Test
+        void savedOpenRecordRoundTrips() {
+            MaintenanceRecord open = record(AssetId.random(), true);
+
+            repository.save(open);
+
+            Optional<MaintenanceRecord> found = repository.findById(open.id());
+            assertTrue(found.isPresent());
+            assertEquals(open, found.get());
+        }
+
+        @Test
+        void saveIsAnUpsertThatCanCloseAnOpenRecord() {
+            MaintenanceRecord open = record(AssetId.random(), true);
+            repository.save(open);
+
+            MaintenanceRecord closed = open.close(NOW.plusSeconds(120));
+            repository.save(closed);
+
+            Optional<MaintenanceRecord> found = repository.findById(open.id());
+            assertTrue(found.isPresent());
+            assertEquals(closed, found.get());
+        }
+
+        @Test
+        void findByAssetReturnsTheFullHistoryNewestOpenedFirst() {
+            AssetId assetId = AssetId.random();
+            MaintenanceRecord older = new MaintenanceRecord(MaintenanceId.random(), assetId,
+                    MaintenanceKind.NOTE, NOW, null, UserId.random(), "just a note", null);
+            MaintenanceRecord newer = new MaintenanceRecord(MaintenanceId.random(), assetId,
+                    MaintenanceKind.GROUNDING, NOW.plusSeconds(10), null, UserId.random(), "prop strike", null);
+            repository.save(older);
+            repository.save(newer);
+
+            List<MaintenanceRecord> history = repository.findByAsset(assetId);
+
+            assertEquals(List.of(newer.id(), older.id()), history.stream().map(MaintenanceRecord::id).toList());
+        }
+
+        @Test
+        void findOpenByAssetReturnsOnlyTheOpenRecordsForThatAsset() {
+            AssetId assetId = AssetId.random();
+            MaintenanceRecord open = record(assetId, true);
+            MaintenanceRecord closed = record(assetId, false);
+            repository.save(open);
+            repository.save(closed);
+
+            List<MaintenanceRecord> openOnly = repository.findOpenByAsset(assetId);
+
+            assertEquals(List.of(open.id()), openOnly.stream().map(MaintenanceRecord::id).toList());
+        }
+
+        @Test
+        void findOpenReturnsOpenRecordsAcrossEveryAssetNewestOpenedFirst() {
+            // Fleet-wide (like AssetUsageRepositoryTests#findRecentReturnsNewestFirstAcrossEveryAssetBoundedByLimit),
+            // so filter to this test's own rows within the whole table.
+            MaintenanceRecord older = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.NOTE, NOW, null, UserId.random(), "just a note", null);
+            MaintenanceRecord newer = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.GROUNDING, NOW.plusSeconds(10), null, UserId.random(), "prop strike", null);
+            MaintenanceRecord closed = record(AssetId.random(), false);
+            repository.save(older);
+            repository.save(newer);
+            repository.save(closed);
+            Set<MaintenanceId> ours = Set.of(older.id(), newer.id(), closed.id());
+
+            List<MaintenanceId> ourOpenOrder = repository.findOpen().stream()
+                    .map(MaintenanceRecord::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newer.id(), older.id()), ourOpenOrder,
+                    "findOpen must span every asset, exclude closed records, and stay newest-opened-first");
+        }
+
+        @Test
+        void findRecentlyClosedReturnsClosedRecordsAcrossEveryAssetNewestClosedFirstBoundedByLimit() {
+            MaintenanceRecord olderClosed = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.NOTE, NOW, NOW.plusSeconds(60), UserId.random(), "just a note", null);
+            MaintenanceRecord newerClosed = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.GROUNDING, NOW, NOW.plusSeconds(120), UserId.random(), "prop strike", null);
+            MaintenanceRecord stillOpen = record(AssetId.random(), true);
+            repository.save(olderClosed);
+            repository.save(newerClosed);
+            repository.save(stillOpen);
+            Set<MaintenanceId> ours = Set.of(olderClosed.id(), newerClosed.id(), stillOpen.id());
+
+            List<MaintenanceId> ourClosedOrder = repository.findRecentlyClosed(10_000).stream()
+                    .map(MaintenanceRecord::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newerClosed.id(), olderClosed.id()), ourClosedOrder,
+                    "findRecentlyClosed must span every asset, exclude open records, and stay newest-closed-first");
+        }
+
+        @Test
+        void findRecentlyClosedRespectsTheLimit() {
+            AssetId assetId = AssetId.random();
+            for (int i = 0; i < 3; i++) {
+                repository.save(new MaintenanceRecord(MaintenanceId.random(), assetId, MaintenanceKind.NOTE,
+                        NOW.plusSeconds(i), NOW.plusSeconds(i + 1), UserId.random(), "note " + i, null));
+            }
+
+            assertTrue(repository.findRecentlyClosed(1).size() <= 1);
+        }
+
+        @Test
+        void flightSecondsAtRoundTripsIncludingAbsence() {
+            MaintenanceRecord withFlightSeconds = record(AssetId.random(), true);
+            MaintenanceRecord withoutFlightSeconds = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.NOTE, NOW, null, UserId.random(), "just a note", null);
+            repository.save(withFlightSeconds);
+            repository.save(withoutFlightSeconds);
+
+            assertEquals(1_800L, repository.findById(withFlightSeconds.id()).orElseThrow().flightSecondsAt());
+            assertNull(repository.findById(withoutFlightSeconds.id()).orElseThrow().flightSecondsAt());
         }
     }
 

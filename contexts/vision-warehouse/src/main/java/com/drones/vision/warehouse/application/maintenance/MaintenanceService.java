@@ -58,4 +58,23 @@ public interface MaintenanceService {
      * @throws NoSuchElementException if the asset is unknown or out of scope (404)
      */
     List<MaintenanceRecord> listForAsset(AssetId assetId, VisibilityScope scope);
+
+    /**
+     * Lists maintenance records across every asset {@code scope} includes — {@link
+     * #listForAsset}'s fleet-wide counterpart (docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.3, D5;
+     * docs/plans/active/WAREHOUSE-UX-CONTEXT.md W7 handoff), so a fleet-wide maintenance page needs
+     * one call rather than one {@link #listForAsset} per grounded asset. Scope-filtered like {@code
+     * DefaultFleetSummaryService#summary(VisibilityScope, boolean)}: silently omits records whose
+     * asset {@code scope} does not include — a visibility filter, not an authority one, so nothing
+     * ever 403s or 404s here. Records for a soft-deleted asset are excluded, matching every other
+     * fleet-facing read's default.
+     *
+     * @param state the {@code open}/{@code closed}/{@code all} filter
+     * @param limit bounds {@link MaintenanceListState#CLOSED}'s (and {@link MaintenanceListState#ALL}'s
+     *              closed portion's) fleet-wide scan; must be positive. Open records are never
+     *              limit-truncated — see {@link com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort#findOpen()}.
+     * @param scope the acting user's visibility scope
+     * @return the maintenance records {@code scope} may see, each carrying its asset's name and category
+     */
+    List<MaintenanceRecordSummary> fleetWide(MaintenanceListState state, int limit, VisibilityScope scope);
 }

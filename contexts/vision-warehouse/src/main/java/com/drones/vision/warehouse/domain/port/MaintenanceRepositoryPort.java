@@ -20,6 +20,10 @@ import java.util.Optional;
  *   <li>{@link #findOpenByAsset(AssetId)} returns only the currently-open records for the asset;
  *       an asset may have more than one open at once (e.g. a grounding and an unrelated repair
  *       note).</li>
+ *   <li>{@link #findOpen()} and {@link #findRecentlyClosed(int)} are the fleet-wide counterparts
+ *       {@code GET /api/maintenance} needs (docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.3, D5;
+ *       docs/plans/active/WAREHOUSE-UX-CONTEXT.md W7 handoff): every asset's records in one query
+ *       rather than one {@link #findByAsset(AssetId)} per grounded asset.</li>
  * </ul>
  *
  * <h2>Threading</h2>
@@ -59,4 +63,25 @@ public interface MaintenanceRepositoryPort {
      * @return an immutable snapshot of the asset's open records; empty if none are open
      */
     List<MaintenanceRecord> findOpenByAsset(AssetId assetId);
+
+    /**
+     * Lists every currently-open maintenance record across every asset, newest opened first —
+     * {@link #findOpenByAsset(AssetId)}'s fleet-wide counterpart. Unbounded: a record is opened and
+     * closed deliberately, one at a time, so fleet-wide open-record volume stays naturally small at
+     * this codebase's operating scale (see {@code DefaultFleetSummaryService#MAX_ASSETS_IN_SUMMARY}'s
+     * own javadoc for the general stance on caps).
+     *
+     * @return an immutable snapshot of every open maintenance record fleet-wide
+     */
+    List<MaintenanceRecord> findOpen();
+
+    /**
+     * Lists the most recently closed maintenance records across every asset, newest closed first —
+     * a bounded fleet-wide "recently closed" snapshot.
+     *
+     * @param limit maximum number of records to return; must be positive
+     * @return an immutable snapshot of the most recently closed records fleet-wide, at most {@code
+     *         limit}
+     */
+    List<MaintenanceRecord> findRecentlyClosed(int limit);
 }

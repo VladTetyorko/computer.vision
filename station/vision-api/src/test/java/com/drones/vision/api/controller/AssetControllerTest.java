@@ -31,7 +31,11 @@ import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
+import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
+import com.drones.vision.flight.domain.model.VehicleProfile;
+import com.drones.vision.api.support.AssetRowFacts;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -74,6 +78,9 @@ class AssetControllerTest {
     private AssetService assetService;
     private TelemetryRepositoryPort telemetryRepositoryPort;
     private AssetImageRepositoryPort assetImageRepositoryPort;
+    private VehicleProfileRepositoryPort vehicleProfileRepositoryPort;
+    private AssetUsageRepositoryPort assetUsageRepositoryPort;
+    private AssetRowFacts assetRowFacts;
     private MockMvc mockMvc;
 
     private final UserId ownerId = UserId.random();
@@ -85,10 +92,15 @@ class AssetControllerTest {
         assetService = mock(AssetService.class);
         telemetryRepositoryPort = mock(TelemetryRepositoryPort.class);
         assetImageRepositoryPort = mock(AssetImageRepositoryPort.class);
+        vehicleProfileRepositoryPort = mock(VehicleProfileRepositoryPort.class);
+        when(vehicleProfileRepositoryPort.findLatest(any())).thenReturn(Optional.empty());
+        assetUsageRepositoryPort = mock(AssetUsageRepositoryPort.class);
+        when(assetUsageRepositoryPort.totalFlightSecondsByAsset()).thenReturn(Map.of());
+        assetRowFacts = new AssetRowFacts(vehicleProfileRepositoryPort, assetUsageRepositoryPort);
 
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new AssetController(assetService, currentUser,
-                        telemetryRepositoryPort, assetImageRepositoryPort))
+                        telemetryRepositoryPort, assetImageRepositoryPort, assetRowFacts))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -157,7 +169,7 @@ class AssetControllerTest {
     private MockMvc mockMvcFor(CurrentUser user) {
         return MockMvcBuilders
                 .standaloneSetup(new AssetController(assetService, user, telemetryRepositoryPort,
-                        assetImageRepositoryPort))
+                        assetImageRepositoryPort, assetRowFacts))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -434,6 +446,48 @@ class AssetControllerTest {
                 .andExpect(jsonPath("$[0].lifecycle").value("DELETED"));
 
         verify(assetService).assets(any(VisibilityScope.class), eq(true));
+    }
+
+    @Test
+    void listJoinsFirmwareFromTheDevicesVehicleProfileAndOmitsItWhenNeverProbed() throws Exception {
+        Device probedDevice = videoDevice();
+        Asset probed = asset(probedDevice);
+        AssetSummary probedSummary = new AssetSummary(probed, "Drone", AssetStatus.OFFLINE, null, null,
+                probed.inventoryState(), probed.identity(), probed.custody());
+        Asset unprobed = asset(videoDevice());
+        AssetSummary unprobedSummary = new AssetSummary(unprobed, "Drone", AssetStatus.OFFLINE, null, null,
+                unprobed.inventoryState(), unprobed.identity(), unprobed.custody());
+
+        when(assetService.assets(any(VisibilityScope.class), eq(false)))
+                .thenReturn(List.of(probedSummary, unprobedSummary));
+        VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#7", Instant.parse("2026-08-27T09:00:00Z"),
+                7, "ardupilot", "4.7.0", "quadcopter", null, List.of(), List.of(), List.of(), null, true, null);
+        when(vehicleProfileRepositoryPort.findLatest(probedDevice.id())).thenReturn(Optional.of(profile));
+
+        mockMvc.perform(get("/api/assets"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].firmware.name").value("ardupilot"))
+                .andExpect(jsonPath("$[0].firmware.version").value("4.7.0"))
+                .andExpect(jsonPath("$[1].firmware").doesNotExist());
+    }
+
+    @Test
+    void listJoinsTotalFlightSecondsDefaultingToZeroForAnAssetWithNoUsages() throws Exception {
+        Asset flown = asset(videoDevice());
+        AssetSummary flownSummary = new AssetSummary(flown, "Drone", AssetStatus.OFFLINE, null, null,
+                flown.inventoryState(), flown.identity(), flown.custody());
+        Asset neverFlown = asset(videoDevice());
+        AssetSummary neverFlownSummary = new AssetSummary(neverFlown, "Drone", AssetStatus.OFFLINE, null, null,
+                neverFlown.inventoryState(), neverFlown.identity(), neverFlown.custody());
+
+        when(assetService.assets(any(VisibilityScope.class), eq(false)))
+                .thenReturn(List.of(flownSummary, neverFlownSummary));
+        when(assetUsageRepositoryPort.totalFlightSecondsByAsset()).thenReturn(Map.of(flown.id(), 3600L));
+
+        mockMvc.perform(get("/api/assets"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].totalFlightSeconds").value(3600))
+                .andExpect(jsonPath("$[1].totalFlightSeconds").value(0));
     }
 
     // ---- PATCH /api/assets/{id} ----
@@ -769,6 +823,41 @@ class AssetControllerTest {
         mockMvc.perform(get("/api/assets/{id}", asset.id().value()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.hasImage").value(true));
+    }
+
+    @Test
+    void detailsJoinsFirmwareAndTotalFlightSecondsFromTheRowFacts() throws Exception {
+        Device device = videoDevice();
+        Asset asset = asset(device);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                asset.inventoryState(), asset.identity(), asset.custody());
+        when(assetService.details(any(VisibilityScope.class), eq(asset.id())))
+                .thenReturn(new AssetDetails(summary, List.of(device), List.of()));
+        VehicleProfile profile = new VehicleProfile("udp://0.0.0.0:14550#7", Instant.parse("2026-08-27T09:00:00Z"),
+                7, "px4", "1.14.0", "quadcopter", null, List.of(), List.of(), List.of(), null, true, null);
+        when(vehicleProfileRepositoryPort.findLatest(device.id())).thenReturn(Optional.of(profile));
+        when(assetUsageRepositoryPort.totalFlightSecondsByAsset()).thenReturn(Map.of(asset.id(), 1800L));
+
+        mockMvc.perform(get("/api/assets/{id}", asset.id().value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firmware.name").value("px4"))
+                .andExpect(jsonPath("$.firmware.version").value("1.14.0"))
+                .andExpect(jsonPath("$.totalFlightSeconds").value(1800));
+    }
+
+    @Test
+    void detailsOmitsFirmwareAndDefaultsHoursToZeroWhenNeitherIsJoined() throws Exception {
+        Device device = videoDevice();
+        Asset asset = asset(device);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                asset.inventoryState(), asset.identity(), asset.custody());
+        when(assetService.details(any(VisibilityScope.class), eq(asset.id())))
+                .thenReturn(new AssetDetails(summary, List.of(device), List.of()));
+
+        mockMvc.perform(get("/api/assets/{id}", asset.id().value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firmware").doesNotExist())
+                .andExpect(jsonPath("$.totalFlightSeconds").value(0));
     }
 
     @Test

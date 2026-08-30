@@ -35,6 +35,10 @@ import java.util.Map;
  *                           AssetSummaryResponse#inventoryState()}
  * @param createdAt          when this asset was first registered
  * @param updatedAt          when this asset was last changed
+ * @param firmware           the asset's most recently observed firmware, or absent — see {@link
+ *                           AssetSummaryResponse#firmware()}
+ * @param totalFlightSeconds cumulative flight seconds, or absent — see {@link
+ *                           AssetSummaryResponse#totalFlightSeconds()}
  * @param devices            the asset's resolved devices
  * @param recentUsages       the asset's recent usage history, newest first
  */
@@ -44,18 +48,25 @@ public record AssetDetailsResponse(String assetId, String displayName, String ca
                                     GeoPositionResponse lastKnownPosition, Map<String, String> attributes,
                                     boolean hasImage, IdentityResponse identity, CustodyResponse custody,
                                     String inventoryState, Instant createdAt, Instant updatedAt,
+                                    FirmwareResponse firmware, Long totalFlightSeconds,
                                     List<DeviceResponse> devices, List<AssetUsageResponse> recentUsages) {
 
     /**
      * Maps an {@link AssetDetails} read model to its wire representation.
      *
-     * @param details  the detail view to map
-     * @param hasImage whether an image is stored for this asset (a separate lookup — see {@link
-     *                 AssetSummaryResponse#from})
+     * @param details            the detail view to map
+     * @param hasImage           whether an image is stored for this asset (a separate lookup — see
+     *                           {@link AssetSummaryResponse#from})
+     * @param firmware           the joined firmware fact, or {@code null} if the caller has none to
+     *                           offer — see {@link AssetSummaryResponse#firmware()}
+     * @param totalFlightSeconds the joined flight-hours fact, or {@code null} if the caller has none
+     *                           to offer — see {@link AssetSummaryResponse#totalFlightSeconds()}
      * @return the response body for {@code details}
      */
-    public static AssetDetailsResponse from(AssetDetails details, boolean hasImage) {
-        AssetSummaryResponse summary = AssetSummaryResponse.from(details.summary(), hasImage);
+    public static AssetDetailsResponse from(AssetDetails details, boolean hasImage, FirmwareResponse firmware,
+                                             Long totalFlightSeconds) {
+        AssetSummaryResponse summary = AssetSummaryResponse.from(details.summary(), hasImage, firmware,
+                totalFlightSeconds);
         List<DeviceResponse> devices = details.devices().stream().map(DeviceResponse::from).toList();
         List<AssetUsageResponse> usages = details.recentUsages().stream().map(AssetUsageResponse::from).toList();
         return new AssetDetailsResponse(
@@ -75,6 +86,8 @@ public record AssetDetailsResponse(String assetId, String displayName, String ca
                 summary.inventoryState(),
                 summary.createdAt(),
                 summary.updatedAt(),
+                summary.firmware(),
+                summary.totalFlightSeconds(),
                 devices,
                 usages);
     }

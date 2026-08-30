@@ -80,6 +80,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 - `simulationService` — `DefaultSimulationService(assetService, assetStreamService, deviceService, feedTransmitterRegistry, mediamtx.rtspBase(), SimulationServiceSettings)`; `deviceService` (not `categoryRepositoryPort`) is the constructor's 3rd param, per ARCHITECTURE-AUDIT R4.
 - `simulationResumeRunner` — gated purely on `VisionSimulationProperties#resumeOnBoot()` (persistence is unconditional, so there is no second half of this gate).
 - **WAREHOUSE-UX W3 (unconditional, alongside `assetService`/`categoryService`):** `assetCustodyService(AssetRepositoryPort, MaintenanceRepositoryPort, AuditTrailPort)` → `DefaultAssetCustodyService`; `maintenanceService(MaintenanceRepositoryPort, AssetRepositoryPort, AuditTrailPort)` → declared `DefaultMaintenanceService` (the concrete type, not `MaintenanceService`, specifically so this one bean also satisfies a `MaintenanceQuery`-typed injection point — see `OnboardingWiringConfiguration#readinessService` above — the same "one instance, two seams" shape `usageSessionService`/`DefaultUsageSessionService` would use if `UsageSessionService` had a second interface); `inventoryExportService(AssetService)` → `com.drones.vision.api.support.InventoryExportService` (the hand-rolled CSV behind `GET /api/inventory/export`).
+- **WAREHOUSE-UX W8 (unconditional, alongside `inventoryExportService`):** `assetRowFacts(VehicleProfileRepositoryPort, AssetUsageRepositoryPort)` → `com.drones.vision.api.support.AssetRowFacts` — bundles both cross-context ports `AssetController`'s new `firmware`/`totalFlightSeconds` join needs into `AssetController`'s fifth constructor parameter (see `station/vision-api/MODULE.md`'s Conventions). `vehicleProfileRepositoryPort` resolves to `PersistenceWiringConfiguration`'s unconditional bean; `assetUsageRepositoryPort` is the same bean `assetService` already consumes — no new port implementation, only a new query method on the existing one.
 
 ### Properties records (`config/properties/`, all `@ConfigurationProperties`)
 
@@ -295,3 +296,10 @@ maps to a real handler, so it can't quietly outlive the gap it records.
   video-publish, live-updates).
 - `EndpointAuthorizationTest`'s `TEMPORARY_UNSCOPED` ledger is a live, shrinking list — read the test
   source for its current size rather than trusting a number in this doc.
+
+**WAREHOUSE-UX wave W8 done.** New unconditional `assetRowFacts` bean (see "Application-service beans"
+above) — no flag, no new port implementation. `./mvnw -B -pl station/vision-app -DskipWeb test` —
+**277 tests**, unchanged count (no new test file added to this module for W8; `ArchitectureTest`
+(14), `ContextArchitectureTest` (5), and `EndpointAuthorizationTest` (2) all stayed green, confirming
+`AssetRowFacts`/the new `assetRowFacts` bean/the widened `AssetController` constructor introduce no
+ArchUnit violation).

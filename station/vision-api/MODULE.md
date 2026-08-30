@@ -22,7 +22,9 @@ DTO leakage": no domain type is ever serialized directly) · `security/` (`Curre
 edge owning no application service) · `ratelimit/` (`RateLimitFilter`/`TokenBucket`, per-principal
 `/api/**` token bucket) · `support/` (edge-local helpers: `SnapshotJpegEncoder`, `CapabilityParsing`,
 `DeviceOriginParsing`, `RemediationOrchestrator`, `VisionApiProperties`, `InventoryExportService` —
-WAREHOUSE-UX W3, the hand-rolled CSV behind `GET /api/inventory/export`) · `demo/` (property-gated
+WAREHOUSE-UX W3, the hand-rolled CSV behind `GET /api/inventory/export`; `AssetRowFacts` — WAREHOUSE-UX
+W8, bundles the `firmware`/`totalFlightSeconds` cross-context joins `AssetController` needs, see
+Conventions) · `demo/` (property-gated
 demo-data seeding, deletable as one unit) · `exception/` (`ApiExceptionHandler` + api-local
 exceptions) · `config/` (MVC/WebSocket/SPA `@Configuration`).
 
@@ -51,8 +53,8 @@ the full mechanism.
 | Controller | Method | Path | Does | Access |
 |---|---|---|---|---|
 | AssetController | POST | `/api/assets` | Create asset | manageOrg |
-| AssetController | GET | `/api/assets?includeDeleted=` | List assets | scope |
-| AssetController | GET | `/api/assets/{id}` | Asset detail | scope |
+| AssetController | GET | `/api/assets?includeDeleted=` | List assets — each row now carries `firmware`/`totalFlightSeconds` (WAREHOUSE-UX W8, see Conventions) | scope |
+| AssetController | GET | `/api/assets/{id}` | Asset detail — same `firmware`/`totalFlightSeconds` join as the list | scope |
 | AssetController | PATCH | `/api/assets/{id}` | Update asset | scope for `displayName`/`attributes` only; `category` (or any managed field) needs manage — see "Authority split" in Conventions |
 | AssetController | POST | `/api/assets/{id}/state` | Lifecycle transition (active/deactivated/deleted) | manage |
 | AssetController | DELETE | `/api/assets/{id}` | Soft delete (archive) | manage |
@@ -64,6 +66,7 @@ the full mechanism.
 | AssetInventoryController | GET | `/api/assets/{id}/maintenance` | List an asset's maintenance history, open and closed | scope (via `MaintenanceService`) |
 | AssetInventoryController | POST | `/api/assets/{id}/maintenance` | Open a maintenance record directly, without also grounding | manage (via `MaintenanceService`) |
 | AssetInventoryController | POST | `/api/assets/{id}/maintenance/{recordId}/close` | Close an open record | manage (via `MaintenanceService`) |
+| AssetInventoryController | GET | `/api/maintenance?state=open\|closed\|all&limit=` | Fleet-wide maintenance read across every in-scope asset, each row carrying `assetId`/`assetName`/`categoryId` (WAREHOUSE-UX W8) | scope (via `MaintenanceService#fleetWide`) |
 | InventoryExportController | GET | `/api/inventory/export?format=csv` | Hand-rolled CSV, one row per visible asset (id/name/category/serial/make/model/registration/inventoryState/custodian/location/lifecycle/createdAt/lastFlownAt) | scope |
 | AssetStreamController | POST | `/api/assets/{id}/stream` | Start the asset's video stream | scope |
 | AssetStreamController | DELETE | `/api/assets/{id}/stream` | Stop it (idempotent) | scope |
@@ -281,6 +284,18 @@ absent). `CreateCategoryRequest(id, name, parentId, connected, attributeHints)` 
 `CategoryEdit` 1:1; `CategoryResponse` gained `connected`; `CategoryCountsResponse` gained
 `inStock`/`issued`/`inField`/`maintenance`/`retired`.
 
+**WAREHOUSE-UX W8 additions** — `FirmwareResponse(name, version)` (`@JsonInclude(NON_NULL)`, static
+`from(VehicleProfile)`) and `FleetMaintenanceRecordResponse(id, assetId, assetName, categoryId, kind,
+openedAt, closedAt, openedBy, summary, flightSecondsAt)` (`@JsonInclude(NON_NULL)`, static
+`from(MaintenanceRecordSummary)`) — the `GET /api/maintenance` row shape, `MaintenanceRecordResponse`'s
+fleet-wide sibling with `assetName`/`categoryId` joined in. `AssetSummaryResponse`/
+`AssetDetailsResponse` each gained trailing `firmware` (`FirmwareResponse`, nullable) and
+`totalFlightSeconds` (`Long`) fields — `firmware` absent when never probed or when the caller has no
+join to offer; `totalFlightSeconds` absent **only** when the caller has no join to offer, never for a
+genuine zero (a never-flown asset reports `0`). Both `from(...)` factories widened to take `firmware`/
+`totalFlightSeconds` as explicit parameters rather than gaining a second overload — see `AssetRowFacts`
+in Conventions for who supplies real values and who passes `null`.
+
 ## Conventions
 
 - **Out-of-scope single-resource reads answer 404, not 403.** A caller must never be able to prove a
@@ -318,6 +333,22 @@ absent). `CreateCategoryRequest(id, name, parentId, connected, attributeHints)` 
   a body touching `category` needs `manage`. Every other asset mutation always requires `manage`.
 - Logging: `System.Logger`, not SLF4J — matches every other adapter/domain class in this codebase;
   SLF4J appears only in `vision-app`'s Spring-only devsupport beans.
+- **`AssetRowFacts` (`support/`, WAREHOUSE-UX W8) bundles two cross-context reads behind one
+  collaborator** — `firmwareOf(Asset)` (iterates the asset's devices, returns the first
+  `VehicleProfileRepositoryPort#findLatest` hit) and `totalFlightSecondsByAsset()` (delegates to
+  `AssetUsageRepositoryPort`'s new aggregate). `AssetController` already sat at four constructor
+  params (`AssetService`, `CurrentUser`, `TelemetryRepositoryPort`, `AssetImageRepositoryPort`);
+  adding both `VehicleProfileRepositoryPort` and `AssetUsageRepositoryPort` directly would have meant
+  six, past the five-parameter ceiling (`.claude/skills/java-clean-code/SKILL.md` §3) — so both ports
+  are bundled into one new fifth parameter instead, the same "bundle into a collaborator" resolution
+  this file's own `AssetInventoryController`/`AssetStreamController` split documents for the same
+  ceiling. `AssetSummary`/domain records were **not** widened for this — see
+  `contexts/vision-warehouse/MODULE.md`'s W8 note for why. Two other call sites of
+  `AssetSummaryResponse.from`/`AssetDetailsResponse.from` — `AssetInventoryController#detailsResponse`
+  and `LiveUpdateRegistry#freshFleetEnvelope` — are already at their own five-parameter ceiling with no
+  room for `AssetRowFacts` either, and pass `null, null` explicitly (each documented in place) rather
+  than silently omitting the parameters; a caller wanting an accurate join after those endpoints
+  should follow up with `GET /api/assets/{id}`.
 - Rationale for any of the above beyond what's stated here lives in the plan doc cited inline, under
   `docs/plans/`.
 
@@ -418,3 +449,13 @@ lookup failure. `./mvnw -B -o -pl contexts/vision-flight,station/vision-api,stat
 — `vision-flight` **351** (unchanged — no source touched), `vision-api` **874** (+13,
 `AssetParameterControllerTest`), `vision-app` **271** (+1, `AssetParameterFlagGatingTest`), all
 green.
+
+**WAREHOUSE-UX wave W8 done.** New `GET /api/maintenance` (`AssetInventoryController#fleetMaintenance`)
++ `firmware`/`totalFlightSeconds` joined onto `AssetController#list`/`#details`'s response rows via the
+new `AssetRowFacts` collaborator (see Conventions). `AssetControllerTest` **62** (+4), `station/vision-api`
+**901** (+8) total, all green; ArchUnit (`ArchitectureTest`/`ContextArchitectureTest`/
+`EndpointAuthorizationTest`) unaffected — `AssetRowFacts` carries no stereotype annotation and depends
+on ports from two different contexts, which `ContextArchitectureTest`'s `contextOf(...)` does not flag
+since it only recognizes `com.drones.vision.<context>` packages, not `vision-api`/`vision-app`/adapter
+code; `fleetMaintenance` reaches `currentUser.scope()` directly so needed no `TEMPORARY_UNSCOPED`
+ledger entry.

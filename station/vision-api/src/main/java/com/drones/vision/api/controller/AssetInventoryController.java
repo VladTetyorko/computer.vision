@@ -3,11 +3,13 @@ package com.drones.vision.api.controller;
 import com.drones.vision.api.dto.AssetDetailsResponse;
 import com.drones.vision.api.dto.CreateMaintenanceRecordRequest;
 import com.drones.vision.api.dto.CustodyActionRequest;
+import com.drones.vision.api.dto.FleetMaintenanceRecordResponse;
 import com.drones.vision.api.dto.InventoryActionRequest;
 import com.drones.vision.api.dto.MaintenanceRecordResponse;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.custody.AssetCustodyService;
+import com.drones.vision.warehouse.application.maintenance.MaintenanceListState;
 import com.drones.vision.warehouse.application.maintenance.MaintenanceService;
 import com.drones.vision.warehouse.domain.model.MaintenanceId;
 import com.drones.vision.kernel.AssetId;
@@ -17,10 +19,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -43,10 +47,20 @@ import java.util.Objects;
  * <p>Custody/inventory writes return the full {@link AssetDetailsResponse} (matching every other
  * mutation on {@link AssetController}); maintenance writes/reads return {@link
  * MaintenanceRecordResponse} instead, since opening/closing a record does not by itself change the
- * asset's own fields.
+ * asset's own fields. {@link #fleetMaintenance} is the one fleet-wide read here — {@link
+ * FleetMaintenanceRecordResponse} instead of {@link MaintenanceRecordResponse}, since a fleet-wide
+ * table needs the asset's name/category alongside each record (docs/plans/active/WAREHOUSE-UX-PLAN.md
+ * §3.3, D5).
  */
 @RestController
 public class AssetInventoryController {
+
+    /**
+     * Default {@code limit} for {@link #fleetMaintenance} when the caller omits it — generous for
+     * this codebase's operating scale (see {@code DefaultFleetSummaryService#MAX_ASSETS_IN_SUMMARY}'s
+     * own javadoc for the general stance on caps).
+     */
+    private static final int DEFAULT_FLEET_MAINTENANCE_LIMIT = 200;
 
     private final AssetCustodyService assetCustodyService;
     private final MaintenanceService maintenanceService;
@@ -117,6 +131,39 @@ public class AssetInventoryController {
     }
 
     /**
+     * Lists maintenance records across every asset the caller's scope includes — this endpoint's
+     * fleet-wide counterpart, one call rather than one {@link #listMaintenance} per grounded asset
+     * (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3, D5; docs/plans/active/WAREHOUSE-UX-CONTEXT.md
+     * W7 handoff).
+     *
+     * @param state {@code open}, {@code closed}, or {@code all}, case-insensitive; defaults to
+     *              {@code open}
+     * @param limit bounds the {@code closed}/{@code all} portion's fleet-wide scan; open records are
+     *              never limit-truncated (see {@link MaintenanceService#fleetWide})
+     * @return the maintenance records the caller may see, each carrying its asset's name and category
+     */
+    @GetMapping("/api/maintenance")
+    public List<FleetMaintenanceRecordResponse> fleetMaintenance(
+            @RequestParam(defaultValue = "open") String state,
+            @RequestParam(defaultValue = "" + DEFAULT_FLEET_MAINTENANCE_LIMIT) int limit) {
+        return maintenanceService.fleetWide(toListState(state), limit, currentUser.scope()).stream()
+                .map(FleetMaintenanceRecordResponse::from)
+                .toList();
+    }
+
+    private static MaintenanceListState toListState(String state) {
+        if (state == null || state.isBlank()) {
+            throw new IllegalArgumentException("state must not be blank");
+        }
+        try {
+            return MaintenanceListState.valueOf(state.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Unknown maintenance list state: " + state
+                    + " (valid values: open, closed, all)", e);
+        }
+    }
+
+    /**
      * Opens a maintenance record against an asset, without changing its inventory state.
      *
      * @param id      the asset
@@ -146,8 +193,17 @@ public class AssetInventoryController {
                 maintenanceService.close(MaintenanceId.of(recordId), currentUser.userId(), currentUser.scope()));
     }
 
+    /**
+     * {@code firmware}/{@code totalFlightSeconds} are always absent on this controller's responses —
+     * deliberately, not an oversight: this class's own javadoc already explains why {@link
+     * AssetCustodyService}/{@link MaintenanceService} live here rather than on {@link
+     * AssetController} (the five-parameter ceiling), and the same ceiling has no room left for
+     * {@code com.drones.vision.api.support.AssetRowFacts} either. A caller wanting an accurate {@code
+     * firmware}/{@code totalFlightSeconds} after a custody/inventory mutation should follow up with
+     * {@code GET /api/assets/{id}}, which does join them (see {@link AssetController#details}).
+     */
     private AssetDetailsResponse detailsResponse(AssetId id) {
         return AssetDetailsResponse.from(assetService.details(currentUser.scope(), id),
-                assetImageRepositoryPort.existsByAssetId(id));
+                assetImageRepositoryPort.existsByAssetId(id), null, null);
     }
 }

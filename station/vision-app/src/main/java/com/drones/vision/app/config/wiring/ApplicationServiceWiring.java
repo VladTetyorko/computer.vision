@@ -15,6 +15,7 @@ import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 import com.drones.vision.flight.domain.port.TrackCorrectionLiveUpdatePort;
+import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
@@ -32,6 +33,7 @@ import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
 import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
 import com.drones.vision.api.live.LiveUpdateRegistry;
+import com.drones.vision.api.support.AssetRowFacts;
 import com.drones.vision.api.support.InventoryExportService;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
@@ -679,6 +681,20 @@ public class ApplicationServiceWiring {
     @Bean
     public InventoryExportService inventoryExportService(AssetService assetService) {
         return new InventoryExportService(assetService);
+    }
+
+    /**
+     * docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.3, D5 (W8) — the {@code vision-api}-side join
+     * behind {@code AssetController}'s {@code firmware}/{@code totalFlightSeconds} row fields.
+     * {@code vehicleProfileRepositoryPort} resolves to {@code PersistenceWiringConfiguration}'s
+     * unconditional bean, mirroring {@code OnboardingWiringConfiguration}'s own use of the same
+     * port; {@code assetUsageRepositoryPort} is the same bean {@code assetService} above already
+     * consumes.
+     */
+    @Bean
+    public AssetRowFacts assetRowFacts(VehicleProfileRepositoryPort vehicleProfileRepositoryPort,
+                                        AssetUsageRepositoryPort assetUsageRepositoryPort) {
+        return new AssetRowFacts(vehicleProfileRepositoryPort, assetUsageRepositoryPort);
     }
 
     /**

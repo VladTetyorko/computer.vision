@@ -195,4 +195,77 @@ class DefaultMaintenanceServiceTest {
 
         assertEquals(1, query.openBlockers(asset.id()).size());
     }
+
+    // -- fleetWide --------------------------------------------------------------------------------
+
+    @Test
+    void fleetWideOpenJoinsTheAssetNameAndCategoryAndIgnoresTheLimit() {
+        MaintenanceRecord open = new MaintenanceRecord(MaintenanceId.random(), asset.id(), MaintenanceKind.GROUNDING,
+                Instant.now(), null, actor, "prop strike", null);
+        when(maintenanceRepository.findOpen()).thenReturn(List.of(open));
+
+        List<MaintenanceRecordSummary> fleetWide = service.fleetWide(MaintenanceListState.OPEN, 1, inScope);
+
+        assertEquals(1, fleetWide.size());
+        assertEquals(open, fleetWide.get(0).record());
+        assertEquals(asset.displayName(), fleetWide.get(0).assetName());
+        assertEquals(asset.category(), fleetWide.get(0).categoryId());
+    }
+
+    @Test
+    void fleetWideClosedDelegatesTheLimitToTheRepository() {
+        MaintenanceRecord open = new MaintenanceRecord(MaintenanceId.random(), asset.id(), MaintenanceKind.GROUNDING,
+                Instant.now(), null, actor, "prop strike", null);
+        MaintenanceRecord closed = open.close(Instant.now());
+        when(maintenanceRepository.findRecentlyClosed(5)).thenReturn(List.of(closed));
+
+        List<MaintenanceRecordSummary> fleetWide = service.fleetWide(MaintenanceListState.CLOSED, 5, inScope);
+
+        assertEquals(List.of(closed), fleetWide.stream().map(MaintenanceRecordSummary::record).toList());
+        verify(maintenanceRepository, never()).findOpen();
+    }
+
+    @Test
+    void fleetWideAllConcatenatesOpenAndRecentlyClosed() {
+        MaintenanceRecord open = new MaintenanceRecord(MaintenanceId.random(), asset.id(), MaintenanceKind.GROUNDING,
+                Instant.now(), null, actor, "prop strike", null);
+        MaintenanceRecord closed = new MaintenanceRecord(MaintenanceId.random(), asset.id(), MaintenanceKind.NOTE,
+                Instant.now(), null, actor, "just a note", null).close(Instant.now());
+        when(maintenanceRepository.findOpen()).thenReturn(List.of(open));
+        when(maintenanceRepository.findRecentlyClosed(200)).thenReturn(List.of(closed));
+
+        List<MaintenanceRecordSummary> fleetWide = service.fleetWide(MaintenanceListState.ALL, 200, inScope);
+
+        assertEquals(2, fleetWide.size());
+    }
+
+    @Test
+    void fleetWideSilentlyDropsRecordsForAssetsOutOfScope() {
+        MaintenanceRecord open = new MaintenanceRecord(MaintenanceId.random(), asset.id(), MaintenanceKind.GROUNDING,
+                Instant.now(), null, actor, "prop strike", null);
+        when(maintenanceRepository.findOpen()).thenReturn(List.of(open));
+
+        List<MaintenanceRecordSummary> fleetWide = service.fleetWide(MaintenanceListState.OPEN, 200, outOfScope);
+
+        assertTrue(fleetWide.isEmpty());
+    }
+
+    @Test
+    void fleetWideDropsRecordsForASoftDeletedAsset() {
+        Asset deleted = asset.withState(com.drones.vision.kernel.LifecycleState.DELETED);
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(deleted));
+        MaintenanceRecord open = new MaintenanceRecord(MaintenanceId.random(), asset.id(), MaintenanceKind.GROUNDING,
+                Instant.now(), null, actor, "prop strike", null);
+        when(maintenanceRepository.findOpen()).thenReturn(List.of(open));
+
+        List<MaintenanceRecordSummary> fleetWide = service.fleetWide(MaintenanceListState.OPEN, 200, inScope);
+
+        assertTrue(fleetWide.isEmpty());
+    }
+
+    @Test
+    void fleetWideRejectsANonPositiveLimit() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service.fleetWide(MaintenanceListState.OPEN, 0, inScope));
+    }
 }

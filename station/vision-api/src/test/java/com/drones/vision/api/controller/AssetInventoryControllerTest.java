@@ -14,6 +14,8 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.application.custody.AssetCustodyService;
+import com.drones.vision.warehouse.application.maintenance.MaintenanceListState;
+import com.drones.vision.warehouse.application.maintenance.MaintenanceRecordSummary;
 import com.drones.vision.warehouse.application.maintenance.MaintenanceService;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
@@ -34,6 +36,7 @@ import java.util.Set;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -190,5 +193,53 @@ class AssetInventoryControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"action\":\"return\"}"))
                 .andExpect(status().isForbidden());
+    }
+
+    // ---- GET /api/maintenance ----
+
+    @Test
+    void fleetMaintenanceDefaultsToOpenAndTheDefaultLimitAndJoinsTheAssetNameAndCategory() throws Exception {
+        MaintenanceRecord record = new MaintenanceRecord(MaintenanceId.random(), asset.id(),
+                MaintenanceKind.GROUNDING, Instant.now(), null, currentUser.userId(), "prop strike", null);
+        MaintenanceRecordSummary summary = new MaintenanceRecordSummary(record, "Drone 1", DRONE);
+        when(maintenanceService.fleetWide(MaintenanceListState.OPEN, 200, currentUser.scope()))
+                .thenReturn(List.of(summary));
+
+        mockMvc.perform(get("/api/maintenance"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].assetId").value(asset.id().value().toString()))
+                .andExpect(jsonPath("$[0].assetName").value("Drone 1"))
+                .andExpect(jsonPath("$[0].categoryId").value("drone"))
+                .andExpect(jsonPath("$[0].kind").value("GROUNDING"));
+    }
+
+    @Test
+    void fleetMaintenancePassesStateAndLimitThrough() throws Exception {
+        when(maintenanceService.fleetWide(MaintenanceListState.CLOSED, 5, currentUser.scope()))
+                .thenReturn(List.of());
+
+        mockMvc.perform(get("/api/maintenance").param("state", "closed").param("limit", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+
+        verify(maintenanceService).fleetWide(MaintenanceListState.CLOSED, 5, currentUser.scope());
+    }
+
+    @Test
+    void fleetMaintenanceAcceptsAllCaseInsensitively() throws Exception {
+        when(maintenanceService.fleetWide(MaintenanceListState.ALL, 200, currentUser.scope())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/maintenance").param("state", "ALL"))
+                .andExpect(status().isOk());
+
+        verify(maintenanceService).fleetWide(MaintenanceListState.ALL, 200, currentUser.scope());
+    }
+
+    @Test
+    void fleetMaintenanceReturns400ForAnUnknownState() throws Exception {
+        mockMvc.perform(get("/api/maintenance").param("state", "expired"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }
 }

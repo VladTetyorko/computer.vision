@@ -16,12 +16,19 @@ import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.stream.Stream;
 
 /**
  * The one implementation of {@link MaintenanceService} and {@link MaintenanceQuery}.
+ *
+ * <p>{@link #fleetWide} joins {@link MaintenanceRecord} against {@link Asset} directly through the
+ * already-injected {@link AssetRepositoryPort} — an in-context join, not a cross-context one (unlike
+ * firmware, which stays out of this class entirely; see {@code
+ * com.drones.vision.api.support.AssetRowFacts}).
  */
 public final class DefaultMaintenanceService implements MaintenanceService, MaintenanceQuery {
 
@@ -82,6 +89,30 @@ public final class DefaultMaintenanceService implements MaintenanceService, Main
             throw new NoSuchElementException("Unknown asset: " + assetId.value());
         }
         return maintenanceRepository.findByAsset(assetId);
+    }
+
+    @Override
+    public List<MaintenanceRecordSummary> fleetWide(MaintenanceListState state, int limit, VisibilityScope scope) {
+        Objects.requireNonNull(state, "state must not be null");
+        Objects.requireNonNull(scope, "scope must not be null");
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive: " + limit);
+        }
+        List<MaintenanceRecord> records = switch (state) {
+            case OPEN -> maintenanceRepository.findOpen();
+            case CLOSED -> maintenanceRepository.findRecentlyClosed(limit);
+            case ALL -> Stream.concat(maintenanceRepository.findOpen().stream(),
+                    maintenanceRepository.findRecentlyClosed(limit).stream()).toList();
+        };
+
+        List<MaintenanceRecordSummary> summaries = new ArrayList<>();
+        for (MaintenanceRecord record : records) {
+            assetRepository.findById(record.assetId())
+                    .filter(asset -> !asset.isDeleted() && scope.includes(asset.id(), asset.ownership()))
+                    .ifPresent(asset -> summaries.add(
+                            new MaintenanceRecordSummary(record, asset.displayName(), asset.category())));
+        }
+        return summaries;
     }
 
     @Override
