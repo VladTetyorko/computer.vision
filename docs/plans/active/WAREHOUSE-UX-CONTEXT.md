@@ -23,7 +23,7 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | W5 readiness ← maintenance | application-service | done | `445e145b` |
 | W6 wizard | web-ui | done | `eafb807e` |
 | W7 maintenance + crew | web-ui | done | `cae23506` |
-| W8 fleet maintenance read, firmware + hours on the row | spring-integrator | done | pending — recorded in a follow-up docs commit, per W4's own precedent |
+| W8 fleet maintenance read, firmware + hours on the row | spring-integrator | done | `fe1c143d` |
 
 Shared tree: agents commit **by path**, never stash. Unrelated dirty files (`infra/rover-sim/**`, `core/rc/manual-control-client*`, `DefaultPeerDirectory.java`) belong to another session — do not touch.
 
