@@ -136,9 +136,11 @@ public class StreamController {
 
     /**
      * Starts a stream pipeline for the given device. The optional request
-     * body's fields, if present, override the corresponding values from
-     * {@link StreamDetectionSupport#defaultConfig()} — the deployment's own default, which starts
-     * equal to {@link PipelineConfig#defaults()} except for {@code detectionEnabled}
+     * body's fields, if present, override the corresponding values from {@link
+     * StreamDetectionSupport#resolveStartConfig} — the device's owning asset's bound {@code
+     * CvProfile}, folded onto {@link StreamDetectionSupport#defaultConfig()} when no binding matches
+     * at any scope (docs/plans/active/CV-SETTINGS-PLAN.md &sect;5.4, W2 deviation 3), which itself
+     * starts equal to {@link PipelineConfig#defaults()} except for {@code detectionEnabled}
      * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.7/&sect;3.8, {@code
      * vision.cv.detection-default-enabled}); everything else comes from that same default.
      *
@@ -163,8 +165,10 @@ public class StreamController {
         StartStreamRequest body = request == null ? StartStreamRequest.EMPTY : request;
         // Body validation (a malformed override is a 400) runs before the scope guard's 404, so a
         // bad request never depends on the caller's scope -- the same ordering AssetController's
-        // requireManageable documents.
-        PipelineConfig config = body.mergeOnto(streamDetectionSupport.defaultConfig());
+        // requireManageable documents. resolveStartConfig folds a bound CvProfile underneath body's
+        // own overrides (docs/plans/active/CV-SETTINGS-PLAN.md §5.4, W2 deviation 3) -- see
+        // StreamDetectionSupport#resolveStartConfig's own javadoc for the fold and its test-safety note.
+        PipelineConfig config = streamDetectionSupport.resolveStartConfig(device, body);
         TrackingConfigPatch tracking = body.trackingPatch();
         streamAccess.requireVisible(device);
         StreamId streamId = streamService.start(device, config, tracking);

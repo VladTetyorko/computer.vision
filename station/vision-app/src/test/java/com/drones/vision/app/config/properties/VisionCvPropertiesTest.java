@@ -118,7 +118,7 @@ class VisionCvPropertiesTest {
                         Duration.ofSeconds(30));
         VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
                 Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true, Duration.ofSeconds(5),
-                true, null, null, null, false, null, reconnect, null, null);
+                true, null, null, null, false, null, reconnect, null, null, null);
         assertEquals(reconnect, properties.reconnect());
     }
 
@@ -141,7 +141,7 @@ class VisionCvPropertiesTest {
         VisionCvProperties.Inference inference = new VisionCvProperties.Inference(List.of("a:1", "b:2"));
         VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
                 Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true, Duration.ofSeconds(5),
-                true, null, null, null, false, null, null, inference, null);
+                true, null, null, null, false, null, null, inference, null, null);
         assertEquals(List.of(new CvTarget("a", 1), new CvTarget("b", 2)), properties.inferenceTargets());
     }
 
@@ -152,7 +152,7 @@ class VisionCvPropertiesTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
                         Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true,
-                        Duration.ofSeconds(5), true, null, null, null, false, null, null, inference, null));
+                        Duration.ofSeconds(5), true, null, null, null, false, null, null, inference, null, null));
         assertTrue(ex.getMessage().contains("vision.cv.inference.targets"), ex.getMessage());
     }
 
@@ -176,7 +176,7 @@ class VisionCvPropertiesTest {
         VisionCvProperties.Training training = new VisionCvProperties.Training("cv-training-host:50062");
         VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
                 Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true, Duration.ofSeconds(5),
-                true, null, null, null, false, null, null, null, training);
+                true, null, null, null, false, null, null, null, training, null);
         assertEquals(new CvTarget("cv-training-host", 50062), properties.trainingTarget());
         assertTrue(properties.trainingTargetConfigured());
     }
@@ -188,7 +188,7 @@ class VisionCvPropertiesTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
                         Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true,
-                        Duration.ofSeconds(5), true, null, null, null, false, null, null, null, training));
+                        Duration.ofSeconds(5), true, null, null, null, false, null, null, null, training, null));
         assertTrue(ex.getMessage().contains("vision.cv.training.target"), ex.getMessage());
     }
 }

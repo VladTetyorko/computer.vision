@@ -14,8 +14,9 @@ vision-app depends on — see Gotchas)
 ## Package layout
 
 `controller/` (every `@RestController`, now including `AssetInventoryController`/
-`InventoryExportController` — WAREHOUSE-UX W3) · `dto/` (wire records only, ~170 — house rule "zero
-DTO leakage": no domain type is ever serialized directly) · `security/` (`CurrentUser`/
+`InventoryExportController` — WAREHOUSE-UX W3, `CvProfileController` — CV-SETTINGS W5) · `dto/` (wire
+records only, ~184 — house rule "zero DTO leakage": no domain type is ever serialized directly) ·
+`security/` (`CurrentUser`/
 `PrincipalResolver`/`StreamAccess`/`OpenByDesign` — the authorization seam, see Conventions) ·
 `live/` (SSE connection registry, per-topic ring buffers, per-connection visibility filtering) ·
 `ws/` (`/ws/manual-control` raw `WebSocketHandler`) · `proxy/` (`HlsProxyController` — a pass-through
@@ -93,8 +94,17 @@ the full mechanism.
 | StreamController | PATCH | `/api/streams/{streamId}/config` | Hot-patch confidence/fps/labelFilter/model/tracking — never interrupts video | scope |
 | StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats; never errors on unknown stream (empty `tracks`) | scope |
 | HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess`, checked **before** the upstream is ever contacted) |
-| CvModelsController | GET | `/api/cv/models` | Static, config-backed detection-model roster | open |
+| CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (CV-SETTINGS-PLAN §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
 | CvTrackersController | GET | `/api/cv/trackers` | Static tracker-engine roster | open |
+| CvProfileController | GET | `/api/cv/profiles` | List profiles the caller may see (every built-in + the caller's own group's) | scope |
+| CvProfileController | GET | `/api/cv/profiles/{id}` | Read one profile | scope |
+| CvProfileController | POST | `/api/cv/profiles` | Create a profile owned by the caller's own group (201) | manageOrg |
+| CvProfileController | PUT | `/api/cv/profiles/{id}` | Replace a non-built-in profile wholesale | manageOrg |
+| CvProfileController | DELETE | `/api/cv/profiles/{id}` | Delete a non-built-in, unbound profile (204) | manageOrg |
+| CvProfileController | PUT | `/api/cv/bindings` | Bind a profile to a scope (`ASSET`/`CATEGORY`/`ORGANIZATION`), replacing any prior binding at that exact scope | manageOrg |
+| CvProfileController | DELETE | `/api/cv/bindings` | Clear a scope's binding, idempotent (204) — body-carrying DELETE, the binding's natural key has no single path id | manageOrg |
+| CvProfileController | GET | `/api/cv/profiles/effective?assetId=` | The one profile `assetId` would start with right now, plus which layer of the asset→category→organization→platform fold supplied it (`source`) | scope |
+| CvProfileController | GET | `/api/cv/coverage` | Fleet-wide "what CV will do on each asset" table, one row per visible asset | scope |
 | EventController | GET | `/api/events?sinceMs&limit` | Cross-stream debounced detection events, newest first | scope (filtered) |
 | EventController | GET | `/api/streams/{streamId}/events?limit` | One stream's events | scope |
 | FleetController | GET | `/api/fleet/summary?includeArchived=` | Per-category counts + attention list | scope |
@@ -122,11 +132,13 @@ the full mechanism.
 | LabelingController | GET | `/api/datasets/{id}/samples?status=&limit=` | List a dataset's samples | scope |
 | LabelingController | GET | `/api/samples/{id}/image` | Fetch one sample's image | scope |
 | LabelingController | PUT | `/api/samples/{id}/annotations` | Confirm/correct a sample's annotations | scope |
-| ModelRegistryController | GET | `/api/cv/registry/models` | The dynamic, gRPC-sourced model registry (distinct from the static `/api/cv/models` picker) | **unscoped** (ledger: `ModelRegistryController#models`) |
-| ModelRegistryController | POST | `/api/cv/registry/models/{id}/promote` | Promote a model version | manageOrg |
+| ModelRegistryController | POST | `/api/cv/registry/models/{id}/promote` | Promote a model version to `LIVE`, demoting whatever was live to `RETIRED` | administer (ADMIN only) |
+| ModelRegistryController | POST | `/api/cv/registry/rollback` | Restore whichever model the last promotion demoted | administer (ADMIN only) |
 | TrainingJobController | POST | `/api/datasets/{id}/train` | Start a training job (uploads the dataset to cv-service over gRPC) | manageOrg + dataset scope |
-| TrainingJobController | GET | `/api/training/jobs/{jobId}` | Poll one job | **unscoped** (ledger) |
-| TrainingJobController | GET | `/api/training/jobs` | List every tracked job | **unscoped** (ledger) |
+| TrainingJobController | GET | `/api/training/jobs/{jobId}` | Poll one in-flight job's live state | **unscoped** (ledger) |
+| TrainingJobController | GET | `/api/training/jobs` | List every tracked in-flight job | **unscoped** (ledger) |
+| TrainingJobController | GET | `/api/cv/training/runs?limit=` | Most recently started **persisted** training runs, newest-first (default limit 50) | manageOrg |
+| TrainingJobController | GET | `/api/cv/training/runs/{runId}` | One persisted run's latest state | manageOrg |
 | OnboardingController | POST | `/api/onboarding/probe` | Pre-registration vehicle probe | **unscoped** (ledger — nothing yet exists to scope against) |
 | OnboardingController | GET | `/api/assets/{assetId}/profile` | Latest vehicle profile | scope |
 | OnboardingController | POST | `/api/assets/{assetId}/probe` | Probe a registered asset's link | manage (audited) |
@@ -354,12 +366,16 @@ in Conventions for who supplies real values and who passes `null`.
 
 ## Gotchas
 
-- **`AssetController#telemetry`, `TrainingJobController#job`/`#jobs`, `ModelRegistryController#models`,
+- **`AssetController#telemetry`, `TrainingJobController#job`/`#jobs`,
   `GeoRegionController#list`/`#progress`, `DiscoveryController#scan`, `SystemNetworkController#network`,
   `SystemStatusController#status`, `DemoController#status`, `OnboardingController#probeCandidate`, and
   `UsageTimelineController#timeline`/`#recording` are genuinely unauthorized today** — no `403`/`404`
   from a caller who shouldn't see them, just a plain `200`. This is the `TEMPORARY_UNSCOPED` ledger
-  (`EndpointAuthorizationTest`, vision-app), not an oversight in this doc.
+  (`EndpointAuthorizationTest`, vision-app), not an oversight in this doc. `ModelRegistryController#models`
+  left this ledger when `GET /api/cv/registry/models` was deleted (CV-SETTINGS-PLAN §8 OQ5, folded into
+  `CvModelsController`'s widened `GET /api/cv/models`, which carries `@OpenByDesign` instead) —
+  `EndpointAuthorizationTest#theTemporaryLedgerHasNoStaleEntries` fails on a ledger entry naming a
+  handler that no longer exists, so removing it was mandatory, not tidiness.
 - **`hasImage` is always `false` on the SSE `fleet` topic's live snapshot** — `AssetImageRepositoryPort`
   has no change-notification port of its own to announce an upload/delete through, and
   `LiveUpdateRegistry`'s constructor is already at the five-parameter ceiling
@@ -407,13 +423,17 @@ in Conventions for who supplies real values and who passes `null`.
 ## Status
 
 Feature flags gating whole controllers/packages off by default: `vision.training.enabled` (false —
-`DatasetController`/`LabelingController`/`ModelRegistryController`/`TrainingJobController` all 404
-like unmapped routes when off), `vision.onboarding.probe.enabled` (false — `POST /api/onboarding/probe`
+`DatasetController`/`LabelingController`/`TrainingJobController` all 404
+like unmapped routes when off), `vision.cv.registry.enabled` (defaults to `vision.cv.enabled`'s own
+value via `application.yaml`'s `${vision.cv.enabled:false}` placeholder, **no longer** tied to
+`vision.training.enabled` since docs/plans/active/CV-SETTINGS-PLAN.md §5 — `ModelRegistryController`
+404s like an unmapped route when off), `vision.onboarding.probe.enabled` (false — `POST /api/onboarding/probe`
 answers 409, and so does `AssetParameterController#writeParameter` — see FLEET-RADIO R5 note below),
 `vision.geo.fixed-camera.enabled` (false — `CameraPoseController`/`MapTracksController`
 answer 409), `vision.api.rate-limit.enabled` (false, see "Rate limiting" above), `vision.auth.enabled`
 (false — every `CurrentUser` call resolves a fixed unbounded dev principal). On by default:
-`vision.live.enabled`, `vision.demo.enabled`.
+`vision.live.enabled`, `vision.demo.enabled`. `CvProfileController` carries no flag at all —
+profiles ship unconditionally, built-ins exist regardless of `vision.cv.enabled`/`vision.cv.registry.enabled`.
 
 Multi-instance SSE fan-out is out of scope — `LiveUpdateRegistry` is explicitly process-local,
 single-instance. `RemediationOrchestrator` living in `support/` rather than as a fourth
@@ -459,3 +479,36 @@ on ports from two different contexts, which `ContextArchitectureTest`'s `context
 since it only recognizes `com.drones.vision.<context>` packages, not `vision-api`/`vision-app`/adapter
 code; `fleetMaintenance` reaches `currentUser.scope()` directly so needed no `TEMPORARY_UNSCOPED`
 ledger entry.
+
+**CV-SETTINGS wave W5 done (2026-08-30, uncommitted).** New `CvProfileController` (8 handlers: profile
+CRUD, `PUT`/`DELETE /api/cv/bindings`, `GET /api/cv/profiles/effective`, `GET /api/cv/coverage`) and
+11 new `dto/` records backing it (`CvProfileResponse`/`CvProfileTrackingResponse`/
+`CvProfileEventRuleResponse`/`CvProfilesResponse`/`CvProfileRequest`/`CvProfileBindingResponse`/
+`CvProfileBindingRequest`/`EffectiveCvProfileResponse`/`CvCoverageRowResponse`/`CvCoverageResponse`)
+plus `TrainingRunResponse`/`TrainingRunsResponse` — see the endpoint table above and Gotchas/Status for
+the wiring/exception-mapping decisions. Also: `GET /api/cv/models` widened to serve the registry's live
+roster when on; `GET /api/cv/registry/models` deleted (folded into the widened `/api/cv/models`);
+`POST /api/cv/registry/rollback` added; `TrainingJobController` gained `GET /api/cv/training/runs`
+(+`/{runId}`) reading `TrainingJobService`'s newly-persisted run history, resolving `datasetName` via a
+new `DatasetRepositoryPort` collaborator injected directly into the controller (the same
+"controllers call a driving-port service, driven ports only read-only" precedent `DatasetController`'s
+own javadoc already documents). Full write scope was `station/vision-api`/`station/vision-app` only —
+`contexts/vision-perception`/`contexts/vision-learning`/`contexts/vision-warehouse`/`storage/persistence`
+were read-only for this wave (already built by earlier CV-SETTINGS waves).
+
+Two deliberate DTO/wire deviations, both informational (frozen `models.ts` leaves no room to do
+otherwise without a `contexts/vision-learning` change, out of this wave's write scope):
+`TrainingRunResponse` drops `TrainingRunRecord#message` entirely (`models.ts`'s `TrainingRun` has no
+such field); `TrainingRunResponse#loss`/`#map50` are boxed `Double`s that are **always** populated from
+the domain's primitive `double` fields, never actually `null`, even though `models.ts` declares
+`number | null` — the domain has no way to represent "no progress reported yet" distinctly from a
+genuine `0.0`.
+
+`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` (run as three
+separate synchronous foreground commands after an `-am` install — see `station/vision-app/MODULE.md`'s
+own W5 entry for why) — `storage/persistence` **260** (unchanged, read-only this wave; docker ran, not
+skipped), `station/vision-api` **932** (+31 from 901: `CvProfileControllerTest` ~20 new cases +
+`TrainingJobControllerTest`'s 9 new `runs`/`run` cases, net of the deleted
+`ModelRegistryControllerTest#models` case and its removed `GET /api/cv/registry/models` coverage),
+`station/vision-app` **278** (see that module's own MODULE.md entry) — all green, default-config bar
+held throughout.

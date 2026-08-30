@@ -24,7 +24,7 @@ toggle exists to turn it off). Always `mvn clean` first — see Gotchas.
 com.drones.vision.app
   config/
     properties/        every @ConfigurationProperties record (21 — see table below)
-    wiring/             20 per-concern @Configuration classes (see table below)
+    wiring/             21 per-concern @Configuration classes (see table below)
     SecurityConfig      the 2 mutually-exclusive SecurityFilterChain beans
   security/             BcryptPasswordHasher, VisionUserDetails, DevPrincipalResolver,
                          SecurityContextPrincipalResolver, Security/NoopSessionAuthenticator
@@ -49,7 +49,8 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `TelemetryWiring` | Simulation, Mavlink, Rc, Onboarding | `simulatedTelemetrySource`, `mavlinkTelemetrySource`, `mavlinkFlightCommander`, `mavlinkManualControlSender` — all unconditional. Static `toMavlinkSettings(...)` reused by `FeedTransmitterWiring`/`DiscoveryWiringConfiguration`/`OnboardingWiringConfiguration` |
 | `PublishWiring` | Publish, Api, Cv | `mediamtxStreamPublisher` (COP `vision.publish.enabled`, default true — own bean so `SystemStatusWiring` observes the *same* instance `streamPublisherPort` routes through), `streamPublisherPort` (unconditional `StreamPublisherPort`; `NoopStreamPublisher` if disabled, else a `PublisherRouter` wrapping the direct publisher + a `MediamtxProxyPublisher`, routed by `vision.publish.source-proxy.enabled`; **fails fast** if source-proxy is on while `vision.cv.frame-transport` is still `push` — see Gotchas), `mediamtxLiveFrameGrabber` (unconditional, cheap/lazy), `replayFrameExtractionPort` (unconditional; `NoopReplayFrameExtractor` if publish disabled), `hlsProxyUpstreamBase: URI`, `snapshotJpegEncoder`, `hlsProxySettings`, `liveSettings` (last 3 bridge Spring-bound `VisionApiProperties` → vision-api's plain mirror of the same simple name — see Gotchas) |
 | `CvWiring` | Cv | `cvGrpcChannel: ManagedChannel` `@Primary` (COE: `cv.enabled` OR `training.enabled` OR `frame-transport=pull` OR `geo.visual.enabled`; built via `CvChannels.forTargets`), `cvTrainingChannel` (COP `vision.cv.training.target` present — independent shutdown), `cvChannelSupervisor` (COE = cvGrpcChannel's expression AND `cv.reconnect.enabled` default true; `@Qualifier("cvGrpcChannel")`), `detectionPort` (unconditional bean, internal branch on `enabled`: `GrpcDetectionPort` w/ `@Qualifier("cvGrpcChannel")` else `NoopDetectionPort`; `destroyMethod=""`), `pulledDetectionPort` (COE `frame-transport=pull`; `@Qualifier("cvGrpcChannel")`), `cvModelRoster` (static constant), `detectionDemandPort` (COE default true, returns concrete `LiveAndPollDetectionDemand`), `streamDefaultConfig`, `streamDetectionSupport`. Static `toGrpcCvSettings(...)` and package-private `controlPlaneChannel(cvTrainingChannel, cvGrpcChannel)` (= training channel if present else falls back to inference channel) shared by `TrainingWiringConfiguration`/`VisualGeoWiringConfiguration` |
-| `TrainingWiringConfiguration` | Training, Cv | Every bean individually `@ConditionalOnProperty(vision.training.enabled=true)`, no fallback: `datasetUploadPort`, `trainingStores`, `replaySources`, `datasetService`, `labelingService` (takes `AssetDirectoryService`, not `AssetService`), `modelRegistryPort`, `modelRegistryService`, `trainingPort`, `trainingJobService`. Channel-consuming beans route through `CvWiring.controlPlaneChannel(...)` |
+| `TrainingWiringConfiguration` | Training, Cv | `datasetUploadPort`, `trainingStores`, `replaySources`, `datasetService`, `labelingService` (takes `AssetDirectoryService`, not `AssetService`), `trainingPort`, `trainingJobService` all `@ConditionalOnProperty(vision.training.enabled=true)`, no fallback. `modelRegistryPort`/`modelRegistryService` are a **separate** switch since CV-SETTINGS-PLAN §5 (CV-SETTINGS-CONTEXT.md's W4-app → W5 handoff decoupled the registry from training): `@ConditionalOnProperty(vision.cv.registry.enabled=true)`, whose own `application.yaml` default follows `vision.cv.enabled` via the `${vision.cv.enabled:false}` placeholder — a CV-only deployment gets the registry for free unless it explicitly opts out (`vision.cv.registry.enabled=false`); a training-only deployment does **not** get it for free any more. Channel-consuming beans route through `CvWiring.controlPlaneChannel(...)` |
+| `CvProfileWiringConfiguration` | — | **Every bean unconditional**, no `@Conditional*` at all (CV-SETTINGS-PLAN §3.1/§5, CV-SETTINGS-CONTEXT.md's W2 → W5 handoff): `cvProfileCacheSettings` (from `VisionCvProperties.Profiles#cacheTtl()`, default 60s), `cvProfileCache` (write-through, lazy-TTL-reload), `cvProfileResolver` (asset→category→organization→platform fold, shared with `ApplicationServiceWiring#streamService` and `CvWiring#streamDetectionSupport`), `cvProfileService` (`DefaultCvProfileService`, behind `CvProfileController`) — profiles ship built-in (4 seeded rows, `V29__cv_profiles.sql`) regardless of `vision.cv.enabled`/`vision.cv.registry.enabled`, the same "ships built-in" posture `TrackingWiring#cvTrackerRoster` takes |
 | `DiscoveryWiringConfiguration` | Discovery, Mavlink | `onvifWsDiscoveryScanner`/`mdnsScanner`/`v4l2Scanner`/`mavlinkHeartbeatScanner` — each COP `vision.discovery.enabled` default true. `discoveryService` and `mavlinkPort` **unconditional** (`DiscoveryController` needs the service regardless; `DefaultDiscoveryService` tolerates an empty port list). `mavlinkHeartbeatScanner` lives in adapter-mavlink, not adapter-discovery like its 3 siblings, because it borrows `mavlinkTelemetrySource`'s open socket and adapters can't depend on each other |
 | `FeedTransmitterWiring` | Publish, Rtsp, Mjpeg, Mavlink, Rc, Onboarding | `rtspFeedTransmitter`, `mjpegFeedTransmitter` (`destroyMethod="close"` — owns a shared `HttpServer`), `mavlinkFeedTransmitter`, `feedTransmitterRegistry` — all unconditional |
 | `PersistenceWiringConfiguration` | Persistence | **Every bean unconditional**, no `@Conditional*` anywhere — 22 one-line `Jpa*Repository(entityManagerFactory)` ports (WAREHOUSE-UX W3 added `maintenanceRepositoryPort`/`assetNoteRepositoryPort`) + `persistenceEntityManagerFactory` (`destroyMethod="close"`, opens a real JDBC connection eagerly). No in-memory fallback exists for any repository port (Postgres is the only store) |
@@ -303,3 +304,52 @@ above) — no flag, no new port implementation. `./mvnw -B -pl station/vision-ap
 (14), `ContextArchitectureTest` (5), and `EndpointAuthorizationTest` (2) all stayed green, confirming
 `AssetRowFacts`/the new `assetRowFacts` bean/the widened `AssetController` constructor introduce no
 ArchUnit violation).
+
+**CV-SETTINGS wave W5 done (2026-08-30, uncommitted).** New unconditional `CvProfileWiringConfiguration`
+(4 beans, see the wiring-map table above) behind `CvProfileController` (vision-api). `TrainingWiringConfiguration`
+split its `modelRegistryPort`/`modelRegistryService` beans onto their own `vision.cv.registry.enabled`
+switch, independent of `vision.training.enabled` — see that row above and `ModelRegistryController`'s
+own javadoc. `VisionCvProperties` gained a `Profiles(Duration cacheTtl)` nested record (21st component
+of the canonical constructor, default 60s) — every direct `new VisionCvProperties(...)` call site with
+15+ positional args needed a trailing `null`/explicit value added; the two legacy convenience
+constructors (4-arg, 15-arg) needed no change, their own compact-constructor fallback already covers it.
+
+**Two real wiring-test defects found and fixed this wave** (both were pending items carried from an
+earlier CV-SETTINGS segment, not new bugs introduced here):
+1. `VisionCvPropertiesTest` had 5 direct `new VisionCvProperties(...)` calls using the canonical
+   constructor's positional form that pre-dated the `Profiles` component — each now passes an
+   explicit trailing `null`/value so the compact constructor's `profiles == null` fallback still runs.
+2. `vision.cv.registry.enabled`'s new "follows `vision.cv.enabled`, not `vision.training.enabled`"
+   default (see above) flipped two existing wiring-test assertions that pinned the *old* coupling:
+   `CvEnabledWiringTest#cvOnlyConfigurationDoesNotWireTheModelRegistry` (renamed
+   `cvOnlyConfigurationWiresTheModelRegistryByDefault`, assertion inverted — a CV-only deployment now
+   gets the registry for free) and `TrainingEnabledWiringTest` (12 tests errored with `UnsatisfiedDependency`
+   on `ModelRegistryPort` — its `@SpringBootTest` properties needed an explicit
+   `vision.cv.registry.enabled=true` added, since `vision.training.enabled=true` alone no longer implies
+   it). New `CvRegistryExplicitOptOutWiringTest` (1 test) proves the escape hatch
+   (`vision.cv.registry.enabled=false` alongside `vision.cv.enabled=true`) still keeps the registry
+   entirely absent, the pre-W5 default behavior, now reachable only by explicit opt-out.
+
+**Verification pitfall, for the next agent**: a background-shelled `./mvnw ... test` (`run_in_background`
+on the Bash tool, or a bare shell `&`) is killed the moment the issuing turn ends — it does **not**
+survive to the next turn the way a normal long build does when run to completion synchronously. Two
+build attempts in this wave were lost this way before switching to fully synchronous, foreground
+`Bash` calls (`./mvnw -B -pl station/vision-api,station/vision-app -am -Dmaven.test.skip=true install`
+first to refresh every upstream jar in one pass, then `./mvnw -B -pl station/vision-api test` and
+`./mvnw -B -pl station/vision-app test` as two separate synchronous foreground commands — each may run
+several minutes, budget the timeout accordingly). Running `-pl station/vision-api test` and
+`-pl station/vision-app test` as two separate invocations **without** the `-am` install first also
+independently produces misleading "cannot find symbol"/constructor-arity compile errors, because the
+second invocation resolves the first's fresh output from a stale `~/.m2` jar rather than from
+reactor-fresh classes — this is the documented `[[maven-build-verification]]` pitfall, not a code
+defect; always `-am install -Dmaven.test.skip=true` across every touched module first when testing
+modules as separate `-pl` invocations in the same session.
+
+`./mvnw -B -pl station/vision-api,station/vision-app -am -Dmaven.test.skip=true install` (fresh jars
+for the whole reactor, including `vision-web`'s own 3121 tests) then `./mvnw -B -pl station/vision-api
+test` (**932**, all green) then `./mvnw -B -pl station/vision-app test` (**278**, all green — +1 over
+the pre-W5 277-minus-the-two-broken-tests baseline: the new `CvRegistryExplicitOptOutWiringTest`) then
+`./mvnw -B -pl storage/persistence test` (**260**, unchanged, read-only this wave; Docker ran for real —
+`PostgresDockerIntegrationTest`'s 29 nested classes executed, not skipped). Default-config bar held
+throughout: every pre-existing green suite stayed green, the two flipped assertions were pinning
+behavior this wave deliberately changed (not accidentally broken), proven fixed rather than silenced.

@@ -3,16 +3,23 @@ package com.drones.vision.api.controller;
 import com.drones.vision.api.dto.StartTrainingJobRequest;
 import com.drones.vision.api.dto.TrainingJobResponse;
 import com.drones.vision.api.dto.TrainingJobsResponse;
+import com.drones.vision.api.dto.TrainingRunResponse;
+import com.drones.vision.api.dto.TrainingRunsResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.learning.application.TrainingJobService;
+import com.drones.vision.learning.domain.model.Dataset;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.TrainingJobSpec;
+import com.drones.vision.learning.domain.model.TrainingRunId;
+import com.drones.vision.learning.domain.model.TrainingRunRecord;
+import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -52,16 +59,37 @@ import com.drones.vision.api.security.CurrentUser;
  * mid-flight (including a rejected dataset upload, docs/plans/done/CV-TRAINING-V2-PLAN.md §4) is <b>never</b>
  * a thrown exception — it is a polled {@link com.drones.vision.learning.domain.model.JobState#FAILED} {@link
  * TrainingJobResponse#state()}, so {@link #job}/{@link #jobs} never special-case it.
+ *
+ * <p>{@link #runs}/{@link #run} (docs/plans/active/CV-SETTINGS-PLAN.md &sect;5.2) expose the durable
+ * {@code vision-learning} run history behind {@code GET /api/cv/training/runs}[/{runId}] — distinct
+ * from {@link #job}/{@link #jobs}'s in-memory poll (see {@link TrainingRunResponse}'s own javadoc
+ * for the two shapes' relationship). Constructor-injected with {@link DatasetRepositoryPort}
+ * directly (a read-only driven port) so every returned {@link TrainingRunResponse} can carry its
+ * {@code datasetName} without growing {@link TrainingJobService}'s own surface for a
+ * controller-only presentation concern — the same "controllers call a driving-port service, driven
+ * ports only read-only" exception {@link DatasetController}'s own javadoc documents for its {@link
+ * com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort} collaborator. {@link
+ * #runs}/{@link #run} additionally map {@link com.drones.vision.platform.AccessDeniedException} →
+ * 403 when the caller may not manage the organization ({@link TrainingJobService#runs}/{@link
+ * TrainingJobService#run}'s own gate — a stricter check than {@link #job}/{@link #jobs}'s unscoped
+ * read, since the persisted run history is a privileged administrative view) and {@link
+ * java.util.NoSuchElementException} → 404 for {@link #run} on an unknown run id.
  */
 @RestController
 @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
 public class TrainingJobController {
 
+    private static final int DEFAULT_RUNS_LIMIT = 50;
+
     private final TrainingJobService trainingJobService;
+    private final DatasetRepositoryPort datasetRepositoryPort;
     private final CurrentUser currentUser;
 
-    public TrainingJobController(TrainingJobService trainingJobService, CurrentUser currentUser) {
+    public TrainingJobController(TrainingJobService trainingJobService, DatasetRepositoryPort datasetRepositoryPort,
+                                  CurrentUser currentUser) {
         this.trainingJobService = Objects.requireNonNull(trainingJobService, "trainingJobService must not be null");
+        this.datasetRepositoryPort =
+                Objects.requireNonNull(datasetRepositoryPort, "datasetRepositoryPort must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
     }
 
@@ -110,5 +138,44 @@ public class TrainingJobController {
     public TrainingJobsResponse jobs() {
         List<TrainingJobResponse> jobs = trainingJobService.jobs().stream().map(TrainingJobResponse::from).toList();
         return new TrainingJobsResponse(jobs);
+    }
+
+    /**
+     * Lists the most recently started persisted training runs.
+     *
+     * @param limit maximum number of runs to return; defaults to {@value #DEFAULT_RUNS_LIMIT}
+     * @return the most recent runs, newest-first
+     */
+    @GetMapping("/api/cv/training/runs")
+    public TrainingRunsResponse runs(@RequestParam(defaultValue = "" + DEFAULT_RUNS_LIMIT) int limit) {
+        List<TrainingRunResponse> runs = trainingJobService.runs(limit, currentUser.userId(), currentUser.scope())
+                .stream().map(this::toResponse).toList();
+        return new TrainingRunsResponse(runs);
+    }
+
+    /**
+     * Reads one persisted training run.
+     *
+     * @param runId the run id, as a canonical UUID string
+     * @return the run's latest persisted state
+     */
+    @GetMapping("/api/cv/training/runs/{runId}")
+    public TrainingRunResponse run(@PathVariable String runId) {
+        TrainingRunRecord run =
+                trainingJobService.run(TrainingRunId.of(runId), currentUser.userId(), currentUser.scope());
+        return toResponse(run);
+    }
+
+    /**
+     * Maps a persisted run to the wire, resolving {@code datasetName} via {@link
+     * #datasetRepositoryPort} — falling back to the raw dataset id when the dataset was deleted
+     * after the run started, the same "fall back to the id" idiom {@code DefaultAssetService#toSummary}
+     * takes for a stale category reference.
+     */
+    private TrainingRunResponse toResponse(TrainingRunRecord run) {
+        String datasetName = datasetRepositoryPort.findById(run.datasetId())
+                .map(Dataset::name)
+                .orElseGet(() -> run.datasetId().value().toString());
+        return TrainingRunResponse.from(run, datasetName);
     }
 }

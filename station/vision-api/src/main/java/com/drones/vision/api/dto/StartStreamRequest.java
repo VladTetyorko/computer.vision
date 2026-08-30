@@ -45,6 +45,17 @@ import java.util.Set;
  *                             <b>minus {@code lock}</b>, which names a track that cannot exist before
  *                             the stream has produced one and is therefore a 400 here; absent keeps
  *                             the seed exactly
+ *
+ * <p><b>CV profile precedence (docs/plans/active/CV-SETTINGS-PLAN.md §5.4, W2 deviation 3)</b>: as
+ * of docs/plans/active/CV-SETTINGS-CONTEXT.md's W5 wave, {@code StreamController#start} no longer
+ * calls {@link #mergeOnto} against the deployment's raw default {@link PipelineConfig} directly —
+ * it resolves the started device's bound {@code CvProfile} first ({@code
+ * StreamDetectionSupport#resolveStartConfig}, asset &rarr; category &rarr; organization &rarr;
+ * platform, the same fold {@code GET /api/cv/profiles/effective} uses) and merges this request onto
+ * <em>that</em> instead. An explicit field on this request still always wins — the fold happens
+ * once, at the bottom, before this request's own overrides are applied — so a caller that never
+ * names a profile sees byte-identical behaviour to before this wave: no binding for a device's
+ * asset resolves back to the platform default this record has always merged onto.
  */
 public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFps, String model,
                                   List<String> labelFilter, List<String> labelDenyFilter, Boolean detectionEnabled,

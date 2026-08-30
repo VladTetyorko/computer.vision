@@ -6,6 +6,9 @@ import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.application.profile.CvProfileService;
+import com.drones.vision.perception.application.profile.EffectiveProfile;
+import com.drones.vision.perception.application.profile.ProfileSource;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.perception.application.stream.PipelineConfigPatch;
 import com.drones.vision.perception.application.stream.TrackingConfigPatch;
@@ -99,7 +102,15 @@ class StreamControllerTest {
     private DetectionRepositoryPort detectionRepositoryPort;
     /** Backs {@link StreamAccess}'s device&rarr;asset&rarr;owner resolution (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2). */
     private AssetRepositoryPort assetRepositoryPort;
-    private StreamDetectionSupport streamDetectionSupport;
+    /**
+     * Stubbed to answer every {@link CvProfileService#effective} call with a {@link
+     * ProfileSource#PLATFORM} resolution wrapping whatever {@code platformDefault} was actually
+     * passed in — byte-identical to the pre-{@code CvProfileService} behavior of merging {@link
+     * StreamController}'s start body straight onto {@link StreamDetectionSupport#defaultConfig()},
+     * so every pre-existing test below is unaffected. Individual tests may re-stub this for a
+     * specific asset to exercise the override-fold behavior instead.
+     */
+    private CvProfileService cvProfileService;
     /**
      * A real instance (not a mock -- {@code LiveAndPollDetectionDemand} is {@code final} and this
      * repo carries no inline Mockito mock-maker), constructed with a never-watching SSE predicate so
@@ -129,7 +140,9 @@ class StreamControllerTest {
         assetRepositoryPort = mock(AssetRepositoryPort.class);
         when(assetRepositoryPort.findByDeviceId(deviceId)).thenReturn(Optional.of(ownedAsset));
         detectionDemand = new LiveAndPollDetectionDemand(assetId -> false, Duration.ofSeconds(10));
-        streamDetectionSupport = new StreamDetectionSupport(PipelineConfig.defaults(), detectionDemand);
+        cvProfileService = mock(CvProfileService.class);
+        when(cvProfileService.effective(any(), any(), any(), any())).thenAnswer(invocation -> new EffectiveProfile(
+                invocation.getArgument(0), null, null, ProfileSource.PLATFORM, invocation.getArgument(1)));
 
         mockMvc = mockMvcFor(currentUser);
     }
@@ -169,11 +182,18 @@ class StreamControllerTest {
     /**
      * A {@link MockMvc} bound to a fresh {@link StreamController} acting as {@code user} — same
      * mocked {@link #streamService}/{@link #streamPublisherPort}/{@link #detectionRepositoryPort}/
-     * {@link #assetRepositoryPort}/{@link #streamDetectionSupport}, only the {@link StreamAccess}'s
-     * {@link CurrentUser} changes.
+     * {@link #assetRepositoryPort}/{@link #cvProfileService}, only the {@link StreamAccess}'s/{@link
+     * StreamDetectionSupport}'s {@link CurrentUser} changes. Rebuilds {@link StreamDetectionSupport}
+     * fresh each call (it is a record, cheap to construct) rather than sharing one instance across
+     * every {@code currentUser}/{@link #currentUserWithScope} variant — {@code
+     * StreamDetectionSupport#resolveStartConfig} now threads its own {@code currentUser} into
+     * {@link #cvProfileService}, so a shared instance would silently ignore whichever scope a given
+     * test asked for.
      */
     private MockMvc mockMvcFor(CurrentUser user) {
         StreamAccess streamAccess = new StreamAccess(streamService, assetRepositoryPort, user);
+        StreamDetectionSupport streamDetectionSupport = new StreamDetectionSupport(PipelineConfig.defaults(),
+                detectionDemand, cvProfileService, assetRepositoryPort, user);
         return MockMvcBuilders
                 .standaloneSetup(new StreamController(streamService, streamPublisherPort, detectionRepositoryPort,
                         new SnapshotJpegEncoder(VisionApiProperties.defaults()), streamDetectionSupport,

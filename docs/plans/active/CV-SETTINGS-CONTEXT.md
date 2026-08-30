@@ -15,7 +15,7 @@ Spec: [CV-SETTINGS-PLAN.md](CV-SETTINGS-PLAN.md). Branch `feat/cv-settings`, cut
 | W4 learning domain+app | domain-modeler → application-service | built, uncommitted | | Domain: `CvModelRecord`/`ModelStatus`/`ModelTaskType`/`ModelRuntime`/`ModelAvailability`/`ModelMetrics`/`MetricsKind`/`ModelProvenance`/`TrainingRunId`/`TrainingRunRecord` + `CvModelRepositoryPort`/`TrainingRunRepositoryPort`. App: `CvModelView`/`CvModelCatalog`/`CatalogSource`/`ConfigModelCatalog`/`PromotionResult`/`TrainingRunStores`; `ModelRegistryService`/`DefaultModelRegistryService` evolved (merge+promote+rollback, `RegisteredModel` deleted); `DefaultTrainingJobService` evolved (run persistence, CANDIDATE registration, `runs`/`run`, gate relaxed to `canManageOrg`). `contexts/vision-learning` green, 234 tests total (see Handoffs). **Nothing wired**: no adapter implements the two new ports (W3), and `vision-app`/`vision-api` still call the old constructors/types (W5). |
 | W2 perception application | application-service | built, uncommitted | | `application/profile/**` — `CvProfileService`/`DefaultCvProfileService`, `CvProfileResolver`, `CvProfileCache`, `CvProfileCacheSettings`, `EffectiveProfile`, `CoverageRow`, `CvProfileSpec`, `ProfileSource`; `DefaultStreamService.start` now folds the resolver in (new 8th ctor param `CvProfileResolver`). `contexts/vision-perception` green, 641 tests total, up from 605 (see Handoffs). **Nothing wired in `vision-app` yet** — no `CvProfileRepositoryPort`/`CvProfileCache`/`CvProfileResolver` bean exists, and `DefaultStreamService`'s 7-arg construction site there will not compile until W5 adds one and passes it through. |
 | W3 persistence | spring-integrator | built, uncommitted | | `V29__cv_profiles.sql`/`V30__cv_model_registry.sql` + `JpaCvProfileRepository`/`JpaCvModelRepository`/`JpaTrainingRunRepository` implementing W1's/W4-domain's ports; `storage/persistence` green, 260 tests total, up from 237 (see Handoffs) |
-| W5 | | pending W2+W4 | | |
+| W5 | spring-integrator | built, uncommitted | | `station/vision-api`/`station/vision-app` wiring: new `CvProfileController` (8 handlers, 11 new DTOs), widened `GET /api/cv/models` (registry-backed when on), `GET /api/cv/registry/models` deleted (folded in), `POST /api/cv/registry/rollback` added, `TrainingJobController` gained `GET /api/cv/training/runs`[/{runId}] + `DatasetRepositoryPort` collaborator, new unconditional `CvProfileWiringConfiguration`, `modelRegistryPort`/`modelRegistryService` moved onto their own `vision.cv.registry.enabled` switch (defaults to `vision.cv.enabled`, decoupled from `vision.training.enabled`). `storage/persistence` 260 (unchanged, read-only), `vision-api` 932 (+31 from 901), `vision-app` 278 (+1 net over pre-W5, after fixing 2 wiring-test regressions the registry-decoupling default caused — see Handoffs) — all green, default-config bar held |
 | W6 | web-ui | built, uncommitted | | `/vision/profiles` page (list/editor/bindings/coverage) + `CvProfile*`/`EffectiveCvProfile`/`CvCoverage*`/`TrainingRun*` TS types + 8 new `VisionApi` methods; `detection-settings.*` deleted, `/settings/detection` redirects; nav rail gained Profiles (see Handoffs) |
 | W7 | web-ui | built, uncommitted | | Fly/Live/Wall CV dual-write removed; Vision drawer "From profile" line + `canManageOrg`-gated "Save to this asset's profile"; H6 stream-config readback; H12 one shared `declutterLevel`; H8 dead `LiveFacade.onConfidence/onFps/onModel` deleted (see Handoffs) |
 | W8 | web-ui | built, uncommitted | | Model registry rewrite (status/runtime/availability/metrics/provenance chips, source-honesty notice, `canAdministerRegistry`-gated Promote/Roll back); 3 new `VisionApi` methods (`promoteModel` widened, `rollbackModel`, `getTrainingRuns`/`getTrainingRun`); new `RunHistoryPage`/`RunDetailPage` (`manage/training/runs[/:runId]`, `orgGuard`); shared `<vision-cv-subnav>` across Models/Labeling/Training (see Handoffs) |
@@ -900,3 +900,66 @@ persistence/application-service ports, and then a live end-to-end verification o
 wave (and W6/W7) called against a real server — nothing here has been exercised against a running
 backend; every response shape is coded against the plan's own frozen §5.2 contract plus the real DTOs
 read directly off W5's uncommitted files on this shared tree.
+
+### W5 → (closing)
+
+Write scope held exactly as launched: `station/vision-api/**`, `station/vision-app/**` (incl.
+`application.yaml`), both modules' `MODULE.md`, this file. Never touched `contexts/vision-perception`,
+`contexts/vision-learning`, `contexts/vision-warehouse`, or `storage/persistence` (all read-only,
+already built by W1-W4/W3) — confirmed via `git status` throughout, same shared-tree discipline W6/W7/W8
+each documented. Never touched `station/vision-web` (only read it, for W6/W7/W8's own frozen shapes and
+to confirm no interference with the concurrent registry/training-UI background agent noted mid-wave).
+
+**Endpoints built, all 8 §5.2 rows**: `GET`/`POST`/`PUT`/`DELETE /api/cv/profiles`[/{id}] (new
+`CvProfileController`), `PUT`/`DELETE /api/cv/bindings`, `GET /api/cv/profiles/effective?assetId=`,
+`GET /api/cv/coverage`; widened `GET /api/cv/models` (registry-backed roster when
+`vision.cv.registry.enabled`, else the static config catalogue, never errors); `GET /api/cv/registry/models`
+**deleted** (folded into the widened `/api/cv/models` per plan §8 OQ5); `POST /api/cv/registry/rollback`
+added alongside the existing `promote`; `GET /api/cv/training/runs`[/{runId}] added to
+`TrainingJobController`. **`CvModelResponse.java`/`PromotionResultResponse.java` were not touched in
+this closing segment** — both were already complete from an earlier W5 segment, before W8 read them
+directly off this shared tree; W8's own handoff note above (§"1. Three `VisionApi` endpoints") already
+confirms it read the real shapes rather than guessing, so no drift is expected, but **neither side has
+run a live end-to-end check against a running server** — every W5 assertion below is MockMvc-level
+(mocked application services), same as every other controller test in this module; a real end-to-end
+smoke test against a booted `vision-app` + Postgres + the web client is the one thing this wave (and
+W6/W7/W8) still has not done.
+
+**W2's deviations, confirmed implemented as decided**: deviation 3 (explicit override — resolve-then-fold
+happens in `CvProfileController`/`StreamDetectionSupport` at the API layer, `vision-perception` never
+folds a caller override in itself); deviation 2 (`effective`/`coverage` both receive `platformDefault:
+PipelineConfig` as a controller constructor param — the same bean `CvWiring#streamDefaultConfig`
+supplies to `StreamDetectionSupport` — and pass it down explicitly; `CvProfileService` never invents one
+internally); deviation 4 (no fork endpoint — `CvProfileService#fork` exists domain-side with no HTTP
+surface; `POST /api/cv/profiles/{id}/fork` is a clean future addition, nothing here blocks it).
+
+**One access-tag correction worth flagging for any doc/UI wave still trusting the old shape**:
+`ModelRegistryController#promote`/`#rollback` are gated `canAdminister()` (ADMIN/unbounded only), not
+`canManageOrg()` — `station/vision-api/MODULE.md`'s endpoint table had this wrong (said `manageOrg`)
+before this closing segment fixed it; W8's own frontend gating (`canAdministerRegistry`, per its own
+handoff above) already matched the real, narrower check, so no frontend behavior changes, only the
+stale doc row.
+
+**Two wiring-test regressions found and fixed in this closing segment** (both were pending items
+carried from an earlier W5 segment, not new bugs): `VisionCvPropertiesTest`'s direct
+`new VisionCvProperties(...)` calls needed a trailing arg for the new `Profiles` record component
+(21st positional parameter); `vision.cv.registry.enabled`'s "follows `vision.cv.enabled`, decoupled from
+`vision.training.enabled`" default (this wave's own design, `application.yaml`'s
+`registry.enabled: ${vision.cv.enabled:false}` placeholder) flipped two wiring-test assertions written
+against the *old* coupling — `CvEnabledWiringTest` (renamed/inverted one assertion: CV-only now wires the
+registry by default) and `TrainingEnabledWiringTest` (needed an explicit `vision.cv.registry.enabled=true`
+added to its `@SpringBootTest` properties, since training-only no longer implies it). New
+`CvRegistryExplicitOptOutWiringTest` proves the opt-out escape hatch. Full detail + the exact assertions
+changed: `station/vision-app/MODULE.md`'s own "CV-SETTINGS wave W5" entry.
+
+**Final verify, all green** (docker ran for real, not skipped): `storage/persistence` **260**
+(unchanged, read-only), `station/vision-api` **932** (+31 from the pre-W5 baseline of 901),
+`station/vision-app` **278**. Default-config bar held: every pre-existing suite that didn't touch a
+changed behavior stayed green untouched; the two flipped assertions were pinning behavior this wave's
+own design deliberately changed, fixed rather than silenced or deleted.
+
+**Deferred, next wave's call**: the live end-to-end smoke test noted above; a `POST
+/api/cv/profiles/{id}/fork` endpoint if a future UI wave wants server-side forking instead of
+client-side copy-then-create; `TrainingRunResponse`'s two informational DTO/wire deviations
+(`message` dropped, `loss`/`map50` boxed-but-never-null) stay open until/unless a `contexts/vision-learning`
+change closes the gap — out of this wave's read-only scope for that context.

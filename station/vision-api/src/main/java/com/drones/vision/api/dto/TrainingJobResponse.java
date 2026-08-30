@@ -12,7 +12,7 @@ import java.time.Instant;
  * <p>No {@code @JsonInclude(NON_NULL)} here — every {@link TrainingJobView} field is always
  * present (its own compact constructor guarantees non-null/non-blank values, defaulting to {@code
  * 0}/{@code ""} before the first progress message arrives), the same "no nullable fields" posture
- * {@link RegisteredModelResponse} takes.
+ * {@link PromoteModelRequest} takes.
  *
  * @param jobId       the id {@code POST /api/datasets/{id}/train} returned; poll it via {@code GET
  *                    /api/training/jobs/{jobId}}

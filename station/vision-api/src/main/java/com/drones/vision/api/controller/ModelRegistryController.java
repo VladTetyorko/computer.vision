@@ -1,47 +1,52 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.PromoteModelRequest;
-import com.drones.vision.api.dto.RegisteredModelResponse;
-import com.drones.vision.api.dto.RegisteredModelsResponse;
+import com.drones.vision.api.dto.PromotionResultResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.learning.application.ModelRegistryService;
-import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.learning.application.PromotionResult;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for the CV model registry (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2) — the
- * ingest/promote control plane that sits behind {@link ModelRegistryService}: {@code GET
- * /api/cv/registry/models} lists every known model reference and which one is active, {@code POST
- * /api/cv/registry/models/{id}/promote} promotes one to production.
+ * Driving REST adapter for the CV model registry's promote/rollback control plane
+ * (docs/plans/done/CV-TRAINING-PLAN.md §7/§8 Phase 2, joined/governed per docs/plans/active/CV-SETTINGS-PLAN.md
+ * §3.2/§5.2) — {@code POST /api/cv/registry/models/{id}/promote} promotes one model to production,
+ * {@code POST /api/cv/registry/rollback} restores whichever model that promotion demoted.
  *
- * <p>Gated by {@code vision.training.enabled} (default {@code false}), same as {@link
- * DatasetController}/{@link LabelingController} — this whole controller is absent from the context
- * when off, so every route 404s like any other unmapped path.
+ * <p>Gated by {@code vision.cv.registry.enabled} (docs/plans/active/CV-SETTINGS-CONTEXT.md's W4-app
+ * &rarr; W5 handoff) — no longer {@code vision.training.enabled}: this whole controller is absent
+ * from the context, every route 404ing like any other unmapped path, when off. That flag defaults to
+ * {@code vision.cv.enabled}'s own value (application.yaml's {@code registry.enabled:
+ * ${vision.cv.enabled:false}} placeholder), so a deployment that already turned detection on gets the
+ * registry for free unless it explicitly opts out.
  *
- * <p><strong>Not the same roster as {@link CvModelsController}</strong>: that endpoint ({@code GET
- * /api/cv/models}) serves a static, config-backed picker for the Fly cockpit's model dropdown; this
- * one is the dynamic registry — every model reference cv-service actually knows about (across
- * training runs/stages), sourced live over gRPC ({@code GrpcModelRegistryPort}, wired in
- * vision-app), and the one place a model gets promoted to production.
+ * <p><strong>{@code GET /api/cv/registry/models} no longer exists</strong> — the roster read folded
+ * into {@link CvModelsController}'s widened {@code GET /api/cv/models} (docs/plans/active/CV-SETTINGS-PLAN.md
+ * §8 OQ5: one roster read, tagged with where it came from, rather than two separate endpoints for a
+ * static picker and a dynamic registry).
  *
- * <p>Error mapping is entirely {@link ModelRegistryService#promote}'s own exceptions surfacing
- * through {@link ApiExceptionHandler}: {@link com.drones.vision.platform.AccessDeniedException}
- * (caller may not manage the organization) → 403; {@link IllegalStateException} (cv-service
- * refuses the promotion — e.g. an unknown model id, "rsync the artifact first" — or no registry
- * reachable at all) → 409; {@link IllegalArgumentException} ({@link ModelRef}'s own blank
- * {@code id}/{@code version} check) → 400. {@link #models()} never throws.
+ * <p><strong>Not the same roster as {@link CvModelsController}</strong>: that endpoint serves any
+ * authenticated caller a read-only roster (falling back to the static config catalogue when this
+ * controller is absent or the worker is unreachable); this one is the mutation surface — promote and
+ * rollback both require {@link com.drones.vision.platform.VisibilityScope#canAdminister()}, ADMIN
+ * only (see {@link ModelRegistryService}'s own javadoc, "Scope").
+ *
+ * <p>Error mapping is entirely {@link ModelRegistryService#promote}/{@link
+ * ModelRegistryService#rollback}'s own exceptions surfacing through {@link ApiExceptionHandler}:
+ * {@link com.drones.vision.platform.AccessDeniedException} (caller may not administer) → 403; {@link
+ * IllegalStateException} (cv-service refuses the promotion, or {@link #rollback} has no previously-
+ * retired model to restore) → 409; {@link IllegalArgumentException} ({@code modelId}/{@code version}
+ * blank, {@link #promote} only) → 400.
  */
 @RestController
-@ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "vision.cv.registry", name = "enabled", havingValue = "true")
 public class ModelRegistryController {
 
     private final ModelRegistryService modelRegistryService;
@@ -54,30 +59,30 @@ public class ModelRegistryController {
     }
 
     /**
-     * Lists every known model reference, marking which one (if any) is currently active. Any
-     * authenticated caller may read this — see {@link ModelRegistryService}'s own javadoc, "Scope".
+     * Promotes a model to production: sets it {@code LIVE} and demotes whichever row was previously
+     * {@code LIVE} to {@code RETIRED}. Requires the caller to administer the organization (ADMIN).
      *
-     * @return the registry snapshot
+     * @param id      the model identifier, from the path
+     * @param request carries the {@code version} to resolve the full model reference
+     * @return the promotion outcome
      */
-    @GetMapping("/api/cv/registry/models")
-    public RegisteredModelsResponse models() {
-        List<RegisteredModelResponse> models =
-                modelRegistryService.models().stream().map(RegisteredModelResponse::from).toList();
-        return new RegisteredModelsResponse(models);
+    @PostMapping("/api/cv/registry/models/{id}/promote")
+    public PromotionResultResponse promote(@PathVariable String id, @RequestBody PromoteModelRequest request) {
+        PromotionResult result =
+                modelRegistryService.promote(id, request.version(), currentUser.userId(), currentUser.scope());
+        return PromotionResultResponse.from(result);
     }
 
     /**
-     * Promotes a model reference to production. Requires the caller to manage the organization
-     * (any manager/admin).
+     * Restores whichever model {@link #promote}'s most recent call demoted to {@code RETIRED} back to
+     * {@code LIVE}, retiring the current one in its place. Requires the caller to administer the
+     * organization (ADMIN).
      *
-     * @param id      the model identifier, from the path
-     * @param request carries the {@code version} to resolve the full {@link ModelRef}
-     * @return the promoted reference, {@code active} always {@code true} on success
+     * @return the rollback outcome
      */
-    @PostMapping("/api/cv/registry/models/{id}/promote")
-    public RegisteredModelResponse promote(@PathVariable String id, @RequestBody PromoteModelRequest request) {
-        ModelRef ref = new ModelRef(id, request.version());
-        modelRegistryService.promote(ref, currentUser.userId(), currentUser.scope());
-        return new RegisteredModelResponse(ref.id(), ref.version(), true);
+    @PostMapping("/api/cv/registry/rollback")
+    public PromotionResultResponse rollback() {
+        PromotionResult result = modelRegistryService.rollback(currentUser.userId(), currentUser.scope());
+        return PromotionResultResponse.from(result);
     }
 }
