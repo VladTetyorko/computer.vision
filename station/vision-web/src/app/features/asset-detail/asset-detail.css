@@ -29,14 +29,22 @@
     background: transparent;
 }
 
-/* ---- Registration/tail number inline edit (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) --------------- */
+/* ---- Registration display row (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) --------------------------- */
 
 .registration-row {
     gap: var(--space-8);
 }
 
-.registration-edit input {
-    max-width: 12rem;
+/* ---- Identity inline edit (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave W4) — four fields in the
+   same narrow side panel the old single-field `.registration-edit` used; `.inline-form`'s own
+   `flex: 1 1 12rem` (src/styles.css-adjacent, this file's own rule above) would make each of the
+   four fields fight for a 12rem minimum in a panel that's rarely wider than ~22rem, so each gets a
+   smaller floor here instead — they still wrap one-per-line on the narrowest viewports (mobile),
+   same "collapse dense controls" contract as every other multi-field form in this app. */
+.identity-edit input {
+    min-width: 7rem;
+    flex: 1 1 7rem;
+    max-width: 10rem;
 }
 
 /* ---- Attributes editor (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3 — advanced mode) ------------------ */

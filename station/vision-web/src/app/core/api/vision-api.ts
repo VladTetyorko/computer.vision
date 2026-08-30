@@ -19,6 +19,7 @@ import type {
   Category,
   CorrectionsResponse,
   CreateAssetRequest,
+  CreateCategoryRequest,
   CreateDatasetRequest,
   CreateGroupRequest,
   CreateDrawingRequest,
@@ -26,6 +27,7 @@ import type {
   CreateMaintenanceRecordRequest,
   CreateMarkRequest,
   CreateUserRequest,
+  CustodyActionRequest,
   CvModelsResponse,
   CvTrackersResponse,
   Dataset,
@@ -96,6 +98,7 @@ import type {
   TrainingJobResponse,
   TrainingJobsResponse,
   TrainingSample,
+  UpdateCategoryRequest,
   UpdateLiveTopicsRequest,
   UpdateStreamConfigRequest,
   UsageRecording,
@@ -295,6 +298,24 @@ export class VisionApi {
   }
 
   /**
+   * Creates a new category (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's Categories table write
+   * half, wave W4) — `CategoryController#create`, `canManageOrg`-gated server-side (`403` for a
+   * pilot; the Categories tab's own create form is hidden from one first, via `orgGuard`'s same
+   * `canManageOrg` check, so this is belt-and-suspenders, not the primary gate).
+   */
+  createCategory(request: CreateCategoryRequest): Promise<Category> {
+    return firstValueFrom(this.http.post<Category>('/api/categories', request));
+  }
+
+  /**
+   * Replaces an existing category's mutable fields — a whole-record `PUT`, not a patch (see
+   * {@link UpdateCategoryRequest}'s own doc comment). `canManageOrg`-gated server-side.
+   */
+  updateCategory(id: string, request: UpdateCategoryRequest): Promise<Category> {
+    return firstValueFrom(this.http.put<Category>(`/api/categories/${encodeURIComponent(id)}`, request));
+  }
+
+  /**
    * The manager page's KPI tile row (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — lifetime
    * flight-utilization aggregates, distinct from {@link getAsset}'s `recentUsages` (a capped
    * recent list). 404 for an unknown asset, same as {@link getAsset}; the caller degrades its own
@@ -352,6 +373,34 @@ export class VisionApi {
     return firstValueFrom(
       this.http.post<AssetDetails>(`/api/assets/${encodeURIComponent(assetId)}/inventory`, request),
     );
+  }
+
+  /**
+   * `ISSUE` (hands an in-stock asset to a custodian) or `RETURN` (brings an issued one back to
+   * stock) — `AssetInventoryController#custody` (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave
+   * W3/W4). Returns the asset's full `AssetDetails`, the same response shape {@link
+   * setAssetInventory} returns. `canManage`-gated, `403` audited.
+   *
+   * The onboarding wizard's Hand-over step's "Issue to" action calls this, then separately calls
+   * {@link assignPilot} — `issue` alone does not create a pilot assignment (verified by reading
+   * `DefaultAssetCustodyService#issue`, which only touches `Custody`/`InventoryState`).
+   */
+  setAssetCustody(assetId: string, request: CustodyActionRequest): Promise<AssetDetails> {
+    return firstValueFrom(
+      this.http.post<AssetDetails>(`/api/assets/${encodeURIComponent(assetId)}/custody`, request),
+    );
+  }
+
+  /**
+   * The fleet-wide CSV export's own URL (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's Export
+   * action, wave W4) — `InventoryExportController#export`, `GET /api/inventory/export?format=csv`.
+   * A plain file download (`Content-Disposition: attachment; filename="inventory.csv"`), not
+   * promise-returning — same pattern as {@link afterActionArchiveUrl}: the Inventory page's page-bar
+   * action binds this straight to `<a [href]="…" download>`, never through `HttpClient`. `format`
+   * is the only query parameter the endpoint accepts (`csv` is the only supported value today).
+   */
+  inventoryExportUrl(format = 'csv'): string {
+    return `/api/inventory/export?format=${encodeURIComponent(format)}`;
   }
 
   usageTelemetry(usageId: string, limit = 200): Promise<TelemetrySample[]> {

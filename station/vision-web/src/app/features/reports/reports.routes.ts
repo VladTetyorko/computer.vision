@@ -1,21 +1,19 @@
-import type { Routes } from '@angular/router';
-import { orgGuard } from '../../core/org/org-guard';
+import { inject } from '@angular/core';
+import { Router, type Routes } from '@angular/router';
 
 /**
- * `/manage/reports` (docs/plans/done/UI-REDESIGN-PLAN.md Wave 4) — own lazy chunk, split per
- * vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8). Spread inside `app.routes.ts`'s
- * `authGuard`-wrapped children group. `orgGuard` (`core/org/org-guard.ts`) added per
- * docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 wave W1 rule 5 — the nav entry (`nav-entries.ts`'s
- * "Inventory reports", fleet group) is `managerOnly`, so the route now agrees (this withdraws the
- * "no extra role gate, mirrors `/command`" note this doc comment used to carry — `/command` itself
- * stays ungated, this page does not). Replaces the `ComingSoon` scaffold `hubs.routes.ts` used to
- * route this path to.
+ * `/manage/reports` — **deleted**, its one surviving section (the "Fleet at a glance" KPI strip)
+ * folded into the Inventory page, above the Vehicles tab (docs/plans/active/WAREHOUSE-UX-PLAN.md
+ * §3.3, wave W4; `features/inventory/inventory-page-logic.ts`'s own doc comment has the full "what
+ * wasn't carried forward" note). No `?tab=` param — the KPI strip has no tab of its own, it sits
+ * above whichever tab is active, so this redirects to plain `/assets` (defaulting to Vehicles, same
+ * as a bare `/assets` always has). See `features/devices/devices.routes.ts`'s identical doc comment
+ * for why this is a `RedirectFunction` rather than a plain string, and why `orgGuard` moved off the
+ * route.
  */
 export const REPORTS_ROUTES: Routes = [
   {
     path: 'manage/reports',
-    title: 'Inventory reports · Vision',
-    canActivate: [orgGuard],
-    loadComponent: () => import('./reports').then((m) => m.ReportsPage),
+    redirectTo: () => inject(Router).createUrlTree(['/assets']),
   },
 ];

@@ -25,13 +25,20 @@ import type { Routes } from '@angular/router';
  * arrays without a shadowing risk (see `app.routes.ts`'s own doc comment for the one ordering
  * constraint that *does* still matter, unrelated to this file).
  *
- * **2. Four `ComingSoon` scaffold routes** — the areas docs/plans/done/NAV-IA-REDESIGN-PLAN.md's Additions table
- * (and each page's own `docs/extracts/design/*.md`) classifies as pure **SCAFFOLD**: `/operate/missions`,
- * `/monitor/layouts`, `/manage/health`, `/manage/firmware` — each a `data:` object
- * binding straight onto `ComingSoon`'s inputs via `withComponentInputBinding()` (see that component's
- * own class doc), never a new page file. `data: {preload: false}` on all four: a scaffold page is
+ * **2. Three remaining `ComingSoon` scaffold routes** — the areas docs/plans/done/NAV-IA-REDESIGN-PLAN.md's
+ * Additions table (and each page's own `docs/extracts/design/*.md`) classifies as pure **SCAFFOLD**:
+ * `/operate/missions`, `/monitor/layouts`, `/manage/firmware` — each a `data:` object binding
+ * straight onto `ComingSoon`'s inputs via `withComponentInputBinding()` (see that component's own
+ * class doc), never a new page file. `data: {preload: false}` on all three: a scaffold page is
  * exactly the kind of route not worth pre-fetching ahead of a real navigation (mirrors `**`'s own
  * `data: {preload: false}` in `app.routes.ts`).
+ *
+ * **`/manage/health` graduated off this scaffold list** (docs/plans/active/WAREHOUSE-UX-PLAN.md §4, W7's
+ * exit criterion — see `features/roster/roster.routes.ts`'s own "Handoff to W4" doc comment): it now
+ * redirects to `/fleet/maintenance` (`features/maintenance/maintenance.page.ts`, wave W7's real
+ * fleet-wide maintenance triage page). A plain string `redirectTo` — no query param to carry, so
+ * this mirrors `features/warehouse/warehouse.routes.ts`'s `/warehouse` → `assets` precedent, not
+ * `features/devices/devices.routes.ts`'s `RedirectFunction` (that one needs `?tab=` on the target).
  *
  * **`/monitor/replay` is gone (docs/plans/done/IA-TRUTH-PLAN.md §2, U1.2)** — it used to redirect to
  * the flat `/replay` route, then (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F8) to this file's own `ComingSoon`
@@ -77,19 +84,7 @@ export const HUBS_ROUTES: Routes = [
     },
     loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
   },
-  {
-    path: 'manage/health',
-    title: 'Maintenance / health · Vision',
-    data: {
-      preload: false,
-      eyebrow: 'Manage',
-      title: 'Maintenance / health',
-      description: "Maintenance records and health history are coming — Command's attention list already flags today's issues.",
-      nearestLabel: 'Open Command',
-      nearestTo: '/command',
-    },
-    loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
-  },
+  { path: 'manage/health', pathMatch: 'full', redirectTo: 'fleet/maintenance' },
   {
     path: 'manage/firmware',
     title: 'Firmware · Vision',

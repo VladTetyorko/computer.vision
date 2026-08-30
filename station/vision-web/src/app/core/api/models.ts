@@ -746,12 +746,43 @@ export interface GeoPosition {
 /**
  * Mirrors `dto.CategoryResponse`. `parent` is absent for a top-level category.
  * `attributeHints` are UI suggestions, not a rigid schema.
+ *
+ * `connected` (docs/plans/active/WAREHOUSE-UX-PLAN.md D4, wave W3) — whether an asset in this
+ * category must wrap at least one device. Always present on the wire (a primitive boolean, no
+ * `@JsonInclude(NON_NULL)` concern) — the Inventory page's Vehicles/Equipment tab split
+ * (`core/fleet/inventory-logic.ts`) reads it directly, never a category-name heuristic.
  */
 export interface Category {
   readonly slug: string;
   readonly name: string;
   readonly parent?: string;
   readonly attributeHints: readonly string[];
+  readonly connected: boolean;
+}
+
+/**
+ * Request body for `POST /api/categories` — mirrors `dto.CreateCategoryRequest`
+ * (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's Categories table write half, wave W3/W4).
+ */
+export interface CreateCategoryRequest {
+  readonly id: string;
+  readonly name: string;
+  readonly parentId?: string;
+  readonly connected: boolean;
+  readonly attributeHints?: readonly string[];
+}
+
+/**
+ * Request body for `PUT /api/categories/{id}` — mirrors `dto.UpdateCategoryRequest`. A
+ * whole-record replacement, not a partial patch (that DTO's own javadoc: `parentId` rules out the
+ * usual "absent means unchanged" convention) — callers must resend every field, not just the one
+ * they changed.
+ */
+export interface UpdateCategoryRequest {
+  readonly name: string;
+  readonly parentId?: string;
+  readonly connected: boolean;
+  readonly attributeHints?: readonly string[];
 }
 
 /**
@@ -1052,6 +1083,20 @@ export interface InventoryActionRequest {
   readonly summary?: string;
 }
 
+/** Mirrors the two actions `POST /api/assets/{id}/custody` accepts (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave W3/W4). */
+export type CustodyAction = 'ISSUE' | 'RETURN';
+
+/**
+ * Mirrors `dto.CustodyActionRequest` — `ISSUE` hands an in-stock asset to a custodian (`custodianId`
+ * required, `location` optional); `RETURN` brings an issued asset back to stock (both fields
+ * ignored). Response is the asset's `AssetDetails`, same shape as {@link InventoryActionRequest}'s.
+ */
+export interface CustodyActionRequest {
+  readonly action: CustodyAction;
+  readonly custodianId?: string;
+  readonly location?: string;
+}
+
 /**
  * Mirrors `dto.StartSimulationRequest.RouteMode` values (docs/main/CYCLES-PLAN.md §7, CT-a's
  * `application.RouteMode`), matched case-insensitively server-side but always sent lowercase here.
@@ -1222,6 +1267,16 @@ export interface CategoryCounts {
   /** Only non-zero when the request asked for `includeArchived=true`. */
   readonly deleted: number;
   readonly streaming: number;
+  /**
+   * `total`'s subset by **effective** inventory state (docs/plans/active/WAREHOUSE-UX-PLAN.md D6,
+   * wave W3) — `issued`/`inField` already resolved from custody/open-usage server-side, never the
+   * raw stored value. Always present (no `@JsonInclude(NON_NULL)` concern, all `int`).
+   */
+  readonly inStock: number;
+  readonly issued: number;
+  readonly inField: number;
+  readonly maintenance: number;
+  readonly retired: number;
 }
 
 /**

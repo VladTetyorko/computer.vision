@@ -28,3 +28,56 @@ th.col-num,
 td.col-num {
   text-align: right;
 }
+
+/* ---- Create form / inline row edit (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's write half,
+   wave W4) — a plain card/inline row, never a modal: four fields is not enough to justify blocking
+   the rest of the page. ------------------------------------------------------------------------ */
+
+.create-heading {
+  margin: 0 0 var(--space-16);
+  font-size: 0.95rem;
+}
+
+.create-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-16);
+  margin-bottom: var(--space-16);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 12rem;
+}
+
+.field-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.field-error {
+  font-size: 0.78rem;
+  color: var(--color-danger-text);
+}
+
+.field-toggle {
+  padding-bottom: var(--space-8);
+}
+
+.create-actions {
+  display: flex;
+  gap: var(--space-8);
+}
+
+/* The inline edit row's own cell spans every column — its content reuses `.create-fields`/
+   `.create-actions` verbatim, so only the cell's own padding needs a page-local rule. */
+.edit-row td {
+  padding: var(--space-16);
+  background: var(--panel-raised);
+}

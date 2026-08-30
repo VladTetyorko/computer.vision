@@ -32,7 +32,11 @@ const ROUTED_PAGES = [
   'fly/cockpit',
   'command/command',
   'asset-detail/asset-detail',
-  'assets/assets',
+  // `/assets` (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 rule 3/§3.3, wave W4) — the old, deleted
+  // `AssetsPage` folded into a tabbed `InventoryPage`; `devices/devices` stays listed even though its
+  // own route is now a redirect (`features/devices/devices.routes.ts`) — `DevicesPage` is still
+  // mounted as the Links tab's content, still page-shaped, and still worth guarding.
+  'inventory/inventory',
   'devices/devices',
   'live/live',
   'wall/wall',

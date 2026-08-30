@@ -146,8 +146,12 @@ describe('NAV_MODES', () => {
     });
   });
 
-  describe('FLEET — three renames plus three carried-over entries (rule 4; see this file\'s own class doc for the carried-over three)', () => {
+  describe('FLEET — three W1 renames, plus W4 folds three entries into Inventory and adds Maintenance', () => {
     const fleet = NAV_MODES.find((mode) => mode.id === 'fleet')!;
+
+    it('has exactly Inventory, Add vehicle, Crew, Maintenance, in that order', () => {
+      expect(fleet.entries.map((entry) => entry.name)).toEqual(['Inventory', 'Add vehicle', 'Crew', 'Maintenance']);
+    });
 
     it('Assets is renamed to "Inventory", stays ungrouped and ungated', () => {
       const inventory = fleet.entries.find((entry) => entry.to === '/assets');
@@ -173,18 +177,28 @@ describe('NAV_MODES', () => {
       expect(fleet.entries.some((entry) => entry.name === 'Pilots / roster')).toBe(false);
     });
 
-    it('Asset categories, Inventory reports and Devices carry over unrenamed, all managerOnly', () => {
-      const carried: readonly [string, string][] = [
+    /**
+     * Wave W4 (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3) folds all three of the old carried-over
+     * entries into `InventoryPage`'s own tabs — Asset categories → `?tab=categories`, Devices →
+     * `?tab=links`, Inventory reports → the KPI strip above Vehicles (no tab of its own). None of the
+     * three keeps a standalone nav entry; their routes still resolve (as redirects into `/assets`),
+     * just not from the rail.
+     */
+    it('Asset categories, Inventory reports and Devices no longer have their own nav entry', () => {
+      for (const [to, name] of [
         ['/manage/categories', 'Asset categories'],
         ['/manage/reports', 'Inventory reports'],
         ['/devices', 'Devices'],
-      ];
-      for (const [to, name] of carried) {
-        const entry = fleet.entries.find((candidate) => candidate.to === to);
-        expect(entry, to).toBeDefined();
-        expect(entry?.name).toBe(name);
-        expect(entry?.managerOnly, name).toBe(true);
+      ] as const) {
+        expect(fleet.entries.some((entry) => entry.to === to || entry.name === name), name).toBe(false);
       }
+    });
+
+    it('Maintenance is new this wave (W4 — the page itself shipped in W7, this nav entry did not), targets /fleet/maintenance, managerOnly', () => {
+      const maintenance = fleet.entries.find((entry) => entry.to === '/fleet/maintenance');
+      expect(maintenance).toBeDefined();
+      expect(maintenance?.name).toBe('Maintenance');
+      expect(maintenance?.managerOnly).toBe(true);
     });
   });
 
@@ -238,17 +252,16 @@ describe('NAV_MODES', () => {
 
   /**
    * Entry-count regression guard (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1's own illustrative
-   * "25 → 15 for a manager, 11 → 10 for a pilot"). That figure is the *eventual*, post-wave-W7 count
-   * — it bakes in `Maintenance` (W7, not built) and the merged Inventory page's tab consolidation
-   * (W4, not built); summing the plan's own §3.1 itemization for "15" independently gives 17-18, not
-   * 15, even before Asset categories/Inventory reports/Devices are placed anywhere (the plan's own
-   * §3.1 mermaid diagram never names a group for any of the three). This wave (W1) is a pure IA
-   * regroup, not a feature removal, so those three fully-built pages stay in the rail (`fleet` — see
-   * `nav-entries.ts`'s own class doc) rather than vanishing with no replacement. The PILOT figure
-   * below does land exactly on the plan's own "10" (every item it names for a pilot is accounted
-   * for); the MANAGER figure is the TRUE count this wave produces, not the plan's estimate.
+   * "25 → 15 for a manager, 11 → 10 for a pilot"). Wave W1 landed the manager at the TRUE count of 20
+   * (not the plan's own "15" estimate — see the W1-era version of this comment for the accounting).
+   * **Wave W4 moves the manager count to 18** — three carried-over `managerOnly` entries fold into
+   * Inventory's own tabs/KPI strip (Asset categories, Inventory reports, Devices: −3), and one new
+   * `managerOnly` entry (Maintenance, W7) joins Fleet (+1): 20 − 3 + 1 = 18. The PILOT count is
+   * unaffected — none of the four changed entries was ever pilot-visible (Categories/Devices/Reports
+   * were `managerOnly`; a pilot's `visibleInventoryTabs()` never showed Links/Categories inside
+   * Inventory either) — it still lands on the plan's own "10".
    */
-  it('a PILOT sees exactly the plan\'s own 10 entries; a MANAGER/ADMIN sees the true full set (20, not the plan\'s illustrative "15" — see this test\'s own doc comment)', () => {
+  it('a PILOT sees exactly the plan\'s own 10 entries; a MANAGER/ADMIN sees 18 (20 − 3 folded into Inventory + 1 new Maintenance — see this test\'s own doc comment)', () => {
     const pilotVisible = visibleEntries(false);
     const managerVisible = visibleEntries(true);
 
@@ -265,7 +278,7 @@ describe('NAV_MODES', () => {
       'Settings',
     ]);
     expect(pilotVisible.length).toBe(10);
-    expect(managerVisible.length).toBe(20);
+    expect(managerVisible.length).toBe(18);
   });
 });
 

@@ -25,6 +25,11 @@ describe('flattenRoutes', () => {
     expect(flattenRoutes(routes)).toEqual([{ path: '/', kind: 'redirect' }]);
   });
 
+  it('treats a RedirectFunction (WAREHOUSE-UX W4\'s query-param-carrying redirects) the same as a static string redirect', () => {
+    const routes: Routes = [{ path: 'devices', redirectTo: () => '/assets?tab=links' }];
+    expect(flattenRoutes(routes)).toEqual([{ path: '/devices', kind: 'redirect' }]);
+  });
+
   it('keeps a multi-segment literal path (e.g. assets/:assetId/replay/:usageId) intact', () => {
     const routes: Routes = [{ path: 'assets/:assetId/replay/:usageId', component: Dummy }];
     expect(flattenRoutes(routes)).toEqual([{ path: '/assets/:assetId/replay/:usageId', kind: 'component' }]);

@@ -1,27 +1,25 @@
-import type { Routes } from '@angular/router';
-import { orgGuard } from '../../core/org/org-guard';
+import { inject } from '@angular/core';
+import { Router, type Routes } from '@angular/router';
 
 /**
- * The `/devices` route — the raw device table/grid (this cycle's Assets/Devices/Warehouse inventory
- * restructure — no dedicated `docs/*-PLAN.md`, see `vision-web/MODULE.md`'s own changelog entry).
- * Used to also serve the asset-first list and answer to a `/warehouse` alias (see the git history of
- * this file — `docs/plans/done/UX-REWORK-PLAN.md §U-d` renamed the page "Warehouse" and added that alias); both
- * moved out once Assets and Devices earned separate pages — the asset-first list is now
- * `features/assets/**`'s own `/assets` route, and `/warehouse` itself is a two-tile launcher
- * (`features/warehouse/**`). The path stays `/devices` for link-compatibility — every existing
- * `router.navigate(['/devices', …])`/`routerLink="/devices"` call site across this app (and any
- * bookmark) keeps working verbatim, still resolving to this same raw-device page. Split into its own
- * file per vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8) — see `features/fly/fly.routes.ts`'s
- * doc comment for why. `orgGuard` (`core/org/org-guard.ts`) added per
- * docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 wave W1 rule 5 — the nav entry (`nav-entries.ts`'s "Devices",
- * fleet group) is `managerOnly`, so the route now agrees: a pilot who guesses/bookmarks the URL is
- * redirected to `/fly` instead of reaching a page the rail never shows them.
+ * `/devices` — **folded into the Inventory page's Links tab** (docs/plans/active/WAREHOUSE-UX-PLAN.md
+ * §3.1 rule 3/§3.3, wave W4). `DevicesPage` itself is unchanged and still lives at
+ * `features/devices/**` — `InventoryPage`'s Links tab imports and mounts it verbatim, this route
+ * just forwards here so every existing `router.navigate(['/devices', …])`/`routerLink="/devices"`
+ * call site and bookmark keeps landing somewhere real. A `RedirectFunction` (not a plain string) so
+ * the query param survives the hop — `Route.redirectTo` accepts `(redirectData) =>
+ * MaybeAsync<string | UrlTree>`, run in an injection context, exactly like a `canActivate` guard.
+ *
+ * No `orgGuard` here (unlike before this wave): a pilot who lands on `?tab=links` is not bounced to
+ * `/fly` — `InventoryFacade#setTabFromQueryParam` clamps an unauthorized tab pick back to `vehicles`
+ * once inside the page, the same "a user without rights never sees the affordance" rule applied at
+ * the tab-content level rather than the route level (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 rule
+ * 6's "keep `orgGuard` on tab content for links/categories" — the tab bar itself is the gate now,
+ * `visibleInventoryTabs`/`isInventoryTabVisible` in `core/fleet/inventory-logic.ts`).
  */
 export const DEVICES_ROUTES: Routes = [
   {
     path: 'devices',
-    title: 'Devices · Vision',
-    canActivate: [orgGuard],
-    loadComponent: () => import('./devices').then((m) => m.DevicesPage),
+    redirectTo: () => inject(Router).createUrlTree(['/assets'], { queryParams: { tab: 'links' } }),
   },
 ];

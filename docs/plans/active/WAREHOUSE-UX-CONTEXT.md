@@ -19,7 +19,7 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | W1 rail | web-ui | done | `3b8a9649` |
 | W2 domain | domain-modeler | done | `47f7eb99` |
 | W3 persistence + API | spring-integrator | done | `5a712e71` |
-| W4 inventory page | web-ui | ready (W1 + W3 both done) | |
+| W4 inventory page | web-ui | done | `<pending — see "docs(warehouse-ux): W4 wave-ledger commit hash" follow-up>` |
 | W5 readiness ← maintenance | application-service | done | `445e145b` |
 | W6 wizard | web-ui | done | `eafb807e` |
 | W7 maintenance + crew | web-ui | done | `cae23506` |
@@ -594,3 +594,111 @@ spec were reviewed by hand and confirmed against the rewritten `onboarding-logic
 `fit-out-logic.ts`/`onboarding-store.ts`/`onboarding-facade.ts` APIs rather than run to green.
 Recommend re-running `npm run test:ci`/`ng build` once `features/inventory/inventory.ts` lands, to
 confirm this wave's own spec files and get a real `add-source` lazy-chunk bundle delta.
+
+## W4 status (Inventory page) — done
+
+Built against W3's contract (§"New/changed DTOs"/"New endpoints" above) and W1's own IA decisions
+(§"W1 notes for W4" above). File scope: `features/inventory/**` (new), `core/fleet/inventory-logic.ts`
+(new), `core/fleet/asset-attributes.ts` (extended), `features/asset-detail/**`,
+`features/categories/**` (extended), `features/devices/**` (read-only mount, unchanged),
+`features/reports/**` (deleted except its route redirect), `features/hubs/**` (nav entries + route
+redirects), `app.routes.ts`, `core/ui/architecture.spec.ts`, plus this file and
+`station/vision-web/MODULE.md`. Did not touch `features/onboarding/**`/`core/onboarding/**` (W6) or
+`features/maintenance/**`/`features/roster/**`/`features/org-settings/**`/`core/maintenance/**` (W7).
+
+**What shipped:**
+- `/assets` is now the **Inventory page** (`InventoryPage`/`InventoryFacade`), tabbed
+  `?tab=vehicles|equipment|links|categories` (default `vehicles`). `features/assets/**` is deleted
+  outright — superseded, not kept as a redirect target (the URL itself is unchanged per OQ4).
+- **Vehicles/Equipment** share one `VehiclesTable` component and one row pipeline
+  (`core/fleet/inventory-logic.ts` + `features/inventory/vehicles-logic.ts`'s `buildVehicleRows`),
+  filtered by `Category#connected` (Vehicles = connected categories, Equipment = the rest). Table:
+  Name/Category/Serial/Readiness/Custodian/State (+Firmware/Hours/Last flown/Links on the Vehicles
+  side only) plus a kebab menu whose verbs (`vehicleRowActions`) are poka-yoke — hidden, never shown
+  disabled — for issue/return/ground/release/retire/fly. Detail pane gained **Identity**
+  (serial/make/model/registration) and **Custody** (custodian/location/since/category) fact groups
+  plus a **Maintenance** drawer (open/closed records, close-in-place, a new-record mini-form) —
+  exactly the three groups WAREHOUSE-UX-PLAN.md §3.3 named.
+- **"Fleet at a glance" KPI strip** now sits above the Vehicles/Equipment tables (ported the
+  `.kpi-tiles` CSS byte-for-byte from the deleted `reports.css`), sourced from the same
+  `GET /api/fleet/summary` W3 shipped. **Export CSV** moved into the page-bar as an action button
+  (`inventoryExportFilename` in `core/fleet/inventory-logic.ts` names the download by tab + date).
+  **Not carried forward:** Reports' "Assets by category" bar chart and "Needs attention" punch
+  list — no plan bullet asked for them on the Inventory page and no replacement chart slot was
+  specced; flagging as a real feature loss, not an oversight.
+- **Links and Categories tabs mount `DevicesPage`/`CategoriesPage` verbatim** (imported components,
+  not copied source) via `<router-outlet>`-free direct template embedding gated on the active tab.
+  Categories gained real create/rename/set-connected mutations this wave (previously read-only) —
+  `CategoriesFacade` now calls the category-mutation endpoints W3 shipped.
+- Role-gating **moved from the route guard to in-page tab visibility**: `isInventoryTabVisible`
+  (`core/fleet/inventory-logic.ts`) hides the Links/Categories tab buttons for non-managers rather
+  than 404ing or redirecting — Vehicles/Equipment stay visible to every role since a pilot needs to
+  see the fleet, just not edit its categories/device links.
+- Routes: `/devices` → `/assets?tab=links`, `/manage/categories` → `/assets?tab=categories`,
+  `/manage/reports` → `/assets` (plain), all as `RedirectFunction`s (not plain strings) so
+  `?tab=` survives the hop; `/manage/health` → `/fleet/maintenance` (plain string, closing W7's own
+  exit criterion below). `nav-entries.ts`: removed the three now-redundant FLEET entries (Asset
+  categories, Inventory reports, Devices — W1's own "drop these in the same commit" note above),
+  added **Maintenance → /fleet/maintenance** (managerOnly) to FLEET, left Crew at `/manage/roster`
+  untouched. Manager count: 20 → 18. Pilot count unchanged at 10.
+
+**Bug found and fixed, not asked for:** `vehicles-table.html`'s Identity fact group read
+`row.asset.identity?.registration` with no fallback to the legacy `attributes.registrationNumber`
+key, while `features/asset-detail/asset-detail-logic.ts`'s pre-existing `effectiveRegistration()`
+already had that fallback for the full Asset Detail page — a pre-D1 asset's registration would have
+shown blank on the Inventory list while still showing correctly on its own detail page. Fixed by
+moving `effectiveRegistration` to `core/fleet/asset-attributes.ts` (second-consumer-to-core, this
+codebase's own established precedent) with a re-export shim left at the old location so
+`asset-detail-logic.ts`'s own import site keeps working verbatim; `VehicleRow` gained a
+`registration` field computed the same way. Net effect: Inventory list and Asset Detail page now
+agree on every asset's registration, always.
+
+**Known visual trade-off, accepted for this wave:** `DevicesPage` and `CategoriesPage` each render
+their own `<vision-page-bar>` internally, so the Links/Categories tabs show two page-bars stacked
+(the Inventory page's own tab strip + the mounted page's bar) rather than one merged bar. Neither
+component's page-bar was extracted into an input this wave — flagging as a follow-up rather than
+reworking two other waves' components under this task's file scope.
+
+**Two backend discrepancies on the Vehicles table, both degrading honestly (`'—'`, never a
+fabricated number):** **Firmware** — no endpoint returns a device's firmware version; the column
+always renders `'—'`. **Hours** — `AssetSummary` carries no cumulative flight-hours field; the
+column always renders `'—'` rather than deriving an estimate from usage records. Both are
+`vision-warehouse`/`vision-flight` territory, not fixed here.
+
+**Handoffs closed this wave:**
+- **W1's own handoff** (§"W1 notes for W4" above): the three redundant FLEET nav entries are gone,
+  replaced by the tabs they used to point at directly.
+- **W7's own exit criterion** (§"W7 status" above, "`/manage/health` route redirects to a real
+  page"): now redirects to `/fleet/maintenance`. **W7's own nav-entry note** ("`nav-entries.ts` will
+  also want a 'Maintenance → /fleet/maintenance' entry... once W4 lands"): added.
+- **W3→W4 handoff's own migration-gap flag** (registration split across `identity.registration` and
+  legacy `attributes.registrationNumber`): closed in commit `280b208e`, already on this branch
+  before this wave's own commit — `station/vision-web/MODULE.md`'s onboarding bullet updated to say
+  so; this wave's `effectiveRegistration` fix (above) is a separate, UI-only consistency bug, not a
+  re-opening of that persistence gap.
+
+**Role-gating:** Links/Categories tabs hidden (not merely disabled) from `MeResponse.topRole` values
+below manager, per `isInventoryTabVisible` above. **Dev parity:** `vision.auth.enabled=false`'s
+unbounded dev admin is topRole-equivalent to ADMIN, so every tab renders exactly as before — no
+special-cased dev branch added. **Degrades honestly:** Firmware/Hours render `'—'`; a failed
+maintenance-record read shows "No maintenance history." rather than blocking the detail pane; a
+failed KPI-strip fetch leaves each tile at `'—'` rather than showing a stale or fabricated number.
+
+**Verify:** `npx tsc --noEmit -p tsconfig.app.json` and `-p tsconfig.spec.json` both clean (zero
+errors), closing out the two W4-owned failures W7's own status section above flagged
+(`inventory.routes.ts`'s then-missing `inventory.ts` and `reports-logic.spec.ts`'s stale
+`CategoryCounts` fixture — both resolved by this wave actually landing the files they were waiting
+on). `npm run test:ci` — **160/160 files, 3042/3042 tests**, the first fully green run since W1's
+154/154, 2968/2968 (W6/W7 both landed against a red whole-project run for the same reason W7's
+status section above documents). `ng build --configuration production` — green, same two
+pre-existing unrelated warnings as prior waves, no new ones. Initial bundle: 413.35 kB → 413.46 kB
+raw (+0.11 kB), 115.86 kB → 115.83 kB transfer (−0.03 kB) vs. W1's last-recorded numbers (the only
+prior wave with a completed build to diff against) — effectively flat. Lazy chunks measured for the
+first time on a successful build (not a delta — W6/W7 never got a green build to measure against):
+`inventory` 81.57 kB / 16.40 kB transfer, `asset-detail` 71.91 kB / 16.12 kB, `onboarding` 98.09 kB /
+23.60 kB, `crew` 35.06 kB / 7.74 kB, `controller-setup` 62.92 kB / 14.84 kB.
+
+**What couldn't be fully absorbed, and why:** Reports' bar chart and needs-attention list (no
+replacement slot specced); the Links/Categories double-page-bar (would require reworking
+`DevicesPage`/`CategoriesPage` internals, out of this wave's file scope); Firmware/Hours (no backing
+data in `vision-warehouse`/`vision-flight` yet).

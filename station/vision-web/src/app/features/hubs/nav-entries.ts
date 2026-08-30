@@ -54,15 +54,15 @@ import type { IconName } from '../../shared/ui/icon-registry';
  * untouched and ungated; they are now reached from a small "Settings" link list on `/settings`
  * (`features/settings/account-settings.html`) instead of from here.
  *
- * **Three entries have no explicit new home named in the WAREHOUSE-UX-PLAN.md §3.1 mermaid diagram —
- * Asset categories, Inventory reports, Devices.** All three are still fully built, working pages; W1 is
- * a pure IA regroup, not a feature removal, so none of them is dropped from the rail the way a genuine
- * `badge: 'soon'` stub is. They join `fleet` — "things and people" is exactly their job (categories and
- * reports are fleet-taxonomy/fleet-reporting; Devices is the raw link table WAREHOUSE-UX-PLAN.md §3.3
- * plans to fold into Inventory's own "Links" tab at wave **W4**, not this one). `nav-entries.spec.ts`
- * documents the resulting manager/pilot entry counts and flags where they diverge from the plan's own
- * illustrative "15/10" (that figure is the *eventual*, post-W7 count with Maintenance and the merged
- * Inventory page folded in — neither exists yet at W1).
+ * **W4 folds Asset categories, Inventory reports, and Devices into Inventory itself** (docs/plans/active/WAREHOUSE-UX-PLAN.md
+ * §3.3) — all three pages are absorbed as `InventoryPage` tabs (`?tab=categories|links`; Reports has
+ * no tab of its own, its one surviving section is the KPI strip above Vehicles) and their standalone
+ * routes now redirect there (`features/categories/categories.routes.ts`, `features/reports/reports.routes.ts`,
+ * `features/devices/devices.routes.ts`). Their three `fleet` nav entries are deleted outright — a
+ * folded-in tab is reached from inside Inventory, never a second rail door to the same content
+ * (this file's own "de-duplicated nav" rule, above). **Maintenance is new this wave** (wave W7,
+ * `features/maintenance/**`) — `/manage/health`'s old `ComingSoon` scaffold is a real page now,
+ * so it earns the nav entry that a `badge: 'soon'` stub never got.
  *
  * **`managerOnly`** — hidden unless `canManageOrg(topRole)` (`core/org/org-logic.ts`, ADMIN/MANAGER) is
  * true, the same gate `shared/ui/identity-chip.ts`'s Organization link and `core/org/org-guard.ts`'s
@@ -185,7 +185,10 @@ export const NAV_MODES: readonly NavMode[] = [
         name: 'Inventory',
         // Renamed from "Assets" (WAREHOUSE-UX-PLAN.md §3.1 rule 4). Still ungated — reading the
         // fleet is not a management action (docs/conclusions/UX-SIMPLIFY-REVIEW.md F3, unchanged by this wave).
-        description: 'Every asset, asset-first — search, filter, and watch, open, or archive.',
+        // Wave W4: one tabbed page now (Vehicles/Equipment/Links/Categories, `?tab=`) — Links and
+        // Categories are gated inside the page itself (a pilot's `visibleInventoryTabs()` never
+        // includes them), not by this nav entry, which stays open to everyone as it always was.
+        description: 'Vehicles, equipment, device links, and categories — one tabbed inventory, plus CSV export.',
         to: '/assets',
       },
       {
@@ -206,29 +209,12 @@ export const NAV_MODES: readonly NavMode[] = [
         managerOnly: true,
       },
       {
-        icon: 'category',
-        name: 'Asset categories',
-        // No new home named in WAREHOUSE-UX-PLAN.md §3.1's mermaid diagram — see this file's own
-        // class doc paragraph on the three carried-over entries. Folds into Inventory's own
-        // "Categories" tab at wave W4; stays its own page and nav entry until then.
-        description: 'Every category, with live counts — creating and editing categories is coming.',
-        to: '/manage/categories',
-        managerOnly: true,
-      },
-      {
-        icon: 'report',
-        name: 'Inventory reports',
-        description: 'A live, read-only fleet dashboard — exportable reports are coming.',
-        to: '/manage/reports',
-        managerOnly: true,
-      },
-      {
-        icon: 'chip',
-        name: 'Devices',
-        // Folds into Inventory's own "Links" tab at wave W4 (WAREHOUSE-UX-PLAN.md §3.3) — stays its
-        // own page and nav entry until then, same reasoning as Asset categories/Inventory reports above.
-        description: 'The raw device table or grid — protocol, URI, lifecycle, and the archived toggle.',
-        to: '/devices',
+        icon: 'wrench',
+        name: 'Maintenance',
+        // New this wave (wave W7, `features/maintenance/**`) — `/manage/health`'s old `ComingSoon`
+        // scaffold redirects here now (`features/hubs/hubs.routes.ts`).
+        description: 'Open and close maintenance/grounding records across the fleet.',
+        to: '/fleet/maintenance',
         managerOnly: true,
       },
     ],
