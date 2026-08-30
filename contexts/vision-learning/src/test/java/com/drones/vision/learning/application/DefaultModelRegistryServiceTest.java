@@ -1,128 +1,295 @@
 package com.drones.vision.learning.application;
 
-import com.drones.vision.platform.AuditAction;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.learning.domain.model.CvModelRecord;
+import com.drones.vision.learning.domain.model.MetricsKind;
+import com.drones.vision.learning.domain.model.ModelAvailability;
+import com.drones.vision.learning.domain.model.ModelMetrics;
+import com.drones.vision.learning.domain.model.ModelProvenance;
+import com.drones.vision.learning.domain.model.ModelRuntime;
+import com.drones.vision.learning.domain.model.ModelStatus;
+import com.drones.vision.learning.domain.model.ModelTaskType;
+import com.drones.vision.learning.domain.port.CvModelRepositoryPort;
+import com.drones.vision.learning.domain.port.ModelRegistryPort;
+import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
-import com.drones.vision.perception.domain.model.ModelRef;
-import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditTrailPort;
-import com.drones.vision.learning.domain.port.ModelRegistryPort;
+import com.drones.vision.platform.VisibilityScope;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import com.drones.vision.platform.AccessDeniedException;
-import com.drones.vision.platform.VisibilityScope;
 
 class DefaultModelRegistryServiceTest {
 
     private FakeModelRegistryPort modelRegistry;
+    private FakeCvModelRepositoryPort cvModelRepository;
+    private ConfigModelCatalog configCatalog;
     private FakeAuditTrailPort auditTrail;
-    private ModelRegistryService service;
+    private MutableClock clock;
+    private DefaultModelRegistryService service;
 
     private final UserId actor = UserId.random();
-    private final ModelRef modelA = new ModelRef("yolo26n", "1");
-    private final ModelRef modelB = new ModelRef("yolo26n", "2");
 
     @BeforeEach
     void setUp() {
         modelRegistry = new FakeModelRegistryPort();
+        cvModelRepository = new FakeCvModelRepositoryPort();
+        configCatalog = new ConfigModelCatalog(List.of(configRow("yolo26n.pt")));
         auditTrail = new FakeAuditTrailPort();
-        service = new DefaultModelRegistryService(modelRegistry, auditTrail);
+        clock = new MutableClock(Instant.parse("2026-08-30T00:00:00Z"));
+        service = new DefaultModelRegistryService(modelRegistry, cvModelRepository, configCatalog, auditTrail, clock);
     }
 
-    // --- models ----------------------------------------------------------------
+    // --- models(): the merge/availability matrix ------------------------------------------------
 
     @Test
-    void modelsMarksTheActiveOneAndLeavesEveryOtherFalse() {
-        modelRegistry.models = List.of(modelA, modelB);
-        modelRegistry.active = modelB;
+    void modelsMarksARowPresentWhenTheWorkerReportsIt() {
+        cvModelRepository.rows.add(row("yolo26n.pt", "latest", ModelStatus.LIVE, actor, clock.instant));
+        modelRegistry.models = List.of(new ModelRef("yolo26n.pt", "latest"));
+        modelRegistry.active = new ModelRef("yolo26n.pt", "latest");
 
-        List<RegisteredModel> models = service.models();
+        CvModelCatalog catalog = service.models();
 
-        assertEquals(List.of(new RegisteredModel(modelA, false), new RegisteredModel(modelB, true)), models);
+        assertEquals(CatalogSource.REGISTRY, catalog.source());
+        CvModelView view = onlyView(catalog);
+        assertEquals(ModelAvailability.PRESENT, view.availability());
+        assertEquals(ModelStatus.LIVE, view.status());
         assertTrue(auditTrail.entries.isEmpty(), "a read must never audit");
     }
 
     @Test
-    void modelsMarksEveryModelInactiveWhenTheRegistryHasNoActiveModel() {
-        modelRegistry.models = List.of(modelA, modelB);
-        modelRegistry.active = null;
+    void modelsMarksARowMissingOnWorkerWhenTheWorkerDoesNotReportIt() {
+        cvModelRepository.rows.add(row("orion12l.pt", "latest", ModelStatus.DRAFT, null, null));
+        modelRegistry.models = List.of(); // the worker reports nothing
 
-        List<RegisteredModel> models = service.models();
+        CvModelCatalog catalog = service.models();
 
-        assertTrue(models.stream().noneMatch(RegisteredModel::active));
+        CvModelView view = onlyView(catalog);
+        assertEquals(ModelAvailability.MISSING_ON_WORKER, view.availability());
+        assertEquals(CatalogSource.REGISTRY, catalog.source());
     }
 
-    // --- promote ----------------------------------------------------------------
+    @Test
+    void modelsSynthesizesARowLessViewForAWorkerModelWithNoPlatformRow() {
+        modelRegistry.models = List.of(new ModelRef("yolo11n.pt", "latest"));
+        modelRegistry.active = null;
+
+        CvModelCatalog catalog = service.models();
+
+        CvModelView view = onlyView(catalog);
+        assertEquals("yolo11n.pt", view.modelId());
+        assertEquals(ModelAvailability.PRESENT, view.availability());
+        assertEquals(ModelStatus.DRAFT, view.status(), "no active stage -> honest DRAFT fallback, not a guess");
+    }
+
+    @Test
+    void modelsSynthesizesALiveStatusWhenTheWorkerMarksItActive() {
+        ModelRef ref = new ModelRef("yolo11n.pt", "latest");
+        modelRegistry.models = List.of(ref);
+        modelRegistry.active = ref;
+
+        CvModelView view = onlyView(service.models());
+
+        assertEquals(ModelStatus.LIVE, view.status());
+    }
+
+    @Test
+    void modelsListsARowMissingOnWorkerAndASynthesizedRowTogether() {
+        cvModelRepository.rows.add(row("orion12l.pt", "latest", ModelStatus.DRAFT, null, null));
+        modelRegistry.models = List.of(new ModelRef("yolo11n.pt", "latest"));
+
+        CvModelCatalog catalog = service.models();
+
+        assertEquals(2, catalog.models().size());
+        assertTrue(catalog.models().stream()
+                .anyMatch(v -> v.modelId().equals("orion12l.pt") && v.availability() == ModelAvailability.MISSING_ON_WORKER));
+        assertTrue(catalog.models().stream()
+                .anyMatch(v -> v.modelId().equals("yolo11n.pt") && v.availability() == ModelAvailability.PRESENT));
+    }
+
+    @Test
+    void modelsFallsBackToTheConfigCatalogWhenTheWorkerIsUnreachableAndNeverThrows() {
+        modelRegistry.unreachable = true;
+
+        CvModelCatalog catalog = service.models();
+
+        assertEquals(CatalogSource.CONFIG, catalog.source());
+        CvModelView view = onlyView(catalog);
+        assertEquals("yolo26n.pt", view.modelId());
+        assertEquals(ModelAvailability.PRESENT, view.availability());
+        assertTrue(auditTrail.entries.isEmpty());
+    }
+
+    // --- promote -----------------------------------------------------------------------------
 
     @Test
     void promoteDeniedForAPilotScopeAndAuditsTheDenialWithoutCallingThePort() {
         VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of());
 
         AccessDeniedException ex = assertThrows(AccessDeniedException.class,
-                () -> service.promote(modelA, actor, pilotScope));
+                () -> service.promote("yolo26n.pt", "latest", actor, pilotScope));
         assertTrue(ex.getMessage().toLowerCase().contains("not permitted"));
 
         assertNull(modelRegistry.lastPromoted);
         AuditEntry entry = onlyEntry();
-        assertEquals(AuditAction.UPDATED, entry.action());
-        assertEquals(AuditTargetType.MODEL, entry.targetType());
         assertEquals("DENIED:out of scope", entry.details().get("result"));
     }
 
     @Test
     void promoteDeniedForAManagerScopeAndAuditsTheDenialWithoutCallingThePort() {
-        // docs/plans/done/OPS-UX-PLAN.md §1: promoting the live model is deployment-global, so a
-        // MANAGER's own-subtree authority (canManageOrg()) is not enough -- only ADMIN may.
         VisibilityScope managerScope = VisibilityScope.groups(Set.of());
 
-        AccessDeniedException ex = assertThrows(AccessDeniedException.class,
-                () -> service.promote(modelA, actor, managerScope));
-        assertTrue(ex.getMessage().toLowerCase().contains("not permitted"));
+        assertThrows(AccessDeniedException.class,
+                () -> service.promote("yolo26n.pt", "latest", actor, managerScope));
 
         assertNull(modelRegistry.lastPromoted);
-        AuditEntry entry = onlyEntry();
-        assertEquals(AuditAction.UPDATED, entry.action());
-        assertEquals(AuditTargetType.MODEL, entry.targetType());
-        assertEquals("DENIED:out of scope", entry.details().get("result"));
+        assertEquals("DENIED:out of scope", onlyEntry().details().get("result"));
     }
 
     @Test
-    void promoteSucceedsForAnUnboundedScopeAndAuditsPromoted() {
-        service.promote(modelA, actor, VisibilityScope.unbounded());
-
-        assertEquals(modelA, modelRegistry.lastPromoted);
-        AuditEntry entry = onlyEntry();
-        assertEquals(AuditAction.UPDATED, entry.action());
-        assertEquals(AuditTargetType.MODEL, entry.targetType());
-        assertEquals(modelA.id() + ":" + modelA.version(), entry.targetId());
-        assertEquals("PROMOTED", entry.details().get("result"));
-        assertEquals(modelA.id(), entry.details().get("modelId"));
-        assertEquals(modelA.version(), entry.details().get("modelVersion"));
+    void promoteRejectsABlankModelId() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service.promote("", "latest", actor, VisibilityScope.unbounded()));
     }
 
     @Test
-    void promotePropagatesAndAuditsARefusalFromThePort() {
-        modelRegistry.promoteFailure =
-                new IllegalStateException("cv-service refused to promote model " + modelA + ": unknown id");
+    void promoteSetsLiveAndDemotesThePreviousLiveRow() {
+        cvModelRepository.rows.add(row("yolo26n.pt", "latest", ModelStatus.LIVE, actor,
+                Instant.parse("2026-08-01T00:00:00Z")));
+        cvModelRepository.rows.add(row("yolo11n.pt", "latest", ModelStatus.DRAFT, null, null));
+
+        PromotionResult result = service.promote("yolo11n.pt", "latest", actor, VisibilityScope.unbounded());
+
+        assertEquals("yolo11n.pt", result.modelId());
+        assertEquals(ModelStatus.LIVE, result.status());
+        assertEquals("yolo26n.pt", result.previousModelId());
+        assertEquals("latest", result.previousVersion());
+
+        CvModelRecord promoted = cvModelRepository.get("yolo11n.pt", "latest");
+        assertEquals(ModelStatus.LIVE, promoted.status());
+        assertEquals(actor, promoted.promotedBy());
+        assertEquals(clock.instant, promoted.promotedAt());
+
+        CvModelRecord demoted = cvModelRepository.get("yolo26n.pt", "latest");
+        assertEquals(ModelStatus.RETIRED, demoted.status());
+        assertEquals(actor, demoted.promotedBy(), "retire() keeps the promotion stamp so rollback can find it");
+
+        assertEquals(new ModelRef("yolo11n.pt", "latest"), modelRegistry.lastPromoted);
+        assertEquals("PROMOTED", onlyEntry().details().get("result"));
+    }
+
+    @Test
+    void promoteWithNoPreviousLiveLeavesPreviousFieldsNull() {
+        cvModelRepository.rows.add(row("yolo26n.pt", "latest", ModelStatus.DRAFT, null, null));
+
+        PromotionResult result = service.promote("yolo26n.pt", "latest", actor, VisibilityScope.unbounded());
+
+        assertNull(result.previousModelId());
+        assertNull(result.previousVersion());
+    }
+
+    @Test
+    void promoteSynthesizesARowForAWorkerOnlyModelWithNoPlatformRowYet() {
+        PromotionResult result = service.promote("orion12l.pt", "latest", actor, VisibilityScope.unbounded());
+
+        assertEquals(ModelStatus.LIVE, result.status());
+        CvModelRecord saved = cvModelRepository.get("orion12l.pt", "latest");
+        assertEquals(ModelStatus.LIVE, saved.status());
+        assertEquals("orion12l.pt", saved.displayName(), "row synthesized with no known display name");
+    }
+
+    @Test
+    void promotePropagatesAndAuditsARefusalFromThePortAndSavesNothing() {
+        modelRegistry.promoteFailure = new IllegalStateException("unknown id");
+        cvModelRepository.rows.add(row("yolo26n.pt", "latest", ModelStatus.LIVE, actor, clock.instant));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> service.promote(modelA, actor, VisibilityScope.unbounded()));
+                () -> service.promote("yolo11n.pt", "latest", actor, VisibilityScope.unbounded()));
         assertTrue(ex.getMessage().contains("unknown id"));
 
-        assertEquals(modelA, modelRegistry.lastPromoted, "the port must still have been called");
-        AuditEntry entry = onlyEntry();
-        assertTrue(entry.details().get("result").startsWith("REFUSED:"));
-        assertTrue(entry.details().get("result").contains("unknown id"));
+        assertTrue(onlyEntry().details().get("result").startsWith("REFUSED:"));
+        assertEquals(ModelStatus.LIVE, cvModelRepository.get("yolo26n.pt", "latest").status(),
+                "a refused promotion must not demote the still-live row");
+        assertNull(cvModelRepository.findByIdAndVersion("yolo11n.pt", "latest").orElse(null));
+    }
+
+    // --- rollback ----------------------------------------------------------------------------
+
+    @Test
+    void rollbackDeniedForAManagerScope() {
+        assertThrows(AccessDeniedException.class,
+                () -> service.rollback(actor, VisibilityScope.groups(Set.of())));
+        assertEquals("DENIED:out of scope", onlyEntry().details().get("result"));
+    }
+
+    @Test
+    void rollbackRefusesWhenThereIsNoPreviousModel() {
+        cvModelRepository.rows.add(row("yolo26n.pt", "latest", ModelStatus.LIVE, actor, clock.instant));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> service.rollback(actor, VisibilityScope.unbounded()));
+        assertTrue(ex.getMessage().contains("No previous model"));
+        assertEquals("REFUSED:no previous model", onlyEntry().details().get("result"));
+        assertNull(modelRegistry.lastPromoted);
+    }
+
+    @Test
+    void rollbackRestoresTheMostRecentlyRetiredModelAndDemotesTheCurrentOne() {
+        cvModelRepository.rows.add(row("yolo26n.pt", "latest", ModelStatus.LIVE, actor,
+                Instant.parse("2026-08-20T00:00:00Z")));
+        cvModelRepository.rows.add(row("yolo11n.pt", "latest", ModelStatus.RETIRED, actor,
+                Instant.parse("2026-08-10T00:00:00Z")));
+        cvModelRepository.rows.add(row("orion12l.pt", "latest", ModelStatus.RETIRED, actor,
+                Instant.parse("2026-08-05T00:00:00Z")));
+
+        PromotionResult result = service.rollback(actor, VisibilityScope.unbounded());
+
+        assertEquals("yolo11n.pt", result.modelId(), "the most recently retired-by-promotion row wins");
+        assertEquals(ModelStatus.LIVE, result.status());
+        assertEquals("yolo26n.pt", result.previousModelId());
+
+        assertEquals(ModelStatus.LIVE, cvModelRepository.get("yolo11n.pt", "latest").status());
+        assertEquals(ModelStatus.RETIRED, cvModelRepository.get("yolo26n.pt", "latest").status());
+        assertEquals(ModelStatus.RETIRED, cvModelRepository.get("orion12l.pt", "latest").status(),
+                "the older retired row is left alone");
+        assertEquals(new ModelRef("yolo11n.pt", "latest"), modelRegistry.lastPromoted);
+        assertEquals("ROLLED_BACK", onlyEntry().details().get("result"));
+    }
+
+    @Test
+    void rollbackPropagatesAndAuditsARefusalFromThePort() {
+        cvModelRepository.rows.add(row("yolo26n.pt", "latest", ModelStatus.LIVE, actor, clock.instant));
+        cvModelRepository.rows.add(row("yolo11n.pt", "latest", ModelStatus.RETIRED, actor,
+                Instant.parse("2026-08-01T00:00:00Z")));
+        modelRegistry.promoteFailure = new IllegalStateException("no artifact on disk");
+
+        assertThrows(IllegalStateException.class, () -> service.rollback(actor, VisibilityScope.unbounded()));
+
+        assertTrue(onlyEntry().details().get("result").startsWith("REFUSED:"));
+        assertEquals(ModelStatus.LIVE, cvModelRepository.get("yolo26n.pt", "latest").status(),
+                "a refused rollback must not demote the still-live row");
+    }
+
+    // --- helpers -------------------------------------------------------------------------------
+
+    private static CvModelView onlyView(CvModelCatalog catalog) {
+        assertEquals(1, catalog.models().size());
+        return catalog.models().get(0);
     }
 
     private AuditEntry onlyEntry() {
@@ -130,19 +297,37 @@ class DefaultModelRegistryServiceTest {
         return auditTrail.entries.get(0);
     }
 
+    private static CvModelRecord row(String modelId, String version, ModelStatus status, UserId promotedBy,
+                                      Instant promotedAt) {
+        return new CvModelRecord(modelId, version, modelId, "general", false, List.of(), ModelTaskType.DETECT,
+                ModelRuntime.PYTORCH, List.of(), status, new ModelMetrics(0.7, MetricsKind.TRAINING),
+                ModelProvenance.none(), promotedBy, promotedAt, Instant.parse("2026-08-01T00:00:00Z"));
+    }
+
+    private static CvModelRecord configRow(String modelId) {
+        return row(modelId, "latest", ModelStatus.DRAFT, null, null);
+    }
+
     private static final class FakeModelRegistryPort implements ModelRegistryPort {
         private List<ModelRef> models = List.of();
         private ModelRef active;
+        private boolean unreachable;
         private RuntimeException promoteFailure;
         private ModelRef lastPromoted;
 
         @Override
         public List<ModelRef> models() {
+            if (unreachable) {
+                throw new RuntimeException("cv-service unreachable");
+            }
             return models;
         }
 
         @Override
         public Optional<ModelRef> active() {
+            if (unreachable) {
+                throw new RuntimeException("cv-service unreachable");
+            }
             return Optional.ofNullable(active);
         }
 
@@ -152,6 +337,38 @@ class DefaultModelRegistryServiceTest {
             if (promoteFailure != null) {
                 throw promoteFailure;
             }
+        }
+    }
+
+    private static final class FakeCvModelRepositoryPort implements CvModelRepositoryPort {
+        private final List<CvModelRecord> rows = new ArrayList<>();
+
+        @Override
+        public Optional<CvModelRecord> findByIdAndVersion(String modelId, String version) {
+            return rows.stream()
+                    .filter(r -> r.modelId().equals(modelId) && r.version().equals(version))
+                    .findFirst();
+        }
+
+        @Override
+        public List<CvModelRecord> findAll() {
+            return List.copyOf(rows);
+        }
+
+        @Override
+        public Optional<CvModelRecord> findLive() {
+            return rows.stream().filter(r -> r.status() == ModelStatus.LIVE).findFirst();
+        }
+
+        @Override
+        public CvModelRecord save(CvModelRecord model) {
+            rows.removeIf(r -> r.modelId().equals(model.modelId()) && r.version().equals(model.version()));
+            rows.add(model);
+            return model;
+        }
+
+        private CvModelRecord get(String modelId, String version) {
+            return findByIdAndVersion(modelId, version).orElseThrow();
         }
     }
 
@@ -177,6 +394,19 @@ class DefaultModelRegistryServiceTest {
         @Override
         public List<AuditEntry> findByActor(UserId actorId, int limit) {
             return List.of();
+        }
+    }
+
+    private static final class MutableClock implements java.util.function.Supplier<Instant> {
+        private final Instant instant;
+
+        MutableClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        @Override
+        public Instant get() {
+            return instant;
         }
     }
 }

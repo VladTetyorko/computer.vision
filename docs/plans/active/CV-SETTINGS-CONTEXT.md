@@ -12,7 +12,7 @@ Spec: [CV-SETTINGS-PLAN.md](CV-SETTINGS-PLAN.md). Branch `feat/cv-settings`, cut
 | Wave | Agent | Status | Commit | Notes |
 |---|---|---|---|---|
 | W1 perception domain | domain-modeler | built, uncommitted | | `CvProfile`/`CvProfileId`/`BindingScope`/`CvProfileBinding`/`CvProfileRepositoryPort` + tests, `contexts/vision-perception` green (see Handoffs) |
-| W4 learning domain+app | domain-modeler → application-service | domain built, uncommitted | | `CvModelRecord`/`ModelStatus`/`ModelTaskType`/`ModelRuntime`/`ModelAvailability`/`ModelMetrics`/`MetricsKind`/`ModelProvenance`/`TrainingRunId`/`TrainingRunRecord` + `CvModelRepositoryPort`/`TrainingRunRepositoryPort` + tests, `contexts/vision-learning` green (see Handoffs). App half (merge/promote/rollback service, `DefaultTrainingJobService` persistence) not started. |
+| W4 learning domain+app | domain-modeler → application-service | built, uncommitted | | Domain: `CvModelRecord`/`ModelStatus`/`ModelTaskType`/`ModelRuntime`/`ModelAvailability`/`ModelMetrics`/`MetricsKind`/`ModelProvenance`/`TrainingRunId`/`TrainingRunRecord` + `CvModelRepositoryPort`/`TrainingRunRepositoryPort`. App: `CvModelView`/`CvModelCatalog`/`CatalogSource`/`ConfigModelCatalog`/`PromotionResult`/`TrainingRunStores`; `ModelRegistryService`/`DefaultModelRegistryService` evolved (merge+promote+rollback, `RegisteredModel` deleted); `DefaultTrainingJobService` evolved (run persistence, CANDIDATE registration, `runs`/`run`, gate relaxed to `canManageOrg`). `contexts/vision-learning` green, 234 tests total (see Handoffs). **Nothing wired**: no adapter implements the two new ports (W3), and `vision-app`/`vision-api` still call the old constructors/types (W5). |
 | W2 | | pending W1 | | |
 | W3 | | pending W1+W4 | | |
 | W5 | | pending W2+W4 | | |
@@ -217,3 +217,147 @@ exactly, no decomposition needed.
 `CvModelRecordTest` 20, `TrainingRunRecordTest` 14), module total 210 (all green). `ModelStatus`/
 `ModelTaskType`/`ModelRuntime`/`ModelAvailability`/`MetricsKind` are pure markers with no dedicated
 test, matching `JobState`'s own precedent in this module.
+
+### W4-app → W5
+
+Built in `contexts/vision-learning/src/main/java/com/drones/vision/learning/application/`. Framework-free,
+`./mvnw -B -pl contexts/vision-learning test` green (234 tests total in the module — up from 210 at the
+W4-domain checkpoint, net +24: `DefaultModelRegistryServiceTest` (17) and `DefaultTrainingJobServiceTest` (29)
+were both fully rewritten against the evolved services, not purely additive). `RegisteredModel.java` is
+**deleted** — `ModelRegistryService#models()` no longer returns `List<RegisteredModel>`.
+
+**No adapter implements `CvModelRepositoryPort`/`TrainingRunRepositoryPort` yet** — that's W3, running
+concurrently. Until it lands, wiring either service needs a stand-in (in-memory) implementation, or W5
+should wait for W3.
+
+**New/changed service signatures**
+```java
+// ModelRegistryService — evolved, same interface name
+public interface ModelRegistryService {
+    CvModelCatalog models(); // was: List<RegisteredModel> models()
+    PromotionResult promote(String modelId, String version, UserId actor, VisibilityScope scope);
+    // was: void promote(ModelRef ref, UserId actor, VisibilityScope scope)
+    PromotionResult rollback(UserId actor, VisibilityScope scope); // new
+}
+
+// DefaultModelRegistryService — evolved constructor
+public DefaultModelRegistryService(ModelRegistryPort modelRegistryPort, CvModelRepositoryPort cvModelRepositoryPort,
+                                    ConfigModelCatalog configCatalog, AuditTrailPort auditTrail);
+// was: DefaultModelRegistryService(ModelRegistryPort, AuditTrailPort)
+
+// TrainingJobService — evolved, same interface name, start()'s gate relaxed
+public interface TrainingJobService {
+    String start(TrainingJobSpec spec, UserId actor, VisibilityScope scope); // now canManageOrg(), was canAdminister()
+    List<TrainingJobView> jobs();
+    Optional<TrainingJobView> job(String jobId);
+    List<TrainingRunRecord> runs(int limit, UserId actor, VisibilityScope scope); // new, canManageOrg()
+    TrainingRunRecord run(TrainingRunId runId, UserId actor, VisibilityScope scope); // new, canManageOrg()
+}
+
+// DefaultTrainingJobService — evolved constructor (one public ctor now, no overload chain)
+public DefaultTrainingJobService(TrainingPort trainingPort, LabelingService labelingService,
+                                  AuditTrailPort auditTrail, TrainingRunStores trainingRunStores,
+                                  int maxFinishedJobs);
+// was: DefaultTrainingJobService(TrainingPort, LabelingService, AuditTrailPort) [+ withdrawn overloads]
+
+// New bundle/read-model/result types (application package root)
+public record TrainingRunStores(TrainingRunRepositoryPort trainingRuns, CvModelRepositoryPort models) {}
+public record ConfigModelCatalog(List<CvModelRecord> models) {}
+public enum CatalogSource { REGISTRY, CONFIG }
+public record CvModelView(String modelId, String version, String displayName, String kind, boolean openVocab,
+    List<String> defaultLabelFilter, ModelTaskType taskType, ModelRuntime runtime, List<String> classes,
+    ModelStatus status, ModelAvailability availability, ModelMetrics metrics, ModelProvenance provenance) {
+    public static CvModelView of(CvModelRecord record, ModelAvailability availability);
+    public static CvModelView synthesize(ModelRef ref, boolean workerReportsLive);
+}
+public record CvModelCatalog(List<CvModelView> models, CatalogSource source) {}
+public record PromotionResult(String modelId, String version, ModelStatus status,
+    String previousModelId, String previousVersion) {} // previousModelId/Version both null or both set
+```
+
+**Wiring W5 needs to build** (both currently missing — construction will not compile until supplied):
+- A `CvModelRepositoryPort`/`TrainingRunRepositoryPort` bean pair — from W3 once it lands (`storage/persistence`);
+  until then, an in-memory stand-in if W5 must proceed first.
+- A `ConfigModelCatalog` bean — build it from `CvWiring#cvModelRoster()`'s three-entry literal
+  (`station/vision-app/.../wiring/CvWiring.java:273-279`), converting each `CvModelResponse` into a
+  `CvModelRecord` (`status=DRAFT`, `provenance=ModelProvenance.none()`, `metrics=null`,
+  `promotedBy`/`promotedAt=null`, pick a `createdAt`/`taskType`/`runtime`/`classes`/`version` — the
+  frozen wire `CvModelResponse` has no `taskType`/`runtime`/`classes`/`version` fields at all, so W5
+  must decide reasonable stand-ins, e.g. `version="latest"`, `taskType=DETECT`, `runtime=PYTORCH`,
+  `classes=List.of()`). `TrainingRunStores(trainingRunRepositoryPort, cvModelRepositoryPort)` bundles
+  the pair for `DefaultTrainingJobService`.
+
+**Exact call sites that will not compile until W5 rewires them:**
+- `station/vision-app/src/main/java/com/drones/vision/app/config/wiring/TrainingWiringConfiguration.java:210-213`
+  (`modelRegistryService` bean — `new DefaultModelRegistryService(modelRegistryPort, auditTrailPort)`, needs the
+  two new constructor args) and `:240-247` (`trainingJobService` bean — `new DefaultTrainingJobService(trainingPort,
+  labelingService, auditTrailPort, applicationProperties.training().maxFinishedJobs())`, needs a `TrainingRunStores`
+  inserted before `maxFinishedJobs`).
+- `station/vision-api/src/main/java/com/drones/vision/api/controller/ModelRegistryController.java` — `models()`
+  maps `List<RegisteredModelResponse>` off `modelRegistryService.models()` (now `CvModelCatalog`, not a `List`);
+  `promote()` calls `modelRegistryService.promote(ModelRef, actor, scope)` returning `void` (now
+  `promote(String modelId, String version, actor, scope)` returning `PromotionResult`). Needs a new response
+  shape matching the frozen §5.2 `CvModel`/promote-response contract, and a new route for `rollback`.
+- `station/vision-api/src/main/java/com/drones/vision/api/dto/RegisteredModelResponse.java`/`RegisteredModelsResponse.java`
+  — both reference the deleted `RegisteredModel`; replace with DTOs mapping `CvModelView`/`CvModelCatalog`/`PromotionResult`
+  per §5.2's frozen wire shape.
+- `station/vision-api/src/main/java/com/drones/vision/api/controller/CvModelsController.java`/`dto/CvModelResponse.java`
+  — currently backed by `CvWiring#cvModelRoster()`'s static literal, not `ModelRegistryService` at all; §1.3/§5.2
+  imply `GET /api/cv/models` should now read through `ModelRegistryService#models()` instead (never-throws, real
+  availability) — confirm against the plan before changing this controller's route, since two controllers
+  (`ModelRegistryController` at `/api/cv/registry/**`, `CvModelsController` at `/api/cv/models`) currently overlap
+  in purpose.
+- Any `*WiringTest.java`/`*ControllerTest.java` in `vision-app`/`vision-api` that construct
+  `DefaultModelRegistryService`/`DefaultTrainingJobService` or reference `RegisteredModel*` directly.
+
+**Exception → HTTP mapping** (mirrors this module's existing `NoSuchElementException`→404/`AccessDeniedException`→403
+convention; new cases this wave adds):
+| Thrown by | Exception | Meaning | Suggested HTTP |
+|---|---|---|---|
+| `promote`/`rollback` | `AccessDeniedException` | scope lacks `canAdminister()` | 403 |
+| `promote` | `IllegalArgumentException` | blank `modelId`/`version` | 400 |
+| `promote` | `IllegalStateException` (message from cv-service) | worker refused (unknown id, unreachable, ...) | 409 |
+| `rollback` | `IllegalStateException("No previous model to roll back to")` | nothing RETIRED to restore | 409 |
+| `start` | `AccessDeniedException` | scope lacks `canManageOrg()` (relaxed from `canAdminister()`) | 403 |
+| `start` | `NoSuchElementException`/`AccessDeniedException`/`IllegalArgumentException` | dataset pre-check (unchanged from before this wave) | 404/403/400 |
+| `runs` | `AccessDeniedException` | scope lacks `canManageOrg()` | 403 |
+| `runs` | `IllegalArgumentException` | `limit <= 0` | 400 |
+| `run` | `AccessDeniedException` | scope lacks `canManageOrg()` | 403 |
+| `run` | `NoSuchElementException` | unknown `runId` | 404 |
+| `models` | *(never throws)* | worker unreachable → `source=CONFIG` fallback | 200 always |
+
+**Deviations from the task brief, judgment calls made where it left a gap — flag if you disagree:**
+1. **Literal signatures `promote(modelId, version, UserId, Instant)`/`rollback(UserId, Instant)` from the
+   task brief were read as shorthand, not literal** — built as `promote(String, String, UserId, VisibilityScope)`/
+   `rollback(UserId, VisibilityScope)` with time supplied by an injected `Supplier<Instant> clock` constructor
+   seam instead, matching every other service in this module (`DefaultDatasetService`, `DefaultLabelingService`,
+   `DefaultTrainingJobService`) and SKILL.md's "acting user/scope is a method parameter, time is a clock seam"
+   convention. No caller-visible `Instant` parameter exists on either public method.
+2. **`promote`/`CvModelView.synthesize` fabricate a minimal row for a worker-only model with no `CvModelRecord`
+   yet** (`kind="unregistered"`, `taskType=DETECT`, `runtime=PYTORCH`, empty `classes`/`defaultLabelFilter`) —
+   required because `cv_models` (§5.3) seeds no rows at all, so every built-in checkpoint starts row-less on a
+   fresh deployment; without this, promoting a built-in through the new service would fail where the old
+   `ModelRegistryController.promote` (pure `ModelRef`) just worked. Both synthesis sites share the same
+   constants (`CvModelView.SYNTHESIZED_KIND`/`SYNTHESIZED_TASK_TYPE`/`SYNTHESIZED_RUNTIME`).
+3. **Config-fallback rows report `ModelAvailability.PRESENT` unconditionally** (not `MISSING_ON_WORKER`) — with
+   the worker unreachable there is nothing to check a config row's presence against; `CatalogSource.CONFIG`
+   itself is the "not verified live" honesty signal, not the per-row availability. Don't read a `CONFIG` catalog's
+   `PRESENT` rows as "confirmed live".
+4. **"Previous" for rollback is derived, not a stored field** — the RETIRED row with the latest `promotedAt`
+   (`CvModelRecord#retire()` keeps that stamp specifically so this works). No new column/field was added to
+   any record; this relies on exactly-one-promotion-history-per-model-id being enough to disambiguate in
+   practice (two different models retired at the exact same instant would tie-break arbitrarily — considered
+   acceptable, flag if not).
+5. **A real, deferred gap, not worked around**: `ModelRegistryPort` cannot surface worker-reported `stage`/`metrics`
+   at all today (only `models()`/`active()`/`promote(ModelRef)` exist) — `cv.proto`'s `ModelInfo.stage`/`.metrics`
+   are dropped by both the port and `GrpcModelRegistryPort` (the adapter). `CvModelView.synthesize` can only
+   honestly report `LIVE`/`DRAFT` (the wire's `stage` is binary anyway — `"active"`/`"available"` per
+   `cv_service/grpc/servicers.py`), and no row in a `CvModelCatalog` ever carries worker-reported metrics — only
+   `DefaultTrainingJobService`'s own `MetricsKind.TRAINING` write ever populates `ModelMetrics`. If per-model
+   worker metrics need to reach the API, `ModelRegistryPort` needs widening first — a domain change out of this
+   wave's write scope, reported rather than made.
+6. **`TrainingRunRecord`'s `message` field is never populated from the upload-phase `note()` calls** —
+   `note()` only ever touches the in-memory `TrainingJobView`; the persisted run's `message` stays `""` until
+   the first real `TrainingProgress` (or a terminal failure) arrives. A poller watching only `run()`/`runs()`
+   (not `job()`) will not see "Uploading dataset…"/"Uploaded N samples…" text. Flag if W5's UI needs that text
+   surfaced through the persisted-run read path too — it would need a deliberate change here, not a UI workaround.
