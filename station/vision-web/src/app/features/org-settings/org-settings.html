@@ -1,12 +1,9 @@
-<div class="page">
-  <vision-page-bar
-    title="Organization"
-    icon="building-org"
-    hint="Grants are limited to your own scope."
-    [count]="facade.barCount()"
-    [countNoun]="facade.barCountNoun()"
-  >
-    <div pageBarFilters class="segmented" role="tablist" aria-label="Organization sections">
+<div [class.page]="!embedded()">
+  <!-- `[class.page]` not a bare class — `embedded()` mounts inside `CrewPage`'s own `.page`
+       (WAREHOUSE-UX-PLAN.md §4 W7); a second nested `.page` would double its 24/32/64px padding. -->
+  <!-- Shared by both header shapes below — see `org-settings.ts`'s own `embedded` doc comment. -->
+  <ng-template #sectionTabsTpl>
+    <div class="segmented" role="tablist" aria-label="Organization sections">
       <button
         type="button"
         class="btn secondary small"
@@ -28,14 +25,32 @@
         Groups
       </button>
     </div>
-    <div pageBarActions>
-      @if (facade.tab() === 'users' && !facade.userFormOpen()) {
-        <button type="button" class="btn" (click)="facade.openUserForm()">Create user</button>
-      } @else if (facade.tab() === 'groups' && !facade.groupFormOpen()) {
-        <button type="button" class="btn" (click)="facade.openGroupForm()">Create group</button>
-      }
+  </ng-template>
+  <ng-template #createButtonTpl>
+    @if (facade.tab() === 'users' && !facade.userFormOpen()) {
+      <button type="button" class="btn" (click)="facade.openUserForm()">Create user</button>
+    } @else if (facade.tab() === 'groups' && !facade.groupFormOpen()) {
+      <button type="button" class="btn" (click)="facade.openGroupForm()">Create group</button>
+    }
+  </ng-template>
+
+  @if (!embedded()) {
+    <vision-page-bar
+      title="Organization"
+      icon="building-org"
+      hint="Grants are limited to your own scope."
+      [count]="facade.barCount()"
+      [countNoun]="facade.barCountNoun()"
+    >
+      <ng-container pageBarFilters><ng-container *ngTemplateOutlet="sectionTabsTpl" /></ng-container>
+      <ng-container pageBarActions><ng-container *ngTemplateOutlet="createButtonTpl" /></ng-container>
+    </vision-page-bar>
+  } @else {
+    <div class="embedded-toolbar">
+      <ng-container *ngTemplateOutlet="sectionTabsTpl" />
+      <ng-container *ngTemplateOutlet="createButtonTpl" />
     </div>
-  </vision-page-bar>
+  }
 
   @if (facade.tab() === 'users') {
     @if (facade.userFormOpen()) {

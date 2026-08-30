@@ -50,6 +50,9 @@ import com.drones.vision.warehouse.application.asset.AssetSpec;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -401,9 +404,11 @@ class AfterActionAssemblerTest {
     }
 
     private AssetDetails assetDetails(Ownership ownership) {
+        Instant now = Instant.now();
         Asset asset = new Asset(assetId, "Drone One", new CategoryId("drone"), ownership, Set.of(deviceId),
-                Map.of(), LifecycleState.ACTIVE);
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+                Map.of(), LifecycleState.ACTIVE, Identity.NONE, Custody.NONE, InventoryState.IN_STOCK, now, now);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                asset.inventoryState(), asset.identity(), asset.custody());
         return new AssetDetails(summary, List.of(), List.of());
     }
 

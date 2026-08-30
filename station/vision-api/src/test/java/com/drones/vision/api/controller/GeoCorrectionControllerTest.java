@@ -23,6 +23,8 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
@@ -81,9 +83,10 @@ class GeoCorrectionControllerTest {
     }
 
     private AssetSummary assetSummary(AssetId assetId) {
-        Asset asset = new Asset(assetId, "drone-1", new CategoryId("drone"), ownership, Set.of(DeviceId.random()),
-                Map.of());
-        return new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "drone-1", new CategoryId("drone"), ownership,
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
+        return new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null, asset.inventoryState(),
+                asset.identity(), asset.custody());
     }
 
     private static AssetUsage usage(UsageId usageId, AssetId assetId) {

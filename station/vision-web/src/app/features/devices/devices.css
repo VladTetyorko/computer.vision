@@ -2,6 +2,16 @@
     font-weight: 500;
 }
 
+/* `embedded()` header row (WAREHOUSE-UX-PLAN.md §4 W9) — replaces `<vision-page-bar>` when mounted
+   inside `InventoryPage`'s "Links" tab; same copy as `features/roster/roster.css`'s identical rule. */
+.embedded-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-8) var(--space-16);
+    margin-bottom: var(--space-16);
+}
+
 /* Contained horizontal scroll (see the template's own comment) — the wrapper scrolls, never the
    page. `table { min-width }` gives every column, especially Name, a floor the browser's auto table
    layout can't squeeze below just because Source's URI wants more room than is available (a real

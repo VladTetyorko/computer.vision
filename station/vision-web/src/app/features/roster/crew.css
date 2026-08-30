@@ -1,0 +1,3 @@
+/* Reuses `.page`/`vision-page-bar`/`.segmented`/`.btn` from `src/styles.css` — no new colors.
+   `<vision-roster>`/`<vision-org-settings>` bring their own `.page`-less content (they render
+   `[embedded]="true"`, so no nested `.page` padding/sticky-bar duplication here). */

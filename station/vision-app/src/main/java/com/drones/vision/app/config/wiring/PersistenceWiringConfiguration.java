@@ -20,9 +20,11 @@ import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
 import com.drones.vision.map.domain.port.TrackTrailRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetNoteRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
+import com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
 import com.drones.vision.adapter.persistence.repository.*;
 import com.drones.vision.app.config.properties.VisionPersistenceProperties;
@@ -239,5 +241,24 @@ public class PersistenceWiringConfiguration {
     @Bean
     public TrackCorrectionRepositoryPort trackCorrectionRepositoryPort(EntityManagerFactory entityManagerFactory) {
         return new JpaTrackCorrectionRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.2 D7 (W3) — maintenance records
+     * ({@code V28__asset_inventory.sql}), same shape as the twenty-two above.
+     */
+    @Bean
+    public MaintenanceRepositoryPort maintenanceRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaMaintenanceRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.2 D7 (W3) — append-only asset notes, same
+     * shape as the twenty-three above. No application service consumes this yet (a later wave's
+     * crew-notes surface will); wired now so the port/schema exist ahead of that UI.
+     */
+    @Bean
+    public AssetNoteRepositoryPort assetNoteRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaAssetNoteRepository(entityManagerFactory);
     }
 }

@@ -11,7 +11,7 @@ import { VisionApi } from '../../../core/api/vision-api';
 import { SidebarStore } from '../../../core/shell/sidebar-store';
 import { ThemeStore } from '../../../core/shell/theme-store';
 import { SystemStatusStore } from '../../../core/system-status/system-status-store';
-import { NAV_MODES, navTiers } from '../../../features/hubs/nav-entries';
+import { NAV_MODES } from '../../../features/hubs/nav-entries';
 import type { OverallHealth } from '../../../core/api/models';
 
 /**
@@ -92,7 +92,7 @@ function navRowHrefs(root: HTMLElement): (string | null)[] {
   return Array.from(root.querySelectorAll('a.nav-row')).map((a) => a.getAttribute('href'));
 }
 
-describe('AppSidebar — tiering + role gate', () => {
+describe('AppSidebar — nav groups + role gate (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1, wave W1)', () => {
   it('renders every group as a non-link label (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F1 — no /operate, /monitor, /manage destination anywhere)', () => {
     const fixture = render();
     const root = fixture.nativeElement as HTMLElement;
@@ -108,57 +108,54 @@ describe('AppSidebar — tiering + role gate', () => {
     expect(navRowHrefs(root)).not.toContain('/manage');
   });
 
-  it("renders each mode's primary tier as routerLink rows, in order, for a non-manager", () => {
+  /**
+   * The one WAREHOUSE-UX-PLAN.md §3.1 structural claim this suite can check without duplicating
+   * `nav-entries.spec.ts`'s own data-level assertions: `system` (and only `system`) renders in
+   * `.sidebar-foot`, the other four groups render in `.sidebar-body`, and both containers preserve
+   * `NAV_MODES`'s own order.
+   */
+  it('renders SYSTEM in the sidebar foot, next to the identity chip — every other group in the body', () => {
+    const fixture = render({ topRole: 'ADMIN' });
+    const root = fixture.nativeElement as HTMLElement;
+
+    const bodyGroups = root.querySelectorAll('.sidebar-body .nav-group');
+    const footGroups = root.querySelectorAll('.sidebar-foot .nav-group');
+    const nonFooterModes = NAV_MODES.filter((mode) => !mode.footer);
+    const footerModes = NAV_MODES.filter((mode) => mode.footer);
+
+    expect(footerModes.map((mode) => mode.id)).toEqual(['system']);
+    expect(bodyGroups.length).toBe(nonFooterModes.length);
+    expect(footGroups.length).toBe(1);
+    expect(Array.from(bodyGroups).map((g) => g.getAttribute('aria-label'))).toEqual(nonFooterModes.map((m) => m.label));
+    expect(footGroups[0].getAttribute('aria-label')).toBe('System');
+
+    // The foot group sits before the identity chip in DOM order (WAREHOUSE-UX-PLAN.md §3.1: "footer,
+    // with the identity chip") — never after the status row at the very bottom.
+    const foot = root.querySelector('.sidebar-foot')!;
+    const children = Array.from(foot.children);
+    const navGroupIdx = children.findIndex((el) => el.classList.contains('nav-group'));
+    const identityIdx = children.findIndex((el) => el.tagName.toLowerCase() === 'vision-identity-chip');
+    expect(navGroupIdx).toBeGreaterThanOrEqual(0);
+    expect(identityIdx).toBeGreaterThan(navGroupIdx);
+  });
+
+  it("renders each group's entries as routerLink rows, in order, for a non-manager (no more primary/advanced/upcoming tiers — docs/plans/active/WAREHOUSE-UX-PLAN.md wave W1)", () => {
     const fixture = render({ topRole: 'PILOT' });
     const root = fixture.nativeElement as HTMLElement;
     const groups = root.querySelectorAll('.nav-group');
 
     NAV_MODES.forEach((mode, i) => {
       const visible = mode.entries.filter((entry) => !entry.managerOnly);
-      const primary = navTiers(visible).primary;
       const hrefs = Array.from(groups[i].querySelectorAll(':scope > a.nav-row')).map((a) => a.getAttribute('href'));
-      expect(hrefs, mode.id).toEqual(primary.map((entry) => entry.to));
+      expect(hrefs, mode.id).toEqual(visible.map((entry) => entry.to));
     });
   });
 
-  it('folds the diagnostics/advanced group entries under a collapsed Advanced disclosure for an ADMIN', () => {
+  it('renders no disclosure and no dimmed row anywhere — the Advanced/Upcoming disclosures and the badge:"soon" tier are retired (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 rule 1)', () => {
     const fixture = render({ topRole: 'ADMIN' });
     const root = fixture.nativeElement as HTMLElement;
-    const manageIndex = NAV_MODES.findIndex((mode) => mode.id === 'manage');
-    const manageGroup = root.querySelectorAll('.nav-group')[manageIndex];
-
-    const advancedTier = navTiers(NAV_MODES[manageIndex].entries).advanced;
-    expect(advancedTier.length).toBeGreaterThan(0); // Devices + Debug, per nav-entries.ts
-
-    const disclosures = manageGroup.querySelectorAll('details.disclosure');
-    // Manage has both an Advanced and an Upcoming disclosure for an ADMIN.
-    expect(disclosures.length).toBe(2);
-    const advancedDetails = disclosures[0] as HTMLDetailsElement;
-    expect(advancedDetails.querySelector('summary')?.textContent).toContain('Advanced');
-    // Closed by default (no persisted preference).
-    expect(advancedDetails.open).toBe(false);
-    const hrefs = Array.from(advancedDetails.querySelectorAll('a.nav-row')).map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(advancedTier.map((entry) => entry.to));
-  });
-
-  it('folds badge:"soon" entries under a collapsed Upcoming disclosure, each dimmed and carrying no per-row chip (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1 — the disclosure title already says it)', () => {
-    // Explicit MANAGER — since docs/plans/done/OPS-UX-PLAN.md §2 A5 (below), `badge: 'soon'` entries only
-    // reach anyone at all for ADMIN/MANAGER; see the dedicated PILOT test for the opposite case.
-    const fixture = render({ topRole: 'MANAGER' });
-    const root = fixture.nativeElement as HTMLElement;
-    const operateIndex = NAV_MODES.findIndex((mode) => mode.id === 'operate');
-    const operateGroup = root.querySelectorAll('.nav-group')[operateIndex];
-
-    const upcomingTier = navTiers(NAV_MODES[operateIndex].entries).upcoming;
-    expect(upcomingTier.length).toBeGreaterThan(0); // Flight plans / missions
-
-    const details = operateGroup.querySelector('details.disclosure') as HTMLDetailsElement;
-    expect(details.querySelector('summary')?.textContent).toContain('Upcoming');
-    const rows = details.querySelectorAll('a.nav-row.dimmed');
-    expect(rows.length).toBe(upcomingTier.length);
-    for (const row of Array.from(rows)) {
-      expect(row.querySelector('.chip')).toBeNull();
-    }
+    expect(root.querySelectorAll('details.disclosure').length).toBe(0);
+    expect(root.querySelectorAll('a.nav-row.dimmed').length).toBe(0);
   });
 
   it('renders every group label without an icon (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1 — icons compete with each row\'s own icon two rows down)', () => {
@@ -194,43 +191,11 @@ describe('AppSidebar — tiering + role gate', () => {
     }
   });
 
-  /**
-   * docs/plans/done/OPS-UX-PLAN.md §2 A5: `badge: 'soon'` scaffold entries are a roadmap preview for
-   * ADMIN/MANAGER, not a working page — a PILOT following one is a dead end with no `managerOnly`
-   * gate to have hidden it. Same F10 "filtered exactly once, here" claim as the `managerOnly` test
-   * above, extended to this second predicate.
-   */
-  it('a PILOT sees no badge:"soon" entry anywhere; ADMIN/MANAGER keep seeing every one, as roadmap', () => {
-    const pilot = render({ topRole: 'PILOT' });
-    const pilotHrefs = navRowHrefs(pilot.nativeElement as HTMLElement);
-    let sawAtLeastOneSoonEntry = false;
-    for (const mode of NAV_MODES) {
-      for (const entry of mode.entries) {
-        if (entry.badge === 'soon') {
-          sawAtLeastOneSoonEntry = true;
-          expect(pilotHrefs, `PILOT should not see upcoming "${entry.name}"`).not.toContain(entry.to);
-        }
-      }
-    }
-    expect(sawAtLeastOneSoonEntry).toBe(true); // sanity: the fixture actually exercises this path
-
-    TestBed.resetTestingModule();
-    const manager = render({ topRole: 'MANAGER' });
-    const managerHrefs = navRowHrefs(manager.nativeElement as HTMLElement);
-    for (const mode of NAV_MODES) {
-      for (const entry of mode.entries) {
-        if (entry.badge === 'soon') {
-          expect(managerHrefs, `MANAGER should still see upcoming "${entry.name}"`).toContain(entry.to);
-        }
-      }
-    }
-  });
-
   it('dev-parity: an ADMIN dev principal (authEnabled=false) sees the same full set as a real ADMIN session', () => {
     const fixture = render({ topRole: 'ADMIN' });
     const root = fixture.nativeElement as HTMLElement;
-    const manage = NAV_MODES.find((mode) => mode.id === 'manage')!;
-    expect(navRowHrefs(root)).toEqual(expect.arrayContaining(manage.entries.map((entry) => entry.to)));
+    const everyEntry = NAV_MODES.flatMap((mode) => mode.entries);
+    expect(navRowHrefs(root)).toEqual(expect.arrayContaining(everyEntry.map((entry) => entry.to)));
   });
 });
 
@@ -380,38 +345,6 @@ describe('AppSidebar — mobile off-canvas sheet + foot', () => {
     fixture.detectChanges();
     expect(root.querySelector('.sidebar')!.classList.contains('mobile-open')).toBe(true);
     expect(root.querySelector('.identity-trigger')!.getAttribute('aria-expanded')).toBe('false');
-  });
-});
-
-describe('AppSidebar — Advanced/Upcoming disclosures persist via SidebarStore', () => {
-  beforeEach(() => localStorage.clear());
-
-  it('toggling the Advanced <details> writes through to SidebarStore.advancedOpen', () => {
-    const fixture = render({ topRole: 'ADMIN' });
-    const store = TestBed.inject(SidebarStore);
-    expect(store.advancedOpen()).toBe(false);
-
-    const root = fixture.nativeElement as HTMLElement;
-    const manageIndex = NAV_MODES.findIndex((mode) => mode.id === 'manage');
-    const advancedDetails = root.querySelectorAll('.nav-group')[manageIndex].querySelectorAll('details.disclosure')[0] as HTMLDetailsElement;
-
-    advancedDetails.open = true;
-    advancedDetails.dispatchEvent(new Event('toggle'));
-    fixture.detectChanges();
-
-    expect(store.advancedOpen()).toBe(true);
-  });
-
-  it('a persisted advancedOpen=true renders the disclosure already open', () => {
-    TestBed.configureTestingModule({});
-    TestBed.inject(SidebarStore).setAdvancedOpen(true);
-    TestBed.resetTestingModule();
-
-    const fixture = render({ topRole: 'ADMIN' });
-    const root = fixture.nativeElement as HTMLElement;
-    const manageIndex = NAV_MODES.findIndex((mode) => mode.id === 'manage');
-    const advancedDetails = root.querySelectorAll('.nav-group')[manageIndex].querySelectorAll('details.disclosure')[0] as HTMLDetailsElement;
-    expect(advancedDetails.open).toBe(true);
   });
 });
 

@@ -5,13 +5,16 @@ import com.drones.vision.api.dto.AssetDetailsResponse;
 import com.drones.vision.api.dto.AssetSummaryResponse;
 import com.drones.vision.api.dto.AssignDeviceRequest;
 import com.drones.vision.api.dto.CreateAssetRequest;
+import com.drones.vision.api.dto.FirmwareResponse;
 import com.drones.vision.api.dto.SetLifecycleStateRequest;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateAssetRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.support.AssetRowFacts;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.DeviceId;
@@ -30,6 +33,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
@@ -46,16 +50,19 @@ import com.drones.vision.api.security.CurrentUser;
  * .claude/skills/java-clean-code/SKILL.md §3's five-parameter ceiling; see that class's own
  * javadoc), not here.
  *
- * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, and two driven ports
- * used read-only: {@link TelemetryRepositoryPort} (serving the telemetry endpoint — there is no
- * service method for "read a usage's telemetry trail" yet, so this controller reads the driven
- * port directly, the same precedent {@link StreamController} sets for {@code viewUrl}), and {@link
+ * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, and three driven
+ * collaborators used read-only: {@link TelemetryRepositoryPort} (serving the telemetry endpoint —
+ * there is no service method for "read a usage's telemetry trail" yet, so this controller reads the
+ * driven port directly, the same precedent {@link StreamController} sets for {@code viewUrl}), {@link
  * AssetImageRepositoryPort} (populating {@code hasImage} on every summary/detail response —
  * docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2 — via its cheap {@code
- * existsByAssetId} check; the image bytes themselves are served by {@link AssetImageController}).
- * Per the hexagonal dependency rule (ARCHITECTURE.md §2, enforced by ArchUnit), this
- * module depends only on {@code vision-domain} and {@code vision-application} — never on an
- * adapter.
+ * existsByAssetId} check; the image bytes themselves are served by {@link AssetImageController}),
+ * and {@link AssetRowFacts} (populating {@code firmware}/{@code totalFlightSeconds}, joined from
+ * vision-flight and warehouse's own usage repository respectively — docs/plans/active/
+ * WAREHOUSE-UX-PLAN.md D5; bundled into one collaborator, not two more constructor parameters, to
+ * stay at the five-parameter ceiling — see that class's own javadoc). Per the hexagonal dependency
+ * rule (ARCHITECTURE.md §2, enforced by ArchUnit), this module depends only on {@code
+ * vision-domain} and {@code vision-application} — never on an adapter.
  *
  * <h2>Who the change is attributed to</h2>
  * The acting user comes from {@link CurrentUser} and is passed to every mutating call, so the
@@ -98,16 +105,18 @@ public class AssetController {
     private final CurrentUser currentUser;
     private final TelemetryRepositoryPort telemetryRepositoryPort;
     private final AssetImageRepositoryPort assetImageRepositoryPort;
+    private final AssetRowFacts assetRowFacts;
 
     public AssetController(AssetService assetService, CurrentUser currentUser,
                             TelemetryRepositoryPort telemetryRepositoryPort,
-                            AssetImageRepositoryPort assetImageRepositoryPort) {
+                            AssetImageRepositoryPort assetImageRepositoryPort, AssetRowFacts assetRowFacts) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
         this.telemetryRepositoryPort =
                 Objects.requireNonNull(telemetryRepositoryPort, "telemetryRepositoryPort must not be null");
         this.assetImageRepositoryPort =
                 Objects.requireNonNull(assetImageRepositoryPort, "assetImageRepositoryPort must not be null");
+        this.assetRowFacts = Objects.requireNonNull(assetRowFacts, "assetRowFacts must not be null");
     }
 
     /**
@@ -205,10 +214,18 @@ public class AssetController {
      */
     @GetMapping("/api/assets")
     public List<AssetSummaryResponse> list(@RequestParam(defaultValue = "false") boolean includeDeleted) {
+        Map<AssetId, Long> flightSecondsByAsset = assetRowFacts.totalFlightSecondsByAsset();
         return assetService.assets(currentUser.scope(), includeDeleted).stream()
-                .map(summary -> AssetSummaryResponse.from(summary,
-                        assetImageRepositoryPort.existsByAssetId(summary.asset().id())))
+                .map(summary -> toSummaryResponse(summary, flightSecondsByAsset))
                 .toList();
+    }
+
+    private AssetSummaryResponse toSummaryResponse(AssetSummary summary, Map<AssetId, Long> flightSecondsByAsset) {
+        Asset asset = summary.asset();
+        FirmwareResponse firmware = assetRowFacts.firmwareOf(asset).map(FirmwareResponse::from).orElse(null);
+        long totalFlightSeconds = flightSecondsByAsset.getOrDefault(asset.id(), 0L);
+        return AssetSummaryResponse.from(summary, assetImageRepositoryPort.existsByAssetId(asset.id()), firmware,
+                totalFlightSeconds);
     }
 
     /**
@@ -281,12 +298,19 @@ public class AssetController {
     }
 
     /**
-     * Fetches {@code id}'s detail view plus its {@code hasImage} flag in one call, scoped to the
-     * caller — an asset outside {@link CurrentUser#scope()} 404s exactly as an unknown id does.
+     * Fetches {@code id}'s detail view plus its {@code hasImage}/{@code firmware}/{@code
+     * totalFlightSeconds} facts in one call, scoped to the caller — an asset outside {@link
+     * CurrentUser#scope()} 404s exactly as an unknown id does. {@code totalFlightSeconds} runs {@link
+     * AssetRowFacts#totalFlightSecondsByAsset()}'s fleet-wide aggregate for a single-asset read too —
+     * one grouped query, not a wasteful full scan; see that method's own javadoc.
      */
     private AssetDetailsResponse detailsResponse(AssetId id) {
-        return AssetDetailsResponse.from(assetService.details(currentUser.scope(), id),
-                assetImageRepositoryPort.existsByAssetId(id));
+        AssetDetails details = assetService.details(currentUser.scope(), id);
+        FirmwareResponse firmware = assetRowFacts.firmwareOf(details.summary().asset())
+                .map(FirmwareResponse::from).orElse(null);
+        long totalFlightSeconds = assetRowFacts.totalFlightSecondsByAsset().getOrDefault(id, 0L);
+        return AssetDetailsResponse.from(details, assetImageRepositoryPort.existsByAssetId(id), firmware,
+                totalFlightSeconds);
     }
 
     /**

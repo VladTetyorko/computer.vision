@@ -18,6 +18,8 @@ import com.drones.vision.adapter.persistence.entity.GroupEntity;
 import com.drones.vision.adapter.persistence.entity.MapDrawingEntity;
 import com.drones.vision.adapter.persistence.entity.MapLayerEntity;
 import com.drones.vision.adapter.persistence.entity.MarkEntity;
+import com.drones.vision.adapter.persistence.entity.AssetNoteEntity;
+import com.drones.vision.adapter.persistence.entity.MaintenanceRecordEntity;
 import com.drones.vision.adapter.persistence.entity.SampleImageEntity;
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
 import com.drones.vision.adapter.persistence.entity.TrackCorrectionEntity;
@@ -212,6 +214,8 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(CategoryEntity.class);
         configuration.addAnnotatedClass(DeviceEntity.class);
         configuration.addAnnotatedClass(AssetEntity.class);
+        configuration.addAnnotatedClass(MaintenanceRecordEntity.class);
+        configuration.addAnnotatedClass(AssetNoteEntity.class);
         configuration.addAnnotatedClass(AssetUsageEntity.class);
         configuration.addAnnotatedClass(TelemetrySampleEntity.class);
         configuration.addAnnotatedClass(DetectionResultEntity.class);

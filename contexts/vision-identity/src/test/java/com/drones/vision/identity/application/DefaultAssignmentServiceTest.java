@@ -5,6 +5,8 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.DeviceId;
@@ -49,14 +51,15 @@ class DefaultAssignmentServiceTest {
         assignmentRepository = new FakeAssignmentRepositoryPort();
         service = new DefaultAssignmentService(assignmentRepository, assetService);
 
-        asset = new Asset(AssetId.random(), "drone", DRONE, new Ownership(UserId.random(), group),
-                Set.of(DeviceId.random()), Map.of());
+        asset = Asset.register(AssetId.random(), "drone", DRONE, new Ownership(UserId.random(), group),
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
         when(assetService.details(asset.id())).thenReturn(detailsOf(asset));
     }
 
     /** Minimal {@link AssetDetails} wrapping one asset — devices/recentUsages are unused by this service. */
     private static AssetDetails detailsOf(Asset asset) {
-        AssetSummary summary = new AssetSummary(asset, "drone", AssetStatus.OFFLINE, null, null);
+        AssetSummary summary = new AssetSummary(asset, "drone", AssetStatus.OFFLINE, null, null,
+                asset.inventoryState(), asset.identity(), asset.custody());
         return new AssetDetails(summary, List.of(), List.of());
     }
 

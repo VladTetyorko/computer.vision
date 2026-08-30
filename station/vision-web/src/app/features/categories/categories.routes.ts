@@ -1,15 +1,16 @@
-import type { Routes } from '@angular/router';
+import { inject } from '@angular/core';
+import { Router, type Routes } from '@angular/router';
 
 /**
- * `/manage/categories` (docs/plans/done/UI-REDESIGN-PLAN.md Wave 4) — own lazy chunk, split per
- * vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8). Spread inside `app.routes.ts`'s
- * `authGuard`-wrapped children group — no extra role gate, mirrors `/assets`. Replaces the
- * `ComingSoon` scaffold `hubs.routes.ts` used to route this path to.
+ * `/manage/categories` — **folded into the Inventory page's Categories tab**
+ * (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 rule 3/§3.3, wave W4). `CategoriesPage` itself is
+ * unchanged in location — still `features/categories/**` — `InventoryPage`'s Categories tab imports
+ * and mounts it. See `features/devices/devices.routes.ts`'s identical doc comment for why this is a
+ * `RedirectFunction` and why `orgGuard` moved off the route (the tab bar is the gate now).
  */
 export const CATEGORIES_ROUTES: Routes = [
   {
     path: 'manage/categories',
-    title: 'Asset categories · Vision',
-    loadComponent: () => import('./categories').then((m) => m.CategoriesPage),
+    redirectTo: () => inject(Router).createUrlTree(['/assets'], { queryParams: { tab: 'categories' } }),
   },
 ];

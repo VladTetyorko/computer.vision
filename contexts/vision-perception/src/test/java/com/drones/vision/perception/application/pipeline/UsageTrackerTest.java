@@ -1,6 +1,9 @@
 package com.drones.vision.perception.application.pipeline;
 
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.Capability;
@@ -886,8 +889,9 @@ class UsageTrackerTest {
     @Test
     void engageOnADeactivatedAssetThrowsIllegalState() {
         DeviceId deviceId = telemetryDevice("tel-1").id();
+        Instant now = Instant.now();
         Asset asset = new Asset(AssetId.random(), "my drone", DRONE, ownership, Set.of(deviceId), Map.of(),
-                LifecycleState.DEACTIVATED);
+                LifecycleState.DEACTIVATED, Identity.NONE, Custody.NONE, InventoryState.IN_STOCK, now, now);
         when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
         UsageTracker tracker = tracker(List.of());
 
@@ -1041,7 +1045,8 @@ class UsageTrackerTest {
     }
 
     private Asset asset(Set<DeviceId> devices) {
-        return new Asset(AssetId.random(), "my drone", DRONE, ownership, devices, Map.of());
+        return Asset.register(AssetId.random(), "my drone", DRONE, ownership, devices, Map.of(), Identity.NONE,
+                Custody.NONE);
     }
 
     /**

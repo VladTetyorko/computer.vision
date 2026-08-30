@@ -1,5 +1,6 @@
 import type {
   AssetEdit,
+  AssetIdentity,
   CreateAssetRequest,
   Membership,
   ProbeCandidateRequest,
@@ -7,188 +8,144 @@ import type {
   Role,
   UserSummary,
 } from '../../core/api/models';
+import { fitOutDeviceSpecs, type FitOutRows } from '../../core/onboarding/fit-out-logic';
 import type { SimulateMode } from '../../core/fleet/simulation-logic';
-import { withRegistrationNumber } from '../../core/fleet/asset-attributes';
 
 /**
- * Pure logic behind the onboarding wizard (docs/plans/done/UX-REWORK-PLAN.md §U-d): step-state transitions,
- * poka-yoke advance gating, and request builders. Split out so it is unit-testable without HTTP,
- * the router, or a canvas — mirrors every other `*-logic.ts` module in this app
- * (`features/devices/devices-page-logic.ts`, `core/telemetry/telemetry-logic.ts`).
+ * Pure logic behind the onboarding wizard (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave W6):
+ * step-state transitions, poka-yoke advance gating, and request builders. Split out so it is
+ * unit-testable without HTTP, the router, or a canvas — mirrors every other `*-logic.ts` module in
+ * this app (`features/devices/devices-page-logic.ts`, `core/telemetry/telemetry-logic.ts`).
  *
  * `OnboardingStore` (the wizard's own "component store", provided per-route like
- * `TelemetryStore`/`DetectionsStore`) is the only caller — it owns every signal and orchestrates
- * the actual HTTP calls, but defers every yes/no and every request shape to the functions here.
+ * `TelemetryStore`/`DetectionsStore`) is the only caller — it owns every signal and orchestrates the
+ * actual HTTP calls, but defers every yes/no and every request shape to the functions here. The
+ * fit-out table's own row semantics (one row per role, `find`/`simulate`/`none`) live in
+ * `core/onboarding/fit-out-logic.ts` instead of here — that module is framework/feature-free and
+ * this one is not (`ProbeDeviceRequest` etc. are wire types, but this file also owns the pilot/
+ * ownership-group logic below, which is onboarding-specific, not a generic core concern).
  */
 
 /**
- * The wizard's seven steps, always in this order — `nextStep`/`prevStep` are the only way to move
- * through the first five. **`assign`** (docs/plans/done/OPS-UX-PLAN.md §2 A3, "Who flies this?") is the
- * exception: the wizard never reaches it via `next()` (the `create` step's own action button is
- * what gets there, only after `POST /api/assets` actually succeeds — see `OnboardingStore#finishCreate`)
- * and it is never back-navigable into `create` (the asset already exists by the time it renders;
- * "going back" would misleadingly suggest undoing that). `nextStep`/`prevStep` still define total
- * cases for it (returning `'assign'`/`'create'` respectively) purely so both functions stay total
- * over the whole `WizardStep` union — `onboarding.html`'s own footer is what actually withholds the
- * Back/Next buttons on this step (see its own template comment).
+ * The wizard's six steps. Five are visible in the stepper (see {@link visibleSteps}); **`sysid`**
+ * never is, exactly like the pre-W6 wizard's own `sysid` step — the wizard reaches it only via an
+ * explicit call from `OnboardingStore#finishCreate`, when the just-created asset's own Prove-step
+ * probe collided with a sysid an already-registered device claims
+ * (`sysid-collision-logic.ts#detectSysidCollision`); every other path skips straight to `handover`.
  *
- * **`verify`** (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1 stage 3/O6, inserted between `test` and
- * `create`) is where the platform actually observes the aircraft's own vehicle link — a
- * pre-registration `POST /api/onboarding/probe` (`OnboardingStore#verify`), distinct from `test`'s
- * `POST /api/devices/probe` (one decoded video frame). Reached only from `test` when the Connect
- * method is `register` — the same set that reaches `test` at all (`nextStep`'s own `connect` case;
- * `discover`/`listen`/`drone` all pivot to `register` before either step, `simulate` skips both).
- * **Never itself blocking**: `canAdvanceFromVerify` below is unconditionally `true` — this wave
- * resolves the plan's own open question OQ3 ("does a NO-GO verdict block, or only advise?", §10) as
- * advisory-only pending an operator's own answer, and separately, `vision.onboarding.probe.enabled`
- * defaults `false` (D17) so a probe attempt commonly 409s outright; neither case may strand an
- * operator mid-wizard over a read this platform cannot promise will succeed.
+ * - **`identify`** (was `profile`): name, category, photo, plus serial/make/model/registration
+ *   (docs/plans/active/WAREHOUSE-UX-PLAN.md D1). If the chosen category is `connected: false`
+ *   (equipment — a battery, a spare prop), this step's own action button reads "Receive" instead of
+ *   "Next" and performs the create call directly (`OnboardingStore#receiveEquipmentAsset`), skipping
+ *   `connect`/`prove`/`register` as rendered steps entirely — `nextStep`'s own `identify` case below
+ *   still defines a `register` target for totality, but no real equipment flow ever calls `next()`
+ *   from this step to reach it.
+ * - **`connect`**: the fit-out table (`core/onboarding/fit-out-logic.ts`) — one row per role (Sense/
+ *   Sight), replacing the pre-W6 five-tile single-device Connect step. Closes coupling C2: a vehicle
+ *   with both a real flight controller and a real camera registers both in one visit.
+ * - **`prove`** (was `test` + `verify`, merged): runs the Test + Verify probes per filled `find` row,
+ *   results shown per row (`OnboardingStore`'s own per-role Prove state). Skipped entirely when no
+ *   row needs proving (`fit-out-logic.ts#needsProve`) — generalizing the pre-W6 "simulate skips test"
+ *   rule to every row, not just a single wizard-wide method.
+ * - **`register`** (was `create`): unchanged in substance — one `POST /api/assets`, now with
+ *   `identity` and N devices (`fit-out-logic.ts#fitOutDeviceSpecs`) instead of exactly one.
+ * - **`handover`** (was `assign`): "Issue to" a custodian (`VisionApi#setAssetCustody` +
+ *   `assignPilot`, since `issue` alone does not create a pilot assignment) or "Leave in stock". Ends
+ *   in a completed sub-state naming the next verb — readiness for a connected vehicle, inventory for
+ *   equipment — rather than an automatic router redirect (`OnboardingStore#handoverOutcome`).
  *
- * **`sysid`** (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0, inserted between `create` and `assign`) is
- * the same kind of exception `assign` already is, one step earlier: the wizard never reaches it via
- * `next()` either — it is entered only by an explicit call from `OnboardingStore#finishCreate`, and
- * only when the just-created asset's own Verify-step profile collided with a sysid an
- * already-registered device claims (`OnboardingStore#sysidCollision`/`sysid-collision-logic.ts#detectSysidCollision`).
- * Every other path (no collision, or a Connect method other than `register`) skips straight to
- * `assign`, byte-identical to the wizard's behavior before this step existed. Like `assign`, it is
- * never back-navigable into `create` (the asset already exists by the time it renders) —
- * `nextStep`/`prevStep` define total, terminal-style cases for it purely so both functions stay total
- * over the whole `WizardStep` union; `onboarding.html`'s own footer withholds the generic Back/Next
- * buttons on this step too, in favor of its own explicit "Write sysid"/"Continue" actions.
+ * Like `sysid`, `handover` is never reached via `next()` either — only via a successful
+ * `finishCreate`/`receiveEquipmentAsset` — and is never back-navigable into `register` (the asset
+ * already exists by the time it renders). `nextStep`/`prevStep` still define total cases for both
+ * purely so they stay total over the whole `WizardStep` union; `onboarding.html`'s own footer is what
+ * actually withholds the generic Back/Next buttons on these two steps.
  */
-export type WizardStep = 'profile' | 'connect' | 'test' | 'verify' | 'create' | 'sysid' | 'assign';
+export type WizardStep = 'identify' | 'connect' | 'prove' | 'register' | 'sysid' | 'handover';
 
-export const WIZARD_STEPS: readonly WizardStep[] = [
-  'profile',
-  'connect',
-  'test',
-  'verify',
-  'create',
-  'sysid',
-  'assign',
-];
+/** Every step, used internally where the full universe matters (e.g. this file's own totality checks). Not what the stepper renders — see {@link visibleSteps}. */
+export const WIZARD_STEPS: readonly WizardStep[] = ['identify', 'connect', 'prove', 'register', 'sysid', 'handover'];
 
 /**
- * The Connect step's entry points (docs/plans/done/UX-REWORK-PLAN.md §U-d — "the existing 3-choice connect
- * component (port / resource / simulate) stays"). `discover` is never the method a probe or a
- * create request is built against — picking "Use" on a scan candidate switches the method to
- * `register` with the candidate's fields prefilled, exactly like the pre-wizard Devices page did
- * (`useCandidate`, moved here verbatim in behavior).
- *
- * `listen` (docs/plans/active/DRONE-INFRA-PLAN.md I-b — "Listen for drones") is a fourth tile, alongside the
- * original three, for a MAVLink-heartbeat-only scan (`drone-scan-logic.ts`): it behaves exactly
- * like `discover` in every gate below — never itself advanceable — since picking an unclaimed
- * vehicle flips the method to `register` with the connect form prefilled
- * (`OnboardingStore#useDroneVehicle`), the same "candidate → register" pivot `discover` already
- * uses.
- *
- * `drone` (docs/plans/active/DRONE-INFRA-PLAN.md I-g, wave B — "Add a real drone") is a fifth tile: a guided
- * firmware×link picker plus parameterized copy-paste config snippets
- * (`drone-config-logic.ts#linkCompatibility`/`configSnippets`), entirely **sub-states of this one
- * Connect step** (`OnboardingStore#droneSubStep`, `'picker' | 'config'`, deliberately not part of
- * this file's own `WizardStep` machine — see that signal's own doc comment). It behaves exactly
- * like `discover`/`listen` in every gate below too — never itself advanceable — for the identical
- * reason: once the operator has configured the aircraft, `OnboardingStore#finishDroneConfigAndListen`
- * flips the method straight to `listen`, handing off to that method's own already-existing scan/
- * pick/register-pivot flow verbatim (per the plan's own "listen is the scan" wording — no second
- * scanner, no second vehicle-list UI). `drone` therefore never itself reaches `test`/`create`.
+ * The stepper's own label row (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 — "Identify · Connect ·
+ * Prove · Register · Hand over"). `sysid` is never included, on either branch — see
+ * {@link WizardStep}'s own doc comment. An equipment category (`connected: false`) shows only the
+ * two steps its own flow actually renders; a connected one shows all five, `prove` included even
+ * though a particular visit might skip past it at runtime (the label row describes the wizard's
+ * shape, not one run's actual path — same as the pre-W6 stepper always showing "Test"/"Verify" even
+ * on the simulate path that skipped both).
  */
-export type ConnectMethod = 'register' | 'discover' | 'simulate' | 'listen' | 'drone';
+export function visibleSteps(connected: boolean): readonly WizardStep[] {
+  return connected ? ['identify', 'connect', 'prove', 'register', 'handover'] : ['identify', 'handover'];
+}
+
+/** What {@link nextStep}/{@link prevStep} need to know beyond the current step. */
+export interface StepContext {
+  /** `Category#connected` for the chosen category — see {@link WizardStep}'s own `identify` case. */
+  readonly connected: boolean;
+  /** `fit-out-logic.ts#needsProve` for the current Connect draft. */
+  readonly needsProve: boolean;
+}
 
 /**
- * The next step for the wizard's own forward-only "Next"/submit action. `simulate` skips `test`
- * entirely (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1's own wording: "simulate path may skip step 3, it
- * always produces frames" — there is no separate device to probe ahead of starting it; starting the
- * simulation *is* the proof it works). Calling this on `'create'` is a caller bug — there is no step
- * after it — so it is left undefined behavior (returns `'create'`, a harmless no-op) rather than
- * throwing, matching every other total function in this file.
+ * The next step for the wizard's own forward-only "Next" action. Calling this on `'register'` is a
+ * caller bug — there is no forward step from it via `next()` (`OnboardingStore#finishCreate` is what
+ * actually advances past it, only after `POST /api/assets` succeeds) — so, like every other total
+ * function in this file, it is left as a harmless no-op (returns `'register'`) rather than throwing.
  */
-export function nextStep(current: WizardStep, method: ConnectMethod | null): WizardStep {
+export function nextStep(current: WizardStep, ctx: StepContext): WizardStep {
   switch (current) {
-    case 'profile':
-      return 'connect';
+    case 'identify':
+      return ctx.connected ? 'connect' : 'register';
     case 'connect':
-      return method === 'simulate' ? 'create' : 'test';
-    case 'test':
-      return 'verify';
-    case 'verify':
-    case 'create':
-      return 'create';
+      return ctx.needsProve ? 'prove' : 'register';
+    case 'prove':
+    case 'register':
+      return 'register';
     case 'sysid':
-      return 'sysid'; // terminal, like 'create'/'assign' above — see this type's own doc comment.
-    case 'assign':
-      return 'assign'; // terminal, like 'create' above — see this type's own doc comment.
+      return 'sysid'; // terminal, like 'register' above — see this type's own doc comment.
+    case 'handover':
+      return 'handover'; // terminal, like 'register' above — see this type's own doc comment.
   }
 }
 
 /** The inverse of {@link nextStep} — back-navigable, per the plan's own "stepper … back-navable" ask. */
-export function prevStep(current: WizardStep, method: ConnectMethod | null): WizardStep {
+export function prevStep(current: WizardStep, ctx: StepContext): WizardStep {
   switch (current) {
-    // `assign`'s own immediate predecessor is `create`, kept only for totality — see this type's
-    // own doc comment for why `onboarding.html` never actually renders a Back button here.
-    case 'assign':
-      return 'create';
-    // `sysid`'s own immediate predecessor is conceptually `create` too (see this type's own doc
-    // comment) — kept only for totality, same as `assign` above; `onboarding.html` never renders a
-    // Back button on this step either.
+    // `handover`'s own immediate predecessor is `register`, kept only for totality — see
+    // `WizardStep`'s own doc comment for why `onboarding.html` never renders a Back button here.
+    case 'handover':
+      return 'register';
+    // `sysid`'s own immediate predecessor is conceptually `register` too — kept only for totality,
+    // same as `handover` above; `onboarding.html` never renders a Back button on this step either.
     case 'sysid':
-      return 'create';
-    case 'create':
-      return method === 'simulate' ? 'connect' : 'verify';
-    case 'verify':
-      return 'test';
-    case 'test':
+      return 'register';
+    case 'register':
+      if (!ctx.connected) {
+        return 'identify'; // the equipment short-circuit never actually renders this step, but stays total.
+      }
+      return ctx.needsProve ? 'prove' : 'connect';
+    case 'prove':
       return 'connect';
     case 'connect':
-    case 'profile':
-      return 'profile';
+    case 'identify':
+      return 'identify';
   }
 }
 
 // --- Poka-yoke: advance gating (docs/plans/done/UX-REWORK-PLAN.md §U-a2 rule 1 — prevention over confirmation) -
 
-/** Profile step: a name and a category are the only two facts every asset must have. */
-export function canAdvanceFromProfile(displayName: string, category: string): boolean {
+/** Identify step: a name and a category are the only two facts every asset must have — serial/make/model/registration are all optional. */
+export function canAdvanceFromIdentify(displayName: string, category: string): boolean {
   return displayName.trim().length > 0 && category.trim().length > 0;
 }
 
-/** Only the file-based simulate modes need a server-side path; `synthetic`/`testDrone` need nothing. */
+/** Only the file-based legacy-simulate modes need a server-side path; `synthetic`/`testDrone` need nothing. */
 export function simulateNeedsVideoPath(mode: SimulateMode): boolean {
   return mode === 'direct' || mode === 'rtsp';
 }
 
-/** Enough of the Connect step's draft state to decide whether "Next" may be pressed. */
-export interface ConnectDraft {
-  readonly method: ConnectMethod | null;
-  readonly protocol: string;
-  readonly uri: string;
-  readonly simMode: SimulateMode;
-  readonly simVideoPath: string;
-}
-
 /**
- * Connect step: `register` needs a protocol and a URI (mirrors the pre-wizard Register form's own
- * `canSubmit`); `discover`/`listen`/`drone` alone (no candidate chosen yet — see
- * {@link ConnectMethod}'s doc comment) never satisfy this, since none of the three carries a
- * protocol/URI of its own until "Use" flips the method to `register`; `simulate` needs a video path
- * only for the two file-based modes.
- */
-export function canAdvanceFromConnect(draft: ConnectDraft): boolean {
-  switch (draft.method) {
-    case 'register':
-      return draft.protocol.trim().length > 0 && draft.uri.trim().length > 0;
-    case 'simulate':
-      return !simulateNeedsVideoPath(draft.simMode) || draft.simVideoPath.trim().length > 0;
-    case 'discover':
-    case 'listen':
-    case 'drone':
-    case null:
-      return false;
-  }
-}
-
-/**
- * Protocols that carry telemetry and no video, so the Test step must stop asking them for a frame
+ * Protocols that carry telemetry and no video, so a Prove-step row must stop asking them for a frame
  * (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §2 B3).
  *
  * A list rather than a single string because the *concept* is "telemetry-only link", not "mavlink":
@@ -207,38 +164,9 @@ export function isTelemetryOnlyProtocol(protocol: string | null | undefined): bo
     && TELEMETRY_ONLY_PROTOCOLS.includes(protocol.trim().toLowerCase());
 }
 
-/**
- * Test step (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1, poka-yoke): "cannot advance to save while the last
- * probe failed" — for `register`/`discover` paths only. `simulate` never reaches this step at all
- * (see {@link nextStep}), so it trivially always may advance; kept as a real branch (not assumed
- * true by the caller) so a future caller that *does* invoke this for `simulate` gets the right
- * answer rather than undefined behavior. `lastProbeOk` is `undefined` before any probe has run —
- * exactly the "not yet allowed" state a fresh Test step starts in.
- *
- * Deliberately unchanged by the telemetry-only work: a frameless probe still returns `ok: true`
- * (that is the whole point of the second 200 shape), so "the last probe succeeded" remains the one
- * question this gate asks. Only the wording around it had to learn the difference.
- */
-export function canAdvanceFromTest(method: ConnectMethod | null, lastProbeOk: boolean | undefined): boolean {
-  return method === 'simulate' || lastProbeOk === true;
-}
-
-/**
- * Verify step (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1 stage 3/O6): unconditionally
- * advanceable — see {@link WizardStep}'s own doc comment for why a vehicle-link observation may
- * never strand an operator mid-wizard. Takes `method` only so this function's own signature makes
- * the "does not actually depend on it" fact checkable at every call site, the same total-function
- * shape every other `canAdvanceFrom*` gate here uses, rather than a bare `true` a caller could
- * mistake for a stub.
- */
-export function canAdvanceFromVerify(method: ConnectMethod | null): boolean {
-  void method;
-  return true;
-}
-
 // --- Request builders --------------------------------------------------------------------------
 
-/** What the Test step's probe call needs — the same three fields a register candidate carries. */
+/** What the Prove step's probe/verify calls need — the same three fields a resolved fit-out row carries. */
 export interface ProbeConnectionDraft {
   readonly protocol: string;
   readonly uri: string;
@@ -256,73 +184,89 @@ export function buildProbeRequest(draft: ProbeConnectionDraft): ProbeDeviceReque
 }
 
 /**
- * Builds `POST /api/onboarding/probe`'s body for the Verify step (§3.1 stage 3/O6) — the same
- * trimmed `{protocol, uri, options}` shape {@link buildProbeRequest} builds for the Test step's own
- * video probe, since `ProbeCandidateRequest` deliberately mirrors `ProbeDeviceRequest` (its own
- * doc comment).
+ * Builds `POST /api/onboarding/probe`'s body for the Prove step's Verify half
+ * (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1 stage 3/O6) — the same trimmed
+ * `{protocol, uri, options}` shape {@link buildProbeRequest} builds for its Test half, since
+ * `ProbeCandidateRequest` deliberately mirrors `ProbeDeviceRequest` (its own doc comment).
  */
 export function buildVerifyRequest(draft: ProbeConnectionDraft): ProbeCandidateRequest {
   return buildProbeRequest(draft);
 }
 
-/** The Profile step's facts, trimmed and validated already by {@link canAdvanceFromProfile}. */
-export interface ProfileDraft {
+/** The Identify step's facts, trimmed and validated already by {@link canAdvanceFromIdentify}. */
+export interface IdentifyDraft {
   readonly displayName: string;
-  readonly registrationNumber: string;
   readonly category: string;
+  readonly registrationNumber: string;
+  readonly serialNumber: string;
+  readonly make: string;
+  readonly model: string;
 }
 
 /**
- * Builds `POST /api/assets`'s body for the `register`/`discover` Connect paths (docs/plans/done/UX-REWORK-PLAN.md
- * §U-d item 2 — "closes the orphaned-device dead end": one call creates the asset *and* registers
- * its device, via `CreateAssetRequest#devices`, rather than registering a device first and hoping
- * something files it under an asset later). The device is given the asset's own display name — this
- * wizard makes assets, not devices, first-class; there is no separate device-naming field anywhere
- * in it.
+ * Builds `CreateAssetRequest#identity`/`AssetEdit#identity` from the Identify step's draft —
+ * `undefined` when every field is blank, never an object of empty strings. Registration rides here
+ * now, not in `attributes` — `core/fleet/asset-attributes.ts`'s `registrationNumber` attribute-key
+ * convention predates `dto.IdentityRequest`/D8's new first-class `registration` column and is left
+ * untouched for `features/asset-detail/**`'s own inline edit (a different wave's file scope); see
+ * this wave's WAREHOUSE-UX-CONTEXT.md handoff for the discrepancy this leaves between the two paths.
  */
-export function buildCreateAssetRequest(
-  profile: ProfileDraft,
-  connect: ProbeConnectionDraft,
-): CreateAssetRequest {
-  const displayName = profile.displayName.trim();
-  const attributes = withRegistrationNumber({}, profile.registrationNumber);
+export function buildIdentityRequest(
+  draft: Pick<IdentifyDraft, 'registrationNumber' | 'serialNumber' | 'make' | 'model'>,
+): AssetIdentity | undefined {
+  const registration = draft.registrationNumber.trim();
+  const serialNumber = draft.serialNumber.trim();
+  const make = draft.make.trim();
+  const model = draft.model.trim();
+  const identity: AssetIdentity = {
+    ...(serialNumber.length > 0 ? { serialNumber } : {}),
+    ...(make.length > 0 ? { make } : {}),
+    ...(model.length > 0 ? { model } : {}),
+    ...(registration.length > 0 ? { registration } : {}),
+  };
+  return Object.keys(identity).length > 0 ? identity : undefined;
+}
+
+/**
+ * Builds `POST /api/assets`'s body for the multi-device fit-out path (docs/plans/active/WAREHOUSE-UX-PLAN.md
+ * §3.4 wave W6 — closes coupling C2). `rows` may be empty (the equipment short-circuit — `devices` is
+ * then simply omitted, which `AssetSpec#toSpec` treats identically to an explicit empty list) or
+ * carry one or two filled rows; never called on `fit-out-logic.ts#usesLegacySimulationPath`'s own
+ * true case, which routes through the simulation request builders instead.
+ */
+export function buildCreateAssetRequest(identify: IdentifyDraft, rows: FitOutRows): CreateAssetRequest {
+  const displayName = identify.displayName.trim();
+  const devices = fitOutDeviceSpecs(rows, displayName);
+  const identity = buildIdentityRequest(identify);
   return {
     displayName,
-    category: profile.category.trim(),
-    ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
-    devices: [
-      {
-        name: displayName,
-        protocol: connect.protocol.trim(),
-        uri: connect.uri.trim(),
-        ...(connect.options && Object.keys(connect.options).length > 0 ? { options: connect.options } : {}),
-      },
-    ],
+    category: identify.category.trim(),
+    ...(identity ? { identity } : {}),
+    ...(devices.length > 0 ? { devices } : {}),
   };
 }
 
 /**
- * Builds the `PATCH /api/assets/{id}` body applied *after* the Simulate Connect path's
- * `POST /api/simulations` call (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1 — "Simulate path routes through
- * POST /api/simulations as today then applies name/photo/attributes via PATCH+PUT"). Deliberately
- * carries no `category` — `DefaultSimulationService` always creates the asset under the fixed
- * `simulated` category regardless of what the Profile step's category picker shows, so sending one
- * here would either no-op or fight the backend's own invariant; the Profile step's category field is
- * simply not honored on this one path (see this module's own onboarding wizard doc comment/MODULE.md
- * for this as a documented, deliberate gap, not an oversight).
+ * Builds the `PATCH /api/assets/{id}` body applied *after* the legacy Simulate Connect path's
+ * `POST /api/simulations` call (docs/plans/active/SOURCE-ONBOARDING-CONTEXT.md §7/§9 —
+ * `fit-out-logic.ts#usesLegacySimulationPath`). Deliberately carries no `category` —
+ * `DefaultSimulationService` always creates the asset under the fixed `simulated` category
+ * regardless of what the Identify step's category picker shows, so sending one here would either
+ * no-op or fight the backend's own invariant; the Identify step's category field is simply not
+ * honored on this one path (a documented, deliberate gap, not an oversight).
  */
 export function buildPostSimulationAssetEdit(
-  profile: Pick<ProfileDraft, 'displayName' | 'registrationNumber'>,
+  identify: Pick<IdentifyDraft, 'displayName' | 'registrationNumber' | 'serialNumber' | 'make' | 'model'>,
 ): AssetEdit {
-  const displayName = profile.displayName.trim();
-  const attributes = withRegistrationNumber({}, profile.registrationNumber);
+  const displayName = identify.displayName.trim();
+  const identity = buildIdentityRequest(identify);
   return {
     ...(displayName.length > 0 ? { displayName } : {}),
-    ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
+    ...(identity ? { identity } : {}),
   };
 }
 
-// --- Step 5: "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) -------------------------------
+// --- Hand over: "Who takes this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3; docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 D3) --
 
 /** Least→most privileged, mirroring the domain's own `Role` ordinal — used only to find the *highest* of a set of memberships below. */
 const ROLE_RANK: Readonly<Record<Role, number>> = { PILOT: 0, MANAGER: 1, ADMIN: 2 };
@@ -333,17 +277,16 @@ const ROLE_RANK: Readonly<Record<Role, number>> = { PILOT: 0, MANAGER: 1, ADMIN:
  * (`VisionUserDetails#ownershipOf`, station/vision-app): the group tied to the creator's **highest**
  * `Role` membership, ties broken by encounter order (the backend's own tie-break is undocumented as
  * stable either — see that method's own comment) — never a group the caller has to pick, since the
- * wizard's Profile/Connect/Test/Create steps never ask for one. Returns `undefined` only for a
+ * wizard's Identify/Connect/Prove/Register steps never ask for one. Returns `undefined` only for a
  * membership-less account (the "couldn't determine your group" honest-degrade case downstream).
  *
  * **Known dev-parity gap** (`vision.auth.enabled=false`): the fixed dev-admin principal's own
  * `MeResponse.memberships` carries a synthetic group id that does not match the real seeded
  * admin/manager/pilot users' own "Root" group id (two different, unrelated ids that merely share a
  * display name) — so this function resolves *a* group correctly, but `pilotsInGroup` below will
- * never find a match against it in that mode. This is a frontend-only wave (docs/plans/done/OPS-UX-PLAN.md
- * §2) with no backend change available to fix the mismatch; the picker's own honest empty state
- * ("nobody in *that* group is a pilot yet") is still a true statement about the data this app can
- * see, never a fabrication — see `onboarding-store.ts#enterAssignStep`'s own note.
+ * never find a match against it in that mode. This is a frontend-only gap with no backend change
+ * available to fix the mismatch; the picker's own honest empty state ("nobody in *that* group is a
+ * pilot yet") is still a true statement about the data this app can see, never a fabrication.
  */
 export function creatorOwnershipGroup(memberships: readonly Membership[]): Membership | undefined {
   return memberships.reduce<Membership | undefined>((best, candidate) => {
@@ -355,11 +298,11 @@ export function creatorOwnershipGroup(memberships: readonly Membership[]): Membe
 }
 
 /**
- * Every enabled user holding a `PILOT` membership in `groupId` — the wizard's own candidate list,
- * same `enabled`-only filter `features/asset-detail/pilots-card.ts#assignable` already applies (a
- * disabled account can't sign in to fly anything). `undefined`/unresolved `groupId` yields no
- * candidates at all, never every pilot app-wide — offering the wrong team's roster would be worse
- * than offering none (docs/plans/done/OPS-UX-PLAN.md §2 A3: "offer the group's pilots").
+ * Every enabled user holding a `PILOT` membership in `groupId` — the Hand-over step's own custodian
+ * candidate list, same `enabled`-only filter `features/asset-detail/pilots-card.ts#assignable`
+ * already applies (a disabled account can't sign in to fly anything). `undefined`/unresolved
+ * `groupId` yields no candidates at all, never every pilot app-wide — offering the wrong team's
+ * roster would be worse than offering none.
  */
 export function pilotsInGroup(users: readonly UserSummary[], groupId: string | undefined): readonly UserSummary[] {
   if (!groupId) {
@@ -377,7 +320,7 @@ export function pilotsInGroup(users: readonly UserSummary[], groupId: string | u
  * group is by construction the group of their own highest-role membership (see
  * {@link creatorOwnershipGroup}'s own doc comment), so their role *there* is never `PILOT` — this
  * only ever preselects the creator for the solo-pilot self-registration case (a plain PILOT's own
- * single membership, still reachable today ahead of the backend's own wave-C gate landing).
+ * single membership).
  */
 export function defaultPilotSelection(creatorUserId: string, ownershipGroup: Membership | undefined): readonly string[] {
   return ownershipGroup?.role === 'PILOT' ? [creatorUserId] : [];

@@ -12,6 +12,8 @@ import com.drones.vision.warehouse.domain.model.DeviceCategory;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GroupId;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
@@ -82,7 +84,7 @@ class DefaultAssetServiceTest {
 
         when(assetRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(categoryRepository.findById(DRONE))
-                .thenReturn(Optional.of(new DeviceCategory(DRONE, "Drone", null, List.of())));
+                .thenReturn(Optional.of(new DeviceCategory(DRONE, "Drone", null, List.of(), true)));
         when(assetLiveStatePort.activeStreamsByDevice()).thenReturn(Map.of());
         when(assetLiveStatePort.stopStreamsForDevices(any())).thenReturn(0);
         when(usageRepository.findRecentByAsset(any(), anyInt())).thenReturn(List.of());
@@ -101,9 +103,26 @@ class DefaultAssetServiceTest {
     }
 
     @Test
-    void assetSpecRejectsZeroDevicesAtTheDomainLevel() {
-        assertThrows(IllegalArgumentException.class,
-                () -> new AssetSpec("my drone", DRONE, Map.of(), List.of()));
+    void createThrowsWhenAConnectedCategoryHasZeroDevices() {
+        // WAREHOUSE-UX-PLAN D4: AssetSpec itself no longer enforces "at least one device" -- a
+        // connected category (like DRONE, stubbed true in setUp) still requires one.
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of());
+
+        assertThrows(IllegalArgumentException.class, () -> service.create(spec, ownership, actingUser));
+        verifyNoInteractions(deviceService);
+    }
+
+    @Test
+    void createSucceedsWithZeroDevicesForANonConnectedCategory() {
+        CategoryId battery = new CategoryId("battery");
+        when(categoryRepository.findById(battery))
+                .thenReturn(Optional.of(new DeviceCategory(battery, "Battery", null, List.of(), false)));
+        AssetSpec spec = new AssetSpec("6S battery", battery, Map.of(), List.of());
+
+        Asset created = service.create(spec, ownership, actingUser);
+
+        assertTrue(created.devices().isEmpty());
+        verifyNoInteractions(deviceService);
     }
 
     @Test
@@ -146,7 +165,8 @@ class DefaultAssetServiceTest {
         Device existing = device("already-registered");
         when(deviceService.find(existing.id())).thenReturn(Optional.of(existing));
         when(assetRepository.findByDeviceId(existing.id())).thenReturn(Optional.empty());
-        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(existing.id()));
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(existing.id()), Identity.NONE,
+                Custody.NONE);
 
         Asset created = service.create(spec, ownership, actingUser);
 
@@ -162,7 +182,7 @@ class DefaultAssetServiceTest {
         when(deviceService.find(existing.id())).thenReturn(Optional.of(existing));
         when(assetRepository.findByDeviceId(existing.id())).thenReturn(Optional.empty());
         AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(registration("brand-new")),
-                List.of(existing.id()));
+                List.of(existing.id()), Identity.NONE, Custody.NONE);
 
         Asset created = service.create(spec, ownership, actingUser);
 
@@ -173,7 +193,8 @@ class DefaultAssetServiceTest {
     void createThrowsForAnUnknownExistingDeviceId() {
         DeviceId unknown = DeviceId.random();
         when(deviceService.find(unknown)).thenReturn(Optional.empty());
-        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(unknown));
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(unknown), Identity.NONE,
+                Custody.NONE);
 
         assertThrows(NoSuchElementException.class, () -> service.create(spec, ownership, actingUser));
         verify(assetRepository, never()).save(any());
@@ -183,7 +204,8 @@ class DefaultAssetServiceTest {
     void createRejectsADeletedExistingDeviceId() {
         Device deleted = device("gone").withState(LifecycleState.DELETED);
         when(deviceService.find(deleted.id())).thenReturn(Optional.of(deleted));
-        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(deleted.id()));
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(deleted.id()), Identity.NONE,
+                Custody.NONE);
 
         assertThrows(IllegalArgumentException.class, () -> service.create(spec, ownership, actingUser));
         verify(assetRepository, never()).save(any());
@@ -195,7 +217,8 @@ class DefaultAssetServiceTest {
         Asset other = asset(Set.of(DeviceId.random()));
         when(deviceService.find(owned.id())).thenReturn(Optional.of(owned));
         when(assetRepository.findByDeviceId(owned.id())).thenReturn(Optional.of(other));
-        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(owned.id()));
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(owned.id()), Identity.NONE,
+                Custody.NONE);
 
         IllegalStateException thrown = assertThrows(IllegalStateException.class,
                 () -> service.create(spec, ownership, actingUser));
@@ -299,7 +322,8 @@ class DefaultAssetServiceTest {
         when(deviceService.find(existing.id())).thenReturn(Optional.of(existing));
         when(assetRepository.findByDeviceId(existing.id())).thenReturn(Optional.empty());
         when(deviceService.devices(false)).thenReturn(List.of());
-        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(existing.id()));
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(existing.id()), Identity.NONE,
+                Custody.NONE);
 
         Asset created = service.createFromCandidate(spec, ownership, actingUser);
 
@@ -443,10 +467,10 @@ class DefaultAssetServiceTest {
     void scopedAssetsGroupScopeKeepsOnlyAssetsOwnedByAScopedGroup() {
         GroupId groupA = GroupId.random();
         GroupId groupB = GroupId.random();
-        Asset inA = new Asset(AssetId.random(), "A", DRONE, new Ownership(actingUser, groupA),
-                Set.of(DeviceId.random()), Map.of());
-        Asset inB = new Asset(AssetId.random(), "B", DRONE, new Ownership(actingUser, groupB),
-                Set.of(DeviceId.random()), Map.of());
+        Asset inA = Asset.register(AssetId.random(), "A", DRONE, new Ownership(actingUser, groupA),
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
+        Asset inB = Asset.register(AssetId.random(), "B", DRONE, new Ownership(actingUser, groupB),
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
         when(assetRepository.findAll()).thenReturn(List.of(inA, inB));
 
         List<Asset> visible = service.assets(VisibilityScope.groups(Set.of(groupA)), false).stream()
@@ -457,8 +481,8 @@ class DefaultAssetServiceTest {
 
     @Test
     void scopedDetailsThrowsNoSuchElementWhenAssetIsOutOfScope() {
-        Asset stored = new Asset(AssetId.random(), "A", DRONE, new Ownership(actingUser, GroupId.random()),
-                Set.of(DeviceId.random()), Map.of());
+        Asset stored = Asset.register(AssetId.random(), "A", DRONE, new Ownership(actingUser, GroupId.random()),
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
         when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
 
         assertThrows(NoSuchElementException.class,
@@ -481,7 +505,7 @@ class DefaultAssetServiceTest {
         Asset stored = asset(Set.of(DeviceId.random()));
         when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
 
-        Asset updated = service.update(stored.id(), new AssetEdit("renamed drone", null, null), actingUser);
+        Asset updated = service.update(stored.id(), new AssetEdit("renamed drone", null, null, null), actingUser);
 
         assertEquals("renamed drone", updated.displayName());
         assertEquals(stored.category(), updated.category());
@@ -495,7 +519,7 @@ class DefaultAssetServiceTest {
         Asset stored = asset(Set.of(DeviceId.random()));
         when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
 
-        service.update(stored.id(), new AssetEdit("renamed drone", null, null), actingUser);
+        service.update(stored.id(), new AssetEdit("renamed drone", null, null, null), actingUser);
 
         ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
         verify(auditTrail).record(captor.capture());
@@ -512,7 +536,7 @@ class DefaultAssetServiceTest {
         when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
 
         Asset updated = service.update(stored.id(),
-                new AssetEdit(null, null, Map.of("registrationNumber", "N12345")), actingUser);
+                new AssetEdit(null, null, Map.of("registrationNumber", "N12345"), null), actingUser);
 
         assertEquals(Map.of("registrationNumber", "N12345"), updated.attributes());
         assertEquals(stored.displayName(), updated.displayName());
@@ -527,7 +551,7 @@ class DefaultAssetServiceTest {
         when(categoryRepository.findById(missing)).thenReturn(Optional.empty());
 
         assertThrows(IllegalArgumentException.class,
-                () -> service.update(stored.id(), new AssetEdit(null, missing, null), actingUser));
+                () -> service.update(stored.id(), new AssetEdit(null, missing, null, null), actingUser));
         verify(assetRepository, never()).save(any());
     }
 
@@ -807,6 +831,7 @@ class DefaultAssetServiceTest {
     }
 
     private Asset asset(Set<DeviceId> devices) {
-        return new Asset(AssetId.random(), "my drone", DRONE, ownership, devices, Map.of());
+        return Asset.register(AssetId.random(), "my drone", DRONE, ownership, devices, Map.of(), Identity.NONE,
+                Custody.NONE);
     }
 }

@@ -15,11 +15,13 @@ public final class CategoryMapper {
 
     public static CategoryEntity toEntity(DeviceCategory category) {
         String parentId = category.parent() == null ? null : category.parent().slug();
-        return new CategoryEntity(category.id().slug(), category.name(), parentId, category.attributeHints());
+        return new CategoryEntity(category.id().slug(), category.name(), parentId, category.attributeHints(),
+                category.connected());
     }
 
     public static DeviceCategory toDomain(CategoryEntity entity) {
         CategoryId parent = entity.parentId() == null ? null : new CategoryId(entity.parentId());
-        return new DeviceCategory(new CategoryId(entity.id()), entity.name(), parent, entity.attributeHints());
+        return new DeviceCategory(new CategoryId(entity.id()), entity.name(), parent, entity.attributeHints(),
+                entity.connected());
     }
 }

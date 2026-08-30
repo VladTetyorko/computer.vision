@@ -5,8 +5,17 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
-import type { AssetSummary, AssignedPilot, UserSummary } from '../../core/api/models';
-import { buildRosterRows, countAssetsWithoutPilot, searchRosterRows, type RosterRow } from './roster-logic';
+import type { AssetSummary, AssignedPilot, Category, UserSummary } from '../../core/api/models';
+import {
+  buildRosterRows,
+  countAssetsWithoutPilot,
+  custodyStatusFor,
+  custodyStatusLabel,
+  custodyStatusTitle,
+  searchRosterRows,
+  type CustodyStatus,
+  type RosterRow,
+} from './roster-logic';
 import {
   buildPilotRows,
   countPilotsWithoutAssets,
@@ -23,10 +32,11 @@ import {
  * `OrgSettingsFacade`'s own precedent for a route already behind that guard).
  *
  * Loads every asset (`VisionApi.listAssets`), the full user list (`listUsers`, once — for display
- * names), and each asset's own assigned pilots (`listAssetPilots`, one call per asset, in parallel —
- * mirrors `AssetsFacade.refreshAssets`'s identical N-call shape for `getAsset`) — the one shared
- * `pilotsByAsset` map both `By asset` and `By pilot` pivots below read, pivoted in opposite
- * directions over the identical source data (`features/roster/roster-logic.ts#buildRosterRows` /
+ * names), every category (`listCategories`, once — {@link connectedCategorySlugs}'s own source,
+ * W10 finding C1(b)), and each asset's own assigned pilots (`listAssetPilots`, one call per asset,
+ * in parallel — mirrors `AssetsFacade.refreshAssets`'s identical N-call shape for `getAsset`) — the
+ * one shared `pilotsByAsset` map both `By asset` and `By pilot` pivots below read, pivoted in
+ * opposite directions over the identical source data (`features/roster/roster-logic.ts#buildRosterRows` /
  * `core/roster/roster-pivot-logic.ts#buildPilotRows`).
  *
  * **Wave 3 (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/13-roster.md) — accordion deleted,
@@ -57,7 +67,18 @@ export class RosterFacade {
 
   private readonly assets = signal<readonly AssetSummary[]>([]);
   private readonly users = signal<readonly UserSummary[]>([]);
+  private readonly categories = signal<readonly Category[]>([]);
   private readonly pilotsByAsset = signal<ReadonlyMap<string, readonly AssignedPilot[]>>(new Map());
+
+  /** `userId → display name` — reused by {@link custodyStatus} below; the roster already loads every user for pilot-name resolution, so custody resolution rides the same map rather than a second fetch. */
+  private readonly nameById = computed(() => new Map(this.users().map((user) => [user.userId, user.displayName])));
+
+  /** Every `Category#connected` category's own slug (mirrors `InventoryFacade`'s identical computed)
+   *  — {@link assetsWithoutPilotCount}'s own scope (WAREHOUSE-UX-CONTEXT.md W10 finding C1(b)): a
+   *  non-connected asset (a battery) has no pilot concept, so it must never inflate the gap tile. */
+  private readonly connectedCategorySlugs = computed(
+    () => new Set(this.categories().filter((category) => category.connected).map((category) => category.slug)),
+  );
 
   private readonly queryParamMap = toSignal(this.route.queryParamMap, {
     initialValue: this.route.snapshot.queryParamMap,
@@ -78,9 +99,14 @@ export class RosterFacade {
     searchPilotRows(buildPilotRows(this.assets(), this.pilotsByAsset(), this.users()), this.searchQuery()),
   );
 
-  /** `⚠ N assets have no pilot` (docs/extracts/design/13-roster.md) — against every loaded asset, not the search-filtered subset. */
+  /** `⚠ N assets have no pilot` (docs/extracts/design/13-roster.md) — against every loaded asset, not the
+   *  search-filtered subset, and scoped to connected (flyable) categories only — see
+   *  {@link connectedCategorySlugs}'s own doc comment. */
   readonly assetsWithoutPilotCount = computed(() =>
-    countAssetsWithoutPilot(buildRosterRows(this.assets(), this.pilotsByAsset(), this.users())),
+    countAssetsWithoutPilot(
+      buildRosterRows(this.assets(), this.pilotsByAsset(), this.users()),
+      this.connectedCategorySlugs(),
+    ),
   );
 
   /**
@@ -128,9 +154,14 @@ export class RosterFacade {
     this.loading.set(true);
     this.error.set(null);
     try {
-      const [assets, users] = await Promise.all([this.api.listAssets(), this.api.listUsers()]);
+      const [assets, users, categories] = await Promise.all([
+        this.api.listAssets(),
+        this.api.listUsers(),
+        this.api.listCategories(),
+      ]);
       this.assets.set(assets);
       this.users.set(users);
+      this.categories.set(categories);
       const entries = await Promise.all(
         assets.map(async (asset): Promise<readonly [string, readonly AssignedPilot[]]> => {
           try {
@@ -177,6 +208,27 @@ export class RosterFacade {
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
+  }
+
+  /**
+   * The "By asset" pivot's custody column (WAREHOUSE-UX-PLAN.md §3.2 D3, wave W7) — "may fly"
+   * (`pilotNames` above) vs. "has it". Delegates to `roster-logic.ts#custodyStatusFor`, whose own
+   * doc comment has the full priority order (WAREHOUSE-UX-CONTEXT.md W10 finding C1(c): the
+   * asset's **effective** `inventoryState` — MAINTENANCE/RETIRED — always wins over a leftover
+   * `custody.custodianId`, never the reverse).
+   */
+  custodyStatus(asset: AssetSummary): CustodyStatus {
+    return custodyStatusFor(asset, this.nameById());
+  }
+
+  /** {@link custodyStatus}'s own row text — `roster.html`'s one muted custody string. */
+  custodyLabel(asset: AssetSummary): string {
+    return custodyStatusLabel(this.custodyStatus(asset));
+  }
+
+  /** {@link custodyStatus}'s own `title` text. */
+  custodyTitle(asset: AssetSummary): string {
+    return custodyStatusTitle(this.custodyStatus(asset));
   }
 
   /** Re-reads one asset's own pilots after `<vision-pilots-card>` reports a change — cheap, one call. */

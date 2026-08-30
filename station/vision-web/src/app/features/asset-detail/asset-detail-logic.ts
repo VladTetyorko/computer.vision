@@ -1,5 +1,7 @@
-import type { TelemetrySample } from '../../core/api/models';
+import type { AssetIdentity, MaintenanceRecord, TelemetrySample } from '../../core/api/models';
+import type { KpiTile } from '../../core/fleet/asset-stats-logic';
 import { hasFix } from '../../core/geo/geo-logic';
+import { hoursSinceClose } from '../../core/maintenance/maintenance-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
 
 /**
@@ -149,4 +151,69 @@ export function attributeRowsToRecord(rows: readonly AttributeRow[]): Record<str
     }
   }
   return result;
+}
+
+// --- Identity (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave W4 — replaces the single
+// Registration inline-edit with a 4-field Identity fact group backed by `AssetIdentity`) ------------
+
+/**
+ * `serialNumber`/`make`/`model`/`registration` form fields → the `PATCH /api/assets/{id}` body's
+ * `identity` replacement (`AssetEdit#identity`'s own doc comment: "present replaces the asset's
+ * identity wholesale — absent fields mean unknown, not unchanged"). A blank field is omitted rather
+ * than sent as `""`, matching `withRegistrationNumber`'s own trim-and-omit convention — clearing a
+ * field in the form and saving means "this is now unknown", the honest reading of the backend's own
+ * "absent means unknown" contract.
+ */
+export function buildIdentityEdit(serialNumber: string, make: string, model: string, registration: string): AssetIdentity {
+  const clean = (value: string): string | undefined => {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+  return {
+    serialNumber: clean(serialNumber),
+    make: clean(make),
+    model: clean(model),
+    registration: clean(registration),
+  };
+}
+
+/**
+ * Moved to `core/fleet/asset-attributes.ts` in wave W4 (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3)
+ * once the Inventory page's own detail panel needed the identical `identity.registration`/legacy-
+ * attribute fallback — see that module's own doc comment for the full migration-gap writeup.
+ * Re-exported here so this page's own pre-existing import site keeps working verbatim.
+ */
+export { effectiveRegistration } from '../../core/fleet/asset-attributes';
+
+/**
+ * The most recently closed maintenance record among an asset's own history — "Since service"
+ * (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4's KPI-band addition) reads *when this closed*, not
+ * when it opened, so a long-open repair that just wrapped up still reads as "just serviced." Ties
+ * broken by nothing further (an asset closing two records at the identical instant is not a case
+ * worth resolving deterministically beyond "pick one"). `undefined` for an asset with no closed
+ * record at all — a genuinely honest "never serviced," never a fabricated one.
+ */
+export function mostRecentlyClosedRecord(records: readonly MaintenanceRecord[]): MaintenanceRecord | undefined {
+  const closed = records.filter((record) => record.closedAt !== undefined);
+  if (closed.length === 0) {
+    return undefined;
+  }
+  return [...closed].sort((a, b) => Date.parse(b.closedAt as string) - Date.parse(a.closedAt as string))[0];
+}
+
+/** `<humanAge> ago`, or `'—'` for an asset with no closed maintenance record yet — same register as {@link sampleAgeLabel}. */
+export function formatSinceService(hours: number | undefined): string {
+  return hours === undefined ? '—' : `${humanAge(hours * 3600)} ago`;
+}
+
+/**
+ * The KPI band's "Since service" tile (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4) — appended after
+ * `core/fleet/asset-stats-logic.ts#kpiTiles`'s own five flight-stat tiles, not folded into that
+ * function: it reads maintenance records, a different fetch this page's facade owns independently of
+ * `AssetStats`, and mirrors `AssetStats`'s own "never fabricate, always `'—'`" discipline rather than
+ * this file's own telemetry-fact discipline.
+ */
+export function sinceServiceTile(records: readonly MaintenanceRecord[], nowMs: number): KpiTile {
+  const record = mostRecentlyClosedRecord(records);
+  return { label: 'Since service', value: formatSinceService(record ? hoursSinceClose(record, nowMs) : undefined) };
 }

@@ -746,12 +746,43 @@ export interface GeoPosition {
 /**
  * Mirrors `dto.CategoryResponse`. `parent` is absent for a top-level category.
  * `attributeHints` are UI suggestions, not a rigid schema.
+ *
+ * `connected` (docs/plans/active/WAREHOUSE-UX-PLAN.md D4, wave W3) — whether an asset in this
+ * category must wrap at least one device. Always present on the wire (a primitive boolean, no
+ * `@JsonInclude(NON_NULL)` concern) — the Inventory page's Vehicles/Equipment tab split
+ * (`core/fleet/inventory-logic.ts`) reads it directly, never a category-name heuristic.
  */
 export interface Category {
   readonly slug: string;
   readonly name: string;
   readonly parent?: string;
   readonly attributeHints: readonly string[];
+  readonly connected: boolean;
+}
+
+/**
+ * Request body for `POST /api/categories` — mirrors `dto.CreateCategoryRequest`
+ * (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's Categories table write half, wave W3/W4).
+ */
+export interface CreateCategoryRequest {
+  readonly id: string;
+  readonly name: string;
+  readonly parentId?: string;
+  readonly connected: boolean;
+  readonly attributeHints?: readonly string[];
+}
+
+/**
+ * Request body for `PUT /api/categories/{id}` — mirrors `dto.UpdateCategoryRequest`. A
+ * whole-record replacement, not a partial patch (that DTO's own javadoc: `parentId` rules out the
+ * usual "absent means unchanged" convention) — callers must resend every field, not just the one
+ * they changed.
+ */
+export interface UpdateCategoryRequest {
+  readonly name: string;
+  readonly parentId?: string;
+  readonly connected: boolean;
+  readonly attributeHints?: readonly string[];
 }
 
 /**
@@ -824,6 +855,25 @@ export interface AssetUsage {
 }
 
 /**
+ * Mirrors `dto.FirmwareResponse` — the asset's most recently observed firmware, joined from
+ * vision-flight at the vision-api layer (docs/plans/active/WAREHOUSE-UX-PLAN.md D5: "firmware stays
+ * flight-owned; the table joins it. Warehouse must not read `vehicle_profiles`."). Nested on
+ * {@link AssetSummary}, absent entirely (not `{ name: undefined, version: undefined }`) when the
+ * asset's devices were never probed at all. Not to be confused with `VehicleProfile#firmware`/
+ * `firmwareVersion` (`core/api/models.ts`'s own flat-string probe-result pair, a different feature) —
+ * this is the joined, display-ready fact `AssetSummaryResponse`/`FleetMaintenanceRecordResponse`
+ * carry.
+ *
+ * @property name    `"ardupilot"` | `"generic"` | `"px4"`, or absent if the probe answered but
+ *                    firmware was not identified.
+ * @property version  the firmware version string, or absent if not identified.
+ */
+export interface Firmware {
+  readonly name?: string;
+  readonly version?: string;
+}
+
+/**
  * Mirrors `dto.AssetSummaryResponse`, the shared field set `AssetDetails` extends. `lastUsedAt`
  * and `lastKnownPosition` are absent for an asset that has never been used.
  *
@@ -853,6 +903,54 @@ export interface AssetSummary {
   readonly lastKnownPosition?: GeoPosition;
   readonly attributes: Record<string, string>;
   readonly hasImage?: boolean;
+  /**
+   * Mirrors `dto.IdentityResponse` (docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W3 → W4/W6/W7 handoff",
+   * D1–D8) — the wire always sends an object, individual fields omitted (not `null`) when unknown.
+   * Optional here (not on the wire) only so the many pre-existing `AssetSummary` test fixtures
+   * outside this wave's file scope (`core/fleet/**`, `features/assets|devices|fly/**`, …) keep
+   * compiling without every one of them being touched to add these five fields — a real `VisionApi`
+   * response always carries it, so a reader that needs it treats `undefined` as "not fetched yet",
+   * never as a fabricated "no identity".
+   */
+  readonly identity?: AssetIdentity;
+  /** Mirrors `dto.CustodyResponse` — see {@link identity}'s own doc comment for why this is optional in TS despite always being present on the wire. */
+  readonly custody?: AssetCustody;
+  /** The **effective** value (`InventoryStates#effective`) — `ISSUED`/`IN_FIELD` are derived server-side, never stored (WAREHOUSE-UX-PLAN.md §3.2 D2). See {@link identity}'s own doc comment for why this is optional in TS. */
+  readonly inventoryState?: InventoryState;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  /**
+   * Mirrors `AssetSummaryResponse#firmware` (docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9
+   * handoff") — absent when never probed, or when the caller has no join to offer (`GET
+   * /api/assets/{id}/custody`/`/inventory`'s own responses always omit it, see
+   * `AssetInventoryController#detailsResponse`'s own doc comment on the five-parameter ceiling; a
+   * caller wanting a fresh value after a custody/inventory mutation re-fetches `GET /api/assets/{id}`).
+   */
+  readonly firmware?: Firmware;
+  /**
+   * Mirrors `AssetSummaryResponse#totalFlightSeconds` — cumulative flight seconds across every
+   * usage; absent only when the caller has no join to offer (see {@link firmware}'s own doc
+   * comment), never when the true value is a genuine zero (a never-flown asset reports `0`).
+   */
+  readonly totalFlightSeconds?: number;
+}
+
+/** Mirrors `warehouse.domain.model.InventoryState` (WAREHOUSE-UX-PLAN.md §3.2 D1/D2). */
+export type InventoryState = 'IN_STOCK' | 'ISSUED' | 'IN_FIELD' | 'MAINTENANCE' | 'RETIRED';
+
+/** Mirrors `dto.IdentityResponse` — every field absent (never `null`) when not yet recorded. */
+export interface AssetIdentity {
+  readonly serialNumber?: string;
+  readonly make?: string;
+  readonly model?: string;
+  readonly registration?: string;
+}
+
+/** Mirrors `dto.CustodyResponse` — `custodianId`/`since` absent for an asset still in stock. */
+export interface AssetCustody {
+  readonly custodianId?: string;
+  readonly location?: string;
+  readonly since?: string;
 }
 
 /**
@@ -924,6 +1022,15 @@ export interface CreateAssetRequest {
   readonly attributes?: Record<string, string>;
   readonly devices?: readonly CreateAssetDeviceSpec[];
   readonly deviceIds?: readonly string[];
+  /**
+   * Mirrors `dto.IdentityRequest`, reused verbatim on the create path (docs/plans/active/WAREHOUSE-UX-PLAN.md
+   * D1, wave W6's Identify step — serial/make/model/registration). Omitted rather than sent as `{}`;
+   * the same shape as {@link AssetIdentity} since the backend's `IdentityRequest`/`IdentityResponse`
+   * carry identical fields. **Not** `custody` — the onboarding wizard establishes custody later, in
+   * its own Hand-over step (`VisionApi#setAssetCustody`), not at creation time, mirroring the
+   * pre-wizard "Assign" step's own timing.
+   */
+  readonly identity?: AssetIdentity;
 }
 
 /**
@@ -935,6 +1042,14 @@ export interface AssetEdit {
   readonly displayName?: string;
   readonly category?: string;
   readonly attributes?: Record<string, string>;
+  /**
+   * Mirrors `dto.UpdateAssetRequest#identity` — present replaces the asset's identity wholesale
+   * (its own absent fields mean "unknown", not "unchanged"). Used only by the onboarding wizard's
+   * legacy whole-vehicle Simulate path (`OnboardingStore#createViaSimulation`), which cannot send
+   * `identity` on the initiating `POST /api/simulations` call and so folds it into this follow-up
+   * `PATCH` alongside `displayName` instead.
+   */
+  readonly identity?: AssetIdentity;
 }
 
 /** Mirrors `POST /api/assets/{id}/devices`'s body (docs/main/CYCLES-PLAN.md §8's pinned contract). */
@@ -953,6 +1068,90 @@ export interface AssetDeletionResponse {
   readonly devicesDeleted: number;
   readonly usagesRetained: number;
   readonly streamsStopped: number;
+}
+
+// --- Maintenance / inventory (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.2/§4 W7, the "W3 → W4/W6/W7
+// handoff" section of WAREHOUSE-UX-CONTEXT.md for the exact wire shapes below) ---------------------
+
+/**
+ * Mirrors `warehouse.domain.model.MaintenanceKind` — only `GROUNDING`/`INSPECTION_DUE` are a
+ * readiness NO-GO blocker (`DefaultReadinessService#MAINTENANCE_BLOCKER_PREFIX`,
+ * `MaintenanceKind#blocksFlight()`); `REPAIR`/`NOTE` are informational, never block `engage`.
+ */
+export type MaintenanceKind = 'GROUNDING' | 'INSPECTION_DUE' | 'REPAIR' | 'NOTE';
+
+/**
+ * Mirrors `dto.MaintenanceRecordResponse` — one element of `GET /api/assets/{id}/maintenance`'s
+ * array, and the return value of the open/close endpoints. `closedAt`/`flightSecondsAt` are absent
+ * (never `null`) while the record is open / when the asset's flight-hours weren't known at close.
+ */
+export interface MaintenanceRecord {
+  readonly id: string;
+  readonly assetId: string;
+  readonly kind: MaintenanceKind;
+  readonly openedAt: string;
+  readonly openedBy: string;
+  readonly summary: string;
+  readonly closedAt?: string;
+  readonly flightSecondsAt?: number;
+}
+
+/** Mirrors `dto.CreateMaintenanceRecordRequest` — `POST /api/assets/{id}/maintenance` (opens a record *without* also grounding the asset; use {@link InventoryActionRequest}'s `GROUND` action for that). */
+export interface CreateMaintenanceRecordRequest {
+  readonly kind: MaintenanceKind;
+  readonly summary: string;
+}
+
+/** Mirrors `application.maintenance.MaintenanceListState` — the `state` query param `GET /api/maintenance` accepts, case-insensitive on the wire, always sent lowercase here. */
+export type MaintenanceListState = 'open' | 'closed' | 'all';
+
+/**
+ * Mirrors `dto.FleetMaintenanceRecordResponse` — one element of `GET /api/maintenance`'s array
+ * (docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9 handoff"), {@link MaintenanceRecord}'s
+ * fleet-wide counterpart: carries the asset's name and category slug alongside each record so the
+ * Maintenance page needs one call, not one `GET /api/assets/{id}/maintenance` per grounded asset.
+ * `closedAt`/`flightSecondsAt` are absent (never `null`) while the record is open / when the
+ * asset's flight-hours weren't known at open, same convention as {@link MaintenanceRecord}.
+ */
+export interface FleetMaintenanceRecord {
+  readonly id: string;
+  readonly assetId: string;
+  readonly assetName: string;
+  readonly categoryId: string;
+  readonly kind: MaintenanceKind;
+  readonly openedAt: string;
+  readonly closedAt?: string;
+  readonly openedBy: string;
+  readonly summary: string;
+  readonly flightSecondsAt?: number;
+}
+
+/** Mirrors the three actions `POST /api/assets/{id}/inventory` accepts. */
+export type InventoryAction = 'GROUND' | 'RELEASE' | 'RETIRE';
+
+/**
+ * Mirrors `dto.InventoryActionRequest` — `kind`/`summary` are required only for `GROUND` (opens a
+ * blocking-capable {@link MaintenanceRecord} in the same call); `RELEASE`/`RETIRE` take neither.
+ * Response is the asset's `AssetDetails`.
+ */
+export interface InventoryActionRequest {
+  readonly action: InventoryAction;
+  readonly kind?: MaintenanceKind;
+  readonly summary?: string;
+}
+
+/** Mirrors the two actions `POST /api/assets/{id}/custody` accepts (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave W3/W4). */
+export type CustodyAction = 'ISSUE' | 'RETURN';
+
+/**
+ * Mirrors `dto.CustodyActionRequest` — `ISSUE` hands an in-stock asset to a custodian (`custodianId`
+ * required, `location` optional); `RETURN` brings an issued asset back to stock (both fields
+ * ignored). Response is the asset's `AssetDetails`, same shape as {@link InventoryActionRequest}'s.
+ */
+export interface CustodyActionRequest {
+  readonly action: CustodyAction;
+  readonly custodianId?: string;
+  readonly location?: string;
 }
 
 /**
@@ -1125,6 +1324,16 @@ export interface CategoryCounts {
   /** Only non-zero when the request asked for `includeArchived=true`. */
   readonly deleted: number;
   readonly streaming: number;
+  /**
+   * `total`'s subset by **effective** inventory state (docs/plans/active/WAREHOUSE-UX-PLAN.md D6,
+   * wave W3) — `issued`/`inField` already resolved from custody/open-usage server-side, never the
+   * raw stored value. Always present (no `@JsonInclude(NON_NULL)` concern, all `int`).
+   */
+  readonly inStock: number;
+  readonly issued: number;
+  readonly inField: number;
+  readonly maintenance: number;
+  readonly retired: number;
 }
 
 /**

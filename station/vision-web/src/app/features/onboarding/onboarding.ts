@@ -11,22 +11,25 @@ import { OnboardingFacade } from './onboarding-facade';
 /**
  * The onboarding wizard's own route (`/add-source`, docs/plans/done/UX-REWORK-PLAN.md §U-d) — replaces the
  * inline "+ Add source" card the pre-wizard Devices/Warehouse page used to open on itself. Five
- * steps, one visible at a time, all state kept in `OnboardingStore` (this component's own
- * page-provided "component store" — see that class's own doc comment): Profile
- * (name/registration/photo/category) → Connect (the pre-existing 3-choice register/discover/
- * simulate component, moved here verbatim) → Test (probe + decoded frame before save — UX-DESIGN
- * §5.1's "test-before-save", skipped for Simulate) → Create (summary, then the actual
- * `POST /api/assets`/`POST /api/simulations` call) → **Assign** (docs/plans/done/OPS-UX-PLAN.md §2 A3, "Who
- * flies this?" — offered only once the asset already exists; see `onboarding-logic.ts#WizardStep`'s
- * own doc comment for why it's the one step that isn't back-navigable).
+ * visible steps (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 wave W6 — see
+ * `onboarding-logic.ts#WizardStep`'s own doc comment for the full per-step contract and the hidden
+ * `sysid` interstitial), all state kept in `OnboardingStore` (this component's own page-provided
+ * "component store"): **Identify** (name/category/photo/serial/make/model/registration — a
+ * `connected: false` category short-circuits straight to Hand-over via its own "Receive" action) →
+ * **Connect** (the fit-out table, `core/onboarding/fit-out-logic.ts` — one row per role, Sense/
+ * Sight) → **Prove** (Test + Verify, run per filled row) → **Register** (the actual
+ * `POST /api/assets` call) → **Hand-over** (docs/plans/done/OPS-UX-PLAN.md §2 A3 — "Issue to" a custodian or
+ * "Leave in stock", ending in a completed sub-state naming the next verb rather than an automatic
+ * redirect).
  *
  * This component itself is deliberately thin — a `@switch` over `store.step()` plus a Back/Next
- * footer (Assign carries its own Skip/Assign-and-finish pair instead, see `onboarding.html`'s own
- * footer comment) — every decision and request shape lives in `onboarding-logic.ts`/`OnboardingStore`,
- * orchestrated by `OnboardingFacade` (docs/plans/done/UI-ARCHITECTURE-PLAN.md), which this component injects
- * exclusively. `onPhotoSelected` is the one bit of DOM-specific glue left here (resetting the raw
- * `<input type="file">`'s own value so the same file can be re-selected later) — a truly
- * self-contained view concern no other component/route could ever need to stay in sync with.
+ * footer (Hand-over and Sysid carry their own inline footers instead, see `onboarding.html`'s own
+ * footer comment) — every decision and request shape lives in `onboarding-logic.ts`/`OnboardingStore`/
+ * `core/onboarding/fit-out-logic.ts`, orchestrated by `OnboardingFacade` (docs/plans/done/UI-ARCHITECTURE-PLAN.md),
+ * which this component injects exclusively. `onPhotoSelected` is the one bit of DOM-specific glue
+ * left here (resetting the raw `<input type="file">`'s own value so the same file can be
+ * re-selected later) — a truly self-contained view concern no other component/route could ever
+ * need to stay in sync with.
  *
  * **Page bar + centered form (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2/§2.3, docs/extracts/design/07-add-source.md,
  * wave 2).** `page-head`'s three-line description is gone outright, not moved into a `hint` — the

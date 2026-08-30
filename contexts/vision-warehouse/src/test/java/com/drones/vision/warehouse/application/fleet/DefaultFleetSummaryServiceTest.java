@@ -3,9 +3,12 @@ package com.drones.vision.warehouse.application.fleet;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.GroupId;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamId;
@@ -60,11 +63,18 @@ class DefaultFleetSummaryServiceTest {
     }
 
     private Asset asset(String displayName, CategoryId category, LifecycleState state, DeviceId... devices) {
-        return new Asset(AssetId.random(), displayName, category, ownership, Set.of(devices), Map.of(), state);
+        Instant now = Instant.now();
+        return new Asset(AssetId.random(), displayName, category, ownership, Set.of(devices), Map.of(), state,
+                Identity.NONE, Custody.NONE, InventoryState.IN_STOCK, now, now);
     }
 
     private static AssetSummary summary(Asset asset, String categoryName, AssetStatus status) {
-        return new AssetSummary(asset, categoryName, status, null, null);
+        return summary(asset, categoryName, status, InventoryState.IN_STOCK);
+    }
+
+    private static AssetSummary summary(Asset asset, String categoryName, AssetStatus status,
+            InventoryState inventoryState) {
+        return new AssetSummary(asset, categoryName, status, null, null, inventoryState, Identity.NONE, Custody.NONE);
     }
 
     @Test
@@ -131,6 +141,31 @@ class DefaultFleetSummaryServiceTest {
         assertEquals(0, robot.deactivated());
         assertEquals(1, robot.deleted());
         assertEquals(0, robot.streaming());
+    }
+
+    @Test
+    void summaryComposesPerCategoryInventoryStateCounts() {
+        Asset inStock = asset("A", DRONE, LifecycleState.ACTIVE, DeviceId.random());
+        Asset issued = asset("B", DRONE, LifecycleState.ACTIVE, DeviceId.random());
+        Asset inField = asset("C", DRONE, LifecycleState.ACTIVE, DeviceId.random());
+        Asset maintenance = asset("D", DRONE, LifecycleState.ACTIVE, DeviceId.random());
+        Asset retired = asset("E", DRONE, LifecycleState.ACTIVE, DeviceId.random());
+
+        when(assetService.assets(false)).thenReturn(List.of(
+                summary(inStock, "Drone", AssetStatus.OFFLINE, InventoryState.IN_STOCK),
+                summary(issued, "Drone", AssetStatus.OFFLINE, InventoryState.ISSUED),
+                summary(inField, "Drone", AssetStatus.STREAMING, InventoryState.IN_FIELD),
+                summary(maintenance, "Drone", AssetStatus.OFFLINE, InventoryState.MAINTENANCE),
+                summary(retired, "Drone", AssetStatus.OFFLINE, InventoryState.RETIRED)));
+
+        FleetSummary result = service.summary(false);
+
+        CategoryCounts drone = result.categories().get(0);
+        assertEquals(1, drone.inStock());
+        assertEquals(1, drone.issued());
+        assertEquals(1, drone.inField());
+        assertEquals(1, drone.maintenance());
+        assertEquals(1, drone.retired());
     }
 
     @Test

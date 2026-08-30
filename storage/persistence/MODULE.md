@@ -16,16 +16,16 @@ All version pins come from `spring-boot-dependencies` (this module's grandparent
 
 **Used by:** vision-app (`PersistenceWiringConfiguration`, unconditional).
 
-**Build/test:** `./mvnw -B -pl storage/persistence -am test` — 224 tests (last measured), one shared
+**Build/test:** `./mvnw -B -pl storage/persistence -am test` — 225 tests (last measured, WAREHOUSE-UX W3), one shared
 `postgres:16` Testcontainers container per test class. Requires a running Docker daemon — there is no
 non-Docker path; tests skip cleanly (not fail) when Docker is unavailable.
 
 ## API surface
 
-Package layout: `repository/` (26 `Jpa*Repository`/`Jpa*Store` classes + `TelemetryBatchSettings`),
-`mapper/` (24 mapper classes — one `toEntity`/`toDomain` pair per aggregate, `public static` methods
+Package layout: `repository/` (28 `Jpa*Repository`/`Jpa*Store` classes + `TelemetryBatchSettings`),
+`mapper/` (26 mapper classes — one `toEntity`/`toDomain` pair per aggregate, `public static` methods
 on a `public final class` with a private constructor), `config/` (`PersistenceUnit`, `JpaOperations`,
-`PersistencePoolSettings`, `ClosingDatasourceConnectionProvider`), `entity/` (29 classes/records: 26
+`PersistencePoolSettings`, `ClosingDatasourceConnectionProvider`), `entity/` (31 classes/records: 28
 `@Entity` types, `AssignmentId` (`@IdClass`), `LayerGrantEmbeddable` (`@Embeddable`), `DbAuditOperation`
 (plain enum)). No `controller/`, `dto/`, or `service/` package — this module is a driven adapter only.
 
@@ -39,8 +39,8 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 |---|---|---|
 | `JpaCategoryRepository` | `CategoryRepositoryPort` | merge upsert, hard delete |
 | `JpaDeviceRepository` | `DeviceRepositoryPort` | merge upsert, hard delete |
-| `JpaAssetRepository` | `AssetRepositoryPort` | merge upsert, hard delete, `findByDeviceId` |
-| `JpaAssetUsageRepository` | `AssetUsageRepositoryPort` | merge upsert; `findByStream` is a deliberately unindexed scan (one-row-per-flight table, read once per stream lookup); `findRecent(int)` is the fleet-wide sibling of `findRecentByAsset` |
+| `JpaAssetRepository` | `AssetRepositoryPort` | merge upsert, hard delete, `findByDeviceId`; `AssetMapper` flattens `Identity`/`Custody` onto the asset row directly (see WAREHOUSE-UX-PLAN.md D7, `V28`) |
+| `JpaAssetUsageRepository` | `AssetUsageRepositoryPort` | merge upsert; `findByStream` is a deliberately unindexed scan (one-row-per-flight table, read once per stream lookup); `findRecent(int)` is the fleet-wide sibling of `findRecentByAsset`; `totalFlightSecondsByAsset()` (WAREHOUSE-UX W8) is this module's **first native SELECT-with-row-projection query** (every earlier native query was a batch `DELETE`/`executeUpdate`) — `em.createNativeQuery(...)` returning `List<Object[]>`, needed because plain JPQL cannot express `coalesce(ended_at, now())` |
 | `JpaTelemetryRepository` | `TelemetryRepositoryPort` | always `persist` (append-only); prune-on-write retention (100k rows/usage default); optional batched-write mode via `TelemetryBatchSettings` (see Batching) — production wiring still uses the immediate-mode constructor; `findByUsage`'s `limit` returns the **earliest** samples, not the newest (see Gotchas) |
 | `JpaDetectionRepository` | `DetectionRepositoryPort` | always `persist`; prune-on-write (100k rows/stream); `DetectionQuery#to` treated as inclusive despite the port's javadoc calling it exclusive (see Gotchas) |
 | `JpaAssetImageRepository` | `AssetImageRepositoryPort` | keyed by `assetId` itself (no synthetic id — at most one image per asset); `data` plain `byte[]`/`bytea` |
@@ -63,6 +63,8 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `JpaTrackTrailRepository` | `TrackTrailRepositoryPort` | always `persist` (append-only breadcrumb trail); `trimToMostRecent`/`deleteOlderThan` are single bulk `DELETE`s, safe to call every tick; excluded from the audit log |
 | `JpaTrackCorrectionRepository` | `TrackCorrectionRepositoryPort` | always `persist`; `deleteOlderThan`/`trimUsageToMostRecent` are bulk `DELETE`s, same shape as `JpaTrackTrailRepository`; excluded from the audit log |
 | `JpaControlProfileRepository` | `ControlProfileRepositoryPort` | `merge` upsert; `activate` clears the owner's other active profiles for that vehicle kind then sets the flag, **in that order**, in one transaction — a partial unique index rejects the opposite order; `NoSuchElementException` for an unknown id **or** one belonging to another operator (deliberately indistinguishable, see Gotchas); audited |
+| `JpaMaintenanceRepository` | `MaintenanceRepositoryPort` | `merge` upsert by `MaintenanceId` (the record mutates via `close()`, same shape as `JpaControlProfileRepository`); `MaintenanceRecordEntity#kind` reuses the domain `MaintenanceKind` enum directly; audited (WAREHOUSE-UX-PLAN.md D7/W3, `V28`); `findOpen()`/`findRecentlyClosed(limit)` (WAREHOUSE-UX W8) are `findOpenByAsset`/`findByAsset`'s fleet-wide counterparts — same `closed_at`/`opened_at` columns, no `asset_id` predicate, `GET /api/maintenance`'s backing queries |
+| `JpaAssetNoteRepository` | `AssetNoteRepositoryPort` | always `persist` (append-only, same shape as `JpaAuditTrail`); no application service consumes this yet — wired ahead of a later wave's crew-notes UI; audited (WAREHOUSE-UX-PLAN.md D7/W3, `V28`) |
 
 ### `entity` — mapping conventions (not repeated per class)
 
@@ -73,7 +75,8 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 - **Domain enums are reused directly** in `@Enumerated(EnumType.STRING)` fields rather than
   duplicated as adapter-local enums: `Capability`, `LifecycleState`, `ZoneKind`, `UsagePhase`,
   `UsageOrigin`, `DeviceOrigin`, `MarkKind`/`MarkStatus`/`MarkSource`, `DatasetStatus`,
-  `DetectionEventState`, `CameraPoseSource`, `FlightPhase`.
+  `DetectionEventState`, `CameraPoseSource`, `FlightPhase`, `InventoryState` (`AssetEntity`),
+  `MaintenanceKind` (`MaintenanceRecordEntity`).
 - **A single `GeoPosition` is flattened** to `latitude`/`longitude`/nullable `altitude_meters`
   columns (`Mark`, `CameraPose`, `TrackPoint`, `DetectionEvent#position`,
   `AssetUsage`'s start/last position) — the opposite of a `List<GeoPosition>`, which is stored whole
@@ -100,8 +103,15 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 - **`AssetUsageEntity#phase`** (nullable, `V19`) falls back to `UsagePhase.PREFLIGHT` on `toDomain`
   only for a genuinely `null` column (a pre-`V19` row); **`AssetUsageEntity#origin`** (`V26`) is
   `NOT NULL` with a database default, so `AssetUsageMapper` has no legacy-null case for it at all.
+- **`AssetEntity` flattens `Identity`/`Custody` onto its own columns** (`V28`) rather than nesting a
+  jsonb blob — `serialNumber`/`make`/`model`/`registration`/`custodianId`/`location`/`custodySince`
+  are plain nullable columns, `inventoryState` is `@Enumerated(EnumType.STRING)`, and
+  `createdAt`/`updatedAt` are plain `Instant` columns; `AssetMapper#toEntity`/`#toDomain` do the
+  flatten/reconstruct in both directions. `MaintenanceRecordEntity`/`AssetNoteEntity` keep their own
+  domain id (`MaintenanceId`/`NoteId`) as primary key, same shape as every other domain-owned-id
+  aggregate above — no synthetic id was invented for either.
 
-## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V27
+## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V28
 
 | Migration | What it does |
 |---|---|
@@ -132,6 +142,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `V25__device_origin.sql` | `devices.origin` (`LIVE`/`SIMULATED`, `NOT NULL DEFAULT 'LIVE'`), backfilling `SIMULATED` for devices already on a `simulated`-category asset |
 | `V26__asset_usage_origin.sql` | `asset_usages.origin` (`STREAM`/`TELEMETRY`/`OPERATOR`, `NOT NULL DEFAULT 'STREAM'`) — single statement, no follow-up `UPDATE` needed since every pre-existing row's correct value is the same one |
 | `V27__rc_relay_readiness.sql` | `feature_requirements.required_parameter_value`/`forbidden_parameter_bits` (nullable); retires the single always-trivially-satisfied `id='ardupilot:rc-relay'` placeholder row V18 seeded and replaces it with two independent, value-aware rows under the same `rc-relay` feature key — a GCS-sysid value check (`SYSID_MYGCS` must equal `255`) and an `RC_OPTIONS` forbidden-bits check (bit 1 must be clear) — net row count for `firmware='ardupilot'` goes from 11 to 12 (FLEET-RADIO-PLAN.md R6) |
+| `V28__asset_inventory.sql` | `assets` += `serial_number`/`make`/`model`/`registration` (from `Identity`), `custodian_id`/`location`/`custody_since` (from `Custody`), `inventory_state` (stored values only — `IN_STOCK`/`MAINTENANCE`/`RETIRED`, default `IN_STOCK`), `created_at`/`updated_at`; backfills `registration` from the pre-existing `attributes->>'registration'` key then removes that key (WAREHOUSE-UX-PLAN.md D8); `categories` += `connected BOOLEAN NOT NULL DEFAULT TRUE`, seeding three passive categories (`battery`/`spare`/`radio`) with `connected=false`; new `maintenance_records` (audited) and `asset_notes` (audited) tables; `asset_usages.pilot_id` (nullable UUID, schema-only — no domain field maps it yet, same status as `first_armed_at`/`last_disarmed_at`) |
 
 A second, conditional Flyway location, `src/main/resources/db/seed/dev`, holds
 `V90001__dev_accounts.sql` (the `admin`/`manager`/`pilot` DEV-ONLY accounts) — it only joins Flyway's
@@ -157,7 +168,7 @@ automatically.**
 - **Audited**: `categories`, `devices`, `device_capabilities`, `assets`, `asset_devices`,
   `asset_usages`, `geofence_zones`, `groups`, `users`, `pilot_assignments`, `marks`, `datasets`,
   `map_layers`, `map_layer_grants`, `map_drawings`, `vehicle_profiles`, `feature_requirements`,
-  `camera_poses`, `control_profiles`.
+  `camera_poses`, `control_profiles`, `maintenance_records`, `asset_notes`.
 - **Excluded** (high-volume append-only, or a trigger would be actively wrong): `telemetry_samples`,
   `detection_results`, `detection_events`, `training_samples`, `sample_images`, `asset_images` (a
   `bytea` column would duplicate image bytes into every audit row), `audit_entries` (auditing an
@@ -296,11 +307,19 @@ buffered samples per open usage; `DEFAULT_BATCH_WINDOW_MILLIS` is non-zero on pu
 - **"Exactly one COP map layer" is enforced by `LayerResolver`'s synchronized find-or-create plus a
   fixed-id migration seed, not by a schema constraint** — `map_layers` has no partial unique index
   for it.
+- **A domain factory that stamps `Instant.now()` (e.g. `Asset.register`'s `createdAt`/`updatedAt`)
+  round-trips lossy through `TIMESTAMPTZ`.** Postgres keeps microsecond precision and *rounds* — not
+  truncates — on the way in, so a value ending e.g. `.xxx614510` can come back as `.xxx615000`; a raw
+  `assertEquals` on the whole record is flaky. `PostgresDockerIntegrationTest` handles the pre-existing,
+  test-supplied case by building the input `Instant` already truncated to millis (`NOW`); for a
+  factory-internal timestamp the test cannot supply, it instead truncates **both sides** to millis right
+  before comparing (`assertAssetRoundTrips`/`millisTruncated`) — same fix, applied after the fact instead
+  of before.
 
 ## Status
 
-Fully implements every repository port the platform currently defines (26 `Jpa*Repository`/`Jpa*Store`
-classes; see API surface) against a schema migrated through `V26`. Wired into vision-app
+Fully implements every repository port the platform currently defines (28 `Jpa*Repository`/`Jpa*Store`
+classes; see API surface) against a schema migrated through `V28`. Wired into vision-app
 unconditionally via `PersistenceWiringConfiguration` — Postgres is the only store.
 
 Open items, all deliberate rather than oversights:
@@ -312,6 +331,13 @@ Open items, all deliberate rather than oversights:
   field exists yet to map them to/from.
 - `DatasetExportPort`'s old filesystem-export implementation is gone; dataset delivery to the
   training host now rides a gRPC upload (`cv/grpc`'s `GrpcDatasetUploadPort`), not this module.
+
+**WAREHOUSE-UX wave W8** added two new query methods against the existing `V28` schema — no new
+migration, since `maintenance_records`/`asset_usages` already carried every column needed
+(`closed_at`/`opened_at`, `asset_id`/`started_at`/`ended_at`). `PostgresDockerIntegrationTest` gained
+a `MaintenanceRepositoryTests` nested class (previously untested against real Postgres) plus three
+new `AssetUsageRepositoryTests` cases for `totalFlightSecondsByAsset` (closed-usage exact duration,
+open-usage running-until-now, absent-asset no-entry).
 
 See `docs/plans/README.md` for the plan-status authority behind the phase references throughout this
 file (MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,

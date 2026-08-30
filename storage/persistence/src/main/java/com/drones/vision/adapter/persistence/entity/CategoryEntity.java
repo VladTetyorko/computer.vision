@@ -40,15 +40,20 @@ public class CategoryEntity {
     @Column(name = "attribute_hints", columnDefinition = "jsonb", nullable = false)
     private List<String> attributeHints = new ArrayList<>();
 
+    @Column(name = "connected", nullable = false)
+    private boolean connected;
+
     /** JPA only. */
     protected CategoryEntity() {
     }
 
-    public CategoryEntity(String id, String name, String parentId, List<String> attributeHints) {
+    public CategoryEntity(String id, String name, String parentId, List<String> attributeHints,
+                           boolean connected) {
         this.id = id;
         this.name = name;
         this.parentId = parentId;
         this.attributeHints = new ArrayList<>(attributeHints);
+        this.connected = connected;
     }
 
     public String id() {
@@ -65,5 +70,9 @@ public class CategoryEntity {
 
     public List<String> attributeHints() {
         return attributeHints;
+    }
+
+    public boolean connected() {
+        return connected;
     }
 }

@@ -63,6 +63,9 @@ import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.VisibilityScope;
 
@@ -108,9 +111,10 @@ class DefaultManualControlServiceTest {
     }
 
     private void stubDetails(Device... devices) {
-        Asset asset = new Asset(assetId, "Drone 1", DRONE, new Ownership(actor, GroupId.random()),
-                Set.of(devices[0].id()), Map.of());
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "Drone 1", DRONE, new Ownership(actor, GroupId.random()),
+                Set.of(devices[0].id()), Map.of(), Identity.NONE, Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                InventoryState.IN_STOCK, Identity.NONE, Custody.NONE);
         when(assetService.details(assetId)).thenReturn(new AssetDetails(summary, List.of(devices), List.of()));
     }
 
@@ -591,6 +595,37 @@ class DefaultManualControlServiceTest {
         assertTrue(readinessService.evaluatedFor.isEmpty());
     }
 
+    // -- engage: refusing a maintenance-grounded asset (WAREHOUSE-UX-CONTEXT.md D6/OQ1) -----
+
+    /**
+     * The "may this asset fly / engage" predicate OQ1 asks for: a {@link ReadinessReport#blockers()}
+     * entry prefixed {@link DefaultReadinessService#MAINTENANCE_BLOCKER_PREFIX} (exactly what {@code
+     * DefaultReadinessService#evaluate} produces for an open, flight-blocking warehouse maintenance
+     * record) must refuse {@code engage} before any device is resolved or any link opened, and audit
+     * distinctly from both the R2 unidentified-vehicle and R6 not-ready refusals.
+     */
+    @Test
+    void engageRefusesWhenAssetIsMaintenanceGroundedWithoutTouchingTheDeviceOrPort() {
+        stubDetails(device);
+        readinessService.blockers =
+                List.of(DefaultReadinessService.MAINTENANCE_BLOCKER_PREFIX + "GROUNDING:Propeller crack found");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+
+        assertTrue(ex.getMessage().contains("Propeller crack found"), "got: " + ex.getMessage());
+        assertTrue(manualControlPort.engagedDevices.isEmpty(), "no link should be opened when grounded");
+        assertEquals(1, auditTrail.recorded.size());
+        assertEquals("REFUSED:maintenance-grounded", auditTrail.recorded.get(0).details().get("result"));
+    }
+
+    @Test
+    void engageProceedsWhenNoMaintenanceBlockerExists() {
+        stubDetails(device);
+
+        assertTrue(service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }).active());
+    }
+
     // -- thread-safety smoke --------------------------------------------------
 
     @Test
@@ -777,12 +812,21 @@ class DefaultManualControlServiceTest {
         List<FeatureReadiness> features = FeatureRequirement.FEATURE_KEYS.stream()
                 .map(key -> new FeatureReadiness(key, key, FeatureStatus.READY, "Ready.", null))
                 .toList();
+
+        /**
+         * WAREHOUSE-UX-CONTEXT.md D6/OQ1: a test exercising the maintenance-grounded refusal sets
+         * this directly, mirroring how {@link #features} drives the rc-relay tests -- empty (the
+         * default) must never interfere with an engage a test is not specifically exercising.
+         */
+        List<String> blockers = List.of();
+
         final List<AssetId> evaluatedFor = new ArrayList<>();
 
         @Override
         public ReadinessReport evaluate(AssetId assetId, VisibilityScope scope) {
             evaluatedFor.add(assetId);
-            return new ReadinessReport(assetId, ReadinessVerdict.GO, Instant.EPOCH, Instant.EPOCH, features, List.of());
+            ReadinessVerdict verdict = blockers.isEmpty() ? ReadinessVerdict.GO : ReadinessVerdict.NO_GO;
+            return new ReadinessReport(assetId, verdict, Instant.EPOCH, Instant.EPOCH, features, blockers);
         }
     }
 

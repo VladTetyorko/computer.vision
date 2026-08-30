@@ -1,0 +1,83 @@
+/* Reuses this app's management-page tokens wholesale (`.page`/`.card`/`.btn`/`.chip`/`.empty`/
+   `.label`/`.mono`/`.muted`/`.truncate`/`.field-sm`/`.field-md` from `src/styles.css`) — no new
+   colors. `.ground-form*` mirrors `org-settings.css`'s own `.org-form*` grid exactly (this page's
+   only form); `.table-scroll` mirrors `devices.css`'s identical wrapper (this app has no shared
+   table-utility class yet — see that file's own comment on why). */
+
+.kpi-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: var(--space-16);
+  margin-bottom: var(--space-16);
+}
+
+.card + .card {
+  margin-top: var(--space-16);
+}
+
+/* ---- "Ground a vehicle" form ---- */
+
+.ground-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.ground-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--space-16);
+}
+
+.ground-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.ground-field select,
+.ground-field textarea {
+  min-height: 40px;
+}
+
+.ground-field .label {
+  margin-bottom: 0;
+}
+
+.ground-field-wide {
+  grid-column: 1 / -1;
+}
+
+.ground-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.ground-form-actions .btn {
+  min-height: 40px;
+}
+
+/* ---- Open/closed tables ---- */
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  min-width: 48rem;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-8);
+  white-space: nowrap;
+}
+
+/* NOTE is informational only — fades, same treatment `devices.css` gives an archived row's chip. */
+.chip.faded {
+  background: transparent;
+}

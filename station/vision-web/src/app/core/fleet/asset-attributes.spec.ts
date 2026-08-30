@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { AssetSummary } from '../api/models';
 import {
   REGISTRATION_NUMBER_ATTRIBUTE_KEY,
+  effectiveRegistration,
   registrationNumberOf,
   withRegistrationNumber,
   withoutRegistrationNumber,
@@ -70,5 +72,29 @@ describe('withoutRegistrationNumber', () => {
     const original = { [REGISTRATION_NUMBER_ATTRIBUTE_KEY]: 'N12345' };
     withoutRegistrationNumber(original);
     expect(original).toEqual({ [REGISTRATION_NUMBER_ATTRIBUTE_KEY]: 'N12345' });
+  });
+});
+
+describe('effectiveRegistration', () => {
+  function asset(partial: Partial<Pick<AssetSummary, 'identity' | 'attributes'>> = {}): Pick<AssetSummary, 'identity' | 'attributes'> {
+    return { attributes: {}, ...partial };
+  }
+
+  it('reads identity.registration when present', () => {
+    expect(effectiveRegistration(asset({ identity: { registration: 'N12345' } }))).toBe('N12345');
+  });
+
+  it('falls back to the legacy attributes.registrationNumber key when identity has none', () => {
+    expect(effectiveRegistration(asset({ attributes: { registrationNumber: 'N-OLD' } }))).toBe('N-OLD');
+  });
+
+  it('prefers identity.registration over the legacy attribute when both are present', () => {
+    expect(
+      effectiveRegistration(asset({ identity: { registration: 'N-NEW' }, attributes: { registrationNumber: 'N-OLD' } })),
+    ).toBe('N-NEW');
+  });
+
+  it('returns undefined when neither is set', () => {
+    expect(effectiveRegistration(asset())).toBeUndefined();
   });
 });

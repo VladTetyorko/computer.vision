@@ -5,7 +5,7 @@ import { COMMAND_ROUTES } from './features/command/command.routes';
 import { WALL_ROUTES } from './features/wall/wall.routes';
 import { MAP_ROUTES } from './features/map/map.routes';
 import { DEVICES_ROUTES } from './features/devices/devices.routes';
-import { ASSETS_ROUTES } from './features/assets/assets.routes';
+import { INVENTORY_ROUTES } from './features/inventory/inventory.routes';
 import { WAREHOUSE_ROUTES } from './features/warehouse/warehouse.routes';
 import { ONBOARDING_ROUTES } from './features/onboarding/onboarding.routes';
 import { ASSET_DETAIL_ROUTES } from './features/asset-detail/asset-detail.routes';
@@ -89,7 +89,7 @@ export const routes: Routes = [
       ...WALL_ROUTES,
       ...MAP_ROUTES,
       ...DEVICES_ROUTES,
-      ...ASSETS_ROUTES,
+      ...INVENTORY_ROUTES,
       ...WAREHOUSE_ROUTES,
       ...ONBOARDING_ROUTES,
       ...ASSET_DETAIL_ROUTES,

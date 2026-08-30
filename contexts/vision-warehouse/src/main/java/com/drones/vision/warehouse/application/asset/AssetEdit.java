@@ -1,23 +1,28 @@
 package com.drones.vision.warehouse.application.asset;
 
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.Identity;
 
 import java.util.Map;
 
 /**
  * A partial edit to an asset: every field is optional, {@code null} means "leave unchanged".
  *
- * <p>Ownership, device membership and lifecycle state are deliberately absent — they change
- * through their own operations, so a rename can never quietly reassign or retire an asset.
+ * <p>Ownership, device membership, custody and lifecycle state are deliberately absent — they
+ * change through their own operations, so a rename can never quietly reassign, hand over, or
+ * retire an asset. {@code identity} (serial/make/model/registration) is an exception: unlike
+ * custody, it is a descriptive fact about the airframe itself, not an authority-bearing state
+ * transition, so it edits alongside {@code displayName}/{@code attributes}.
  *
  * @param displayName replacement name, or {@code null} to keep the current one
  * @param category    replacement category, or {@code null} to keep the current one
  * @param attributes  replacement attributes, or {@code null} to keep the current map
+ * @param identity    replacement identity, or {@code null} to keep the current one
  */
-public record AssetEdit(String displayName, CategoryId category, Map<String, String> attributes) {
+public record AssetEdit(String displayName, CategoryId category, Map<String, String> attributes, Identity identity) {
 
     /** An edit that changes nothing — the identity of this operation. */
-    public static final AssetEdit NOTHING = new AssetEdit(null, null, null);
+    public static final AssetEdit NOTHING = new AssetEdit(null, null, null, null);
 
     public AssetEdit {
         if (displayName != null && displayName.isBlank()) {

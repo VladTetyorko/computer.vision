@@ -118,7 +118,8 @@ import com.drones.vision.platform.VisibilityScope;
  * <h2>Audit</h2>
  * Mirrors {@link DefaultFlightCommandService#audit}: one {@link AuditEntry} per {@code
  * ENGAGE}/{@code RELEASE}/{@code WATCHDOG}/{@code DENIED:out of scope}/{@code
- * REFUSED:unidentified-vehicle:<reason>}/{@code REFUSED:not-ready:<featureKey>} — {@link
+ * REFUSED:unidentified-vehicle:<reason>}/{@code REFUSED:not-ready:<featureKey>}/{@code
+ * REFUSED:maintenance-grounded} (WAREHOUSE-UX-CONTEXT.md D6/OQ1) — {@link
  * AuditAction#UPDATED} (no dedicated "commanded" value exists), {@link AuditTargetType#ASSET},
  * attributes {@code {assetId, command:"MANUAL_CONTROL", result}}.
  */
@@ -135,6 +136,7 @@ public final class DefaultManualControlService implements ManualControlService {
     private static final String RESULT_DENIED = "DENIED:out of scope";
     private static final String RESULT_REFUSED_PREFIX = "REFUSED:unidentified-vehicle:";
     private static final String RESULT_REFUSED_NOT_READY_PREFIX = "REFUSED:not-ready:";
+    private static final String RESULT_REFUSED_MAINTENANCE = "REFUSED:maintenance-grounded";
     private static final String RC_RELAY_FEATURE_KEY = "rc-relay";
     private static final String ATTR_ASSET_ID = "assetId";
     private static final String ATTR_COMMAND = "command";
@@ -240,7 +242,9 @@ public final class DefaultManualControlService implements ManualControlService {
                         "Asset " + assetId.value() + " is outside your scope; you may not take manual control of it");
             }
 
-            requireRcRelayReady(assetId, actor, scope);
+            ReadinessReport readiness = readinessService.evaluate(assetId, scope);
+            requireNotMaintenanceGrounded(readiness, assetId, actor);
+            requireRcRelayReady(readiness, assetId, actor);
 
             Device device = firstCommandableDevice(details.devices())
                     .orElseThrow(() -> new IllegalStateException(
@@ -297,6 +301,37 @@ public final class DefaultManualControlService implements ManualControlService {
     }
 
     /**
+     * WAREHOUSE-UX-CONTEXT.md D6/OQ1: refuses {@link #engage} on an asset with at least one open,
+     * flight-blocking warehouse maintenance record (a manager's {@code GROUNDING}, or an open
+     * {@code INSPECTION_DUE}) — the same {@code readinessService.evaluate} call {@link
+     * #requireRcRelayReady} already needs is reused here rather than a second lookup, since {@link
+     * ReadinessReport#blockers()} already carries a {@link
+     * DefaultReadinessService#MAINTENANCE_BLOCKER_PREFIX}-prefixed entry per open blocker whenever
+     * one exists (see that class's own "Maintenance blockers" javadoc section). Runs before any
+     * device is resolved or any port is touched, exactly like {@link #requireRcRelayReady} — no live
+     * link is needed, the fact already lives in warehouse's own record.
+     *
+     * <p>This is the "may this asset fly / engage" predicate OQ1 asks for: a grounded asset refuses
+     * manual control the same way a {@code rc-relay} misconfiguration does, and a manager's {@code
+     * AssetCustodyService#release} clears it in one click. {@code DefaultFlightCommandService}'s
+     * {@code arm}/{@code disarm} (the MAVLink command path) and perception's {@code UsageTracker}
+     * (which opens the underlying {@code AssetUsage} session) are <b>not</b> gated by this check —
+     * out of this wave's scope, flagged in WAREHOUSE-UX-CONTEXT.md's W5 handoff.
+     */
+    private void requireNotMaintenanceGrounded(ReadinessReport report, AssetId assetId, UserId actor) {
+        List<String> maintenanceBlockers = report.blockers().stream()
+                .filter(blocker -> blocker.startsWith(DefaultReadinessService.MAINTENANCE_BLOCKER_PREFIX))
+                .toList();
+        if (maintenanceBlockers.isEmpty()) {
+            return;
+        }
+        audit(actor, assetId, RESULT_REFUSED_MAINTENANCE);
+        throw new IllegalStateException("Asset " + assetId.value()
+                + " is grounded for maintenance and may not take manual control: "
+                + String.join(" ", maintenanceBlockers));
+    }
+
+    /**
      * FLEET-RADIO R6: re-checks the {@code rc-relay} feature (GCS-sysid mismatch, {@code RC_OPTIONS}
      * ignoring overrides) from the vehicle's own last-probed profile, right before this engage —
      * never cached from an earlier preflight read, since either fact can change in between. No live
@@ -309,10 +344,10 @@ public final class DefaultManualControlService implements ManualControlService {
      * incomplete profile) is "no evidence either way", not a blocker, matching {@code
      * ReadinessService}'s own "absence of evidence is not evidence of readiness" rule; a vehicle that
      * has simply never been probed must still be able to engage manual control, exactly as it could
-     * before this wave.
+     * before this wave. Takes the same {@link ReadinessReport} {@link #requireNotMaintenanceGrounded}
+     * already fetched, rather than evaluating readiness twice per {@link #engage} call.
      */
-    private void requireRcRelayReady(AssetId assetId, UserId actor, VisibilityScope scope) {
-        ReadinessReport report = readinessService.evaluate(assetId, scope);
+    private void requireRcRelayReady(ReadinessReport report, AssetId assetId, UserId actor) {
         report.features().stream()
                 .filter(feature -> feature.featureKey().equals(RC_RELAY_FEATURE_KEY))
                 .filter(feature -> feature.status() == FeatureStatus.MISSING)

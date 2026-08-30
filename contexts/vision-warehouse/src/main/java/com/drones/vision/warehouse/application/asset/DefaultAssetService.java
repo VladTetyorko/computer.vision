@@ -11,6 +11,8 @@ import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.model.DeviceCategory;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryStates;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
@@ -88,7 +90,11 @@ public final class DefaultAssetService implements AssetService {
         Objects.requireNonNull(spec, "spec must not be null");
         Objects.requireNonNull(ownership, "ownership must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
-        requireCategory(spec.category());
+        DeviceCategory category = requireCategory(spec.category());
+        if (category.connected() && spec.devices().isEmpty() && spec.existingDeviceIds().isEmpty()) {
+            throw new IllegalArgumentException("Category " + category.id().slug()
+                    + " requires at least one device (WAREHOUSE-UX-PLAN D4)");
+        }
 
         Set<DeviceId> deviceIds = new LinkedHashSet<>();
         for (DeviceRegistration registration : spec.devices()) {
@@ -101,8 +107,8 @@ public final class DefaultAssetService implements AssetService {
             deviceIds.add(requireAssignable(existingDeviceId).id());
         }
 
-        Asset saved = assetRepository.save(new Asset(AssetId.random(), spec.displayName(), spec.category(),
-                ownership, deviceIds, spec.attributes()));
+        Asset saved = assetRepository.save(Asset.register(AssetId.random(), spec.displayName(), spec.category(),
+                ownership, deviceIds, spec.attributes(), spec.identity(), spec.custody()));
         audit(actor, AuditAction.CREATED, saved,
                 "Created asset " + saved.displayName() + " with " + deviceIds.size() + " source(s)", Map.of());
         return saved;
@@ -207,8 +213,10 @@ public final class DefaultAssetService implements AssetService {
         String displayName = edit.displayName() != null ? edit.displayName() : asset.displayName();
         CategoryId category = edit.category() != null ? edit.category() : asset.category();
         Map<String, String> attributes = edit.attributes() != null ? edit.attributes() : asset.attributes();
+        Identity identity = edit.identity() != null ? edit.identity() : asset.identity();
 
-        Asset saved = assetRepository.save(asset.withDetails(displayName, category, attributes));
+        Asset saved = assetRepository.save(
+                asset.withDetails(displayName, category, attributes).withIdentity(identity, Instant.now()));
         Map<String, String> changes = changes(asset, saved);
         if (!changes.isEmpty()) {
             audit(actor, AuditAction.UPDATED, saved, "Edited asset " + saved.displayName(), changes);
@@ -235,7 +243,7 @@ public final class DefaultAssetService implements AssetService {
             stopStreamsOf(asset);
         }
 
-        Asset saved = assetRepository.save(asset.withState(state));
+        Asset saved = assetRepository.save(asset.withState(state).touch(Instant.now()));
         String what = describe(asset.state(), state);
         audit(actor, actionFor(asset.state(), state), saved,
                 "Asset " + saved.displayName() + " " + what, Map.of());
@@ -295,7 +303,7 @@ public final class DefaultAssetService implements AssetService {
         }
 
         int usagesRetained = countUsages(id);
-        Asset deleted = assetRepository.save(asset.withState(LifecycleState.DELETED));
+        Asset deleted = assetRepository.save(asset.withState(LifecycleState.DELETED).touch(Instant.now()));
         audit(actor, AuditAction.DELETED, deleted, "Deleted asset " + deleted.displayName(),
                 Map.of("devicesDeleted", String.valueOf(devicesDeleted),
                         "usagesRetained", String.valueOf(usagesRetained),
@@ -329,7 +337,7 @@ public final class DefaultAssetService implements AssetService {
 
         Set<DeviceId> devices = new LinkedHashSet<>(asset.devices());
         devices.add(deviceId);
-        Asset saved = assetRepository.save(asset.withDevices(devices));
+        Asset saved = assetRepository.save(asset.withDevices(devices).touch(Instant.now()));
         audit(actor, AuditAction.UPDATED, saved, "Assigned " + device.name() + " to asset " + saved.displayName(),
                 Map.of("devices", asset.devices() + " → " + devices));
         return saved;
@@ -352,7 +360,7 @@ public final class DefaultAssetService implements AssetService {
                     "Asset " + asset.displayName() + " must keep at least one device; unassign refused");
         }
 
-        Asset saved = assetRepository.save(asset.withDevices(devices));
+        Asset saved = assetRepository.save(asset.withDevices(devices).touch(Instant.now()));
         audit(actor, AuditAction.UPDATED, saved, "Unassigned a device from asset " + saved.displayName(),
                 Map.of("devices", asset.devices() + " → " + devices));
         return saved;
@@ -398,8 +406,8 @@ public final class DefaultAssetService implements AssetService {
                 .orElseThrow(() -> new NoSuchElementException("Unknown asset: " + id.value()));
     }
 
-    private void requireCategory(CategoryId category) {
-        categoryRepository.findById(category)
+    private DeviceCategory requireCategory(CategoryId category) {
+        return categoryRepository.findById(category)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown category: " + category.slug()));
     }
 
@@ -414,8 +422,10 @@ public final class DefaultAssetService implements AssetService {
         List<AssetUsage> mostRecent = usageRepository.findRecentByAsset(asset.id(), 1);
         Instant lastUsedAt = mostRecent.isEmpty() ? null : mostRecent.get(0).startedAt();
         GeoPosition lastKnownPosition = mostRecent.isEmpty() ? null : lastKnownPosition(mostRecent.get(0));
+        boolean hasOpenUsage = usageRepository.findOpenByAsset(asset.id()).isPresent();
 
-        return new AssetSummary(asset, categoryName, status, lastUsedAt, lastKnownPosition);
+        return new AssetSummary(asset, categoryName, status, lastUsedAt, lastKnownPosition,
+                InventoryStates.effective(asset, hasOpenUsage), asset.identity(), asset.custody());
     }
 
     private static GeoPosition lastKnownPosition(AssetUsage usage) {
@@ -433,6 +443,9 @@ public final class DefaultAssetService implements AssetService {
         }
         if (!before.attributes().equals(after.attributes())) {
             changes.put("attributes", before.attributes() + " → " + after.attributes());
+        }
+        if (!before.identity().equals(after.identity())) {
+            changes.put("identity", before.identity() + " → " + after.identity());
         }
         return changes;
     }

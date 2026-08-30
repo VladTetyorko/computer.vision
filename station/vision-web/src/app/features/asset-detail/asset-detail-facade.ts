@@ -28,7 +28,6 @@ import {
   buildDeviceRenameEdit,
   operatorAssetActions,
 } from '../../core/fleet/warehouse-logic';
-import { registrationNumberOf, withRegistrationNumber, withoutRegistrationNumber } from '../../core/fleet/asset-attributes';
 import {
   flightBars as buildFlightBars,
   kpiTiles as buildKpiTiles,
@@ -36,8 +35,11 @@ import {
   type KpiTile,
 } from '../../core/fleet/asset-stats-logic';
 import {
+  buildIdentityEdit,
+  effectiveRegistration as computeEffectiveRegistration,
   freshestSample,
   groupTelemetryByDevice,
+  sinceServiceTile,
   telemetryDevices,
   telemetryFactRows,
   withFixOnlyPosition,
@@ -45,9 +47,11 @@ import {
 } from './asset-detail-logic';
 import type {
   AssetDetails,
+  AssetIdentity,
   AssetStats,
   Device,
   DetectionEvent,
+  MaintenanceRecord,
   SettableLifecycleState,
   TelemetrySample,
 } from '../../core/api/models';
@@ -200,12 +204,31 @@ export class AssetDetailFacade {
   // --- KPI tile row + "Recent flights" chart (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B items 3–4) -
 
   readonly stats = signal<AssetStats | undefined>(undefined);
-  readonly kpiTiles = computed<readonly KpiTile[]>(() => buildKpiTiles(this.stats(), this.nowSignal()));
+  /** The utilization row's flight-stat tiles, plus one more (docs/plans/active/WAREHOUSE-UX-PLAN.md
+   *  §3.4, wave W4) — "Since service", read from this asset's own maintenance history, not `AssetStats`. */
+  readonly kpiTiles = computed<readonly KpiTile[]>(() => [
+    ...buildKpiTiles(this.stats(), this.nowSignal()),
+    sinceServiceTile(this.maintenanceRecords(), this.nowSignal()),
+  ]);
   readonly flightBars = computed<readonly FlightBar[]>(() => buildFlightBars(this.asset()?.recentUsages ?? [], this.nowSignal()));
 
-  // --- Registration/tail number + attributes (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) ---------------
+  // --- Identity + maintenance (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave W4 — replaces the
+  // old single-field `attributes.registrationNumber` editor with the full `AssetIdentity` group) ---
 
-  readonly registrationNumber = computed(() => registrationNumberOf(this.asset()?.attributes ?? {}));
+  readonly identity = computed(() => this.asset()?.identity);
+  /** `identity.registration`, falling back to the legacy attribute key — see `asset-detail-logic.ts
+   *  #effectiveRegistration`'s own doc comment for the migration gap this covers. */
+  readonly effectiveRegistration = computed(() => {
+    const asset = this.asset();
+    return asset ? computeEffectiveRegistration(asset) : undefined;
+  });
+
+  /** This asset's own maintenance history — fetched alongside `fetchAsset`/`refresh`
+   *  (`GET /api/assets/{id}/maintenance`, the same per-asset endpoint `InventoryFacade`'s drawer
+   *  uses — deliberately not the fleet-wide `GET /api/maintenance` `/fleet/maintenance` itself uses
+   *  since wave W9, which would fetch every other asset's records just to discard them here). Feeds
+   *  both {@link kpiTiles}' "Since service" tile and (later waves) a maintenance drawer on this page. */
+  readonly maintenanceRecords = signal<readonly MaintenanceRecord[]>([]);
 
   // --- Hardware section: attach-a-device picker ---------------------------------------------------
 
@@ -290,6 +313,17 @@ export class AssetDetailFacade {
     this.currentAssetIdSignal.set(assetId);
     void this.fetchAsset(assetId);
     void this.loadStats(assetId);
+    void this.loadMaintenanceRecords(assetId);
+  }
+
+  /** Silent-degrade to an empty list on failure — same "enrichment, not a user-initiated action"
+   *  convention as {@link loadStats}/{@link pollStreamEvents} on this page. */
+  private async loadMaintenanceRecords(assetId: string): Promise<void> {
+    try {
+      this.maintenanceRecords.set(await this.api.listAssetMaintenance(assetId));
+    } catch {
+      this.maintenanceRecords.set([]);
+    }
   }
 
   private async pollStreamEvents(streamId: string): Promise<void> {
@@ -333,7 +367,7 @@ export class AssetDetailFacade {
     if (!id) {
       return Promise.resolve();
     }
-    return Promise.all([this.fetchAsset(id), this.loadStats(id)]).then(() => undefined);
+    return Promise.all([this.fetchAsset(id), this.loadStats(id), this.loadMaintenanceRecords(id)]).then(() => undefined);
   }
 
   /** The cockpit-link band's secondary CTA — the lightweight single-device watch page, read-only. */
@@ -363,21 +397,23 @@ export class AssetDetailFacade {
     return this.router.navigate(['/assets']);
   }
 
-  // --- Registration/tail number + attributes editors — both submit the asset's full replacement
-  //     `attributes` map (`application.AssetEdit`'s own Javadoc), never a merge. -----------------
+  // --- Identity + attributes editors — both submit the asset's full replacement `identity`/
+  //     `attributes` (`application.AssetEdit`'s own Javadoc), never a merge. --------------------
 
   /** `true` = ok for the caller to close its editor (saved, or nothing needed saving); `false` = the
-   *  update failed (`FleetStore.updateAsset` already toasted) and the editor should stay open. */
-  async saveRegistrationNumber(draft: string): Promise<boolean> {
+   *  update failed (`FleetStore.updateAsset` already toasted) and the editor should stay open.
+   *  Replaces the old `saveRegistrationNumber` (single-field, `attributes.registrationNumber`) —
+   *  this wave's edit form covers all four `AssetIdentity` fields at once, PATCH'd via `identity`
+   *  (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4). */
+  async saveIdentity(serialNumber: string, make: string, model: string, registration: string): Promise<boolean> {
     const asset = this.asset();
     if (!asset) {
       return false;
     }
-    const trimmed = draft.trim();
-    const attributes = trimmed.length > 0 ? withRegistrationNumber(asset.attributes, trimmed) : withoutRegistrationNumber(asset.attributes);
+    const identity: AssetIdentity = buildIdentityEdit(serialNumber, make, model, registration);
     this.busy.set(true);
     try {
-      return !!(await this.fleet.updateAsset(asset.assetId, { attributes }));
+      return !!(await this.fleet.updateAsset(asset.assetId, { identity }));
     } finally {
       this.busy.set(false);
     }

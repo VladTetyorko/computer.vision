@@ -23,6 +23,8 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -115,9 +117,10 @@ class CameraPoseControllerTest {
 
     private AssetId stubExistingAsset() {
         AssetId assetId = AssetId.random();
-        Asset asset = new Asset(assetId, "camera-1", new CategoryId("camera"), ownership, Set.of(DeviceId.random()),
-                Map.of());
-        AssetSummary summary = new AssetSummary(asset, "Camera", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "camera-1", new CategoryId("camera"), ownership,
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Camera", AssetStatus.OFFLINE, null, null,
+                asset.inventoryState(), asset.identity(), asset.custody());
         AssetDetails details = new AssetDetails(summary, List.of(), List.of());
         when(assetService.details(any(VisibilityScope.class), eq(assetId))).thenReturn(details);
         return assetId;

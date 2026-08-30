@@ -10,11 +10,14 @@ import type { Routes } from '@angular/router';
  * `RouterTestingHarness`/`TestBed` for every candidate URL.
  *
  * Three questions matter for that check: does a path terminate in an actual component
- * (`loadComponent`/`component`), a static redirect (`redirectTo`), or a guard-only leaf
- * (`canActivate` with no `children` of its own — `app.routes.ts`'s `landingGuard` route,
- * docs/plans/done/OPS-UX-PLAN.md §2 A1, which resolves its destination by role at navigation time
- * rather than naming one statically) — any of the three means "no dead link"; none of them means the
- * path was never registered at all (would 404 via the `**` catch-all).
+ * (`loadComponent`/`component`), a redirect — static (`redirectTo: string`) or computed
+ * (`redirectTo: RedirectFunction`, docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 wave W4's
+ * query-param-carrying redirects, e.g. `features/devices/devices.routes.ts`'s `/devices` →
+ * `/assets?tab=links`) — or a guard-only leaf (`canActivate` with no `children` of its own —
+ * `app.routes.ts`'s `landingGuard` route, docs/plans/done/OPS-UX-PLAN.md §2 A1, which resolves its
+ * destination by role at navigation time rather than naming one statically) — any of the three means
+ * "no dead link"; none of them means the path was never registered at all (would 404 via the `**`
+ * catch-all).
  */
 export interface FlatRoute {
   /** Normalized, leading-slash path, e.g. `/assets/:assetId`; the bare root is `/`. */
@@ -39,7 +42,7 @@ export function flattenRoutes(routes: Routes, prefix = ''): FlatRoute[] {
     }
     if (route.loadComponent || route.component) {
       out.push({ path: full || '/', kind: 'component' });
-    } else if (typeof route.redirectTo === 'string') {
+    } else if (typeof route.redirectTo === 'string' || typeof route.redirectTo === 'function') {
       out.push({ path: full || '/', kind: 'redirect' });
     } else if (route.canActivate && route.children?.length === 0) {
       // A guard-only leaf (`{ path, canActivate, children: [] }`) — its `canActivate` always

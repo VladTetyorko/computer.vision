@@ -24,13 +24,21 @@ import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
+import com.drones.vision.warehouse.application.maintenance.MaintenanceQuery;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
+import com.drones.vision.warehouse.domain.model.MaintenanceId;
+import com.drones.vision.warehouse.domain.model.MaintenanceKind;
+import com.drones.vision.warehouse.domain.model.MaintenanceRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +68,7 @@ class DefaultReadinessServiceTest {
     private AssetService assetService;
     private FakeVehicleProfileRepositoryPort profileRepository;
     private FakeFeatureRequirementRepositoryPort requirementRepository;
+    private FakeMaintenanceQuery maintenanceQuery;
     private DefaultReadinessService service;
 
     private final AssetId assetId = AssetId.random();
@@ -70,16 +79,25 @@ class DefaultReadinessServiceTest {
         assetService = mock(AssetService.class);
         profileRepository = new FakeVehicleProfileRepositoryPort();
         requirementRepository = new FakeFeatureRequirementRepositoryPort();
-        service = new DefaultReadinessService(assetService, profileRepository, requirementRepository, () -> NOW);
+        maintenanceQuery = new FakeMaintenanceQuery();
+        service = new DefaultReadinessService(assetService, profileRepository, requirementRepository,
+                maintenanceQuery, () -> NOW);
 
         device = new Device(DeviceId.random(), "FC", Set.of(Capability.TELEMETRY),
                 new StreamDescriptor("mavlink", URI.create("udp://127.0.0.1:14550"), Map.of()));
-        Asset asset = new Asset(assetId, "Drone 1", DRONE, new Ownership(UserId.random(), GroupId.random()),
-                Set.of(device.id()), Map.of());
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "Drone 1", DRONE, new Ownership(UserId.random(), GroupId.random()),
+                Set.of(device.id()), Map.of(), Identity.NONE, Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                InventoryState.IN_STOCK, Identity.NONE, Custody.NONE);
         when(assetService.details(org.mockito.ArgumentMatchers.any(VisibilityScope.class),
                 org.mockito.ArgumentMatchers.eq(assetId)))
                 .thenReturn(new AssetDetails(summary, List.of(device), List.of()));
+    }
+
+    /** One open, flight-blocking {@code GROUNDING} record for {@link #assetId}, opened just now. */
+    private MaintenanceRecord openGroundingRecord(String summary) {
+        return new MaintenanceRecord(MaintenanceId.random(), assetId, MaintenanceKind.GROUNDING, NOW, null,
+                UserId.random(), summary, null);
     }
 
     private static VehicleProfile profile(boolean complete, String incompleteReason,
@@ -185,6 +203,97 @@ class DefaultReadinessServiceTest {
 
         assertTrue(report.features().stream().allMatch(f -> f.status() == FeatureStatus.UNKNOWN));
         assertEquals(ReadinessVerdict.GO, report.verdict()); // no MISSING blockers -- see class javadoc
+    }
+
+    // -- WAREHOUSE-UX-CONTEXT.md D6/OQ1: warehouse maintenance blockers -----------------------
+
+    /** No maintenance records at all must leave the configuration-derived verdict untouched. */
+    @Test
+    void noMaintenanceRecordsLeavesTheVerdictUnchanged() {
+        requirementRepository.rows.add(new FeatureRequirement("ground-speed", "Ground speed", "ardupilot",
+                VFR_HUD, "VFR_HUD", 2.0, null, null, null));
+        profileRepository.save(device.id(),
+                profile(true, null, List.of(new MessageObservation(VFR_HUD, "VFR_HUD", 5.0, 50))));
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(ReadinessVerdict.GO, report.verdict());
+        assertTrue(report.blockers().isEmpty());
+    }
+
+    /**
+     * An open {@code GROUNDING} record forces {@link ReadinessVerdict#NO_GO} even on an otherwise
+     * fully-ready asset, and the wire-visible blocker carries the record's own summary verbatim --
+     * D6's whole point: a manager's grounding is a NO-GO a pilot can read the reason for.
+     */
+    @Test
+    void openGroundingRecordForcesNoGoAndCarriesTheRecordsSummary() {
+        requirementRepository.rows.add(new FeatureRequirement("ground-speed", "Ground speed", "ardupilot",
+                VFR_HUD, "VFR_HUD", 2.0, null, null, null));
+        profileRepository.save(device.id(),
+                profile(true, null, List.of(new MessageObservation(VFR_HUD, "VFR_HUD", 5.0, 50))));
+        maintenanceQuery.addRecord(assetId, openGroundingRecord("Propeller crack found on preflight"));
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(ReadinessVerdict.NO_GO, report.verdict());
+        assertEquals(1, report.blockers().size());
+        String blocker = report.blockers().get(0);
+        assertTrue(blocker.startsWith(DefaultReadinessService.MAINTENANCE_BLOCKER_PREFIX), "got: " + blocker);
+        assertTrue(blocker.contains("GROUNDING"), "got: " + blocker);
+        assertTrue(blocker.contains("Propeller crack found on preflight"), "got: " + blocker);
+    }
+
+    /**
+     * A maintenance blocker must win over an otherwise-{@code UNKNOWN} (never-probed) verdict too --
+     * "grounded" is a harder fact than "nobody has probed this yet".
+     */
+    @Test
+    void openGroundingRecordForcesNoGoEvenWhenNeverProbed() {
+        maintenanceQuery.addRecord(assetId, openGroundingRecord("Grounded pending annual inspection"));
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(ReadinessVerdict.NO_GO, report.verdict());
+        assertEquals(1, report.blockers().size());
+    }
+
+    /**
+     * A closed record is not a blocker, even though this hand-rolled {@link FakeMaintenanceQuery}
+     * deliberately does not pre-filter -- {@code DefaultReadinessService} itself must apply {@link
+     * MaintenanceRecord#isOpen()} defensively, not merely trust {@link MaintenanceQuery#openBlockers}'s
+     * own "open only" contract.
+     */
+    @Test
+    void closedRecordIsNotABlocker() {
+        requirementRepository.rows.add(new FeatureRequirement("ground-speed", "Ground speed", "ardupilot",
+                VFR_HUD, "VFR_HUD", 2.0, null, null, null));
+        profileRepository.save(device.id(),
+                profile(true, null, List.of(new MessageObservation(VFR_HUD, "VFR_HUD", 5.0, 50))));
+        MaintenanceRecord closed = openGroundingRecord("Repaired and returned to service").close(NOW);
+        maintenanceQuery.addRecord(assetId, closed);
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(ReadinessVerdict.GO, report.verdict());
+        assertTrue(report.blockers().isEmpty());
+    }
+
+    /**
+     * An open {@code NOTE} record is informational, never a blocker -- same defensive posture as
+     * {@link #closedRecordIsNotABlocker}, this time against {@link MaintenanceKind#blocksFlight()}
+     * rather than {@link MaintenanceRecord#isOpen()}.
+     */
+    @Test
+    void openNoteKindIsNotABlocker() {
+        MaintenanceRecord note = new MaintenanceRecord(MaintenanceId.random(), assetId, MaintenanceKind.NOTE, NOW,
+                null, UserId.random(), "Cleaned gimbal lens", null);
+        maintenanceQuery.addRecord(assetId, note);
+
+        ReadinessReport report = service.evaluate(assetId, VisibilityScope.unbounded());
+
+        assertEquals(ReadinessVerdict.UNKNOWN, report.verdict()); // never probed, no blocker to override it
+        assertTrue(report.blockers().isEmpty());
     }
 
     @Test
@@ -429,6 +538,26 @@ class DefaultReadinessServiceTest {
         @Override
         public Optional<VehicleProfile> findByUsageAndPhase(UsageId usageId, FlightPhase phase) {
             throw new UnsupportedOperationException("not exercised by DefaultReadinessServiceTest");
+        }
+    }
+
+    /**
+     * Deliberately does <b>not</b> pre-filter to open/blocking-only, unlike the real {@link
+     * MaintenanceQuery#openBlockers} contract -- a test seeds whatever {@link MaintenanceRecord} it
+     * wants via {@link #addRecord}, so {@code closedRecordIsNotABlocker}/{@code
+     * openNoteKindIsNotABlocker} actually exercise {@code DefaultReadinessService}'s own defensive
+     * filtering rather than merely re-testing a correctly-behaving fake.
+     */
+    private static final class FakeMaintenanceQuery implements MaintenanceQuery {
+        private final Map<AssetId, List<MaintenanceRecord>> recordsByAsset = new HashMap<>();
+
+        void addRecord(AssetId assetId, MaintenanceRecord record) {
+            recordsByAsset.computeIfAbsent(assetId, id -> new ArrayList<>()).add(record);
+        }
+
+        @Override
+        public List<MaintenanceRecord> openBlockers(AssetId assetId) {
+            return List.copyOf(recordsByAsset.getOrDefault(assetId, List.of()));
         }
     }
 

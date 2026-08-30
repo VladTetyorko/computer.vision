@@ -5,6 +5,8 @@ import com.drones.vision.api.support.StreamViewerLinks;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
@@ -129,8 +131,8 @@ class AssetStreamControllerTest {
         for (Device device : devices) {
             ids.add(device.id());
         }
-        return new Asset(AssetId.random(), "my drone", new CategoryId("drone"), ownership, ids,
-                Map.of("weightKg", "1.2"));
+        return Asset.register(AssetId.random(), "my drone", new CategoryId("drone"), ownership, ids,
+                Map.of("weightKg", "1.2"), Identity.NONE, Custody.NONE);
     }
 
     // ---- POST /api/assets/{id}/stream ----

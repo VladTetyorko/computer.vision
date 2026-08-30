@@ -1,0 +1,170 @@
+<div class="page">
+  <vision-page-bar
+    title="Inventory"
+    icon="warehouse"
+    [count]="facade.activeRows().length"
+    countNoun="item"
+  >
+    @if (facade.tab() === 'vehicles' || facade.tab() === 'equipment') {
+      <!-- One `<ng-container pageBarFilters>` around the whole group, not one attribute per element
+           (NG8011) — an `@if` wrapping more than one projectable root node can't be split across a
+           slot's individual children; `<ng-container>` renders no element of its own, so this is
+           purely a projection-grouping fix, not a layout change (every child below is still its own
+           flex item inside the bar's filter row, exactly as if each carried the attribute itself). -->
+      <ng-container pageBarFilters>
+        <input
+          type="search"
+          class="inv-search"
+          placeholder="Search by name…"
+          aria-label="Search by name"
+          [ngModel]="facade.searchQuery()"
+          (ngModelChange)="facade.searchQuery.set($event)"
+        />
+
+        <select
+          name="invCategoryFilter"
+          class="inv-filter"
+          aria-label="Filter by category"
+          [ngModel]="facade.categoryFilter()"
+          (ngModelChange)="facade.categoryFilter.set($event)"
+        >
+          <option value="">All categories</option>
+          @for (option of facade.categoryOptions(); track option.slug) {
+            <option [value]="option.slug">{{ option.name }}</option>
+          }
+        </select>
+
+        <select
+          name="invStateFilter"
+          class="inv-filter"
+          aria-label="Filter by inventory state"
+          [ngModel]="facade.inventoryStateFilter()"
+          (ngModelChange)="onInventoryStateFilterChange($event)"
+        >
+          <option value="all">Any state</option>
+          <option value="IN_STOCK">In stock</option>
+          <option value="ISSUED">Issued</option>
+          <option value="IN_FIELD">In field</option>
+          <option value="MAINTENANCE">Maintenance</option>
+          <option value="RETIRED">Retired</option>
+        </select>
+
+        <select
+          name="invCustodianFilter"
+          class="inv-filter"
+          aria-label="Filter by custodian"
+          [ngModel]="facade.custodianFilter()"
+          (ngModelChange)="facade.custodianFilter.set($event)"
+        >
+          <option value="">Any custodian</option>
+          @for (option of facade.custodianOptions(); track option.id) {
+            <option [value]="option.id">{{ option.name }}</option>
+          }
+        </select>
+
+        <select
+          name="invReadinessFilter"
+          class="inv-filter"
+          aria-label="Filter by readiness"
+          [ngModel]="facade.readinessFilter()"
+          (ngModelChange)="onReadinessFilterChange($event)"
+        >
+          <option value="all">Any readiness</option>
+          <option value="GO">Go</option>
+          <option value="NO_GO">No-go</option>
+          <option value="UNEVALUATED">Unevaluated</option>
+        </select>
+
+        <label class="row toggle">
+          <input type="checkbox" name="showRetired" [ngModel]="facade.showRetired()" (ngModelChange)="facade.showRetired.set($event)" />
+          <span>Show retired</span>
+        </label>
+
+        <label class="row toggle">
+          <input
+            type="checkbox"
+            name="showArchived"
+            [ngModel]="facade.showArchived()"
+            (ngModelChange)="facade.toggleShowArchived()"
+          />
+          <span>Show archived</span>
+        </label>
+
+        @if (facade.hasActiveFilters()) {
+          <button type="button" class="btn secondary small" (click)="facade.clearFilters()">Clear filters</button>
+        }
+      </ng-container>
+    }
+
+    <a pageBarActions class="btn secondary" [href]="facade.exportUrl()" [download]="facade.exportFilename()">Export CSV</a>
+    <button pageBarActions type="button" class="btn" (click)="facade.goToAddSource()">+ Add vehicle</button>
+    <button
+      pageBarActions
+      type="button"
+      class="btn secondary"
+      (click)="facade.loadAll()"
+      [disabled]="facade.loading()"
+    >
+      Refresh
+    </button>
+  </vision-page-bar>
+
+  @if (facade.tab() === 'vehicles') {
+    <!-- ---- "Fleet at a glance" KPI strip (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3 — ported from
+         the deleted Reports page's own KPI section, `inventory-page-logic.ts#inventoryKpis`; same
+         `.kpi-tiles` grid + tone convention that page used). Only above Vehicles — it's a fleet-wide
+         summary, and Vehicles is the tab a bare `/assets` has always opened on (OQ4). -->
+    <div class="kpi-tiles">
+      <vision-stat label="Total assets" [value]="facade.kpis().totalAssets" />
+      <vision-stat label="Streaming now" [value]="facade.kpis().streaming" tone="ok" [live]="facade.kpis().streaming > 0" />
+      <vision-stat label="Active" [value]="facade.kpis().active" />
+      <vision-stat label="Deactivated" [value]="facade.kpis().deactivated" tone="muted" />
+      <vision-stat label="Needs attention" [value]="facade.kpis().needsAttention" [tone]="facade.kpis().needsAttention > 0 ? 'danger' : 'ok'" />
+    </div>
+  }
+
+  <!-- ---- Tab bar (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 rule 3 — "Inventory is one page with
+       tabs"). Filtered by role: a pilot never sees Links/Categories at all
+       (`InventoryFacade#visibleTabs`). -->
+  <div class="segmented tab-bar" role="tablist" aria-label="Inventory tabs">
+    @for (t of facade.visibleTabs(); track t) {
+      <button
+        type="button"
+        role="tab"
+        class="btn secondary small"
+        [class.active]="facade.tab() === t"
+        [attr.aria-selected]="facade.tab() === t"
+        (click)="selectTab(t)"
+      >
+        @switch (t) {
+          @case ('vehicles') { Vehicles }
+          @case ('equipment') { Equipment }
+          @case ('links') { Links }
+          @case ('categories') { Categories }
+        }
+      </button>
+    }
+  </div>
+
+  @if ((facade.tab() === 'vehicles' || facade.tab() === 'equipment') && facade.error(); as error) {
+    <!-- Non-blocking: Links/Categories mount their own facades and keep working even when this
+         page's own fleet fetch fails — "never a blocked page" (CLAUDE.md), so only the two tabs
+         that actually depend on it see the notice. -->
+    <vision-notice variant="danger" icon="alert">{{ error }}</vision-notice>
+  }
+
+  @switch (facade.tab()) {
+    @case ('vehicles') {
+      <vision-vehicles-table [rows]="facade.vehicleRows()" [connected]="true" />
+    }
+    @case ('equipment') {
+      <vision-vehicles-table [rows]="facade.equipmentRows()" [connected]="false" />
+    }
+    @case ('links') {
+      <vision-devices [sel]="sel()" [embedded]="true" />
+    }
+    @case ('categories') {
+      <vision-categories [embedded]="true" />
+    }
+  }
+</div>

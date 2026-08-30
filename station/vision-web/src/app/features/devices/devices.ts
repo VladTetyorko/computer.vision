@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { KebabMenu } from '../../shared/ui/kebab-menu';
@@ -57,10 +58,21 @@ const PROMOTE_TO_ASSET_LABEL = 'Promote to asset…';
  * better, and this task's own file-scope grep found nothing else in the app reading `viewMode`.
  * Selecting a row opens the panel via `?sel=<deviceId>` (the facade owns it) rather than navigating —
  * there was nowhere to navigate to before this wave; now there's a panel instead.
+ *
+ * **`embedded` (docs/plans/active/WAREHOUSE-UX-PLAN.md §4 wave W9).** Mounted as the Inventory page's
+ * "Links" tab (`features/inventory/inventory.ts`) with `[embedded]="true"` — same pattern
+ * `OrgSettingsPage`'s own `embedded` doc comment explains: Inventory's own single sticky
+ * `vision-page-bar` already carries the page's title/tab bar, so this component's own bar would be a
+ * second stacked sticky header reading duplicate chrome. `embedded` true swaps `<vision-page-bar>`
+ * for a plain, non-sticky `.embedded-toolbar` row carrying the identical search input + archived
+ * toggle + "+ Add source"/Refresh buttons — the same two `<ng-template>`s (filters, actions) fed to
+ * both header shapes via `NgTemplateOutlet`, so the two never drift. `embedded` defaults to `false`
+ * (the standalone `/devices` route still renders its own bar) and every fetch/mutation below is
+ * unchanged either way.
  */
 @Component({
   selector: 'vision-devices',
-  imports: [FormsModule, RouterLink, PageBar, KebabMenu, EmptyState, TwoPane],
+  imports: [FormsModule, RouterLink, PageBar, KebabMenu, EmptyState, TwoPane, NgTemplateOutlet],
   templateUrl: './devices.html',
   styleUrl: './devices.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -79,6 +91,9 @@ export class DevicesPage {
    * `effect()` below, since only a component can receive a route input.
    */
   readonly sel = input<string | undefined>(undefined);
+
+  /** `true` when mounted inside `InventoryPage`'s "Links" tab — see this class's own doc comment. */
+  readonly embedded = input(false);
 
   protected readonly facade = inject(DevicesFacade);
 

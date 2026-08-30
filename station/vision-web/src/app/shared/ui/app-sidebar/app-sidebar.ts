@@ -10,7 +10,7 @@ import { shellStatusLabel, shellStatusSeverity } from '../../../core/system-stat
 import { SystemStatusStore } from '../../../core/system-status/system-status-store';
 import { GlobalOverlayStore } from '../../../core/ui/overlay-store';
 import { DemoButton } from '../../../features/demo/demo-button/demo-button';
-import { NAV_MODES, navTiers, type NavMode } from '../../../features/hubs/nav-entries';
+import { NAV_MODES, type NavMode } from '../../../features/hubs/nav-entries';
 import { Icon } from '../icon';
 import { IdentityChip } from '../identity-chip';
 import { NotificationBell } from '../notification-bell';
@@ -43,9 +43,13 @@ import { NotificationBell } from '../notification-bell';
  * longer reachable *from here*, which is the specific mechanism that makes the hub pages removable
  * without breaking an old bookmark.
  *
- * **Tiering** (primary / advanced / upcoming) is computed once per mode by
- * `nav-entries.ts#navTiers` — never re-derived here, for the same "one source of truth" reason F1
- * fixes for the entry list itself.
+ * **Five groups, one of them in the footer (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1, wave W1).** `NAV_MODES`
+ * no longer carries `primary`/`advanced`/`upcoming` tiers or the two collapsed disclosures that used
+ * to render them — every entry in a group's `entries` renders flat (see `nav-entries.ts`'s own class
+ * doc for why both tiers were retired). `modes()` below splits the five groups into `bodyModes()`
+ * (`operate`/`monitor`/`fleet`/`vision`, rendered in `.sidebar-body`) and `systemMode()`
+ * (`system`, `NavMode.footer === true`, rendered in `.sidebar-foot` next to the identity chip) —
+ * exactly the split WAREHOUSE-UX-PLAN.md §3.1's own mermaid diagram draws.
  *
  * **`effectiveCollapsed`** simply re-exposes `SidebarStore.collapsed`, which owns the whole
  * override/route/preference precedence (see that store's own class doc). This component deliberately
@@ -73,9 +77,11 @@ import { NotificationBell } from '../notification-bell';
  * **Interest-point simplification (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1)** — the sidebar's own ranking
  * ("where am I" then "one-click switch" then "quiet ambient status") drove three trims: group labels
  * drop their `mode.icon` glyph entirely (it competed with each row's own icon two rows down; the
- * uppercase/tracked/muted label text already reads as a label without one); the Upcoming disclosure's
- * rows drop their per-row `soon` chip (the disclosure's own `<summary>Upcoming</summary>` already says
- * it); and the foot's old two-`.chip` "N live" / "ONLINE"/"OFFLINE" pair collapses to an "N live" chip
+ * uppercase/tracked/muted label text already reads as a label without one); the Upcoming disclosure
+ * this paragraph originally trimmed a per-row chip off is gone outright as of
+ * docs/plans/active/WAREHOUSE-UX-PLAN.md wave W1 (see `nav-entries.ts`'s own class doc — every
+ * `badge: 'soon'` entry left the rail, so there is no more disclosure to render); and the foot's old
+ * two-`.chip` "N live" / "ONLINE"/"OFFLINE" pair collapses to an "N live" chip
  * (when > 0) plus one bare online/offline `.dot` — see the theme-toggle paragraph below for what now
  * shares that row. The active-row treatment (F4: 2px `--color-info` inset bar) keeps its mechanism;
  * only its resting background moved from `--panel-raised` to `--color-info-soft` in `app-sidebar.css`,
@@ -147,32 +153,30 @@ export class AppSidebar {
   /** Optional — only present while the `@else` branch (closed) renders it; see class doc's mobile-sheet paragraph. */
   private readonly hamburgerEl = viewChild<ElementRef<HTMLButtonElement>>('hamburger');
 
-  /** `nav-entries.ts#navTiers`, re-exposed as a protected field so the template can call it per mode — same idiom as `identity-chip.ts`'s `protected readonly roleLabel = topRoleLabel`. */
-  protected readonly tiersFor = navTiers;
-
   /** Same ADMIN/MANAGER gate `identity-chip`/the former `ManageHub` used — applied exactly once, here (F10). */
   private readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
 
   /**
-   * `NAV_MODES` with every `managerOnly` entry dropped for anyone who isn't ADMIN/MANAGER, **and**
-   * (docs/plans/done/OPS-UX-PLAN.md §2 A5) every `badge: 'soon'` scaffold entry dropped for the same
-   * audience. A `badge: 'soon'` row is a roadmap preview, not a working page (`nav-entries.ts`'s own
-   * class doc: "every remaining pure-SCAFFOLD entry") — genuinely useful context for ADMIN/MANAGER
-   * sizing up what's coming, but a dead end for a PILOT, who has no manage-facing reason to browse
-   * it and no `managerOnly` gate of its own to hide behind (several `upcoming` entries, e.g. Operate's
-   * "Flight plans", are plain functional-role rows once shipped, not manager tools). Reuses the exact
-   * `canManage()` gate rather than a second predicate — same "safe default for an unresolved role"
-   * posture the `managerOnly` filter already has: a not-yet-loaded session hides both, never shows
-   * either speculatively.
+   * `NAV_MODES` with every `managerOnly` entry dropped for anyone who isn't ADMIN/MANAGER — the one
+   * filter left here now that every `badge: 'soon'` scaffold entry has left `NAV_MODES` outright
+   * (docs/plans/active/WAREHOUSE-UX-PLAN.md wave W1; `nav-entries.ts`'s own class doc has the full
+   * writeup of what replaced the old `badge`-drop half of this filter).
    */
   protected readonly modes = computed<readonly NavMode[]>(() =>
     NAV_MODES.map((mode) => ({
       ...mode,
-      entries: mode.entries.filter(
-        (entry) => (!entry.managerOnly || this.canManage()) && (entry.badge !== 'soon' || this.canManage()),
-      ),
+      entries: mode.entries.filter((entry) => !entry.managerOnly || this.canManage()),
     })),
   );
+
+  /** The four groups rendered in `.sidebar-body` — everything except `system` (see `bodyModes`'s
+   *  sibling `systemMode` below, and `NavMode.footer`'s own doc comment in `nav-entries.ts`). */
+  protected readonly bodyModes = computed(() => this.modes().filter((mode) => !mode.footer));
+
+  /** The one group (`system`) rendered in `.sidebar-foot`, next to the identity chip
+   *  (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1) — `undefined` only if `NAV_MODES` itself stopped
+   *  carrying a `footer` group, which `nav-entries.spec.ts` guards against. */
+  protected readonly systemMode = computed(() => this.modes().find((mode) => mode.footer));
 
   /** See class doc — the store owns the precedence; this is just the template's handle on it. */
   protected readonly effectiveCollapsed = this.sidebar.collapsed;
@@ -261,14 +265,5 @@ export class AppSidebar {
 
   protected closeMobile(): void {
     this.overlays.close('sidebar-mobile');
-  }
-
-  /** A native `<details>`'s own `toggle` event carries whether it just opened or closed — read straight off the element rather than tracked separately. */
-  protected onAdvancedToggle(event: Event): void {
-    this.sidebar.setAdvancedOpen((event.target as HTMLDetailsElement).open);
-  }
-
-  protected onUpcomingToggle(event: Event): void {
-    this.sidebar.setUpcomingOpen((event.target as HTMLDetailsElement).open);
   }
 }

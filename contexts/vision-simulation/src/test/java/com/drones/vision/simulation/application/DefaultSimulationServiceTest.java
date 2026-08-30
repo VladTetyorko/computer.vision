@@ -1,6 +1,9 @@
 package com.drones.vision.simulation.application;
 
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
@@ -16,6 +19,7 @@ import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
+import java.time.Instant;
 import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.perception.domain.port.FeedTransmitterPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -935,8 +939,8 @@ class DefaultSimulationServiceTest {
     @Test
     void fitSimulatedDeviceRegistersASimulatedDeviceAndAssignsItToTheAsset() {
         AssetId assetId = AssetId.random();
-        Asset realAsset = new Asset(assetId, "My Real Drone", new CategoryId("drone"), ownership,
-                Set.of(DeviceId.random()), Map.of());
+        Asset realAsset = Asset.register(assetId, "My Real Drone", new CategoryId("drone"), ownership,
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
         when(assetService.details(assetId)).thenReturn(new AssetDetails(summaryOf(realAsset), List.of(), List.of()));
         Device registered = new Device(DeviceId.random(), "My Real Drone · video", Set.of(Capability.VIDEO),
                 new StreamDescriptor("sim", URI.create("sim://my-real-drone-video"), Map.of()),
@@ -998,8 +1002,8 @@ class DefaultSimulationServiceTest {
         Device liveVideoDevice = new Device(DeviceId.random(), "drone · video", Set.of(Capability.VIDEO),
                 new StreamDescriptor("rtsp", feedUri(FeedId.random()), Map.of()),
                 LifecycleState.ACTIVE, DeviceOrigin.LIVE);
-        Asset asset = new Asset(AssetId.random(), "real drone", new CategoryId("drone"), ownership,
-                Set.of(liveVideoDevice.id()), Map.of("source", file.toString()));
+        Asset asset = Asset.register(AssetId.random(), "real drone", new CategoryId("drone"), ownership,
+                Set.of(liveVideoDevice.id()), Map.of("source", file.toString()), Identity.NONE, Custody.NONE);
         stubFleetOf(asset, liveVideoDevice);
 
         List<AssetId> resumed = service.resumeAll();
@@ -1012,8 +1016,10 @@ class DefaultSimulationServiceTest {
     void resumeAllSkipsADeactivatedAsset(@TempDir Path tempDir) throws IOException {
         Path file = videoFile(tempDir, "clip.mp4");
         Device videoDevice = rtspVideoDevice(feedUri(FeedId.random()));
+        Instant now = Instant.now();
         Asset asset = new Asset(AssetId.random(), "drone", SIMULATED, ownership, Set.of(videoDevice.id()),
-                Map.of("source", file.toString()), LifecycleState.DEACTIVATED);
+                Map.of("source", file.toString()), LifecycleState.DEACTIVATED, Identity.NONE, Custody.NONE,
+                InventoryState.IN_STOCK, now, now);
         when(assetService.assets()).thenReturn(List.of(summaryOf(asset)));
 
         List<AssetId> resumed = service.resumeAll();
@@ -1131,11 +1137,13 @@ class DefaultSimulationServiceTest {
     }
 
     private Asset simulatedAsset(Device videoDevice, Map<String, String> attributes) {
-        return new Asset(AssetId.random(), "drone", SIMULATED, ownership, Set.of(videoDevice.id()), attributes);
+        return Asset.register(AssetId.random(), "drone", SIMULATED, ownership, Set.of(videoDevice.id()), attributes,
+                Identity.NONE, Custody.NONE);
     }
 
     private AssetSummary summaryOf(Asset asset) {
-        return new AssetSummary(asset, "Simulated", AssetStatus.OFFLINE, null, null);
+        return new AssetSummary(asset, "Simulated", AssetStatus.OFFLINE, null, null, asset.inventoryState(),
+                asset.identity(), asset.custody());
     }
 
     /** Stubs {@link #assetService} so {@code resumeAll} sees exactly one asset, with one device. */
@@ -1167,8 +1175,8 @@ class DefaultSimulationServiceTest {
     }
 
     private Asset stubCreate() {
-        Asset created = new Asset(AssetId.random(), "placeholder", SIMULATED, ownership,
-                Set.of(DeviceId.random(), DeviceId.random()), Map.of());
+        Asset created = Asset.register(AssetId.random(), "placeholder", SIMULATED, ownership,
+                Set.of(DeviceId.random(), DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
         when(assetService.create(any(), eq(ownership), eq(actor))).thenReturn(created);
         return created;
     }

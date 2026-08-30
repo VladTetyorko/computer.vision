@@ -21,6 +21,8 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -252,8 +254,8 @@ class EventControllerTest {
     void recentFiltersOutEventsOnAssetsOutsideTheCallersScope() throws Exception {
         AssetId ownedAssetId = AssetId.random();
         AssetId foreignAssetId = AssetId.random();
-        Asset ownedAsset = new Asset(ownedAssetId, "my drone", new CategoryId("drone"), ownership,
-                Set.of(DeviceId.random()), Map.of());
+        Asset ownedAsset = Asset.register(ownedAssetId, "my drone", new CategoryId("drone"), ownership,
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
         when(assetRepositoryPort.findById(ownedAssetId)).thenReturn(Optional.of(ownedAsset));
         when(assetRepositoryPort.findById(foreignAssetId)).thenReturn(Optional.empty());
 
@@ -281,8 +283,9 @@ class EventControllerTest {
     void forStreamReturns404ForARunningStreamOnADeviceOutsideTheCallersScope() throws Exception {
         DeviceId deviceId = DeviceId.random();
         AssetId foreignAssetId = AssetId.random();
-        Asset foreignAsset = new Asset(foreignAssetId, "someone else's drone", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of());
+        Asset foreignAsset = Asset.register(foreignAssetId, "someone else's drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of(), Identity.NONE,
+                Custody.NONE);
         when(streamService.streams())
                 .thenReturn(List.of(new ActiveStream(streamId, deviceId, Instant.now())));
         when(assetRepositoryPort.findByDeviceId(deviceId)).thenReturn(Optional.of(foreignAsset));
@@ -298,8 +301,8 @@ class EventControllerTest {
     void forStreamStillReturnsEventsForARunningStreamOnTheCallersOwnAssignedAsset() throws Exception {
         DeviceId deviceId = DeviceId.random();
         AssetId ownedAssetId = AssetId.random();
-        Asset ownedAsset = new Asset(ownedAssetId, "my drone", new CategoryId("drone"), ownership,
-                Set.of(deviceId), Map.of());
+        Asset ownedAsset = Asset.register(ownedAssetId, "my drone", new CategoryId("drone"), ownership,
+                Set.of(deviceId), Map.of(), Identity.NONE, Custody.NONE);
         when(streamService.streams())
                 .thenReturn(List.of(new ActiveStream(streamId, deviceId, Instant.now())));
         when(assetRepositoryPort.findByDeviceId(deviceId)).thenReturn(Optional.of(ownedAsset));

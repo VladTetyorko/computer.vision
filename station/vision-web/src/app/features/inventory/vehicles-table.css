@@ -1,0 +1,244 @@
+/* ---- Table (mirrors `features/assets/assets.css`'s dense list — Angular's emulated view
+   encapsulation means none of that page's rules reach this component, so the shape is copied, not
+   shared) ------------------------------------------------------------------------------------- */
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+table {
+    min-width: 56rem;
+}
+
+td:first-child {
+    min-width: 10rem;
+}
+
+table td {
+    padding-top: var(--space-4);
+    padding-bottom: var(--space-4);
+}
+
+.name-cell {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    min-width: 0;
+}
+
+.name {
+    font-weight: 500;
+}
+
+.name-cell .name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+th.col-num,
+td.col-num {
+    text-align: right;
+}
+
+.row-state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-4);
+}
+
+.chip.faded {
+    background: transparent;
+}
+
+tbody tr.row-selectable {
+    cursor: pointer;
+}
+
+tbody tr.row-selectable:hover {
+    background: var(--panel-hover);
+}
+
+tbody tr.row-selectable:focus-visible {
+    outline: 2px solid var(--color-info);
+    outline-offset: -2px;
+}
+
+tbody tr.row-selectable.selected {
+    background: var(--color-info-soft);
+    box-shadow: inset 2px 0 0 0 var(--color-info);
+}
+
+tbody tr.row-selectable.archived {
+    opacity: 0.6;
+}
+
+.row-kebab-cell {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+}
+
+/* ---- Detail panel (same anatomy as `features/assets/assets.css`'s own copy) ------------------ */
+
+.detail-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-8);
+    margin-bottom: var(--space-16);
+}
+
+.detail-fields {
+    display: grid;
+    grid-template-columns: 6rem 1fr;
+    column-gap: var(--space-8);
+    row-gap: var(--space-8);
+    margin: 0 0 var(--space-16);
+}
+
+.detail-field {
+    display: contents;
+}
+
+.detail-field dt {
+    padding-top: var(--space-2);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.detail-field dd {
+    margin: 0;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: var(--text);
+}
+
+.detail-section {
+    margin-bottom: var(--space-16);
+}
+
+.detail-heading {
+    margin: 0 0 var(--space-8);
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.detail-empty {
+    font-size: 0.85rem;
+}
+
+.detail-device-list {
+    list-style: none;
+    margin: 0 0 var(--space-8);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.detail-device-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    min-width: 0;
+    font-size: 0.85rem;
+}
+
+.detail-device-row .truncate {
+    min-width: 0;
+}
+
+/* Maintenance row spends its middle slot on the summary, not a fixed-width column — a record's own
+   free-text summary is the whole point of the row, so it gets `flex: 1` rather than truncating like
+   the plain two-column device row above. */
+.maintenance-row {
+    justify-content: space-between;
+}
+
+.maintenance-row .truncate {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.new-record-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+}
+
+.new-record-form input[type='text'] {
+    flex: 1;
+    min-width: 8rem;
+}
+
+.detail-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    padding-top: var(--space-16);
+    border-top: 1px solid var(--border);
+}
+
+/* ---- Issue to… / Ground modals (mirrors `features/command/geofence-zone-dialog.css`'s own
+   `.backdrop`/`.dialog` convention — a page-local pair, not a shared global class: Angular's
+   emulated view encapsulation styles only what a component itself projects). ------------------- */
+
+.backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-16);
+    background: var(--hud-bg-strong);
+    backdrop-filter: blur(2px);
+}
+
+.dialog {
+    width: min(28rem, 100%);
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: var(--space-16) var(--space-24);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-16);
+}
+
+.dialog-head h2 {
+    margin: 0;
+    font-size: 1.05rem;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.field-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.create-actions {
+    display: flex;
+    gap: var(--space-8);
+}

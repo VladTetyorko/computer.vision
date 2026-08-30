@@ -13,12 +13,20 @@ import java.util.List;
  * fpv-drone} → {@code drone}); {@code attributeHints} are UI suggestions for
  * an asset's free-form {@code attributes}, not a rigid schema.
  *
+ * <p>{@code connected} (docs/plans/active/WAREHOUSE-UX-PLAN.md D4) says whether an asset in this
+ * category wraps a live device at all: a drone or camera is connected and must have at least one
+ * device (enforced in the application layer, since {@link com.drones.vision.warehouse.domain.model.Asset}
+ * itself only knows a {@link CategoryId}, not this record); a battery, spare part, or radio is not
+ * connected and legitimately has zero devices.
+ *
  * @param id             typed category identity
  * @param name           human-readable name; must not be blank
  * @param parent         parent category id, or {@code null} for a top-level category
  * @param attributeHints suggested attribute keys for assets in this category; defensively copied to an immutable list
+ * @param connected      whether an asset in this category must wrap at least one device
  */
-public record DeviceCategory(CategoryId id, String name, CategoryId parent, List<String> attributeHints) {
+public record DeviceCategory(CategoryId id, String name, CategoryId parent, List<String> attributeHints,
+                              boolean connected) {
 
     public DeviceCategory {
         if (id == null) {

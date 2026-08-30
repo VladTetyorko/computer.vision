@@ -1,0 +1,200 @@
+<div class="page">
+  <vision-page-bar
+    title="Maintenance"
+    icon="wrench"
+    hint="Every asset currently grounded, awaiting inspection, or in repair — plus the fleet's retired count."
+  >
+    @if (!facade.groundFormOpen()) {
+      <button pageBarActions type="button" class="btn" (click)="facade.openGroundForm()">Ground a vehicle</button>
+    }
+  </vision-page-bar>
+
+  @if (facade.loading()) {
+    <p class="muted">Loading…</p>
+  } @else if (facade.error(); as error) {
+    <vision-empty title="Couldn't load maintenance" [message]="error">
+      <button type="button" class="btn secondary" (click)="facade.load()">Try again</button>
+    </vision-empty>
+  } @else {
+    <div class="kpi-tiles">
+      <vision-stat label="Grounded" [value]="facade.kpis().grounded" [tone]="facade.kpis().grounded > 0 ? 'danger' : 'ok'" />
+      <vision-stat
+        label="Inspection due"
+        [value]="facade.kpis().inspectionDue"
+        [tone]="facade.kpis().inspectionDue > 0 ? 'warn' : 'ok'"
+      />
+      <vision-stat label="In repair" [value]="facade.kpis().inRepair" [tone]="facade.kpis().inRepair > 0 ? 'warn' : 'ok'" />
+      <vision-stat label="Retired" [value]="facade.kpis().retired" tone="muted" />
+    </div>
+
+    @if (facade.groundFormOpen()) {
+      <section class="card">
+        <vision-section-header title="Ground a vehicle" subtitle="Opens a maintenance record and takes the asset out of service immediately." />
+        <!-- Mirrors `org-settings.html`'s own create-form idiom (`label.org-field` implicitly
+             associating each control, `field-sm`/`field-md` width buckets, no separate id/for
+             pairing needed) — reused here under this page's own class names. -->
+        <form class="ground-form" (ngSubmit)="facade.submitGround()" (keydown.escape)="facade.closeGroundForm()">
+          <div class="ground-form-grid">
+            <label class="ground-field">
+              <span class="label">Asset</span>
+              <select
+                name="groundAsset"
+                class="field-md"
+                [ngModel]="facade.groundAssetId()"
+                (ngModelChange)="facade.groundAssetId.set($event)"
+                [disabled]="facade.grounding()"
+                required
+              >
+                <option value="">{{ facade.groundable().length === 0 ? 'No assets available to ground' : 'Choose an asset…' }}</option>
+                @for (asset of facade.groundable(); track asset.assetId) {
+                  <option [value]="asset.assetId">{{ asset.displayName }}</option>
+                }
+              </select>
+            </label>
+            <label class="ground-field">
+              <span class="label">Kind</span>
+              <select
+                name="groundKind"
+                class="field-sm"
+                [ngModel]="facade.groundKind()"
+                (ngModelChange)="facade.groundKind.set($event)"
+                [disabled]="facade.grounding()"
+              >
+                @for (kind of groundableKinds; track kind) {
+                  <option [value]="kind">{{ kindLabels[kind] }}</option>
+                }
+              </select>
+            </label>
+            <label class="ground-field ground-field-wide">
+              <span class="label">Summary</span>
+              <textarea
+                name="groundSummary"
+                rows="2"
+                placeholder="What's wrong, or why it's grounded…"
+                [ngModel]="facade.groundSummary()"
+                (ngModelChange)="facade.groundSummary.set($event)"
+                [disabled]="facade.grounding()"
+                required
+              ></textarea>
+            </label>
+          </div>
+          <div class="ground-form-actions">
+            <button type="button" class="btn secondary" (click)="facade.closeGroundForm()" [disabled]="facade.grounding()">Cancel</button>
+            <button type="submit" class="btn" [disabled]="facade.grounding() || !facade.groundAssetId() || !facade.groundSummary().trim()">
+              {{ facade.grounding() ? 'Grounding…' : 'Ground' }}
+            </button>
+          </div>
+        </form>
+      </section>
+    }
+
+    @if (!facade.hasAnyAssets()) {
+      <vision-empty title="No assets yet" message="Add a source before you can ground or track its maintenance." />
+    } @else if (facade.nothingGrounded()) {
+      <vision-empty title="Nothing grounded · every vehicle is in stock or in the field" />
+    } @else {
+      <section class="card">
+        <vision-section-header
+          title="Open"
+          [subtitle]="pluralize(facade.openRows().length, 'record') + ' currently keeping an asset out of service'"
+        />
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Category</th>
+                <th>Kind</th>
+                <th>Summary</th>
+                <th>Opened</th>
+                <th>Opened by</th>
+                <th>Custodian</th>
+                <th aria-label="Actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (record of facade.openRows(); track record.id) {
+                <tr>
+                  <td class="truncate" [title]="record.assetName">{{ record.assetName }}</td>
+                  <td class="muted truncate">{{ facade.categoryNameFor(record) }}</td>
+                  <td>
+                    <span
+                      class="chip"
+                      [class.danger]="record.kind === 'GROUNDING'"
+                      [class.warn]="record.kind === 'INSPECTION_DUE'"
+                      [class.faded]="record.kind === 'NOTE'"
+                    >
+                      {{ kindLabels[record.kind] }}
+                    </span>
+                  </td>
+                  <td class="muted truncate" [title]="record.summary">{{ record.summary }}</td>
+                  <td class="mono">{{ openedAge(record) }}</td>
+                  <td class="muted truncate">{{ facade.displayNameFor(record.openedBy) }}</td>
+                  <td class="muted truncate">{{ facade.custodianLabelFor(record) ?? '—' }}</td>
+                  <!-- Close vs Release read the same at a glance until you notice they act at different
+                       scope (this row's one record vs. the whole asset) — W10 finding M1. Copy now
+                       names that scope directly ("record" / "asset"); which one is styled primary
+                       flips per `isLastOpenRecord` (`maintenance-logic.ts#isLastOpenRecordForAsset`'s
+                       own doc comment): with other open records left on this asset, releasing it
+                       would return it to service while something else is still flagged — the riskier
+                       move — so Close stays primary; once this is the asset's last one, the two
+                       actions finish the same job and Release becomes primary instead. -->
+                  <td class="actions">
+                    <button
+                      type="button"
+                      class="btn small"
+                      [class.secondary]="facade.isLastOpenRecord(record)"
+                      [disabled]="facade.busyRecordId() === record.id"
+                      title="Closes just this record — other open records on the asset, if any, stay open."
+                      (click)="facade.closeRecord(record)"
+                    >
+                      Close record
+                    </button>
+                    <button
+                      type="button"
+                      class="btn small"
+                      [class.secondary]="!facade.isLastOpenRecord(record)"
+                      [disabled]="facade.busyAssetId() === record.assetId"
+                      title="Returns the whole asset to stock, regardless of any other open records on it."
+                      (click)="facade.release(record.assetId)"
+                    >
+                      Release asset
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    }
+
+    @if (facade.closedRows().length > 0) {
+      <section class="card">
+        <vision-section-header title="Recently closed" subtitle="Last 20 closed records" />
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Kind</th>
+                <th>Summary</th>
+                <th>Closed</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (record of facade.closedRows(); track record.id) {
+                <tr>
+                  <td class="truncate" [title]="record.assetName">{{ record.assetName }}</td>
+                  <td class="muted">{{ kindLabels[record.kind] }}</td>
+                  <td class="muted truncate" [title]="record.summary">{{ record.summary }}</td>
+                  <td class="mono">{{ closedHoursAgo(record) }} ago</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    }
+  }
+</div>

@@ -37,8 +37,10 @@ import com.drones.vision.perception.domain.model.DetectionEventId;
 import com.drones.vision.perception.domain.model.DetectionEventState;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.model.DeviceCategory;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.GeoPosition;
@@ -56,6 +58,10 @@ import com.drones.vision.map.domain.model.LayerGrant;
 import com.drones.vision.map.domain.model.LayerId;
 import com.drones.vision.map.domain.model.LayerKind;
 import com.drones.vision.kernel.LifecycleState;
+import com.drones.vision.warehouse.domain.model.MaintenanceId;
+import com.drones.vision.warehouse.domain.model.MaintenanceKind;
+import com.drones.vision.warehouse.domain.model.MaintenanceRecord;
+import com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort;
 import com.drones.vision.map.domain.model.MapLayer;
 import com.drones.vision.map.domain.model.Mark;
 import com.drones.vision.map.domain.model.MarkId;
@@ -144,6 +150,7 @@ import com.drones.vision.adapter.persistence.repository.JpaDrawingRepository;
 import com.drones.vision.adapter.persistence.repository.JpaFeatureRequirementRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGeofenceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGroupRepository;
+import com.drones.vision.adapter.persistence.repository.JpaMaintenanceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMapLayerRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMarkRepository;
 import com.drones.vision.adapter.persistence.repository.JpaSampleImageStore;
@@ -219,21 +226,43 @@ class PostgresDockerIntegrationTest {
     private static final Instant NOW = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
     /**
+     * {@link Asset#register} stamps {@code createdAt}/{@code updatedAt} with an internal, untestable
+     * {@code Instant.now()} — unlike every other timestamp in this file, the test cannot substitute
+     * the millisecond-truncated {@link #NOW} for it. Compare with both sides truncated to milliseconds
+     * for the same reason {@link #NOW} exists: a raw {@code assertEquals(Asset, Asset)} is flaky
+     * because Postgres's {@code TIMESTAMPTZ} keeps only microsecond precision and rounds — not
+     * truncates — on the way in, so e.g. {@code .xxx614510} can come back as {@code .xxx615000}.
+     */
+    private static void assertAssetRoundTrips(Asset expected, Asset actual) {
+        assertEquals(millisTruncated(expected), millisTruncated(actual));
+    }
+
+    private static Asset millisTruncated(Asset asset) {
+        return new Asset(asset.id(), asset.displayName(), asset.category(), asset.ownership(), asset.devices(),
+                asset.attributes(), asset.state(), asset.identity(), asset.custody(), asset.inventoryState(),
+                asset.createdAt().truncatedTo(ChronoUnit.MILLIS), asset.updatedAt().truncatedTo(ChronoUnit.MILLIS));
+    }
+
+    /**
      * The control-plane / configuration tables {@code V21__db_audit_log.sql} attaches {@code
      * trg_audit_*} to — kept here, not just in the migration's own header, so {@link
      * DbAuditLogCoverageTests} fails loudly the moment a future migration adds a table and
      * nobody consciously classifies it. Mirrors that migration's "Included" list, plus {@code
      * camera_poses} added by {@code V22__fixed_camera_geo.sql} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
-     * decision D4 — a camera's pose is control-plane configuration, not telemetry) and {@code
+     * decision D4 — a camera's pose is control-plane configuration, not telemetry), {@code
      * control_profiles} added by {@code V24__control_profiles.sql}
      * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C4 — a saved layout decides what a switch
-     * does to an aircraft, which is control-plane configuration by any reading).
+     * does to an aircraft, which is control-plane configuration by any reading), and {@code
+     * maintenance_records}/{@code asset_notes} added by {@code V28__asset_inventory.sql}
+     * (docs/plans/active/WAREHOUSE-UX-PLAN.md D7 — grounding/inspection history and crew notes are
+     * operator-authored, low-volume, accountability-relevant records, not machine-output telemetry).
      */
     private static final Set<String> AUDITED_TABLES = Set.of(
             "categories", "devices", "device_capabilities", "assets", "asset_devices",
             "asset_usages", "geofence_zones", "groups", "users", "pilot_assignments",
             "marks", "datasets", "map_layers", "map_layer_grants", "map_drawings",
-            "vehicle_profiles", "feature_requirements", "camera_poses", "control_profiles");
+            "vehicle_profiles", "feature_requirements", "camera_poses", "control_profiles",
+            "maintenance_records", "asset_notes");
 
     /**
      * Every other base table in the schema as of V22 — high-volume append-only event tables, the
@@ -291,7 +320,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void savedTopLevelCategoryRoundTrips() {
             DeviceCategory category = new DeviceCategory(new CategoryId("cat-toplevel"), "Top Level", null,
-                    List.of("hint-a", "hint-b"));
+                    List.of("hint-a", "hint-b"), true);
 
             repository.save(category);
 
@@ -302,10 +331,11 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void savedChildCategoryRoundTripsWithParent() {
-            DeviceCategory parent = new DeviceCategory(new CategoryId("cat-parent"), "Parent", null, List.of());
+            DeviceCategory parent = new DeviceCategory(new CategoryId("cat-parent"), "Parent", null, List.of(),
+                    true);
             repository.save(parent);
             DeviceCategory child = new DeviceCategory(new CategoryId("cat-child"), "Child", parent.id(),
-                    List.of("hint"));
+                    List.of("hint"), true);
             repository.save(child);
 
             Optional<DeviceCategory> found = repository.findById(child.id());
@@ -316,8 +346,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void saveIsAnUpsert() {
             CategoryId id = new CategoryId("cat-upsert");
-            repository.save(new DeviceCategory(id, "Original Name", null, List.of("a")));
-            repository.save(new DeviceCategory(id, "Renamed", null, List.of("a", "b")));
+            repository.save(new DeviceCategory(id, "Original Name", null, List.of("a"), true));
+            repository.save(new DeviceCategory(id, "Renamed", null, List.of("a", "b"), true));
 
             Optional<DeviceCategory> found = repository.findById(id);
             assertTrue(found.isPresent());
@@ -327,7 +357,8 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void findAllIncludesSavedCategory() {
-            DeviceCategory category = new DeviceCategory(new CategoryId("cat-findall"), "Find All", null, List.of());
+            DeviceCategory category = new DeviceCategory(new CategoryId("cat-findall"), "Find All", null, List.of(),
+                    true);
             repository.save(category);
 
             List<DeviceCategory> all = repository.findAll();
@@ -432,14 +463,14 @@ class PostgresDockerIntegrationTest {
             deviceRepository.save(new Device(deviceId, "asset-device", Set.of(Capability.VIDEO),
                     new StreamDescriptor("sim", URI.create("sim://asset-device"), Map.of())));
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
-                    Set.of(deviceId), Map.of("weight-kg", "1.2"));
+            Asset asset = Asset.register(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
+                    Set.of(deviceId), Map.of("weight-kg", "1.2"), Identity.NONE, Custody.NONE);
 
             repository.save(asset);
 
             Optional<Asset> found = repository.findById(asset.id());
             assertTrue(found.isPresent());
-            assertEquals(asset, found.get());
+            assertAssetRoundTrips(asset, found.get());
         }
 
         @Test
@@ -447,8 +478,8 @@ class PostgresDockerIntegrationTest {
             AssetId id = AssetId.random();
             DeviceId deviceId = DeviceId.random();
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset original = new Asset(id, "original", new CategoryId("drone"), ownership, Set.of(deviceId),
-                    Map.of());
+            Asset original = Asset.register(id, "original", new CategoryId("drone"), ownership, Set.of(deviceId),
+                    Map.of(), Identity.NONE, Custody.NONE);
             repository.save(original);
 
             Asset deactivated = original.withState(LifecycleState.DEACTIVATED);
@@ -463,8 +494,8 @@ class PostgresDockerIntegrationTest {
         void findByDeviceIdLocatesOwningAsset() {
             DeviceId deviceId = DeviceId.random();
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "device-owner", new CategoryId("drone"), ownership,
-                    Set.of(deviceId), Map.of());
+            Asset asset = Asset.register(AssetId.random(), "device-owner", new CategoryId("drone"), ownership,
+                    Set.of(deviceId), Map.of(), Identity.NONE, Custody.NONE);
             repository.save(asset);
 
             Optional<Asset> found = repository.findByDeviceId(deviceId);
@@ -480,8 +511,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void deleteByIdIsIdempotent() {
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "to-delete", new CategoryId("drone"), ownership,
-                    Set.of(DeviceId.random()), Map.of());
+            Asset asset = Asset.register(AssetId.random(), "to-delete", new CategoryId("drone"), ownership,
+                    Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
             repository.save(asset);
 
             repository.deleteById(asset.id());
@@ -494,8 +525,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void findAllIncludesSavedAsset() {
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "findall-asset", new CategoryId("drone"), ownership,
-                    Set.of(DeviceId.random()), Map.of());
+            Asset asset = Asset.register(AssetId.random(), "findall-asset", new CategoryId("drone"), ownership,
+                    Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
             repository.save(asset);
 
             List<Asset> all = repository.findAll();
@@ -764,6 +795,179 @@ class PostgresDockerIntegrationTest {
 
             assertTrue(found.isPresent());
             assertEquals(UsagePhase.PREFLIGHT, found.get().phase());
+        }
+
+        /**
+         * The fleet-wide aggregate {@link AssetController} joins onto the asset row (WAREHOUSE-UX W8)
+         * -- a closed usage contributes its exact wall-clock duration.
+         */
+        @Test
+        void totalFlightSecondsByAssetSumsAClosedUsagesExactDuration() {
+            AssetId assetId = AssetId.random();
+            AssetUsage closed = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(90), null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+            repository.save(closed);
+
+            Map<AssetId, Long> totals = repository.totalFlightSecondsByAsset();
+
+            assertEquals(90L, totals.get(assetId));
+        }
+
+        /** An open usage (no {@code endedAt}) counts as running until now, not zero. */
+        @Test
+        void totalFlightSecondsByAssetTreatsAnOpenUsageAsRunningUntilNow() {
+            AssetId assetId = AssetId.random();
+            Instant startedThirtySecondsAgo = Instant.now().minusSeconds(30).truncatedTo(ChronoUnit.MILLIS);
+            AssetUsage open = new AssetUsage(UsageId.random(), assetId, startedThirtySecondsAgo, null, null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+            repository.save(open);
+
+            Long seconds = repository.totalFlightSecondsByAsset().get(assetId);
+
+            assertTrue(seconds != null && seconds >= 25 && seconds <= 120,
+                    "an open usage must count its in-progress duration up to now, not zero: " + seconds);
+        }
+
+        /** No row for an asset with no usages at all -- callers apply their own zero default. */
+        @Test
+        void totalFlightSecondsByAssetHasNoEntryForAnAssetWithNoUsages() {
+            assertFalse(repository.totalFlightSecondsByAsset().containsKey(AssetId.random()));
+        }
+    }
+
+    @Nested
+    class MaintenanceRepositoryTests {
+
+        private final MaintenanceRepositoryPort repository = new JpaMaintenanceRepository(entityManagerFactory);
+
+        private MaintenanceRecord record(AssetId assetId, boolean open) {
+            MaintenanceRecord record = new MaintenanceRecord(MaintenanceId.random(), assetId,
+                    MaintenanceKind.GROUNDING, NOW, null, UserId.random(), "prop strike", 1_800L);
+            return open ? record : record.close(NOW.plusSeconds(3600));
+        }
+
+        @Test
+        void unknownIdReturnsEmptyOptional() {
+            assertTrue(repository.findById(MaintenanceId.random()).isEmpty());
+        }
+
+        @Test
+        void savedOpenRecordRoundTrips() {
+            MaintenanceRecord open = record(AssetId.random(), true);
+
+            repository.save(open);
+
+            Optional<MaintenanceRecord> found = repository.findById(open.id());
+            assertTrue(found.isPresent());
+            assertEquals(open, found.get());
+        }
+
+        @Test
+        void saveIsAnUpsertThatCanCloseAnOpenRecord() {
+            MaintenanceRecord open = record(AssetId.random(), true);
+            repository.save(open);
+
+            MaintenanceRecord closed = open.close(NOW.plusSeconds(120));
+            repository.save(closed);
+
+            Optional<MaintenanceRecord> found = repository.findById(open.id());
+            assertTrue(found.isPresent());
+            assertEquals(closed, found.get());
+        }
+
+        @Test
+        void findByAssetReturnsTheFullHistoryNewestOpenedFirst() {
+            AssetId assetId = AssetId.random();
+            MaintenanceRecord older = new MaintenanceRecord(MaintenanceId.random(), assetId,
+                    MaintenanceKind.NOTE, NOW, null, UserId.random(), "just a note", null);
+            MaintenanceRecord newer = new MaintenanceRecord(MaintenanceId.random(), assetId,
+                    MaintenanceKind.GROUNDING, NOW.plusSeconds(10), null, UserId.random(), "prop strike", null);
+            repository.save(older);
+            repository.save(newer);
+
+            List<MaintenanceRecord> history = repository.findByAsset(assetId);
+
+            assertEquals(List.of(newer.id(), older.id()), history.stream().map(MaintenanceRecord::id).toList());
+        }
+
+        @Test
+        void findOpenByAssetReturnsOnlyTheOpenRecordsForThatAsset() {
+            AssetId assetId = AssetId.random();
+            MaintenanceRecord open = record(assetId, true);
+            MaintenanceRecord closed = record(assetId, false);
+            repository.save(open);
+            repository.save(closed);
+
+            List<MaintenanceRecord> openOnly = repository.findOpenByAsset(assetId);
+
+            assertEquals(List.of(open.id()), openOnly.stream().map(MaintenanceRecord::id).toList());
+        }
+
+        @Test
+        void findOpenReturnsOpenRecordsAcrossEveryAssetNewestOpenedFirst() {
+            // Fleet-wide (like AssetUsageRepositoryTests#findRecentReturnsNewestFirstAcrossEveryAssetBoundedByLimit),
+            // so filter to this test's own rows within the whole table.
+            MaintenanceRecord older = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.NOTE, NOW, null, UserId.random(), "just a note", null);
+            MaintenanceRecord newer = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.GROUNDING, NOW.plusSeconds(10), null, UserId.random(), "prop strike", null);
+            MaintenanceRecord closed = record(AssetId.random(), false);
+            repository.save(older);
+            repository.save(newer);
+            repository.save(closed);
+            Set<MaintenanceId> ours = Set.of(older.id(), newer.id(), closed.id());
+
+            List<MaintenanceId> ourOpenOrder = repository.findOpen().stream()
+                    .map(MaintenanceRecord::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newer.id(), older.id()), ourOpenOrder,
+                    "findOpen must span every asset, exclude closed records, and stay newest-opened-first");
+        }
+
+        @Test
+        void findRecentlyClosedReturnsClosedRecordsAcrossEveryAssetNewestClosedFirstBoundedByLimit() {
+            MaintenanceRecord olderClosed = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.NOTE, NOW, NOW.plusSeconds(60), UserId.random(), "just a note", null);
+            MaintenanceRecord newerClosed = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.GROUNDING, NOW, NOW.plusSeconds(120), UserId.random(), "prop strike", null);
+            MaintenanceRecord stillOpen = record(AssetId.random(), true);
+            repository.save(olderClosed);
+            repository.save(newerClosed);
+            repository.save(stillOpen);
+            Set<MaintenanceId> ours = Set.of(olderClosed.id(), newerClosed.id(), stillOpen.id());
+
+            List<MaintenanceId> ourClosedOrder = repository.findRecentlyClosed(10_000).stream()
+                    .map(MaintenanceRecord::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newerClosed.id(), olderClosed.id()), ourClosedOrder,
+                    "findRecentlyClosed must span every asset, exclude open records, and stay newest-closed-first");
+        }
+
+        @Test
+        void findRecentlyClosedRespectsTheLimit() {
+            AssetId assetId = AssetId.random();
+            for (int i = 0; i < 3; i++) {
+                repository.save(new MaintenanceRecord(MaintenanceId.random(), assetId, MaintenanceKind.NOTE,
+                        NOW.plusSeconds(i), NOW.plusSeconds(i + 1), UserId.random(), "note " + i, null));
+            }
+
+            assertTrue(repository.findRecentlyClosed(1).size() <= 1);
+        }
+
+        @Test
+        void flightSecondsAtRoundTripsIncludingAbsence() {
+            MaintenanceRecord withFlightSeconds = record(AssetId.random(), true);
+            MaintenanceRecord withoutFlightSeconds = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.NOTE, NOW, null, UserId.random(), "just a note", null);
+            repository.save(withFlightSeconds);
+            repository.save(withoutFlightSeconds);
+
+            assertEquals(1_800L, repository.findById(withFlightSeconds.id()).orElseThrow().flightSecondsAt());
+            assertNull(repository.findById(withoutFlightSeconds.id()).orElseThrow().flightSecondsAt());
         }
     }
 
@@ -1904,8 +2108,8 @@ class PostgresDockerIntegrationTest {
         new JpaDeviceRepository(entityManagerFactory).save(new Device(deviceId, "restart-device",
                 Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://restart"), Map.of())));
         Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-        Asset asset = new Asset(AssetId.random(), "restart-survivor", new CategoryId("drone"), ownership,
-                Set.of(deviceId), Map.of("note", "written-before-restart"));
+        Asset asset = Asset.register(AssetId.random(), "restart-survivor", new CategoryId("drone"), ownership,
+                Set.of(deviceId), Map.of("note", "written-before-restart"), Identity.NONE, Custody.NONE);
         new JpaAssetRepository(entityManagerFactory).save(asset);
 
         EntityManagerFactory freshContext = PersistenceUnit.start(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),
@@ -1913,7 +2117,7 @@ class PostgresDockerIntegrationTest {
         try {
             Optional<Asset> found = new JpaAssetRepository(freshContext).findById(asset.id());
             assertTrue(found.isPresent());
-            assertEquals(asset, found.get());
+            assertAssetRoundTrips(asset, found.get());
             assertFalse(found.get().attributes().isEmpty());
         } finally {
             freshContext.close();
