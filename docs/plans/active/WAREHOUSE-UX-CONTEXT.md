@@ -22,7 +22,7 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | W4 inventory page | web-ui | ready (W1 + W3 both done) | |
 | W5 readiness ← maintenance | application-service | done | `445e145b` |
 | W6 wizard | web-ui | ready (W3 done) | |
-| W7 maintenance + crew | web-ui | done | `<pending — see W7 status section>` |
+| W7 maintenance + crew | web-ui | done | `cae23506` |
 
 Shared tree: agents commit **by path**, never stash. Unrelated dirty files (`infra/rover-sim/**`, `core/rc/manual-control-client*`, `DefaultPeerDirectory.java`) belong to another session — do not touch.
 
