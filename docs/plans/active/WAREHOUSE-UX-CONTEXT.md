@@ -19,7 +19,7 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | W1 rail | web-ui | done | `3b8a9649` |
 | W2 domain | domain-modeler | done | `47f7eb99` |
 | W3 persistence + API | spring-integrator | done | `5a712e71` |
-| W4 inventory page | web-ui | done | `<pending — see "docs(warehouse-ux): W4 wave-ledger commit hash" follow-up>` |
+| W4 inventory page | web-ui | done | `89048b93` |
 | W5 readiness ← maintenance | application-service | done | `445e145b` |
 | W6 wizard | web-ui | done | `eafb807e` |
 | W7 maintenance + crew | web-ui | done | `cae23506` |
